@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryCheckpoint, HistoryEvent, HistoryReset, HistoryStats, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -132,7 +132,6 @@ export function validateEventToolUse(raw: ValidatorInput): EventToolUse {
     input: obj["input"],
     detail: (obj["detail"] === undefined || obj["detail"] === null ? undefined : asString(obj["detail"], "EventToolUse.detail")),
     inputView: (obj["inputView"] === undefined || obj["inputView"] === null ? undefined : validateEventToolInputView(obj["inputView"])),
-    planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "EventToolUse.planContent")),
     inputTruncated: (obj["inputTruncated"] === undefined || obj["inputTruncated"] === null ? undefined : asBoolean(obj["inputTruncated"], "EventToolUse.inputTruncated")),
     background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventToolUse.background")),
   };
@@ -384,26 +383,6 @@ export function validateEventRateLimit(raw: ValidatorInput): EventRateLimit {
   };
 }
 
-export function validateEventStats(raw: ValidatorInput): EventStats {
-  const obj = asObject(raw, "EventStats");
-  return {
-    ts: asNumber(obj["ts"], "EventStats.ts"),
-    cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
-    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
-    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
-    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
-    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
-    memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
-    memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
-    memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),
-    netRx: asNumber(obj["netRx"], "EventStats.netRx"),
-    netTx: asNumber(obj["netTx"], "EventStats.netTx"),
-    blockRead: asNumber(obj["blockRead"], "EventStats.blockRead"),
-    blockWrite: asNumber(obj["blockWrite"], "EventStats.blockWrite"),
-    diskUsed: asNumber(obj["diskUsed"], "EventStats.diskUsed"),
-  };
-}
-
 export function validateEventRepositoryCommit(raw: ValidatorInput): EventRepositoryCommit {
   const obj = asObject(raw, "EventRepositoryCommit");
   return {
@@ -520,9 +499,6 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
     case "rateLimit":
       result.rateLimit = validateEventRateLimit(obj["rateLimit"]);
       break;
-    case "stats":
-      result.stats = validateEventStats(obj["stats"]);
-      break;
     case "commitSnapshot":
       result.commitSnapshot = validateEventCommitSnapshot(obj["commitSnapshot"]);
       break;
@@ -532,6 +508,33 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
     // Unknown kinds pass through.
   }
   return result;
+}
+
+export function validateEventStats(raw: ValidatorInput): EventStats {
+  const obj = asObject(raw, "EventStats");
+  return {
+    ts: asNumber(obj["ts"], "EventStats.ts"),
+    cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
+    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
+    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
+    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
+    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
+    memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
+    memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
+    memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),
+    netRx: asNumber(obj["netRx"], "EventStats.netRx"),
+    netTx: asNumber(obj["netTx"], "EventStats.netTx"),
+    blockRead: asNumber(obj["blockRead"], "EventStats.blockRead"),
+    blockWrite: asNumber(obj["blockWrite"], "EventStats.blockWrite"),
+    diskUsed: asNumber(obj["diskUsed"], "EventStats.diskUsed"),
+  };
+}
+
+export function validateHistoryStats(raw: ValidatorInput): HistoryStats {
+  const obj = asObject(raw, "HistoryStats");
+  return {
+    samples: validateArray(obj["samples"], "HistoryStats.samples", validateEventStats) as EventStats[],
+  };
 }
 
 export function validateTaskEventBackward(raw: ValidatorInput): TaskEventBackward {
@@ -599,6 +602,14 @@ export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
     queuedAt: (obj["queuedAt"] === undefined || obj["queuedAt"] === null ? undefined : asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp),
     startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp),
     completedAt: (obj["completedAt"] === undefined || obj["completedAt"] === null ? undefined : asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp),
+  };
+}
+
+export function validateTaskPlan(raw: ValidatorInput): TaskPlan {
+  const obj = asObject(raw, "TaskPlan");
+  return {
+    toolUseID: asString(obj["toolUseID"], "TaskPlan.toolUseID"),
+    content: asString(obj["content"], "TaskPlan.content"),
   };
 }
 
@@ -675,7 +686,7 @@ export function validateTask(raw: ValidatorInput): Task {
     startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp),
     turnStartedAt: (obj["turnStartedAt"] === undefined || obj["turnStartedAt"] === null ? undefined : asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp),
     inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
-    planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "Task.planContent")),
+    currentPlan: (obj["currentPlan"] === undefined || obj["currentPlan"] === null ? undefined : validateTaskPlan(obj["currentPlan"])),
     runtime: validateRuntimeInstance(obj["runtime"]),
     rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
     gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
@@ -833,6 +844,29 @@ export function validateUsageResp(raw: ValidatorInput): UsageResp {
   return {
     providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),
     local: validateLocalUsage(obj["local"]),
+  };
+}
+
+export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
+  const obj = asObject(raw, "HistoryEvent");
+  return {
+    recordID: asNumber(obj["recordID"], "HistoryEvent.recordID"),
+    index: asNumber(obj["index"], "HistoryEvent.index"),
+    message: validateEventMessage(obj["message"]),
+  };
+}
+
+export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoint {
+  const obj = asObject(raw, "HistoryCheckpoint");
+  return {
+    cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
+  };
+}
+
+export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
+  const obj = asObject(raw, "HistoryReset");
+  return {
+    bootstrapURL: asString(obj["bootstrapURL"], "HistoryReset.bootstrapURL"),
   };
 }
 

@@ -387,6 +387,7 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 		var stdin bytes.Buffer
 		log := &testLogSink{Version: LogVersionV2}
+		before := time.Now().Truncate(time.Millisecond)
 		if err := PlainTextWritePrompt(&stdin, Prompt{Text: "hello"}, log); err != nil {
 			t.Fatal(err)
 		}
@@ -405,6 +406,9 @@ func TestSession(t *testing.T) {
 			t.Fatalf("messages = %d, want 1", len(record.Messages))
 		}
 		input, ok := record.Messages[0].Message.(*UserInputMessage)
+		if record.Messages[0].ProducerTime.Before(before) || record.Messages[0].ProducerTime.After(time.Now()) {
+			t.Fatalf("persisted input observation = %v", record.Messages[0].ProducerTime)
+		}
 		if !ok || input.Text != "hello" {
 			t.Errorf("message = %#v, want user input hello", record.Messages[0].Message)
 		}

@@ -34,6 +34,10 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   const clearBtn = page.getByTestId("clear-and-execute-plan");
   await expect(clearBtn).toBeVisible({ timeout: 10_000 });
 
+  const plannedTask = await api.getTask(taskId);
+  expect(plannedTask.currentPlan?.toolUseID).toBeTruthy();
+  expect(plannedTask.currentPlan?.content).toBeTruthy();
+
   // The plan content should be rendered.
   await expect(page.getByTestId("plan-content")).toBeVisible();
 
@@ -46,6 +50,9 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   // Click the button; the task restarts and settles back to waiting.
   await clearBtn.click();
   await waitForTaskState(api, taskId, "waiting", 20_000);
+  expect((await api.getTask(taskId)).currentPlan ?? null).toBeNull();
+  await expect(page.getByTestId("plan-content")).toHaveCount(0);
+  await expect(clearBtn).toHaveCount(0);
 });
 
 test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({ page, api, uniquePrompt }) => {

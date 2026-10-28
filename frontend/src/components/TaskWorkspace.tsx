@@ -53,11 +53,7 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
   return (
     <Show when={taskIdFromParam(params.taskId)}>
       {(taskId) => (
-        <TaskTimelineProvider
-          taskId={taskId()}
-          taskState={state.taskById(taskId())?.state ?? "pending"}
-          onError={state.showWarning}
-        >
+        <TaskTimelineProvider taskId={taskId()} taskState={state.taskById(taskId())?.state ?? "pending"}>
           <div
             class={`${styles.workspace} ${mode() === "fullscreen" ? styles.fullscreen : ""}`}
 

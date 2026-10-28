@@ -24,6 +24,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/maruel/ksid"
 
+	"github.com/maruel/gomode/sse"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -36,7 +38,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/maruel/gomode/sse"
 )
 
 // taskHandlers owns task HTTP protocol concerns.
@@ -107,6 +108,17 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	stats, statsLive, statsUnsub := entry.Task().SubscribeStats(r.Context())
+	defer statsUnsub()
+	if err := stream.writeControl("statsSnapshot", apiconv.StatsSnapshot(stats)); err != nil {
+		log.WarnContext(r.Context(), "write task resource snapshot", "err", err)
+		return
+	}
+	if err := stream.flush(); err != nil {
+		log.WarnContext(r.Context(), "flush task resource snapshot", "err", err)
+		return
+	}
+
 	// Terminal tasks have no live channel. Stream their parsed raw-log history
 	// directly, keeping memory bounded even for very large task logs.
 	state := entry.Task().GetState()
@@ -145,7 +157,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.streamTaskEvents(&stream, entry, state, loadedTask); err != nil {
+	if err := h.streamTaskEvents(&stream, entry, state, loadedTask, statsLive); err != nil {
 		if r.Context().Err() != nil {
 			return
 		}
@@ -161,7 +173,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state taskslog.State, loadedTask *taskslog.LoadedTask) error {
+func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.Entry, state taskslog.State, loadedTask *taskslog.LoadedTask, statsLive <-chan runtime.Stats) error {
 	rawHistory := shouldReplayHistoryFromDisk(state, loadedTask)
 	source := taskEventSourceMemory
 	if rawHistory {
@@ -171,27 +183,21 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		return err
 	}
 	var history task.TimelineSnapshot
-	var statsHistory []runtime.Stats
 	var live <-chan task.TimelineMessage
-	var statsLive <-chan runtime.Stats
-	var unsub, statsUnsub func()
+	var unsub func()
 	var liveAfter uint64
 	if rawHistory {
 		// Subscribe before scanning so a revive's new live output is buffered,
-		// but do not copy stale in-memory messages or stats: raw disk is the
-		// authoritative history for this stopped incarnation.
+		// but do not copy in-memory messages: raw disk is the authoritative
+		// conversation history for this stopped incarnation.
 		liveAfter, live, unsub = entry.Task().SubscribeLiveMessages(stream.ctx)
-		statsLive, statsUnsub = entry.Task().SubscribeLiveStats(stream.ctx)
 	} else {
 		history, live, unsub = entry.Task().SubscribeSnapshot(stream.ctx)
-		statsHistory, statsLive, statsUnsub = entry.Task().SubscribeStats(stream.ctx)
 	}
 	defer unsub()
-	defer statsUnsub()
 
 	stream.tracker = newHistoryTracker(entry.Task())
 	now := time.Now()
-	backwardOnly := false
 	if rawHistory {
 		// A stopped task no longer has reliable in-memory history. Parse and
 		// stream its raw log directly rather than building a derived cache.
@@ -206,40 +212,10 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		}
 	} else {
 		through := uint64(history.Len()) //nolint:gosec // A timeline cannot approach uint64 capacity.
-		if stream.backward && !stream.resume.active() {
-			preview := newTaskPreview()
-			for i := history.Len() - 1; i >= 0; i-- {
-				if err := stream.ctx.Err(); err != nil {
-					history.Release()
-					return err
-				}
-				m := history.At(i)
-				if !preview.add(agent.TimedMessage{Message: m.Message, ProducerTime: m.ObservedAt}) {
-					break
-				}
-			}
-			events := preview.events(newHistoryTracker(entry.Task()))
-			if len(events) > 0 {
-				id := stream.resume.eventID(through, taskEventMessageEnd)
-				if err := stream.writeBackward(events, id.String()); err != nil {
-					history.Release()
-					return err
-				}
-				if err := stream.flush(); err != nil {
-					history.Release()
-					return fmt.Errorf("flush recent task SSE preview: %w", err)
-				}
-				backwardOnly = true
-			}
-		}
+
 		err := h.replayMemoryHistory(stream, entry, history, now, through)
 		history.Release()
 		if err != nil {
-			return err
-		}
-	}
-	if !stream.resume.active() {
-		if err := stream.writeStats(statsHistory); err != nil {
 			return err
 		}
 	}
@@ -250,7 +226,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		return fmt.Errorf("flush task SSE stream: %w", err)
 	}
 
-	if backwardOnly || isTaskEventTerminal(state) {
+	if isTaskEventTerminal(state) {
 		return nil
 	}
 
@@ -298,7 +274,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 				// the response has no consumer left to serve.
 				return nil
 			}
-			if err := stream.writeStats([]runtime.Stats{cs}); err != nil {
+			if err := stream.writeControl("stats", apiconv.Stats(&cs)); err != nil {
 				return err
 			}
 			if err := stream.coalescedFlush(flushTimer); err != nil {
@@ -322,10 +298,9 @@ func isTaskEventTerminal(state taskslog.State) bool {
 	return state == taskslog.StatePurged || state == taskslog.StateCrashed || state == taskslog.StateFailed
 }
 
-// newHistoryTracker builds the per-stream API conversion tracker with the
-// task's plan-content projection wired in.
+// newHistoryTracker builds the per-stream API conversion tracker.
 func newHistoryTracker(t *task.Task) *apiconv.ToolTimingTracker {
-	return apiconv.NewToolTimingTracker(t.Harness, t.RequestedModel, t.Pricer, t.PlanContentFor)
+	return apiconv.NewToolTimingTracker(t.Harness, t.RequestedModel, t.Pricer)
 }
 
 func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskmgr.Entry, history task.TimelineSnapshot, at time.Time, through uint64) error {
@@ -358,7 +333,7 @@ func (h *taskHandlers) replayHistoryFromDisk(stream *taskEventStream, entry *tas
 			return err
 		}
 		if len(events) > 0 {
-			if err := stream.writeBackward(events, ""); err != nil {
+			if err := stream.writeBackward(events); err != nil {
 				return err
 			}
 			if err := stream.flush(); err != nil {
@@ -871,6 +846,11 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.taskSvc.getTask))
 	m.HandleFunc("GET /tasks/{id}/info", handleWithTask(h, h.taskSvc.getTaskInfo))
 	m.HandleFunc("GET /tasks/{id}/events", h.handleTaskEvents)
+	hh := &historyHandlers{taskHandlers: h}
+	m.HandleFunc("GET /tasks/{id}/history/bootstrap", hh.handleHistoryBootstrap)
+	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/chunks/{first}/{last}", hh.handleHistoryChunk)
+	m.HandleFunc("GET /tasks/{id}/history/costs", hh.handleHistoryCosts)
+	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)
 	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.taskSvc.sendInput))
 	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(h, h.taskSvc.restartTask))
 	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(h, h.taskSvc.clearContext))
@@ -1229,13 +1209,20 @@ func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at ti
 	return nil
 }
 
-func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
-	for i := range stats {
-		ev := apiconv.StatsEvent(&stats[i])
-		if err := s.writeEvent(&ev, taskEventID{}); err != nil {
-			return err
-		}
+// writeControl sends typed metadata without changing the conversation cursor.
+func (s *taskEventStream) writeControl(name string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("marshal task SSE control: %w", err)
 	}
+	if err := s.beginWrite(); err != nil {
+		return err
+	}
+	n, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, data)
+	if err != nil {
+		return errors.Join(fmt.Errorf("write task SSE control: %w", err), s.clearWriteDeadline())
+	}
+	s.writtenBytes += n
 	return nil
 }
 
@@ -1263,11 +1250,11 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 	return nil
 }
 
-func (s *taskEventStream) writeBackward(messages []v1.EventMessage, id string) error {
+func (s *taskEventStream) writeBackward(messages []v1.EventMessage) error {
 	if !s.backward {
 		return nil
 	}
-	data, err := json.Marshal(v1.TaskEventBackward{Messages: messages, EventID: id})
+	data, err := json.Marshal(v1.TaskEventBackward{Messages: messages})
 	if err != nil {
 		return fmt.Errorf("marshal backward task SSE boundary: %w", err)
 	}

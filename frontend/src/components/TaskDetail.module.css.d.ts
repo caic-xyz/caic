@@ -50,6 +50,9 @@ declare const classes: {
   readonly "headerTitle": string;
   readonly "hierarchy": string;
   readonly "hierarchyLink": string;
+  readonly "history-loading": string;
+  readonly "historyLoading": string;
+  readonly "historyNavigation": string;
   readonly "indentSession": string;
   readonly "indentTurn": string;
   readonly "inputForm": string;

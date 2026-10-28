@@ -1,4 +1,4 @@
-// TaskDetail renders source-owned parent/child transcripts, scoped tools, root context, file links, and task actions.
+// TaskDetail renders a recent text preview, complete task history, stable scrolling, and task actions.
 
 import {
   createSignal,
@@ -21,10 +21,12 @@ import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
 import SkillIcon from "@material-symbols/svg-400/outlined/menu_book.svg?solid";
 import ProcessesIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
+import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
 import type {
   EventMessage,
+  TaskPlan,
   EventResult,
   AskQuestion,
   EventAsk,
@@ -35,7 +37,6 @@ import type {
   DiffFileStat,
   ForgeCheck,
   EventSkillLoad,
-  EventStats,
   EventToolInputView,
   EventSubagentSpawn,
   TaskRateLimit,
@@ -71,6 +72,7 @@ import {
 import { ContextSkillsTracker } from "../contextSkills";
 import { createLiveDuration } from "../liveDuration";
 import { useTaskTimeline } from "../TaskTimelineContext";
+import { createHistoryScroll } from "../historyScroll";
 import { attachmentThumbnailWidth, taskAttachmentURL, taskAttachmentViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
@@ -128,7 +130,7 @@ interface Props {
   error?: string;
   initialPrompt?: string;
   inPlanMode?: boolean;
-  planContent?: string;
+  currentPlan: TaskPlan | null;
   repo: string;
   remoteURL?: string;
   forge?: string;
@@ -367,30 +369,13 @@ export default function TaskDetail(props: Props) {
     onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
-  // Auto-scroll: keep scrolled to bottom unless the user scrolled up.
   let messageAreaRef: HTMLDivElement | undefined;
-  let userScrolledUp = false;
-
-  function isNearBottom(el: HTMLElement): boolean {
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  }
-
-  function handleScroll() {
-    if (!messageAreaRef) return;
-    userScrolledUp = !isNearBottom(messageAreaRef);
-  }
-
-  function scrollToBottom() {
-    if (messageAreaRef && !userScrolledUp) {
-      messageAreaRef.scrollTop = messageAreaRef.scrollHeight;
-    }
-  }
-
-  // Scroll to bottom whenever messages change, if the user hasn't scrolled up.
-  createEffect(() => {
-    messages(); // track dependency
-    requestAnimationFrame(scrollToBottom);
-  });
+  const historyScroll = createHistoryScroll(
+    () => messageAreaRef,
+    () => props.taskId,
+    timeline.epoch,
+    () => [messages(), timeline.preview(), props.currentPlan],
+  );
 
   // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
   const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<ReadonlySet<string>>(
@@ -414,23 +399,13 @@ export default function TaskDetail(props: Props) {
     const anchorKey = `turn:${key}`;
     const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
     toggleTurn(key);
-    restoreAnchor(anchorKey, beforeTop);
+    historyScroll.restoreAnchor(anchorKey, beforeTop);
   }
   function anchoredToggleSession(e: MouseEvent, key: string) {
     const anchorKey = `session:${key}`;
     const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
     toggleSession(key);
-    restoreAnchor(anchorKey, beforeTop);
-  }
-  function restoreAnchor(anchorKey: string, beforeTop: number | undefined) {
-    const container = messageAreaRef;
-    if (!container || beforeTop === undefined) return;
-    requestAnimationFrame(() => {
-      const afterEl = container.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
-      if (afterEl) {
-        container.scrollTop += afterEl.getBoundingClientRect().top - beforeTop;
-      }
-    });
+    historyScroll.restoreAnchor(anchorKey, beforeTop);
   }
   function toggleTurn(key: string) {
     setExpandedTurnKeys((prev) => {
@@ -474,7 +449,6 @@ export default function TaskDetail(props: Props) {
       derivedTaskId = taskId;
       derivedEpoch = epoch;
       derivedRouting = routing;
-      if (taskChanged) userScrolledUp = false;
     }
     for (let i = idx; i < msgs.length; i++) {
       const event = msgs[i];
@@ -510,11 +484,7 @@ export default function TaskDetail(props: Props) {
     }
     return timings;
   };
-  const statsHistory = createMemo<EventStats[]>(() =>
-    messages()
-      .filter((m) => m.kind === "stats" && m.stats !== undefined)
-      .map((m) => m.stats as EventStats),
-  );
+  const statsHistory = timeline.stats;
   // The agent normally emits the initial prompt as its first user-input event.
   // Setup can fail before that happens, so retain the recorded prompt as task context.
   const hasInitialPromptEvent = createMemo(() => {
@@ -750,6 +720,14 @@ export default function TaskDetail(props: Props) {
   let inputActive = true;
   onCleanup(() => {
     inputActive = false;
+    nativeTracker.derive([]);
+    timingTracker.derive([], true);
+    backgroundTracker.derive([]);
+    skillsTracker.clear();
+    messageGrouper.resetAfter([]);
+    groupedMessages = [];
+    setupLogs = [];
+    setCompletedMsgs([]);
     props.onCancelInputConversion();
   });
   async function sendInput() {
@@ -906,7 +884,7 @@ export default function TaskDetail(props: Props) {
                 isWaiting={() => false}
                 lastAskGroup={() => null}
                 onAskAnswer={sendAskAnswer}
-                pendingAction={pendingAction}
+                currentPlan={null}
                 model={props.model ?? null}
                 turnTiming={() => undefined}
                 nativeByToolUseID={nativeByToolUseID}
@@ -1313,7 +1291,32 @@ export default function TaskDetail(props: Props) {
             </section>
           )}
         </Show>
-        <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
+        <Show when={timeline.loading() && !timeline.error()}>
+          <div class={styles.historyLoading} role="status" aria-label="Loading history">
+            <LoadingIcon aria-hidden="true" />
+          </div>
+        </Show>
+        <div
+          class={styles.messageArea}
+          ref={messageAreaRef}
+          onScroll={historyScroll.scroll}
+          tabIndex={0}
+          role="region"
+          aria-label="Task conversation"
+          data-testid="task-message-area"
+          aria-busy={timeline.loading()}
+        >
+          <Show when={timeline.error()} keyed>
+            {(error) => (
+              <div class={styles.historyNavigation} role="alert">
+                <span>{error}</span>
+                <Button variant="gray" onClick={timeline.retry}>
+                  Retry history
+                </Button>
+              </div>
+            )}
+          </Show>
+
           <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
             {(prompt) => (
               <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
@@ -1323,6 +1326,22 @@ export default function TaskDetail(props: Props) {
                 <div class={styles.userInputMsg}>
                   <Markdown text={prompt} />
                 </div>
+              </section>
+            )}
+          </Show>
+          <Show when={timeline.preview()}>
+            {(preview) => (
+              <section aria-label="Recent activity">
+                <Show when={preview().prompt && preview().prompt !== props.initialPrompt}>
+                  <div class={styles.userInputMsg}>
+                    <Markdown text={preview().prompt.slice(-4_000)} />
+                  </div>
+                </Show>
+                <Show when={preview().response}>
+                  <div class={styles.assistantMsg}>
+                    <Markdown text={preview().response} />
+                  </div>
+                </Show>
               </section>
             )}
           </Show>
@@ -1532,6 +1551,7 @@ export default function TaskDetail(props: Props) {
                               isWaiting={isWaiting}
                               lastAskGroup={lastAskGroup}
                               onAskAnswer={sendAskAnswer}
+                              currentPlan={props.currentPlan}
                               onClearAndExecutePlan={clearAndExecutePlan}
                               pendingAction={pendingAction}
                               model={props.model ?? null}
@@ -1561,7 +1581,7 @@ export default function TaskDetail(props: Props) {
           <Show when={backgroundUnanchored().length > 0}>
             <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
           </Show>
-          <Show when={messages().length === 0}>
+          <Show when={messages().length === 0 && !timeline.loading()}>
             <p class={styles.placeholder}>Waiting for agent output...</p>
           </Show>
         </div>
@@ -1719,6 +1739,7 @@ function GroupContent(props: {
   isWaiting: () => boolean;
   lastAskGroup: () => MessageGroup | null;
   onAskAnswer: (text: string) => void;
+  currentPlan: TaskPlan | null;
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
   model: string | null;
@@ -1810,6 +1831,7 @@ function GroupContent(props: {
             toolCalls={group().toolCalls}
             taskId={props.taskId}
             events={group().events}
+            currentPlan={props.currentPlan}
             onClearAndExecutePlan={props.isWaiting() ? props.onClearAndExecutePlan : undefined}
             pendingAction={props.pendingAction}
             nativeByToolUseID={props.nativeByToolUseID}
@@ -2153,6 +2175,7 @@ function ToolMessageGroup(props: {
   toolCalls: ToolCall[];
   taskId: string;
   events?: EventMessage[];
+  currentPlan: TaskPlan | null;
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
   nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
@@ -2161,6 +2184,15 @@ function ToolMessageGroup(props: {
   backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
+  const currentPlan = () => {
+    const plan = props.currentPlan;
+    return plan &&
+      calls().some(
+        (call) => call.use.name === "ExitPlanMode" && call.use.toolUseID === plan.toolUseID && !isChildEvent(call),
+      )
+      ? plan
+      : null;
+  };
   const callKey = (call: ToolCall) => `${props.taskId}:tool:${toolIdentity(call.source, call.use.toolUseID)}`;
   const groupKey = () => {
     const first = calls()[0];
@@ -2187,8 +2219,6 @@ function ToolMessageGroup(props: {
                 outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
                 open={detailsOpenState.get(callKey(call())) ?? false}
                 onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
-                onClearAndExecutePlan={props.onClearAndExecutePlan}
-                pendingAction={props.pendingAction}
                 nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                 nativeSettled={props.nativeSettled}
                 backgroundCommands={props
@@ -2222,8 +2252,6 @@ function ToolMessageGroup(props: {
                     outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
                     open={detailsOpenState.get(callKey(call())) ?? false}
                     onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
-                    suppressPlanContent={true}
-                    pendingAction={props.pendingAction}
                     nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                     nativeSettled={props.nativeSettled}
                     backgroundCommands={props
@@ -2235,27 +2263,27 @@ function ToolMessageGroup(props: {
               </Index>
             </div>
           </details>
-          <Show when={calls().find((c) => c.use.planContent)?.use.planContent} keyed>
-            {(plan) => (
-              <div class={styles.planAction}>
-                <div class={styles.planContent} data-testid="plan-content">
-                  <Markdown text={plan} />
-                </div>
-                <Show when={props.onClearAndExecutePlan}>
-                  <Button
-                    variant="gray"
-                    loading={props.pendingAction?.() === "restart"}
-                    disabled={!!props.pendingAction?.()}
-                    onClick={props.onClearAndExecutePlan}
-                    data-testid="clear-and-execute-plan"
-                  >
-                    Clear and execute plan
-                  </Button>
-                </Show>
-              </div>
-            )}
-          </Show>
         </>
+      </Show>
+      <Show when={currentPlan()}>
+        {(plan) => (
+          <div class={styles.planAction}>
+            <div class={styles.planContent} data-testid="plan-content">
+              <Markdown text={plan().content} />
+            </div>
+            <Show when={props.onClearAndExecutePlan}>
+              <Button
+                variant="gray"
+                loading={props.pendingAction?.() === "restart"}
+                disabled={!!props.pendingAction?.()}
+                onClick={props.onClearAndExecutePlan}
+                data-testid="clear-and-execute-plan"
+              >
+                Clear and execute plan
+              </Button>
+            </Show>
+          </div>
+        )}
       </Show>
     </Show>
   );
@@ -2463,9 +2491,6 @@ function ToolCallCard(props: {
   onToggle: (open: boolean) => void;
   thinkingEvents?: EventMessage[];
   outputDeltaEvents?: EventMessage[];
-  onClearAndExecutePlan?: () => void;
-  pendingAction?: () => string | null;
-  suppressPlanContent?: boolean;
   nativeActivity?: NativeActivity[];
   nativeSettled?: () => boolean;
   backgroundCommands?: BackgroundCommandActivity[];
@@ -2613,25 +2638,6 @@ function ToolCallCard(props: {
           </pre>
         </Show>
       </details>
-      <Show when={!props.suppressPlanContent && props.call.use.planContent} keyed>
-        {(plan) => (
-          <div class={styles.planAction}>
-            <div class={styles.planContent} data-testid="plan-content">
-              <Markdown text={plan} />
-            </div>
-            <Show when={props.onClearAndExecutePlan}>
-              <Button
-                variant="gray"
-                loading={props.pendingAction?.() === "restart"}
-                disabled={!!props.pendingAction?.()}
-                onClick={props.onClearAndExecutePlan}
-              >
-                Clear and execute plan
-              </Button>
-            </Show>
-          </div>
-        )}
-      </Show>
     </>
   );
 }

@@ -1125,6 +1125,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 	// Clear in-memory messages.
 	t.ClearMessages(ctx)
+	r.NotifyTaskChange()
 
 	// Start new session.
 	t.SetState(taskslog.StateStarting)

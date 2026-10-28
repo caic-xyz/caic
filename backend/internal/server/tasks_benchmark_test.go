@@ -222,39 +222,6 @@ func BenchmarkHandleTaskEventsPurgedReplay(b *testing.B) {
 	})
 }
 
-func BenchmarkHandleTaskEventsBackwardHistory(b *testing.B) {
-	const deltaCount = 10_000
-	taskID := ksid.NewID()
-	tk := mustNewTask(b, taskID, agent.Prompt{Text: "benchmark backward history"}, harness.Claude)
-	messages := make([]agent.Message, 0, deltaCount+2)
-	messages = append(messages, &agent.UserInputMessage{Text: "benchmark backward history"})
-	for range deltaCount {
-		messages = append(messages, &agent.TextDeltaMessage{Text: "x"})
-	}
-	messages = append(messages, &agent.TextMessage{Text: "final compact response"})
-	tk.SeedTimeline(messages)
-	tk.SetState(taskslog.StateRunning)
-	s := newTestRouter(b, nil)
-	insertTestTask(s, taskID, tk)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events?backward=1", http.NoBody)
-		req.SetPathValue("id", taskID.String())
-		w := httptest.NewRecorder()
-
-		testTaskHandlers(s).handleTaskEvents(w, req)
-
-		if w.Code != http.StatusOK {
-			b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-		}
-		if !bytes.Contains(w.Body.Bytes(), []byte("event: backward")) || !bytes.Contains(w.Body.Bytes(), []byte("event: ready")) {
-			b.Fatal("SSE body did not contain the backward and ready boundaries")
-		}
-	}
-}
-
 var benchmarkReplaySkipped int
 
 func BenchmarkHistoryReplayFilter(b *testing.B) {

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import type { EventMessage } from "@sdk/types.gen";
 import { expect } from "@tests/expect";
 
-import { deriveNetworkRates, deriveToolTimingSummaries, IncrementalToolTimingTracker } from "./taskStats";
+import { deriveNetworkRates, ToolTimingTracker } from "./taskStats";
 
 function toolUse(id: string, name: string, ts: number): EventMessage {
   return { kind: "toolUse", ts, toolUse: { toolUseID: id, name, input: {} } };
@@ -12,6 +12,12 @@ function toolUse(id: string, name: string, ts: number): EventMessage {
 
 function toolResult(id: string, ts: number, duration: number): EventMessage {
   return { kind: "toolResult", ts, toolResult: { toolUseID: id, duration } };
+}
+
+function deriveToolTimingSummaries(events: readonly EventMessage[]) {
+  const tracker = new ToolTimingTracker();
+  for (const event of events) tracker.append(event);
+  return tracker.snapshot();
 }
 
 describe("task stats", () => {
@@ -47,21 +53,21 @@ describe("task stats", () => {
     ]);
   });
 
-  it("incrementally extends summaries and resets when history is replaced", () => {
-    const tracker = new IncrementalToolTimingTracker();
-    const first = [toolUse("read", "Read", 1_000), toolResult("read", 2_000, 0)];
-    expect(tracker.derive(first)).toEqual([{ name: "Read", calls: 1, durationMs: 1_000 }]);
-
-    const extended = [...first, toolUse("bash", "Bash", 3_000), toolResult("bash", 4_000, 0.5)];
-    expect(tracker.derive(extended)).toEqual([
-      { name: "Read", calls: 1, durationMs: 1_000 },
+  it("incrementally appends scalar timing without retaining messages", () => {
+    const tracker = new ToolTimingTracker();
+    tracker.append(toolUse("read", "Read", 1000));
+    tracker.append(toolResult("read", 2000, 0));
+    expect(tracker.snapshot()).toEqual([{ name: "Read", calls: 1, durationMs: 1000 }]);
+    tracker.append(toolUse("bash", "Bash", 3000));
+    tracker.append(toolResult("bash", 4000, 0.5));
+    expect(tracker.snapshot()).toEqual([
+      { name: "Read", calls: 1, durationMs: 1000 },
       { name: "Bash", calls: 1, durationMs: 500 },
     ]);
-    const unchanged = tracker.derive(extended);
-    expect(tracker.derive([...extended, { kind: "text", ts: 5_000, text: { text: "done" } }])).toBe(unchanged);
-    expect(tracker.derive([toolUse("write", "Write", 5_000), toolResult("write", 5_250, 0)])).toEqual([
-      { name: "Write", calls: 1, durationMs: 250 },
-    ]);
+    const unchanged = tracker.snapshot();
+    tracker.append({ kind: "text", ts: 5000, text: { text: "discarded payload" } });
+    expect(tracker.snapshot()).toBe(unchanged);
+    expect(JSON.stringify(tracker)).not.toContain("discarded payload");
   });
 
   it("derives network throughput without spanning counter resets", () => {

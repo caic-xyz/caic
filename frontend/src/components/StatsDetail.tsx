@@ -1,18 +1,18 @@
-// Task usage, timing analytics, and resource history within the persistent workspace.
+// Renders compact task usage, turn/tool analytics, and bounded resource history.
 
-import { createMemo, lazy, Show, Suspense } from "solid-js";
+import { createMemo, lazy, Show, Suspense, type JSX } from "solid-js";
 import TaskViewHeader from "./TaskViewHeader";
 
-import type { EventMessage, EventStats } from "@sdk/types.gen";
+import type { EventStats } from "@sdk/types.gen";
 
-import { IncrementalToolTimingTracker, type ToolTimingSummary } from "../taskStats";
-import type { TurnTiming } from "../timing";
+import type { ToolTimingSummary } from "../taskStats";
+import type { AnalyticsTurn } from "../taskAnalytics";
 import styles from "./StatsDetail.module.css";
 
 const StatsCharts = lazy(() => import("./StatsCharts"));
 const noStats: readonly EventStats[] = [];
 const noTools: readonly ToolTimingSummary[] = [];
-const noTurns: readonly TurnTiming[] = [];
+const noTurns: readonly AnalyticsTurn[] = [];
 
 export interface TaskUsageSummary {
   inputTokens: number;
@@ -28,9 +28,9 @@ interface UsageDetails extends TaskUsageSummary {
 }
 
 interface StatsContentProps {
-  events: readonly EventMessage[];
+  tools: readonly ToolTimingSummary[];
   stats: EventStats[];
-  turns: TurnTiming[];
+  turns: readonly AnalyticsTurn[];
   usage?: TaskUsageSummary;
 }
 
@@ -38,6 +38,7 @@ interface StatsDetailProps extends StatsContentProps {
   branch: string;
   repo: string;
   taskPath: string;
+  status?: JSX.Element;
 }
 
 function formatUsageTokens(tokens: number): string {
@@ -50,11 +51,11 @@ function formatUSD(usd: number): string {
   return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
-function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
-  const completeCost = turns.every((turn) => turn.result.cost !== undefined);
+function sumTurnUsage(turns: readonly AnalyticsTurn[]): UsageDetails {
+  const completeCost = turns.every((turn) => turn.cost !== null);
   return turns.reduce<UsageDetails>(
     (total, turn) => {
-      const usage = turn.result.usage;
+      const usage = turn.usage;
       total.inputTokens += usage.inputTokens;
       total.cacheWriteInputTokens += usage.cacheCreationInputTokens;
       total.cacheReadInputTokens += usage.cacheReadInputTokens;
@@ -62,7 +63,7 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
       total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
       total.totalTokens +=
         usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
-      if (completeCost) total.costUSD += turn.result.cost?.usd ?? 0;
+      if (completeCost) total.costUSD += turn.cost?.usd ?? 0;
       return total;
     },
     {
@@ -78,8 +79,7 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
 }
 
 export function StatsContent(props: StatsContentProps) {
-  const toolTimingTracker = new IncrementalToolTimingTracker();
-  const toolSummaries = createMemo(() => toolTimingTracker.derive(props.events));
+  const toolSummaries = () => props.tools;
   const usage = createMemo<UsageDetails>(() => {
     const fromTurns = sumTurnUsage(props.turns);
     if (!props.usage) return fromTurns;
@@ -184,7 +184,10 @@ export default function StatsDetail(props: StatsDetailProps) {
           <span class={styles.headerBranch}>{props.branch}</span>
         </span>
       </TaskViewHeader>
-      <StatsContent events={props.events} stats={props.stats} turns={props.turns} usage={props.usage} />
+      <Show when={props.status}>
+        <div class={styles.status}>{props.status}</div>
+      </Show>
+      <StatsContent tools={props.tools} stats={props.stats} turns={props.turns} usage={props.usage} />
     </div>
   );
 }

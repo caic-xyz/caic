@@ -337,6 +337,13 @@ type RuntimeInstance struct {
 	VNCPort      int    `json:"vncPort,omitempty"`
 }
 
+// TaskPlan is the task's current root ExitPlanMode content. The identity and
+// content form one projection and are cleared together.
+type TaskPlan struct {
+	ToolUseID string `json:"toolUseID"`
+	Content   string `json:"content"`
+}
+
 // Task is the JSON representation sent to the frontend.
 type Task struct {
 	ID                                 ksid.ID              `json:"id"`
@@ -386,7 +393,7 @@ type Task struct {
 	StartedAt       time.Time       `json:"startedAt,omitzero"`     // When the task was created.
 	TurnStartedAt   time.Time       `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
 	InPlanMode      bool            `json:"inPlanMode,omitempty"`
-	PlanContent     string          `json:"planContent,omitempty"`
+	CurrentPlan     *TaskPlan       `json:"currentPlan,omitempty"`
 	Runtime         RuntimeInstance `json:"runtime"`
 	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
 	// Per-task feature flags.

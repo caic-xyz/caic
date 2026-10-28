@@ -1,4 +1,4 @@
-// Tests parent/child ownership, scoped tool interaction, task navigation, and SSE lifecycle.
+// Tests automatic history, task-owned plan updates, parent/child tools, and SSE lifecycle.
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -7,22 +7,24 @@ import { Route, Router } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
+import { createSignal } from "solid-js";
+import type { EventMessage, ISOTimestamp, TaskPlan } from "@sdk/types.gen";
+import type { HistoryEventsHandlers } from "@sdk/api.gen";
 
 import TaskDetail from "./TaskDetail";
-import { TaskTimelineProvider } from "../TaskTimelineContext";
+import { TaskTimelineProvider, useTaskTimeline } from "../TaskTimelineContext";
 import { api } from "../api";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 
 // Spies on the real api singleton replace the former module mocks.
-const taskEventStreamMock = vi.spyOn(api, "taskEventBackfill");
+const taskEventStreamMock = vi.spyOn(api, "taskEvents");
 const clearContextMock = vi.spyOn(api, "clearContext");
 const compactContextMock = vi.spyOn(api, "compactContext");
 const getTaskDiffMock = vi.spyOn(api, "getTaskDiff");
 const getTaskDiffIndexMock = vi.spyOn(api, "getTaskDiffIndex");
 const getTaskFileDiffMock = vi.spyOn(api, "getTaskFileDiff");
 
-taskEventStreamMock.mockImplementation(((_id: string, handlers: { onReady?: () => void }) => {
+taskEventStreamMock.mockImplementation(((_id: string, _backward: string, handlers: { onReady?: () => void }) => {
   const fakeES = {
     addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
     close: vi.fn(),
@@ -33,7 +35,7 @@ taskEventStreamMock.mockImplementation(((_id: string, handlers: { onReady?: () =
     handlers.onReady?.();
   }, 0);
   return fakeES as unknown as EventSource;
-}) as typeof api.taskEventBackfill);
+}) as typeof api.taskEvents);
 clearContextMock.mockImplementation(() => Promise.resolve({ status: "cleared" }) as never);
 compactContextMock.mockImplementation(() => Promise.resolve({ status: "compacting" }) as never);
 getTaskDiffMock.mockImplementation(() => Promise.resolve({} as never));
@@ -71,6 +73,7 @@ const baseProps = {
   onPurge: () => {},
   onRevive: () => {},
   childTasks: [],
+  currentPlan: null,
   inputDraft: "",
   onInputDraft: () => {},
   inputImages: [],
@@ -83,7 +86,7 @@ const baseProps = {
   onError: () => {},
 };
 
-function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
+function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}, timelineState?: string) {
   window.history.replaceState(null, "", "/task/@abc+test-task");
   return render(() => (
     <Router>
@@ -91,11 +94,7 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
         path="/*"
         component={() => (
           <HostModeProvider>
-            <TaskTimelineProvider
-              taskId={props.taskId ?? baseProps.taskId}
-              taskState={props.taskState ?? baseProps.taskState}
-              onError={props.onError ?? baseProps.onError}
-            >
+            <TaskTimelineProvider taskId={props.taskId ?? baseProps.taskId} taskState={timelineState ?? "stopped"}>
               <TaskDetail {...baseProps} {...props} />
             </TaskTimelineProvider>
           </HostModeProvider>
@@ -105,9 +104,277 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
   ));
 }
 
+it("updates only the task-owned root plan while preserving canonical history and transport", async () => {
+  const events: EventMessage[] = [
+    { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "owned", name: "ExitPlanMode", input: {} } },
+    { kind: "toolUse", ts: 1100, toolUse: { toolUseID: "newer", name: "ExitPlanMode", input: {} } },
+    { kind: "nativeSubagent", ts: 1200, nativeSubagent: { id: "child", label: "Child reviewer", status: "completed" } },
+    {
+      kind: "toolUse",
+      ts: 1300,
+      source: { agentID: "child" },
+      toolUse: { toolUseID: "owned", name: "ExitPlanMode", input: {} },
+    },
+  ];
+  const stream = vi
+    .spyOn(api, "historyEvents")
+    .mockImplementation(() => ({ close: vi.fn() }) as unknown as EventSource);
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/bootstrap"))
+      return Response.json({
+        projectionVersion: "v1",
+        generation: "test",
+        scope: "owner",
+        recordsPerChunk: 256,
+        through: events.length,
+        cursor: "v1.test.4.end",
+        resourceBase: "/history/owner",
+        inPlanMode: false,
+      });
+    if (url.endsWith("/stats")) return Response.json({ samples: [] });
+    if (url.includes("/chunks/"))
+      return Response.json(events.map((message, index) => ({ recordID: index + 1, index: 0, message })));
+    throw new Error(`Unexpected history request: ${url}`);
+  });
+  const [plan, setPlan] = createSignal<TaskPlan | null>({ toolUseID: "owned", content: "Original root plan" });
+  let timeline: ReturnType<typeof useTaskTimeline> | undefined;
+  function Probe() {
+    timeline = useTaskTimeline();
+    return null;
+  }
+  window.history.replaceState(null, "", "/task/@abc+test-task");
+  const view = render(() => (
+    <Router>
+      <Route
+        path="/*"
+        component={() => (
+          <HostModeProvider>
+            <TaskTimelineProvider taskId="abc" taskState="has_plan">
+              <Probe />
+              <TaskDetail {...baseProps} taskState="has_plan" currentPlan={plan()} />
+            </TaskTimelineProvider>
+          </HostModeProvider>
+        )}
+      />
+    </Router>
+  ));
+  try {
+    await waitFor(() => expect(screen.getByTestId("plan-content")).toHaveTextContent("Original root plan"));
+    assert.ok(timeline);
+    const messages = timeline.messages();
+    const epoch = timeline.epoch();
+    const requests = fetchMock.mock.calls.length;
+    const streams = stream.mock.calls.length;
+    const card = screen.getByTestId("native-subagent-card");
+    const summary = card.querySelector("summary");
+    assert.ok(summary);
+    await userEvent.setup().click(summary);
+    expect(screen.getAllByTestId("plan-content")).toHaveLength(1);
+    setPlan({ toolUseID: "owned", content: "Revised root plan" });
+    await waitFor(() => expect(screen.getByTestId("plan-content")).toHaveTextContent("Revised root plan"));
+    setPlan({ toolUseID: "absent", content: "Unowned plan" });
+    expect(screen.queryByTestId("plan-content")).not.toBeInTheDocument();
+    setPlan(null);
+    expect(screen.queryByTestId("plan-content")).not.toBeInTheDocument();
+    assert.equal(timeline.messages(), messages);
+    assert.equal(timeline.epoch(), epoch);
+    assert.equal(fetchMock.mock.calls.length, requests);
+    assert.equal(stream.mock.calls.length, streams);
+  } finally {
+    view.unmount();
+    fetchMock.mockRestore();
+    stream.mockRestore();
+  }
+});
+
+it("keeps a single-call plan dormant inside a collapsed past turn", async () => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+    for (const event of [
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "past-plan", name: "ExitPlanMode", input: {} } },
+      resultEvent(2000),
+      { kind: "userInput", ts: 3000, userInput: { text: "Continue" } },
+      { kind: "text", ts: 4000, text: { text: "Current response" } },
+      resultEvent(5000),
+    ] satisfies EventMessage[])
+      handlers.onMessage(event);
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail({ taskId: "plan-disclosure", currentPlan: { toolUseID: "past-plan", content: "Dormant plan" } });
+  expect(screen.queryByTestId("plan-content")).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: /1 tool call/ }));
+  expect(screen.getByTestId("plan-content")).toHaveTextContent("Dormant plan");
+  expect(screen.getByTestId("tool-call")).not.toHaveAttribute("open");
+});
+
+it("retries live history and automatically loads the full tool output", async () => {
+  const startedAt = Date.now() - 2_000;
+  let chunkRequests = 0;
+  const requests: string[] = [];
+  const historyStream = vi
+    .spyOn(api, "historyEvents")
+    .mockImplementation(() => ({ close: vi.fn() }) as unknown as EventSource);
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/bootstrap"))
+      return Response.json({
+        projectionVersion: "v1",
+        generation: "test",
+        scope: "owner",
+        recordsPerChunk: 256,
+        through: 520,
+        cursor: "v1.test.520.end",
+        resourceBase: "/history/owner",
+        inPlanMode: false,
+      });
+    if (url.endsWith("/stats")) return Response.json({ samples: [] });
+    if (url.includes("/chunks/")) {
+      if (++chunkRequests === 1) return new Response("temporarily unavailable", { status: 503 });
+      const earlier = url.endsWith("/1/256");
+      if (url.endsWith("/257/512")) return Response.json([]);
+      return Response.json([
+        ...(earlier
+          ? [
+              {
+                recordID: 2,
+                index: 0,
+                message: {
+                  kind: "toolUse",
+                  ts: startedAt,
+                  toolUse: { toolUseID: "tool", name: "Bash", input: { command: "echo old" } },
+                },
+              },
+            ]
+          : []),
+        {
+          recordID: earlier ? 3 : 520,
+          index: 0,
+          message: {
+            kind: "toolOutputDelta",
+            ts: 520,
+            toolOutputDelta: { toolUseID: "tool", delta: earlier ? "old output" : "tail output" },
+          },
+        },
+      ]);
+    }
+    throw new Error(`Unexpected history request: ${url}`);
+  });
+  const view = renderTaskDetail({}, "running");
+  try {
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("History request failed (503)"));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Retry history" }));
+    await waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
+    expect(screen.getAllByTestId("tool-call")).toHaveLength(1);
+    expect(screen.getByTestId("tool-duration")).toBeInTheDocument();
+    expect(requests.some((url) => url.endsWith("/chunks/1/256"))).toBe(true);
+    expect(screen.getByTestId("tool-call")).toHaveTextContent("old outputtail output");
+  } finally {
+    view.unmount();
+    fetchMock.mockRestore();
+    historyStream.mockRestore();
+  }
+});
+
+it("automatically restores completed activity timing while keeping live observations ticking", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(10_000);
+  const starts: EventMessage[] = [
+    {
+      kind: "nativeSubagent",
+      ts: 1_000,
+      nativeSubagent: { id: "worker", label: "Historical worker", status: "running" },
+    },
+    { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "shell-tool", name: "Bash", input: {}, background: true } },
+    {
+      kind: "backgroundCommand",
+      ts: 1_000,
+      backgroundCommand: { id: "shell", toolUseID: "shell-tool", status: "running" },
+    },
+  ];
+  const finishes: EventMessage[] = [
+    { kind: "nativeSubagent", ts: 2_000, nativeSubagent: { id: "worker", status: "completed" } },
+    { kind: "backgroundCommand", ts: 2_000, backgroundCommand: { id: "shell", status: "completed" } },
+  ];
+  const seeds = starts.map((message, index) => ({ recordID: index + 1, index: 0, message }));
+  const streams: HistoryEventsHandlers[] = [];
+  const historyStream = vi.spyOn(api, "historyEvents").mockImplementation((_id, _cursor, handlers) => {
+    streams.push(handlers);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  const requests: string[] = [];
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/bootstrap"))
+      return Response.json({
+        projectionVersion: "v1",
+        generation: "test",
+        scope: "owner",
+        recordsPerChunk: 256,
+        through: 258,
+        cursor: "v1.test.258.end",
+        resourceBase: "/history/owner",
+        inPlanMode: false,
+      });
+    if (url.endsWith("/stats")) return Response.json({ samples: [] });
+    if (url.includes("/chunks/"))
+      return Response.json(
+        url.endsWith("/1/256")
+          ? seeds
+          : finishes.map((message, index) => ({ recordID: 257 + index, index: 0, message })),
+      );
+    throw new Error(`Unexpected history request: ${url}`);
+  });
+  const view = renderTaskDetail({}, "running");
+  try {
+    await vi.waitFor(() => expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01"));
+    await vi.waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
+    const beforeTick = requests.length;
+    expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
+    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
+    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    expect(requests).toHaveLength(beforeTick);
+    const stream = streams[0];
+    assert.ok(stream);
+    stream.onMessage({
+      recordID: 259,
+      index: 0,
+      message: { kind: "nativeSubagent", ts: Date.now() - 1_000, nativeSubagent: { id: "ongoing", status: "running" } },
+    });
+    stream.onMessage({
+      recordID: 260,
+      index: 0,
+      message: {
+        kind: "backgroundCommand",
+        ts: Date.now() - 1_000,
+        backgroundCommand: { id: "ongoing-shell", status: "running" },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    const native = view.container.querySelector('[data-native-id="ongoing"]');
+    const background = view.container.querySelector('[data-command-id="ongoing-shell"]');
+    assert.ok(native instanceof HTMLElement && background instanceof HTMLElement);
+    expect(within(native).getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
+    expect(within(background).getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(within(native).getByTestId("native-subagent-duration")).toHaveTextContent("0:03");
+    expect(within(background).getByTestId("background-command-duration")).toHaveTextContent("0:03");
+  } finally {
+    view.unmount();
+    fetchMock.mockRestore();
+    historyStream.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
 it("links a sent image to its document view at the conversation width", async () => {
   const hash = "a".repeat(64);
-  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
     handlers.onMessage({
       kind: "userInput",
       ts: 1000,
@@ -128,7 +395,7 @@ it("links a sent image to its document view at the conversation width", async ()
 
 it("falls back to the inline image when the attachment cannot load", async () => {
   const hash = "a".repeat(64);
-  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
     handlers.onMessage({
       kind: "userInput",
       ts: 1000,
@@ -158,7 +425,7 @@ it("falls back to the inline image when the attachment cannot load", async () =>
 });
 
 it("keeps rendering an image inline when it has no digest", async () => {
-  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
     handlers.onMessage({
       kind: "userInput",
       ts: 1000,
@@ -182,7 +449,7 @@ it("keeps a child-first card mounted and open as parent content and lifecycle me
     itemID: "answer",
   };
   let send: ((message: EventMessage) => void) | undefined;
-  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
     send = handlers.onMessage;
     handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Child first" } });
     handlers.onReady?.();
@@ -218,7 +485,7 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
   const parent = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "reason" };
   const child = { ...parent, agentID: "codex:thread:child", threadID: "child", itemID: "answer" };
   let send: ((message: EventMessage) => void) | undefined;
-  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
     send = handlers.onMessage;
     const initial: EventMessage[] = [
       { kind: "thinkingDelta", ts: 1000, source: parent, thinkingDelta: { text: "Consider " } },
@@ -320,7 +587,7 @@ describe("TaskDetail", () => {
       .spyOn(api, "getTaskToolInput")
       .mockResolvedValue({ toolUseID: "same", input: { scoped: "child input" } });
     t.after(() => inputSpy.mockRestore());
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       send = handlers.onMessage;
       handlers.onMessage({
         kind: "toolUse",
@@ -426,7 +693,7 @@ describe("TaskDetail", () => {
   it("keeps an identified answer mounted when the successful result repeats it", async () => {
     const source = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "answer" };
     let send: ((message: EventMessage) => void) | undefined;
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       send = handlers.onMessage;
       handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Finished." } });
       handlers.onReady?.();
@@ -445,7 +712,7 @@ describe("TaskDetail", () => {
   });
 
   it("omits empty session metadata without leaving extra separators", async () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "init",
         ts: 1_000,
@@ -548,7 +815,7 @@ describe("TaskDetail", () => {
   });
 
   it("opens agent screenshot links in the file viewer", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1000,
@@ -570,7 +837,7 @@ describe("TaskDetail", () => {
   });
 
   it("resolves file URIs and relative paths while preserving web links", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1000,
@@ -596,7 +863,7 @@ describe("TaskDetail", () => {
   });
 
   it("links distinct skill paths and enriches a uniquely named skill", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({ kind: "skillLoad", ts: 1000, skillLoad: { skill: "review" } });
       handlers.onMessage({
         kind: "skillLoad",
@@ -630,7 +897,7 @@ describe("TaskDetail", () => {
   for (const subtype of ["compact_boundary", "context_cleared"]) {
     it(`keeps prior skill links at the ${subtype} separator and empties the header`, async () => {
       let send: ((message: EventMessage) => void) | undefined;
-      taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
         send = handlers.onMessage;
         handlers.onMessage({
           kind: "init",
@@ -661,7 +928,7 @@ describe("TaskDetail", () => {
   }
 
   it("reveals each closed section's skill links when its session expands", async () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       for (const message of [
         {
           kind: "init",
@@ -712,7 +979,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps a cleared prompt and restarted response in the same visible section", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "init",
@@ -781,7 +1048,7 @@ describe("TaskDetail", () => {
 
   it("preserves completed boundaries and turn expansion across live boundaries and same-session init", async () => {
     let send: ((event: EventMessage) => void) | undefined;
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       send = handlers.onMessage;
       const events: EventMessage[] = [
         {
@@ -909,7 +1176,7 @@ describe("TaskDetail", () => {
     });
 
     try {
-      taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
         handlers.onMessage({
           kind: "text",
           ts: 1_000,
@@ -1053,7 +1320,7 @@ describe("TaskDetail", () => {
   });
 
   it("renders Codex file-change diffs with colored lines", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -1106,7 +1373,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows canonical native status on the tool call that spawned it", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -1160,7 +1427,7 @@ describe("TaskDetail", () => {
   });
 
   it("renders a native card that has no transcript item to anchor to", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "nativeSubagent",
         ts: 1_000,
@@ -1182,7 +1449,7 @@ describe("TaskDetail", () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     let complete = () => {};
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "toolUse",
         ts: 8_000,
@@ -1211,7 +1478,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows elapsed time on a single-event message block", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "userInput",
         ts: 1_000,
@@ -1236,7 +1503,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows one timing control for a thinking-only block", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "userInput",
         ts: 1_000,
@@ -1264,7 +1531,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows one summed timing control for collapsed Codex thinking", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const usage = (ts: number): EventMessage => ({
         kind: "usage",
         ts,
@@ -1315,7 +1582,7 @@ describe("TaskDetail", () => {
   });
 
   it("formats short result durations without misleading zero seconds", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.duration = 0.125;
@@ -1336,7 +1603,7 @@ describe("TaskDetail", () => {
   });
 
   it("does not repeat a successful assistant response from the result payload", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1_000,
@@ -1360,7 +1627,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps result payload text for failed turns", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.isError = true;
@@ -1381,7 +1648,7 @@ describe("TaskDetail", () => {
 
   it("opens invocation details from a completed turn's result card", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.usage.inputTokens = 1_000;
@@ -1404,7 +1671,7 @@ describe("TaskDetail", () => {
 
   it("opens invocation details from a collapsed turn without expanding it", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const firstResult = resultEvent(2_000);
       const latestResult = resultEvent(4_000);
       if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
@@ -1437,7 +1704,7 @@ describe("TaskDetail", () => {
   });
 
   it("right-aligns the duration on collapsed turns", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const firstResult = resultEvent(333_000);
       if (firstResult.result) firstResult.result.duration = 332;
       const events: EventMessage[] = [
@@ -1463,7 +1730,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows an explicit zero duration on collapsed turns without timing metadata", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const firstResult = resultEvent(0);
       const secondResult = resultEvent(0);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -1492,7 +1759,7 @@ describe("TaskDetail", () => {
 
   it("summarizes every turn in the collapsed session details", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -1598,7 +1865,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps the prompt visible when a later input repeats it", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1,
@@ -1623,7 +1890,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows setup logs inside task details", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1,
@@ -1657,7 +1924,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows zero instead of an implausible reconstructed setup duration", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1_500,
@@ -1690,7 +1957,7 @@ describe("TaskDetail", () => {
   });
 
   it("collapses setup logs after the agent session starts", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1_500,
@@ -1724,7 +1991,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows in-progress context compaction", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1744,7 +2011,7 @@ describe("TaskDetail", () => {
   });
 
   it("reports the harness context size on a compaction boundary", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1770,7 +2037,7 @@ describe("TaskDetail", () => {
   });
 
   it("surfaces a failed context compaction", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1800,7 +2067,7 @@ type FakeES = {
 // Build a mock that fires the "ready" event synchronously so tests don't need
 // to advance timers just to get the component into live mode.
 function makeSyncReadyMock(created: FakeES[], capturedCb?: { value: ((ev: EventMessage) => void) | null }) {
-  taskEventStreamMock.mockImplementation((_id, handlers) => {
+  taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
     if (capturedCb) capturedCb.value = handlers.onMessage;
     const fakeES: FakeES = {
       addEventListener: vi.fn(),
@@ -1818,7 +2085,7 @@ function makeManualReadyMock(
   capturedCb: { value: ((ev: EventMessage) => void) | null },
   readyHandler: { value: (() => void) | null },
 ) {
-  taskEventStreamMock.mockImplementation((_id, handlers) => {
+  taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
     capturedCb.value = handlers.onMessage;
     readyHandler.value = handlers.onReady ?? null;
     const fakeES: FakeES = {
@@ -1889,7 +2156,7 @@ describe("SSE connection", () => {
     let onMessage: ((ev: EventMessage) => void) | undefined;
     let onReady: (() => void) | undefined;
     let onReset: (() => void) | undefined;
-    taskEventStreamMock.mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
       onMessage = handlers.onMessage;
       onReady = handlers.onReady;
       onReset = handlers.onReset;
@@ -1951,7 +2218,7 @@ describe("SSE connection", () => {
   it("reports terminal history errors and does not retry after the native error", () => {
     const created: FakeES[] = [];
     let historyError: ((error: { message: string }) => void) | undefined;
-    taskEventStreamMock.mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
       historyError = handlers.onHistoryError;
       const fakeES: FakeES = {
         addEventListener: vi.fn(),
@@ -1961,13 +2228,11 @@ describe("SSE connection", () => {
       created.push(fakeES);
       return fakeES as unknown as EventSource;
     });
-    const onError = vi.fn();
-
-    renderTaskDetail({ onError });
+    renderTaskDetail();
     if (!historyError) throw new Error("history error callback not captured");
     historyError({ message: "task history is unavailable" });
 
-    expect(onError).toHaveBeenCalledWith("Task history error: task history is unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent("task history is unavailable");
     assert.ok(created[0] !== undefined);
     expect(created[0].close).toHaveBeenCalledOnce();
     if (!created[0].onerror) throw new Error("onerror not set");
@@ -1999,7 +2264,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     const callbacks: Array<(ev: EventMessage) => void> = [];
     const readyHandlers: Array<() => void> = [];
-    taskEventStreamMock.mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
       callbacks.push(handlers.onMessage);
       if (handlers.onReady) readyHandlers.push(handlers.onReady);
       const fakeES: FakeES = {

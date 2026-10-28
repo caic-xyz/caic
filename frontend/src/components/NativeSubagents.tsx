@@ -1,4 +1,4 @@
-// Stable expandable native activity cards with optional child transcripts and background-command results.
+// Expandable native activity cards with child transcripts, lifecycle timing, and background results.
 
 import { createMemo, For, Show, type JSX } from "solid-js";
 
@@ -125,7 +125,7 @@ export function BackgroundCommandStatusChip(props: { command: BackgroundCommandA
   return (
     <span class={styles.status} data-state={props.command.status} data-testid="background-command-chip">
       <Show
-        when={props.command.status === "running"}
+        when={props.command.status === "running" && !props.settled}
         fallback={
           <Show
             when={props.command.exitCode !== undefined && props.command.exitCode !== null}

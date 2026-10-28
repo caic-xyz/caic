@@ -21,8 +21,8 @@ export function nativeTerminal(status: EventNativeSubagent["status"]): boolean {
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
-// Missing terminal evidence is not success or interruption. A settled parent only
-// makes its last running observation stale; it never invents a terminal outcome.
+// Missing terminal evidence is not success or interruption. A settled parent or
+// incomplete historical window makes a running observation stale, not terminal.
 export function nativeActivityStatus(activity: NativeActivity, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   if (activity.status === "unknown") return "Status unknown";
@@ -278,8 +278,8 @@ export function backgroundTerminal(status: EventBackgroundCommand["status"]): bo
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
-// Missing terminal evidence is not success or interruption. A settled parent only
-// makes its last running observation stale; it never invents a terminal outcome.
+// Missing terminal evidence is not success or interruption. A settled parent or
+// incomplete historical window makes a running observation stale, not terminal.
 export function backgroundCommandStatus(activity: BackgroundCommandActivity, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);

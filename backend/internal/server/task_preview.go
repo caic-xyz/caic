@@ -1,18 +1,17 @@
-// Selects recent task previews from semantic messages or ordered API projections with complete text and tool context.
+// Selects recent disk previews from ordered API projections with complete text and tool context.
 
 package server
 
 import (
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 )
 
-// taskPreviewEventLimit counts visible semantic messages, excluding metadata and
+// taskPreviewEventLimit counts visible projected events, excluding metadata and
 // superseded streaming fragments. The latest response and missing tool starts
 // may extend the preview past this limit.
 const taskPreviewEventLimit = 50
@@ -24,11 +23,10 @@ type previewContentKey struct {
 }
 
 type previewMessage struct {
-	timed     agent.TimedMessage
-	projected *v1.EventMessage
-	position  int
-	parts     []string // Newest first; assembled once after backward collection.
-	complete  bool
+	event    v1.EventMessage
+	position int
+	parts    []string // Newest first; assembled once after backward collection.
+	complete bool
 }
 
 type taskPreview struct {
@@ -43,121 +41,6 @@ type taskPreview struct {
 
 func newTaskPreview() *taskPreview {
 	return &taskPreview{content: make(map[previewContentKey]*previewMessage), tools: make(map[agent.ToolKey]struct{})}
-}
-
-func (p *taskPreview) add(timed agent.TimedMessage) bool {
-	r := previewRecord{entry: previewMessage{timed: timed}, source: *timed.Message.Provenance()}
-	switch m := timed.Message.(type) {
-	case *agent.TextMessage:
-		r.kind = v1.EventKindText
-		r.text = m.Text
-	case *agent.TextDeltaMessage:
-		r.kind = v1.EventKindTextDelta
-		r.text = m.Text
-	case *agent.ThinkingMessage:
-		r.kind = v1.EventKindThinking
-		r.text = m.Text
-	case *agent.ThinkingDeltaMessage:
-		r.kind = v1.EventKindThinkingDelta
-		r.text = m.Text
-	case *agent.WidgetMessage:
-		r.kind = v1.EventKindWidget
-		r.text = m.HTML
-		r.toolID = m.ToolUseID
-	case *agent.WidgetDeltaMessage:
-		r.kind = v1.EventKindWidgetDelta
-		r.text = m.Delta
-		r.toolID = m.ToolUseID
-	case *agent.ToolOutputDeltaMessage:
-		r.kind = v1.EventKindToolOutputDelta
-		r.text = m.Delta
-		r.toolID = m.ToolUseID
-	case *agent.ToolResultMessage:
-		r.kind = v1.EventKindToolResult
-		r.toolID = m.ToolUseID
-	case *agent.ToolUseMessage:
-		r.kind = v1.EventKindToolUse
-		r.toolID = m.ToolUseID
-	case *agent.AskMessage:
-		if len(m.Questions) > 0 {
-			r.kind = v1.EventKindAsk
-			r.toolID = m.ToolUseID
-		}
-	case *agent.TodoMessage:
-		r.kind = v1.EventKindTodo
-		r.toolID = m.ToolUseID
-	case *agent.ResultMessage:
-		r.kind = v1.EventKindResult
-		r.text = m.Result
-	case *agent.UserInputMessage:
-		if m.Text != "" || len(m.Images) > 0 {
-			r.kind = v1.EventKindUserInput
-		}
-	case *agent.InitMessage:
-		r.kind = v1.EventKindInit
-	case *agent.SystemMessage:
-		if m.Subtype == agent.SystemSubtypeCompactBoundary || m.Subtype == "context_cleared" {
-			r.kind = v1.EventKindSystem
-		}
-	case *agent.ParseErrorMessage:
-		r.kind = v1.EventKindError
-	case *agent.NativeSubagentMessage:
-		r.kind = v1.EventKindNativeSubagent
-	case *agent.BackgroundCommandMessage:
-		r.kind = v1.EventKindBackgroundCommand
-	}
-	return p.addRecord(&r)
-}
-
-func projectedPreviewRecord(event *v1.EventMessage) previewRecord {
-	r := previewRecord{entry: previewMessage{projected: event}, source: agent.MessageSource(event.Source), kind: event.Kind}
-	if event.Ts != 0 {
-		r.entry.timed.ProducerTime = time.UnixMilli(event.Ts)
-	}
-	switch event.Kind {
-	case v1.EventKindText:
-		r.text = event.Text.Text
-	case v1.EventKindTextDelta:
-		r.text = event.TextDelta.Text
-	case v1.EventKindThinking:
-		r.text = event.Thinking.Text
-	case v1.EventKindThinkingDelta:
-		r.text = event.ThinkingDelta.Text
-	case v1.EventKindToolUse:
-		r.toolID = event.ToolUse.ToolUseID
-	case v1.EventKindToolResult:
-		r.toolID = event.ToolResult.ToolUseID
-	case v1.EventKindToolOutputDelta:
-		r.text = event.ToolOutputDelta.Delta
-		r.toolID = event.ToolOutputDelta.ToolUseID
-	case v1.EventKindWidget:
-		r.text = event.Widget.HTML
-		r.toolID = event.Widget.ToolUseID
-	case v1.EventKindWidgetDelta:
-		r.text = event.WidgetDelta.Delta
-		r.toolID = event.WidgetDelta.ToolUseID
-	case v1.EventKindAsk:
-		if len(event.Ask.Questions) == 0 {
-			r.kind = ""
-		}
-		r.toolID = event.Ask.ToolUseID
-	case v1.EventKindTodo:
-		r.toolID = event.Todo.ToolUseID
-	case v1.EventKindResult:
-		r.text = event.Result.Result
-	case v1.EventKindUserInput:
-		if event.UserInput.Text == "" && len(event.UserInput.Images) == 0 {
-			r.kind = ""
-		}
-	case v1.EventKindSystem:
-		if event.System.Subtype != agent.SystemSubtypeCompactBoundary && event.System.Subtype != "context_cleared" {
-			r.kind = ""
-		}
-	case v1.EventKindInit, v1.EventKindError, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand:
-	default:
-		r.kind = ""
-	}
-	return r
 }
 
 // addRecord consumes newest-first root messages, keeping the window plus its
@@ -245,7 +128,7 @@ func (p *taskPreview) addRecord(r *previewRecord) bool {
 				if !previous.complete {
 					previous.parts = append(previous.parts, r.text)
 					previous.position = p.position
-					previous.timed.ProducerTime = r.entry.timed.ProducerTime
+					previous.event.Ts = r.entry.event.Ts
 				}
 				return !p.done()
 			}
@@ -312,73 +195,88 @@ func (p *taskPreview) done() bool {
 	return true
 }
 
-func (p *taskPreview) events(tracker *apiconv.ToolTimingTracker) []v1.EventMessage {
+func (p *taskPreview) events() []v1.EventMessage {
 	slices.SortFunc(p.messages, func(a, b *previewMessage) int { return b.position - a.position })
 	events := make([]v1.EventMessage, 0, len(p.messages))
 	for _, entry := range p.messages {
-		timed := entry.timed
-		var text string
+		ev := entry.event
 		if len(entry.parts) > 0 {
 			slices.Reverse(entry.parts)
-			text = strings.Join(entry.parts, "")
-		}
-		if entry.projected != nil {
-			ev := *entry.projected
-			if len(entry.parts) > 0 {
-				ev.Ts = 0
-				if !timed.ProducerTime.IsZero() {
-					ev.Ts = timed.ProducerTime.UnixMilli()
-				}
-				switch ev.Kind {
-				case v1.EventKindTextDelta:
-					ev.TextDelta = &v1.EventTextDelta{Text: text}
-				case v1.EventKindThinkingDelta:
-					ev.ThinkingDelta = &v1.EventThinkingDelta{Text: text}
-				case v1.EventKindToolOutputDelta:
-					output := *ev.ToolOutputDelta
-					output.Delta = text
-					output.ContentType, output.Formatted = apiconv.FormatToolOutput(text)
-					ev.ToolOutputDelta = &output
-				case v1.EventKindWidgetDelta:
-					widget := *ev.WidgetDelta
-					widget.Delta = text
-					ev.WidgetDelta = &widget
-				default:
-					// Parts are populated only for streaming delta records.
-				}
-			}
-			events = append(events, ev)
-			continue
-		}
-		if len(entry.parts) > 0 {
-			switch m := timed.Message.(type) {
-			case *agent.TextDeltaMessage:
-				timed.Message = &agent.TextDeltaMessage{MessageProvenance: m.MessageProvenance, Text: text}
-			case *agent.ThinkingDeltaMessage:
-				timed.Message = &agent.ThinkingDeltaMessage{MessageProvenance: m.MessageProvenance, Text: text}
-			case *agent.ToolOutputDeltaMessage:
-				timed.Message = &agent.ToolOutputDeltaMessage{MessageProvenance: m.MessageProvenance, ToolUseID: m.ToolUseID, Delta: text}
-			case *agent.WidgetDeltaMessage:
-				timed.Message = &agent.WidgetDeltaMessage{MessageProvenance: m.MessageProvenance, ToolUseID: m.ToolUseID, Delta: text}
+			text := strings.Join(entry.parts, "")
+			switch ev.Kind {
+			case v1.EventKindTextDelta:
+				ev.TextDelta = &v1.EventTextDelta{Text: text}
+			case v1.EventKindThinkingDelta:
+				ev.ThinkingDelta = &v1.EventThinkingDelta{Text: text}
+			case v1.EventKindToolOutputDelta:
+				output := *ev.ToolOutputDelta
+				output.Delta = text
+				output.ContentType, output.Formatted = apiconv.FormatToolOutput(text)
+				ev.ToolOutputDelta = &output
+			case v1.EventKindWidgetDelta:
+				widget := *ev.WidgetDelta
+				widget.Delta = text
+				ev.WidgetDelta = &widget
+			default:
+				// Parts are populated only for streaming delta records.
 			}
 		}
-		projected := tracker.ConvertMessage(timed.Message, timed.ProducerTime)
-		if result, ok := timed.Message.(*agent.ResultMessage); ok && result.Result == "" {
-			// The selected window can omit intervening turn boundaries. Its
-			// text cannot be used to reconstruct an empty native result.
-			for i := range projected {
-				if projected[i].Result != nil {
-					projected[i].Result.Result = ""
-				}
-			}
-		}
-		events = append(events, projected...)
+		events = append(events, ev)
 	}
 	return events
 }
 
-// previewRecord describes selection independently of its semantic or already
-// projected payload. Disk projections have been parsed and converted in order.
+func projectedPreviewRecord(event *v1.EventMessage) previewRecord {
+	r := previewRecord{entry: previewMessage{event: *event}, source: agent.MessageSource(event.Source), kind: event.Kind}
+
+	switch event.Kind {
+	case v1.EventKindText:
+		r.text = event.Text.Text
+	case v1.EventKindTextDelta:
+		r.text = event.TextDelta.Text
+	case v1.EventKindThinking:
+		r.text = event.Thinking.Text
+	case v1.EventKindThinkingDelta:
+		r.text = event.ThinkingDelta.Text
+	case v1.EventKindToolUse:
+		r.toolID = event.ToolUse.ToolUseID
+	case v1.EventKindToolResult:
+		r.toolID = event.ToolResult.ToolUseID
+	case v1.EventKindToolOutputDelta:
+		r.text = event.ToolOutputDelta.Delta
+		r.toolID = event.ToolOutputDelta.ToolUseID
+	case v1.EventKindWidget:
+		r.text = event.Widget.HTML
+		r.toolID = event.Widget.ToolUseID
+	case v1.EventKindWidgetDelta:
+		r.text = event.WidgetDelta.Delta
+		r.toolID = event.WidgetDelta.ToolUseID
+	case v1.EventKindAsk:
+		if len(event.Ask.Questions) == 0 {
+			r.kind = ""
+		}
+		r.toolID = event.Ask.ToolUseID
+	case v1.EventKindTodo:
+		r.toolID = event.Todo.ToolUseID
+	case v1.EventKindResult:
+		r.text = event.Result.Result
+	case v1.EventKindUserInput:
+		if event.UserInput.Text == "" && len(event.UserInput.Images) == 0 {
+			r.kind = ""
+		}
+	case v1.EventKindSystem:
+		if event.System.Subtype != agent.SystemSubtypeCompactBoundary && event.System.Subtype != "context_cleared" {
+			r.kind = ""
+		}
+	case v1.EventKindInit, v1.EventKindError, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand:
+	default:
+		r.kind = ""
+	}
+	return r
+}
+
+// previewRecord describes selection over disk projections parsed and converted
+// in canonical order before newest-first collection.
 type previewRecord struct {
 	entry  previewMessage
 	source agent.MessageSource

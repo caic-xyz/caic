@@ -215,7 +215,6 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let Widget = EventKind("widget")
     public static let WidgetDelta = EventKind("widgetDelta")
     public static let RateLimit = EventKind("rateLimit")
-    public static let Stats = EventKind("stats")
     public static let CommitSnapshot = EventKind("commitSnapshot")
     public static let SkillLoad = EventKind("skillLoad")
 
@@ -1131,6 +1130,13 @@ public struct TaskStartupFailure: Codable {
     public let cause: String
 }
 
+/// TaskPlan is the task's current root ExitPlanMode content. The identity and
+/// content form one projection and are cleared together.
+public struct TaskPlan: Codable {
+    public let toolUseID: String
+    public let content: String
+}
+
 /// RuntimeInstance holds per-task runtime metadata.
 public struct RuntimeInstance: Codable {
     /// Runtime instance ID.
@@ -1217,7 +1223,7 @@ public struct Task: Codable {
     /// When the current turn started; zero when not running.
     public let turnStartedAt: ISOTimestamp?
     public let inPlanMode: Bool?
-    public let planContent: String?
+    public let currentPlan: TaskPlan?
     public let runtime: RuntimeInstance
     /// Current quota block resolved by the backend.
     public let rateLimit: TaskRateLimit?
@@ -1424,8 +1430,6 @@ public struct EventToolUse: Codable {
     public let detail: String?
     /// Backend-normalized structured input for tool-card rendering.
     public let inputView: EventToolInputView?
-    /// Snapshot of plan content for ExitPlanMode events.
-    public let planContent: String?
     /// True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
     public let inputTruncated: Bool?
     /// True when the tool runs in the background (Bash/Agent run_in_background).
@@ -1653,29 +1657,6 @@ public struct EventRateLimit: Codable {
     public let overageResetsAt: ISOTimestamp?
 }
 
-/// EventStats is a runtime resource usage snapshot emitted periodically.
-public struct EventStats: Codable {
-    public let ts: Int
-    /// 100% is one fully busy logical CPU.
-    public let cpuPerc: Double
-    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
-    public let cpuCeiling: Double?
-    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
-    public let cpuQuota: Double?
-    /// Owning runtime's logical CPU count; null when unknown.
-    public let runtimeCPUs: Int?
-    /// Runtime CPU metadata observation failure; usage samples remain usable.
-    public let cpuError: String?
-    public let memUsed: Int
-    public let memLimit: Int
-    public let memPerc: Double
-    public let netRx: Int
-    public let netTx: Int
-    public let blockRead: Int
-    public let blockWrite: Int
-    public let diskUsed: Int
-}
-
 /// EventRepositoryCommit identifies one immutable repository branch tip in a
 /// commit snapshot.
 public struct EventRepositoryCommit: Codable {
@@ -1744,14 +1725,43 @@ public struct EventMessage: Codable {
     public let widget: EventWidget?
     public let widgetDelta: EventWidgetDelta?
     public let rateLimit: EventRateLimit?
-    public let stats: EventStats?
     public let commitSnapshot: EventCommitSnapshot?
     public let skillLoad: EventSkillLoad?
 }
 
-/// TaskEventBackward carries a chronological recent preview before canonical
-/// history. EventID resumes strictly after the preview's memory snapshot. It is
-/// empty for disk previews, whose canonical history uses the same connection.
+/// EventStats is a runtime resource usage snapshot emitted periodically.
+public struct EventStats: Codable {
+    public let ts: Int
+    /// 100% is one fully busy logical CPU.
+    public let cpuPerc: Double
+    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
+    public let cpuCeiling: Double?
+    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
+    public let cpuQuota: Double?
+    /// Owning runtime's logical CPU count; null when unknown.
+    public let runtimeCPUs: Int?
+    /// Runtime CPU metadata observation failure; usage samples remain usable.
+    public let cpuError: String?
+    public let memUsed: Int
+    public let memLimit: Int
+    public let memPerc: Double
+    public let netRx: Int
+    public let netTx: Int
+    public let blockRead: Int
+    public let blockWrite: Int
+    public let diskUsed: Int
+}
+
+/// HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+/// Replace samples sharing a timestamp: disk usage can revise the latest sample.
+/// These host observations are separate from immutable raw task history.
+public struct HistoryStats: Codable {
+    public let samples: [EventStats]
+}
+
+/// TaskEventBackward carries a chronological recent disk preview before canonical
+/// history on the same connection. EventID is empty. Memory-backed streams send
+/// canonical history and support normal event-ID resume.
 public struct TaskEventBackward: Codable {
     public let messages: [EventMessage]
     public let eventId: String
@@ -2272,6 +2282,67 @@ public struct WebFetchReq: Codable {
 public struct WebFetchResp: Codable {
     public let title: String
     public let content: String
+}
+
+/// HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+/// ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
+/// for direct arithmetic access. Scope isolates the
+/// authenticated account, including legacy shared tasks. Browser HTTP caching
+/// owns storage/eviction; clients need no inactive decoded transcript cache.
+/// Generation changes on server restart/task replacement. A stale reference
+/// returns 409; bootstrap again and discard old cursor metadata.
+/// For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
+/// and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+public struct HistoryBootstrap: Codable {
+    public let projectionVersion: String
+    public let generation: String
+    public let scope: String
+    public let recordsPerChunk: Int
+    public let through: Int
+    public let cursor: String
+    public let resourceBase: String
+}
+
+/// HistoryEvent is an immutable normalized output; the identity is scoped to the
+/// projection version and timeline generation supplied by HistoryBootstrap.
+public struct HistoryEvent: Codable {
+    public let recordID: Int
+    public let index: UInt32
+    public let message: EventMessage
+}
+
+/// HistoryPosition identifies one normalized output in a one-based physical raw
+/// record. Index is zero-based across every output of that record. Metadata and
+/// zero-output controls occupy record IDs too; IDs are not semantic event counts.
+public struct HistoryPosition: Codable {
+    public let recordID: Int
+    public let index: UInt32
+}
+
+/// HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
+/// includes the prefix so session-cumulative reports retain their meaning. Model
+/// is the authoritative root model at the result, including reroutes, even when
+/// pricing is unknown; canonical output bytes are unchanged.
+public struct HistoryTurnEstimate: Codable {
+    public let recordID: Int
+    public let index: UInt32
+    public let model: String?
+    public let cost: EventCost?
+    public let totalUSD: Double
+}
+
+/// HistoryCheckpoint advances through all outputs of a physical record,
+/// including a record with zero outputs. Cursor is opaque; it encodes projection
+/// version, generation, raw record and either output index or end-of-record.
+/// SSE resumes strictly after it. The Last-Event-ID header overrides the initial
+/// cursor query on reconnect. Named stats events never replace this raw cursor.
+public struct HistoryCheckpoint: Codable {
+    public let cursor: String
+}
+
+/// HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
+public struct HistoryReset: Codable {
+    public let bootstrapURL: String
 }
 
 public struct ErrorDetails: Codable {

@@ -221,6 +221,7 @@ func logV1AskQuestionFromData(in []v1.AskQuestion) []v3.AskQuestion {
 func logV2UserInputMessageToData(m *UserInputMessage, token logRecordType) v2.UserInputMessage {
 	return v2.UserInputMessage{
 		MessageType: string(token),
+		Ts:          m.Ts,
 		Text:        m.Text,
 		Images:      logV2ImageDataToData(m.Images),
 	}
@@ -228,6 +229,7 @@ func logV2UserInputMessageToData(m *UserInputMessage, token logRecordType) v2.Us
 
 func logV2UserInputMessageFromData(m *v2.UserInputMessage) UserInputMessage {
 	return UserInputMessage{
+		Ts:     m.Ts,
 		Text:   m.Text,
 		Images: logV2ImageDataFromData(m.Images),
 	}

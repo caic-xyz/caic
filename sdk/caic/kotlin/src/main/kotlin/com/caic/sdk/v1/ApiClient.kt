@@ -2,12 +2,14 @@
 package com.caic.sdk.v1
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -33,7 +35,10 @@ class ApiClient(
     baseURL: String,
     private val tokenProvider: (() -> String?)? = null,
     private val httpClient: OkHttpClient = OkHttpClient(),
+    // Optional UTF-8 limit for named SSE lines and accumulated event data; null accepts any event size.
+    private val maxSSEEventBytes: Long? = null,
 ) {
+    init { require(maxSSEEventBytes == null || maxSSEEventBytes >= 0) }
     private val baseURL: String = baseURL.trimEnd('/')
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMediaType = "application/json".toMediaType()
@@ -130,7 +135,7 @@ class ApiClient(
     /** Clones a repository into the server's root directory. */
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/caic/v1/server/repos", json.encodeToString(req))
     /** Lists branches for a repository. */
-    suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=$repo")
+    suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=${java.net.URLEncoder.encode(repo, "UTF-8")}")
     /** Creates a task to fix a failing CI pipeline. */
     suspend fun botFixCI(req: BotFixCIReq): Task = request("POST", "/api/caic/v1/ci/fix-ci", json.encodeToString(req))
     /** Injects a CI fix command into an existing task's PR. */
@@ -158,7 +163,7 @@ class ApiClient(
     /** Reconnects to an orphaned task runtime instance. */
     suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/revive")
     /** Returns the log tail of a failed CI check run. */
-    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/ci/log/$id?jobID=$jobID")
+    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/ci/log/$id?jobID=${java.net.URLEncoder.encode(jobID, "UTF-8")}")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
@@ -166,11 +171,11 @@ class ApiClient(
     /** Builds an editable handoff prompt for continuing a task in a fresh agent session. */
     suspend fun getTaskHandoff(id: String): TaskHandoffResp = request("GET", "/api/caic/v1/tasks/$id/handoff")
     /** Returns repository status and the unified diff for a task's branch. */
-    suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
+    suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=${java.net.URLEncoder.encode(path, "UTF-8")}")
     /** Returns repository and changed-file metadata without loading patch bodies. */
     suspend fun getTaskDiffIndex(id: String): TaskDiffIndexResp = request("GET", "/api/caic/v1/tasks/$id/diff/index")
     /** Returns one committed or uncommitted file patch. */
-    suspend fun getTaskFileDiff(id: String, repository: String, commit: String, path: String, originalPath: String): FileDiffResp = request("GET", "/api/caic/v1/tasks/$id/diff/file?repository=$repository&commit=$commit&path=$path&originalPath=$originalPath")
+    suspend fun getTaskFileDiff(id: String, repository: String, commit: String, path: String, originalPath: String): FileDiffResp = request("GET", "/api/caic/v1/tasks/$id/diff/file?repository=${java.net.URLEncoder.encode(repository, "UTF-8")}&commit=${java.net.URLEncoder.encode(commit, "UTF-8")}&path=${java.net.URLEncoder.encode(path, "UTF-8")}&originalPath=${java.net.URLEncoder.encode(originalPath, "UTF-8")}")
     /** Returns compact Git state for every repository mapped to a task. */
     suspend fun getTaskRepoStatus(id: String): TaskRepoStatusResp = request("GET", "/api/caic/v1/tasks/$id/repo-status")
     /** Returns the list of running processes inside the task's runtime instance. */
@@ -178,21 +183,50 @@ class ApiClient(
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/caic/v1/processes/$id/$pid/signal", json.encodeToString(req))
     /** Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. */
-    suspend fun getTaskToolInput(id: String, toolUseID: String, agentID: String, delegationToolUseID: String, threadID: String, turnID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID?agentID=$agentID&delegationToolUseID=$delegationToolUseID&threadID=$threadID&turnID=$turnID")
+    suspend fun getTaskToolInput(id: String, toolUseID: String, agentID: String, delegationToolUseID: String, threadID: String, turnID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID?agentID=${java.net.URLEncoder.encode(agentID, "UTF-8")}&delegationToolUseID=${java.net.URLEncoder.encode(delegationToolUseID, "UTF-8")}&threadID=${java.net.URLEncoder.encode(threadID, "UTF-8")}&turnID=${java.net.URLEncoder.encode(turnID, "UTF-8")}")
     /** Returns current usage quota statistics. */
     suspend fun getUsage(): UsageResp = request("GET", "/api/caic/v1/usage")
     /** Returns daily cross-task usage rollups for the usage dashboard. */
     suspend fun getUsageDashboard(): UsageDashboardResp = request("GET", "/api/caic/v1/usage/dashboard")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
+    /** Returns small live-task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. */
+    suspend fun getHistoryBootstrap(id: String): HistoryBootstrap = request("GET", "/api/caic/v1/tasks/$id/history/bootstrap")
+    /** Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. */
+    suspend fun getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/chunks/$first/$last")
+    /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
+    suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate> = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
 
     // SSE endpoints
-    /** Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
-    fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/caic/v1/tasks/$id/events")
+    /** Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
+    fun taskEvents(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onBackward: ((TaskEventBackward) -> Unit)? = null, onReady: (() -> Unit)? = null, onReset: (() -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<EventMessage> = namedSSEFlow("/api/caic/v1/tasks/$id/events?backward=${java.net.URLEncoder.encode(backward, "UTF-8")}", lastEventID, onEventID) { type, data ->
+        when (type) {
+            "message" -> json.decodeFromString<EventMessage>(data)
+            "statsSnapshot" -> { val payload = json.decodeFromString<HistoryStats>(data); onStatsSnapshot?.invoke(payload); null }
+            "stats" -> { val payload = json.decodeFromString<EventStats>(data); onStats?.invoke(payload); null }
+            "backward" -> { val payload = json.decodeFromString<TaskEventBackward>(data); onBackward?.invoke(payload); null }
+            "ready" -> { onReady?.invoke(); null }
+            "reset" -> { onReset?.invoke(); null }
+            "error" -> { val payload = json.decodeFromString<TaskHistoryStreamError>(data); onHistoryError?.invoke(payload); null }
+            else -> null
+        }
+    }
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/tasks/events")
     /** Streams usage quota updates via SSE. */
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/usage/events")
+    /** Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    fun historyEvents(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = namedSSEFlow("/api/caic/v1/tasks/$id/history/events?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}", lastEventID, onEventID) { type, data ->
+        when (type) {
+            "message" -> json.decodeFromString<HistoryEvent>(data)
+            "checkpoint" -> { val payload = json.decodeFromString<HistoryCheckpoint>(data); onCheckpoint?.invoke(payload); null }
+            "statsSnapshot" -> { val payload = json.decodeFromString<HistoryStats>(data); onStatsSnapshot?.invoke(payload); null }
+            "stats" -> { val payload = json.decodeFromString<EventStats>(data); onStats?.invoke(payload); null }
+            "reset" -> { val payload = json.decodeFromString<HistoryReset>(data); onReset?.invoke(payload); null }
+            "error" -> { val payload = json.decodeFromString<TaskHistoryStreamError>(data); onHistoryError?.invoke(payload); null }
+            else -> null
+        }
+    }
 
     private inline fun <reified T> sseFlow(
         path: String,
@@ -231,13 +265,118 @@ class ApiClient(
         awaitClose { source.cancel() }
     }
 
+    private class SSETransportFailure(cause: java.io.IOException) : java.io.IOException(cause)
+
+    private inline fun <T> sseIO(read: () -> T): T = try {
+        read()
+    } catch (e: java.io.IOException) {
+        throw SSETransportFailure(e)
+    }
+
+    // Named streams own framing because EventSource normalizes empty IDs to null.
+    // One frame is materialized at a time; flow backpressure bounds queued events, not event size.
+    private fun <T> namedSSEFlow(
+        path: String,
+        lastEventID: String?,
+        onEventID: ((String) -> Unit)?,
+        decode: (String, String) -> T?,
+    ): Flow<T> = callbackFlow {
+        val request = Request.Builder().url("$baseURL$path")
+            .header("Accept", "text/event-stream")
+            .apply {
+                if (lastEventID != null) header("Last-Event-ID", lastEventID)
+                tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") }
+            }.build()
+        val call = httpClient.newCall(request)
+        val reader = launch(Dispatchers.IO) {
+            try {
+                sseIO { call.execute() }.use { response ->
+                    if (!response.isSuccessful) throw java.io.IOException("SSE connection failed: HTTP ${response.code}")
+                    val source = response.body?.source() ?: throw java.io.IOException("Missing SSE body")
+                    val lineBytes = okio.Buffer()
+                    val data = StringBuilder()
+                    var dataSize = 0L
+                    var eventType = "message"
+                    var eventID: String? = null
+                    var previousCR = false
+                    while (!sseIO { source.exhausted() }) {
+                        val byte = sseIO { source.readByte() }.toInt() and 255
+                        if (byte == 10 && previousCR) { previousCR = false; continue }
+                        previousCR = byte == 13
+                        if (byte != 10 && byte != 13) {
+                            if (maxSSEEventBytes != null && lineBytes.size >= maxSSEEventBytes) throw java.io.IOException("SSE line too large")
+                            lineBytes.writeByte(byte)
+                            continue
+                        }
+                        val line = lineBytes.readUtf8()
+                        if (line.isEmpty()) {
+                            eventID?.let { onEventID?.invoke(it) }
+                            if (data.isNotEmpty()) {
+                                val event = decode(eventType, data.substring(0, data.length - 1))
+                                if (event != null) send(event)
+                            }
+                            eventType = "message"
+                            eventID = null
+                            data.setLength(0)
+                            dataSize = 0
+                            continue
+                        }
+                        if (line.startsWith(":")) continue
+                        val field = line.substringBefore(":")
+                        val value = line.substringAfter(":", "").removePrefix(" ")
+                        when (field) {
+                            "event" -> eventType = value.ifEmpty { "message" }
+                            "id" -> if (!value.contains('\u0000')) eventID = value
+                            "data" -> {
+                                if (maxSSEEventBytes != null) {
+                                    dataSize += value.toByteArray(Charsets.UTF_8).size + if (data.isEmpty()) 0 else 1
+                                    if (dataSize > maxSSEEventBytes) throw java.io.IOException("SSE frame too large")
+                                }
+                                data.append(value).append('\n')
+                            }
+                        }
+                    }
+                }
+                close()
+            } catch (e: CancellationException) {
+                // A callback can cancel only this child; terminate its output too.
+                close(e)
+                throw e
+            } catch (e: Exception) {
+                close(e)
+            }
+        }
+        awaitClose { call.cancel(); reader.cancel() }
+    }
+
     // Reconnecting SSE wrappers with exponential backoff.
-    /** Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
-    fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
+    /** Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
+    fun taskEventsReconnecting(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onBackward: ((TaskEventBackward) -> Unit)? = null, onReady: (() -> Unit)? = null, onReset: (() -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<EventMessage> = flow {
+        val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
+        reconnectingNamedFlow { taskEvents(id, backward, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onBackward = onBackward, onReady = onReady, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
+    }
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }
     /** Streams usage quota updates via SSE. */
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
+    /** Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    fun historyEventsReconnecting(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
+        val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
+        reconnectingNamedFlow { historyEvents(id, cursor, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
+    }
+
+    private fun <T> reconnectingNamedFlow(connect: () -> Flow<T>): Flow<T> = flow {
+        var delayMs = 500L
+        while (true) {
+            try {
+                connect().onEach { delayMs = 500L }.collect { emit(it) }
+            } catch (e: SSETransportFailure) {
+                // Only exceptions marked at network reads are retryable.
+            }
+            delay(jitteredDelay(delayMs))
+            delayMs = (delayMs * 3 / 2).coerceAtMost(30_000L)
+        }
+    }
 
     private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {
         var delayMs = 500L

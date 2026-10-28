@@ -42,7 +42,6 @@ export type EventKind =
   | "widget"
   | "widgetDelta"
   | "rateLimit"
-  | "stats"
   | "commitSnapshot"
   | "skillLoad";
 /**
@@ -72,7 +71,6 @@ export const EventKindToolOutputDelta = "toolOutputDelta";
 export const EventKindWidget = "widget";
 export const EventKindWidgetDelta = "widgetDelta";
 export const EventKindRateLimit = "rateLimit";
-export const EventKindStats = "stats";
 export const EventKindCommitSnapshot = "commitSnapshot";
 export const EventKindSkillLoad = "skillLoad";
 
@@ -206,8 +204,6 @@ export interface EventToolUse {
   detail?: string;
   /** Backend-normalized structured input for tool-card rendering. */
   inputView?: EventToolInputView;
-  /** Snapshot of plan content for ExitPlanMode events. */
-  planContent?: string;
   /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
   inputTruncated?: boolean;
   /** True when the tool runs in the background (Bash/Agent run_in_background). */
@@ -455,29 +451,6 @@ export interface EventRateLimit {
   overageResetsAt?: ISOTimestamp;
 }
 
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-export interface EventStats {
-  ts: number /* int64 */;
-  /** 100% is one fully busy logical CPU. */
-  cpuPerc: number /* float64 */;
-  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-  cpuCeiling?: number /* float64 */;
-  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-  cpuQuota?: number /* float64 */;
-  /** Owning runtime's logical CPU count; null when unknown. */
-  runtimeCPUs?: number /* int */;
-  /** Runtime CPU metadata observation failure; usage samples remain usable. */
-  cpuError?: string;
-  memUsed: number /* uint64 */;
-  memLimit: number /* uint64 */;
-  memPerc: number /* float64 */;
-  netRx: number /* uint64 */;
-  netTx: number /* uint64 */;
-  blockRead: number /* uint64 */;
-  blockWrite: number /* uint64 */;
-  diskUsed: number /* int64 */;
-}
-
 /**
  * EventRepositoryCommit identifies one immutable repository branch tip in a
  * commit snapshot.
@@ -552,15 +525,37 @@ export interface EventMessage {
   widget?: EventWidget;
   widgetDelta?: EventWidgetDelta;
   rateLimit?: EventRateLimit;
-  stats?: EventStats;
   commitSnapshot?: EventCommitSnapshot;
   skillLoad?: EventSkillLoad;
 }
 
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+export interface EventStats {
+  ts: number /* int64 */;
+  /** 100% is one fully busy logical CPU. */
+  cpuPerc: number /* float64 */;
+  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+  cpuCeiling?: number /* float64 */;
+  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+  cpuQuota?: number /* float64 */;
+  /** Owning runtime's logical CPU count; null when unknown. */
+  runtimeCPUs?: number /* int */;
+  /** Runtime CPU metadata observation failure; usage samples remain usable. */
+  cpuError?: string;
+  memUsed: number /* uint64 */;
+  memLimit: number /* uint64 */;
+  memPerc: number /* float64 */;
+  netRx: number /* uint64 */;
+  netTx: number /* uint64 */;
+  blockRead: number /* uint64 */;
+  blockWrite: number /* uint64 */;
+  diskUsed: number /* int64 */;
+}
+
 /**
- * TaskEventBackward carries a chronological recent preview before canonical
- * history. EventID resumes strictly after the preview's memory snapshot. It is
- * empty for disk previews, whose canonical history uses the same connection.
+ * TaskEventBackward carries a chronological recent disk preview before canonical
+ * history on the same connection. EventID is empty. Memory-backed streams send
+ * canonical history and support normal event-ID resume.
  */
 export interface TaskEventBackward {
   messages: EventMessage[];
@@ -1363,6 +1358,15 @@ export interface TaskStartupFailure {
   cause: string;
 }
 
+/**
+ * TaskPlan is the task's current root ExitPlanMode content. The identity and
+ * content form one projection and are cleared together.
+ */
+export interface TaskPlan {
+  toolUseID: string;
+  content: string;
+}
+
 /** RuntimeInstance holds per-task runtime metadata. */
 export interface RuntimeInstance {
   /** Runtime instance ID. */
@@ -1449,7 +1453,7 @@ export interface Task {
   /** When the current turn started; zero when not running. */
   turnStartedAt?: ISOTimestamp;
   inPlanMode?: boolean;
-  planContent?: string;
+  currentPlan?: TaskPlan;
   runtime: RuntimeInstance;
   /** Current quota block resolved by the backend. */
   rateLimit?: TaskRateLimit;
@@ -1589,6 +1593,15 @@ export interface CreateTaskReq {
   gitHubToken?: boolean;
   /** Enables task-scoped CAIC MCP delegation. */
   caicMCP?: boolean;
+}
+
+/**
+ * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * Replace samples sharing a timestamp: disk usage can revise the latest sample.
+ * These host observations are separate from immutable raw task history.
+ */
+export interface HistoryStats {
+  samples: EventStats[];
 }
 
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
@@ -2137,6 +2150,77 @@ export interface WebFetchReq {
 export interface WebFetchResp {
   title: string;
   content: string;
+}
+
+/**
+ * HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+ * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
+ * for direct arithmetic access. Scope isolates the
+ * authenticated account, including legacy shared tasks. Browser HTTP caching
+ * owns storage/eviction; clients need no inactive decoded transcript cache.
+ * Generation changes on server restart/task replacement. A stale reference
+ * returns 409; bootstrap again and discard old cursor metadata.
+ * For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
+ * and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+ */
+export interface HistoryBootstrap {
+  projectionVersion: string;
+  generation: string;
+  scope: string;
+  recordsPerChunk: number /* uint64 */;
+  through: number /* uint64 */;
+  cursor: string;
+  resourceBase: string;
+}
+
+/**
+ * HistoryEvent is an immutable normalized output; the identity is scoped to the
+ * projection version and timeline generation supplied by HistoryBootstrap.
+ */
+export interface HistoryEvent {
+  recordID: number /* uint64 */;
+  index: number;
+  message: EventMessage;
+}
+
+/**
+ * HistoryPosition identifies one normalized output in a one-based physical raw
+ * record. Index is zero-based across every output of that record. Metadata and
+ * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ */
+export interface HistoryPosition {
+  recordID: number /* uint64 */;
+  index: number;
+}
+
+/**
+ * HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
+ * includes the prefix so session-cumulative reports retain their meaning. Model
+ * is the authoritative root model at the result, including reroutes, even when
+ * pricing is unknown; canonical output bytes are unchanged.
+ */
+export interface HistoryTurnEstimate {
+  recordID: number /* uint64 */;
+  index: number;
+  model?: string;
+  cost?: EventCost;
+  totalUSD: number /* float64 */;
+}
+
+/**
+ * HistoryCheckpoint advances through all outputs of a physical record,
+ * including a record with zero outputs. Cursor is opaque; it encodes projection
+ * version, generation, raw record and either output index or end-of-record.
+ * SSE resumes strictly after it. The Last-Event-ID header overrides the initial
+ * cursor query on reconnect. Named stats events never replace this raw cursor.
+ */
+export interface HistoryCheckpoint {
+  cursor: string;
+}
+
+/** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
+export interface HistoryReset {
+  bootstrapURL: string;
 }
 
 export interface ErrorDetails {

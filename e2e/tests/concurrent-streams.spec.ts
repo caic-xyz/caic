@@ -51,7 +51,7 @@ for (const width of [390, 1280]) {
     await once(proxy, "listening");
     const address = proxy.address();
     if (address === null || typeof address === "string") throw new Error("Missing proxy port");
-    await page.route(`**/tasks/${id}/events?*`, (route) => {
+    await page.route(`**/tasks/${id}/history/events?*`, (route) => {
       const url = new URL(route.request().url());
       url.port = String(address.port);
       return route.continue({ url: url.toString() });
@@ -153,7 +153,7 @@ for (const width of [390, 1280]) {
       await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_RECONNECT" } });
       const markers = ["child-a missed output", "child-b missed output", "parent missed output"];
       const observed = await fetch(
-        `${testInfo.project.use.baseURL}/api/caic/v1/tasks/${id}/events?last-event-id=${encodeURIComponent(cursor)}`,
+        `${testInfo.project.use.baseURL}/api/caic/v1/tasks/${id}/history/events?cursor=${encodeURIComponent(cursor)}`,
         { signal: AbortSignal.timeout(10000) },
       );
       expect(observed.ok).toBe(true);
@@ -226,6 +226,10 @@ for (const width of [390, 1280]) {
       await expect(page.getByTestId("tool-call")).toHaveCount(3);
 
       await page.reload();
+      await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
+      // The complete backlog returns automatically on reload, without
+      // scrolling or otherwise asking the conversation to load older records.
+      await expect(page.getByText("Setup logs", { exact: true })).toHaveCount(1);
       await expect(cards).toHaveCount(2);
       await cardB.locator(":scope > summary").press("Enter");
       await cardA.locator(":scope > summary").press("Enter");

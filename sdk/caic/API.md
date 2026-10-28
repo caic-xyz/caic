@@ -61,7 +61,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
-| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. |  | `EventMessage` SSE<br>Named events: `backward` (`TaskEventBackward`), `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
+| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. |  | `EventMessage` SSE<br>Named events: `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `backward` (`TaskEventBackward`), `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
 | POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
@@ -78,6 +78,10 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
+| GET | `/api/caic/v1/tasks/{id}/history/bootstrap` | Returns small live-task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. |  | `HistoryBootstrap` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/chunks/{first}/{last}` | Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. |  | `HistoryEvent[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
 ## Processes
 
@@ -240,7 +244,6 @@ EventKind identifies the type of SSE event.
 | `widget` |  |
 | `widgetDelta` |  |
 | `rateLimit` |  |
-| `stats` |  |
 | `commitSnapshot` |  |
 | `skillLoad` |  |
 
@@ -991,6 +994,16 @@ TaskStartupFailure identifies the failed startup phase and original agent diagno
 | `phase` | `string` |  | yes |
 | `cause` | `string` |  | yes |
 
+### TaskPlan
+
+TaskPlan is the task's current root ExitPlanMode content. The identity and
+content form one projection and are cleared together.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `content` | `string` |  | yes |
+
 ### RuntimeInstance
 
 RuntimeInstance holds per-task runtime metadata.
@@ -1069,7 +1082,7 @@ Task is the JSON representation sent to the frontend.
 | `startedAt` | `ISOTimestamp` | When the task was created. |  |
 | `turnStartedAt` | `ISOTimestamp` | When the current turn started; zero when not running. |  |
 | `inPlanMode` | `boolean` |  |  |
-| `planContent` | `string` |  |  |
+| `currentPlan` | `TaskPlan` |  |  |
 | `runtime` | `RuntimeInstance` |  | yes |
 | `rateLimit` | `TaskRateLimit` | Current quota block resolved by the backend. |  |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
@@ -1326,7 +1339,6 @@ EventToolUse is emitted when the assistant invokes a tool.
 | `input` | `JSONValue` |  | yes |
 | `detail` | `string` | Backend-normalized short display detail for tool headers. |  |
 | `inputView` | `EventToolInputView` | Backend-normalized structured input for tool-card rendering. |  |
-| `planContent` | `string` | Snapshot of plan content for ExitPlanMode events. |  |
 | `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
 | `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |
 
@@ -1611,27 +1623,6 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
 | `overageResetsAt` | `ISOTimestamp` | When overage resets; zero if not using overage. |  |
 
-### EventStats
-
-EventStats is a runtime resource usage snapshot emitted periodically.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `ts` | `int64` |  | yes |
-| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
-| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
-| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
-| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
-| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
-| `memUsed` | `uint64` |  | yes |
-| `memLimit` | `uint64` |  | yes |
-| `memPerc` | `float64` |  | yes |
-| `netRx` | `uint64` |  | yes |
-| `netTx` | `uint64` |  | yes |
-| `blockRead` | `uint64` |  | yes |
-| `blockWrite` | `uint64` |  | yes |
-| `diskUsed` | `int64` |  | yes |
-
 ### EventRepositoryCommit
 
 EventRepositoryCommit identifies one immutable repository branch tip in a
@@ -1710,15 +1701,45 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `widget` | `EventWidget` |  |  |
 | `widgetDelta` | `EventWidgetDelta` |  |  |
 | `rateLimit` | `EventRateLimit` |  |  |
-| `stats` | `EventStats` |  |  |
 | `commitSnapshot` | `EventCommitSnapshot` |  |  |
 | `skillLoad` | `EventSkillLoad` |  |  |
 
+### EventStats
+
+EventStats is a runtime resource usage snapshot emitted periodically.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `ts` | `int64` |  | yes |
+| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
+| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
+| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
+| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
+| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
+| `memUsed` | `uint64` |  | yes |
+| `memLimit` | `uint64` |  | yes |
+| `memPerc` | `float64` |  | yes |
+| `netRx` | `uint64` |  | yes |
+| `netTx` | `uint64` |  | yes |
+| `blockRead` | `uint64` |  | yes |
+| `blockWrite` | `uint64` |  | yes |
+| `diskUsed` | `int64` |  | yes |
+
+### HistoryStats
+
+HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+Replace samples sharing a timestamp: disk usage can revise the latest sample.
+These host observations are separate from immutable raw task history.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `samples` | `EventStats[]` |  | yes |
+
 ### TaskEventBackward
 
-TaskEventBackward carries a chronological recent preview before canonical
-history. EventID resumes strictly after the preview's memory snapshot. It is
-empty for disk previews, whose canonical history uses the same connection.
+TaskEventBackward carries a chronological recent disk preview before canonical
+history on the same connection. EventID is empty. Memory-backed streams send
+canonical history and support normal event-ID resume.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -2325,4 +2346,83 @@ WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 |-------|------|-------------|----------|
 | `title` | `string` |  | yes |
 | `content` | `string` |  | yes |
+
+### HistoryBootstrap
+
+HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
+for direct arithmetic access. Scope isolates the
+authenticated account, including legacy shared tasks. Browser HTTP caching
+owns storage/eviction; clients need no inactive decoded transcript cache.
+Generation changes on server restart/task replacement. A stale reference
+returns 409; bootstrap again and discard old cursor metadata.
+For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
+and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `projectionVersion` | `string` |  | yes |
+| `generation` | `string` |  | yes |
+| `scope` | `string` |  | yes |
+| `recordsPerChunk` | `uint64` |  | yes |
+| `through` | `uint64` |  | yes |
+| `cursor` | `string` |  | yes |
+| `resourceBase` | `string` |  | yes |
+
+### HistoryEvent
+
+HistoryEvent is an immutable normalized output; the identity is scoped to the
+projection version and timeline generation supplied by HistoryBootstrap.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `recordID` | `uint64` |  | yes |
+| `index` | `number` |  | yes |
+| `message` | `EventMessage` |  | yes |
+
+### HistoryPosition
+
+HistoryPosition identifies one normalized output in a one-based physical raw
+record. Index is zero-based across every output of that record. Metadata and
+zero-output controls occupy record IDs too; IDs are not semantic event counts.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `recordID` | `uint64` |  | yes |
+| `index` | `number` |  | yes |
+
+### HistoryTurnEstimate
+
+HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
+includes the prefix so session-cumulative reports retain their meaning. Model
+is the authoritative root model at the result, including reroutes, even when
+pricing is unknown; canonical output bytes are unchanged.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `recordID` | `uint64` |  | yes |
+| `index` | `number` |  | yes |
+| `model` | `string` |  |  |
+| `cost` | `EventCost` |  |  |
+| `totalUSD` | `float64` |  | yes |
+
+### HistoryCheckpoint
+
+HistoryCheckpoint advances through all outputs of a physical record,
+including a record with zero outputs. Cursor is opaque; it encodes projection
+version, generation, raw record and either output index or end-of-record.
+SSE resumes strictly after it. The Last-Event-ID header overrides the initial
+cursor query on reconnect. Named stats events never replace this raw cursor.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `cursor` | `string` |  | yes |
+
+### HistoryReset
+
+HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `bootstrapURL` | `string` |  | yes |
 

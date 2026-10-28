@@ -30,33 +30,28 @@ const InputTruncateThreshold = 4096
 const maxPendingToolTimings = 1024
 
 // ToolTimingTracker computes per-tool-call duration while converting agent
-// messages to API events. It also projects the immutable message stream into
-// the API view: plan content for ExitPlanMode via a resolver taken at
-// construction, and fallback result text via a turn text window.
+// messages to API events and supplies fallback result text from a turn text
+// window.
 //
-// harness and planContent are fixed at construction; the per-stream state
+// The harness is fixed at construction; the per-stream state
 // (pending, window) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
-	harness     harness.Name
-	cost        task.CostTracker
-	pricer      usage.ModelPricer
-	pending     map[agent.ToolKey]time.Time
-	planContent func(toolUseID string) string
-	window      task.ResultTextWindow
-	skillReads  agent.SkillReadTracker // Confirms inferred skill loads.
+	harness    harness.Name
+	cost       task.CostTracker
+	pricer     usage.ModelPricer
+	pending    map[agent.ToolKey]time.Time
+	window     task.ResultTextWindow
+	skillReads agent.SkillReadTracker // Confirms inferred skill loads.
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
-// harness into API events. planContent resolves the plan text to display on
-// an ExitPlanMode event with the given tool use ID; pass nil to disable the
-// projection.
-func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer, planContent func(toolUseID string) string) *ToolTimingTracker {
+// harness into API events.
+func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer) *ToolTimingTracker {
 	return &ToolTimingTracker{
-		harness:     h,
-		cost:        task.CostTracker{Harness: h, Model: model},
-		pricer:      pricer,
-		planContent: planContent,
-		pending:     make(map[agent.ToolKey]time.Time),
+		harness: h,
+		cost:    task.CostTracker{Harness: h, Model: model},
+		pricer:  pricer,
+		pending: make(map[agent.ToolKey]time.Time),
 	}
 }
 
@@ -144,7 +139,6 @@ func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 				Input:          input,
 				Detail:         detail,
 				InputView:      inputView,
-				PlanContent:    tt.planFor(m),
 				InputTruncated: truncated,
 				Background:     bg,
 			},
@@ -452,16 +446,6 @@ func changeStat(stat *logv3.ChangeStat) *v1.EventChangeStat {
 		LinesDeleted: stat.LinesDeleted,
 		BinaryFiles:  stat.BinaryFiles,
 	}
-}
-
-// planFor resolves the plan content projection for a tool use event. The
-// resolver returns content only for the visible ExitPlanMode, so superseded
-// plans and all other tool uses render without a snapshot.
-func (tt *ToolTimingTracker) planFor(m *agent.ToolUseMessage) string {
-	if m.Source.IsChild() || tt.planContent == nil {
-		return ""
-	}
-	return tt.planContent(m.ToolUseID)
 }
 
 func (tt *ToolTimingTracker) rememberToolStart(source *agent.MessageSource, toolUseID string, now time.Time) {

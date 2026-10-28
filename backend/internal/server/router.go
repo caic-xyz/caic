@@ -158,6 +158,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	}
 	webFetch := &webFetchHandlers{}
 	svc := &taskService{
+		history:   newTaskHistory(ctx, log.With("scope", "task-history"), d.TaskMgr),
 		ctx:       ctx,
 		taskMgr:   d.TaskMgr,
 		prefs:     d.Preferences,

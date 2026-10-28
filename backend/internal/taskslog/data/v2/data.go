@@ -138,6 +138,7 @@ type TextMessage struct {
 // UserInputMessage is the persisted UserInputMessage representation.
 type UserInputMessage struct {
 	MessageType string      `json:"t"`
+	Ts          float64     `json:"ts,omitempty"` // Server observation time, Unix seconds with millisecond precision; zero means unknown.
 	Text        string      `json:"text,omitempty"`
 	Images      []ImageData `json:"images,omitempty"`
 }

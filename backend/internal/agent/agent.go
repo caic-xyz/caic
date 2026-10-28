@@ -57,11 +57,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/gomode/mcp"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-	"github.com/maruel/gomode/mcp"
 )
 
 // Prompt bundles user text with optional images for a single interaction.
@@ -1596,7 +1597,7 @@ func PlainTextWritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images})
+	return log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000})
 }
 
 // isSignalExit reports whether err indicates the process was killed by a

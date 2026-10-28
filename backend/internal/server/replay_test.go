@@ -25,7 +25,7 @@ import (
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.InitMessage{
 		ReportedModel: "claude-opus-4-6",
 		Version:       "2.1.34",
@@ -58,7 +58,7 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 
 func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.AskMessage{
 		ToolUseID: "ask_1",
 		Questions: []logv3.AskQuestion{
@@ -93,7 +93,7 @@ func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 
 func TestGenericTodoWriteIsTodo(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.TodoMessage{
 		ToolUseID: "todo_1",
 		Todos: []agent.TodoItem{
@@ -124,7 +124,7 @@ func TestGenericTodoWriteIsTodo(t *testing.T) {
 
 func TestGenericToolTiming(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	t0 := time.Now()
 	t1 := t0.Add(500 * time.Millisecond)
 
@@ -149,7 +149,7 @@ func TestGenericToolTiming(t *testing.T) {
 
 func TestGenericConvertTextAndUsage(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Codex, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Codex, "", nil)
 
 	textMsg := &agent.TextMessage{Text: "hello"}
 	usageMsg := &agent.UsageMessage{
@@ -178,7 +178,7 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 
 func TestGenericConvertResult(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.ResultMessage{
 		MessageType:  "result",
 		Subtype:      "success",
@@ -202,7 +202,7 @@ func TestGenericConvertResult(t *testing.T) {
 
 func TestGenericConvertStreamEvent(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.TextDeltaMessage{Text: "Hi"}
 	events := gt.ConvertMessage(msg, time.Now())
 	if len(events) != 1 {
@@ -218,7 +218,7 @@ func TestGenericConvertStreamEvent(t *testing.T) {
 
 func TestGenericConvertUserInput(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.UserInputMessage{
 		Text: "hello agent",
 	}
@@ -236,7 +236,7 @@ func TestGenericConvertUserInput(t *testing.T) {
 
 func TestGenericConvertSystemMessage(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.SystemMessage{
 		MessageType: "system",
 		Subtype:     "status",
@@ -252,7 +252,7 @@ func TestGenericConvertSystemMessage(t *testing.T) {
 
 func TestGenericConvertThinking(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.ThinkingMessage{Text: "let me think..."}
 	events := gt.ConvertMessage(msg, time.Now())
 	if len(events) != 1 {
@@ -272,7 +272,7 @@ func TestGenericConvertThinking(t *testing.T) {
 func TestGenericConvertNativeSubagentEvent(t *testing.T) {
 	t.Parallel()
 
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	events := gt.ConvertMessage(&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
 		ID:        "child-1",
 		ToolUseID: "spawn-1",
@@ -296,7 +296,7 @@ func TestGenericConvertNativeSubagentEvent(t *testing.T) {
 
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.RawMessage{
 		MessageType: "tool_progress",
 		Raw:         []byte(`{"type":"tool_progress"}`),
@@ -311,7 +311,7 @@ func TestToolInputTruncation(t *testing.T) {
 	t.Parallel()
 	t.Run("SmallInputPassedThrough", func(t *testing.T) {
 		t.Parallel()
-		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		msg := &agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/etc/hosts"}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -326,7 +326,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("LargeInputTruncated", func(t *testing.T) {
 		t.Parallel()
-		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		largeContent := make([]byte, apiconv.InputTruncateThreshold+1)
 		for i := range largeContent {
 			largeContent[i] = 'x'
@@ -346,7 +346,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundTrue", func(t *testing.T) {
 		t.Parallel()
-		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		msg := &agent.ToolUseMessage{ToolUseID: "t3", Name: "Bash", Input: json.RawMessage(`{"command":"sleep 60","run_in_background":true}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -358,7 +358,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundAbsent", func(t *testing.T) {
 		t.Parallel()
-		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		msg := &agent.ToolUseMessage{ToolUseID: "t4", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -370,7 +370,7 @@ func TestToolInputTruncation(t *testing.T) {
 	})
 	t.Run("BackgroundAgentTool", func(t *testing.T) {
 		t.Parallel()
-		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		msg := &agent.ToolUseMessage{ToolUseID: "t5", Name: "Agent", Input: json.RawMessage(`{"prompt":"search","run_in_background":true}`)}
 		events := gt.ConvertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -384,7 +384,7 @@ func TestToolInputTruncation(t *testing.T) {
 
 func TestGenericConvertWidget(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.WidgetMessage{
 		ToolUseID: "wid_1",
 		Title:     "Chart",
@@ -414,7 +414,7 @@ func TestGenericConvertWidget(t *testing.T) {
 
 func TestGenericConvertWidgetDelta(t *testing.T) {
 	t.Parallel()
-	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 	msg := &agent.WidgetDeltaMessage{
 		ToolUseID: "wid_2",
 		Delta:     "<h1>Hel",
@@ -450,7 +450,7 @@ func TestTaskEventStreamResume(t *testing.T) {
 					t.Fatal(err)
 				}
 				w := httptest.NewRecorder()
-				stream := taskEventStream{w: w, writer: sse.New(w), tracker: apiconv.NewToolTimingTracker(harness.Codex, "", nil, nil), resume: taskEventResume{timelineID: "timeline", source: taskEventSourceMemory}}
+				stream := taskEventStream{w: w, writer: sse.New(w), tracker: apiconv.NewToolTimingTracker(harness.Codex, "", nil), resume: taskEventResume{timelineID: "timeline", source: taskEventSourceMemory}}
 				sequence := uint64(0)
 				for _, line := range []string{
 					`{"method":"thread/started","params":{"thread":{"id":"child","parentThreadId":"root"}}}`,
@@ -520,7 +520,7 @@ func TestTaskEventStreamResume(t *testing.T) {
 		stream := taskEventStream{
 			w:       w,
 			writer:  sse.New(w),
-			tracker: apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil),
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, "", nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,
@@ -564,7 +564,7 @@ func TestTaskEventStreamResume(t *testing.T) {
 		stream := taskEventStream{
 			w:       w,
 			writer:  sse.New(w),
-			tracker: apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil),
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, "", nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,

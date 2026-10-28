@@ -10,30 +10,43 @@ for (const width of [390, 1280]) {
     const prompt = uniquePrompt("Long prompt") + " Describe the change and its expected behavior.".repeat(250);
     const id = await createTaskAPI(api, prompt);
     await waitForTaskState(api, id, "waiting");
-    const eventsURL = `**/api/caic/v1/tasks/${id}/events*`;
+    const chunksURL = `**/api/caic/v1/tasks/${id}/history/**/chunks/**`;
+    const release = Promise.withResolvers<void>();
+    let requested = false;
     // Keep the recorded prompt visible before conversation history arrives.
-    await page.route(eventsURL, (route) =>
-      route.fulfill({ contentType: "text/event-stream", body: "event: ready\ndata: {}\n\n" }),
-    );
-    await page.goto(`/task/@${id}`);
-    await expect(page.getByRole("heading", { name: "Prompt", exact: true })).toBeVisible();
+    await page.route(chunksURL, async (route) => {
+      requested = true;
+      await release.promise;
+      await route.continue();
+    });
+    try {
+      await page.goto(`/task/@${id}`);
+      await expect.poll(() => requested).toBe(true);
+      await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "true");
+      await expect(page.getByRole("heading", { name: "Prompt", exact: true })).toBeVisible();
 
-    for (const phase of ["recorded", "replayed"]) {
-      const messages = page.getByTestId("task-message-area");
-      await expect.poll(() => messages.evaluate((el) => el.clientHeight)).toBeGreaterThan(150);
-      const input = page.getByTestId("task-detail-prompt");
-      await expect(input).toBeInViewport();
-      expect(await input.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(844);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-      expect(await messages.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
-        await messages.evaluate((el) => el.clientHeight),
-      );
-      await page.screenshot({ path: test.info().outputPath(`long-prompt-${phase}.png`) });
-      if (phase === "recorded") {
-        await page.unroute(eventsURL);
-        await page.reload();
-        await expect(page.getByRole("heading", { name: "Prompt", exact: true })).toHaveCount(0);
+      for (const phase of ["recorded", "replayed"]) {
+        const messages = page.getByTestId("task-message-area");
+        await expect.poll(() => messages.evaluate((el) => el.clientHeight)).toBeGreaterThan(150);
+        const input = page.getByTestId("task-detail-prompt");
+        await expect(input).toBeInViewport();
+        expect(await input.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(844);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        expect(await messages.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
+          await messages.evaluate((el) => el.clientHeight),
+        );
+        await page.screenshot({ path: test.info().outputPath(`long-prompt-${phase}.png`) });
+        if (phase === "recorded") {
+          release.resolve();
+          await expect(messages).toHaveAttribute("aria-busy", "false");
+          await page.unroute(chunksURL);
+          await page.reload();
+          await expect(messages).toHaveAttribute("aria-busy", "false");
+          await expect(page.getByRole("heading", { name: "Prompt", exact: true })).toHaveCount(0);
+        }
       }
+    } finally {
+      release.resolve();
     }
   });
 }

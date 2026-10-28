@@ -7,7 +7,7 @@ import type { EventStats } from "@sdk/types.gen";
 
 import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
-import type { TurnTiming } from "../timing";
+import type { AnalyticsTurn } from "../taskAnalytics";
 import { formatTimingDuration } from "../timing";
 import ChartDataTable from "./ChartDataTable";
 import { ToggleChip } from "./FormControls";
@@ -83,9 +83,9 @@ function formatExactSampleTime(ts: number): string {
   return new Date(ts).toISOString();
 }
 
-function tokenData(turns: readonly TurnTiming[], asShare: boolean): TokenDatum[] {
+function tokenData(turns: readonly AnalyticsTurn[], asShare: boolean): TokenDatum[] {
   return turns.flatMap((turn, i) => {
-    const usage = turn.result.usage;
+    const usage = turn.usage;
     const counts: readonly (readonly [string, number])[] = [
       ["New input", usage.inputTokens],
       ["Cache write", usage.cacheCreationInputTokens],
@@ -103,7 +103,7 @@ function tokenData(turns: readonly TurnTiming[], asShare: boolean): TokenDatum[]
 // Cache reads usually outweigh the other categories by an order of magnitude, so
 // the absolute stack flattens them into the baseline; the share view keeps the
 // composition between them readable.
-function drawTokenChart(turns: readonly TurnTiming[], width: number, asShare: boolean): Element {
+function drawTokenChart(turns: readonly AnalyticsTurn[], width: number, asShare: boolean): Element {
   const data = tokenData(turns, asShare);
   return Plot.plot({
     width,
@@ -480,7 +480,7 @@ function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Elem
 
 export default function StatsCharts(props: {
   stats: readonly EventStats[];
-  turns: readonly TurnTiming[];
+  turns: readonly AnalyticsTurn[];
   tools: readonly ToolTimingSummary[];
 }) {
   const stats = createMemo<readonly EventStats[]>((previous) => {
@@ -489,9 +489,9 @@ export default function StatsCharts(props: {
       ? previous
       : next;
   }, []);
-  const turns = createMemo<readonly TurnTiming[]>((previous) => {
+  const turns = createMemo<readonly AnalyticsTurn[]>((previous) => {
     const next = props.turns;
-    return next.length === previous.length && next.at(-1)?.event === previous.at(-1)?.event ? previous : next;
+    return next.length === previous.length && next.at(-1) === previous.at(-1) ? previous : next;
   }, []);
   const [tokenShare, setTokenShare] = createSignal(false);
   const tokenLabel = () => (tokenShare() ? "Token share by turn" : "Token volume by turn");
@@ -501,11 +501,12 @@ export default function StatsCharts(props: {
       : "Each bar is one completed turn's tokens, stacked by category; cache reads usually dominate the total.";
   const tokenRows = () =>
     turns().map((turn, index) => {
-      const usage = turn.result.usage;
+      const usage = turn.usage;
       const total =
         usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
       return [
         `Turn ${index + 1}`,
+        turn.model || "Unknown",
         formatTokens(usage.inputTokens),
         formatTokens(usage.cacheCreationInputTokens),
         formatTokens(usage.cacheReadInputTokens),
@@ -538,7 +539,7 @@ export default function StatsCharts(props: {
           />
           <ChartDataTable
             caption="Turn tokens"
-            columns={["Turn", "New input", "Cache write", "Cache read", "Output", "Total"]}
+            columns={["Turn", "Model", "New input", "Cache write", "Cache read", "Output", "Total"]}
             regionLabel="Token counts by turn"
             rows={tokenRows()}
           />

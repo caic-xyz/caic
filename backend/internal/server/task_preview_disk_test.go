@@ -47,7 +47,7 @@ func TestRecentDiskPreview(t *testing.T) {
 			t.Fatal(err)
 		}
 		source.SetWireResolver(agent.Backends{harness.Codex: codex.New("", nil)})
-		tracker := apiconv.NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := apiconv.NewToolTimingTracker(harness.Codex, "", nil)
 		events, err := recentDiskPreview(t.Context(), source, tracker)
 		if err != nil {
 			t.Fatal(err)
@@ -76,7 +76,7 @@ func TestRecentDiskPreview(t *testing.T) {
 	t.Run("projected fragments use the same bounded selection", func(t *testing.T) {
 		t.Parallel()
 		messages := []agent.Message{&agent.UserInputMessage{Text: "Start"}, &agent.TextDeltaMessage{Text: "one "}, &agent.TextDeltaMessage{Text: "answer"}, &agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}, &agent.ToolOutputDeltaMessage{ToolUseID: "tool", Delta: "out"}, &agent.ToolOutputDeltaMessage{ToolUseID: "tool", Delta: "put"}}
-		forward := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
+		forward := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
 		projected := make([]v1.EventMessage, 0, len(messages))
 		for _, message := range messages {
 			projected = append(projected, forward.ConvertMessage(message, time.Time{})...)
@@ -88,7 +88,7 @@ func TestRecentDiskPreview(t *testing.T) {
 				break
 			}
 		}
-		events := preview.events(forward)
+		events := preview.events()
 		encoded, err := json.Marshal(events)
 		if err != nil {
 			t.Fatal(err)
@@ -110,7 +110,7 @@ func TestRecentDiskPreview(t *testing.T) {
 		source.SetWireResolver(agent.Backends{harness.Codex: codex.New("", nil)})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		if _, err := recentDiskPreview(ctx, source, apiconv.NewToolTimingTracker(harness.Codex, "", nil, nil)); !errors.Is(err, context.Canceled) {
+		if _, err := recentDiskPreview(ctx, source, apiconv.NewToolTimingTracker(harness.Codex, "", nil)); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation error: %v", err)
 		}
 	})

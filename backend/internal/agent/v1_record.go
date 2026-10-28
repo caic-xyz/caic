@@ -44,7 +44,8 @@ func parseV1Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 			return ParsedRecord{Control: true}, err
 		}
 		msgs, err = p.applyMessageState(msgs)
-		return ParsedRecord{Messages: wrapParsedMessages(msgs, time.Time{}), Control: true}, err
+		record := ParsedRecord{Messages: wrapParsedMessages(msgs, time.Time{}), Control: true}
+		return record, err
 	}
 	msgs, err := p.parseAndApplyNative(line)
 	return ParsedRecord{Messages: wrapParsedMessages(msgs, time.Time{})}, err

@@ -1,4 +1,4 @@
-// Task commands, frontend focus notifications, runtime artifacts, API DTOs, and Git summary refreshes.
+// Task commands, shared live-history projections, frontend focus, runtime artifacts, API DTOs, and Git summaries.
 
 package server
 
@@ -59,6 +59,7 @@ type taskService struct {
 	fakeCI    FakeCIHook
 	runtimes  *runtime.Router
 	metrics   metrics.Recorder
+	history   *taskHistory
 
 	focusMu          sync.Mutex
 	focusSubscribers map[chan string]string

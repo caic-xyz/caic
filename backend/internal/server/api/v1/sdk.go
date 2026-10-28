@@ -33,6 +33,16 @@ func SDKAPI() apispec.Config[api.ErrorCode] {
 			"EventMessage": "Backend-neutral event types",
 		},
 		SpecialTypes: []apispec.SpecialType{
+			// Raw history output indices use uint32; map that wire integer
+			// explicitly because the generator's builtin integers omit it.
+			{
+				Type:       reflect.TypeFor[uint32](),
+				TSType:     "number",
+				KTType:     "Long",
+				SwiftType:  "UInt32",
+				DocType:    "number",
+				TSValidate: "asNumber(%[1]s, %[2]q)",
+			},
 			{
 				Type:       reflect.TypeFor[json.RawMessage](),
 				TSType:     "any /* json.RawMessage */",

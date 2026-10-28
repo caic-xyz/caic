@@ -15,14 +15,18 @@ export class ContextSkillsTracker {
   private loads: EventSkillLoad[] = [];
   private snapshot: ContextSkills = { current: [], closed: new Map() };
 
+  clear(): void {
+    this.processed = 0;
+    this.loads = [];
+    this.snapshot = { current: [], closed: new Map() };
+  }
+
   derive(taskId: string, epoch: number, messages: EventMessage[]): ContextSkills {
     let changed = false;
     if (taskId !== this.taskId || epoch !== this.epoch || messages.length < this.processed) {
       this.taskId = taskId;
       this.epoch = epoch;
-      this.processed = 0;
-      this.loads = [];
-      this.snapshot = { current: [], closed: new Map() };
+      this.clear();
     }
     let current = this.snapshot.current;
     let closed = this.snapshot.closed;

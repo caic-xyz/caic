@@ -95,11 +95,13 @@ func Task(in *TaskInput) (v1.Task, error) {
 		AgentVersion:    snap.AgentVersion,
 		SessionID:       snap.SessionID,
 		InPlanMode:      snap.InPlanMode,
-		PlanContent:     snap.PlanContent,
 		GitHubToken:     snap.GitHubToken,
 		CostUSD:         costUSD,
 		NumTurns:        numTurns,
 		Duration:        duration.Seconds(),
+	}
+	if snap.PlanExitID != "" && snap.PlanContent != "" {
+		out.CurrentPlan = &v1.TaskPlan{ToolUseID: snap.PlanExitID, Content: snap.PlanContent}
 	}
 	out.StartedAt = t.StartedAt
 	out.TurnStartedAt = snap.TurnStartedAt

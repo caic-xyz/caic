@@ -9,6 +9,7 @@ declare const classes: {
   readonly "noData": string;
   readonly "section": string;
   readonly "sectionTitle": string;
+  readonly "status": string;
   readonly "usageGrid": string;
   readonly "usageLabel": string;
   readonly "usageMetric": string;

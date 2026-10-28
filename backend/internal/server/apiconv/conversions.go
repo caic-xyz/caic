@@ -451,8 +451,8 @@ func ProcessInfos(procs []runtime.ProcessInfo) []v1.ProcessInfo {
 	return out
 }
 
-// StatsEvent converts runtime stats to an API event.
-func StatsEvent(cs *runtime.Stats) v1.EventMessage {
+// Stats converts a runtime observation to its API representation.
+func Stats(cs *runtime.Stats) v1.EventStats {
 	var ceiling *float64
 	if cs.CPUCeiling > 0 {
 		ceiling = new(cs.CPUCeiling)
@@ -461,24 +461,20 @@ func StatsEvent(cs *runtime.Stats) v1.EventMessage {
 	if cs.RuntimeCPUs > 0 {
 		runtimeCPUs = new(cs.RuntimeCPUs)
 	}
-	return v1.EventMessage{
-		Kind: v1.EventKindStats,
-		Ts:   cs.Ts.UnixMilli(),
-		Stats: &v1.EventStats{
-			Ts:          cs.Ts.UnixMilli(),
-			CPUPerc:     cs.CPUPerc,
-			CPUCeiling:  ceiling,
-			CPUQuota:    cs.CPUQuota,
-			RuntimeCPUs: runtimeCPUs,
-			CPUError:    cs.CPUError,
-			MemUsed:     cs.MemUsed,
-			MemLimit:    cs.MemLimit,
-			MemPerc:     cs.MemPerc,
-			NetRx:       cs.NetRx,
-			NetTx:       cs.NetTx,
-			BlockRead:   cs.BlockRead,
-			BlockWrite:  cs.BlockWrite,
-			DiskUsed:    cs.DiskUsed,
-		},
+	return v1.EventStats{
+		Ts: cs.Ts.UnixMilli(), CPUPerc: cs.CPUPerc, CPUCeiling: ceiling,
+		CPUQuota: cs.CPUQuota, RuntimeCPUs: runtimeCPUs, CPUError: cs.CPUError,
+		MemUsed: cs.MemUsed, MemLimit: cs.MemLimit, MemPerc: cs.MemPerc,
+		NetRx: cs.NetRx, NetTx: cs.NetTx, BlockRead: cs.BlockRead,
+		BlockWrite: cs.BlockWrite, DiskUsed: cs.DiskUsed,
 	}
+}
+
+// StatsSnapshot converts the bounded resource ring, including an empty array.
+func StatsSnapshot(samples []runtime.Stats) v1.HistoryStats {
+	out := v1.HistoryStats{Samples: make([]v1.EventStats, len(samples))}
+	for i := range samples {
+		out.Samples[i] = Stats(&samples[i])
+	}
+	return out
 }

@@ -1,35 +1,20 @@
-// StatsPage is the /task/:taskId/stats route for task usage, timing, and resource analytics.
+// StatsPage displays statistics derived from shared task history and lazy cost estimates.
 
-import { createMemo, Show } from "solid-js";
+import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
-
-import type { EventStats } from "@sdk/types.gen";
 
 import { useAppState } from "../AppState";
 import { DetailPane } from "../components/Layout";
 import StatsDetail from "../components/StatsDetail";
 import { useTaskTimeline } from "../TaskTimelineContext";
+import { createTaskAnalytics } from "../createTaskAnalytics";
+import Button from "../components/Button";
 import { taskIdFromParam, taskPathForTask } from "../taskPath";
-import { IncrementalTaskTimingTracker } from "../timing";
 
 function StatsPane(props: { taskId: string }) {
   const state = useAppState();
   const task = () => state.taskById(props.taskId);
-  const timeline = useTaskTimeline();
-  const timingTracker = new IncrementalTaskTimingTracker();
-  let timingEpoch = -1;
-  const timings = createMemo(() => {
-    const epoch = timeline.epoch();
-    const reset = epoch !== timingEpoch;
-    timingEpoch = epoch;
-    return timingTracker.derive(timeline.messages(), reset);
-  });
-  const stats = createMemo<EventStats[]>(() =>
-    timeline
-      .messages()
-      .filter((event) => event.kind === "stats" && event.stats !== undefined)
-      .map((event) => event.stats as EventStats),
-  );
+  const analytics = createTaskAnalytics(useTaskTimeline());
   const taskPath = () => {
     const current = task();
     return current ? taskPathForTask(current) : `/task/@${props.taskId}`;
@@ -37,18 +22,40 @@ function StatsPane(props: { taskId: string }) {
 
   return (
     <StatsDetail
+      status={
+        analytics.loading() || analytics.error() || analytics.pricing() || !analytics.snapshot().costComplete ? (
+          <>
+            <Show when={analytics.loading()}>
+              <p role="status">Loading statistics…</p>
+            </Show>
+            <Show when={analytics.error()}>
+              {(message) => (
+                <p role="alert">
+                  Statistics incomplete: {message()} <Button onClick={analytics.retry}>Retry statistics</Button>
+                </p>
+              )}
+            </Show>
+            <Show when={!analytics.loading() && analytics.pricing()}>
+              <p role="status">Updating cost estimates…</p>
+            </Show>
+            <Show when={!analytics.loading() && !analytics.pricing() && !analytics.snapshot().costComplete}>
+              <p role="status">Some turn costs are unavailable.</p>
+            </Show>
+          </>
+        ) : null
+      }
       taskPath={taskPath()}
       repo={task()?.repos?.[0]?.name ?? ""}
       branch={task()?.repos?.[0]?.branch ?? ""}
-      events={timeline.messages()}
-      stats={stats()}
-      turns={timings().turns}
+      tools={analytics.snapshot().tools}
+      stats={analytics.stats()}
+      turns={analytics.snapshot().turns}
       usage={{
         inputTokens: task()?.cumulativeInputTokens ?? 0,
         cacheWriteInputTokens: task()?.cumulativeCacheCreationInputTokens ?? 0,
         cacheReadInputTokens: task()?.cumulativeCacheReadInputTokens ?? 0,
         outputTokens: task()?.cumulativeOutputTokens ?? 0,
-        costUSD: task()?.costUSD ?? 0,
+        costUSD: task()?.costUSD ?? (analytics.snapshot().costComplete ? analytics.snapshot().costUSD : 0),
       }}
     />
   );

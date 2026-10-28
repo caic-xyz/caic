@@ -184,7 +184,6 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
     case "nativeSubagent":
     case "backgroundCommand":
     case "skillLoad":
-    case "stats":
     case "subagentEnd":
     case "subagentStart":
     case "system":

@@ -39,25 +39,13 @@ export function deriveNetworkRates(stats: readonly EventStats[]): NetworkRateSam
   });
 }
 
-export class IncrementalToolTimingTracker {
-  private processed = 0;
-  private lastProcessed: EventMessage | null = null;
+export class ToolTimingTracker {
   private starts = new Map<string, ToolStart>();
   private totals = new Map<string, ToolTimingSummary>();
   private summaries: ToolTimingSummary[] = [];
   private dirty = false;
 
-  derive(events: readonly EventMessage[]): ToolTimingSummary[] {
-    if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
-      this.clear();
-    }
-    for (let i = this.processed; i < events.length; i++) {
-      const event = events[i];
-      if (!event) throw new Error("Missing task statistics event");
-      this.append(event);
-    }
-    this.processed = events.length;
-    this.lastProcessed = events.at(-1) ?? null;
+  snapshot(): ToolTimingSummary[] {
     if (this.dirty) {
       this.summaries = Array.from(this.totals.values(), (summary) => ({ ...summary })).sort(
         (a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name),
@@ -67,37 +55,32 @@ export class IncrementalToolTimingTracker {
     return this.summaries;
   }
 
-  private append(event: EventMessage) {
+  append(event: EventMessage): boolean {
     if (event.kind === "toolUse" && event.toolUse) {
       this.starts.set(toolIdentity(event.source, event.toolUse.toolUseID), { name: event.toolUse.name, ts: event.ts });
-      return;
+      return false;
     }
-    if (event.kind !== "toolResult" || !event.toolResult) return;
+    if (event.kind !== "toolResult" || !event.toolResult) return false;
 
     const key = toolIdentity(event.source, event.toolResult.toolUseID);
     const start = this.starts.get(key);
-    if (!start) return;
+    if (!start) return false;
     this.starts.delete(key);
     const durationMs = toolResultDurationMs(event.toolResult, start.ts, event.ts);
-    if (durationMs === null) return;
+    if (durationMs === null) return false;
 
     const summary = this.totals.get(start.name) ?? { name: start.name, calls: 0, durationMs: 0 };
     summary.calls += 1;
     summary.durationMs += durationMs;
     this.totals.set(start.name, summary);
     this.dirty = true;
-  }
-
-  private clear() {
-    this.processed = 0;
-    this.lastProcessed = null;
-    this.starts = new Map<string, ToolStart>();
-    this.totals = new Map<string, ToolTimingSummary>();
-    this.summaries = [];
-    this.dirty = false;
+    return true;
   }
 }
 
-export function deriveToolTimingSummaries(events: readonly EventMessage[]): ToolTimingSummary[] {
-  return new IncrementalToolTimingTracker().derive(events);
+// mergeStats keeps the newest revision of each timestamp in the bounded ring.
+export function mergeStats(first: readonly EventStats[], latest: readonly EventStats[]): EventStats[] {
+  const values = new Map(first.map((sample) => [sample.ts, sample]));
+  for (const sample of latest) values.set(sample.ts, sample);
+  return [...values.values()].sort((a, b) => a.ts - b.ts).slice(-60);
 }

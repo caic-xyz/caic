@@ -18,6 +18,7 @@ import type {
   Warning,
   TaskListEvent,
 } from "@sdk/types.gen";
+import type { HistoryEventsHandlers } from "@sdk/api.gen";
 
 // Structured HTTP errors preserve the transport status used by route recovery.
 function apiError(status: number): Error & { status: number } {
@@ -91,6 +92,8 @@ class FakeEventSource {
   close = vi.fn(() => {
     for (const unregister of this.registered.splice(0)) unregister();
   });
+
+  removeEventListener = vi.fn();
 
   onerror: ((e: Event) => void) | null = null;
 
@@ -193,7 +196,7 @@ const apiSpyNames = [
   "globalTaskEvents",
   "globalUsageEvents",
   "taskEvents",
-  "taskEventBackfill",
+  "historyEvents",
   "sendInput",
   "restartTask",
   "clearContext",
@@ -263,7 +266,19 @@ function chipPathValues(): string[] {
 beforeEach(() => {
   spySeams();
   vi.clearAllMocks();
+  vi.mocked(api.historyEvents).mockImplementation(() => new FakeEventSource("", []) as unknown as EventSource);
   fetchRouter.reset();
+  fetchRouter.apiGet(/\/history\/stats$/, () => ({ samples: [] }));
+  fetchRouter.apiGet(/\/history\/bootstrap$/, () => ({
+    projectionVersion: "v1",
+    generation: "test",
+    scope: "test",
+    recordsPerChunk: 256,
+    through: 0,
+    cursor: "v1.test.0.end",
+    resourceBase: "/history",
+    inPlanMode: false,
+  }));
   fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
   fetchRouter.apiGet("/.well-known/gomode.json", () => ({ service: "caic", webShell: { voiceGateway: { url: "/" } } }));
   fakeESListeners.length = 0;
@@ -289,9 +304,6 @@ beforeEach(() => {
     return es;
   }) as unknown as typeof api.globalUsageEvents);
   vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
-  vi.mocked(api.taskEventBackfill).mockImplementation(
-    (() => new FakeEventSource()) as unknown as typeof api.taskEventBackfill,
-  );
   vi.mocked(api.listCaches).mockResolvedValue(null as never);
   vi.mocked(api.getCacheSizes).mockResolvedValue(null as never);
   vi.mocked(api.getMetrics).mockResolvedValue({ series: [] } as never);
@@ -595,6 +607,101 @@ describe("structured warnings", () => {
       expect(screen.getByText("Task list event error: malformed event")).toBeInTheDocument();
     });
   }
+});
+
+it("aborts old-account history and opens the same task through the new account's scoped resources", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
+  };
+  const sharedTask = makeTask({ id: "shared", title: "Shared task", state: "waiting" });
+  initialTaskSnapshot = [sharedTask];
+  vi.mocked(api.getTask).mockResolvedValue(sharedTask);
+  const streams: { handlers: HistoryEventsHandlers; close: ReturnType<typeof vi.fn> }[] = [];
+  vi.mocked(api.historyEvents).mockImplementation((_id, _cursor, handlers) => {
+    const close = vi.fn();
+    streams.push({ handlers, close });
+    return { close } as unknown as EventSource;
+  });
+  const fallbackFetch = globalThis.fetch;
+  const delayed = deferred<Response>();
+  const historyRequests: string[] = [];
+  const pendingSignals: AbortSignal[] = [];
+  let account = "a";
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    if (!url.includes("/history/")) return fallbackFetch(input, init);
+    historyRequests.push(url);
+    if (url.endsWith("/bootstrap"))
+      return Promise.resolve(
+        Response.json({
+          projectionVersion: "v1",
+          generation: "shared-log",
+          scope: account,
+          recordsPerChunk: 256,
+          through: 520,
+          cursor: `v1.shared-log.520.end`,
+          resourceBase: `/history/${account}`,
+          inPlanMode: false,
+        }),
+      );
+    if (url.endsWith("/stats")) return Promise.resolve(Response.json({ samples: [] }));
+    if (url === "/history/a/chunks/257/512") {
+      if (!init?.signal) throw new Error("History request has no owner signal");
+      pendingSignals.push(init.signal);
+      return delayed.promise;
+    }
+    if (!url.endsWith("/chunks/513/520")) return Promise.resolve(Response.json([]));
+    const scope = url.startsWith("/history/a/") ? "a" : "b";
+    return Promise.resolve(
+      Response.json([
+        {
+          recordID: 520,
+          index: 0,
+          message: { kind: "text", ts: 520, text: { text: `Private account ${scope} transcript` } },
+        },
+      ]),
+    );
+  });
+  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
+  const checkedIdentity = deferred<UserResp>();
+  vi.spyOn(api, "getMe").mockReturnValue(checkedIdentity.promise);
+  renderApp("/task/@shared");
+  await screen.findByText("Private account a transcript");
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const user = userEvent.setup();
+  await waitFor(() => expect(pendingSignals).toHaveLength(1));
+  await user.click(screen.getByTitle("account-a"));
+  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+  expect(screen.getByText("Checking your session…")).toBeInTheDocument();
+  expect(pendingSignals[0]?.aborted).toBe(true);
+  expect(streams[0]?.close).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Private account a transcript")).not.toBeInTheDocument();
+  const transition = historyRequests.length;
+  account = "b";
+  checkedIdentity.resolve({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" });
+  await screen.findByText("Private account b transcript");
+  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/b/chunks/"))).toBe(true);
+  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/a/"))).toBe(false);
+  delayed.resolve(
+    Response.json([
+      {
+        recordID: 300,
+        index: 0,
+        message: { kind: "text", ts: 300, text: { text: "Late private account a response" } },
+      },
+    ]),
+  );
+  await delayed.promise;
+  streams[0]?.handlers.onMessage({
+    recordID: 600,
+    index: 0,
+    message: { kind: "userInput", ts: 600, userInput: { text: "Retired account a stream" } },
+  });
+  await waitFor(() => expect(screen.getByText("Private account b transcript")).toBeInTheDocument());
+  expect(
+    screen.queryByText(/Late private account a|Retired account a|Private account a transcript/),
+  ).not.toBeInTheDocument();
 });
 
 it("destroys account A task and repo state before rendering confirmed account B", async () => {
@@ -1200,44 +1307,42 @@ describe("App task-list SSE recovery", () => {
   });
 });
 
-it("switches conversation and statistics together without duplicating task streams", async () => {
+it("shares conversation and numeric statistics subscriptions across task switches", async () => {
   const first = makeTask({ id: "first", title: "First task", state: "waiting" });
   const second = makeTask({ id: "second", title: "Second task", state: "waiting" });
   initialTaskSnapshot = [first, second];
   vi.mocked(api.getTask).mockImplementation(async (id) => (id === "first" ? first : second));
-  vi.mocked(api.taskEventBackfill).mockImplementation((id, handlers) => {
+  vi.mocked(api.historyEvents).mockImplementation((id, _cursor, handlers) => {
     queueMicrotask(() => {
-      handlers.onMessage({ kind: "textDelta", ts: 1000, textDelta: { text: `Transcript for ${id}` } });
       handlers.onMessage({
-        kind: "stats",
-        ts: 1000,
-        stats: {
-          ts: 1000,
-          cpuPerc: id === "first" ? 11 : 88,
-          memUsed: 512,
-          memLimit: 1024,
-          memPerc: 50,
-          netRx: 0,
-          netTx: 0,
-          blockRead: 0,
-          blockWrite: 0,
-          diskUsed: -1,
-        },
+        recordID: 1,
+        index: 0,
+        message: { kind: "text", ts: 1000, text: { text: `Transcript for ${id}` } },
       });
-      handlers.onReady?.();
+      handlers.onStats?.({
+        ts: 1000,
+        cpuPerc: id === "first" ? 11 : 88,
+        memUsed: 512,
+        memLimit: 1024,
+        memPerc: 50,
+        netRx: 0,
+        netTx: 0,
+        blockRead: 0,
+        blockWrite: 0,
+        diskUsed: -1,
+      });
     });
-    return new FakeEventSource() as unknown as EventSource;
+    return new FakeEventSource("", []) as unknown as EventSource;
   });
   const { history } = renderApp("/task/@first/stats");
   await screen.findByText("Transcript for first");
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("11.0%"));
-
   history.set({ value: "/task/@second/stats" });
-
   await screen.findByText("Transcript for second");
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("88.0%"));
   expect(screen.queryByText("Transcript for first")).not.toBeInTheDocument();
-  expect(api.taskEventBackfill).toHaveBeenCalledTimes(2);
+  expect(api.taskEvents).not.toHaveBeenCalled();
+  expect(api.historyEvents).toHaveBeenCalledTimes(2);
 });
 
 describe("App keyboard shortcuts", () => {

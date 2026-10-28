@@ -93,5 +93,5 @@ func recentDiskPreview(ctx context.Context, lt *taskslog.LoadedTask, tracker *ap
 			break
 		}
 	}
-	return preview.events(tracker), nil
+	return preview.events(), nil
 }

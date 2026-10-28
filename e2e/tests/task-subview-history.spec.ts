@@ -16,7 +16,7 @@ for (const width of [390, 1280]) {
       }
       let streams = 0;
       page.on("request", (request) => {
-        if (/\/tasks\/[^/]+\/events\?/.test(request.url())) streams++;
+        if (/\/tasks\/[^/]+\/history\/events\?/.test(request.url())) streams++;
       });
       await page.goto(`/task/@${id}`);
       const conversation = page.getByTestId("conversation-pane");
@@ -87,6 +87,8 @@ for (const width of [390, 1280]) {
       await page.goBack();
       await expect(page).toHaveURL(taskURL);
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
+      // Each mounted statistics view owns its independent numeric-fold stream.
+      // Other subviews leave the conversation subscription untouched.
       expect(streams).toBe(initialStreams);
       if (subview === "stats" && width === 1280) {
         await link.click();

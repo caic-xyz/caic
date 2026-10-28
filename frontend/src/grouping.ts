@@ -55,7 +55,7 @@ export interface ScopedTool {
   range: { start: number; end: number } | null;
 }
 
-export function isChildEvent(event: EventMessage): boolean {
+export function isChildEvent(event: Pick<EventMessage, "source">): boolean {
   const s = event.source;
   return !!(s?.agentID || s?.delegationToolUseID || (s?.rootThreadID && s.threadID && s.threadID !== s.rootThreadID));
 }
@@ -500,8 +500,6 @@ function groupMessagesAfter(
       case "diffStat":
         // Metadata-only; repository summaries load the current diff state separately.
         break;
-      case "stats":
-        // Metadata-only; stats are handled by StatsIcon component.
         break;
       case "skillLoad":
         if (isChildEvent(ev)) groups.push({ kind: "other", events: [ev], toolCalls: [] });

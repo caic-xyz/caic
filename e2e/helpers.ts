@@ -8,7 +8,7 @@ import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { StepLoadTimingReport } from "../frontend/src/stepTimings";
-import type { PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
+import type { HistoryBootstrap, PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
 
 // Observe diagnostic entries without exposing a test-only hook in the viewer.
 export async function collectStepTimings(page: Page): Promise<StepLoadTimingReport[]> {
@@ -207,4 +207,9 @@ export async function convertPngsToWebp(dir: string): Promise<void> {
       }
     }),
   );
+}
+
+export function recentHistoryChunk(bootstrap: HistoryBootstrap) {
+  const first = Math.floor((bootstrap.through - 1) / bootstrap.recordsPerChunk) * bootstrap.recordsPerChunk + 1;
+  return { first, last: bootstrap.through, url: `${bootstrap.resourceBase}/chunks/${first}/${bootstrap.through}` };
 }

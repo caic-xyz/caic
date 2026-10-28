@@ -1,4 +1,4 @@
-// Strict canonical v2 and v3 task-log record extraction and decoding.
+// Strict canonical v2/v3 task-log decoding, including persisted user-input observation times.
 
 package agent
 
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"strconv"
 	"time"
@@ -189,6 +190,20 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	}
 	msgs, err = p.applyMessageState(msgs)
 	record.Messages = wrapParsedMessages(msgs, time.Time{})
+	if kind == logControlUserInput {
+		for i := range record.Messages {
+			input, ok := record.Messages[i].Message.(*UserInputMessage)
+			if !ok {
+				return record, errors.New("invalid user input control message")
+			}
+			if input.Ts < 0 || input.Ts > float64(math.MaxInt64)/1000 {
+				return record, errors.New("invalid user input observation timestamp")
+			}
+			if input.Ts > 0 {
+				record.Messages[i].ProducerTime = time.UnixMilli(int64(math.Round(input.Ts * 1000)))
+			}
+		}
+	}
 	if token == logRecordRelayGeneration && len(msgs) == 1 {
 		generation, ok := msgs[0].(*RelayGenerationMessage)
 		if !ok {
@@ -274,7 +289,7 @@ func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string
 		}
 	case logControlUserInput:
 		switch field {
-		case "images", "text":
+		case "images", "text", "ts":
 			return true
 		}
 	case logControlMCPRequest:

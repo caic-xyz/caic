@@ -256,6 +256,8 @@ describe("BackgroundCommands", () => {
     render(() => <BackgroundCommandCard command={commands[1]} settled={true} />);
     expect(screen.getByText("Last observed running · outcome unknown")).toBeInTheDocument();
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
+    render(() => <BackgroundCommandStatusChip command={commands[1]} settled={true} />);
+    expect(screen.getByTestId("background-command-chip")).toHaveTextContent("Last observed running · outcome unknown");
   });
 
   it("the tool-row chip resolves from running in background to the exit code", () => {

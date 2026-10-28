@@ -28,7 +28,7 @@ export default function TaskDetailPage() {
               error={t()?.error}
               initialPrompt={t()?.initialPrompt}
               inPlanMode={t()?.inPlanMode}
-              planContent={t()?.planContent}
+              currentPlan={t()?.currentPlan ?? null}
               repo={t()?.repos?.[0]?.name ?? ""}
               remoteURL={t()?.repos?.[0]?.remoteURL}
               forge={t()?.repos?.[0]?.forge}

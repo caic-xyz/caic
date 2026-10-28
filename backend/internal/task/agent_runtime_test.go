@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -2495,6 +2496,43 @@ func testRunnerSessions(t *testing.T) {
 				}
 			}
 		})
+	})
+
+	t.Run("SessionFailurePublishesClearedPlan", func(t *testing.T) {
+		t.Parallel()
+		for _, restart := range []bool{false, true} {
+			t.Run(strconv.FormatBool(restart), func(t *testing.T) {
+				t.Parallel()
+				backend := &agenttest.FakeBackend{HarnessName: "test"}
+				r := newTestAgentRuntime(t, newTestCheckout(t, "", t.TempDir(), testContainer()), t.TempDir(), map[harness.Name]agent.Backend{"test": backend})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+				tk.SeedTimeline([]agent.Message{
+					&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
+					&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
+				})
+				tk.SetState(taskslog.StateHasPlan)
+				changes := make(chan Snapshot, 4)
+				r.NotifyTaskChange = func() { changes <- tk.Snapshot() }
+				var err error
+				if restart {
+					_, err = r.RestartSession(t.Context(), tk, agent.Prompt{Text: "execute"})
+				} else {
+					_, err = r.ClearContextSession(t.Context(), tk)
+				}
+				if err == nil {
+					t.Fatal("unconfigured backend unexpectedly started")
+				}
+				select {
+				case snapshot := <-changes:
+					if snapshot.PlanExitID != "" || snapshot.PlanContent != "" || snapshot.InPlanMode {
+						t.Fatalf("notification retained cleared plan: %+v", snapshot)
+					}
+				default:
+					t.Fatal("no cleared-plan notification before session failure")
+				}
+			})
+		}
 	})
 
 	t.Run("RestartSession", func(t *testing.T) {

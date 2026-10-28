@@ -1,10 +1,20 @@
-/* Styles for the TaskView component. */
+/* Task conversation layout, history loading feedback, transcript groups, and task controls. */
 
 .container {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.historyNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 .header {
@@ -1339,5 +1349,29 @@ a.ciStatus:hover {
 
   .askOptions {
     flex-direction: column;
+  }
+}
+
+.historyLoading {
+  display: flex;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.historyLoading svg {
+  width: 1em;
+  height: 1em;
+  animation: history-loading 1s linear infinite;
+}
+
+@keyframes history-loading {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .historyLoading svg {
+    animation: none;
   }
 }

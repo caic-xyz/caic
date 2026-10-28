@@ -91,7 +91,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         event.ts = start + index++ * 150;
         return `data: ${JSON.stringify(event)}\n\n`;
       });
-      events.push(...resourceHistory().map((event) => `data: ${JSON.stringify(event)}\n\n`));
+      events.unshift(`event: statsSnapshot\ndata: ${JSON.stringify({ samples: resourceHistory() })}\n\n`);
       await route.fulfill({
         contentType: "text/event-stream",
         body: `retry: 600000\n\n${events.join("")}event: ready\ndata: {}\n\n`,

@@ -148,6 +148,27 @@ func recvType(ch <-chan TimelineMessage) string {
 }
 
 func TestTask(t *testing.T) {
+	t.Run("PlanSummaryChanges", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.SeedTimeline([]agent.Message{
+			&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first"}`)},
+			&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
+		})
+		tk.SetState(taskslog.StateRunning)
+		if changed := tk.addParsedMessage(agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "edit", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"first","new_string":"revised"}`)}}); !changed {
+			t.Fatal("visible plan edit did not notify task summary subscribers")
+		}
+		if got := tk.Snapshot().PlanContent; got != "revised" {
+			t.Fatalf("edited plan = %q", got)
+		}
+		if changed := tk.addParsedMessage(agent.TimedMessage{Message: agent.ContextCleared()}); !changed {
+			t.Fatal("context clear did not notify task summary subscribers")
+		}
+		if got := tk.Snapshot().PlanContent; got != "" {
+			t.Fatalf("cleared plan = %q", got)
+		}
+	})
 	t.Run("TitleRefreshDue", func(t *testing.T) {
 		t.Parallel()
 		want := []int{1, 2, 5, 10, 20, 50, 100, 150}
@@ -1647,8 +1668,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("ExitPlanModeProjectsPlanContent", func(t *testing.T) {
 			t.Parallel()
-			// PlanContentFor must resolve plan content for the ExitPlanMode
-			// that exits the current plan, without storing it on the message.
+			// The snapshot pairs the current plan with its root ExitPlanMode owner.
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -1656,11 +1676,11 @@ func TestTask(t *testing.T) {
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
 			})
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"})
-			if got := tk.PlanContentFor("tu2"); got != "plan A" {
-				t.Errorf("PlanContentFor(tu2) = %q, want %q", got, "plan A")
+			if snap := tk.Snapshot(); snap.PlanExitID != "tu2" || snap.PlanContent != "plan A" {
+				t.Errorf("current plan = (%q, %q), want (tu2, plan A)", snap.PlanExitID, snap.PlanContent)
 			}
-			if got := tk.PlanContentFor("tu1"); got != "" {
-				t.Errorf("PlanContentFor(tu1) = %q, want empty (not the exiting plan)", got)
+			if got := tk.Snapshot().PlanExitID; got == "tu1" {
+				t.Errorf("superseded plan owner = %q", got)
 			}
 		})
 		t.Run("NewExitPlanModeClearsPreviousPlanContent", func(t *testing.T) {
@@ -1674,8 +1694,8 @@ func TestTask(t *testing.T) {
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v1"}`),
 			})
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"})
-			if got := tk.PlanContentFor("tu2"); got != "plan v1" {
-				t.Fatalf("PlanContentFor(tu2) = %q before update, want %q", got, "plan v1")
+			if snap := tk.Snapshot(); snap.PlanExitID != "tu2" || snap.PlanContent != "plan v1" {
+				t.Errorf("current plan = (%q, %q), want (tu2, plan v1)", snap.PlanExitID, snap.PlanContent)
 			}
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
 
@@ -1685,11 +1705,11 @@ func TestTask(t *testing.T) {
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v2"}`),
 			})
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu4", Name: "ExitPlanMode"})
-			if got := tk.PlanContentFor("tu2"); got != "" {
-				t.Errorf("PlanContentFor(tu2) = %q, want empty (superseded by plan v2)", got)
+			if got := tk.Snapshot().PlanExitID; got == "tu2" {
+				t.Errorf("superseded plan owner = %q", got)
 			}
-			if got := tk.PlanContentFor("tu4"); got != "plan v2" {
-				t.Errorf("PlanContentFor(tu4) = %q, want %q", got, "plan v2")
+			if snap := tk.Snapshot(); snap.PlanExitID != "tu4" || snap.PlanContent != "plan v2" {
+				t.Errorf("current plan = (%q, %q), want (tu4, plan v2)", snap.PlanExitID, snap.PlanContent)
 			}
 		})
 		t.Run("HasPlanToRunningOnText", func(t *testing.T) {
@@ -2365,14 +2385,14 @@ func TestTask(t *testing.T) {
 			})
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"})
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
-			if got := tk.PlanContentFor("tu2"); got != "the plan" {
-				t.Fatalf("PlanContentFor(tu2) = %q before ClearMessages, want %q", got, "the plan")
+			if snap := tk.Snapshot(); snap.PlanExitID != "tu2" || snap.PlanContent != "the plan" {
+				t.Errorf("current plan = (%q, %q), want (tu2, the plan)", snap.PlanExitID, snap.PlanContent)
 			}
 
 			tk.ClearMessages(t.Context())
 
-			if got := tk.PlanContentFor("tu2"); got != "" {
-				t.Errorf("PlanContentFor(tu2) = %q after ClearMessages, want empty", got)
+			if got := tk.Snapshot().PlanExitID; got == "tu2" {
+				t.Errorf("superseded plan owner = %q", got)
 			}
 		})
 		t.Run("SuppressionLiftsAfterTurn", func(t *testing.T) {
@@ -2720,8 +2740,8 @@ func TestTask(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 			}
 			tk.SeedTimeline(msgs)
-			if got := tk.PlanContentFor("tu2"); got != "" {
-				t.Errorf("PlanContentFor(tu2) = %q, want empty (context_cleared should clear it)", got)
+			if got := tk.Snapshot().PlanExitID; got == "tu2" {
+				t.Errorf("superseded plan owner = %q", got)
 			}
 		})
 		t.Run("PlanUpdateClearsPreviousExitPlanModePlanContent", func(t *testing.T) {
@@ -2748,11 +2768,11 @@ func TestTask(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 			}
 			tk.SeedTimeline(msgs)
-			if got := tk.PlanContentFor("tu2"); got != "" {
-				t.Errorf("PlanContentFor(tu2) = %q, want empty (superseded by plan v2)", got)
+			if got := tk.Snapshot().PlanExitID; got == "tu2" {
+				t.Errorf("superseded plan owner = %q", got)
 			}
-			if got := tk.PlanContentFor("tu5"); got != "plan v2" {
-				t.Errorf("PlanContentFor(tu5) = %q, want %q", got, "plan v2")
+			if snap := tk.Snapshot(); snap.PlanExitID != "tu5" || snap.PlanContent != "plan v2" {
+				t.Errorf("current plan = (%q, %q), want (tu5, plan v2)", snap.PlanExitID, snap.PlanContent)
 			}
 		})
 		t.Run("FoldingTheSameSliceTwiceIsIdempotent", func(t *testing.T) {
@@ -2809,11 +2829,8 @@ func TestTask(t *testing.T) {
 			if as.PlanContent != bs.PlanContent {
 				t.Errorf("PlanContent = %q after second fold, want %q (first)", bs.PlanContent, as.PlanContent)
 			}
-			if a.PlanContentFor("tu2") != b.PlanContentFor("tu2") {
-				t.Errorf("PlanContentFor(tu2) differs between folds: %q vs %q", a.PlanContentFor("tu2"), b.PlanContentFor("tu2"))
-			}
-			if a.PlanContentFor("tu4") != b.PlanContentFor("tu4") {
-				t.Errorf("PlanContentFor(tu4) differs between folds: %q vs %q", a.PlanContentFor("tu4"), b.PlanContentFor("tu4"))
+			if as.PlanExitID != bs.PlanExitID {
+				t.Errorf("PlanExitID differs between folds: %q vs %q", as.PlanExitID, bs.PlanExitID)
 			}
 		})
 		t.Run("NativeSubagentState", func(t *testing.T) {
@@ -3861,27 +3878,6 @@ func TestTask(t *testing.T) {
 			}
 			if history[len(history)-1].CPUPerc != 64.0 {
 				t.Errorf("history[last].CPUPerc = %v, want 64.0", history[len(history)-1].CPUPerc)
-			}
-		})
-		t.Run("LiveOnlyDoesNotReplayRing", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.PushStats(&runtime.Stats{CPUPerc: 50})
-			live, unsub := tk.SubscribeLiveStats(t.Context())
-			defer unsub()
-			select {
-			case got := <-live:
-				t.Fatalf("unexpected historical stat: %+v", got)
-			default:
-			}
-			tk.PushStats(&runtime.Stats{CPUPerc: 75})
-			select {
-			case got := <-live:
-				if got.CPUPerc != 75 {
-					t.Fatalf("live CPU = %v, want 75", got.CPUPerc)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for live stats")
 			}
 		})
 	})

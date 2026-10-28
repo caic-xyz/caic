@@ -595,20 +595,6 @@ func (t *Task) LastAgentResult() string {
 	return ""
 }
 
-// PlanContentFor returns the plan content to display on an ExitPlanMode
-// message with the given tool use ID: the current plan content when this is
-// the visible plan (most recent ExitPlanMode, not cleared by
-// context_cleared), else "". SSE conversion consumes this projection because
-// the immutable message no longer carries a plan snapshot.
-func (t *Task) PlanContentFor(toolUseID string) string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if toolUseID == "" || toolUseID != t.planExitID {
-		return ""
-	}
-	return t.planContent
-}
-
 // LastExitError returns the most recent non-zero relay exit diagnostic.
 func (t *Task) LastExitError() string {
 	t.mu.Lock()
@@ -753,6 +739,7 @@ type Snapshot struct {
 	InPlanMode            bool
 	PlanFile              string
 	PlanContent           string
+	PlanExitID            string
 	CostUSD               float64
 	NumTurns              int
 	Duration              time.Duration
@@ -965,8 +952,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// One forward pass: the task starts empty, so every field below is derived
 	// from msgs alone and the per-concern handlers touch disjoint fields.
 	// Later entries (model_rerouted) override earlier ones. The fold only reads
-	// msgs — projections like plan content are resolved later via
-	// PlanContentFor instead of being written into messages.
+	// msgs; the current plan is projected through the task snapshot.
 	//
 	// Plan state: a context_cleared marker resets it — it means ClearMessages
 	// was called (e.g. "Clear and execute plan"), so plan data before the
@@ -1054,14 +1040,11 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 				}
 			case "context_cleared", "compact_boundary":
 				if m.Subtype == "context_cleared" {
-					t.inPlanMode = false
-					t.planFile = ""
-					t.planContent = ""
-					t.planDismissed = true
-					t.planExitID = ""
+					t.clearContextLocked()
+				} else {
+					t.priorNumTurns = t.liveNumTurns
+					t.priorDuration = t.liveDuration
 				}
-				t.priorNumTurns = t.liveNumTurns
-				t.priorDuration = t.liveDuration
 				// Compaction replaces the conversation with a summary, so the
 				// pre-compaction usage no longer describes the live context.
 				if m.ContextTokensAfter > 0 {
@@ -1278,19 +1261,6 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 // subscribers (including reconnecting clients) can see the full timeline.
 func (t *Task) ClearMessages(ctx context.Context) {
 	t.addMessage(ctx, agent.ContextCleared())
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.sessionID = ""
-	t.priorNumTurns = t.liveNumTurns
-	t.priorDuration = t.liveDuration
-	t.inPlanMode = false
-	t.planFile = ""
-	t.planContent = ""
-	t.planDismissed = true
-	// Drop the plan projection: PlanContentFor returns "" until a new plan
-	// is written and exited.
-	t.planExitID = ""
 }
 
 // Subscribe returns a snapshot of all past messages plus a live channel for
@@ -1471,16 +1441,6 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 	t.statsSubs = append(t.statsSubs, s)
 	t.mu.Unlock()
 	return history, s.ch, unsubscribeStats(t, ctx, s)
-}
-
-// SubscribeLiveStats returns only stats produced after subscription. It avoids
-// allocating a ring-buffer snapshot when raw disk history is authoritative.
-func (t *Task) SubscribeLiveStats(ctx context.Context) (live <-chan runtime.Stats, unsubFn func()) {
-	s := &statsSub{ch: make(chan runtime.Stats, 64)}
-	t.mu.Lock()
-	t.statsSubs = append(t.statsSubs, s)
-	t.mu.Unlock()
-	return s.ch, unsubscribeStats(t, ctx, s)
 }
 
 func unsubscribeStats(t *Task, ctx context.Context, s *statsSub) func() {
@@ -1722,6 +1682,19 @@ func (t *Task) DiscardRollup() {
 	sink.Discard(meta)
 }
 
+// clearContextLocked resets session-owned metadata when a root context boundary
+// is applied. The caller holds t.mu.
+func (t *Task) clearContextLocked() {
+	t.sessionID = ""
+	t.priorNumTurns = t.liveNumTurns
+	t.priorDuration = t.liveDuration
+	t.inPlanMode = false
+	t.planFile = ""
+	t.planContent = ""
+	t.planDismissed = true
+	t.planExitID = ""
+}
+
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
 func (t *Task) snapshotLocked() Snapshot {
 	return Snapshot{
@@ -1753,6 +1726,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		InPlanMode:            t.inPlanMode,
 		PlanFile:              t.planFile,
 		PlanContent:           t.planContent,
+		PlanExitID:            t.planExitID,
 		CostUSD:               t.costTracker.TotalUSD,
 		NumTurns:              t.liveNumTurns,
 		Duration:              t.liveDuration,
@@ -1921,11 +1895,12 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	}
 
 	initialState := t.state
+	initialPlanMode, initialPlanID, initialPlanContent := t.inPlanMode, t.planExitID, t.planContent
 	// A compaction boundary rewrites the summary's live context fill, so the
 	// task list must refresh even though the task state is unchanged.
 	summaryChanged := false
 	defer func() {
-		stateChanged = summaryChanged || t.state != initialState
+		stateChanged = summaryChanged || t.state != initialState || t.inPlanMode != initialPlanMode || t.planExitID != initialPlanID || t.planContent != initialPlanContent
 		t.mu.Unlock()
 	}()
 	if meta, ok := m.(*agent.MetaSessionMessage); ok {
@@ -2071,8 +2046,12 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		t.lastExitError = ""
 	}
 	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
-		t.priorNumTurns = t.liveNumTurns
-		t.priorDuration = t.liveDuration
+		if sm.Subtype == "context_cleared" {
+			t.clearContextLocked()
+		} else {
+			t.priorNumTurns = t.liveNumTurns
+			t.priorDuration = t.liveDuration
+		}
 		// Compaction replaces the conversation with a summary, so the
 		// pre-compaction usage no longer describes the live context.
 		if sm.ContextTokensAfter > 0 {
@@ -2229,7 +2208,7 @@ type editToolInput struct {
 
 // trackToolUse inspects a ToolUseMessage for plan-related tools and updates
 // PlanFile, InPlanMode, and which ExitPlanMode carries the current plan
-// (planExitID, resolved via PlanContentFor). The caller must hold t.mu.
+// (planExitID in the task snapshot). The caller must hold t.mu.
 func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 	switch tu.Name {
 	case "EnterPlanMode":

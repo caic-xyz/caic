@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -382,6 +383,25 @@ func TestToDTO(t *testing.T) {
 
 func TestComputeTaskPatch(t *testing.T) {
 	t.Parallel()
+	t.Run("CurrentPlanIsReplacedOrClearedAsOneValue", func(t *testing.T) {
+		t.Parallel()
+		old := []byte(`{"id":"abc","currentPlan":{"toolUseID":"exit","content":"first"}}`)
+		for _, tc := range []struct{ name, next, want string }{
+			{"edit", `{"id":"abc","currentPlan":{"toolUseID":"exit","content":"revised"}}`, `{"toolUseID":"exit","content":"revised"}`},
+			{"clear", `{"id":"abc"}`, `null`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				patch, err := computeTaskPatch(old, []byte(tc.next))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(patch, map[string]json.RawMessage{"id": json.RawMessage(`"abc"`), "currentPlan": json.RawMessage(tc.want)}) {
+					t.Fatalf("patch = %s", patch)
+				}
+			})
+		}
+	})
 	t.Run("ChangedFields", func(t *testing.T) {
 		t.Parallel()
 		old := `{"id":"abc","state":"running","costUSD":0.0}`

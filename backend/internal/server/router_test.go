@@ -807,7 +807,7 @@ func TestHandleTaskEvents(t *testing.T) {
 		}
 	})
 
-	t.Run("BackwardBoundaryPrecedesCanonicalHistory", func(t *testing.T) {
+	t.Run("MemoryCanonicalReplayAndResumeWithBackwardRequest", func(t *testing.T) {
 		t.Parallel()
 		taskID := ksid.NewID()
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
@@ -828,30 +828,16 @@ func TestHandleTaskEvents(t *testing.T) {
 		testTaskHandlers(s).handleTaskEvents(w, req)
 
 		body := w.Body.String()
-		backwardAt := strings.Index(body, "event: backward")
-		canonicalAt := strings.Index(body, "id: v1/")
-		if backwardAt < 0 || canonicalAt < 0 || backwardAt >= canonicalAt {
-			t.Fatalf("backward boundary did not precede canonical history:\n%s", body)
+		if !strings.Contains(body, "latest response") || !strings.Contains(body, "BashInPreview") || !strings.Contains(body, "event: ready") {
+			t.Fatalf("memory replay omitted canonical messages or its ready boundary:\n%s", body)
 		}
-		backwardEnd := backwardAt + strings.Index(body[backwardAt:], "\n\n")
-		if backwardEnd < backwardAt || strings.Contains(body[backwardAt:backwardEnd], "id:") {
-			t.Fatalf("backward boundary unexpectedly carried an SSE ID:\n%s", body[backwardAt:canonicalAt])
-		}
-		backwardID := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3, event: taskEventMessageEnd}.String()
-		if !strings.Contains(body[backwardAt:backwardEnd], "latest response") ||
-			!strings.Contains(body[backwardAt:backwardEnd], `"eventId":"`+backwardID+`"`) ||
-			!strings.Contains(body, "event: ready") {
-			t.Fatalf("backward boundary or canonical ready marker missing:\n%s", body)
-		}
-		if !strings.Contains(body[backwardAt:backwardEnd], "BashInPreview") || !strings.Contains(body[backwardEnd:], "BashInPreview") {
-			t.Fatalf("preview or canonical history omitted tool activity:\n%s", body)
-		}
+		resumeID := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3, event: taskEventMessageEnd}.String()
 
 		resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		t.Cleanup(resumeCancel)
 		resumeReq := httptest.NewRequestWithContext(resumeCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		resumeReq.SetPathValue("id", taskID.String())
-		resumeReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(backwardID)
+		resumeReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(resumeID)
 		resumeWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(resumeWriter, resumeReq)
 		resumedBody := resumeWriter.Body.String()
@@ -2820,8 +2806,8 @@ func TestTaskEventStreamLiveFlushes(t *testing.T) {
 
 	// The burst shares one deferred flush: the ready flush plus at most an
 	// immediate flush and the window timer flush.
-	if len(recorder.flushes) > 3 {
-		t.Errorf("flushes = %d, want at most ready + 2 for one burst", len(recorder.flushes))
+	if len(recorder.flushes) > 4 {
+		t.Errorf("flushes = %d, want at most snapshot + ready + 2 for one burst", len(recorder.flushes))
 	}
 	// A deferred flush must still deliver the burst after the last write.
 	if len(recorder.flushes) == 0 || recorder.flushes[len(recorder.flushes)-1].Before(recorder.writes[len(recorder.writes)-1]) {

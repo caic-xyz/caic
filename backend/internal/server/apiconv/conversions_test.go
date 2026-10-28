@@ -315,24 +315,20 @@ func TestStatsEvent(t *testing.T) {
 
 	ts := time.Date(2026, time.March, 20, 10, 30, 0, 0, time.UTC)
 	stats := &runtime.Stats{Ts: ts, CPUPerc: 12.5, CPUCeiling: 1.5, CPUQuota: new(2.5), RuntimeCPUs: 8, MemUsed: 100, MemLimit: 200, MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700}
-	want := v1.EventMessage{
-		Kind: v1.EventKindStats,
-		Ts:   ts.UnixMilli(),
-		Stats: &v1.EventStats{
-			Ts: ts.UnixMilli(), CPUPerc: 12.5, CPUCeiling: new(1.5), CPUQuota: new(2.5), RuntimeCPUs: new(8), MemUsed: 100, MemLimit: 200,
-			MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700,
-		},
+	want := v1.EventStats{
+		Ts: ts.UnixMilli(), CPUPerc: 12.5, CPUCeiling: new(1.5), CPUQuota: new(2.5), RuntimeCPUs: new(8), MemUsed: 100, MemLimit: 200,
+		MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700,
 	}
-	if got := StatsEvent(stats); !reflect.DeepEqual(got, want) {
+	if got := Stats(stats); !reflect.DeepEqual(got, want) {
 		t.Errorf("StatsEvent() = %#v, want %#v", got, want)
 	}
 	stats.CPUQuota = new(0.0)
 	stats.CPUError = "runtime CPU info unavailable"
-	got := StatsEvent(stats).Stats
+	got := Stats(stats)
 	if got.CPUQuota == nil || *got.CPUQuota != 0 || got.CPUCeiling == nil || *got.CPUCeiling != 1.5 || got.CPUError != "runtime CPU info unavailable" {
 		t.Fatalf("configured ceiling with unrestricted quota = %+v", got)
 	}
-	got = StatsEvent(&runtime.Stats{}).Stats
+	got = Stats(&runtime.Stats{})
 	if got.CPUCeiling != nil || got.CPUQuota != nil || got.RuntimeCPUs != nil {
 		t.Fatalf("unknown observations must be null: %+v", got)
 	}
@@ -377,6 +373,30 @@ func TestTaskState(t *testing.T) {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("CurrentPlanUsesCapturedSnapshot", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SeedTimeline([]agent.Message{
+			&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: []byte(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
+			&agent.ToolUseMessage{ToolUseID: "root-exit", Name: "ExitPlanMode"},
+		})
+		snapshot := tk.Snapshot()
+		tk.ClearMessages(t.Context())
+		captured, err := Task(&TaskInput{Task: tk, Snapshot: snapshot})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if captured.CurrentPlan == nil || captured.CurrentPlan.ToolUseID != "root-exit" || captured.CurrentPlan.Content != "first plan" {
+			t.Fatalf("captured plan = %+v", captured.CurrentPlan)
+		}
+		current, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.CurrentPlan != nil {
+			t.Fatalf("cleared plan = %+v", current.CurrentPlan)
+		}
+	})
 	t.Run("OverageDoesNotBlock", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})

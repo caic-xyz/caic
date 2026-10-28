@@ -1,4 +1,4 @@
-// Focused tests for task SSE replay buffering, native retry ownership, and cleanup.
+// Tests disk-history SSE replay buffering, native retry ownership, and lifecycle cleanup.
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -11,8 +11,7 @@ import type { EventMessage } from "@sdk/types.gen";
 import { api } from "./api";
 import { createTaskEventTimeline } from "./taskEventTimeline";
 
-const taskEventStreamMock = vi.spyOn(api, "taskEventBackfill");
-const taskEventStreamFromLastEventIDMock = vi.spyOn(api, "taskEventStreamFromLastEventID");
+const taskEventStreamMock = vi.spyOn(api, "taskEvents");
 
 interface FakeEventSource {
   close: ReturnType<typeof vi.fn>;
@@ -26,18 +25,11 @@ interface Connection {
 
 function captureConnections(): Connection[] {
   const connections: Connection[] = [];
-  taskEventStreamMock.mockImplementation((_id: string, handlers: TaskEventsHandlers) => {
+  taskEventStreamMock.mockImplementation((_id: string, _backward: string, handlers: TaskEventsHandlers) => {
     const source: FakeEventSource = { close: vi.fn(), onerror: null };
     connections.push({ handlers, source });
     return source as unknown as EventSource;
   });
-  taskEventStreamFromLastEventIDMock.mockImplementation(
-    (_id: string, _eventId: string, handlers: TaskEventsHandlers) => {
-      const source: FakeEventSource = { close: vi.fn(), onerror: null };
-      connections.push({ handlers, source });
-      return source as unknown as EventSource;
-    },
-  );
   return connections;
 }
 
@@ -49,7 +41,6 @@ describe("createTaskEventTimeline", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     taskEventStreamMock.mockReset();
-    taskEventStreamFromLastEventIDMock.mockReset();
   });
 
   afterEach(() => {
@@ -62,8 +53,7 @@ describe("createTaskEventTimeline", () => {
       dispose,
       ...createTaskEventTimeline({
         taskId: () => "task",
-        taskState: () => "running",
-        onError: vi.fn(),
+        taskState: () => "stopped",
       }),
     }));
     assert.ok(connections[0] !== undefined);
@@ -73,62 +63,19 @@ describe("createTaskEventTimeline", () => {
     expect(timeline.messages()).toEqual([]);
     handlers.onReady?.();
     expect(timeline.messages()).toEqual([textEvent("history", 1)]);
-    expect(timeline.epoch()).toBe(1);
+    const epoch = timeline.epoch();
 
     handlers.onMessage(textEvent(" live", 2));
     expect(timeline.messages()).toHaveLength(1);
     vi.advanceTimersByTime(100);
     expect(timeline.messages()).toEqual([textEvent("history", 1), textEvent(" live", 2)]);
 
+    expect(timeline.epoch()).toBe(epoch);
     handlers.onReset?.();
     handlers.onMessage(textEvent("replacement", 3));
     handlers.onReady?.();
     expect(timeline.messages()).toEqual([textEvent("replacement", 3)]);
-    expect(timeline.epoch()).toBe(2);
-    timeline.dispose();
-  });
-
-  it("renders the backward boundary while history loads, then reconciles canonical history", () => {
-    const connections = captureConnections();
-    const timeline = createRoot((dispose) => ({
-      dispose,
-      ...createTaskEventTimeline({
-        taskId: () => "task",
-        taskState: () => "running",
-        onError: vi.fn(),
-      }),
-    }));
-    assert.ok(connections[0] !== undefined);
-    const handlers = connections[0].handlers;
-    const backwardMessage = textEvent("latest", 3);
-    const tailEvent = textEvent("!", 5);
-
-    handlers.onBackward?.({
-      messages: [textEvent("earlier preview", 2), backwardMessage],
-      eventId: "v1/timeline/memory/4/0",
-    });
-    expect(timeline.messages()).toEqual([textEvent("earlier preview", 2), backwardMessage]);
-    expect(connections).toHaveLength(2);
-    assert.ok(connections[1] !== undefined);
-    const tail = connections[1].handlers;
-    tail.onMessage(tailEvent);
-    expect(timeline.messages()).toEqual([textEvent("earlier preview", 2), backwardMessage, tailEvent]);
-    handlers.onMessage(textEvent("older", 1));
-    handlers.onMessage(textEvent("latest response", 4));
-    handlers.onReady?.();
-    expect(timeline.messages()).toEqual([textEvent("older", 1), textEvent("latest response", 4), tailEvent]);
-    expect(timeline.epoch()).toBe(1);
-    expect(connections[0].source.close).toHaveBeenCalledOnce();
-
-    tail.onReady?.();
-    tail.onMessage(textEvent(" live", 6));
-    vi.advanceTimersByTime(100);
-    expect(timeline.messages()).toEqual([
-      textEvent("older", 1),
-      textEvent("latest response", 4),
-      tailEvent,
-      textEvent(" live", 6),
-    ]);
+    expect(timeline.epoch()).toBeGreaterThan(epoch);
     timeline.dispose();
   });
 
@@ -136,45 +83,90 @@ describe("createTaskEventTimeline", () => {
     const connections = captureConnections();
     const timeline = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "purged", onError: vi.fn() }),
+      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "purged" }),
     }));
     const handlers = connections[0]?.handlers;
     assert.ok(handlers !== undefined);
     const preview = [textEvent("recent", 2), textEvent("latest", 3)];
     handlers.onBackward?.({ messages: preview, eventId: "" });
-    expect(timeline.messages()).toEqual(preview);
+    expect(timeline.messages()).toEqual([]);
+    expect(timeline.preview()).toEqual({ prompt: "", response: "recentlatest" });
     expect(connections).toHaveLength(1);
     handlers.onMessage(textEvent("canonical", 1));
-    expect(timeline.messages()).toEqual(preview);
+    expect(timeline.messages()).toEqual([]);
+    expect(timeline.preview()).toEqual({ prompt: "", response: "recentlatest" });
     handlers.onReady?.();
     expect(timeline.messages()).toEqual([textEvent("canonical", 1)]);
+    expect(timeline.preview()).toBeNull();
+    expect(timeline.loading()).toBe(false);
     timeline.dispose();
   });
 
-  it("replaces backfill when the backward event ID is rejected", () => {
+  it("owns resource replacement, decoder recovery, and disk-native zero pricing", async () => {
     const connections = captureConnections();
     const timeline = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({
-        taskId: () => "task",
-        taskState: () => "running",
-        onError: vi.fn(),
-      }),
+      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "stopped" }),
     }));
-    assert.ok(connections[0] !== undefined);
-    const handlers = connections[0].handlers;
-    const stale = textEvent("stale", 1);
-    const replacement = textEvent("replacement", 2);
-
-    handlers.onBackward?.({ messages: [stale], eventId: "v1/stale/memory/1/0" });
-    assert.ok(connections[1] !== undefined);
-    const tail = connections[1].handlers;
-    tail.onReset?.();
-    tail.onMessage(replacement);
-    expect(timeline.messages()).toEqual([]);
-    tail.onReady?.();
-    expect(timeline.messages()).toEqual([replacement]);
-    timeline.dispose();
+    try {
+      const handlers = connections[0]?.handlers;
+      assert.ok(handlers);
+      const sample = {
+        ts: 1,
+        cpuPerc: 0,
+        memUsed: 0,
+        memLimit: 0,
+        memPerc: 0,
+        netRx: 0,
+        netTx: 0,
+        blockRead: 0,
+        blockWrite: 0,
+        diskUsed: -1,
+      };
+      handlers.onStatsSnapshot?.({ samples: [sample] });
+      handlers.onStats?.({ ...sample, diskUsed: 20 });
+      assert.equal(timeline.stats()[0]?.diskUsed, 20);
+      handlers.onStatsSnapshot?.({ samples: [{ ...sample, ts: 2 }] });
+      assert.deepEqual(
+        timeline.stats().map((value) => value.ts),
+        [2],
+      );
+      handlers.onMessage({
+        kind: "result",
+        ts: 1,
+        result: {
+          subtype: "success",
+          isError: false,
+          result: "done",
+          duration: 1,
+          durationAPI: 1,
+          numTurns: 1,
+          totalCostUSD: 0,
+          cost: { usd: 0, source: "reported" },
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+            reportedModel: "model",
+          },
+        },
+      });
+      handlers.onReady?.();
+      const costs = await timeline.readCosts(new AbortController().signal);
+      assert.equal(costs[0]?.result, timeline.messages()[0]?.result);
+      assert.equal(costs[0]?.cost?.usd, 0);
+      handlers.onError(new Error("Invalid HistoryStats.samples"));
+      assert.equal(timeline.error(), "Invalid HistoryStats.samples");
+      assert.equal(connections[0]?.source.close.mock.calls.length, 1);
+      timeline.retry();
+      connections[1]?.handlers.onStatsSnapshot?.({ samples: [] });
+      connections[1]?.handlers.onReady?.();
+      assert.equal(timeline.error(), null);
+      assert.deepEqual(timeline.stats(), []);
+    } finally {
+      timeline.dispose();
+    }
   });
 
   it("leaves visibility, connectivity, and nonterminal retries to EventSource", () => {
@@ -182,8 +174,7 @@ describe("createTaskEventTimeline", () => {
     const dispose = createRoot((rootDispose) => {
       createTaskEventTimeline({
         taskId: () => "task",
-        taskState: () => "running",
-        onError: vi.fn(),
+        taskState: () => "stopped",
       });
       return rootDispose;
     });
@@ -203,14 +194,13 @@ describe("createTaskEventTimeline", () => {
     expect(connection.source.close).toHaveBeenCalledOnce();
   });
 
-  it("closes completed terminal streams and reconnects when the task restarts", () => {
+  it("closes completed terminal streams and reconnects when the task becomes stopped", () => {
     const connections = captureConnections();
     const owner = createRoot((dispose) => {
-      const [state, setState] = createSignal("running");
+      const [state, setState] = createSignal("stopped");
       createTaskEventTimeline({
         taskId: () => "task",
         taskState: state,
-        onError: vi.fn(),
       });
       return { dispose, setState };
     });
@@ -229,30 +219,38 @@ describe("createTaskEventTimeline", () => {
     terminalConnection.source.onerror(new Event("error"));
     expect(terminalConnection.source.close).toHaveBeenCalledOnce();
 
-    owner.setState("running");
+    owner.setState("stopped");
     expect(connections).toHaveLength(3);
     assert.ok(connections[2] !== undefined);
     expect(connections[2].source.close).not.toHaveBeenCalled();
     owner.dispose();
   });
 
-  it("closes and reports terminal history failures", () => {
+  it("reports terminal history failure and explicitly retries without accepting stale callbacks", () => {
     const connections = captureConnections();
-    const onError = vi.fn();
-    const dispose = createRoot((rootDispose) => {
-      createTaskEventTimeline({
-        taskId: () => "task",
-        taskState: () => "running",
-        onError,
-      });
-      return rootDispose;
-    });
-    assert.ok(connections[0] !== undefined);
-    connections[0].handlers.onHistoryError?.({ message: "unavailable" });
-
-    expect(connections[0].source.close).toHaveBeenCalledOnce();
-    expect(onError).toHaveBeenCalledWith("Task history error: unavailable");
-    dispose();
+    const owner = createRoot((dispose) => ({
+      dispose,
+      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "purged" }),
+    }));
+    const first = connections[0];
+    assert.ok(first);
+    expect(owner.loading()).toBe(true);
+    first.handlers.onHistoryError?.({ message: "unavailable" });
+    expect(first.source.close).toHaveBeenCalledOnce();
+    expect(owner.error()).toBe("unavailable");
+    expect(owner.loading()).toBe(false);
+    owner.retry();
+    expect(owner.error()).toBeNull();
+    expect(owner.loading()).toBe(true);
+    const next = connections[1];
+    assert.ok(next);
+    first.handlers.onMessage(textEvent("stale", 1));
+    next.handlers.onMessage(textEvent("recovered", 2));
+    expect(owner.messages()).toEqual([]);
+    next.handlers.onReady?.();
+    expect(owner.messages()).toEqual([textEvent("recovered", 2)]);
+    expect(owner.loading()).toBe(false);
+    owner.dispose();
   });
 
   it("replaces the connection and ignores stale callbacks when the task changes", () => {
@@ -264,8 +262,7 @@ describe("createTaskEventTimeline", () => {
         setTaskId,
         ...createTaskEventTimeline({
           taskId,
-          taskState: () => "running",
-          onError: vi.fn(),
+          taskState: () => "stopped",
         }),
       };
     });

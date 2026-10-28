@@ -5,9 +5,10 @@ import { render, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "@tests/expect";
 
-import type { EventStats } from "@sdk/types.gen";
+import type { EventMessage, EventStats } from "@sdk/types.gen";
 
-import type { TurnTiming } from "../timing";
+import type { AnalyticsTurn } from "../taskAnalytics";
+import { ToolTimingTracker } from "../taskStats";
 import { StatsContent, type TaskUsageSummary } from "./StatsDetail";
 
 const usage: TaskUsageSummary = {
@@ -18,29 +19,29 @@ const usage: TaskUsageSummary = {
   outputTokens: 500,
 };
 
-const turns: [TurnTiming] = [
+function tools(events: readonly EventMessage[]) {
+  const tracker = new ToolTimingTracker();
+  for (const event of events) tracker.append(event);
+  return tracker.snapshot();
+}
+const turns: [AnalyticsTurn] = [
   {
-    event: { kind: "result", ts: 2_000 },
-    result: {
-      subtype: "success",
-      isError: false,
-      result: "done",
-      totalCostUSD: 0.125,
-      cost: { usd: 0.125, source: "reported" },
-      duration: 5,
-      durationAPI: 4,
-      numTurns: 1,
-      usage: {
-        inputTokens: 1_000,
-        outputTokens: 500,
-        cacheCreationInputTokens: 2_000,
-        cacheReadInputTokens: 7_000,
-        reasoningOutputTokens: 200,
-        reportedModel: "test-model",
-      },
-    },
+    key: "1:0",
+    ts: 2000,
+    model: "test-model",
+    durationMs: 5000,
+    durationAPIMs: 4000,
+    waitMs: 3000,
     changeStat: null,
-    waitMs: 3_000,
+    cost: { usd: 0.125, source: "reported" },
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheCreationInputTokens: 2000,
+      cacheReadInputTokens: 7000,
+      reasoningOutputTokens: 200,
+      reportedModel: "test-model",
+    },
   },
 ];
 
@@ -121,7 +122,7 @@ describe("StatsContent", () => {
       },
     ] as const;
     const { findByTestId, getByTestId } = render(() => (
-      <StatsContent events={events} stats={[]} turns={turns} usage={usage} />
+      <StatsContent tools={tools(events)} stats={[]} turns={turns} usage={usage} />
     ));
 
     const summary = getByTestId("task-usage-summary");
@@ -139,7 +140,7 @@ describe("StatsContent", () => {
   it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const manyTurns = Array.from({ length: 12 }, () => turns[0]);
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={[]} turns={manyTurns} usage={usage} />);
+    const { findByTestId } = render(() => <StatsContent tools={[]} stats={[]} turns={manyTurns} usage={usage} />);
     const chart = await findByTestId("turn-token-chart");
     const labels = Array.from(
       chart.querySelectorAll('[aria-label="x-axis tick label"] text'),
@@ -152,7 +153,7 @@ describe("StatsContent", () => {
   it("shows aligned resource history and network throughput", async () => {
     const user = userEvent.setup();
     const { findByLabelText, findByTestId } = render(() => (
-      <StatsContent events={[]} stats={stats} turns={[]} usage={usage} />
+      <StatsContent tools={[]} stats={stats} turns={[]} usage={usage} />
     ));
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("CPU50.0% · 0.50 CPUs");
@@ -208,7 +209,7 @@ describe("StatsContent", () => {
   it("shows CPU equivalents without inventing unknown capacity", async () => {
     const { findByTestId } = render(() => (
       <StatsContent
-        events={[]}
+        tools={[]}
         stats={[{ ...stats[0], cpuPerc: 150, cpuCeiling: undefined }]}
         turns={[]}
         usage={usage}
@@ -223,7 +224,7 @@ describe("StatsContent", () => {
   it("distinguishes a fractional quota and configured ceiling from effective capacity", async () => {
     const { findByTestId } = render(() => (
       <StatsContent
-        events={[]}
+        tools={[]}
         stats={[
           {
             ...stats[0],
@@ -246,7 +247,7 @@ describe("StatsContent", () => {
 
   it("keeps an unrestricted quota distinct from the configured ceiling", async () => {
     const { findByTestId } = render(() => (
-      <StatsContent events={[]} stats={[{ ...stats[0], cpuQuota: 0, runtimeCPUs: 8 }]} turns={[]} usage={usage} />
+      <StatsContent tools={[]} stats={[{ ...stats[0], cpuQuota: 0, runtimeCPUs: 8 }]} turns={[]} usage={usage} />
     ));
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("no explicit quota");
@@ -256,7 +257,7 @@ describe("StatsContent", () => {
   it("explains a metadata failure while preserving usage and the runtime ceiling", async () => {
     const { findByTestId } = render(() => (
       <StatsContent
-        events={[]}
+        tools={[]}
         stats={[{ ...stats[0], cpuQuota: undefined, runtimeCPUs: 4, cpuError: "inspect unavailable" }]}
         turns={[]}
         usage={usage}
@@ -270,7 +271,7 @@ describe("StatsContent", () => {
   });
 
   it("reads resource samples through the crosshair without clipping the readout", async () => {
-    const { findByLabelText } = render(() => <StatsContent events={[]} stats={stats} turns={[]} usage={usage} />);
+    const { findByLabelText } = render(() => <StatsContent tools={[]} stats={stats} turns={[]} usage={usage} />);
     const cpuChart = await findByLabelText("CPU utilization over time");
     const width = Number(cpuChart.getAttribute("width"));
     const frameLeft = 40; // the CPU chart reserves room for its left axis
@@ -316,7 +317,7 @@ describe("StatsContent", () => {
         diskUsed: 1_537,
       },
     ];
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={irregularStats} turns={[]} usage={usage} />);
+    const { findByTestId } = render(() => <StatsContent tools={[]} stats={irregularStats} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     await user.click(within(resources).getByText("Exact samples (2)"));
     const table = within(resources).getByRole("table");
@@ -330,7 +331,7 @@ describe("StatsContent", () => {
 
   it("does not infer network throughput from one sample", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
+    const { findByTestId } = render(() => <StatsContent tools={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("Waiting for another sample");
     expect(resources).toHaveTextContent("No disk history available");
@@ -338,14 +339,14 @@ describe("StatsContent", () => {
   });
 
   it("names each chart for assistive technology", async () => {
-    const { findByRole } = render(() => <StatsContent events={[]} stats={stats} turns={turns} usage={usage} />);
+    const { findByRole } = render(() => <StatsContent tools={[]} stats={stats} turns={turns} usage={usage} />);
 
     expect(await findByRole("img", { name: "CPU utilization over time" })).toBeInTheDocument();
     expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
   });
 
   it("qualifies what the token chart aggregates", async () => {
-    const { findByRole } = render(() => <StatsContent events={[]} stats={[]} turns={turns} usage={usage} />);
+    const { findByRole } = render(() => <StatsContent tools={[]} stats={[]} turns={turns} usage={usage} />);
 
     expect(await findByRole("img", { name: "Token volume by turn" })).toHaveAttribute(
       "aria-description",
@@ -356,7 +357,7 @@ describe("StatsContent", () => {
   it("switches the token chart between volume and each turn's share", async () => {
     const user = userEvent.setup();
     const { findByRole, findByTestId } = render(() => (
-      <StatsContent events={[]} stats={[]} turns={turns} usage={usage} />
+      <StatsContent tools={[]} stats={[]} turns={turns} usage={usage} />
     ));
     const figure = await findByTestId("turn-token-chart");
     expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
@@ -371,7 +372,7 @@ describe("StatsContent", () => {
 
   it("lists the exact turn token counts as the chart's text alternative", async () => {
     const user = userEvent.setup();
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={[]} turns={turns} usage={usage} />);
+    const { findByTestId } = render(() => <StatsContent tools={[]} stats={[]} turns={turns} usage={usage} />);
     const figure = await findByTestId("turn-token-chart");
 
     await user.click(within(figure).getByText("Turn tokens (1)"));
@@ -388,7 +389,7 @@ describe("StatsContent", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "tool-1", name: "Bash", input: {} } },
       { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "tool-1", duration: 1 } },
     ] as const;
-    const { findByTestId } = render(() => <StatsContent events={events} stats={[]} turns={[]} usage={usage} />);
+    const { findByTestId } = render(() => <StatsContent tools={tools(events)} stats={[]} turns={[]} usage={usage} />);
     const figure = await findByTestId("tool-time-chart");
 
     await user.click(within(figure).getByText("Tool timings (1)"));

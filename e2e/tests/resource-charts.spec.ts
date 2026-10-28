@@ -1,7 +1,7 @@
 // End-to-end coverage for reading resource samples from the task statistics charts.
 
 import { createTaskAPI, expect, test } from "../helpers";
-import type { EventMessage } from "../../sdk/caic/ts/v1/types.gen";
+import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 
 test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }, testInfo) => {
   const id = await createTaskAPI(api, "Inspect fractional CPU constraints");
@@ -26,10 +26,10 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
       diskUsed: -1,
     },
   };
-  await page.route(`**/api/caic/v1/tasks/${id}/events*`, (route) =>
+  await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
     route.fulfill({
       contentType: "text/event-stream",
-      body: `data: ${JSON.stringify(event)}\n\nevent: ready\ndata: {}\n\n`,
+      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: [event.stats] })}\n\nevent: checkpoint\ndata: {"cursor":"fixture"}\n\n`,
     }),
   );
   await page.goto(`/task/@${id}/stats`);
@@ -66,9 +66,7 @@ for (const history of ["clustered", "live"] as const) {
       // Reproduce stream restarts: the first two samples are only 1 ms apart
       // in a 20-second window, making their dots less than one pixel apart.
       const start = Date.UTC(2026, 9, 4);
-      const events: EventMessage[] = [0, 1, 20_000].map((offset, index) => ({
-        kind: "stats",
-        ts: start + offset,
+      const events: { stats: EventStats }[] = [0, 1, 20_000].map((offset, index) => ({
         stats: {
           ts: start + offset,
           cpuPerc: 118 + index,
@@ -85,10 +83,10 @@ for (const history of ["clustered", "live"] as const) {
           diskUsed: -1,
         },
       }));
-      await page.route(`**/api/caic/v1/tasks/${id}/events*`, (route) =>
+      await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
         route.fulfill({
           contentType: "text/event-stream",
-          body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "event: ready\ndata: {}\n\n",
+          body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: events.map((event) => event.stats) })}\n\nevent: checkpoint\ndata: {"cursor":"fixture"}\n\n`,
         }),
       );
     }

@@ -42,7 +42,6 @@ const (
 	EventKindWidget            EventKind = "widget"
 	EventKindWidgetDelta       EventKind = "widgetDelta"
 	EventKindRateLimit         EventKind = "rateLimit"
-	EventKindStats             EventKind = "stats"
 	EventKindCommitSnapshot    EventKind = "commitSnapshot"
 	EventKindSkillLoad         EventKind = "skillLoad"
 
@@ -55,9 +54,9 @@ type TaskHistoryStreamError struct {
 	Message string `json:"message"`
 }
 
-// TaskEventBackward carries a chronological recent preview before canonical
-// history. EventID resumes strictly after the preview's memory snapshot. It is
-// empty for disk previews, whose canonical history uses the same connection.
+// TaskEventBackward carries a chronological recent disk preview before canonical
+// history on the same connection. EventID is empty. Memory-backed streams send
+// canonical history and support normal event-ID resume.
 type TaskEventBackward struct {
 	Messages []EventMessage `json:"messages"`
 	EventID  string         `json:"eventId"`
@@ -93,7 +92,6 @@ type EventMessage struct {
 	Widget            *EventWidget            `json:"widget,omitempty"`
 	WidgetDelta       *EventWidgetDelta       `json:"widgetDelta,omitempty"`
 	RateLimit         *EventRateLimit         `json:"rateLimit,omitempty"`
-	Stats             *EventStats             `json:"stats,omitempty"`
 	CommitSnapshot    *EventCommitSnapshot    `json:"commitSnapshot,omitempty"`
 	SkillLoad         *EventSkillLoad         `json:"skillLoad,omitempty"`
 }
@@ -146,7 +144,6 @@ type EventToolUse struct {
 	Input          json.RawMessage    `json:"input"`
 	Detail         string             `json:"detail,omitempty"`         // Backend-normalized short display detail for tool headers.
 	InputView      EventToolInputView `json:"inputView,omitzero"`       // Backend-normalized structured input for tool-card rendering.
-	PlanContent    string             `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
 	InputTruncated bool               `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 	Background     bool               `json:"background,omitempty"`     // True when the tool runs in the background (Bash/Agent run_in_background).
 }

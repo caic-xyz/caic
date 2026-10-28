@@ -404,10 +404,6 @@ sealed interface EventKind {
         override val value = "rateLimit"
     }
     @Serializable
-    data object Stats : EventKind {
-        override val value = "stats"
-    }
-    @Serializable
     data object CommitSnapshot : EventKind {
         override val value = "commitSnapshot"
     }
@@ -449,7 +445,6 @@ object EventKindSerializer : KSerializer<EventKind> {
             "widget" -> EventKind.Widget
             "widgetDelta" -> EventKind.WidgetDelta
             "rateLimit" -> EventKind.RateLimit
-            "stats" -> EventKind.Stats
             "commitSnapshot" -> EventKind.CommitSnapshot
             "skillLoad" -> EventKind.SkillLoad
             else -> EventKind.Other(v)
@@ -1730,6 +1725,16 @@ data class TaskStartupFailure(
     val cause: String,
 )
 
+/**
+ * TaskPlan is the task's current root ExitPlanMode content. The identity and
+ * content form one projection and are cleared together.
+ */
+@Serializable
+data class TaskPlan(
+    @SerialName("toolUseID") val toolUseID: String,
+    val content: String,
+)
+
 /** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
 data class RuntimeInstance(
@@ -1819,7 +1824,7 @@ data class Task(
     /** When the current turn started; zero when not running. */
     val turnStartedAt: Instant? = null,
     val inPlanMode: Boolean? = null,
-    val planContent: String? = null,
+    val currentPlan: TaskPlan? = null,
     val runtime: RuntimeInstance,
     /** Current quota block resolved by the backend. */
     val rateLimit: TaskRateLimit? = null,
@@ -2039,8 +2044,6 @@ data class EventToolUse(
     val detail: String? = null,
     /** Backend-normalized structured input for tool-card rendering. */
     val inputView: EventToolInputView? = null,
-    /** Snapshot of plan content for ExitPlanMode events. */
-    val planContent: String? = null,
     /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
     val inputTruncated: Boolean? = null,
     /** True when the tool runs in the background (Bash/Agent run_in_background). */
@@ -2293,30 +2296,6 @@ data class EventRateLimit(
     val overageResetsAt: Instant? = null,
 )
 
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-@Serializable
-data class EventStats(
-    val ts: Long,
-    /** 100% is one fully busy logical CPU. */
-    val cpuPerc: Double,
-    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-    val cpuCeiling: Double? = null,
-    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-    val cpuQuota: Double? = null,
-    /** Owning runtime's logical CPU count; null when unknown. */
-    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
-    /** Runtime CPU metadata observation failure; usage samples remain usable. */
-    val cpuError: String? = null,
-    val memUsed: Long,
-    val memLimit: Long,
-    val memPerc: Double,
-    val netRx: Long,
-    val netTx: Long,
-    val blockRead: Long,
-    val blockWrite: Long,
-    val diskUsed: Long,
-)
-
 /**
  * EventRepositoryCommit identifies one immutable repository branch tip in a
  * commit snapshot.
@@ -2398,15 +2377,46 @@ data class EventMessage(
     val widget: EventWidget? = null,
     val widgetDelta: EventWidgetDelta? = null,
     val rateLimit: EventRateLimit? = null,
-    val stats: EventStats? = null,
     val commitSnapshot: EventCommitSnapshot? = null,
     val skillLoad: EventSkillLoad? = null,
 )
 
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+@Serializable
+data class EventStats(
+    val ts: Long,
+    /** 100% is one fully busy logical CPU. */
+    val cpuPerc: Double,
+    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+    val cpuCeiling: Double? = null,
+    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+    val cpuQuota: Double? = null,
+    /** Owning runtime's logical CPU count; null when unknown. */
+    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
+    /** Runtime CPU metadata observation failure; usage samples remain usable. */
+    val cpuError: String? = null,
+    val memUsed: Long,
+    val memLimit: Long,
+    val memPerc: Double,
+    val netRx: Long,
+    val netTx: Long,
+    val blockRead: Long,
+    val blockWrite: Long,
+    val diskUsed: Long,
+)
+
 /**
- * TaskEventBackward carries a chronological recent preview before canonical
- * history. EventID resumes strictly after the preview's memory snapshot. It is
- * empty for disk previews, whose canonical history uses the same connection.
+ * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * Replace samples sharing a timestamp: disk usage can revise the latest sample.
+ * These host observations are separate from immutable raw task history.
+ */
+@Serializable
+data class HistoryStats(val samples: List<EventStats>)
+
+/**
+ * TaskEventBackward carries a chronological recent disk preview before canonical
+ * history on the same connection. EventID is empty. Memory-backed streams send
+ * canonical history and support normal event-ID resume.
  */
 @Serializable
 data class TaskEventBackward(val messages: List<EventMessage>, val eventId: String)
@@ -2956,6 +2966,81 @@ data class WebFetchReq(val url: String)
 /** WebFetchResp is the response for POST /api/caic/v1/web/fetch. */
 @Serializable
 data class WebFetchResp(val title: String, val content: String)
+
+/**
+ * HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+ * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
+ * for direct arithmetic access. Scope isolates the
+ * authenticated account, including legacy shared tasks. Browser HTTP caching
+ * owns storage/eviction; clients need no inactive decoded transcript cache.
+ * Generation changes on server restart/task replacement. A stale reference
+ * returns 409; bootstrap again and discard old cursor metadata.
+ * For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
+ * and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+ */
+@Serializable
+data class HistoryBootstrap(
+    val projectionVersion: String,
+    val generation: String,
+    val scope: String,
+    val recordsPerChunk: Long,
+    val through: Long,
+    val cursor: String,
+    val resourceBase: String,
+)
+
+/**
+ * HistoryEvent is an immutable normalized output; the identity is scoped to the
+ * projection version and timeline generation supplied by HistoryBootstrap.
+ */
+@Serializable
+data class HistoryEvent(
+    @SerialName("recordID") val recordID: Long,
+    val index: Long,
+    val message: EventMessage,
+)
+
+/**
+ * HistoryPosition identifies one normalized output in a one-based physical raw
+ * record. Index is zero-based across every output of that record. Metadata and
+ * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ */
+@Serializable
+data class HistoryPosition(
+    @SerialName("recordID") val recordID: Long,
+    val index: Long,
+)
+
+/**
+ * HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
+ * includes the prefix so session-cumulative reports retain their meaning. Model
+ * is the authoritative root model at the result, including reroutes, even when
+ * pricing is unknown; canonical output bytes are unchanged.
+ */
+@Serializable
+data class HistoryTurnEstimate(
+    @SerialName("recordID") val recordID: Long,
+    val index: Long,
+    val model: String? = null,
+    val cost: EventCost? = null,
+    @SerialName("totalUSD") val totalUSD: Double,
+)
+
+/**
+ * HistoryCheckpoint advances through all outputs of a physical record,
+ * including a record with zero outputs. Cursor is opaque; it encodes projection
+ * version, generation, raw record and either output index or end-of-record.
+ * SSE resumes strictly after it. The Last-Event-ID header overrides the initial
+ * cursor query on reconnect. Named stats events never replace this raw cursor.
+ */
+@Serializable
+data class HistoryCheckpoint(val cursor: String)
+
+/** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
+@Serializable
+data class HistoryReset(
+    @SerialName("bootstrapURL") val bootstrapURL: String,
+)
 
 @Serializable
 data class ErrorDetails(val code: ErrorCode, val message: String)

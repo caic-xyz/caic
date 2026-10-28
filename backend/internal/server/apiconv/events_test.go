@@ -14,12 +14,9 @@ import (
 
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -35,7 +32,7 @@ func (conversionPricer) ModelPrice(_ agent.QuotaProvider, model string, _ time.T
 func TestToolTimingTrackerConvertMessage(t *testing.T) {
 	t.Run("tool timing separates owners and late correlation", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		root := agent.MessageSource{ThreadID: "root", TurnID: "turn"}
 		child := agent.MessageSource{ThreadID: "session", DelegationToolUseID: "delegate"}
 		t0 := time.Unix(10, 0)
@@ -52,7 +49,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("user input image carries its content hash", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		payload := []byte("prompt image bytes")
 		events := tracker.ConvertMessage(&agent.UserInputMessage{
 			Text:   "look",
@@ -72,7 +69,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("undecodable user input image has no hash", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		events := tracker.ConvertMessage(&agent.UserInputMessage{
 			Images: []logv3.ImageData{{MediaType: "image/png", Data: "not base64"}},
 		}, time.Unix(1, 0))
@@ -98,7 +95,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			&agent.DiffStatMessage{}, &agent.TurnCommitSnapshotMessage{},
 		} {
 			*message.Provenance() = source
-			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			tracker := NewToolTimingTracker(harness.Codex, "", nil)
 			events := tracker.ConvertMessage(message, time.Unix(1, 0))
 			if len(events) == 0 {
 				t.Fatalf("%T produced no event", message)
@@ -129,7 +126,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			{&agent.TextMessage{Text: "Parent answer", Source: parent}, &agent.ToolUseMessage{Source: child, ToolUseID: "child-tool"}, &agent.ToolResultMessage{Source: child, ToolUseID: "child-tool"}, &agent.ThinkingDeltaMessage{Text: "child reasoning", Source: child}, &agent.TextMessage{Text: "Child answer", Source: child}},
 			{&agent.TextDeltaMessage{Text: "Parent ", Source: parent}, &agent.TextDeltaMessage{Text: "Child answer", Source: child}, &agent.TextDeltaMessage{Text: "answer", Source: parent}},
 		} {
-			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			tracker := NewToolTimingTracker(harness.Codex, "", nil)
 			for _, msg := range messages {
 				tracker.ConvertMessage(msg, time.Time{})
 			}
@@ -147,7 +144,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			&agent.TextMessage{Source: source},
 			&agent.ThinkingMessage{Source: source},
 		} {
-			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			tracker := NewToolTimingTracker(harness.Codex, "", nil)
 			if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 1 {
 				t.Errorf("%T completion = %+v", msg, events)
 			}
@@ -163,13 +160,13 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			{TurnID: "turn", ItemID: "item"},
 		} {
 			for _, msg := range []agent.Message{&agent.TextMessage{Source: partial}, &agent.ThinkingMessage{Source: partial}} {
-				tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+				tracker := NewToolTimingTracker(harness.Codex, "", nil)
 				if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 0 {
 					t.Errorf("unscoped %T completion = %+v", msg, events)
 				}
 			}
 			for _, msg := range []agent.Message{&agent.TextMessage{Text: "Visible", Source: partial}, &agent.ThinkingMessage{Text: "Visible", Source: partial}} {
-				tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+				tracker := NewToolTimingTracker(harness.Codex, "", nil)
 				if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 1 {
 					t.Errorf("nonempty %T with partial source = %+v", msg, events)
 				}
@@ -180,7 +177,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 	t.Run("cost projection preserves raw reports", func(t *testing.T) {
 		t.Parallel()
 		at := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
-		codex := NewToolTimingTracker(harness.Codex, "gpt-6-sol", conversionPricer{}, nil)
+		codex := NewToolTimingTracker(harness.Codex, "gpt-6-sol", conversionPricer{})
 		raw := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}
 		first := codex.ConvertMessage(raw, at)[0].Result
 		if first == nil || first.Cost.USD != 2 || first.Cost.Source != "estimated" || raw.TotalCostUSD != 0 {
@@ -192,7 +189,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			t.Fatalf("Codex result after compaction = %+v", second)
 		}
 
-		claude := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		claude := NewToolTimingTracker(harness.Claude, "", nil)
 		claude.ConvertMessage(&agent.ResultMessage{MessageType: "result", TotalCostUSD: 2}, at)
 		cumulative := claude.ConvertMessage(&agent.ResultMessage{MessageType: "result", TotalCostUSD: 3}, at)[0].Result
 		if cumulative == nil || cumulative.Cost.USD != 1 || cumulative.Cost.Source != "reported" || cumulative.TotalCostUSD != 3 {
@@ -202,7 +199,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool use includes replacement file changes display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "edit-1",
 			Name:      "Edit",
@@ -237,7 +234,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("native subagent preserves only harness-reported lifecycle facts", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.OpenCode, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.OpenCode, "", nil)
 		events := tracker.ConvertMessage(&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
 			ID:      "child-1",
 			GroupID: "spawn-1",
@@ -257,7 +254,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool use includes harness normalized subagent display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "agent-1",
 			Name:      "Agent",
@@ -288,7 +285,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool use includes patch file changes display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "edit-1",
 			Name:      "Edit",
@@ -318,7 +315,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("nonzero exit becomes error event", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil)
 		events := tracker.ConvertMessage(&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}, time.Unix(1, 0))
 		if len(events) != 1 {
 			t.Fatalf("got %d events, want 1", len(events))
@@ -333,7 +330,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("zero exit is hidden", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil)
 		events := tracker.ConvertMessage(&agent.ExitMessage{ExitCode: 0}, time.Unix(1, 0))
 		if len(events) != 0 {
 			t.Fatalf("got %d events, want 0", len(events))
@@ -342,7 +339,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool result prefers harness duration", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		start := time.Unix(1, 0)
 		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}, start)
 		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool", DurationMs: 125}, start.Add(time.Second))
@@ -353,7 +350,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("missing producer time leaves tool duration unknown", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil)
 		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Read"}, time.Time{})
 		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool"}, time.Time{})
 		if len(events) != 1 || events[0].Ts != 0 || events[0].ToolResult == nil || events[0].ToolResult.Duration != 0 {
@@ -363,7 +360,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("pending tool timings are bounded", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil)
 		start := time.Unix(1, 0)
 		for i := range maxPendingToolTimings {
 			tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", i), Name: "Tool"}, start)
@@ -383,7 +380,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("rate limit uses API status", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil)
 		events := tracker.ConvertMessage(&agent.RateLimitMessage{
 			Status: agent.RateLimitStatusAllowedWarning,
 		}, time.Unix(1, 0))
@@ -397,7 +394,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("commit snapshot is a standalone event", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil)
 		events := tracker.ConvertMessage(agent.NewTurnCommitSnapshotMessage([]logv3.RepositoryCommit{{
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
@@ -419,7 +416,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("reported skill load is an event and a read is not", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil)
 		if events := tracker.ConvertMessage(&agent.SkillReadMessage{ToolUseID: "sk", Skill: "review"}, time.Unix(1, 0)); len(events) != 0 {
 			t.Fatalf("read events = %+v, want none", events)
 		}
@@ -432,7 +429,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("inferred skill load follows a successful tool result", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil)
 		at := time.Unix(1, 0)
 		for _, id := range []string{"ok", "failed"} {
 			for _, m := range agent.InferredSkillReadFromPath("/home/user/.agents/skills/"+id+"/SKILL.md", id) {
@@ -449,50 +446,6 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		want := &v1.EventSkillLoad{Skill: "ok", Path: "/home/user/.agents/skills/ok/SKILL.md"}
 		if len(events) != 2 || events[1].Kind != v1.EventKindSkillLoad || !reflect.DeepEqual(events[1].SkillLoad, want) {
 			t.Fatalf("successful result events = %+v, want tool result then %+v", events, want)
-		}
-	})
-}
-
-func TestConvertMessagePlanContentProjection(t *testing.T) {
-	t.Parallel()
-
-	t.Run("plan content follows latest ExitPlanMode", func(t *testing.T) {
-		t.Parallel()
-		tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		planWrite := &agent.ToolUseMessage{
-			ToolUseID: "tu-1", Name: "Write",
-			Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
-		}
-		exit := &agent.ToolUseMessage{ToolUseID: "tu-2", Name: "ExitPlanMode"}
-		tk.SeedTimeline([]agent.Message{planWrite, exit})
-
-		tt := NewToolTimingTracker(harness.Claude, "", nil, tk.PlanContentFor)
-		if events := tt.ConvertMessage(planWrite, time.Unix(1, 0)); len(events) != 1 || events[0].ToolUse == nil {
-			t.Fatalf("write events = %#v, want 1 tool_use event", events)
-		} else if events[0].ToolUse.PlanContent != "" {
-			t.Errorf("write PlanContent = %q, want empty (superseded)", events[0].ToolUse.PlanContent)
-		}
-		events := tt.ConvertMessage(exit, time.Unix(2, 0))
-		if len(events) != 1 || events[0].ToolUse == nil {
-			t.Fatalf("exit events = %#v, want 1 tool_use event", events)
-		}
-		if events[0].ToolUse.PlanContent != "plan A" {
-			t.Errorf("exit PlanContent = %q, want %q", events[0].ToolUse.PlanContent, "plan A")
-		}
-	})
-
-	t.Run("nil resolver yields empty plan content", func(t *testing.T) {
-		t.Parallel()
-		tt := NewToolTimingTracker(harness.Claude, "", nil, nil)
-		events := tt.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tu-1", Name: "ExitPlanMode"}, time.Unix(1, 0))
-		if len(events) != 1 || events[0].ToolUse == nil {
-			t.Fatalf("events = %#v, want 1 tool_use event", events)
-		}
-		if events[0].ToolUse.PlanContent != "" {
-			t.Errorf("PlanContent = %q, want empty", events[0].ToolUse.PlanContent)
 		}
 	})
 }
