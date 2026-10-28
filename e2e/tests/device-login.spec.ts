@@ -36,8 +36,6 @@ test("device approval, normal permissions, logout, and network protection", asyn
     await test.step("signed-in approver explicitly approves the displayed code", async () => {
       await screen.goto("/");
       await screen.getByRole("link", { name: "Sign in with another device" }).click();
-      await screen.goto("/device-login?goModeHost=1");
-      await screen.getByRole("button", { name: "Sign in with another device" }).click();
       const code = await screen.getByLabel("Device code", { exact: true }).innerText();
       expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
       await expect(screen.getByText(`${origin}/device`, { exact: true })).toBeVisible();
@@ -47,11 +45,29 @@ test("device approval, normal permissions, logout, and network protection", asyn
       await approval.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
       await expect(approval).toHaveURL(`${origin}/device`);
       await expect(approval.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
-      await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-      await approval.getByRole("button", { name: "Check code" }).click();
+      await expect(screen.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
+      await screen.screenshot({ path: test.info().outputPath("device-display.png"), fullPage: true });
+      const input = approval.getByRole("textbox", { name: "Device code" });
+      await expect(input).toBeFocused();
+      await expect(input).toHaveAttribute("inputmode", "text");
+      await expect(approval.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
+      let lookups = 0;
+      approval.on("request", (request) => {
+        if (request.url().endsWith("/auth/device/lookup")) lookups++;
+      });
+      const raw = code.replaceAll("-", "").toLowerCase();
+      await input.pressSequentially(raw.slice(0, -1));
+      await input.press("Enter");
+      expect(lookups).toBe(0);
+      await expect(approval.getByRole("status", { includeHidden: true })).toHaveText("");
+      await expect(input).toHaveValue(code.slice(0, -1));
+      await approval.screenshot({ path: test.info().outputPath("device-entry.png"), fullPage: true });
+      await input.pressSequentially(raw.slice(-1));
       await expect(approval.getByText("127.0.0.0/24", { exact: true })).toBeVisible();
       await expect(approval.getByText(/Never approve a code sent by someone else/)).toBeVisible();
       await expect(approval.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
+      expect(lookups).toBe(1);
+      await approval.screenshot({ path: test.info().outputPath("device-review.png"), fullPage: true });
       // Lookup alone must leave the display waiting and unauthenticated.
       await expect(screen.getByRole("status")).toHaveText("Waiting for approval…");
       const before = await display.request.get("/auth/me");
@@ -118,22 +134,18 @@ test("device approval, normal permissions, logout, and network protection", asyn
     });
     await test.step("denial never issues a session", async () => {
       await screen.goto("/device-login");
-      await screen.getByRole("button", { name: "Sign in with another device" }).click();
       const code = await screen.getByLabel("Device code", { exact: true }).innerText();
       await approval.goto("/device");
       await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-      await approval.getByRole("button", { name: "Check code" }).click();
       await approval.getByRole("button", { name: "Deny sign-in" }).click();
       await expect(screen.getByRole("status")).toHaveText("Sign-in denied.", { timeout: 15_000 });
       expect((await display.request.get("/auth/me")).status()).toBe(404);
     });
     await test.step("approver identifies and revokes the display session without ending its own session", async () => {
       await screen.goto("/device-login");
-      await screen.getByRole("button", { name: "Sign in with another device" }).click();
       const code = await screen.getByLabel("Device code", { exact: true }).innerText();
       await approval.goto("/device");
       await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-      await approval.getByRole("button", { name: "Check code" }).click();
       await approval.getByRole("button", { name: "Approve sign-in" }).click();
       await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
       const credential = (await display.cookies()).find((c) => c.name === "caic_session");
@@ -224,7 +236,6 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
     await page.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Device code" })).toBeVisible();
     await page.goto("/device-login");
-    await page.getByRole("button", { name: "Sign in with another device" }).click();
     const code = await page.getByLabel("Device code", { exact: true }).innerText();
     // The display's code and controls must stay readable without horizontal scrolling.
     for (const width of [320, 1280]) {
@@ -241,7 +252,6 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
     await page.screenshot({ path: testInfo.outputPath("display-200-percent.png") });
     await page.goto("/device");
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code" }).click();
     await expect(page.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
     for (const width of [1280, 640]) {
       // Native 200% zoom turns these into 640px and 320px CSS viewports.
@@ -272,7 +282,7 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
   }
 });
 
-test("account changes require another explicit code check before approval", async ({ browser }) => {
+test("account changes require re-entering the code before approval", async ({ browser }) => {
   const display = await browser.newContext({ baseURL: origin });
   const approver = await browser.newContext({ baseURL: origin });
   await approver.addInitScript(() => {
@@ -300,12 +310,10 @@ test("account changes require another explicit code check before approval", asyn
     const screen = await display.newPage();
     const approval = await approver.newPage();
     await screen.goto("/device-login");
-    await screen.getByRole("button", { name: "Sign in with another device", exact: true }).click();
     const code = await screen.getByLabel("Device code", { exact: true }).innerText();
     await approval.goto("/device");
     await approval.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
     await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-    await approval.getByRole("button", { name: "Check code" }).click();
     await expect(approval.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
     const accountTab = await approver.newPage();
     await accountTab.goto("/device");
@@ -336,7 +344,6 @@ test("account changes require another explicit code check before approval", asyn
     await expect(approval.getByRole("textbox", { name: "Device code" })).toHaveValue("");
     await expect(approval.getByRole("button", { name: "Approve sign-in" })).toHaveCount(0);
     await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-    await approval.getByRole("button", { name: "Check code" }).click();
     await approval.getByRole("button", { name: "Approve sign-in" }).click();
     await expect(screen).toHaveURL(`${origin}/`, { timeout: 15000 });
     const me = await display.request.get("/auth/me");
@@ -381,7 +388,6 @@ test("pairing errors offer recovery without silently repeating an approval or ex
             : route.fulfill({ status: error === "rate_limited" ? 429 : 400, json: { error } }),
         );
         await screen.goto("/device-login");
-        await screen.getByRole("button", { name: "Sign in with another device", exact: true }).click();
         await expect(screen.getByRole("status")).toHaveText(message ?? "");
         await expect(screen.getByRole("button", { name: "Create a new code", exact: true })).toBeVisible();
         if (error === "network")
@@ -424,7 +430,6 @@ test("pairing errors offer recovery without silently repeating an approval or ex
         );
         await approval.goto("/device");
         await approval.getByRole("textbox", { name: "Device code" }).fill(details.user_code);
-        await approval.getByRole("button", { name: "Check code", exact: true }).click();
         if (!lookupFailure) await approval.getByRole("button", { name: "Approve sign-in", exact: true }).click();
         await expect(approval.getByRole("status")).toHaveText(message ?? "");
         await expect(approval.getByRole("button", { name: "Approve sign-in", exact: true })).toHaveCount(0);
@@ -442,7 +447,7 @@ test("pairing errors offer recovery without silently repeating an approval or ex
   }
 });
 
-test("same-account session replacement requires a new check and rejects an old decision replay", async ({
+test("same-account session replacement requires code re-entry and rejects an old decision replay", async ({
   browser,
 }) => {
   const display = await browser.newContext({ baseURL: origin });
@@ -472,12 +477,10 @@ test("same-account session replacement requires a new check and rejects an old d
     const screen = await display.newPage();
     const page = await approver.newPage();
     await screen.goto("/device-login");
-    await screen.getByRole("button", { name: "Sign in with another device", exact: true }).click();
     const code = await screen.getByLabel("Device code", { exact: true }).innerText();
     await page.goto("/device");
     await page.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code", exact: true }).click();
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toBeVisible();
     const original = (await (await approver.request.get("/auth/me")).json()) as { id: string; sessionID: string };
     // Replace the cookie with a normal provider login without updating this tab.
@@ -489,7 +492,6 @@ test("same-account session replacement requires a new check and rejects an old d
     await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("");
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toHaveCount(0);
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code", exact: true }).click();
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toBeVisible();
     let staleBody = "";
     let staleHeaders: Record<string, string> = {};
@@ -538,7 +540,6 @@ test("same-account session replacement requires a new check and rejects an old d
       expect(replay.status()).toBe(403);
     }
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code", exact: true }).click();
     await page.getByRole("button", { name: "Approve sign-in", exact: true }).click();
     await expect(screen).toHaveURL(`${origin}/`, { timeout: 15000 });
     expect((await approver.request.get("/auth/me")).ok()).toBe(true);
@@ -578,12 +579,10 @@ test("a delayed missing-session probe rediscovers the replacement without revoki
     const screen = await display.newPage();
     const page = await approver.newPage();
     await screen.goto("/device-login");
-    await screen.getByRole("button", { name: "Sign in with another device", exact: true }).click();
     const code = await screen.getByLabel("Device code", { exact: true }).innerText();
     await page.goto("/device");
     await page.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code" }).click();
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toBeVisible();
     expect(
       (await approver.request.post("/auth/logout", { headers: { "X-Caic-CSRF": "1", Origin: origin } })).ok(),
@@ -608,7 +607,6 @@ test("a delayed missing-session probe rediscovers the replacement without revoki
     ]);
     expect((await approver.request.get("/auth/me")).ok()).toBe(true);
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
-    await page.getByRole("button", { name: "Check code", exact: true }).click();
     await page.getByRole("button", { name: "Approve sign-in", exact: true }).click();
     await expect(screen).toHaveURL(`${origin}/`, { timeout: 15000 });
   } finally {

@@ -32,9 +32,6 @@ export function DeviceLoginPage() {
           />
         </Show>
       </Show>
-      <a href="/" rel="external">
-        Back to caic
-      </a>
     </main>
   );
 }
@@ -91,9 +88,6 @@ export function DeviceApprovalPage() {
               onAuthenticationRequired={auth.reloadIdentity}
               verifyApprover={verifyApprover}
             />
-            <a href="/" rel="external">
-              Back to caic
-            </a>
           </main>
         </Show>
       </Show>
