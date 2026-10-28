@@ -1,29 +1,21 @@
-// Verifies built caic frontend readiness waits for authoritative initial task data.
+// Verifies scoped task preparation and deferred browser voice loading in the production caic bundle.
 
-import { expect, test } from "../helpers";
+import { expect, test, installNativeVoiceBridge } from "../helpers";
 
 test("native preparation waits for the empty complete task snapshot", async ({ page }) => {
   const snapshot = Promise.withResolvers<void>();
   const requested = Promise.withResolvers<void>();
+  const scripts: string[] = [];
+  page.on("request", (request) => {
+    if (request.resourceType() === "script") scripts.push(request.url());
+  });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => {
-    const messages: Array<{ ready: boolean; tools: Array<{ name: string }> }> = [];
-    const bridge: { onmessage?: ((event: { data: string }) => void) | null; postMessage(message: string): void } = {
-      postMessage(message) {
-        const auth = JSON.parse(message) as Record<string, unknown>;
-        if (auth.authChanged === true && auth.nativeAccess === true) {
-          bridge.onmessage?.({ data: JSON.stringify({ ...auth, frontendToken: "native-identity" }) });
-        }
-      },
-    };
-    Object.assign(window, {
-      goModeHost: { isVoiceConnected: () => false },
-      goModeFrontendDocument: Promise.resolve("native-document"),
-      gomodeAuth: bridge,
-      gomodeFrontendReadiness: { postMessage: (message: string) => messages.push(JSON.parse(message)) },
-      preparationMessages: messages,
-    });
+  await installNativeVoiceBridge(page, false);
+  await page.route("**/api/caic/v1/server/config", async (route) => {
+    const response = await route.fetch();
+    const config = await response.json();
+    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } });
   });
   await page.route("**/api/caic/v1/tasks/events", async (route) => {
     requested.resolve();
@@ -37,7 +29,7 @@ test("native preparation waits for the empty complete task snapshot", async ({ p
   await requested.promise;
   await expect(page.getByTestId("app-shell")).toBeVisible();
   await page.waitForFunction(
-    () => typeof (window as unknown as { executeGoModeVoiceTool?: unknown }).executeGoModeVoiceTool === "function",
+    () => typeof (window as unknown as { dispatchGoModeVoiceTool?: unknown }).dispatchGoModeVoiceTool === "function",
   );
   const readiness = () =>
     page.evaluate(
@@ -53,9 +45,11 @@ test("native preparation waits for the empty complete task snapshot", async ({ p
     .toEqual({
       document: "native-document",
       token: "native-identity",
+      scope: expect.any(String),
       ready: true,
       tools: [expect.objectContaining({ name: "focus_task" })],
     });
+  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
   expect(errors).toEqual([]);
 });
 
@@ -63,7 +57,9 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
   const snapshot = Promise.withResolvers<void>();
   const requested = Promise.withResolvers<void>();
   const voiceRequests: string[] = [];
+  const scripts: string[] = [];
   page.on("request", (request) => {
+    if (request.resourceType() === "script") scripts.push(request.url());
     if (request.url().includes("/api/voicegateway/")) voiceRequests.push(request.url());
   });
   await page.route("**/api/caic/v1/server/config", async (route) => {
@@ -96,8 +92,10 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
   await expect(page.getByTestId("voice-overlay")).toHaveCount(0);
   await page.keyboard.press("F4");
   expect(voiceRequests).toEqual([]);
+  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
   await page.screenshot({ path: testInfo.outputPath("frontend-pending.png") });
   snapshot.resolve();
   await expect(page.getByTestId("voice-overlay")).toBeVisible();
+  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("frontend-ready.png") });
 });

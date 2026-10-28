@@ -13,9 +13,9 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.20.1
 	github.com/lmittmann/tint v1.2.0
-	github.com/maruel/apisdkgen v0.1.4-0.20261027045729-b2d0ee47306b
+	github.com/maruel/apisdkgen v0.1.4
 	github.com/maruel/genai v0.10.2
-	github.com/maruel/gomode v0.2.1-0.20261028002125-693119a15a98
+	github.com/maruel/gomode v0.2.1-0.20261028020636-e312b61cc60d
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.15

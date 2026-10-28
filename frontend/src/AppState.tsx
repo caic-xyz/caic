@@ -95,7 +95,10 @@ function createAppStore() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  const frontendPreparation = auth.frontendPreparation();
+  const identity = auth.frontendPreparation();
+  if (identity === null) throw new Error("Task state requires an established identity");
+  const frontendPreparation = identity.createScope();
+  onCleanup(() => frontendPreparation.dispose());
   const hostMode = useHostMode();
   const initialTaskId = taskIdFromPath(location.pathname);
   let initialTaskFocusClaimed = false;
@@ -124,6 +127,7 @@ function createAppStore() {
   // this account, including an empty list. Reconnects retain usable cached
   // tasks; ordinary deltas and partial reconnect snapshots do not revoke it.
   const [initialTasksReady, setInitialTasksReady] = createSignal(false);
+  createEffect(() => frontendPreparation.setDataReady(initialTasksReady()));
   let taskStreamGeneration = 0;
   let taskMembership = new Set<string>();
   const [tasksLoading, setTasksLoading] = createSignal(true);
@@ -1641,7 +1645,6 @@ function createAppStore() {
     // task data + selection
     tasks,
     tasksLoading,
-    initialTasksReady,
     settledLoading,
     settledError,
     repos,

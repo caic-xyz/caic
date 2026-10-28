@@ -30,6 +30,67 @@ export async function collectStepTimings(page: Page): Promise<StepLoadTimingRepo
   return reports;
 }
 
+// Exercise the public asynchronous native bridge, including its page/identity/scope binding.
+export async function installNativeVoiceBridge(page: Page, connected: boolean) {
+  await page.addInitScript((connected) => {
+    type Binding = { document: string; token: string; scope: string; ready: boolean; tools: Array<{ name: string }> };
+    const messages: Binding[] = [];
+    const pending = new Map<string, (result: Record<string, unknown>) => void>();
+    let invocation = 0;
+    const bridge: { onmessage?: ((event: { data: string }) => void) | null; postMessage(message: string): void } = {
+      postMessage(message) {
+        const auth = JSON.parse(message) as Record<string, unknown>;
+        if (auth.authChanged === true && auth.nativeAccess === true)
+          bridge.onmessage?.({ data: JSON.stringify({ ...auth, frontendToken: "native-identity" }) });
+      },
+    };
+    Object.assign(window, {
+      goModeHost: { isVoiceConnected: () => connected },
+      goModeFrontendDocument: Promise.resolve("native-document"),
+      gomodeAuth: bridge,
+      gomodeFrontendReadiness: { postMessage: (message: string) => messages.push(JSON.parse(message)) },
+      preparationMessages: messages,
+      gomodeFrontendToolResult: {
+        postMessage(message: string) {
+          const reply = JSON.parse(message) as { invocation: string; result: Record<string, unknown> };
+          pending.get(reply.invocation)?.(reply.result);
+          pending.delete(reply.invocation);
+        },
+      },
+      invokeFrontendTool(name: string, args: Record<string, unknown>) {
+        const binding = messages.at(-1);
+        const dispatch = (window as unknown as { dispatchGoModeVoiceTool?: (request: unknown) => void })
+          .dispatchGoModeVoiceTool;
+        if (!binding?.ready || !dispatch) throw new Error("Frontend is not prepared");
+        return new Promise<Record<string, unknown>>((resolve) => {
+          const id = String(++invocation);
+          pending.set(id, resolve);
+          dispatch({
+            document: binding.document,
+            token: binding.token,
+            scope: binding.scope,
+            invocation: id,
+            name,
+            args,
+          });
+        });
+      },
+    });
+  }, connected);
+}
+
+export async function invokeFrontendTool(page: Page, name: string, args: Record<string, unknown>) {
+  return page.evaluate(
+    ({ name, args }) =>
+      (
+        window as unknown as {
+          invokeFrontendTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
+        }
+      ).invokeFrontendTool(name, args),
+    { name, args },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Adapt Playwright's APIRequestContext to the SDK's FetchFn interface.
 // ---------------------------------------------------------------------------

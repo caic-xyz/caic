@@ -222,7 +222,11 @@ function spySeams(): void {
 // Real AuthProvider fetches server info on mount; serve it through the network seam.
 const fetchRouter = installFetchRouter();
 fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
-fetchRouter.apiGet("/.well-known/gomode.json", () => ({ service: "caic", webShell: { voiceGateway: { url: "/" } } }));
+fetchRouter.apiGet("/.well-known/gomode.json", () => ({
+  apiVersion: 1,
+  service: "caic",
+  webShell: { toolGroups: [{ name: "tasks", endpoint: "/api/caic/v1/mcp" }], voiceGateway: { url: "/" } },
+}));
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
@@ -280,7 +284,11 @@ beforeEach(() => {
     inPlanMode: false,
   }));
   fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
-  fetchRouter.apiGet("/.well-known/gomode.json", () => ({ service: "caic", webShell: { voiceGateway: { url: "/" } } }));
+  fetchRouter.apiGet("/.well-known/gomode.json", () => ({
+    apiVersion: 1,
+    service: "caic",
+    webShell: { toolGroups: [{ name: "tasks", endpoint: "/api/caic/v1/mcp" }], voiceGateway: { url: "/" } },
+  }));
   fakeESListeners.length = 0;
   fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
@@ -2315,7 +2323,7 @@ describe("App repo chips: No repository", () => {
     expect(normal).toHaveAttribute("aria-hidden", "true");
     const link = within(voiceView).getByRole("link", { name: "Task 1, waiting: Review output" });
     expect(link).toHaveAttribute("href", "/task/@task1");
-    expect(executeFrontendVoiceTool("focus_task", { task_number: "#1" })).toEqual({ task_id: "task1" });
+    expect(await executeFrontendVoiceTool("focus_task", { task_number: "#1" })).toEqual({ task_id: "task1" });
     expect(history.get()).toBe("/");
     expect(link).toHaveAttribute("aria-current", "true");
     window.goModeHost = { isVoiceConnected: () => false };
@@ -2338,9 +2346,9 @@ describe("App repo chips: No repository", () => {
     const { history } = renderApp();
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "task1", title: "Review output", state: "waiting" })] });
-    expect(executeFrontendVoiceTool("focus_task", { task_number: "missing" })).toHaveProperty("error");
+    expect(await executeFrontendVoiceTool("focus_task", { task_number: "missing" })).toHaveProperty("error");
     expect(history.get()).toBe("/");
-    expect(executeFrontendVoiceTool("focus_task", { task_number: 1 })).toEqual({ task_id: "task1" });
+    expect(await executeFrontendVoiceTool("focus_task", { task_number: 1 })).toEqual({ task_id: "task1" });
     await waitFor(() => expect(history.get()).toContain("@task1"));
     expect(screen.getByTestId("detail-pane")).toBeInTheDocument();
   });
@@ -4355,7 +4363,9 @@ it("rejects task image adoption at the owner boundary before SSE introduction an
       <MemoryRouter
         root={(props) => (
           <HostModeProvider>
-            <AppStateProvider>{props.children}</AppStateProvider>
+            <Show when={useAuth().ready()}>
+              <AppStateProvider>{props.children}</AppStateProvider>
+            </Show>
           </HostModeProvider>
         )}
       >

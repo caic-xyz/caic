@@ -14,7 +14,7 @@ const (
 	goModeTasksGroupName          = "tasks"
 	goModeTasksGroupDescription   = "caic coding-agent task management: create, monitor, answer, and control tasks."
 	goModeAPIVersion              = 1
-	goModeBridge                  = 2
+	goModeBridge                  = 3
 	goModeEmbeddedVoiceGatewayURL = "/"
 	goModeVoiceTokenEndpoint      = "/api/caic/v1/voice/token" //nolint:gosec // HTTP route, not a credential.
 )

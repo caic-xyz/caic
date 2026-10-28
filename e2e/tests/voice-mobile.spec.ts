@@ -1,6 +1,13 @@
 // Browser coverage for voice choice compatibility, shared errors, native focus, and mobile task navigation.
 
-import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
+import {
+  createTaskAPI,
+  expect,
+  test,
+  waitForTaskState,
+  installNativeVoiceBridge,
+  invokeFrontendTool,
+} from "../helpers";
 import type { Config } from "../../sdk/caic/ts/v1/types.gen";
 
 test("browser voice selects a text choice on mobile and displays a failed choice once", async ({ page }) => {
@@ -14,7 +21,13 @@ test("browser voice selects a text choice on mobile and displays a failed choice
     await route.fulfill({ json: { ...config, voiceGateway: { mode: "embedded" } } });
   });
   await page.route("**/.well-known/gomode.json", (route) =>
-    route.fulfill({ json: { service: "caic", webShell: { voiceGateway: { url: "/" } } } }),
+    route.fulfill({
+      json: {
+        apiVersion: 1,
+        service: "caic",
+        webShell: { toolGroups: [{ name: "tasks", endpoint: "/api/caic/v1/mcp" }], voiceGateway: { url: "/" } },
+      },
+    }),
   );
   let includeTextChoice = true;
   await page.route("**/api/voicegateway/v1/voice/choices", (route) =>
@@ -53,9 +66,7 @@ test("browser voice selects a text choice on mobile and displays a failed choice
 
 test("mobile voice task links open details and browser back restores the voice list", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => {
-    Object.assign(window, { goModeHost: { isVoiceConnected: () => true } });
-  });
+  await installNativeVoiceBridge(page, true);
   const id = await createTaskAPI(api, "Review mobile voice task view");
   const task = await waitForTaskState(api, id, "waiting", 30_000);
 
@@ -72,14 +83,7 @@ test("mobile voice task links open details and browser back restores the voice l
   await expect.poll(() => voiceView.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
-  // Deliver the same synchronous frontend invocation used by the native bridge.
-  const result = await page.evaluate((id) => {
-    const host = window as Window & {
-      executeGoModeVoiceTool?: (name: string, args: Record<string, unknown>) => Record<string, unknown>;
-    };
-    if (!host.executeGoModeVoiceTool) throw new Error("Frontend voice tools are not registered");
-    return host.executeGoModeVoiceTool("focus_task", { task_number: id });
-  }, id);
+  const result = await invokeFrontendTool(page, "focus_task", { task_number: id });
   expect(result).toEqual({ task_id: id });
   await expect(page).toHaveURL(/\/$/);
   await expect(taskLink).toHaveAttribute("aria-current", "true");
@@ -94,22 +98,14 @@ test("mobile voice task links open details and browser back restores the voice l
   await page.setViewportSize({ width: 900, height: 844 });
   await expect(voiceView).not.toBeVisible();
   await expect(page.getByTestId("task-list")).toBeVisible();
-  await page.evaluate((id) => {
-    const host = window as Window & {
-      executeGoModeVoiceTool?: (name: string, args: Record<string, unknown>) => Record<string, unknown>;
-    };
-    if (!host.executeGoModeVoiceTool) throw new Error("Frontend voice tools are not registered");
-    return host.executeGoModeVoiceTool("focus_task", { task_number: id });
-  }, id);
+  await invokeFrontendTool(page, "focus_task", { task_number: id });
   await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
   await expect(page.getByTestId("detail-pane")).toBeVisible();
 });
 
 test("six long task titles fit above voice controls on a Pixel 6", async ({ page, api }) => {
   await page.setViewportSize({ width: 393, height: 851 });
-  await page.addInitScript(() => {
-    Object.assign(window, { goModeHost: { isVoiceConnected: () => true } });
-  });
+  await installNativeVoiceBridge(page, true);
 
   const ids = await Promise.all(
     Array.from({ length: 6 }, (_, index) =>

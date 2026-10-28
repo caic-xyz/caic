@@ -196,7 +196,9 @@ function Shell(props: { children?: JSX.Element }) {
           <KeyboardShortcuts
             open={shortcutsOpen()}
             onOpenChange={setShortcutsOpen}
-            voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && s.initialTasksReady()}
+            voiceAvailable={
+              hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && s.frontendPreparation.ready()
+            }
           />
           <VoiceTaskFocus mobile={mobile} />
           <div

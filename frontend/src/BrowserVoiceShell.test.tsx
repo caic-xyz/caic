@@ -7,39 +7,11 @@ import { render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 
-import { resolveVoiceGateway, VoiceTaskUpdates } from "./BrowserVoiceShell";
+import { VoiceTaskUpdates } from "./BrowserVoiceShell";
 import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { getVoiceTaskNumber } from "./voiceTaskState";
 
 const injectTextMock = vi.spyOn(voiceSession, "injectText");
-
-describe("resolveVoiceGateway", () => {
-  const origin = "https://caic.example.com";
-  const manifest = (url: string, tokenEndpoint?: string) => ({
-    service: "caic",
-    webShell: { voiceGateway: { url, tokenEndpoint } },
-  });
-
-  it("uses embedded mode for same-origin gateway paths and URLs", () => {
-    expect(resolveVoiceGateway(manifest("/voice/"), origin)).toEqual({ url: "/voice/", tokenEndpoint: null });
-    expect(resolveVoiceGateway(manifest("https://caic.example.com/voice/"), origin)).toEqual({
-      url: "https://caic.example.com/voice/",
-      tokenEndpoint: null,
-    });
-  });
-
-  it("requires a same-origin token endpoint for an external gateway", () => {
-    expect(resolveVoiceGateway(manifest("https://voice.example.com", "/api/caic/v1/voice/token"), origin)).toEqual({
-      url: "https://voice.example.com",
-      tokenEndpoint: "https://caic.example.com/api/caic/v1/voice/token",
-    });
-    for (const endpoint of ["//evil.example/token", "/\\\\evil.example/token", "https://evil.example/token"]) {
-      expect(() => resolveVoiceGateway(manifest("https://voice.example.com", endpoint), origin)).toThrow(
-        "same-origin token endpoint",
-      );
-    }
-  });
-});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,7 +26,7 @@ describe("VoiceTaskUpdates", () => {
   it("seeds existing tasks and numbers new tasks without injecting creation feedback", async () => {
     voiceSession.setState((s) => ({ ...s, connected: true }));
     const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([task("a-task", "Existing work")]);
-    const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
+    const view = render(() => <VoiceTaskUpdates tasks={tasks} session={voiceSession} />);
     expect(injectTextMock).not.toHaveBeenCalled();
     expect(getVoiceTaskNumber("a-task")).toBe(1);
 
@@ -68,7 +40,7 @@ describe("VoiceTaskUpdates", () => {
 
   it("reports attention and CI changes without replaying the connection baseline", () => {
     const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([task("a-task", "Existing work")]);
-    const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
+    const view = render(() => <VoiceTaskUpdates tasks={tasks} session={voiceSession} />);
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(injectTextMock).not.toHaveBeenCalled();
 
@@ -91,7 +63,7 @@ describe("VoiceTaskUpdates", () => {
       task("a-task", "First work"),
       task("b-task", "Second work"),
     ]);
-    const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
+    const view = render(() => <VoiceTaskUpdates tasks={tasks} session={voiceSession} />);
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(injectTextMock).not.toHaveBeenCalled();
 

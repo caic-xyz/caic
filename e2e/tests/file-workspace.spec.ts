@@ -53,10 +53,16 @@ for (const width of [390, 1000, 1440]) {
   test(`document workspace keeps task and viewer state at ${width}px`, async ({ page, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     const config = await api.getConfig();
-    config.voiceGateway = { mode: "embedded", url: "/voice/" };
+    config.voiceGateway = { mode: "embedded", url: "/" };
     await page.route("**/api/caic/v1/server/config", (route) => route.fulfill({ json: config }));
     await page.route("**/.well-known/gomode.json", (route) =>
-      route.fulfill({ json: { service: "caic", webShell: { voiceGateway: { url: "/voice/" } } } }),
+      route.fulfill({
+        json: {
+          apiVersion: 1,
+          service: "caic",
+          webShell: { toolGroups: [{ name: "tasks", endpoint: "/api/caic/v1/mcp" }], voiceGateway: { url: "/" } },
+        },
+      }),
     );
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));

@@ -1,7 +1,6 @@
-// Registers frontend task tools and publishes their account-owned initial data readiness.
+// Registers account-scoped task focus and mirrors native voice task navigation.
 
 import { createEffect, on, onCleanup, type Accessor } from "solid-js";
-import { registerFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
 import { useHostMode } from "@maruel/gomode/web/HostMode";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { useAppState } from "./AppState";
@@ -53,40 +52,40 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
     ),
   );
 
-  const unregister = registerFrontendVoiceTool({
-    declaration: {
-      name: "focus_task",
-      description:
-        "Select a task when switching conversational focus without calling a task-scoped service tool. " +
-        "Task-scoped service tools automatically select their target task. " +
-        "Use the task number or stable task ID from the task context or service tools. This selects the task in the user's frontend.",
-      parameters: {
-        type: "object",
-        properties: { task_number: { oneOf: [{ type: "integer", minimum: 1 }, { type: "string" }] } },
-        required: ["task_number"],
-        additionalProperties: false,
+  s.frontendPreparation.setTools([
+    {
+      declaration: {
+        name: "focus_task",
+        description:
+          "Select a task when switching conversational focus without calling a task-scoped service tool. " +
+          "Task-scoped service tools automatically select their target task. " +
+          "Use the task number or stable task ID from the task context or service tools. This selects the task in the user's frontend.",
+        parameters: {
+          type: "object",
+          properties: { task_number: { oneOf: [{ type: "integer", minimum: 1 }, { type: "string" }] } },
+          required: ["task_number"],
+          additionalProperties: false,
+        },
+      },
+      execute(args) {
+        const ref = args.task_number;
+        const number =
+          typeof ref === "number"
+            ? ref
+            : typeof ref === "string" && /^#?[1-9]\d*$/.test(ref)
+              ? Number(ref.replace(/^#/, ""))
+              : null;
+        const id = number !== null ? getVoiceTaskId(number) : typeof ref === "string" ? ref : undefined;
+        if (!voiceConnected() || !id || !s.tasks().some((task) => task.id === id)) {
+          throw new Error(
+            "Unknown task reference or disconnected voice session. Read the current tasks and try again.",
+          );
+        }
+        focusTask(id);
+        return { task_id: id };
       },
     },
-    execute(args) {
-      const ref = args.task_number;
-      const number =
-        typeof ref === "number"
-          ? ref
-          : typeof ref === "string" && /^#?[1-9]\d*$/.test(ref)
-            ? Number(ref.replace(/^#/, ""))
-            : null;
-      const id = number !== null ? getVoiceTaskId(number) : typeof ref === "string" ? ref : undefined;
-      if (!voiceConnected() || !id || !s.tasks().some((task) => task.id === id)) {
-        throw new Error("Unknown task reference or disconnected voice session. Read the current tasks and try again.");
-      }
-      focusTask(id);
-      return { task_id: id };
-    },
-  });
-
-  createEffect(() => {
-    s.frontendPreparation?.setReady(s.initialTasksReady());
-  });
+  ]);
 
   createEffect(() => {
     // A service focus event may precede its task's upsert. Membership removals
@@ -97,8 +96,6 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
   });
 
   onCleanup(() => {
-    s.frontendPreparation?.setReady(false);
-    unregister();
     setFocusedVoiceTask(null);
   });
   return null;

@@ -51,6 +51,8 @@ export function installFetchRouter(): FetchRouter {
       if (typeof route.match === "string" ? url === route.match : route.match.test(url)) {
         return Promise.resolve({
           ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
           json: () => Promise.resolve(route.respond(url, init)),
         } as unknown as Response);
       }
