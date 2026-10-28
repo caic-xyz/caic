@@ -237,7 +237,7 @@ func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string
 		return field == "variables"
 	case logControlSession:
 		switch field {
-		case "agent_version", "model", "reported_effort", "session_id":
+		case "agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id":
 			return true
 		}
 	case logControlModelInfo:

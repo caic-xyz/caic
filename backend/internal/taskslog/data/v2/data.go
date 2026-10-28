@@ -223,11 +223,12 @@ type MetaMessage struct {
 
 // MetaSessionMessage is the persisted MetaSessionMessage representation.
 type MetaSessionMessage struct {
-	MessageType    string `json:"t"`
-	SessionID      string `json:"session_id"`
-	ReportedModel  string `json:"model,omitempty"`
-	ReportedEffort string `json:"reported_effort,omitempty"`
-	AgentVersion   string `json:"agent_version,omitempty"`
+	MessageType           string `json:"t"`
+	SessionID             string `json:"session_id"`
+	ReportedModel         string `json:"model,omitempty"`
+	ReportedEffort        string `json:"reported_effort,omitempty"`
+	AgentVersion          string `json:"agent_version,omitempty"`
+	AutoCompactTokenLimit int    `json:"auto_compact_token_limit,omitempty"`
 }
 
 // RelayGenerationMessage is the persisted RelayGenerationMessage representation.

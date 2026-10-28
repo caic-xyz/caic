@@ -1789,6 +1789,8 @@ data class Task(
     val stoppedDiskUsedBytes: Long,
     /** Model context window limit (tokens). */
     val contextWindowLimit: Int,
+    /** Auto-compaction threshold (tokens), or zero if unknown. */
+    val autoCompactTokenLimit: Int,
     val error: String? = null,
     val startupFailure: TaskStartupFailure? = null,
     val result: String? = null,

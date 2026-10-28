@@ -303,6 +303,7 @@ export default function TaskList(props: TaskListProps) {
         cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
         cumulativeOutputTokens={t().cumulativeOutputTokens}
         contextWindowLimit={t().contextWindowLimit}
+        autoCompactTokenLimit={t().autoCompactTokenLimit}
         cacheTTLSeconds={t().cacheTTLSeconds}
         cacheExpiresAt={t().cacheExpiresAt}
         turnStartedAt={t().turnStartedAt}

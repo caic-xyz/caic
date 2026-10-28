@@ -650,6 +650,7 @@ export function validateTask(raw: ValidatorInput): Task {
     cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
     stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
+    autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
     error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
     startupFailure: (obj["startupFailure"] === undefined || obj["startupFailure"] === null ? undefined : validateTaskStartupFailure(obj["startupFailure"])),
     result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),

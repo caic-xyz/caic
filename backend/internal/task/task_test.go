@@ -454,6 +454,19 @@ func TestTask(t *testing.T) {
 			t.Fatalf("ContextWindowLimit = %d, want 180000", got)
 		}
 	})
+	t.Run("AutoCompactThresholdLiveAndReplay", func(t *testing.T) {
+		t.Parallel()
+		live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		live.addParsedMessage(agent.TimedMessage{Message: &agent.InitMessage{AutoCompactTokenLimit: 244800}})
+		if got := live.Snapshot().AutoCompactTokenLimit; got != 244800 {
+			t.Fatalf("live threshold = %d", got)
+		}
+		restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		restored.SeedTimeline([]agent.Message{&agent.InitMessage{AutoCompactTokenLimit: 244800}})
+		if got := restored.Snapshot().AutoCompactTokenLimit; got != 244800 {
+			t.Fatalf("restored threshold = %d", got)
+		}
+	})
 	t.Run("BackwardMessages", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

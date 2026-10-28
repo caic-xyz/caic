@@ -175,6 +175,7 @@ type Task struct {
 	reportedEffort         string                          // Thinking effort reported by InitMessage (may differ from RequestedEffort).
 	agentVersion           string                          // Agent version, captured from InitMessage.
 	reportedContextWindow  int                             // Context window size reported by the agent (0 = unknown).
+	autoCompactTokenLimit  int                             // Configured threshold for this agent session (0 = unknown).
 	planFile               string                          // Path to plan file inside instance, captured from Write tool_use.
 	planContent            string                          // Content of the plan file, captured from Write tool_use input.
 	planExitID             string                          // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
@@ -724,52 +725,53 @@ type StateTransition struct {
 // server to build API responses without data races on fields that
 // addMessage/SeedTimeline modify concurrently.
 type Snapshot struct {
-	State              taskslog.State
-	StateUpdatedAt     time.Time
-	TurnStartedAt      time.Time // non-zero only while state is Running
-	Repos              []taskslog.RepoMount
-	RuntimeName        runtime.Name
-	RuntimeInstanceID  runtime.ID
-	Tailscale          bool
-	TailscaleFQDN      string
-	TailscaleAuthURL   string
-	USB                bool
-	Display            bool
-	Sudo               bool
-	SudoPassword       string
-	VNCPort            int // VNC WebSocket port (0 = no VNC).
-	GitHubToken        bool
-	RelayOffset        int64
-	Title              string
-	SessionID          string
-	RequestedModel     string
-	RequestedEffort    string
-	ReportedModel      string
-	ReportedEffort     string
-	AgentVersion       string
-	ContextWindowLimit int // Non-zero when reported by the agent at runtime.
-	InPlanMode         bool
-	PlanFile           string
-	PlanContent        string
-	CostUSD            float64
-	NumTurns           int
-	Duration           time.Duration
-	Usage              agent.Usage
-	LastUsage          agent.Usage
-	LastAPIUsage       agent.Usage
-	CacheExpiresAt     time.Time
-	DiffStat           v3.DiffStat
-	RepoStates         []v3.RepoState // Compact per-repo git state from the latest diff probe.
-	DiskUsed           int64
-	DiskKnown          bool
-	ForgeOwner         string
-	ForgeRepo          string
-	ForgePR            int
-	ForgePRState       forge.PRState // "open", "closed", "merged"; empty when no PR.
-	ForgeIssue         int
-	CIStatus           forge.CIStatus
-	CIChecks           []forge.Check
-	RateLimit          RateLimit
+	State                 taskslog.State
+	StateUpdatedAt        time.Time
+	TurnStartedAt         time.Time // non-zero only while state is Running
+	Repos                 []taskslog.RepoMount
+	RuntimeName           runtime.Name
+	RuntimeInstanceID     runtime.ID
+	Tailscale             bool
+	TailscaleFQDN         string
+	TailscaleAuthURL      string
+	USB                   bool
+	Display               bool
+	Sudo                  bool
+	SudoPassword          string
+	VNCPort               int // VNC WebSocket port (0 = no VNC).
+	GitHubToken           bool
+	RelayOffset           int64
+	Title                 string
+	SessionID             string
+	RequestedModel        string
+	RequestedEffort       string
+	ReportedModel         string
+	ReportedEffort        string
+	AgentVersion          string
+	ContextWindowLimit    int // Non-zero when reported by the agent at runtime.
+	AutoCompactTokenLimit int // Non-zero when known for this session.
+	InPlanMode            bool
+	PlanFile              string
+	PlanContent           string
+	CostUSD               float64
+	NumTurns              int
+	Duration              time.Duration
+	Usage                 agent.Usage
+	LastUsage             agent.Usage
+	LastAPIUsage          agent.Usage
+	CacheExpiresAt        time.Time
+	DiffStat              v3.DiffStat
+	RepoStates            []v3.RepoState // Compact per-repo git state from the latest diff probe.
+	DiskUsed              int64
+	DiskKnown             bool
+	ForgeOwner            string
+	ForgeRepo             string
+	ForgePR               int
+	ForgePRState          forge.PRState // "open", "closed", "merged"; empty when no PR.
+	ForgeIssue            int
+	CIStatus              forge.CIStatus
+	CIChecks              []forge.Check
+	RateLimit             RateLimit
 }
 
 // RateLimit records the active quota block resolved for a task. It is retained
@@ -1013,6 +1015,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		}
 		switch m := msg.(type) {
 		case *agent.MetaSessionMessage:
+			if m.AutoCompactTokenLimit > 0 {
+				t.autoCompactTokenLimit = m.AutoCompactTokenLimit
+			}
 			if m.SessionID != "" {
 				t.sessionID = m.SessionID
 			}
@@ -1026,6 +1031,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 				t.reportedEffort = m.ReportedEffort
 			}
 		case *agent.InitMessage:
+			if m.AutoCompactTokenLimit > 0 {
+				t.autoCompactTokenLimit = m.AutoCompactTokenLimit
+			}
 			if m.SessionID != "" {
 				t.sessionID = m.SessionID
 			}
@@ -1717,52 +1725,53 @@ func (t *Task) DiscardRollup() {
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
 func (t *Task) snapshotLocked() Snapshot {
 	return Snapshot{
-		State:              t.state,
-		StateUpdatedAt:     t.stateUpdatedAt,
-		TurnStartedAt:      t.turnStartedAt,
-		Repos:              append([]taskslog.RepoMount(nil), t.Repos...),
-		RuntimeName:        t.RuntimeName,
-		RuntimeInstanceID:  t.runtimeInstanceID,
-		Tailscale:          t.Tailscale,
-		TailscaleFQDN:      t.TailscaleFQDN,
-		TailscaleAuthURL:   t.TailscaleAuthURL,
-		USB:                t.USB,
-		Display:            t.Display,
-		Sudo:               t.Sudo,
-		SudoPassword:       t.SudoPassword,
-		VNCPort:            t.VNCPort,
-		GitHubToken:        t.GitHubToken,
-		RelayOffset:        t.RelayOffset,
-		Title:              t.title,
-		SessionID:          t.sessionID,
-		RequestedModel:     t.RequestedModel,
-		RequestedEffort:    t.RequestedEffort,
-		ReportedModel:      t.reportedModel,
-		ReportedEffort:     t.reportedEffort,
-		AgentVersion:       t.agentVersion,
-		ContextWindowLimit: t.reportedContextWindow,
-		InPlanMode:         t.inPlanMode,
-		PlanFile:           t.planFile,
-		PlanContent:        t.planContent,
-		CostUSD:            t.costTracker.TotalUSD,
-		NumTurns:           t.liveNumTurns,
-		Duration:           t.liveDuration,
-		Usage:              t.liveUsage.Clone(),
-		LastUsage:          t.lastUsage.Clone(),
-		LastAPIUsage:       t.lastAPIUsage.Clone(),
-		CacheExpiresAt:     t.cacheExpiresAt,
-		DiffStat:           t.liveDiffStat,
-		RepoStates:         t.liveRepoStates,
-		DiskUsed:           t.diskUsed,
-		DiskKnown:          t.diskKnown,
-		ForgeOwner:         t.forgeOwner,
-		ForgeRepo:          t.forgeRepo,
-		ForgePR:            t.forgePR,
-		ForgePRState:       t.forgePRState,
-		ForgeIssue:         t.ForgeIssue,
-		CIStatus:           t.ciStatus,
-		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
-		RateLimit:          t.rateLimit,
+		State:                 t.state,
+		StateUpdatedAt:        t.stateUpdatedAt,
+		TurnStartedAt:         t.turnStartedAt,
+		Repos:                 append([]taskslog.RepoMount(nil), t.Repos...),
+		RuntimeName:           t.RuntimeName,
+		RuntimeInstanceID:     t.runtimeInstanceID,
+		Tailscale:             t.Tailscale,
+		TailscaleFQDN:         t.TailscaleFQDN,
+		TailscaleAuthURL:      t.TailscaleAuthURL,
+		USB:                   t.USB,
+		Display:               t.Display,
+		Sudo:                  t.Sudo,
+		SudoPassword:          t.SudoPassword,
+		VNCPort:               t.VNCPort,
+		GitHubToken:           t.GitHubToken,
+		RelayOffset:           t.RelayOffset,
+		Title:                 t.title,
+		SessionID:             t.sessionID,
+		RequestedModel:        t.RequestedModel,
+		RequestedEffort:       t.RequestedEffort,
+		ReportedModel:         t.reportedModel,
+		ReportedEffort:        t.reportedEffort,
+		AgentVersion:          t.agentVersion,
+		ContextWindowLimit:    t.reportedContextWindow,
+		AutoCompactTokenLimit: t.autoCompactTokenLimit,
+		InPlanMode:            t.inPlanMode,
+		PlanFile:              t.planFile,
+		PlanContent:           t.planContent,
+		CostUSD:               t.costTracker.TotalUSD,
+		NumTurns:              t.liveNumTurns,
+		Duration:              t.liveDuration,
+		Usage:                 t.liveUsage.Clone(),
+		LastUsage:             t.lastUsage.Clone(),
+		LastAPIUsage:          t.lastAPIUsage.Clone(),
+		CacheExpiresAt:        t.cacheExpiresAt,
+		DiffStat:              t.liveDiffStat,
+		RepoStates:            t.liveRepoStates,
+		DiskUsed:              t.diskUsed,
+		DiskKnown:             t.diskKnown,
+		ForgeOwner:            t.forgeOwner,
+		ForgeRepo:             t.forgeRepo,
+		ForgePR:               t.forgePR,
+		ForgePRState:          t.forgePRState,
+		ForgeIssue:            t.ForgeIssue,
+		CIStatus:              t.ciStatus,
+		CIChecks:              append([]forge.Check(nil), t.ciChecks...),
+		RateLimit:             t.rateLimit,
 	}
 }
 
@@ -1958,6 +1967,9 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 
 	// Capture metadata from the init message.
 	if init, ok := m.(*agent.InitMessage); ok && !child {
+		if init.AutoCompactTokenLimit > 0 {
+			t.autoCompactTokenLimit = init.AutoCompactTokenLimit
+		}
 		if init.SessionID != "" {
 			t.sessionID = init.SessionID
 		}

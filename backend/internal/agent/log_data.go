@@ -718,7 +718,7 @@ func marshalV2Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *MetaSessionMessage:
-		r := v2.MetaSessionMessage{MessageType: m.MessageType, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, AgentVersion: m.AgentVersion}
+		r := v2.MetaSessionMessage{MessageType: m.MessageType, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, AgentVersion: m.AgentVersion, AutoCompactTokenLimit: m.AutoCompactTokenLimit}
 		r.MessageType = string(token)
 		record = r
 	case *RelayGenerationMessage:
@@ -968,7 +968,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = MetaSessionMessage{MessageType: record.MessageType, SessionID: record.SessionID, ReportedModel: record.ReportedModel, ReportedEffort: record.ReportedEffort, AgentVersion: record.AgentVersion}
+			*out = MetaSessionMessage{MessageType: record.MessageType, SessionID: record.SessionID, ReportedModel: record.ReportedModel, ReportedEffort: record.ReportedEffort, AgentVersion: record.AgentVersion, AutoCompactTokenLimit: record.AutoCompactTokenLimit}
 		case *RelayGenerationMessage:
 			record, err := decodeLogData[v2.RelayGenerationMessage](line, false)
 			if err != nil {

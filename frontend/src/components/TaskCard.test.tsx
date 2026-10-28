@@ -34,6 +34,7 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     cumulativeCacheReadInputTokens: 0,
     cumulativeOutputTokens: 0,
     contextWindowLimit: 200_000,
+    autoCompactTokenLimit: 0,
     runtime: { id: "rt" },
     selected: false,
     tabIndex: 0,
@@ -403,6 +404,22 @@ describe("TaskCard", () => {
     renderCard(() => <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 0 })} />);
     expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("12kt");
     expect(screen.getByTestId("task-card-tokens")).not.toHaveTextContent("/");
+  });
+
+  it("uses the auto-compact threshold and explains both limits", () => {
+    renderCard(() => (
+      <TaskCard
+        {...props({ activeInputTokens: 180_000, autoCompactTokenLimit: 244_800, contextWindowLimit: 400_000 })}
+      />
+    ));
+    const tokens = screen.getByTestId("task-card-tokens");
+    expect(tokens).toHaveTextContent("180kt/245kt");
+    const trigger = tokens.parentElement;
+    if (!trigger) throw new Error("Missing token tooltip trigger");
+    fireEvent.mouseEnter(trigger);
+    const tooltip = screen.getByText(/Configured auto-compact threshold: 244,800 total active tokens/);
+    expect(tooltip).toHaveTextContent("The effective limit may be lower");
+    expect(tooltip).toHaveTextContent("Context window: 400kt");
   });
 
   it("hides quota recovery when the task has no repository", () => {

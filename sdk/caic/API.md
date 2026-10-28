@@ -1044,6 +1044,7 @@ Task is the JSON representation sent to the frontend.
 | `cacheExpiresAt` | `ISOTimestamp` | When the prompt cache expires. |  |
 | `stoppedDiskUsedBytes` | `int64` | Final writable-layer size retained by a stopped task, or -1 when unavailable. | yes |
 | `contextWindowLimit` | `int` | Model context window limit (tokens). | yes |
+| `autoCompactTokenLimit` | `int` | Auto-compaction threshold (tokens), or zero if unknown. | yes |
 | `error` | `string` |  |  |
 | `startupFailure` | `TaskStartupFailure` |  |  |
 | `result` | `string` |  |  |

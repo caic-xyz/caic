@@ -128,6 +128,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	out.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
 	out.CacheTTLSeconds = snap.LastAPIUsage.CacheTTLSeconds
 	out.CacheExpiresAt = snap.CacheExpiresAt
+	out.AutoCompactTokenLimit = snap.AutoCompactTokenLimit
 	out.StoppedDiskUsedBytes = -1
 	if snap.State == taskslog.StateStopped {
 		if result != nil && result.DiskUsedBytes != nil {

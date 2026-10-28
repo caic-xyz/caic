@@ -125,12 +125,13 @@ func NativeDuration(message Message) (time.Duration, bool) {
 type InitMessage struct {
 	MessageProvenance
 
-	SessionID      string   `json:"session_id"`
-	Cwd            string   `json:"cwd"`
-	Tools          []string `json:"tools"`
-	ReportedModel  string   `json:"model"`
-	ReportedEffort string   `json:"reported_effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
-	Version        string   `json:"claude_code_version"`
+	SessionID             string   `json:"session_id"`
+	Cwd                   string   `json:"cwd"`
+	Tools                 []string `json:"tools"`
+	ReportedModel         string   `json:"model"`
+	ReportedEffort        string   `json:"reported_effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+	Version               string   `json:"claude_code_version"`
+	AutoCompactTokenLimit int      `json:"auto_compact_token_limit,omitempty"`
 }
 
 // Type implements Message.
@@ -1241,16 +1242,17 @@ func appendNativeRecord(log LogSink, version LogVersion, token logRecordType, da
 
 // WriteMetaSession appends a caic_session control record for init metadata.
 func WriteMetaSession(log LogSink, init *InitMessage) error {
-	if init.SessionID == "" && init.ReportedModel == "" && init.ReportedEffort == "" && init.Version == "" {
+	if init.SessionID == "" && init.ReportedModel == "" && init.ReportedEffort == "" && init.Version == "" && init.AutoCompactTokenLimit == 0 {
 		return nil
 	}
 	return log.AppendMessage(&MetaSessionMessage{
-		MessageProvenance: init.MessageProvenance,
-		MessageType:       messageTypeSession,
-		SessionID:         init.SessionID,
-		ReportedModel:     init.ReportedModel,
-		ReportedEffort:    init.ReportedEffort,
-		AgentVersion:      init.Version,
+		MessageProvenance:     init.MessageProvenance,
+		MessageType:           messageTypeSession,
+		SessionID:             init.SessionID,
+		ReportedModel:         init.ReportedModel,
+		ReportedEffort:        init.ReportedEffort,
+		AgentVersion:          init.Version,
+		AutoCompactTokenLimit: init.AutoCompactTokenLimit,
 	})
 }
 

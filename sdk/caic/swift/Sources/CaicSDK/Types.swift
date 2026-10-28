@@ -1187,6 +1187,8 @@ public struct Task: Codable {
     public let stoppedDiskUsedBytes: Int
     /// Model context window limit (tokens).
     public let contextWindowLimit: Int
+    /// Auto-compaction threshold (tokens), or zero if unknown.
+    public let autoCompactTokenLimit: Int
     public let error: String?
     public let startupFailure: TaskStartupFailure?
     public let result: String?

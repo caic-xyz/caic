@@ -110,7 +110,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.SetModelInventory(newModelInventory(models))
 	}
 	wire.suppressUserInput = true
-	initMsg := &agent.InitMessage{SessionID: wire.threadID, ReportedModel: wire.reportedModel, ReportedEffort: wire.reportedEffort, Version: wire.agentVersion}
+	initMsg := &agent.InitMessage{SessionID: wire.threadID, ReportedModel: wire.reportedModel, ReportedEffort: wire.reportedEffort, Version: wire.agentVersion, AutoCompactTokenLimit: autoCompactTokenLimit}
 	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 		_ = rp.Cmd.Process.Kill()
@@ -224,6 +224,8 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
+const autoCompactTokenLimit = 244800
+
 func codexAppServerArgs() []string {
 	// Compact at 244,800 total active tokens: 90% of the 272K input-token
 	// threshold for Sol/Terra long-context API pricing (2x input/cache and 1.5x
@@ -242,7 +244,7 @@ func codexAppServerArgs() []string {
 	return []string{
 		"codex", "--no-daemon", "app-server",
 		"-c", `approval_policy="never"`,
-		"-c", `model_auto_compact_token_limit=244800`,
+		"-c", fmt.Sprintf("model_auto_compact_token_limit=%d", autoCompactTokenLimit),
 		"-c", `model_auto_compact_token_limit_scope="total"`,
 		"-c", `sandbox_mode="danger-full-access"`,
 	}

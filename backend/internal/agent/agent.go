@@ -636,7 +636,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		} else if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		return []Message{&InitMessage{MessageProvenance: m.MessageProvenance, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion}}, nil
+		return []Message{&InitMessage{MessageProvenance: m.MessageProvenance, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion, AutoCompactTokenLimit: m.AutoCompactTokenLimit}}, nil
 	case logControlLegacyInit:
 		var m v1.LegacyInit
 		if err := json.Unmarshal(line, &m); err != nil {

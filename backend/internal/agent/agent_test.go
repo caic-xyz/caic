@@ -567,6 +567,28 @@ func TestDirectionalNativeRecords(t *testing.T) {
 func TestWriteMetaSession(t *testing.T) {
 	t.Parallel()
 
+	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+		t.Run(fmt.Sprintf("V%dCompactThreshold", version), func(t *testing.T) {
+			t.Parallel()
+			buf := &testLogSink{Version: version}
+			if err := WriteMetaSession(buf, &InitMessage{SessionID: "session", AutoCompactTokenLimit: 244800}); err != nil {
+				t.Fatal(err)
+			}
+			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			init, ok := record.Messages[0].Message.(*InitMessage)
+			if !ok || init.AutoCompactTokenLimit != 244800 {
+				t.Fatalf("restored message = %#v", record.Messages[0].Message)
+			}
+		})
+	}
+
 	t.Run("V3PreservesProvenance", func(t *testing.T) {
 		t.Parallel()
 		buf := &testLogSink{Version: LogVersionV3}

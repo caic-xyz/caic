@@ -1419,6 +1419,8 @@ export interface Task {
   stoppedDiskUsedBytes: number /* int64 */;
   /** Model context window limit (tokens). */
   contextWindowLimit: number /* int */;
+  /** Auto-compaction threshold (tokens), or zero if unknown. */
+  autoCompactTokenLimit: number /* int */;
   error?: string;
   startupFailure?: TaskStartupFailure;
   result?: string;

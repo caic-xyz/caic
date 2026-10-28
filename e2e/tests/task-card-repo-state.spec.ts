@@ -1,8 +1,42 @@
-// E2E tests task-card repository-state summaries and refreshes without agent activity.
+// Browser coverage for task-card compaction, tooltips, and repository-state refreshes.
 
 import { ok } from "node:assert/strict";
 import { expect, test, waitForTaskState } from "../helpers";
 import type { TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
+
+test("task card shows the configured compaction threshold", async ({ page, api, uniquePrompt }) => {
+  const [repo] = await api.listRepos();
+  ok(repo);
+  const task = await api.createTask({
+    initialPrompt: { text: uniquePrompt("FAKE_DEMO compact threshold") },
+    repos: [{ name: repo.path }],
+    harness: "codex",
+  });
+  await waitForTaskState(api, task.id, "waiting");
+  const snapshot = {
+    kind: "snapshot",
+    snapshot: [
+      {
+        ...(await api.getTask(task.id)),
+        activeInputTokens: 180_000,
+        activeCacheReadTokens: 0,
+        autoCompactTokenLimit: 244_800,
+        contextWindowLimit: 400_000,
+      },
+    ],
+  } satisfies TaskListEvent;
+  await page.route(
+    (url) => url.pathname === "/api/caic/v1/tasks/events",
+    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+  );
+  await page.goto(`/task/@${task.id}`);
+  const tokens = page.locator(`[data-task-id="${task.id}"]`).getByTestId("task-card-tokens");
+  await expect(tokens).toHaveText("180kt/245kt");
+  await tokens.hover();
+  const tooltip = page.getByText(/Configured auto-compact threshold: 244,800 total active tokens/);
+  await expect(tooltip).toContainText("The effective limit may be lower");
+  await expect(tooltip).toContainText("Context window: 400kt");
+});
 
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();

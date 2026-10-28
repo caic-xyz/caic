@@ -58,6 +58,7 @@ export interface TaskCardProps {
   cumulativeCacheReadInputTokens: number;
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
+  autoCompactTokenLimit: number;
   cacheTTLSeconds?: number;
   cacheExpiresAt?: string;
   turnStartedAt?: string;
@@ -552,7 +553,7 @@ export default function TaskCard(props: TaskCardProps) {
               <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
                 {" · "}
                 <Tooltip
-                  text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
+                  text={`${props.autoCompactTokenLimit > 0 ? `Configured auto-compact threshold: ${props.autoCompactTokenLimit.toLocaleString()} total active tokens. The effective limit may be lower; displayed input is approximate. ` : ""}${props.contextWindowLimit > 0 ? `Context window: ${formatTokens(props.contextWindowLimit)}. ` : ""}Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
                 >
                   <span
                     class={styles.tokens}
@@ -560,12 +561,14 @@ export default function TaskCard(props: TaskCardProps) {
                     style={{
                       "--tokens-color": tokenColor(
                         props.activeInputTokens + props.activeCacheReadTokens,
-                        props.contextWindowLimit,
+                        props.autoCompactTokenLimit || props.contextWindowLimit,
                       ),
                     }}
                   >
                     {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}
-                    <Show when={props.contextWindowLimit > 0}>/{formatTokens(props.contextWindowLimit)}</Show>
+                    <Show when={props.autoCompactTokenLimit || props.contextWindowLimit}>
+                      /{formatTokens(props.autoCompactTokenLimit || props.contextWindowLimit)}
+                    </Show>
                   </span>
                 </Tooltip>
               </Show>
