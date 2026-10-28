@@ -323,22 +323,18 @@ func (*Store) WriteResultTrailer(log agent.LogSink, title string, res *Result) e
 
 func resultTrailer(title string, res *Result) *agent.MetaResultMessage {
 	mr := &agent.MetaResultMessage{
-		MessageType:              "caic_result",
-		State:                    res.State.String(),
-		Title:                    title,
-		CostUSD:                  res.CostUSD,
-		Duration:                 res.Duration.Seconds(),
-		NumTurns:                 res.NumTurns,
-		InputTokens:              res.Usage.InputTokens,
-		OutputTokens:             res.Usage.OutputTokens,
-		CacheCreationInputTokens: res.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
-		ReasoningOutputTokens:    res.Usage.ReasoningOutputTokens,
-		DiffStat:                 res.DiffStat,
-		DiskUsedBytes:            res.DiskUsedBytes,
-		AgentResult:              res.AgentResult,
-		StartupFailure:           res.StartupFailure,
+		MessageType:    "caic_result",
+		State:          res.State.String(),
+		Title:          title,
+		CostUSD:        res.CostUSD,
+		Duration:       res.Duration.Seconds(),
+		NumTurns:       res.NumTurns,
+		DiffStat:       res.DiffStat,
+		DiskUsedBytes:  res.DiskUsedBytes,
+		AgentResult:    res.AgentResult,
+		StartupFailure: res.StartupFailure,
 	}
+	mr.SetUsage(res.Usage)
 	if res.Err != nil {
 		mr.Error = res.Err.Error()
 	}

@@ -297,3 +297,21 @@ describe("summarizeUsageDays drill-down", () => {
     ]);
   });
 });
+
+describe("arbitrary cache-write lifetimes", () => {
+  it("counts generic buckets once while accepting old dashboard fields", () => {
+    const first = day("2026-01-24");
+    first.tokens.cacheWrites = [
+      { ttlSeconds: 0, tokens: 3 },
+      { ttlSeconds: 7200, tokens: 40 },
+    ];
+    first.tokens.cacheWrite5mTokens = 3;
+    const second = day("2026-01-25");
+    second.tokens.cacheWrite1hTokens = 7;
+    const summary = summarizeUsageDays([first, second]);
+    expect(summary.totalTokens).toBe(120);
+    expect(usageCacheHitRate(summary.tokens)).toBeCloseTo(40 / 110);
+    expect(summary.tokens.cacheWrites?.find((b) => b.ttlSeconds === 7200)?.tokens).toBe(40);
+    expect(first.tokens.cacheWrites[1]?.tokens).toBe(40);
+  });
+});

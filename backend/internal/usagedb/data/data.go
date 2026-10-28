@@ -4,7 +4,10 @@
 // unversioned format additively through optional fields.
 package data
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Time is a Unix millisecond timestamp that encodes as a plain int64.
 // Zero means unknown; guard zero time.Time values before calling NewTime.
@@ -23,9 +26,19 @@ type RowKind struct {
 	Kind string `json:"kind"`
 }
 
+// CacheWrite stores the token count for an applied lifetime in seconds.
+// A zero lifetime means unknown.
+type CacheWrite struct {
+	TTLSeconds int64 `json:"ttl_seconds"`
+	Tokens     int64 `json:"tokens"`
+}
+
 // TokenBuckets contains disjoint input buckets and output token counters.
-// Unknown cache-write TTLs use the five-minute bucket.
+// CacheWrites retains arbitrary lifetimes; unknown lifetimes remain distinct.
 type TokenBuckets struct {
+	CacheWrites []CacheWrite `json:"cache_writes,omitzero"`
+	// CacheWrite5m and CacheWrite1h preserve fields in released daily rows.
+	// Newly observed usage uses CacheWrites.
 	Input        int64 `json:"input_tokens,omitzero"`
 	CacheWrite5m int64 `json:"cache_write_5m,omitzero"`
 	CacheWrite1h int64 `json:"cache_write_1h,omitzero"`
@@ -36,14 +49,68 @@ type TokenBuckets struct {
 
 // TotalInput returns the call's full input context size.
 func (b TokenBuckets) TotalInput() int64 {
-	return b.Input + b.CacheWrite5m + b.CacheWrite1h + b.CacheRead
+	n := b.Input + b.CacheRead
+	for _, v := range b.Writes() {
+		n += v.Tokens
+	}
+	return n
+}
+
+// Writes returns all cache writes without losing fields in released daily rows.
+func (b TokenBuckets) Writes() []CacheWrite {
+	if b.CacheWrite5m == 0 && b.CacheWrite1h == 0 {
+		return b.CacheWrites
+	}
+	out := slices.Clone(b.CacheWrites)
+	if b.CacheWrite5m != 0 {
+		out = append(out, CacheWrite{TTLSeconds: 300, Tokens: b.CacheWrite5m})
+	}
+	if b.CacheWrite1h != 0 {
+		out = append(out, CacheWrite{TTLSeconds: 3600, Tokens: b.CacheWrite1h})
+	}
+	return out
+}
+
+// CacheWriteCount returns the tokens for an exact reported lifetime.
+func (b TokenBuckets) CacheWriteCount(ttl time.Duration) int64 {
+	var n int64
+	for _, v := range b.Writes() {
+		if time.Duration(v.TTLSeconds)*time.Second == ttl {
+			n += v.Tokens
+		}
+	}
+	return n
+}
+
+// Clone copies the bucket slice for independently owned snapshots.
+func (b TokenBuckets) Clone() TokenBuckets {
+	b.CacheWrites = slices.Clone(b.CacheWrites)
+	return b
 }
 
 // plus returns the field-wise sum of b and o.
 func (b TokenBuckets) plus(o TokenBuckets) TokenBuckets {
 	b.Input += o.Input
-	b.CacheWrite5m += o.CacheWrite5m
-	b.CacheWrite1h += o.CacheWrite1h
+	writes := slices.Clone(b.Writes())
+	for _, v := range o.Writes() {
+		i := slices.IndexFunc(writes, func(e CacheWrite) bool { return e.TTLSeconds == v.TTLSeconds })
+		if i < 0 {
+			writes = append(writes, v)
+		} else {
+			writes[i].Tokens += v.Tokens
+		}
+	}
+	slices.SortFunc(writes, func(a, b CacheWrite) int {
+		if a.TTLSeconds < b.TTLSeconds {
+			return -1
+		}
+		if a.TTLSeconds > b.TTLSeconds {
+			return 1
+		}
+		return 0
+	})
+	b.CacheWrites = writes
+	b.CacheWrite5m, b.CacheWrite1h = 0, 0
 	b.CacheRead += o.CacheRead
 	b.Output += o.Output
 	b.Reasoning += o.Reasoning

@@ -69,3 +69,26 @@ func TestUsageRow(t *testing.T) {
 		}
 	})
 }
+
+func TestTokenBuckets(t *testing.T) {
+	t.Parallel()
+	t.Run("arbitrary and stored durations", func(t *testing.T) {
+		t.Parallel()
+		var row UsageRow
+		if err := json.Unmarshal([]byte(`{"cache_write_5m":10,"cache_write_1h":20,"cache_writes":[{"ttl_seconds":7200,"tokens":30}],"input_tokens":40}`), &row); err != nil {
+			t.Fatal(err)
+		}
+		if row.TotalInput() != 100 || row.CacheWriteCount(2*time.Hour) != 30 {
+			t.Fatalf("counts = %+v", row)
+		}
+		snapshot := row.Clone()
+		snapshot.CacheWrites[0].Tokens = 999
+		if row.CacheWrites[0].Tokens != 30 {
+			t.Fatal("snapshot aliases source")
+		}
+		row.Add(&Delta{CacheWrites: []CacheWrite{{TTLSeconds: 7200, Tokens: 5}}})
+		if row.CacheWriteCount(2*time.Hour) != 35 || row.TotalInput() != 105 {
+			t.Fatalf("aggregate = %+v", row)
+		}
+	})
+}

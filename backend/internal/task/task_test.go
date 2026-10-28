@@ -24,6 +24,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	"github.com/maruel/genai"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -4229,6 +4231,78 @@ func TestPricedCost(t *testing.T) {
 	// glm-5.3-flash: $0.15/M input, $0.03/M cache read, $0.50/M output.
 	prices := fakePricer{"zai/glm-5.3-flash": {InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}
 
+	t.Run("UsageContributionIsHarnessNeutral", func(t *testing.T) {
+		t.Parallel()
+		for _, h := range []harness.Name{harness.Claude, harness.Codex, harness.OpenCode, harness.Pi} {
+			for _, replay := range []bool{false, true} {
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, h, "", "")
+				messages := []agent.Message{
+					&agent.UsageMessage{Additive: true, Usage: agent.Usage{InputTokens: 100}},
+					&agent.UsageMessage{Usage: agent.Usage{InputTokens: 900}},
+					&agent.ResultMessage{UsageIsSnapshot: true, Usage: agent.Usage{InputTokens: 50}},
+					&agent.ResultMessage{Usage: agent.Usage{InputTokens: 7}},
+				}
+				if replay {
+					tk.SeedTimeline(messages)
+				} else {
+					for _, m := range messages {
+						tk.addMessage(t.Context(), m)
+					}
+				}
+				_, _, _, total, last := tk.LiveStats()
+				if total.InputTokens != 107 || last.InputTokens != 7 {
+					t.Fatalf("%s replay %v: total=%+v, context=%+v", h, replay, total, last)
+				}
+			}
+		}
+	})
+
+	t.Run("PiCacheTotalsLiveReplayAndPersistence", func(t *testing.T) {
+		t.Parallel()
+		messages := []agent.Message{
+			&agent.UsageMessage{Additive: true, PerCall: true, Usage: agent.Usage{CacheCreationInputTokens: 100, CacheWrites: tokens.CacheWrites{{TTL: time.Hour, Tokens: 100}}, CacheTTLSeconds: 3600}},
+			&agent.UsageMessage{Additive: true, PerCall: true, Usage: agent.Usage{CacheCreationInputTokens: 10, CacheTTLSeconds: 300}},
+			&agent.ResultMessage{MessageType: "result", UsageIsSnapshot: true, Usage: agent.Usage{CacheCreationInputTokens: 10, CacheTTLSeconds: 300}},
+			// An invocation without per-call events still contributes its result.
+			&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{CacheCreationInputTokens: 7}},
+		}
+		for _, replay := range []bool{false, true} {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "anthropic/claude-opus-4-6", "")
+			if replay {
+				tk.SeedTimeline(messages)
+			} else {
+				for _, msg := range messages {
+					tk.addMessage(t.Context(), msg)
+				}
+			}
+			_, _, _, total, last := tk.LiveStats()
+			want := agent.Usage{CacheCreationInputTokens: 117, CacheWrites: tokens.CacheWrites{{Tokens: 7}, {TTL: 5 * time.Minute, Tokens: 10}, {TTL: time.Hour, Tokens: 100}}}
+			if !total.Equal(want) || last.CacheCreationInputTokens != 7 {
+				t.Fatalf("replay %v: total=%+v, last=%+v", replay, total, last)
+			}
+			store := taskslog.NewStore(logtest.Logger(t), t.TempDir())
+			log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := &taskslog.Result{State: taskslog.StatePurged, Usage: total}
+			if err := store.WriteResultTrailer(log, "done", res); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := store.LoadAllReadOnly()
+			if err != nil || len(loaded) != 1 || !loaded[0].LastTrailer.Usage.Equal(want) {
+				t.Fatalf("trailer restore = %+v, %v", loaded, err)
+			}
+			if _, err := store.CompressTerminal(path, log, tk.terminalLogSummary(agent.LogVersionV3, res)); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err = store.LoadAllReadOnly()
+			if err != nil || len(loaded) != 1 || !loaded[0].LastTrailer.Usage.Equal(want) {
+				t.Fatalf("cached restore = %+v, %v", loaded, err)
+			}
+		}
+	})
+
 	t.Run("CodexRequestCostLiveReplayRollup", func(t *testing.T) {
 		t.Parallel()
 		for _, exited := range []bool{false, true} {
@@ -4254,9 +4328,9 @@ func TestPricedCost(t *testing.T) {
 						tk.addMessage(t.Context(), msg)
 					}
 				}
-				cost, _, _, tokens, _ := tk.LiveStats()
-				if math.Abs(cost-wantCost) > 1e-9 || tokens.InputTokens != resultUsage.InputTokens || tokens.OutputTokens != resultUsage.OutputTokens {
-					t.Fatalf("exited %v/replay %v: cost=%v, tokens=%+v", exited, replay, cost, tokens)
+				cost, _, _, tokenCounts, _ := tk.LiveStats()
+				if math.Abs(cost-wantCost) > 1e-9 || tokenCounts.InputTokens != resultUsage.InputTokens || tokenCounts.OutputTokens != resultUsage.OutputTokens {
+					t.Fatalf("exited %v/replay %v: cost=%v, tokens=%+v", exited, replay, cost, tokenCounts)
 				}
 				last := sink.Observes[len(sink.Observes)-1].Event
 				if !last.TurnBoundary || math.Abs(last.CostUSD-wantCost) > 1e-9 || last.Delta.Input != int64(resultUsage.InputTokens) {
@@ -4349,10 +4423,10 @@ func TestPricedCost(t *testing.T) {
 		}
 		messages := func() []agent.Message {
 			return []agent.Message{
-				&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
-				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.UsageMessage{Additive: true, ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.UsageMessage{Additive: true, Usage: agent.Usage{InputTokens: 1_000_000}},
 				&agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 20_000},
-				&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.UsageMessage{Additive: true, ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
 			}
 		}
 		for _, tc := range []struct {
@@ -4372,8 +4446,8 @@ func TestPricedCost(t *testing.T) {
 						tk.addMessage(t.Context(), m)
 					}
 				}
-				if cost, _, _, _, _ := tk.LiveStats(); math.Abs(cost-0.45) > 1e-9 {
-					t.Errorf("costUSD = %v, want 0.45 including compaction", cost)
+				if cost, _, _, total, _ := tk.LiveStats(); math.Abs(cost-0.45) > 1e-9 || total.InputTokens != 3_000_000 {
+					t.Errorf("costUSD = %v, input = %d; want 0.45 and 3000000 including compaction", cost, total.InputTokens)
 				}
 			})
 		}
@@ -4387,11 +4461,11 @@ func TestPricedCost(t *testing.T) {
 		tk.Pricer = prices
 		tk.SetState(taskslog.StateRunning)
 		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"})
-		tk.addMessage(t.Context(), &agent.UsageMessage{
+		tk.addMessage(t.Context(), &agent.UsageMessage{Additive: true,
 			ReportedModel: "zai/glm-5.3-flash",
 			Usage:         agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
 		})
-		tk.addMessage(t.Context(), &agent.UsageMessage{
+		tk.addMessage(t.Context(), &agent.UsageMessage{Additive: true,
 			ReportedModel: "zai/glm-5.3-flash",
 			Usage:         agent.Usage{InputTokens: 2_000_000, CacheReadInputTokens: 1_000_000},
 		})
@@ -4401,9 +4475,10 @@ func TestPricedCost(t *testing.T) {
 			t.Fatalf("costUSD = %v, want %v", costUSD, want)
 		}
 		tk.addMessage(t.Context(), &agent.ResultMessage{
-			MessageType:  "result",
-			TotalCostUSD: 0.01, // Last call only.
-			NumTurns:     2,
+			MessageType:     "result",
+			UsageIsSnapshot: true,
+			TotalCostUSD:    0.01, // Last call only.
+			NumTurns:        2,
 		})
 		if costUSD, _, _, _, _ = tk.LiveStats(); costUSD != want {
 			t.Errorf("costUSD after result = %v, want %v (must keep accumulated value)", costUSD, want)
@@ -4704,5 +4779,26 @@ func TestGitSummaryLogRoundTrip(t *testing.T) {
 				t.Fatal("failure lost retained data or stale marker")
 			}
 		})
+	}
+}
+
+// BenchmarkTaskCacheWriteReplay measures restoring 1,000 cached requests across
+// 100 invocations, where cumulative accounting must retain cache lifetimes.
+func BenchmarkTaskCacheWriteReplay(b *testing.B) {
+	const model = "anthropic/claude-opus-4-6"
+	prices := quotausage.NewPricer(nil)
+	messages := make([]agent.Message, 0, 1100)
+	u := agent.Usage{InputTokens: 100, CacheCreationInputTokens: 1000, CacheReadInputTokens: 10_000, OutputTokens: 100, CacheTTLSeconds: 3600}
+	for range 100 {
+		for range 10 {
+			messages = append(messages, &agent.UsageMessage{Additive: true, PerCall: true, ReportedModel: model, Usage: u})
+		}
+		messages = append(messages, &agent.ResultMessage{MessageType: "result", UsageIsSnapshot: true, Usage: u})
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "cache replay"}, harness.Pi, model, "")
+		tk.Pricer = prices
+		tk.SeedTimeline(messages)
 	}
 }

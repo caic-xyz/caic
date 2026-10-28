@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -20,6 +22,28 @@ func TestCostTracker(t *testing.T) {
 		"gpt-6-sol":  {InputPerMTok: 2, CachedInputPerMTok: 0.2, OutputPerMTok: 10},
 		"gpt-6-luna": {InputPerMTok: 0.1},
 	}
+
+	t.Run("UnknownResultCacheDurationDoesNotDoubleCount", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.OpenCode, Model: "anthropic/claude-opus-4-6"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: c.Model, Usage: agent.Usage{CacheCreationInputTokens: 100_000, CacheTTLSeconds: 3600}}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{CacheCreationInputTokens: 100_000}}, at, pricer)
+		if !ok || math.Abs(cost.USD-1) > 1e-9 {
+			t.Fatalf("cost = %+v/%v, want 1", cost, ok)
+		}
+	})
+
+	t.Run("MixedCacheResultResidual", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.OpenCode, Model: "anthropic/claude-opus-4-6"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: c.Model, Usage: agent.Usage{CacheCreationInputTokens: 100_000, CacheTTLSeconds: 3600}}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{CacheCreationInputTokens: 300_000, CacheWrites: tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 100000}, {TTL: time.Hour, Tokens: 200000}}, CacheTTLSeconds: 300}}, at, pricer)
+		if !ok || math.Abs(cost.USD-2.625) > 1e-9 {
+			t.Fatalf("cost = %+v/%v, want 2.625", cost, ok)
+		}
+	})
 
 	t.Run("OpenAIRequestsAcrossHarnesses", func(t *testing.T) {
 		t.Parallel()

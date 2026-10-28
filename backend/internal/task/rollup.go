@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
@@ -51,18 +50,13 @@ func (DiscardRollup) Close() error { return nil }
 // rollupEvent translates one agent message into a rollup event. The bool is
 // false for messages the rollup does not count.
 //
-// Token sources are disjoint per harness so no call is counted twice:
-// Claude, Codex, and OpenCode put the authoritative turn total on the result
-// record (Claude's per-call assistant records arrive duplicated, and Codex's
-// result copies its accumulated per-call usage), while Pi's turn total
-// arrives as the turn-end UsageMessage and its result carries only the last
-// call's usage. Non-token fields (turns, durations, context window) are
-// counted from every record that reports them.
-func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model string, costUSD float64, h harness.Name) (usagedb.Event, bool) {
+// Adapters identify additive usage and context-only result snapshots so live
+// and restored rollups count the same token contributions for every harness.
+func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model string, costUSD float64) (usagedb.Event, bool) {
 	e := usagedb.Event{At: at, Replayed: replayed, Model: model, CostUSD: costUSD}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
-		if h == harness.Pi {
+		if m.Additive {
 			e.Delta.TokenBuckets = rollupTokens(m.Usage)
 		}
 		if !m.Source.IsChild() {
@@ -72,7 +66,7 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 		if m.Source.IsChild() {
 			return e, false
 		}
-		if h != harness.Pi {
+		if !m.UsageIsSnapshot {
 			e.Delta.TokenBuckets = rollupTokens(m.Usage)
 		}
 		e.Delta.Turns++
@@ -121,9 +115,7 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 }
 
 // rollupTokens splits one harness usage report into the disjoint token
-// buckets. Cache writes land in the one-hour bucket when the harness
-// reported a 3600s effective TTL, else in the five-minute bucket (unknown
-// TTLs included).
+// buckets, retaining mixed and unknown cache lifetimes.
 func rollupTokens(u agent.Usage) data.TokenBuckets {
 	b := data.TokenBuckets{
 		Input:     int64(u.InputTokens),
@@ -131,11 +123,7 @@ func rollupTokens(u agent.Usage) data.TokenBuckets {
 		CacheRead: int64(u.CacheReadInputTokens),
 		Reasoning: int64(u.ReasoningOutputTokens),
 	}
-	if u.CacheTTLSeconds >= 3600 {
-		b.CacheWrite1h = int64(u.CacheCreationInputTokens)
-	} else {
-		b.CacheWrite5m = int64(u.CacheCreationInputTokens)
-	}
+	b.CacheWrites = usagedb.CacheWritesToData(u.CacheWriteBuckets())
 	return b
 }
 

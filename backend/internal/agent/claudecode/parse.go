@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	"github.com/buger/jsonparser"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -24,9 +26,13 @@ func toAgentUsage(u *claudecode.MsgUsage) agent.Usage {
 	usage := agent.Usage{
 		InputTokens:              int(u.InputTokens),
 		OutputTokens:             int(u.OutputTokens),
-		CacheCreationInputTokens: int(u.CacheCreationInputTokens),
+		CacheCreationInputTokens: max(0, int(u.CacheCreationInputTokens)),
 		CacheReadInputTokens:     int(u.CacheReadInputTokens),
 	}
+	usage.CacheWrites = tokens.NewCacheWrites(int64(usage.CacheCreationInputTokens), 0,
+		tokens.CacheWrite{TTL: time.Hour, Tokens: int64(u.CacheCreation.Ephemeral1hInputTokens)},
+		tokens.CacheWrite{TTL: 5 * time.Minute, Tokens: int64(u.CacheCreation.Ephemeral5mInputTokens)})
+
 	// Claude Code normally gives a subscription's main conversation a one-hour
 	// cache. Named subagents have separate five-minute caches. A fork can read
 	// the parent's prefix on its first request, but its writes use the auxiliary

@@ -755,7 +755,7 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 	d := s.days[day]
 	out := DayRollup{
 		Day:                      day,
-		Tokens:                   d.TokenBuckets,
+		Tokens:                   d.Clone(),
 		Turns:                    d.Turns,
 		ErroredTurns:             d.ErroredTurns,
 		APIMs:                    d.APIMs,
@@ -1210,7 +1210,7 @@ func countTaskSets(sets map[string]map[string]struct{}) map[string]int {
 // newModelRollup exports one accumulated bucket as a model rollup.
 func newModelRollup(b *bucket) ModelRollup {
 	return ModelRollup{
-		Tokens:         b.TokenBuckets,
+		Tokens:         b.Clone(),
 		Turns:          b.Turns,
 		ErroredTurns:   b.ErroredTurns,
 		APIMs:          b.APIMs,
@@ -1230,7 +1230,7 @@ func newModelRollup(b *bucket) ModelRollup {
 // the harness-by-model cross buckets for that harness.
 func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) HarnessRollup {
 	out := HarnessRollup{
-		Tokens:         b.TokenBuckets,
+		Tokens:         b.Clone(),
 		Turns:          b.Turns,
 		ErroredTurns:   b.ErroredTurns,
 		APIMs:          b.APIMs,

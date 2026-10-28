@@ -7,21 +7,38 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 func TestModelPriceCost(t *testing.T) {
 	t.Parallel()
+	t.Run("ArbitraryCacheDuration", func(t *testing.T) {
+		t.Parallel()
+		p := ModelPrice{CacheWritePerMTok: 2, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 7200, PerMTok: 7}}, LongContext: LongContextPrice{InputTokensAbove: 100_000, InputMultiplier: 5, OutputMultiplier: 5}}
+		u := agent.Usage{CacheCreationInputTokens: 200_000, CacheWrites: tokens.CacheWrites{{Tokens: 100_000}, {TTL: 2 * time.Hour, Tokens: 100_000}}}
+		for range 2 {
+			if got := p.RequestCost(u); math.Abs(got-4.5) > 1e-9 {
+				t.Fatalf("tiered cost = %v, want 4.5", got)
+			}
+		}
+		if got := p.Cost(u); math.Abs(got-.9) > 1e-9 {
+			t.Fatalf("base price was mutated: %v", got)
+		}
+	})
+
 	t.Run("Tokens", func(t *testing.T) {
 		t.Parallel()
 		p := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}
 		u := agent.Usage{InputTokens: 1_000_000, OutputTokens: 2_000_000, CacheReadInputTokens: 3_000_000}
 		want := 0.15 + 2*0.50 + 3*0.03
-		if got := p.Cost(u); got != want {
+		if got := p.Cost(u); !reflect.DeepEqual(got, want) {
 			t.Errorf("Cost = %v, want %v", got, want)
 		}
 	})
@@ -30,15 +47,23 @@ func TestModelPriceCost(t *testing.T) {
 		p := ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}
 		u := agent.Usage{InputTokens: 100_000, CacheCreationInputTokens: 400_000}
 		want := 0.1*0.30 + 0.4*0.30
-		if got := p.Cost(u); got != want {
+		if got := p.Cost(u); !reflect.DeepEqual(got, want) {
 			t.Errorf("Cost = %v, want %v", got, want)
 		}
 	})
+	t.Run("DifferentDurationDoesNotInheritOneHourRate", func(t *testing.T) {
+		t.Parallel()
+		p := ModelPrice{CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}}
+		if got := p.Cost(agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 7200}); got != 5 {
+			t.Fatalf("cost = %v, want default rate 5", got)
+		}
+	})
+
 	t.Run("OneHourCacheWrite", func(t *testing.T) {
 		t.Parallel()
-		p := ModelPrice{InputPerMTok: 4, CacheWritePerMTok: 5, CacheWrite1hPerMTok: 8, CachedInputPerMTok: 0.2, OutputPerMTok: 20}
-		got := p.CostBuckets(1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000)
-		if want := 37.2; got != want {
+		p := ModelPrice{InputPerMTok: 4, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, CachedInputPerMTok: 0.2, OutputPerMTok: 20}
+		got := p.CostBuckets(1_000_000, tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 1_000_000}, {TTL: time.Hour, Tokens: 1_000_000}}, 1_000_000, 1_000_000)
+		if want := 37.2; !reflect.DeepEqual(got, want) {
 			t.Errorf("CostBuckets = %v, want %v", got, want)
 		}
 		usage := agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 3600}
@@ -132,6 +157,36 @@ func TestPricer(t *testing.T) {
 			}
 		}
 	})
+	t.Run("ClaudeRequestCost", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, model string
+			u           agent.Usage
+			want        float64
+		}{
+			{"Haiku threshold", "claude-haiku-5-5", agent.Usage{InputTokens: 100_000, OutputTokens: 1_000}, 0.0105},
+			{"Haiku above threshold", "claude-haiku-5-5", agent.Usage{InputTokens: 100_001, OutputTokens: 1_000}, 0.0525005},
+			{"Haiku cached threshold", "claude-haiku-5-5", agent.Usage{CacheReadInputTokens: 100_001, OutputTokens: 1_000}, 0.00750005},
+			{"Sonnet cache read", "claude-sonnet-5-5", agent.Usage{CacheReadInputTokens: 1_000_000}, 0.1},
+			{"Haiku mixed writes threshold", "claude-haiku-5-5", agent.Usage{CacheCreationInputTokens: 100_000, CacheWrites: tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 60000}, {TTL: time.Hour, Tokens: 40000}}, CacheTTLSeconds: 300}, 0.0155},
+			{"Haiku mixed writes above threshold", "claude-haiku-5-5", agent.Usage{CacheCreationInputTokens: 100_001, CacheWrites: tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 60001}, {TTL: time.Hour, Tokens: 40000}}, CacheTTLSeconds: 300}, 0.077500625},
+			{"Opus mixed writes", "claude-opus-4-6", agent.Usage{CacheCreationInputTokens: 1_000_000, CacheWrites: tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 600000}, {TTL: time.Hour, Tokens: 400000}}, CacheTTLSeconds: 300}, 7.75},
+			{"Opus one hour", "claude-opus-4-6", agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 3600}, 10},
+			{"Sonnet long context", "claude-sonnet-4-6", agent.Usage{InputTokens: 999_000, OutputTokens: 1_000}, 3.012},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderAnthropic, tc.model, time.Now())
+				if !ok {
+					t.Fatal("missing model price")
+				}
+				if got := p.RequestCost(tc.u); math.Abs(got-tc.want) > 1e-9 {
+					t.Fatalf("cost = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("RequestCost", func(t *testing.T) {
 		t.Parallel()
 		p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, "gpt-6.1-sol", time.Now())
@@ -156,7 +211,7 @@ func TestPricer(t *testing.T) {
 			})
 		}
 		// Aggregated history cannot establish the context length of a request.
-		if got := p.CostBuckets(300_000, 0, 0, 0, 1_000); got != 0.61 {
+		if got := p.CostBuckets(300_000, nil, 0, 1_000); got != 0.61 {
 			t.Errorf("aggregate cost = %v, want 0.61", got)
 		}
 	})
@@ -170,7 +225,7 @@ func TestPricer(t *testing.T) {
 			}
 			got, ok := p.ModelPrice(provider, model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
 			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
-			if !ok || got != want {
+			if !ok || !reflect.DeepEqual(got, want) {
 				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
 			}
 		}
@@ -215,7 +270,7 @@ func TestPricer(t *testing.T) {
 				t.Errorf("ModelPrice(%q) not priced", tc.model)
 				continue
 			}
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("%s price = %+v, want %+v", tc.model, got, tc.want)
 			}
 		}
@@ -266,7 +321,7 @@ func TestPricer(t *testing.T) {
 				if !ok {
 					t.Fatal("deepseek-flash not priced")
 				}
-				if got != tc.want {
+				if !reflect.DeepEqual(got, tc.want) {
 					t.Errorf("price = %+v, want %+v", got, tc.want)
 				}
 			})
@@ -282,7 +337,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.003, OutputPerMTok: 0.60}); got != want {
+		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.003, OutputPerMTok: 0.60}); !reflect.DeepEqual(got, want) {
 			t.Errorf("holiday peak-hour price = %+v, want off-peak %+v", got, want)
 		}
 		after := time.Date(2026, 9, 28, 2, 0, 0, 0, time.UTC)
@@ -290,7 +345,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}); got != want {
+		if want := (ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}); !reflect.DeepEqual(got, want) {
 			t.Errorf("post-holiday peak-hour price = %+v, want peak %+v", got, want)
 		}
 	})
@@ -325,14 +380,14 @@ func TestPricer(t *testing.T) {
 				t.Errorf("ModelPrice(%q) not priced", model)
 				continue
 			}
-			if got != want {
+			if !reflect.DeepEqual(got, want) {
 				t.Errorf("%s price = %+v, want %+v", model, got, want)
 			}
 		}
 		// The Codex harness reports prefixless model IDs; the task hints the
 		// provider.
 		got, ok := p.ModelPrice(agent.QuotaProviderCodex, "gpt-5.6-terra", time.Now())
-		if !ok || got != want {
+		if !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("hinted price = %+v/%v, want %+v", got, ok, want)
 		}
 		// Daybreak aliases price at the model they currently point to.
@@ -340,7 +395,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("daybreak blue not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}); got != want {
+		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}); !reflect.DeepEqual(got, want) {
 			t.Errorf("daybreak blue price = %+v, want %+v", got, want)
 		}
 	})
@@ -353,13 +408,13 @@ func TestPricer(t *testing.T) {
 			model    string
 			want     ModelPrice
 		}{
-			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWrite1hPerMTok: 8, OutputPerMTok: 20}},
+			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, OutputPerMTok: 20}},
 			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, OutputPerMTok: 50, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 		} {
 			got, ok := p.ModelPrice(tc.provider, tc.model, at)
-			if !ok || got != tc.want {
+			if !ok || !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("%s price = %+v/%v, want %+v", tc.model, got, ok, tc.want)
 			}
 		}
@@ -376,8 +431,8 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("anthropic model not priced")
 		}
-		want := ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}
-		if got != want {
+		want := ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 6}}, OutputPerMTok: 15.0}
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("price = %+v, want %+v", got, want)
 		}
 		// Dated model IDs share the family price.
@@ -385,7 +440,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("dated anthropic model not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}); got != want {
+		if want := (ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 10}}, OutputPerMTok: 25.0}); !reflect.DeepEqual(got, want) {
 			t.Errorf("price = %+v, want %+v", got, want)
 		}
 	})
@@ -404,7 +459,7 @@ func TestPricer(t *testing.T) {
 			t.Fatal("openrouter model not priced via fetcher")
 		}
 		want := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, CacheWritePerMTok: 0.15, OutputPerMTok: 0.50}
-		if price != want {
+		if !reflect.DeepEqual(price, want) {
 			t.Errorf("price = %+v, want %+v", price, want)
 		}
 		if hits != 1 {
@@ -420,7 +475,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}
-		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}); price != want {
+		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}); !reflect.DeepEqual(price, want) {
 			t.Errorf("price = %+v, want %+v", price, want)
 		}
 	})
@@ -438,7 +493,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}
-		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}); price != want {
+		if want := (ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}); !reflect.DeepEqual(price, want) {
 			t.Errorf("price = %+v, want %+v", price, want)
 		}
 	})
@@ -538,7 +593,7 @@ func TestParsePricingJSON(t *testing.T) {
 		if !ok {
 			t.Fatal("deepseek-v4-flash is not priced")
 		}
-		if want := tables.providers["deepseek"]["deepseek-flash"]; !slices.EqualFunc(tiers, want, func(a, b PriceTier) bool { return a.Price == b.Price }) {
+		if want := tables.providers["deepseek"]["deepseek-flash"]; !slices.EqualFunc(tiers, want, func(a, b PriceTier) bool { return reflect.DeepEqual(a.Price, b.Price) }) {
 			t.Errorf("deepseek-v4-flash tiers = %+v, want deepseek-flash %+v", tiers, want)
 		}
 	})
@@ -596,7 +651,7 @@ func TestModelPriceValidate(t *testing.T) {
 			name string
 			p    ModelPrice
 		}{
-			{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWrite1hPerMTok: 2.5, OutputPerMTok: 5}},
+			{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 2.5}}, OutputPerMTok: 5}},
 			// A free model prices every field at zero.
 			{"Free", ModelPrice{}},
 			{"LongContext", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
@@ -619,7 +674,7 @@ func TestModelPriceValidate(t *testing.T) {
 			{"Input", ModelPrice{InputPerMTok: -1}},
 			{"CachedInput", ModelPrice{CachedInputPerMTok: -0.01}},
 			{"CacheWrite", ModelPrice{CacheWritePerMTok: -0.01}},
-			{"CacheWrite1h", ModelPrice{CacheWrite1hPerMTok: -0.01}},
+			{"CacheWrite1h", ModelPrice{CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: -0.01}}}},
 			{"Output", ModelPrice{OutputPerMTok: -1}},
 			{"LongContextThreshold", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: -1, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{"LongContextInput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, OutputMultiplier: 1.5}}},

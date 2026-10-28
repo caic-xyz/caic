@@ -1,4 +1,4 @@
-// Shared types and message definitions for the agent abstraction layer.
+// Shared message types and duration-aware token accounting for the agent abstraction layer.
 
 package agent
 
@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	v2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -431,9 +434,6 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 }
 
 // UsageMessage reports token consumption and per-call or cumulative harness costs.
-//
-// Its JSON encoding is persisted in task logs. Keep JSON field names and their
-// meanings backward-compatible with logs written by released binaries.
 type UsageMessage struct {
 	MessageProvenance
 
@@ -455,6 +455,10 @@ type UsageMessage struct {
 	// harness-reported record already covers the same API call. The
 	// model stamp remains valid for per-model usage analytics.
 	ModelDerived bool `json:"model_derived,omitempty"`
+	// Additive marks a unique contribution to cumulative token totals. It is
+	// independent of PerCall, which controls request-scoped pricing. Adapters
+	// derive this from native events during both live parsing and replay.
+	Additive bool `json:"-"`
 }
 
 // Type implements Message.
@@ -487,8 +491,8 @@ type TodoItem struct {
 // (typically single-digit). The bulk of the input context lands in cache
 // fields.
 //
-// In ResultMessage these values are per-query (sum of all API calls in the turn).
-// Task.liveUsage sums them across all queries for cumulative totals.
+// Adapters mark whether UsageMessage contributes additional tokens and whether
+// ResultMessage repeats a context snapshot already covered by those reports.
 //
 // ReasoningOutputTokens is a subset of OutputTokens used for extended thinking
 // (Claude) or reasoning summaries (Codex). Zero when the harness does not report it.
@@ -496,9 +500,48 @@ type Usage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	ReasoningOutputTokens    int `json:"reasoning_output_tokens,omitempty"`
-	CacheTTLSeconds          int `json:"cache_ttl_seconds,omitempty"` // Effective cache TTL from last API call; 0 = unknown.
+	// CacheWrites partitions CacheCreationInputTokens by applied lifetime.
+	// A missing partition uses CacheTTLSeconds when reported, otherwise unknown TTL.
+	CacheWrites           tokens.CacheWrites `json:"-"`
+	CacheReadInputTokens  int                `json:"cache_read_input_tokens"`
+	ReasoningOutputTokens int                `json:"reasoning_output_tokens,omitempty"`
+	CacheTTLSeconds       int                `json:"cache_ttl_seconds,omitempty"` // First cache expiry from the last call; zero = unknown.
+}
+
+// CacheWriteBuckets returns disjoint write counts, retaining unknown lifetimes.
+func (u *Usage) CacheWriteBuckets() tokens.CacheWrites {
+	if len(u.CacheWrites) > 0 {
+		return u.CacheWrites
+	}
+	if u.CacheCreationInputTokens == 0 {
+		return nil
+	}
+	return tokens.CacheWrites{{TTL: time.Duration(u.CacheTTLSeconds) * time.Second, Tokens: int64(u.CacheCreationInputTokens)}}
+}
+
+// Equal compares usage reports, including their ordered duration buckets.
+func (u *Usage) Equal(v Usage) bool {
+	return u.InputTokens == v.InputTokens && u.OutputTokens == v.OutputTokens && u.CacheCreationInputTokens == v.CacheCreationInputTokens && u.CacheReadInputTokens == v.CacheReadInputTokens && u.ReasoningOutputTokens == v.ReasoningOutputTokens && u.CacheTTLSeconds == v.CacheTTLSeconds && slices.Equal(u.CacheWrites, v.CacheWrites)
+}
+
+// Clone returns usage whose duration buckets can be independently owned.
+func (u *Usage) Clone() Usage {
+	out := *u
+	out.CacheWrites = slices.Clone(u.CacheWrites)
+	return out
+}
+
+// Add accumulates token counts, preserving each cache duration across calls.
+// An aggregate has no single applied cache expiry.
+func (u *Usage) Add(v Usage) {
+	writes := u.CacheWriteBuckets().Add(v.CacheWriteBuckets())
+	u.InputTokens += v.InputTokens
+	u.OutputTokens += v.OutputTokens
+	u.CacheCreationInputTokens += v.CacheCreationInputTokens
+	u.CacheWrites = writes
+	u.CacheReadInputTokens += v.CacheReadInputTokens
+	u.ReasoningOutputTokens += v.ReasoningOutputTokens
+	u.CacheTTLSeconds = 0
 }
 
 // TurnCommitSnapshotMessage is a standalone durable record of the committed
@@ -522,14 +565,17 @@ func (m *TurnCommitSnapshotMessage) Type() string { return messageTypeTurnCommit
 type ResultMessage struct {
 	MessageProvenance
 
-	MessageType   string `json:"type"`
-	Subtype       string `json:"subtype"`
-	IsError       bool   `json:"is_error"`
-	DurationMs    int64  `json:"duration_ms"`
-	DurationAPIMs int64  `json:"duration_api_ms"`
-	NumTurns      int    `json:"num_turns"`
-	Result        string `json:"result"`
-	SessionID     string `json:"session_id"`
+	MessageType string `json:"type"`
+	Subtype     string `json:"subtype"`
+	IsError     bool   `json:"is_error"`
+	// UsageIsSnapshot excludes context usage already covered by additive reports
+	// from token totals. The adapter sets it when the native result repeats usage.
+	UsageIsSnapshot bool   `json:"-"`
+	DurationMs      int64  `json:"duration_ms"`
+	DurationAPIMs   int64  `json:"duration_api_ms"`
+	NumTurns        int    `json:"num_turns"`
+	Result          string `json:"result"`
+	SessionID       string `json:"session_id"`
 	// TotalCostUSD is the harness-reported value. Its scope varies by harness:
 	// Claude reports a cumulative session total, while Codex omits it.
 	// Derived per-turn costs belong to the task projection, not persisted logs.
@@ -1216,7 +1262,55 @@ func (m *ModelInfoMessage) Type() string { return messageTypeModelInfo }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
-type MetaResultMessage v3.MetaResultMessage
+type MetaResultMessage struct {
+	MessageProvenance
+
+	MessageType              string          `json:"t"`
+	State                    string          `json:"state"`
+	Title                    string          `json:"title,omitempty"`
+	CostUSD                  float64         `json:"cost_usd,omitempty"`
+	Duration                 float64         `json:"duration,omitempty"` // Seconds.
+	NumTurns                 int             `json:"num_turns,omitempty"`
+	InputTokens              int             `json:"input_tokens,omitempty"`
+	OutputTokens             int             `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int             `json:"cache_creation_input_tokens,omitempty"`
+	CacheWrites              []v3.CacheWrite `json:"cache_writes,omitempty"`
+	CacheReadInputTokens     int             `json:"cache_read_input_tokens,omitempty"`
+	ReasoningOutputTokens    int             `json:"reasoning_output_tokens,omitempty"`
+	DiffStat                 v3.DiffStat     `json:"diff_stat,omitzero"`
+	// TODO(2026-10-01): Make DiskUsedBytes an int64 value using -1 for
+	// unavailable measurements after legacy result records have aged out.
+	DiskUsedBytes  *int64             `json:"disk_used_bytes,omitempty"`
+	Error          string             `json:"error,omitempty"`
+	AgentResult    string             `json:"agent_result,omitempty"`
+	StartupFailure *v3.StartupFailure `json:"startup_failure,omitempty"`
+}
+
+// SetUsage copies token accounting into result metadata.
+func (m *MetaResultMessage) SetUsage(u Usage) {
+	m.InputTokens = u.InputTokens
+	m.OutputTokens = u.OutputTokens
+	m.CacheCreationInputTokens = u.CacheCreationInputTokens
+	m.CacheReadInputTokens = u.CacheReadInputTokens
+	m.ReasoningOutputTokens = u.ReasoningOutputTokens
+	writes := u.CacheWriteBuckets()
+	m.CacheWrites = make([]v3.CacheWrite, len(writes))
+	for i, b := range writes {
+		m.CacheWrites[i] = v3.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens}
+	}
+}
+
+// TokenUsage returns duration accounting from result metadata.
+func (m *MetaResultMessage) TokenUsage() Usage {
+	u := Usage{InputTokens: m.InputTokens, OutputTokens: m.OutputTokens, CacheCreationInputTokens: m.CacheCreationInputTokens, CacheReadInputTokens: m.CacheReadInputTokens, ReasoningOutputTokens: m.ReasoningOutputTokens}
+	if len(m.CacheWrites) > 0 {
+		u.CacheWrites = make(tokens.CacheWrites, len(m.CacheWrites))
+		for i, b := range m.CacheWrites {
+			u.CacheWrites[i] = tokens.CacheWrite{TTL: time.Duration(b.TTLSeconds) * time.Second, Tokens: b.Tokens}
+		}
+	}
+	return u
+}
 
 // Type implements Message.
 func (m *MetaResultMessage) Type() string { return messageTypeResult }

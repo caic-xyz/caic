@@ -153,7 +153,7 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 		CostUSD:      0.12,
 		TurnBoundary: true,
 		Delta: data.Delta{
-			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheRead: 30, Output: 40, Reasoning: 5},
+			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheWrites: []data.CacheWrite{{TTLSeconds: 7200, Tokens: 50}}, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
 			ToolCalls:    map[string]int{"Read": 2},
 			ToolTimings:  map[string]data.ToolTiming{"Read": {Count: 1, DurationMs: 1250}},
@@ -177,6 +177,9 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	day := got.Days[0]
 	if day.Tokens.Input != 10 || day.Tokens.CacheWrite1h != 20 || day.Tokens.CacheRead != 30 || day.Tokens.Output != 40 {
 		t.Errorf("tokens = %#v", day.Tokens)
+	}
+	if len(day.Tokens.CacheWrites) != 2 || day.Tokens.CacheWrites[1].TTLSeconds != 7200 || day.Tokens.CacheWrites[1].Tokens != 50 {
+		t.Fatalf("duration buckets = %+v", day.Tokens.CacheWrites)
 	}
 	if day.CostUSD != 0.12 || day.Turns != 1 {
 		t.Errorf("totals = cost %v, turns %d", day.CostUSD, day.Turns)

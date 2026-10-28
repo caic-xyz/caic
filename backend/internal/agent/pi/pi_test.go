@@ -503,3 +503,98 @@ func TestBackendResumeMismatch(t *testing.T) {
 		t.Fatalf("resume mismatch error=%v", err)
 	}
 }
+
+func TestToAgentUsage(t *testing.T) {
+	t.Parallel()
+	for _, hour := range []int64{20, 40} {
+		u := toAgentUsage(&genaipi.MessageUsage{CacheWrite: 30, CacheWrite1h: hour})
+		if u.CacheWriteBuckets().Total() != 30 {
+			t.Fatalf("total = %+v", u)
+		}
+		for _, b := range u.CacheWriteBuckets() {
+			if b.Tokens < 0 {
+				t.Fatalf("negative write bucket: %+v", u)
+			}
+		}
+	}
+}
+
+func TestWireUsageAccounting(t *testing.T) {
+	t.Parallel()
+	t.Run("native run boundaries", func(t *testing.T) {
+		t.Parallel()
+		const start = `{"type":"agent_start"}`
+		const turn = `{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10}}}`
+		const end = `{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10}}]}`
+		const summary = `{"type":"compaction_end","reason":"manual","result":{"usage":{"input":3,"totalTokens":3}}}`
+		const retry = `{"type":"agent_end","willRetry":true,"messages":[{"role":"assistant","usage":{"input":10}}]}`
+		for _, tc := range []struct {
+			name      string
+			events    []string
+			want      int
+			snapshots []bool
+		}{
+			{"request result is a snapshot", []string{start, turn, end}, 10, []bool{true}},
+			{"result-only invocation", []string{start, end}, 10, []bool{false}},
+			{"compaction within a run", []string{start, summary, turn, end}, 13, []bool{true}},
+			{"standalone compaction precedes a new run", []string{summary, start, end}, 13, []bool{false}},
+			{"retry run has independent result coverage", []string{start, turn, retry, start, end}, 20, []bool{false}},
+			{"result coverage resets", []string{start, turn, end, start, end}, 20, []bool{true, false}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				w := &piWireFormat{}
+				var total int
+				var snapshots []bool
+				for _, event := range tc.events {
+					messages, err := w.ParseMessage([]byte(event))
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, m := range messages {
+						switch m := m.(type) {
+						case *agent.UsageMessage:
+							if !m.Additive {
+								t.Fatalf("native usage is not additive: %+v", m)
+							}
+							total += m.Usage.InputTokens
+						case *agent.ResultMessage:
+							snapshots = append(snapshots, m.UsageIsSnapshot)
+							if !m.UsageIsSnapshot {
+								total += m.Usage.InputTokens
+							}
+						}
+					}
+				}
+				if total != tc.want || !slices.Equal(snapshots, tc.snapshots) {
+					t.Fatalf("total=%d snapshots=%v, want %d/%v", total, snapshots, tc.want, tc.snapshots)
+				}
+			})
+		}
+	})
+
+	t.Run("error result preserves coverage until agent_end", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{}
+		events := []string{
+			`{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10}}}`,
+			`{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"failed"}}`,
+			`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10}}]}`,
+		}
+		var snapshots []bool
+		for _, event := range events {
+			messages, err := w.ParseMessage([]byte(event))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range messages {
+				if result, ok := m.(*agent.ResultMessage); ok {
+					snapshots = append(snapshots, result.UsageIsSnapshot)
+				}
+			}
+		}
+		if !slices.Equal(snapshots, []bool{true, true}) {
+			t.Fatalf("snapshot markers = %v, want both results covered", snapshots)
+		}
+	})
+}

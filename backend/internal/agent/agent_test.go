@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -1251,6 +1253,41 @@ func TestRelayGenerationCommand(t *testing.T) {
 }
 
 func TestLogRecordParser(t *testing.T) {
+	t.Run("LegacyResultCacheWrites", func(t *testing.T) {
+		t.Parallel()
+		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+			parser, err := NewLogRecordParser(version, testParseFn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_creation_1h_input_tokens":100}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(record.Messages) != 1 {
+				t.Fatalf("messages = %+v", record.Messages)
+			}
+			m, ok := record.Messages[0].Message.(*MetaResultMessage)
+			want := []v3.CacheWrite{{Tokens: 10}, {TTLSeconds: 3600, Tokens: 100}}
+			if !ok || !reflect.DeepEqual(m.CacheWrites, want) {
+				t.Fatalf("v%d canonical cache writes = %+v", version, m)
+			}
+			encoded, err := MarshalLogMessage(version, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, expected any
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":0,"tokens":10},{"ttl_seconds":3600,"tokens":100}]}`), &expected); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, expected) {
+				t.Fatalf("v%d rewritten result = %s", version, encoded)
+			}
+		}
+	})
 	t.Run("ChildContextDoesNotInheritRootSnapshot", func(t *testing.T) {
 		t.Parallel()
 		p, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) {
@@ -2032,3 +2069,21 @@ func (w *countingWire) ParseMessage(line []byte) ([]Message, error) {
 func (*countingWire) WritePrompt(io.Writer, Prompt, LogSink) error { return nil }
 
 func (*countingWire) WriteCompact(io.Writer, string, LogSink) error { return nil }
+
+func TestUsage(t *testing.T) {
+	t.Parallel()
+	t.Run("Add", func(t *testing.T) {
+		t.Parallel()
+		u := Usage{CacheCreationInputTokens: 30, CacheTTLSeconds: 3600}
+		u.Add(Usage{InputTokens: 10, CacheCreationInputTokens: 100, CacheWrites: tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 80}, {TTL: time.Hour, Tokens: 20}}, CacheTTLSeconds: 300})
+		u.Add(Usage{OutputTokens: 5, ReasoningOutputTokens: 3, CacheReadInputTokens: 40, CacheCreationInputTokens: 10})
+		want := Usage{InputTokens: 10, OutputTokens: 5, ReasoningOutputTokens: 3, CacheReadInputTokens: 40, CacheCreationInputTokens: 140, CacheWrites: tokens.CacheWrites{{Tokens: 10}, {TTL: 5 * time.Minute, Tokens: 80}, {TTL: time.Hour, Tokens: 50}}}
+		if !u.Equal(want) {
+			t.Fatalf("aggregate = %+v, want %+v", u, want)
+		}
+		five, hour := u.CacheWriteBuckets().Count(5*time.Minute), u.CacheWriteBuckets().Count(time.Hour)
+		if five != 80 || hour != 50 {
+			t.Fatalf("write buckets = %d/%d, want 80/50", five, hour)
+		}
+	})
+}

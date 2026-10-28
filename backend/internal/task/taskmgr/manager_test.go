@@ -556,6 +556,18 @@ func TestUnionRuntimeIDs(t *testing.T) {
 
 func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Parallel()
+	t.Run("valid_result_accounting_coverage_is_not_native_identity", func(t *testing.T) {
+		t.Parallel()
+		contribution := &agent.UsageMessage{Additive: true, Usage: agent.Usage{InputTokens: 10}}
+		durable := &agent.ResultMessage{UsageIsSnapshot: true, Usage: agent.Usage{InputTokens: 10}}
+		relay := &agent.ResultMessage{Usage: agent.Usage{InputTokens: 10}}
+		after := &agent.TextMessage{Text: "after"}
+		merged := mergeLogAndRelayMessages(harness.Pi, []agent.Message{contribution, durable}, []agent.Message{relay, after})
+		if len(merged) != 3 || merged[1] != durable || merged[2] != after {
+			t.Fatalf("result snapshot duplicated across overlap: %+v", merged)
+		}
+	})
+
 	t.Run("valid_exact_overlap", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(

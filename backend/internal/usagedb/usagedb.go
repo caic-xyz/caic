@@ -14,6 +14,8 @@ package usagedb
 import (
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
 )
@@ -124,4 +126,28 @@ type DayRollup struct {
 	Skills                   map[string]int // distinct tasks that read the skill that day
 	Tools                    map[string]int
 	ToolTimings              map[string]data.ToolTiming
+}
+
+// CacheWritesToData projects runtime durations to independent persisted seconds.
+func CacheWritesToData(in tokens.CacheWrites) []data.CacheWrite {
+	if in == nil {
+		return nil
+	}
+	out := make([]data.CacheWrite, len(in))
+	for i, b := range in {
+		out[i] = data.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens}
+	}
+	return out
+}
+
+// CacheWritesFromData restores runtime durations, including unknown lifetimes.
+func CacheWritesFromData(in []data.CacheWrite) tokens.CacheWrites {
+	if in == nil {
+		return nil
+	}
+	out := make(tokens.CacheWrites, len(in))
+	for i, b := range in {
+		out[i] = tokens.CacheWrite{TTL: time.Duration(b.TTLSeconds) * time.Second, Tokens: b.Tokens}
+	}
+	return out
 }

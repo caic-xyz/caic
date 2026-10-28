@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	logv1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -111,7 +113,9 @@ func TestStore(t *testing.T) {
 			State:         StateWaiting,
 			DiskUsedBytes: new(int64(456)),
 			Usage: agent.Usage{
-				ReasoningOutputTokens: 123,
+				ReasoningOutputTokens:    123,
+				CacheCreationInputTokens: 110,
+				CacheWrites:              tokens.CacheWrites{{TTL: 0, Tokens: 10}, {TTL: time.Hour, Tokens: 100}},
 			},
 		}
 		if err := (&Store{}).WriteResultTrailer(b, "title", res); err != nil {
@@ -123,6 +127,11 @@ func TestStore(t *testing.T) {
 		}
 		if got.ReasoningOutputTokens != 123 {
 			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
+		}
+		var loaded LoadedTask
+		applyMetaResult(&loaded, &got)
+		if !loaded.LastTrailer.Usage.Equal(res.Usage) {
+			t.Fatalf("trailer usage = %+v, want %+v", loaded.LastTrailer.Usage, res.Usage)
 		}
 		if got.DiskUsedBytes == nil || *got.DiskUsedBytes != 456 {
 			t.Errorf("DiskUsedBytes = %v, want 456", got.DiskUsedBytes)
@@ -1048,7 +1057,7 @@ func TestStore(t *testing.T) {
 					if v2.RequestedModel != v1.RequestedModel || v2.AgentVersion != v1.AgentVersion {
 						t.Fatalf("native init metadata v2 = (%q, %q), v1 = (%q, %q)", v2.RequestedModel, v2.AgentVersion, v1.RequestedModel, v1.AgentVersion)
 					}
-					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns || v2.LastTrailer.Usage != v1.LastTrailer.Usage {
+					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns || !v2.LastTrailer.Usage.Equal(v1.LastTrailer.Usage) {
 						t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
 					}
 					if v2.Timeline != nil {

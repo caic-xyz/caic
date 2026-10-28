@@ -2004,11 +2004,21 @@ export interface UsageResp {
 }
 
 /**
+ * UsageDashboardCacheWrite counts cache writes for one applied lifetime.
+ * TTLSeconds zero means the provider did not report a lifetime.
+ */
+export interface UsageDashboardCacheWrite {
+  ttlSeconds: number /* int64 */;
+  tokens: number /* int64 */;
+}
+
+/**
  * UsageDashboardTokens separates usage totals by their prompt-cache bucket.
  * Input, cache writes, and cache reads are disjoint; their sum is the full
  * prompt context consumed by the model.
  */
 export interface UsageDashboardTokens {
+  cacheWrites?: UsageDashboardCacheWrite[];
   inputTokens: number /* int64 */;
   cacheWrite5mTokens: number /* int64 */;
   cacheWrite1hTokens: number /* int64 */;

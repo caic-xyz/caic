@@ -100,10 +100,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if m.PerCall || (!m.ModelDerived && m.ReportedModel != "") {
 			priced = c.priceRequest(m, at, pricer)
 			if priced {
-				c.pricedUsage.InputTokens += m.Usage.InputTokens
-				c.pricedUsage.CacheCreationInputTokens += m.Usage.CacheCreationInputTokens
-				c.pricedUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
-				c.pricedUsage.OutputTokens += m.Usage.OutputTokens
+				c.pricedUsage.Add(m.Usage)
 			}
 		} else if c.Harness == harness.Pi && !m.ModelDerived {
 			// Pi summary usage may aggregate multiple requests. Older records
@@ -127,12 +124,13 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			// Results sum every request, including child threads. Subtract calls
 			// already priced, then estimate only the remaining aggregate at base
 			// rates: legacy logs and missing events do not establish request sizes.
+			writes := m.Usage.CacheWriteBuckets().Subtract(c.pricedUsage.CacheWriteBuckets())
 			remaining := agent.Usage{
 				InputTokens:              max(0, m.Usage.InputTokens-c.pricedUsage.InputTokens),
-				CacheCreationInputTokens: max(0, m.Usage.CacheCreationInputTokens-c.pricedUsage.CacheCreationInputTokens),
+				CacheCreationInputTokens: int(writes.Total()),
 				CacheReadInputTokens:     max(0, m.Usage.CacheReadInputTokens-c.pricedUsage.CacheReadInputTokens),
 				OutputTokens:             max(0, m.Usage.OutputTokens-c.pricedUsage.OutputTokens),
-				CacheTTLSeconds:          m.Usage.CacheTTLSeconds,
+				CacheWrites:              writes,
 			}
 			if !c.priceUsage(remaining, at, pricer) {
 				if remaining.InputTokens > 0 || remaining.CacheCreationInputTokens > 0 || remaining.CacheReadInputTokens > 0 || remaining.OutputTokens > 0 {

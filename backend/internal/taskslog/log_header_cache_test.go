@@ -1,4 +1,4 @@
-// Tests historical v6 header-cache snapshots, exact disk shapes, and corrupt-cache recovery.
+// Tests versioned header-cache snapshots, exact disk shapes, and corrupt-cache recovery.
 
 package taskslog
 
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -103,7 +105,7 @@ const historicalHeaderTask = `{"task_id":"task","prompt":"prompt","title":"title
 
 func TestHeaderCache(t *testing.T) {
 	t.Parallel()
-	t.Run("HistoricalSnapshot", func(t *testing.T) {
+	t.Run("InvalidatesOlderSchemas", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "task.jsonl")
 		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
@@ -117,9 +119,28 @@ func TestHeaderCache(t *testing.T) {
 		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		if _, ok := readHeaderCache(path); ok {
+			t.Fatal("older cache must rebuild duration counts from log")
+		}
+	})
+
+	t.Run("HistoricalSnapshot", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"version":7,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), historicalHeaderTask)
+		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		got, ok := readHeaderCache(path)
 		if !ok {
-			t.Fatal("historical v6 cache missed")
+			t.Fatal("header cache missed")
 		}
 		if got.path != path || got.LastTrailer.Err == nil || got.LastTrailer.Err.Error() != "pin" {
 			t.Fatalf("restored snapshot = %+v", got)
@@ -154,9 +175,11 @@ func TestHeaderCache(t *testing.T) {
 		fixture.LastTrailer.DiffStat = v3.DiffStat{{Path: "binary", OldSize: 42, NewSize: 84}}
 		fixture.LastTrailer.DiskUsedBytes = new(int64(0))
 		fixture.LastTrailer.Usage.CacheTTLSeconds = 300
+		fixture.LastTrailer.Usage.CacheCreationInputTokens = 117
+		fixture.LastTrailer.Usage.CacheWrites = tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 10}, {TTL: time.Hour, Tokens: 100}, {TTL: 2 * time.Hour, Tokens: 7}}
 		fixture.LastTrailer.StartupFailure = &v3.StartupFailure{Harness: "claude", Phase: "start", Cause: "broken"}
 		raw := inventoryJSON(t, fixture)
-		for _, fragment := range []string{`"repos":[]`, `"cache_mounts":null`, `"mounts":[]`, `"oldSize":42`, `"newSize":84`, `"disk_used_bytes":0`, `"cache_ttl_seconds":300`, `"startup_failure":{"harness":"claude","phase":"start","cause":"broken"}`} {
+		for _, fragment := range []string{`"repos":[]`, `"cache_mounts":null`, `"mounts":[]`, `"oldSize":42`, `"newSize":84`, `"disk_used_bytes":0`, `"cache_ttl_seconds":300`, `"cache_writes":[{"ttl_seconds":300,"tokens":10},{"ttl_seconds":3600,"tokens":100},{"ttl_seconds":7200,"tokens":7}]`, `"startup_failure":{"harness":"claude","phase":"start","cause":"broken"}`} {
 			if !bytes.Contains(raw, []byte(fragment)) {
 				t.Fatalf("shape missing %s: %s", fragment, raw)
 			}
@@ -191,7 +214,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":7,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -220,7 +243,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":7,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}

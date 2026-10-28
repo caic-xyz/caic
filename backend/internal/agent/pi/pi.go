@@ -1,11 +1,11 @@
-// Package pi implements agent.Backend for Pi coding agent CLI in RPC mode.
+// Package pi implements Pi RPC sessions with adapter-owned token accounting.
 //
 // Pi uses a custom type-dispatched JSONL protocol over stdin/stdout (not
 // JSON-RPC 2.0). There is no handshake — the subprocess is immediately ready
 // to accept commands after launch.
 //
-// Per-session state is managed by piWireFormat, which wraps the stateless
-// parseMessage function. A fresh piWireFormat is created for every Start,
+// Per-session state is managed by piWireFormat around the stateless event
+// decoders. A fresh piWireFormat is created for every Start,
 // AttachRelay, and NewWire call so that counters reset between sessions and
 // replays.
 //
@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	"github.com/maruel/genai/providers/pi"
 
@@ -414,12 +416,13 @@ const maxTrackedToolOutputs = 1024
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	nativeSubagents nativeSubagents
-	mu              sync.Mutex
-	initSent        bool
-	sessionID       string
-	startTime       time.Time // When the prompt was written.
-	numTurns        int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	nativeSubagents  nativeSubagents
+	usageSinceResult bool // Parser-owned coverage of the native result snapshot.
+	mu               sync.Mutex
+	initSent         bool
+	sessionID        string
+	startTime        time.Time // When the prompt was written.
+	numTurns         int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
 	modelCtxWindow int64  // Model's context window from set_model response; 0 if unknown.
 	modelProvider  string // Provider of the active model, from message events; "" if unknown.
@@ -463,17 +466,44 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, log agent
 	return writeJSONLine(wr, cmd, log)
 }
 
-// ParseMessage wraps the stateless parseMessage with stateful interceptions:
-//
-//   - done: emits ResultMessage (future Pi versions).
-//   - agent_end: emits ResultMessage with usage + duration.
-//   - turn_end: emits UsageMessage from turn's assistant message.
+// ParseMessage adapts native Pi records and marks unique token contributions.
+// turn_end and compaction summaries are additive; a result repeats the last
+// call when those reports already account for it. This state is reconstructed
+// from native records during replay, including result-only histories.
 func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	typ, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
+	// Each agent_start begins a low-level run with its own agent_end messages.
+	// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/agent/src/agent-loop.ts
+	if typ == pi.EventAgentStart {
+		w.usageSinceResult = false
+	}
+	msgs, err := w.parseNativeMessage(typ, line)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *agent.UsageMessage:
+			m.Additive = true
+			if !m.Source.IsChild() {
+				w.usageSinceResult = true
+			}
+		case *agent.ResultMessage:
+			if !m.Source.IsChild() {
+				m.UsageIsSnapshot = w.usageSinceResult
+				if typ == pi.EventAgentEnd {
+					w.usageSinceResult = false
+				}
+			}
+		}
+	}
+	return msgs, nil
+}
 
+func (w *piWireFormat) parseNativeMessage(typ pi.EventType, line []byte) ([]agent.Message, error) {
 	// Restore model context window from synthetic caic_model_info line
 	// written during Start. This ensures replay/import correctly
 	// reports the model's real context window instead of falling back
@@ -732,9 +762,13 @@ func toAgentUsage(u *pi.MessageUsage) agent.Usage {
 		InputTokens:              int(u.Input),
 		OutputTokens:             int(u.Output),
 		CacheReadInputTokens:     int(u.CacheRead),
-		CacheCreationInputTokens: int(u.CacheWrite),
+		CacheCreationInputTokens: max(0, int(u.CacheWrite)),
 		ReasoningOutputTokens:    int(u.Reasoning),
 	}
+	if u.CacheWrite1h > 0 {
+		usage.CacheWrites = tokens.NewCacheWrites(int64(usage.CacheCreationInputTokens), 5*time.Minute, tokens.CacheWrite{TTL: time.Hour, Tokens: u.CacheWrite1h})
+	}
+
 	// Pi defines cacheWrite1h as the one-hour subset of cacheWrite and only
 	// Anthropic reports it. A positive remainder is therefore a mixed response
 	// whose first expiry is five minutes. Other providers do not report an

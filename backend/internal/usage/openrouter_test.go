@@ -5,6 +5,7 @@ package usage
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -71,7 +72,7 @@ func TestOpenRouterFetcherModelPrice(t *testing.T) {
 			t.Fatal("priced model not found")
 		}
 		want := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, CacheWritePerMTok: 0.15, OutputPerMTok: 0.50}
-		if price != want {
+		if !reflect.DeepEqual(price, want) {
 			t.Errorf("price = %+v, want %+v", price, want)
 		}
 

@@ -26,19 +26,31 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 
 func TestToAgentUsage(t *testing.T) {
 	t.Parallel()
+	t.Run("inconsistent breakdown", func(t *testing.T) {
+		t.Parallel()
+		u := toAgentUsage(&genclaudecode.MsgUsage{CacheCreationInputTokens: 20, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}})
+		if u.CacheWriteBuckets().Total() != 20 {
+			t.Fatalf("write buckets exceed total: %+v", u)
+		}
+	})
+
 	for _, tt := range []struct {
 		name string
 		in   genclaudecode.MsgUsage
 		want int
 	}{
 		{name: "unknown", in: genclaudecode.MsgUsage{CacheReadInputTokens: 100}},
-		{name: "five minute", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 100}}, want: 300},
-		{name: "one hour", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral1hInputTokens: 100}}, want: 3600},
-		{name: "mixed uses first expiry", in: genclaudecode.MsgUsage{CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}}, want: 300},
+		{name: "five minute", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 100, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 100}}, want: 300},
+		{name: "one hour", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 100, CacheCreation: genclaudecode.CacheCreation{Ephemeral1hInputTokens: 100}}, want: 3600},
+		{name: "mixed uses first expiry", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 110, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}}, want: 300},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := toAgentUsage(&tt.in).CacheTTLSeconds; got != tt.want {
+			usage := toAgentUsage(&tt.in)
+			if usage.CacheWriteBuckets().Count(time.Hour) != int64(tt.in.CacheCreation.Ephemeral1hInputTokens) {
+				t.Fatalf("one-hour tokens lost: %+v", usage)
+			}
+			if got := usage.CacheTTLSeconds; got != tt.want {
 				t.Errorf("CacheTTLSeconds = %d, want %d", got, tt.want)
 			}
 		})

@@ -1590,7 +1590,7 @@ func TestWireFormat(t *testing.T) {
 				t.Fatalf("event %d type = %T, want *agent.UsageMessage", i, msgs[0])
 			}
 			got := usage.Usage
-			if got != want[i] {
+			if !got.Equal(want[i]) {
 				t.Errorf("event %d usage = %+v, want %+v", i, got, want[i])
 			}
 		}
@@ -1620,7 +1620,7 @@ func TestWireFormat(t *testing.T) {
 				t.Fatal(err)
 			}
 			usage, ok := msgs[0].(*agent.UsageMessage)
-			if !ok || usage.Usage != (agent.Usage{}) {
+			if !ok || !usage.Usage.Equal(agent.Usage{}) {
 				t.Fatalf("live=%v snapshot = %#v, want zero usage", live, msgs[0])
 			}
 			if _, err := w.ParseMessage(turnStarted); err != nil {
@@ -1705,7 +1705,7 @@ func TestWireFormat(t *testing.T) {
 		w.mu.Lock()
 		reset := w.totalUsage
 		w.mu.Unlock()
-		if reset != (agent.Usage{}) {
+		if !reset.Equal(agent.Usage{}) {
 			t.Errorf("totalUsage not reset after ResultMessage: %+v", reset)
 		}
 	})

@@ -46,7 +46,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		if duration == 0 {
 			duration = result.Duration
 		}
-		if cumulativeUsage == (agent.Usage{}) {
+		if cumulativeUsage.Equal(agent.Usage{}) {
 			cumulativeUsage = result.Usage
 		}
 	}

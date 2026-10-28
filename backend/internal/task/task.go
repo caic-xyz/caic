@@ -568,7 +568,7 @@ func (t *Task) HasSession() bool {
 func (t *Task) LiveStats() (costUSD float64, numTurns int, duration time.Duration, cumulativeUsage, lastTurnUsage agent.Usage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.costTracker.TotalUSD, t.liveNumTurns, t.liveDuration, t.liveUsage, t.lastUsage
+	return t.costTracker.TotalUSD, t.liveNumTurns, t.liveDuration, t.liveUsage.Clone(), t.lastUsage.Clone()
 }
 
 // LastAgentResult returns the result text from the most recent ResultMessage,
@@ -995,6 +995,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			continue
 		}
 
+		t.observeUsageLocked(msg)
 		if exit, ok := msg.(*agent.ExitMessage); ok {
 			if exit.ExitCode != 0 && !cleanTurnComplete {
 				t.lastExitError = exit.ExitError()
@@ -1094,11 +1095,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			if len(m.DiffStat) > 0 {
 				t.diffCreated = true
 			}
-			t.liveUsage.InputTokens += m.Usage.InputTokens
-			t.liveUsage.OutputTokens += m.Usage.OutputTokens
-			t.liveUsage.CacheCreationInputTokens += m.Usage.CacheCreationInputTokens
-			t.liveUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
-			t.liveUsage.ReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 			t.lastUsage = m.Usage
 			t.liveNumTurns += m.NumTurns
 			t.liveDuration += time.Duration(m.DurationMs) * time.Millisecond
@@ -1751,9 +1747,9 @@ func (t *Task) snapshotLocked() Snapshot {
 		CostUSD:            t.costTracker.TotalUSD,
 		NumTurns:           t.liveNumTurns,
 		Duration:           t.liveDuration,
-		Usage:              t.liveUsage,
-		LastUsage:          t.lastUsage,
-		LastAPIUsage:       t.lastAPIUsage,
+		Usage:              t.liveUsage.Clone(),
+		LastUsage:          t.lastUsage.Clone(),
+		LastAPIUsage:       t.lastAPIUsage.Clone(),
 		CacheExpiresAt:     t.cacheExpiresAt,
 		DiffStat:           t.liveDiffStat,
 		RepoStates:         t.liveRepoStates,
@@ -1816,6 +1812,21 @@ func (t *Task) setLiveRepoStatesLocked(states []v3.RepoState) {
 		return
 	}
 	t.liveRepoStates = states
+}
+
+// observeUsageLocked accumulates root token contributions while leaving
+// context snapshots available independently of accounting.
+func (t *Task) observeUsageLocked(msg agent.Message) {
+	switch m := msg.(type) {
+	case *agent.UsageMessage:
+		if m.Additive {
+			t.liveUsage.Add(m.Usage)
+		}
+	case *agent.ResultMessage:
+		if !m.UsageIsSnapshot {
+			t.liveUsage.Add(m.Usage)
+		}
+	}
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -2074,11 +2085,6 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 				t.setLiveDiffStatLocked(rm.DiffStat)
 			}
 		}
-		t.liveUsage.InputTokens += rm.Usage.InputTokens
-		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
-		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
-		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
-		t.liveUsage.ReasoningOutputTokens += rm.Usage.ReasoningOutputTokens
 		t.lastUsage = rm.Usage
 		t.liveNumTurns += rm.NumTurns
 		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
@@ -2096,6 +2102,9 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		if t.state == taskslog.StateRunning || t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking {
 			t.setState(t.settledTurnStateLocked())
 		}
+	}
+	if !child {
+		t.observeUsageLocked(m)
 	}
 	t.costTracker.Observe(m, at, t.Pricer)
 	// Forward the folded message to the usage rollup with the cost snapshot
@@ -2326,7 +2335,7 @@ func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.T
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
-	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.costTracker.TotalUSD, t.Harness)
+	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.costTracker.TotalUSD)
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}

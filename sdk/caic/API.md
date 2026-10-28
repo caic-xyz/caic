@@ -2172,6 +2172,16 @@ UsageResp is the response for GET /api/caic/v1/usage.
 | `providers` | `ProviderQuota[]` |  |  |
 | `local` | `LocalUsage` |  | yes |
 
+### UsageDashboardCacheWrite
+
+UsageDashboardCacheWrite counts cache writes for one applied lifetime.
+TTLSeconds zero means the provider did not report a lifetime.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `ttlSeconds` | `int64` |  | yes |
+| `tokens` | `int64` |  | yes |
+
 ### UsageDashboardTokens
 
 UsageDashboardTokens separates usage totals by their prompt-cache bucket.
@@ -2180,6 +2190,7 @@ prompt context consumed by the model.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `cacheWrites` | `UsageDashboardCacheWrite[]` |  |  |
 | `inputTokens` | `int64` |  | yes |
 | `cacheWrite5mTokens` | `int64` |  | yes |
 | `cacheWrite1hTokens` | `int64` |  | yes |

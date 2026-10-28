@@ -132,7 +132,7 @@ func TestObserve(t *testing.T) {
 		}
 		// Both events accumulate into one row; the 1h cache write lands in
 		// the 1h bucket.
-		if row.Input != 15 || row.CacheWrite1h != 400 || row.CacheRead != 900 {
+		if row.Input != 15 || row.CacheWriteCount(time.Hour) != 400 || row.CacheRead != 900 {
 			t.Errorf("input buckets = %+v", row)
 		}
 		if row.Output != 70 || row.Turns != 1 || row.APIMs != 1500 || row.WallMs != 4000 {

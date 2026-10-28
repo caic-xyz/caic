@@ -305,7 +305,7 @@ func TestWireFormat(t *testing.T) {
 			if len(turns) != 2 || turns[0].Usage.InputTokens != 100 || turns[0].Usage.CacheReadInputTokens != 60 || turns[0].Usage.OutputTokens != 20 || turns[0].DurationMs != 0 || turns[0].NumTurns != 0 {
 				t.Fatalf("turns = %+v", turns)
 			}
-			if !turns[1].IsError || !strings.Contains(turns[1].Result, "quota exhausted") || turns[1].Usage != (agent.Usage{}) {
+			if !turns[1].IsError || !strings.Contains(turns[1].Result, "quota exhausted") || !turns[1].Usage.Equal(agent.Usage{}) {
 				t.Fatalf("second result = %+v", turns[1])
 			}
 		})
@@ -379,7 +379,7 @@ func TestWireFormat(t *testing.T) {
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("fresh result = %v, %v", msgs, err)
 			}
-			if m, ok := msgs[0].(*agent.ResultMessage); !ok || m.Usage != (agent.Usage{}) {
+			if m, ok := msgs[0].(*agent.ResultMessage); !ok || !m.Usage.Equal(agent.Usage{}) {
 				t.Fatalf("fresh result = %v", msgs)
 			}
 		})

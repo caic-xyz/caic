@@ -2828,12 +2828,20 @@ data class LocalUsage(val windows: List<LocalWindow>)
 data class UsageResp(val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
 /**
+ * UsageDashboardCacheWrite counts cache writes for one applied lifetime.
+ * TTLSeconds zero means the provider did not report a lifetime.
+ */
+@Serializable
+data class UsageDashboardCacheWrite(val ttlSeconds: Long, val tokens: Long)
+
+/**
  * UsageDashboardTokens separates usage totals by their prompt-cache bucket.
  * Input, cache writes, and cache reads are disjoint; their sum is the full
  * prompt context consumed by the model.
  */
 @Serializable
 data class UsageDashboardTokens(
+    val cacheWrites: List<UsageDashboardCacheWrite>? = null,
     val inputTokens: Long,
     val cacheWrite5mTokens: Long,
     val cacheWrite1hTokens: Long,

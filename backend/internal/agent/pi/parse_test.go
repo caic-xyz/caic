@@ -771,6 +771,9 @@ func TestCaicModelInfo(t *testing.T) {
 		if um.Usage.ReasoningOutputTokens != 20 {
 			t.Errorf("ReasoningOutputTokens = %d, want 20", um.Usage.ReasoningOutputTokens)
 		}
+		if um.Usage.CacheWriteBuckets().Count(time.Hour) != 20 {
+			t.Fatalf("one-hour tokens lost: %+v", um.Usage)
+		}
 		if um.Usage.CacheTTLSeconds != 300 {
 			t.Errorf("CacheTTLSeconds = %d, want 300 for mixed five-minute and one-hour writes", um.Usage.CacheTTLSeconds)
 		}

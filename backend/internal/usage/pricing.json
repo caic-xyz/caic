@@ -3,19 +3,25 @@
     {
       "provider": "anthropic",
       "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "retrieved": "2026-09-21",
+      "retrieved": "2026-10-27",
       "models": [
         {
           "id": "claude-fable-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 1.0,
                 "cache_write_per_mtok": 12.5,
-                "output_per_mtok": 50.0
+                "output_per_mtok": 50.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 20.0
+                  }
+                ]
               }
             }
           ]
@@ -23,14 +29,20 @@
         {
           "id": "claude-fable-5-1",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 0.25,
                 "cache_write_per_mtok": 12.5,
-                "output_per_mtok": 50.0
+                "output_per_mtok": 50.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 20.0
+                  }
+                ]
               }
             }
           ]
@@ -38,14 +50,46 @@
         {
           "id": "claude-haiku-4-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 1.0,
                 "cached_input_per_mtok": 0.1,
                 "cache_write_per_mtok": 1.25,
-                "output_per_mtok": 5.0
+                "output_per_mtok": 5.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 2.0
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-haiku-5-5",
+          "source": "https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+          "retrieved": "2026-10-27",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.1,
+                "cached_input_per_mtok": 0.01,
+                "cache_write_per_mtok": 0.125,
+                "output_per_mtok": 0.5,
+                "long_context": {
+                  "input_tokens_above": 100000,
+                  "input_multiplier": 5,
+                  "output_multiplier": 5
+                },
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 0.2
+                  }
+                ]
               }
             }
           ]
@@ -53,14 +97,20 @@
         {
           "id": "claude-mythos-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 1.0,
                 "cache_write_per_mtok": 12.5,
-                "output_per_mtok": 50.0
+                "output_per_mtok": 50.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 20.0
+                  }
+                ]
               }
             }
           ]
@@ -68,14 +118,20 @@
         {
           "id": "claude-mythos-5-1",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 0.25,
                 "cache_write_per_mtok": 12.5,
-                "output_per_mtok": 50.0
+                "output_per_mtok": 50.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 20.0
+                  }
+                ]
               }
             }
           ]
@@ -83,14 +139,20 @@
         {
           "id": "claude-opus-4-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 5.0,
                 "cached_input_per_mtok": 0.5,
                 "cache_write_per_mtok": 6.25,
-                "output_per_mtok": 25.0
+                "output_per_mtok": 25.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 10.0
+                  }
+                ]
               }
             }
           ]
@@ -98,14 +160,20 @@
         {
           "id": "claude-opus-4-6",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 5.0,
                 "cached_input_per_mtok": 0.5,
                 "cache_write_per_mtok": 6.25,
-                "output_per_mtok": 25.0
+                "output_per_mtok": 25.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 10.0
+                  }
+                ]
               }
             }
           ]
@@ -113,14 +181,20 @@
         {
           "id": "claude-opus-4-7",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 5.0,
                 "cached_input_per_mtok": 0.5,
                 "cache_write_per_mtok": 6.25,
-                "output_per_mtok": 25.0
+                "output_per_mtok": 25.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 10.0
+                  }
+                ]
               }
             }
           ]
@@ -128,14 +202,20 @@
         {
           "id": "claude-opus-4-8",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 5.0,
                 "cached_input_per_mtok": 0.5,
                 "cache_write_per_mtok": 6.25,
-                "output_per_mtok": 25.0
+                "output_per_mtok": 25.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 10.0
+                  }
+                ]
               }
             }
           ]
@@ -143,14 +223,20 @@
         {
           "id": "claude-opus-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 5.0,
                 "cached_input_per_mtok": 0.5,
                 "cache_write_per_mtok": 6.25,
-                "output_per_mtok": 25.0
+                "output_per_mtok": 25.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 10.0
+                  }
+                ]
               }
             }
           ]
@@ -158,15 +244,20 @@
         {
           "id": "claude-opus-5-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 4.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 5.0,
-                "cache_write_1h_per_mtok": 8.0,
-                "output_per_mtok": 20.0
+                "output_per_mtok": 20.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 8.0
+                  }
+                ]
               }
             }
           ]
@@ -174,14 +265,20 @@
         {
           "id": "claude-sonnet-4-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 3.0,
                 "cached_input_per_mtok": 0.3,
                 "cache_write_per_mtok": 3.75,
-                "output_per_mtok": 15.0
+                "output_per_mtok": 15.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 6.0
+                  }
+                ]
               }
             }
           ]
@@ -189,14 +286,20 @@
         {
           "id": "claude-sonnet-4-6",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 3.0,
                 "cached_input_per_mtok": 0.3,
                 "cache_write_per_mtok": 3.75,
-                "output_per_mtok": 15.0
+                "output_per_mtok": 15.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 6.0
+                  }
+                ]
               }
             }
           ]
@@ -204,14 +307,41 @@
         {
           "id": "claude-sonnet-5",
           "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-          "retrieved": "2026-09-21",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 2.5,
-                "output_per_mtok": 10.0
+                "output_per_mtok": 10.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 4.0
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "source": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+          "retrieved": "2026-10-27",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.1,
+                "cache_write_per_mtok": 2.5,
+                "output_per_mtok": 10.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 3600,
+                    "per_mtok": 4.0
+                  }
+                ]
               }
             }
           ]

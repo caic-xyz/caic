@@ -806,17 +806,11 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 		lt.Title = mr.Title
 	}
 	lt.LastTrailer = &Result{
-		State:    lt.State,
-		CostUSD:  mr.CostUSD,
-		Duration: time.Duration(mr.Duration * float64(time.Second)),
-		NumTurns: mr.NumTurns,
-		Usage: agent.Usage{
-			InputTokens:              mr.InputTokens,
-			OutputTokens:             mr.OutputTokens,
-			CacheCreationInputTokens: mr.CacheCreationInputTokens,
-			CacheReadInputTokens:     mr.CacheReadInputTokens,
-			ReasoningOutputTokens:    mr.ReasoningOutputTokens,
-		},
+		State:          lt.State,
+		CostUSD:        mr.CostUSD,
+		Duration:       time.Duration(mr.Duration * float64(time.Second)),
+		NumTurns:       mr.NumTurns,
+		Usage:          mr.TokenUsage(),
 		DiffStat:       mr.DiffStat,
 		DiskUsedBytes:  mr.DiskUsedBytes,
 		AgentResult:    mr.AgentResult,

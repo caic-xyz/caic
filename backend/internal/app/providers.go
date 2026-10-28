@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
@@ -54,7 +55,7 @@ func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.
 	if !ok {
 		return 0, false
 	}
-	return price.CostBuckets(row.Input, row.CacheWrite5m, row.CacheWrite1h, row.CacheRead, row.Output), true
+	return price.CostBuckets(row.Input, usagedb.CacheWritesFromData(row.Writes()), row.CacheRead, row.Output), true
 }
 
 func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {

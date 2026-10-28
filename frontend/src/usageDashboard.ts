@@ -88,6 +88,7 @@ function dayView(day: UsageDashboardDay, drilldown: UsageDrilldown | null): DayV
 function emptyTokens(): UsageDashboardTokens {
   return {
     inputTokens: 0,
+    cacheWrites: [],
     cacheWrite5mTokens: 0,
     cacheWrite1hTokens: 0,
     cacheReadTokens: 0,
@@ -97,6 +98,13 @@ function emptyTokens(): UsageDashboardTokens {
 }
 
 function addTokens(total: UsageDashboardTokens, tokens: UsageDashboardTokens): void {
+  const buckets = cacheWriteBuckets(total);
+  for (const b of cacheWriteBuckets(tokens)) {
+    const existing = buckets.find((v) => v.ttlSeconds === b.ttlSeconds);
+    if (existing) existing.tokens += b.tokens;
+    else buckets.push({ ...b });
+  }
+  total.cacheWrites = buckets;
   total.inputTokens += tokens.inputTokens;
   total.cacheWrite5mTokens += tokens.cacheWrite5mTokens;
   total.cacheWrite1hTokens += tokens.cacheWrite1hTokens;
@@ -105,14 +113,23 @@ function addTokens(total: UsageDashboardTokens, tokens: UsageDashboardTokens): v
   total.reasoningTokens += tokens.reasoningTokens;
 }
 
+// cacheWriteBuckets also accepts dashboards served by versions without durations.
+function cacheWriteBuckets(tokens: UsageDashboardTokens): { ttlSeconds: number; tokens: number }[] {
+  if (tokens.cacheWrites) return tokens.cacheWrites.map((b) => ({ ...b }));
+  return [
+    { ttlSeconds: 300, tokens: tokens.cacheWrite5mTokens },
+    { ttlSeconds: 3600, tokens: tokens.cacheWrite1hTokens },
+  ];
+}
+
+function cacheWriteTotal(tokens: UsageDashboardTokens): number {
+  return tokens.cacheWrites
+    ? tokens.cacheWrites.reduce((sum, b) => sum + b.tokens, 0)
+    : tokens.cacheWrite5mTokens + tokens.cacheWrite1hTokens;
+}
+
 function tokenTotal(tokens: UsageDashboardTokens): number {
-  return (
-    tokens.inputTokens +
-    tokens.cacheWrite5mTokens +
-    tokens.cacheWrite1hTokens +
-    tokens.cacheReadTokens +
-    tokens.outputTokens
-  );
+  return tokens.inputTokens + cacheWriteTotal(tokens) + tokens.cacheReadTokens + tokens.outputTokens;
 }
 
 function counts(entries: readonly UsageDashboardCount[]): UsageDashboardCount[] {
@@ -283,6 +300,6 @@ export function usageDailySeries(
 
 // usageCacheHitRate returns cache reads as a share of all input context.
 export function usageCacheHitRate(tokens: UsageDashboardTokens): number {
-  const input = tokens.inputTokens + tokens.cacheWrite5mTokens + tokens.cacheWrite1hTokens + tokens.cacheReadTokens;
+  const input = tokens.inputTokens + cacheWriteTotal(tokens) + tokens.cacheReadTokens;
   return input === 0 ? 0 : tokens.cacheReadTokens / input;
 }

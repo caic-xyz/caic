@@ -4,6 +4,7 @@ package apiconv
 
 import (
 	"slices"
+	"time"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
@@ -56,10 +57,16 @@ func usageDashboardToolTimings(timings map[string]data.ToolTiming) []v1.UsageDas
 }
 
 func usageDashboardTokens(tokens data.TokenBuckets) v1.UsageDashboardTokens {
+	writes := tokens.Writes()
+	buckets := make([]v1.UsageDashboardCacheWrite, 0, len(writes))
+	for _, b := range writes {
+		buckets = append(buckets, v1.UsageDashboardCacheWrite{TTLSeconds: b.TTLSeconds, Tokens: b.Tokens})
+	}
 	return v1.UsageDashboardTokens{
 		Input:        tokens.Input,
-		CacheWrite5m: tokens.CacheWrite5m,
-		CacheWrite1h: tokens.CacheWrite1h,
+		CacheWrites:  buckets,
+		CacheWrite5m: tokens.CacheWriteCount(5*time.Minute) + tokens.CacheWriteCount(0),
+		CacheWrite1h: tokens.CacheWriteCount(time.Hour),
 		CacheRead:    tokens.CacheRead,
 		Output:       tokens.Output,
 		Reasoning:    tokens.Reasoning,

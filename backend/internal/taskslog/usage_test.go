@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
@@ -29,6 +30,60 @@ import (
 
 func TestStoreUsageRows(t *testing.T) {
 	t.Parallel()
+
+	t.Run("Pi contributions survive native replay", func(t *testing.T) {
+		t.Parallel()
+		_, logStore, rollup := newUsageStores(t)
+		if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		events := []string{
+			`{"type":"agent_start"}`,
+			`{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10}}}`,
+			`{"type":"compaction_end","reason":"manual","result":{"usage":{"input":3,"totalTokens":3}}}`,
+			`{"type":"turn_end","message":{"role":"assistant","usage":{"input":20,"totalTokens":20}}}`,
+			`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10}},{"role":"assistant","usage":{"input":20}}]}`,
+			`{"type":"agent_start"}`,
+			`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":7}}]}`,
+		}
+		for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+			header, err := agent.MarshalLogMessage(version, &agent.MetaMessage{MessageType: "caic_meta", Version: int(version), Harness: string(harness.Pi), Prompt: "usage", StartedAt: usageAt(5), RequestedModel: "anthropic/claude-opus-4-6"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := header
+			raw = append(raw, '\n')
+			for _, event := range events {
+				raw = append(raw, fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`+"\n", usageAt(5).Unix(), event)...)
+			}
+			if err := os.WriteFile(filepath.Join(logStore.LogDir, ksid.NewID().String()+".jsonl"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), agent.Backends{harness.Pi: pi.New("pi", nil)})); err != nil {
+			t.Fatal(err)
+		}
+		days := rollup.Days()
+		if len(days) != 1 || days[0].Tokens.Input != 80 || days[0].Turns != 4 || days[0].Compactions != 2 {
+			t.Fatalf("restored accounting = %+v", days)
+		}
+	})
+
+	t.Run("reconstructs mixed cache duration counts", func(t *testing.T) {
+		t.Parallel()
+		_, logStore, rollup := newUsageStores(t)
+		for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), version, usageAt(5), usageAt(5),
+				`{"type":"result","num_turns":1,"usage":{"cache_creation_input_tokens":110,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":100}}}`)
+		}
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+			t.Fatal(err)
+		}
+		days := rollup.Days()
+		if len(days) != 1 || days[0].Tokens.CacheWriteCount(5*time.Minute) != 20 || days[0].Tokens.CacheWriteCount(time.Hour) != 200 {
+			t.Fatalf("mixed cache tokens = %+v", days)
+		}
+	})
 
 	t.Run("reconstructs v2 and v3 by producer day and skips v1", func(t *testing.T) {
 		t.Parallel()

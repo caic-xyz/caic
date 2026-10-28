@@ -322,6 +322,7 @@ func logV2MetaResultMessageToData(m *MetaResultMessage, token logRecordType) v2.
 		InputTokens:              m.InputTokens,
 		OutputTokens:             m.OutputTokens,
 		CacheCreationInputTokens: m.CacheCreationInputTokens,
+		CacheWrites:              logV2CacheWritesToData(m.CacheWrites),
 		CacheReadInputTokens:     m.CacheReadInputTokens,
 		ReasoningOutputTokens:    m.ReasoningOutputTokens,
 		DiffStat:                 logV2DiffFileStatToData(m.DiffStat),
@@ -343,6 +344,7 @@ func logV2MetaResultMessageFromData(m *v2.MetaResultMessage) MetaResultMessage {
 		InputTokens:              m.InputTokens,
 		OutputTokens:             m.OutputTokens,
 		CacheCreationInputTokens: m.CacheCreationInputTokens,
+		CacheWrites:              logCacheWritesFromData(m.CacheCreationInputTokens, m.CacheCreation1hInputTokens, logV2CacheWritesFromData(m.CacheWrites)),
 		CacheReadInputTokens:     m.CacheReadInputTokens,
 		ReasoningOutputTokens:    m.ReasoningOutputTokens,
 		DiffStat:                 logV2DiffFileStatFromData(m.DiffStat),
@@ -810,8 +812,7 @@ func marshalV3Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *MetaResultMessage:
-		r := v3.MetaResultMessage(*m)
-		r.MessageType = string(token)
+		r := logV3MetaResultMessageToData(m, token)
 		record = r
 	case *MetaPRMessage:
 		r := v3.MetaPRMessage(*m)
@@ -1086,7 +1087,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = MetaResultMessage(record)
+			*out = logV3MetaResultMessageFromData(&record)
 		case *MetaPRMessage:
 			record, err := decodeLogData[v3.MetaPRMessage](line, false)
 			if err != nil {
@@ -1118,4 +1119,88 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 		return version.Validate()
 	}
 	return nil
+}
+
+func logV2CacheWritesToData(in []v3.CacheWrite) []v2.CacheWrite {
+	if in == nil {
+		return nil
+	}
+	out := make([]v2.CacheWrite, len(in))
+	for i, b := range in {
+		out[i] = v2.CacheWrite(b)
+	}
+	return out
+}
+func logV2CacheWritesFromData(in []v2.CacheWrite) []v3.CacheWrite {
+	if in == nil {
+		return nil
+	}
+	out := make([]v3.CacheWrite, len(in))
+	for i, b := range in {
+		out[i] = v3.CacheWrite(b)
+	}
+	return out
+}
+
+func logV3MetaResultMessageToData(m *MetaResultMessage, token logRecordType) v3.MetaResultMessage {
+	return v3.MetaResultMessage{
+		MessageProvenance:        m.MessageProvenance,
+		MessageType:              string(token),
+		State:                    m.State,
+		Title:                    m.Title,
+		CostUSD:                  m.CostUSD,
+		Duration:                 m.Duration,
+		NumTurns:                 m.NumTurns,
+		InputTokens:              m.InputTokens,
+		OutputTokens:             m.OutputTokens,
+		CacheCreationInputTokens: m.CacheCreationInputTokens,
+		CacheWrites:              m.CacheWrites,
+		CacheReadInputTokens:     m.CacheReadInputTokens,
+		ReasoningOutputTokens:    m.ReasoningOutputTokens,
+		DiffStat:                 m.DiffStat,
+		DiskUsedBytes:            m.DiskUsedBytes,
+		Error:                    m.Error,
+		AgentResult:              m.AgentResult,
+		StartupFailure:           m.StartupFailure,
+	}
+}
+
+func logV3MetaResultMessageFromData(m *v3.MetaResultMessage) MetaResultMessage {
+	return MetaResultMessage{
+		MessageProvenance:        m.MessageProvenance,
+		MessageType:              m.MessageType,
+		State:                    m.State,
+		Title:                    m.Title,
+		CostUSD:                  m.CostUSD,
+		Duration:                 m.Duration,
+		NumTurns:                 m.NumTurns,
+		InputTokens:              m.InputTokens,
+		OutputTokens:             m.OutputTokens,
+		CacheCreationInputTokens: m.CacheCreationInputTokens,
+		CacheWrites:              logCacheWritesFromData(m.CacheCreationInputTokens, m.CacheCreation1hInputTokens, m.CacheWrites),
+		CacheReadInputTokens:     m.CacheReadInputTokens,
+		ReasoningOutputTokens:    m.ReasoningOutputTokens,
+		DiffStat:                 m.DiffStat,
+		DiskUsedBytes:            m.DiskUsedBytes,
+		Error:                    m.Error,
+		AgentResult:              m.AgentResult,
+		StartupFailure:           m.StartupFailure,
+	}
+}
+
+// logCacheWritesFromData translates the stored one-hour subset at the decoding
+// boundary. Explicit duration buckets take precedence over that subset.
+func logCacheWritesFromData(total, oneHour int, buckets []v3.CacheWrite) []v3.CacheWrite {
+	if len(buckets) > 0 || oneHour <= 0 {
+		return buckets
+	}
+	oneHour = min(max(0, total), oneHour)
+	out := make([]v3.CacheWrite, 0, 2)
+	if remaining := total - oneHour; remaining > 0 {
+		out = append(out, v3.CacheWrite{Tokens: int64(remaining)})
+	}
+	if oneHour > 0 {
+		out = append(out, v3.CacheWrite{TTLSeconds: 3600, Tokens: int64(oneHour)})
+	}
+	return out
 }

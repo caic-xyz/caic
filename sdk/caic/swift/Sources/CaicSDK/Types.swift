@@ -2152,10 +2152,18 @@ public struct UsageResp: Codable {
     public let local: LocalUsage
 }
 
+/// UsageDashboardCacheWrite counts cache writes for one applied lifetime.
+/// TTLSeconds zero means the provider did not report a lifetime.
+public struct UsageDashboardCacheWrite: Codable {
+    public let ttlSeconds: Int
+    public let tokens: Int
+}
+
 /// UsageDashboardTokens separates usage totals by their prompt-cache bucket.
 /// Input, cache writes, and cache reads are disjoint; their sum is the full
 /// prompt context consumed by the model.
 public struct UsageDashboardTokens: Codable {
+    public let cacheWrites: [UsageDashboardCacheWrite]?
     public let inputTokens: Int
     public let cacheWrite5mTokens: Int
     public let cacheWrite1hTokens: Int

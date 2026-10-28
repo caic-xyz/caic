@@ -931,10 +931,19 @@ type UsageResp struct {
 	Local     LocalUsage      `json:"local"`
 }
 
+// UsageDashboardCacheWrite counts cache writes for one applied lifetime.
+// TTLSeconds zero means the provider did not report a lifetime.
+type UsageDashboardCacheWrite struct {
+	TTLSeconds int64 `json:"ttlSeconds"`
+	Tokens     int64 `json:"tokens"`
+}
+
 // UsageDashboardTokens separates usage totals by their prompt-cache bucket.
 // Input, cache writes, and cache reads are disjoint; their sum is the full
 // prompt context consumed by the model.
 type UsageDashboardTokens struct {
+	CacheWrites []UsageDashboardCacheWrite `json:"cacheWrites,omitempty"`
+
 	Input        int64 `json:"inputTokens"`
 	CacheWrite5m int64 `json:"cacheWrite5mTokens"`
 	CacheWrite1h int64 `json:"cacheWrite1hTokens"`

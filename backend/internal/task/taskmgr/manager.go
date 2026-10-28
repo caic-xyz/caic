@@ -2559,7 +2559,7 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 		// ContextWindow is restored from caic_model_info in the durable task log.
 		// A bounded relay tail can start after that record, leaving the replayed
 		// usage with the same token counts but no context-window metadata.
-		return ok && av.Usage == bv.Usage && av.ReportedModel == bv.ReportedModel
+		return ok && av.Usage.Equal(bv.Usage) && av.ReportedModel == bv.ReportedModel
 	case *agent.ResultMessage:
 		bv, ok := b.(*agent.ResultMessage)
 		if !ok {
@@ -2579,6 +2579,11 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 		// The context window is derived from the model the wire has seen. A bounded
 		// relay tail can resume after that record, so like the usage message above
 		// the window cannot anchor the overlap.
+		// Coverage is derived from preceding records. A bounded relay tail may
+		// lack those reports, but still represents the same native result.
+		aa.UsageIsSnapshot = false
+		bb.UsageIsSnapshot = false
+
 		aa.ContextWindow = 0
 		bb.ContextWindow = 0
 		return reflect.DeepEqual(&aa, &bb)

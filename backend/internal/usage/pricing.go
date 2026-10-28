@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/tokens"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
@@ -24,12 +26,12 @@ const pricingDateLayout = "2006-01-02"
 // do not surcharge cache writes leave CacheWritePerMTok zero, which bills
 // cache-creation tokens at the input price.
 type ModelPrice struct {
-	InputPerMTok        float64          `json:"input_per_mtok"`                    // Non-cached input (cache miss).
-	CachedInputPerMTok  float64          `json:"cached_input_per_mtok"`             // Cache read (cache hit).
-	CacheWritePerMTok   float64          `json:"cache_write_per_mtok,omitempty"`    // Cache creation; 0 = same as input.
-	CacheWrite1hPerMTok float64          `json:"cache_write_1h_per_mtok,omitempty"` // One-hour cache creation; 0 = same as CacheWritePerMTok.
-	OutputPerMTok       float64          `json:"output_per_mtok"`
-	LongContext         LongContextPrice `json:"long_context,omitzero"`
+	InputPerMTok       float64           `json:"input_per_mtok"`                 // Non-cached input (cache miss).
+	CachedInputPerMTok float64           `json:"cached_input_per_mtok"`          // Cache read (cache hit).
+	CacheWritePerMTok  float64           `json:"cache_write_per_mtok,omitempty"` // Cache creation; 0 = same as input.
+	CacheWritePrices   []CacheWritePrice `json:"cache_write_prices,omitempty"`   // Overrides for exact applied lifetimes.
+	OutputPerMTok      float64           `json:"output_per_mtok"`
+	LongContext        LongContextPrice  `json:"long_context,omitzero"`
 }
 
 // staticModelPrice prices model under a harness model-provider prefix, or ""
@@ -58,48 +60,32 @@ func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
 // The Sol/Terra tier applies to the full request above 272K total input tokens:
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol
 // https://developers.openai.com/api/docs/models/gpt-6.1-terra
-func (p ModelPrice) RequestCost(u agent.Usage) float64 {
+// Haiku 5.5 uses 5x input and output rates above 100K, including cache tokens:
+// https://platform.claude.com/docs/en/models/haiku-5-5/overview
+func (p *ModelPrice) RequestCost(u agent.Usage) float64 {
 	input := int64(u.InputTokens) + int64(u.CacheCreationInputTokens) + int64(u.CacheReadInputTokens)
+	inputMultiplier, outputMultiplier := 1., 1.
 	if p.LongContext.InputTokensAbove > 0 && input > p.LongContext.InputTokensAbove {
-		p.InputPerMTok *= p.LongContext.InputMultiplier
-		p.CachedInputPerMTok *= p.LongContext.InputMultiplier
-		p.CacheWritePerMTok *= p.LongContext.InputMultiplier
-		p.CacheWrite1hPerMTok *= p.LongContext.InputMultiplier
-		p.OutputPerMTok *= p.LongContext.OutputMultiplier
+		inputMultiplier = p.LongContext.InputMultiplier
+		outputMultiplier = p.LongContext.OutputMultiplier
 	}
-	return p.Cost(u)
+	return p.costBuckets(int64(u.InputTokens), u.CacheWriteBuckets(), int64(u.CacheReadInputTokens), int64(u.OutputTokens), inputMultiplier, outputMultiplier)
 }
 
-// Cost returns the USD cost of one usage report at p.
-func (p ModelPrice) Cost(u agent.Usage) float64 {
-	write5m, write1h := int64(u.CacheCreationInputTokens), int64(0)
-	if u.CacheTTLSeconds >= 3600 {
-		write5m, write1h = 0, write5m
-	}
-	return p.CostBuckets(int64(u.InputTokens), write5m, write1h, int64(u.CacheReadInputTokens), int64(u.OutputTokens))
+// Cost returns the USD cost of one usage report at base context rates.
+func (p *ModelPrice) Cost(u agent.Usage) float64 {
+	return p.CostBuckets(int64(u.InputTokens), u.CacheWriteBuckets(), int64(u.CacheReadInputTokens), int64(u.OutputTokens))
 }
 
-// CostBuckets prices disjoint token buckets, including one-hour cache writes
-// when the source records their TTL separately.
-func (p ModelPrice) CostBuckets(input, cacheWrite5m, cacheWrite1h, cacheRead, output int64) float64 {
-	write := p.CacheWritePerMTok
-	if write == 0 {
-		write = p.InputPerMTok
-	}
-	write1h := p.CacheWrite1hPerMTok
-	if write1h == 0 {
-		write1h = write
-	}
-	return (float64(input)*p.InputPerMTok +
-		float64(cacheWrite5m)*write +
-		float64(cacheWrite1h)*write1h +
-		float64(cacheRead)*p.CachedInputPerMTok +
-		float64(output)*p.OutputPerMTok) / 1_000_000
+// CostBuckets prices disjoint tokens and exact cache-write lifetimes at base
+// context rates. Unknown or unlisted lifetimes use the default write rate.
+func (p *ModelPrice) CostBuckets(input int64, writes tokens.CacheWrites, cacheRead, output int64) float64 {
+	return p.costBuckets(input, writes, cacheRead, output, 1, 1)
 }
 
 // Validate checks non-negative rates and a complete, positive long-context tier
 // when one is configured.
-func (p ModelPrice) Validate() error {
+func (p *ModelPrice) Validate() error {
 	fields := []struct {
 		name  string
 		value float64
@@ -107,9 +93,19 @@ func (p ModelPrice) Validate() error {
 		{"input_per_mtok", p.InputPerMTok},
 		{"cached_input_per_mtok", p.CachedInputPerMTok},
 		{"cache_write_per_mtok", p.CacheWritePerMTok},
-		{"cache_write_1h_per_mtok", p.CacheWrite1hPerMTok},
 		{"output_per_mtok", p.OutputPerMTok},
 	}
+	for i, v := range p.CacheWritePrices {
+		if v.TTLSeconds <= 0 || v.TTLSeconds > int64((1<<63-1)/time.Second) || v.PerMTok < 0 {
+			return errors.New("invalid cache-write price override")
+		}
+		for _, other := range p.CacheWritePrices[:i] {
+			if other.TTLSeconds == v.TTLSeconds {
+				return errors.New("duplicate cache-write price lifetime")
+			}
+		}
+	}
+
 	for _, f := range fields {
 		if f.value < 0 {
 			return fmt.Errorf("%s is negative: %v", f.name, f.value)
@@ -119,6 +115,32 @@ func (p ModelPrice) Validate() error {
 		return errors.New("long_context requires a positive input threshold and multipliers")
 	}
 	return nil
+}
+
+func (p *ModelPrice) costBuckets(input int64, writes tokens.CacheWrites, cacheRead, output int64, inputMultiplier, outputMultiplier float64) float64 {
+	write := p.CacheWritePerMTok
+	if write == 0 {
+		write = p.InputPerMTok
+	}
+	total := float64(input)*p.InputPerMTok + float64(cacheRead)*p.CachedInputPerMTok
+	for _, b := range writes {
+		rate := write
+		for _, override := range p.CacheWritePrices {
+			if b.TTL == time.Duration(override.TTLSeconds)*time.Second {
+				rate = override.PerMTok
+				break
+			}
+		}
+		total += float64(b.Tokens) * rate
+	}
+	return (total*inputMultiplier + float64(output)*p.OutputPerMTok*outputMultiplier) / 1_000_000
+}
+
+// CacheWritePrice overrides the default cache-write rate for one exact lifetime.
+// Unlisted and unknown durations use CacheWritePerMTok, or the input price.
+type CacheWritePrice struct {
+	TTLSeconds int64   `json:"ttl_seconds"`
+	PerMTok    float64 `json:"per_mtok"`
 }
 
 // LongContextPrice applies multipliers to an entire request above InputTokensAbove.

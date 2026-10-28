@@ -190,7 +190,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 					attributedModel = u.ReportedModel
 				}
 			}
-			delta, ok := usageDelta(confirmed, lt.Harness)
+			delta, ok := usageDelta(confirmed)
 			switch m := confirmed.(type) {
 			case *agent.ToolUseMessage:
 				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
@@ -278,11 +278,11 @@ func usageClaudeModel(current string, m agent.Message) string {
 
 // usageDelta mirrors the durable, non-priced part of live rollup
 // translation; see LoadedTask.UsageRows for the fields it cannot reconstruct.
-func usageDelta(m agent.Message, h harness.Name) (data.Delta, bool) {
+func usageDelta(m agent.Message) (data.Delta, bool) {
 	var d data.Delta
 	switch m := m.(type) {
 	case *agent.UsageMessage:
-		if h == harness.Pi {
+		if m.Additive {
 			d.TokenBuckets = usageTokens(m.Usage)
 		}
 		if !m.Source.IsChild() {
@@ -292,7 +292,7 @@ func usageDelta(m agent.Message, h harness.Name) (data.Delta, bool) {
 		if m.Source.IsChild() {
 			return data.Delta{}, false
 		}
-		if h != harness.Pi {
+		if !m.UsageIsSnapshot {
 			d.TokenBuckets = usageTokens(m.Usage)
 		}
 		d.Turns = 1
@@ -332,10 +332,6 @@ func usageTokens(u agent.Usage) data.TokenBuckets {
 		CacheRead: int64(u.CacheReadInputTokens),
 		Reasoning: int64(u.ReasoningOutputTokens),
 	}
-	if u.CacheTTLSeconds >= 3600 {
-		b.CacheWrite1h = int64(u.CacheCreationInputTokens)
-	} else {
-		b.CacheWrite5m = int64(u.CacheCreationInputTokens)
-	}
+	b.CacheWrites = usagedb.CacheWritesToData(u.CacheWriteBuckets())
 	return b
 }

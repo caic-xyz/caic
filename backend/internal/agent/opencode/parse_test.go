@@ -880,7 +880,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
 		}
-		if rm.Usage != (agent.Usage{}) {
+		if !rm.Usage.Equal(agent.Usage{}) {
 			t.Errorf("Usage = %+v, want empty", rm.Usage)
 		}
 	})
