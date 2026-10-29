@@ -8,31 +8,6 @@ HTTP?=:2242
 FRONTEND_TEST = pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
 
-# Static checks for verify, grouped into independent lanes run concurrently by
-# scripts/run-concurrently.sh. Each is read-only; fix applies their autofixes.
-#
-# The verify recipe passes these single-quoted through two shell layers, so a
-# lane variable must not contain a single quote; use double quotes inside.
-#
-VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-
-# The gofmt and goimports formatters are checked by custom-gcl run itself
-# (formatters section of .golangci.yml) with its warm analysis cache; a separate
-# `golangci-lint fmt --diff` pass would re-typecheck the whole tree without that
-# cache. Caveat: when another linter fails on the same file, run reports the
-# lint error only, so a formatting problem there surfaces on the next verify
-# after the lint fix. fix applies the formatters through `golangci-lint fmt`.
-# methodfilecheck (see .golangci.yml) is a golangci-lint module plugin, so Go
-# linting must run through the custom binary built from the published plugin
-# module; the plain binary is fine for `fmt`.
-VERIFY_GO = ./custom-gcl run --show-stats=false ./... && go mod tidy -diff
-VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && pnpm exec node scripts/lint_frontend_styles.mjs
-VERIFY_TS = pnpm exec node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json
-VERIFY_ESLINT = pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .
-VERIFY_PY = uv run --locked ruff format --check --quiet . && uv run --locked ruff check --quiet .
-VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files
-VERIFY_MISC = uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && uv run --locked python scripts/update_backend_architecture.py --check
-
 help:
 	@echo 'caic - Manage multiple coding agents'
 	@echo ''
@@ -88,10 +63,17 @@ custom-gcl:
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
-# The one static gate. Runs every check-only lane concurrently; the read-only
-# counterpart of fix and the pre-push gate. Independent of test.
 verify: custom-gcl frontend-deps
-	@./scripts/run-concurrently.sh workflows,go,js,ts,eslint,python,shell,misc '$(VERIFY_WORKFLOWS)' '$(VERIFY_GO)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
+	@./scripts/run-concurrently.sh sdk,workflows,go,js,ts,eslint,python,shell,misc \
+		'cd ./backend/internal/server/api/v1 && go run ../../../cmd/gen-api-sdk -check' \
+		'go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12' \
+		'./custom-gcl run --show-stats=false ./... && go mod tidy -diff' \
+		'pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && pnpm exec node scripts/lint_frontend_styles.mjs' \
+		'pnpm exec node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json' \
+		'pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .' \
+		'uv run --locked ruff format --check --quiet . && uv run --locked ruff check --quiet .' \
+		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
+		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && uv run --locked python scripts/update_backend_architecture.py --check'
 
 # Apply every autofix, then refresh the generated file index and architecture
 # diagram. Order matters: the stylelint fixer runs last because its

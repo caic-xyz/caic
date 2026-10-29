@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -17,23 +18,21 @@ func main() {
 }
 
 func mainImpl() error {
-	apis := []apisdkgen.API{
-		apisdkgen.NewAPI(
-			".",
-			outputConfig(
-				"../../../../../sdk/caic",
-				"../../../../../sdk/caic/kotlin/src/main/kotlin/com/caic/sdk/v1",
-				"../../../../../sdk/caic/swift/Sources/CaicSDK",
-			),
-			v1.SDKAPI(),
+	check := flag.Bool("check", false, "verify generated SDKs without writing them")
+	flag.Parse()
+	api := apisdkgen.NewAPI(
+		".",
+		outputConfig(
+			"../../../../../sdk/caic",
+			"../../../../../sdk/caic/kotlin/src/main/kotlin/com/caic/sdk/v1",
+			"../../../../../sdk/caic/swift/Sources/CaicSDK",
 		),
+		v1.SDKAPI(),
+	)
+	if *check {
+		return api.Verify()
 	}
-	for i := range apis {
-		if err := apisdkgen.Generate(&apis[i]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return api.Generate()
 }
 
 func outputConfig(sdkDir, kotlinDir, swiftDir string) apisdkgen.OutputConfig {
