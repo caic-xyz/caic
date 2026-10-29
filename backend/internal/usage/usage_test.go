@@ -11,25 +11,29 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-func TestBaseFetcherGet(t *testing.T) {
+func TestBaseFetcher(t *testing.T) {
 	t.Parallel()
 
-	b := newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "")
-	got := b.get(t.Context(), func(context.Context) (*ProviderQuota, error) {
-		return &ProviderQuota{Provider: agent.QuotaProviderCodex}, nil
-	})
-	if got.FetchedAt.IsZero() || got.FetchError {
-		t.Fatalf("first fetch metadata = (%v, %v), want timestamp without error", got.FetchedAt, got.FetchError)
-	}
+	t.Run("Get", func(t *testing.T) {
+		t.Parallel()
 
-	b.fetchAt = time.Now().Add(-CacheTTL)
-	got = b.get(t.Context(), func(context.Context) (*ProviderQuota, error) {
-		return nil, errors.New("provider unavailable")
+		b := newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "")
+		got := b.get(t.Context(), func(context.Context) (*ProviderQuota, error) {
+			return &ProviderQuota{Provider: agent.QuotaProviderCodex}, nil
+		})
+		if got.FetchedAt.IsZero() || got.FetchError {
+			t.Fatalf("first fetch metadata = (%v, %v), want timestamp without error", got.FetchedAt, got.FetchError)
+		}
+
+		b.fetchAt = time.Now().Add(-CacheTTL)
+		got = b.get(t.Context(), func(context.Context) (*ProviderQuota, error) {
+			return nil, errors.New("provider unavailable")
+		})
+		if !got.FetchError {
+			t.Fatal("failed refresh FetchError = false, want true")
+		}
+		if b.cached.FetchError {
+			t.Fatal("failed refresh mutated the cached successful snapshot")
+		}
 	})
-	if !got.FetchError {
-		t.Fatal("failed refresh FetchError = false, want true")
-	}
-	if b.cached.FetchError {
-		t.Fatal("failed refresh mutated the cached successful snapshot")
-	}
 }

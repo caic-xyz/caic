@@ -79,12 +79,13 @@ type Config struct {
 	// must be non-nil.
 	LogStore *taskslog.Store
 	// Runtimes validates runtime selection and dispatches task runtime operations.
-	Runtimes            *runtime.Router
-	Backends            agent.Backends
-	HarnessEnv          map[string][]string
-	RuntimeMetadata     runtime.Metadata
-	RuntimeStartTimeout time.Duration
-	Provider            genai.Provider // nil-safe
+	Runtimes             *runtime.Router
+	Backends             agent.Backends
+	HarnessEnv           map[string][]string
+	RuntimeMetadata      runtime.Metadata
+	RuntimeStartTimeout  time.Duration
+	EnsureSessionTimeout time.Duration
+	Provider             genai.Provider // nil-safe
 	// Pricer resolves per-model token pricing for cost reporting. When nil,
 	// a default quota-provider pricer is used.
 	Pricer quotausage.ModelPricer
@@ -121,18 +122,19 @@ type Manager struct {
 	QuotaTracker *quotausage.Tracker
 	Checkouts    *repo.Registry
 
-	log                 *slog.Logger
-	serverCtx           context.Context // lifetime of the Manager; for goroutines that outlive requests
-	cancelServerCtx     context.CancelFunc
-	logStore            *taskslog.Store
-	harnessEnv          map[string][]string
-	runtimeMetadata     runtime.Metadata
-	runtimeStartTimeout time.Duration
-	provider            genai.Provider
-	pricer              quotausage.ModelPricer
-	rollup              task.RollupSink
-	taskMCPScoper       TaskMCPScoper
-	relay               relayReader
+	log                  *slog.Logger
+	serverCtx            context.Context // lifetime of the Manager; for goroutines that outlive requests
+	cancelServerCtx      context.CancelFunc
+	logStore             *taskslog.Store
+	harnessEnv           map[string][]string
+	runtimeMetadata      runtime.Metadata
+	runtimeStartTimeout  time.Duration
+	ensureSessionTimeout time.Duration
+	provider             genai.Provider
+	pricer               quotausage.ModelPricer
+	rollup               task.RollupSink
+	taskMCPScoper        TaskMCPScoper
+	relay                relayReader
 
 	// Guarded by eventMu.
 	eventMu              sync.Mutex
@@ -194,23 +196,24 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		pricer = quotausage.NewPricer(nil)
 	}
 	m := &Manager{
-		Runtimes:            cfg.Runtimes,
-		QuotaTracker:        quotausage.NewTracker(),
-		log:                 cfg.Log.With("cmp", "taskmgr"),
-		serverCtx:           serverCtx,
-		cancelServerCtx:     cancelServerCtx,
-		Backends:            maps.Clone(cfg.Backends),
-		logStore:            cfg.LogStore,
-		harnessEnv:          cfg.HarnessEnv,
-		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
-		runtimeStartTimeout: cfg.RuntimeStartTimeout,
-		provider:            cfg.Provider,
-		pricer:              pricer,
-		rollup:              cfg.Rollup,
-		Checkouts:           cfg.Checkouts,
-		relay:               agentRelayReader{},
-		tasks:               make(map[ksid.ID]*Entry),
-		changed:             make(chan struct{}),
+		Runtimes:             cfg.Runtimes,
+		QuotaTracker:         quotausage.NewTracker(),
+		log:                  cfg.Log.With("cmp", "taskmgr"),
+		serverCtx:            serverCtx,
+		cancelServerCtx:      cancelServerCtx,
+		Backends:             maps.Clone(cfg.Backends),
+		logStore:             cfg.LogStore,
+		harnessEnv:           cfg.HarnessEnv,
+		runtimeMetadata:      maps.Clone(cfg.RuntimeMetadata),
+		runtimeStartTimeout:  cfg.RuntimeStartTimeout,
+		ensureSessionTimeout: cfg.EnsureSessionTimeout,
+		provider:             cfg.Provider,
+		pricer:               pricer,
+		rollup:               cfg.Rollup,
+		Checkouts:            cfg.Checkouts,
+		relay:                agentRelayReader{},
+		tasks:                make(map[ksid.ID]*Entry),
+		changed:              make(chan struct{}),
 	}
 	return m, nil
 }
@@ -276,16 +279,17 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 		entry:   e,
 		ctx:     context.WithoutCancel(m.serverCtx),
 		agentRuntime: task.AgentRuntime{
-			Backends:            m.Backends,
-			LogStore:            m.logStore,
-			LogPath:             &e.LogPath,
-			Runtimes:            m.Runtimes,
-			Log:                 m.log.With("task", t.ID),
-			NotifyTaskChange:    m.NotifyTaskChange,
-			Checkout:            m.resolveCheckout(t),
-			RuntimeMetadata:     m.runtimeMetadata,
-			RuntimeStartTimeout: m.runtimeStartTimeout,
-			MCPRegistry:         taskMCP,
+			Backends:             m.Backends,
+			LogStore:             m.logStore,
+			LogPath:              &e.LogPath,
+			Runtimes:             m.Runtimes,
+			Log:                  m.log.With("task", t.ID),
+			NotifyTaskChange:     m.NotifyTaskChange,
+			Checkout:             m.resolveCheckout(t),
+			RuntimeMetadata:      m.runtimeMetadata,
+			RuntimeStartTimeout:  m.runtimeStartTimeout,
+			EnsureSessionTimeout: m.ensureSessionTimeout,
+			MCPRegistry:          taskMCP,
 		},
 	}
 	return e

@@ -21,147 +21,151 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-func TestRuntimeBackendRepositoryStatus(t *testing.T) {
+func TestRuntimeBackend(t *testing.T) {
 	t.Parallel()
 
-	b := NewRuntimeBackend(0)
-	id, err := b.Launch(t.Context(), []runtime.Repo{
-		{GitRoot: "primary", Branch: "caic-1"},
-		{GitRoot: "mapped", Branch: "caic-1"},
-	}, &runtime.StartOptions{LogWriter: io.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("primary repository has committed and uncommitted changes", func(t *testing.T) {
+	t.Run("RepositoryStatus", func(t *testing.T) {
 		t.Parallel()
 
-		status, err := b.RepositoryStatus(t.Context(), id, 0)
+		b := NewRuntimeBackend(0)
+		id, err := b.Launch(t.Context(), []runtime.Repo{
+			{GitRoot: "primary", Branch: "caic-1"},
+			{GitRoot: "mapped", Branch: "caic-1"},
+		}, &runtime.StartOptions{LogWriter: io.Discard})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if status.Ahead != 1 || status.Behind != 0 {
-			t.Errorf("divergence = ahead %d behind %d, want ahead 1 behind 0", status.Ahead, status.Behind)
-		}
-		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
-			{Path: "cmd/caic/main.go", LinesAdded: 8},
-			{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
-		}) {
-			t.Errorf("DiffStat = %#v", status.DiffStat)
-		}
-		if len(status.Commits) != 1 || status.Commits[0].Subject != "Add task activity summary" {
-			t.Errorf("Commits = %#v", status.Commits)
-		}
-		if !slices.Equal(status.Uncommitted, []runtime.GitFileStatus{{
-			Path:           "frontend/src/App.tsx",
-			WorktreeStatus: "M",
-			LinesAdded:     4,
-			LinesDeleted:   2,
-		}}) {
-			t.Errorf("Uncommitted = %#v", status.Uncommitted)
-		}
-	})
 
-	t.Run("mapped repository has an independent worktree state", func(t *testing.T) {
-		t.Parallel()
-
-		status, err := b.RepositoryStatus(t.Context(), id, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if status.Ahead != 0 || status.Behind != 1 {
-			t.Errorf("divergence = ahead %d behind %d, want ahead 0 behind 1", status.Ahead, status.Behind)
-		}
-		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
-			{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
-			{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
-		}) {
-			t.Errorf("DiffStat = %#v", status.DiffStat)
-		}
-		if len(status.Commits) != 0 {
-			t.Errorf("Commits = %#v, want none", status.Commits)
-		}
-	})
-}
-
-func TestRuntimeBackendFileDiff(t *testing.T) {
-	t.Parallel()
-
-	b := NewRuntimeBackend(0)
-	tests := []struct {
-		name    string
-		repoIdx int
-		commit  string
-		path    string
-		want    string
-		numstat string
-	}{
-		{
-			name:    "committed primary file",
-			repoIdx: 0,
-			commit:  "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
-			path:    "cmd/caic/main.go",
-			want:    "+\tstatus := task.RepositoryStatus()",
-			numstat: "8\t0\tcmd/caic/main.go\n",
-		},
-		{
-			name:    "uncommitted primary file",
-			repoIdx: 0,
-			path:    "frontend/src/App.tsx",
-			want:    "+  <span>Repository changes</span>",
-			numstat: "4\t2\tfrontend/src/App.tsx\n",
-		},
-		{
-			name:    "uncommitted mapped Go file",
-			repoIdx: 1,
-			path:    "internal/service/api.go",
-			want:    "+\tstate := repositoryState()",
-			numstat: "6\t1\tinternal/service/api.go\n",
-		},
-		{
-			name:    "uncommitted mapped documentation",
-			repoIdx: 1,
-			path:    "README.md",
-			want:    "+Open Repository changes.",
-			numstat: "3\t4\tREADME.md\n",
-		},
-		{
-			name: "unknown file",
-			path: "unknown.txt",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run("primary repository has committed and uncommitted changes", func(t *testing.T) {
 			t.Parallel()
 
-			got, err := b.FileDiff(t.Context(), "", test.repoIdx, test.commit, test.path, "")
+			status, err := b.RepositoryStatus(t.Context(), id, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if test.want == "" && got != "" {
-				t.Errorf("FileDiff() = %q, want empty content", got)
+			if status.Ahead != 1 || status.Behind != 0 {
+				t.Errorf("divergence = ahead %d behind %d, want ahead 1 behind 0", status.Ahead, status.Behind)
 			}
-			if test.want != "" && !strings.Contains(got, test.want) {
-				t.Errorf("FileDiff() = %q, want content containing %q", got, test.want)
+			if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
+				{Path: "cmd/caic/main.go", LinesAdded: 8},
+				{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
+			}) {
+				t.Errorf("DiffStat = %#v", status.DiffStat)
 			}
-			if got == "" {
-				return
+			if len(status.Commits) != 1 || status.Commits[0].Subject != "Add task activity summary" {
+				t.Errorf("Commits = %#v", status.Commits)
 			}
-			patch := filepath.Join(t.TempDir(), "fixture.patch")
-			if err := os.WriteFile(patch, []byte(got), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			cmd := exec.CommandContext(t.Context(), "git", "apply", "--numstat", patch) //nolint:gosec // patch is an owned test file.
-			cmd.Dir = filepath.Join("..", "..", "..")
-			numstat, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("git apply --numstat: %v: %s", err, numstat)
-			}
-			if string(numstat) != test.numstat {
-				t.Errorf("git apply --numstat = %q, want %q", numstat, test.numstat)
+			if !slices.Equal(status.Uncommitted, []runtime.GitFileStatus{{
+				Path:           "frontend/src/App.tsx",
+				WorktreeStatus: "M",
+				LinesAdded:     4,
+				LinesDeleted:   2,
+			}}) {
+				t.Errorf("Uncommitted = %#v", status.Uncommitted)
 			}
 		})
-	}
+
+		t.Run("mapped repository has an independent worktree state", func(t *testing.T) {
+			t.Parallel()
+
+			status, err := b.RepositoryStatus(t.Context(), id, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Ahead != 0 || status.Behind != 1 {
+				t.Errorf("divergence = ahead %d behind %d, want ahead 0 behind 1", status.Ahead, status.Behind)
+			}
+			if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
+				{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
+				{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
+			}) {
+				t.Errorf("DiffStat = %#v", status.DiffStat)
+			}
+			if len(status.Commits) != 0 {
+				t.Errorf("Commits = %#v, want none", status.Commits)
+			}
+		})
+	})
+
+	t.Run("FileDiff", func(t *testing.T) {
+		t.Parallel()
+
+		b := NewRuntimeBackend(0)
+		tests := []struct {
+			name    string
+			repoIdx int
+			commit  string
+			path    string
+			want    string
+			numstat string
+		}{
+			{
+				name:    "committed primary file",
+				repoIdx: 0,
+				commit:  "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
+				path:    "cmd/caic/main.go",
+				want:    "+\tstatus := task.RepositoryStatus()",
+				numstat: "8\t0\tcmd/caic/main.go\n",
+			},
+			{
+				name:    "uncommitted primary file",
+				repoIdx: 0,
+				path:    "frontend/src/App.tsx",
+				want:    "+  <span>Repository changes</span>",
+				numstat: "4\t2\tfrontend/src/App.tsx\n",
+			},
+			{
+				name:    "uncommitted mapped Go file",
+				repoIdx: 1,
+				path:    "internal/service/api.go",
+				want:    "+\tstate := repositoryState()",
+				numstat: "6\t1\tinternal/service/api.go\n",
+			},
+			{
+				name:    "uncommitted mapped documentation",
+				repoIdx: 1,
+				path:    "README.md",
+				want:    "+Open Repository changes.",
+				numstat: "3\t4\tREADME.md\n",
+			},
+			{
+				name: "unknown file",
+				path: "unknown.txt",
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := b.FileDiff(t.Context(), "", test.repoIdx, test.commit, test.path, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if test.want == "" && got != "" {
+					t.Errorf("FileDiff() = %q, want empty content", got)
+				}
+				if test.want != "" && !strings.Contains(got, test.want) {
+					t.Errorf("FileDiff() = %q, want content containing %q", got, test.want)
+				}
+				if got == "" {
+					return
+				}
+				patch := filepath.Join(t.TempDir(), "fixture.patch")
+				if err := os.WriteFile(patch, []byte(got), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.CommandContext(t.Context(), "git", "apply", "--numstat", patch) //nolint:gosec // patch is an owned test file.
+				cmd.Dir = filepath.Join("..", "..", "..")
+				numstat, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git apply --numstat: %v: %s", err, numstat)
+				}
+				if string(numstat) != test.numstat {
+					t.Errorf("git apply --numstat = %q, want %q", numstat, test.numstat)
+				}
+			})
+		}
+	})
 }
 
 func TestFakeAgentNaturalPromptMatching(t *testing.T) {
@@ -378,30 +382,33 @@ func TestInitHarnessCache(t *testing.T) {
 	})
 }
 
-func TestVNCServerClose(t *testing.T) {
+func TestVNCServer(t *testing.T) {
 	t.Parallel()
-	server, err := StartVNC(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", server.Port()))
-	if err != nil {
-		_ = server.Close()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	var version [12]byte
-	if _, err := io.ReadFull(conn, version[:]); err != nil {
-		t.Fatal(err)
-	}
-	if err := server.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := conn.Read(version[:]); !errors.Is(err, io.EOF) {
-		t.Fatalf("connection after close: %v, want EOF", err)
-	}
+	t.Run("Close", func(t *testing.T) {
+		t.Parallel()
+		server, err := StartVNC(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", server.Port()))
+		if err != nil {
+			_ = server.Close()
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		var version [12]byte
+		if _, err := io.ReadFull(conn, version[:]); err != nil {
+			t.Fatal(err)
+		}
+		if err := server.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.Read(version[:]); !errors.Is(err, io.EOF) {
+			t.Fatalf("connection after close: %v, want EOF", err)
+		}
+	})
 }

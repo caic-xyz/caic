@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -299,84 +300,302 @@ func TestReapPiProcessExit(t *testing.T) {
 	}
 }
 
-func TestBackendStart(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(piSSHHelperEnv, "1")
-	t.Setenv("PATH", dir)
-	t.Setenv("PI_SSH_HELPER_DIR", dir)
-
-	msgs := make(chan agent.TimedMessage, 1)
-	log := &agenttest.LogSink{Version: agent.LogVersionV2}
-	sess, err := New("", nil).Start(t.Context(), &agent.Options{
-		ResumeSessionID: "ses-1",
-		Logger:          slog.New(slog.DiscardHandler),
-		Target:          runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:             "/workspace",
-		Model:           "openai-codex/gpt-5.6-terra",
-		MsgCh:           msgs,
-		Log:             log,
-	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	args, err := os.ReadFile(filepath.Join(dir, "relay-args")) //nolint:gosec // test-owned temporary directory
-	if err != nil || !strings.Contains(string(args), "'--session' 'ses-1'") {
-		t.Fatalf("Pi resume command=%s err=%v", args, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {
-		t.Fatalf("pi update was not run: %v", err)
-	}
-	if !strings.Contains(log.String(), `"t":"exit"`) {
-		t.Fatalf("startup log = %q, want failed launch diagnostics", log.String())
-	}
-	if strings.Count(log.String(), `"t":"relay_generation"`) != 2 ||
-		!strings.Contains(log.String(), `"generation":"generation-1"`) ||
-		!strings.Contains(log.String(), `"generation":"generation-2"`) {
-		t.Fatalf("startup log = %q, want one distinct generation per Pi relay launch", log.String())
-	}
-	for _, want := range []string{
-		"Pi startup failed; running pi update --all ...",
-		"Pi and extensions updated",
-		"Pi update completed; retrying startup ...",
-	} {
-		if !strings.Contains(log.String(), want) {
-			t.Fatalf("startup log = %q, want %q", log.String(), want)
+func TestBackend(t *testing.T) {
+	t.Run("Start", func(t *testing.T) {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "version-called")); err == nil {
-		t.Fatal("pi --version was called")
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	count, err := os.ReadFile(filepath.Join(dir, "relay-count")) //nolint:gosec // dir is a test-owned temporary directory.
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(count) != "11" {
-		t.Errorf("Pi relay launches = %d, want 2", len(count))
-	}
-	msg := <-msgs
-	meta, ok := msg.Message.(*agent.MetaSessionMessage)
-	if !ok {
-		t.Fatalf("startup message = %T, want *agent.MetaSessionMessage", msg.Message)
-	}
-	if meta.ReportedModel != "openai-codex/gpt-5.6-terra" || meta.ReportedEffort != "high" {
-		t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
-	}
+		dir := t.TempDir()
+		if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(piSSHHelperEnv, "1")
+		t.Setenv("PATH", dir)
+		t.Setenv("PI_SSH_HELPER_DIR", dir)
 
-	// Race-instrumented SSH helpers also wait for the race runtime at exit.
-	stopCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if err := sess.Stop(stopCtx); err != nil {
-		t.Errorf("Stop: %v", err)
-	}
+		msgs := make(chan agent.TimedMessage, 1)
+		log := &agenttest.LogSink{Version: agent.LogVersionV2}
+		sess, err := New("", nil).Start(t.Context(), &agent.Options{
+			ResumeSessionID: "ses-1",
+			Logger:          slog.New(slog.DiscardHandler),
+			Target:          runtime.ConnectionTarget{SSHHost: "task"},
+			Dir:             "/workspace",
+			Model:           "openai-codex/gpt-5.6-terra",
+			MsgCh:           msgs,
+			Log:             log,
+		})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		args, err := os.ReadFile(filepath.Join(dir, "relay-args")) //nolint:gosec // test-owned temporary directory
+		if err != nil || !strings.Contains(string(args), "'--session' 'ses-1'") {
+			t.Fatalf("Pi resume command=%s err=%v", args, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {
+			t.Fatalf("pi update was not run: %v", err)
+		}
+		if !strings.Contains(log.String(), `"t":"exit"`) {
+			t.Fatalf("startup log = %q, want failed launch diagnostics", log.String())
+		}
+		if strings.Count(log.String(), `"t":"relay_generation"`) != 2 ||
+			!strings.Contains(log.String(), `"generation":"generation-1"`) ||
+			!strings.Contains(log.String(), `"generation":"generation-2"`) {
+			t.Fatalf("startup log = %q, want one distinct generation per Pi relay launch", log.String())
+		}
+		for _, want := range []string{
+			"Pi startup failed; running pi update --all ...",
+			"Pi and extensions updated",
+			"Pi update completed; retrying startup ...",
+		} {
+			if !strings.Contains(log.String(), want) {
+				t.Fatalf("startup log = %q, want %q", log.String(), want)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(dir, "version-called")); err == nil {
+			t.Fatal("pi --version was called")
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		count, err := os.ReadFile(filepath.Join(dir, "relay-count")) //nolint:gosec // dir is a test-owned temporary directory.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(count) != "11" {
+			t.Errorf("Pi relay launches = %d, want 2", len(count))
+		}
+		msg := <-msgs
+		meta, ok := msg.Message.(*agent.MetaSessionMessage)
+		if !ok {
+			t.Fatalf("startup message = %T, want *agent.MetaSessionMessage", msg.Message)
+		}
+		if meta.ReportedModel != "openai-codex/gpt-5.6-terra" || meta.ReportedEffort != "high" {
+			t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
+		}
+
+		// Race-instrumented SSH helpers also wait for the race runtime at exit.
+		stopCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		if err := sess.Stop(stopCtx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	t.Run("ResumeMismatch", func(t *testing.T) {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(piSSHHelperEnv, "1")
+		t.Setenv("PATH", dir)
+		t.Setenv("PI_SSH_HELPER_DIR", dir)
+		if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
+			t.Fatalf("resume mismatch error=%v", err)
+		}
+	})
+
+	t.Run("AgentArgs", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+		t.Run("resume_exact_session", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			args := New("", nil).AgentArgs(agent.HarnessArgs{ResumeSessionID: "saved-session"})
+			if !slices.Equal(args, []string{"pi", "--mode", "rpc", "--approve", "--session", "saved-session"}) {
+				t.Fatalf("resume args = %v", args)
+			}
+		})
+		t.Run("approves project-local inputs in rpc mode", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			args := New("", nil).AgentArgs(agent.HarnessArgs{})
+			want := []string{"pi", "--mode", "rpc", "--approve"}
+			if !slices.Equal(args, want) {
+				t.Errorf("args = %v, want %v", args, want)
+			}
+		})
+	})
+
+	t.Run("NewWire", func(t *testing.T) {
+		msgUpdateWithAccumulatedMessage := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"message":{"role":"assistant","content":[{"type":"text","text":"ignored accumulated text"}]}}`
+		// Regression: replay (relay output during adoption, and on-disk logs) uses
+		// NewWire().ParseMessage. It must use the stateful wire format so agent_end
+		// produces a terminal ResultMessage; without it SeedTimeline cannot infer
+		// the waiting state and adopted pi tasks stay stuck as "running".
+		t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			agentEnd := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":10,"output":5}}]}`)
+			msgs, err := New("", nil).NewWire().ParseMessage(agentEnd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var hasResult bool
+			for _, m := range msgs {
+				if _, ok := m.(*agent.ResultMessage); ok {
+					hasResult = true
+				}
+			}
+			if !hasResult {
+				t.Fatalf("NewWire().ParseMessage produced no ResultMessage for agent_end: %#v", msgs)
+			}
+		})
+
+		t.Run("message_update ignores accumulated message payload", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			msgs, err := New("", nil).NewWire().ParseMessage([]byte(msgUpdateWithAccumulatedMessage))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want 1", len(msgs))
+			}
+			delta, ok := msgs[0].(*agent.TextDeltaMessage)
+			if !ok {
+				t.Fatalf("got %T, want TextDeltaMessage", msgs[0])
+			}
+			if delta.Text != "hello" {
+				t.Errorf("delta = %q, want hello", delta.Text)
+			}
+		})
+
+		t.Run("message_end emits consolidated text", func(t *testing.T) {
+			t.Parallel()
+			msgs, err := New("", nil).NewWire().ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final text"}],"stopReason":"stop"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want 1", len(msgs))
+			}
+			text, ok := msgs[0].(*agent.TextMessage)
+			if !ok {
+				t.Fatalf("got %T, want TextMessage", msgs[0])
+			}
+			if text.Text != "final text" {
+				t.Errorf("text = %q, want final text", text.Text)
+			}
+		})
+
+		t.Run("tool_execution_update emits incremental deltas", func(t *testing.T) {
+			t.Parallel()
+			parser := New("", nil).NewWire().ParseMessage
+
+			// Simulate two tool_execution_update events with accumulated text.
+			// The second event contains the full accumulated text (first + new).
+			update1 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello"}]}}`)
+			update2 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello world"}]}}`)
+
+			msgs1, err := parser(update1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs1) != 1 {
+				t.Fatalf("update1: got %d messages, want 1", len(msgs1))
+			}
+			tod1, ok := msgs1[0].(*agent.ToolOutputDeltaMessage)
+			if !ok {
+				t.Fatalf("update1: got %T, want ToolOutputDeltaMessage", msgs1[0])
+			}
+			if tod1.Delta != "hello" {
+				t.Errorf("update1 delta: got %q, want %q", tod1.Delta, "hello")
+			}
+
+			msgs2, err := parser(update2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs2) != 1 {
+				t.Fatalf("update2: got %d messages, want 1", len(msgs2))
+			}
+			tod2, ok := msgs2[0].(*agent.ToolOutputDeltaMessage)
+			if !ok {
+				t.Fatalf("update2: got %T, want ToolOutputDeltaMessage", msgs2[0])
+			}
+			// Should be only the incremental part, not the full accumulated text.
+			if tod2.Delta != " world" {
+				t.Errorf("update2 delta: got %q, want %q", tod2.Delta, " world")
+			}
+
+			// Third update with same text should produce empty delta (filtered out).
+			update3 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello world"}]}}`)
+			msgs3, err := parser(update3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs3) != 0 {
+				t.Fatalf("update3: got %d messages, want 0 (empty delta filtered)", len(msgs3))
+			}
+		})
+
+		t.Run("tool output tracking is bounded and evicted on completion", func(t *testing.T) {
+			t.Parallel()
+			wire := &piWireFormat{}
+			update := func(id string) []byte {
+				return []byte(`{"type":"tool_execution_update","toolCallId":"` + id + `","partialResult":{"content":[{"type":"text","text":"x"}]}}`)
+			}
+			for i := range maxTrackedToolOutputs {
+				if _, err := wire.ParseMessage(update("tool-" + strconv.Itoa(i))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := len(wire.toolOutputLen); got != maxTrackedToolOutputs {
+				t.Fatalf("tracked tool outputs = %d, want %d", got, maxTrackedToolOutputs)
+			}
+			if _, err := wire.ParseMessage(update("overflow")); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(wire.toolOutputLen); got != 1 {
+				t.Fatalf("tracked tool outputs after reset = %d, want 1", got)
+			}
+			if _, err := wire.ParseMessage([]byte(`{"type":"tool_execution_end","toolCallId":"overflow"}`)); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(wire.toolOutputLen); got != 0 {
+				t.Fatalf("tracked tool outputs after result = %d, want 0", got)
+			}
+		})
+
+		t.Run("caic_exit carries relay stderr", func(t *testing.T) {
+			t.Parallel()
+			parser := New("", nil).NewWire().ParseMessage
+			line := []byte(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`)
+			msgs, err := parser(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want 1", len(msgs))
+			}
+			exit, ok := msgs[0].(*agent.ExitMessage)
+			if !ok {
+				t.Fatalf("got %T, want ExitMessage", msgs[0])
+			}
+			if exit.ExitCode != 2 || exit.Error != "Unknown option: --approve" {
+				t.Errorf("exit = %+v, want code 2 with stderr", exit)
+			}
+		})
+
+		t.Run("prompt command parses to UserInputMessage", func(t *testing.T) {
+			t.Parallel()
+			parser := New("", nil).NewWire().ParseMessage
+			line := []byte(`{"type":"prompt","message":"run rpi/446b-camera/build-annotate-cv.sh without docker","streamingBehavior":"steer"}`)
+			msgs, err := parser(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want 1", len(msgs))
+			}
+			ui, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok {
+				t.Fatalf("got %T, want UserInputMessage", msgs[0])
+			}
+			want := "run rpi/446b-camera/build-annotate-cv.sh without docker"
+			if ui.Text != want {
+				t.Errorf("text: got %q, want %q", ui.Text, want)
+			}
+		})
+	})
 }
 
 func TestPiWireFormat(t *testing.T) {
@@ -464,47 +683,6 @@ func TestPiWireFormat(t *testing.T) {
 			t.Fatalf("message[0] type = %T, want *agent.ResultMessage", msgs[0])
 		}
 	})
-}
-
-func TestAgentArgs(t *testing.T) {
-	t.Parallel()
-
-	t.Run("resume_exact_session", func(t *testing.T) {
-		t.Parallel()
-		args := New("", nil).AgentArgs(agent.HarnessArgs{ResumeSessionID: "saved-session"})
-		if !slices.Equal(args, []string{"pi", "--mode", "rpc", "--approve", "--session", "saved-session"}) {
-			t.Fatalf("resume args = %v", args)
-		}
-	})
-	t.Run("approves project-local inputs in rpc mode", func(t *testing.T) {
-		t.Parallel()
-		args := New("", nil).AgentArgs(agent.HarnessArgs{})
-		want := []string{"pi", "--mode", "rpc", "--approve"}
-		if !slices.Equal(args, want) {
-			t.Errorf("args = %v, want %v", args, want)
-		}
-	})
-}
-
-func TestBackendResumeMismatch(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(piSSHHelperEnv, "1")
-	t.Setenv("PATH", dir)
-	t.Setenv("PI_SSH_HELPER_DIR", dir)
-	if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
-	if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
-		t.Fatalf("resume mismatch error=%v", err)
-	}
 }
 
 func TestToAgentUsage(t *testing.T) {

@@ -34,24 +34,6 @@ func TestNoSessionError(t *testing.T) {
 	})
 }
 
-func TestConflictErr(t *testing.T) {
-	t.Parallel()
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		inner := errors.New("timeout")
-		e := conflictErr(inner, "no active session to compact")
-		if got, want := e.Error(), "no active session to compact: timeout"; got != want {
-			t.Errorf("Error() = %q, want %q", got, want)
-		}
-		if e.Kind != KindConflict {
-			t.Errorf("Kind = %v, want KindConflict", e.Kind)
-		}
-		if !errors.Is(e, inner) {
-			t.Error("errors.Is did not find wrapped error")
-		}
-	})
-}
-
 func TestErrorKind(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
@@ -83,6 +65,20 @@ func TestError(t *testing.T) {
 		e := &Error{Kind: KindConflict, Msg: "task is not stopped"}
 		if e.Error() != "task is not stopped" {
 			t.Errorf("Error() = %q, want %q", e.Error(), "task is not stopped")
+		}
+	})
+	t.Run("conflictErr", func(t *testing.T) {
+		t.Parallel()
+		inner := errors.New("timeout")
+		e := conflictErr(inner, "no active session to compact")
+		if got, want := e.Error(), "no active session to compact: timeout"; got != want {
+			t.Errorf("Error() = %q, want %q", got, want)
+		}
+		if e.Kind != KindConflict {
+			t.Errorf("Kind = %v, want KindConflict", e.Kind)
+		}
+		if !errors.Is(e, inner) {
+			t.Error("errors.Is did not find wrapped error")
 		}
 	})
 	t.Run("wrapped_message", func(t *testing.T) {

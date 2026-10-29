@@ -72,32 +72,34 @@ func TestParseZaiAccountReport(t *testing.T) {
 	})
 }
 
-func TestZaiFetcherGet(t *testing.T) {
+func TestZaiFetcher(t *testing.T) {
 	t.Parallel()
-	t.Run("balance from stub server", func(t *testing.T) {
-		t.Parallel()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{
-				"balance":5.17,"rechargeAmount":10.0,"giveAmount":1.0,
-				"totalSpendAmount":5.83,"availableBalance":5.17}}`))
-		}))
-		t.Cleanup(server.Close)
-
-		f := stubZaiFetcher(t, server, "zai-key")
-		quota := f.Get(t.Context())
-		if quota == nil || quota.Provider != agent.QuotaProviderZai {
-			t.Fatalf("Get() = %#v, want zai provider quota", quota)
-		}
-		if quota.Balance.Currency != "USD" || quota.Balance.Total != 5.17 || quota.Balance.Granted != 1 || quota.Balance.ToppedUp != 10 {
-			t.Fatalf("balance = %#v, want USD 5.17 granted 1 topped up 10", quota.Balance)
-		}
-	})
-
-	t.Run("empty key returns no fetcher", func(t *testing.T) {
+	t.Run("New", func(t *testing.T) {
 		t.Parallel()
 		if f := NewZaiFetcher(""); f != nil {
 			t.Fatalf("NewZaiFetcher(\"\") = %v, want nil", f)
 		}
+	})
+	t.Run("Get", func(t *testing.T) {
+		t.Parallel()
+		t.Run("balance from stub server", func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{
+					"balance":5.17,"rechargeAmount":10.0,"giveAmount":1.0,
+					"totalSpendAmount":5.83,"availableBalance":5.17}}`))
+			}))
+			t.Cleanup(server.Close)
+
+			f := stubZaiFetcher(t, server, "zai-key")
+			quota := f.Get(t.Context())
+			if quota == nil || quota.Provider != agent.QuotaProviderZai {
+				t.Fatalf("Get() = %#v, want zai provider quota", quota)
+			}
+			if quota.Balance.Currency != "USD" || quota.Balance.Total != 5.17 || quota.Balance.Granted != 1 || quota.Balance.ToppedUp != 10 {
+				t.Fatalf("balance = %#v, want USD 5.17 granted 1 topped up 10", quota.Balance)
+			}
+		})
 	})
 }

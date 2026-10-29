@@ -42,6 +42,18 @@ func TestBackend(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("SetModelInventory", func(t *testing.T) {
+		t.Parallel()
+
+		b := New("", nil)
+		b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}})
+
+		got := b.ModelInventory()
+		if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"high", "low"}) {
+			t.Fatalf("ModelInventory() = %#v, want normalized inventory", got)
+		}
+	})
 }
 
 func TestParseModels(t *testing.T) {
@@ -82,18 +94,6 @@ func TestNew(t *testing.T) {
 
 	if got := New("", nil).ModelInventory(); len(got.Models) != 0 {
 		t.Fatalf("ModelInventory() = %#v, want an empty inventory before discovery", got)
-	}
-}
-
-func TestSetModelInventory(t *testing.T) {
-	t.Parallel()
-
-	b := New("", nil)
-	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}})
-
-	got := b.ModelInventory()
-	if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"high", "low"}) {
-		t.Fatalf("ModelInventory() = %#v, want normalized inventory", got)
 	}
 }
 

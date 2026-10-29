@@ -255,6 +255,72 @@ func TestRouter(t *testing.T) {
 			t.Fatal("unexpected event after cancellation")
 		}
 	})
+
+	t.Run("List", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("returns partial instances with an error naming the unavailable runtime", func(t *testing.T) {
+			t.Parallel()
+			router, err := runtime.NewRouter([]runtime.System{
+				newRouterFakeBackend("docker"),
+				&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
+			}, metrics.Nop{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			instances, err := router.List(t.Context())
+			if err == nil {
+				t.Fatal("List returned no error for an unavailable runtime")
+			}
+			if len(instances) == 0 {
+				t.Fatalf("List returned no instances alongside %v", err)
+			}
+			if !strings.Contains(err.Error(), "podman") {
+				t.Fatalf("error = %v, want the unavailable runtime named", err)
+			}
+		})
+
+		t.Run("returns no instances when no runtime answered", func(t *testing.T) {
+			t.Parallel()
+			router, err := runtime.NewRouter([]runtime.System{
+				&listFailingBackend{routerFakeBackend: newRouterFakeBackend("docker")},
+			}, metrics.Nop{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			instances, err := router.List(t.Context())
+			if err == nil {
+				t.Fatal("List returned no error when every runtime failed")
+			}
+			if instances != nil {
+				t.Fatalf("instances = %v, want nil", instances)
+			}
+		})
+
+		t.Run("returns an empty inventory when a runtime answered", func(t *testing.T) {
+			t.Parallel()
+			router, err := runtime.NewRouter([]runtime.System{
+				&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
+				&listEmptyBackend{routerFakeBackend: newRouterFakeBackend("docker")},
+			}, metrics.Nop{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			instances, err := router.List(t.Context())
+			if err == nil {
+				t.Fatal("List returned no error for an unavailable runtime")
+			}
+			if instances == nil {
+				t.Fatal("List returned no instances although a runtime answered; an empty inventory is not an unreadable one")
+			}
+			if len(instances) != 0 {
+				t.Fatalf("instances = %v, want none", instances)
+			}
+		})
+	})
 }
 
 func TestRouterWatchStatsSetupFailure(t *testing.T) {
@@ -276,72 +342,6 @@ func TestRouterWatchStatsSetupFailure(t *testing.T) {
 	default:
 		t.Fatal("prior stream was not drained")
 	}
-}
-
-func TestRouterList(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns partial instances with an error naming the unavailable runtime", func(t *testing.T) {
-		t.Parallel()
-		router, err := runtime.NewRouter([]runtime.System{
-			newRouterFakeBackend("docker"),
-			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
-		}, metrics.Nop{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		instances, err := router.List(t.Context())
-		if err == nil {
-			t.Fatal("List returned no error for an unavailable runtime")
-		}
-		if len(instances) == 0 {
-			t.Fatalf("List returned no instances alongside %v", err)
-		}
-		if !strings.Contains(err.Error(), "podman") {
-			t.Fatalf("error = %v, want the unavailable runtime named", err)
-		}
-	})
-
-	t.Run("returns no instances when no runtime answered", func(t *testing.T) {
-		t.Parallel()
-		router, err := runtime.NewRouter([]runtime.System{
-			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("docker")},
-		}, metrics.Nop{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		instances, err := router.List(t.Context())
-		if err == nil {
-			t.Fatal("List returned no error when every runtime failed")
-		}
-		if instances != nil {
-			t.Fatalf("instances = %v, want nil", instances)
-		}
-	})
-
-	t.Run("returns an empty inventory when a runtime answered", func(t *testing.T) {
-		t.Parallel()
-		router, err := runtime.NewRouter([]runtime.System{
-			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
-			&listEmptyBackend{routerFakeBackend: newRouterFakeBackend("docker")},
-		}, metrics.Nop{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		instances, err := router.List(t.Context())
-		if err == nil {
-			t.Fatal("List returned no error for an unavailable runtime")
-		}
-		if instances == nil {
-			t.Fatal("List returned no instances although a runtime answered; an empty inventory is not an unreadable one")
-		}
-		if len(instances) != 0 {
-			t.Fatalf("instances = %v, want none", instances)
-		}
-	})
 }
 
 // listFailingBackend models a runtime whose inventory cannot be read.

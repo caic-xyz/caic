@@ -53,20 +53,24 @@ func TestBase(t *testing.T) {
 	})
 }
 
-func TestModelInventoryContextWindowLimit(t *testing.T) {
+func TestModelInventory(t *testing.T) {
 	t.Parallel()
 
-	inv := ModelInventory{Models: []Model{
-		{ID: "known", ContextWindow: 200_000},
-		{ID: "unknown"},
-	}}
-	if got := inv.ContextWindowLimit("known"); got != 200_000 {
-		t.Errorf("ContextWindowLimit(known) = %d, want 200000", got)
-	}
-	if got := inv.ContextWindowLimit("unknown"); got != 0 {
-		t.Errorf("ContextWindowLimit(unknown) = %d, want 0", got)
-	}
-	if got := inv.ContextWindowLimit("absent"); got != 0 {
-		t.Errorf("ContextWindowLimit(absent) = %d, want 0", got)
-	}
+	t.Run("ContextWindowLimit", func(t *testing.T) {
+		t.Parallel()
+
+		inv := ModelInventory{Models: []Model{
+			{ID: "known", ContextWindow: 200_000},
+			{ID: "unknown"},
+		}}
+		if got := inv.ContextWindowLimit("known"); got != 200_000 {
+			t.Errorf("ContextWindowLimit(known) = %d, want 200000", got)
+		}
+		if got := inv.ContextWindowLimit("unknown"); got != 0 {
+			t.Errorf("ContextWindowLimit(unknown) = %d, want 0", got)
+		}
+		if got := inv.ContextWindowLimit("absent"); got != 0 {
+			t.Errorf("ContextWindowLimit(absent) = %d, want 0", got)
+		}
+	})
 }

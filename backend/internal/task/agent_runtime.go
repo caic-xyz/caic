@@ -64,10 +64,11 @@ type AgentRuntime struct {
 	Log              *slog.Logger
 	NotifyTaskChange func()
 
-	Checkout            *repo.Checkout // nil for no-repository tasks
-	RuntimeMetadata     runtime.Metadata
-	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
-	MCPRegistry         mcp.Registry  // Task-scoped CAIC MCP registry; nil when disabled.
+	Checkout             *repo.Checkout // nil for no-repository tasks
+	RuntimeMetadata      runtime.Metadata
+	RuntimeStartTimeout  time.Duration // Timeout for instance start (image pull). Must be non-zero.
+	EnsureSessionTimeout time.Duration // Timeout for session verification in EnsureSession. Defaults to 10s if <= 0.
+	MCPRegistry          mcp.Registry  // Task-scoped CAIC MCP registry; nil when disabled.
 }
 
 // Reconnect attaches to the existing relay using validated persistent history.
@@ -151,6 +152,10 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 // context must also own the session process; cancellation drains its local
 // transport without sending a stop sentinel to the retained remote agent.
 func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *Task, h *SessionHandle) (*SessionHandle, error) {
+	timeout := r.EnsureSessionTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
 	select {
 	case <-h.Done():
 		// Session exited immediately (agent was already done).
@@ -166,7 +171,7 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		}
 		t.SetState(taskslog.StateWaiting)
 		return r.StartSession(ctx, t, agent.Prompt{})
-	case <-time.After(10 * time.Second):
+	case <-time.After(timeout):
 		// Session is alive — all good.
 		return h, nil
 	case <-ctx.Done():

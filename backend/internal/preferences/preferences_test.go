@@ -9,276 +9,475 @@ import (
 	"time"
 )
 
-func TestPreferencesValidate(t *testing.T) {
+func TestPreferences(t *testing.T) {
 	t.Parallel()
-	t.Run("valid_empty", func(t *testing.T) {
+
+	t.Run("Validate", func(t *testing.T) {
 		t.Parallel()
-		p := newPreferences()
-		if err := p.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("valid_full", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "github/foo", BaseBranch: "develop"},
-				{Path: "github/bar"},
-			},
-			Harness: "claude",
-			Models:  map[string]string{"claude": "opus", "codex": "o3"},
-			Efforts: EffortPreferences{"claude": {"opus": "max"}, "codex": {"o3": "high"}},
-			Settings: Settings{
-				BaseImage:       "custom:latest",
-				RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
-				PurgeDelay:      91 * time.Second,
-				CacheMappings: []CacheMapping{
-					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
-				},
-				CustomMounts: []MountMapping{
-					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false, ReadOnly: true},
-				},
-			},
-		}
-		if err := p.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	for _, delay := range []time.Duration{MinPurgeDelay, MaxPurgeDelay} {
-		t.Run("valid_purge_delay_"+delay.String(), func(t *testing.T) {
+		t.Run("valid_empty", func(t *testing.T) {
 			t.Parallel()
 			p := newPreferences()
-			p.Settings.PurgeDelay = delay
 			if err := p.Validate(); err != nil {
 				t.Fatal(err)
 			}
 		})
-	}
-	for _, tc := range []struct {
-		name  string
-		delay time.Duration
-	}{
-		{name: "purge_delay_below_minimum", delay: MinPurgeDelay - time.Second},
-		{name: "purge_delay_above_maximum", delay: MaxPurgeDelay + time.Second},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run("valid_full", func(t *testing.T) {
 			t.Parallel()
-			p := &Preferences{Version: currentVersion, Settings: Settings{PurgeDelay: tc.delay}}
-			if err := p.Validate(); err == nil {
-				t.Fatal("expected error for invalid purge delay")
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "github/foo", BaseBranch: "develop"},
+					{Path: "github/bar"},
+				},
+				Harness: "claude",
+				Models:  map[string]string{"claude": "opus", "codex": "o3"},
+				Efforts: EffortPreferences{"claude": {"opus": "max"}, "codex": {"o3": "high"}},
+				Settings: Settings{
+					BaseImage:       "custom:latest",
+					RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
+					PurgeDelay:      91 * time.Second,
+					CacheMappings: []CacheMapping{
+						{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
+					},
+					CustomMounts: []MountMapping{
+						{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false, ReadOnly: true},
+					},
+				},
 			}
-		})
-	}
-	t.Run("invalid_container_platform", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{Version: currentVersion, Settings: Settings{RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/386"}}, PurgeDelay: MinPurgeDelay}}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for invalid container platform")
-		}
-	})
-	t.Run("wrong_version", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{Version: 99}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for wrong version")
-		}
-	})
-	t.Run("empty_repo_path", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{Version: 1, Repositories: []RepoPrefs{{Path: ""}}}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for empty repo path")
-		}
-	})
-	t.Run("duplicate_repo_path", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "github/foo"},
-				{Path: "github/foo"},
-			},
-		}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for duplicate repo path")
-		}
-	})
-	t.Run("valid_cache_mappings", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				PurgeDelay: MinPurgeDelay,
-				CacheMappings: []CacheMapping{
-					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
-				},
-			},
-		}
-		if err := p.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("valid_home_relative_default_container_path", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				PurgeDelay:    MinPurgeDelay,
-				CacheMappings: []CacheMapping{{HostPath: "~/.cache/tool", Enabled: true}},
-				CustomMounts:  []MountMapping{{HostPath: "~/.claude", Enabled: true}},
-			},
-		}
-		if err := p.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("cache_mapping_empty_host", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				CacheMappings: []CacheMapping{
-					{HostPath: "", ContainerPath: "/container/a"},
-				},
-			},
-		}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for empty hostPath")
-		}
-	})
-	t.Run("cache_mapping_empty_container", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				CacheMappings: []CacheMapping{
-					{HostPath: "/host/a", ContainerPath: ""},
-				},
-			},
-		}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for empty containerPath")
-		}
-	})
-	t.Run("valid_custom_mounts", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				PurgeDelay: MinPurgeDelay,
-				CustomMounts: []MountMapping{
-					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
-				},
-			},
-		}
-		if err := p.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("custom_mount_empty_host", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				CustomMounts: []MountMapping{
-					{HostPath: "", ContainerPath: "/container/a"},
-				},
-			},
-		}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for empty hostPath")
-		}
-	})
-	t.Run("custom_mount_empty_container", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Settings: Settings{
-				CustomMounts: []MountMapping{
-					{HostPath: "/host/a", ContainerPath: ""},
-				},
-			},
-		}
-		if err := p.Validate(); err == nil {
-			t.Fatal("expected error for empty containerPath")
-		}
-	})
-}
-
-func TestSettingsValidate(t *testing.T) {
-	t.Parallel()
-	for _, delay := range []time.Duration{MinPurgeDelay, 91 * time.Second, MaxPurgeDelay} {
-		t.Run("valid_"+delay.String(), func(t *testing.T) {
-			t.Parallel()
-			s := defaultSettings()
-			s.PurgeDelay = delay
-			if err := s.Validate(); err != nil {
+			if err := p.Validate(); err != nil {
 				t.Fatal(err)
 			}
 		})
-	}
-	for _, tc := range []struct {
-		name  string
-		delay time.Duration
-	}{
-		{name: "below_minimum", delay: MinPurgeDelay - time.Second},
-		{name: "above_maximum", delay: MaxPurgeDelay + time.Second},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+		for _, delay := range []time.Duration{MinPurgeDelay, MaxPurgeDelay} {
+			t.Run("valid_purge_delay_"+delay.String(), func(t *testing.T) {
+				t.Parallel()
+				p := newPreferences()
+				p.Settings.PurgeDelay = delay
+				if err := p.Validate(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+		for _, tc := range []struct {
+			name  string
+			delay time.Duration
+		}{
+			{name: "purge_delay_below_minimum", delay: MinPurgeDelay - time.Second},
+			{name: "purge_delay_above_maximum", delay: MaxPurgeDelay + time.Second},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				p := &Preferences{Version: currentVersion, Settings: Settings{PurgeDelay: tc.delay}}
+				if err := p.Validate(); err == nil {
+					t.Fatal("expected error for invalid purge delay")
+				}
+			})
+		}
+		t.Run("invalid_container_platform", func(t *testing.T) {
 			t.Parallel()
-			s := defaultSettings()
-			s.PurgeDelay = tc.delay
-			if err := s.Validate(); err == nil {
-				t.Fatal("expected error for invalid purge delay")
+			p := &Preferences{Version: currentVersion, Settings: Settings{RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/386"}}, PurgeDelay: MinPurgeDelay}}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for invalid container platform")
 			}
 		})
-	}
+		t.Run("wrong_version", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{Version: 99}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for wrong version")
+			}
+		})
+		t.Run("empty_repo_path", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{Version: 1, Repositories: []RepoPrefs{{Path: ""}}}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for empty repo path")
+			}
+		})
+		t.Run("duplicate_repo_path", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "github/foo"},
+					{Path: "github/foo"},
+				},
+			}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for duplicate repo path")
+			}
+		})
+		t.Run("valid_cache_mappings", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					PurgeDelay: MinPurgeDelay,
+					CacheMappings: []CacheMapping{
+						{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
+					},
+				},
+			}
+			if err := p.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("valid_home_relative_default_container_path", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					PurgeDelay:    MinPurgeDelay,
+					CacheMappings: []CacheMapping{{HostPath: "~/.cache/tool", Enabled: true}},
+					CustomMounts:  []MountMapping{{HostPath: "~/.claude", Enabled: true}},
+				},
+			}
+			if err := p.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("cache_mapping_empty_host", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					CacheMappings: []CacheMapping{
+						{HostPath: "", ContainerPath: "/container/a"},
+					},
+				},
+			}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for empty hostPath")
+			}
+		})
+		t.Run("cache_mapping_empty_container", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					CacheMappings: []CacheMapping{
+						{HostPath: "/host/a", ContainerPath: ""},
+					},
+				},
+			}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for empty containerPath")
+			}
+		})
+		t.Run("valid_custom_mounts", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					PurgeDelay: MinPurgeDelay,
+					CustomMounts: []MountMapping{
+						{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
+					},
+				},
+			}
+			if err := p.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("custom_mount_empty_host", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					CustomMounts: []MountMapping{
+						{HostPath: "", ContainerPath: "/container/a"},
+					},
+				},
+			}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for empty hostPath")
+			}
+		})
+		t.Run("custom_mount_empty_container", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Settings: Settings{
+					CustomMounts: []MountMapping{
+						{HostPath: "/host/a", ContainerPath: ""},
+					},
+				},
+			}
+			if err := p.Validate(); err == nil {
+				t.Fatal("expected error for empty containerPath")
+			}
+		})
+	})
+
+	t.Run("TouchRepo", func(t *testing.T) {
+		t.Parallel()
+		t.Run("new_repo_with_overrides", func(t *testing.T) {
+			t.Parallel()
+			before := time.Now().Unix()
+			p := &Preferences{Version: currentVersion}
+			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
+			if len(p.Repositories) != 1 {
+				t.Fatalf("got %d repos", len(p.Repositories))
+			}
+			r := p.Repositories[0]
+			if r.Path != "github/foo" || r.Harness != "claude" || r.Model != "opus" {
+				t.Fatalf("got %+v", r)
+			}
+			if r.LastUsed < before {
+				t.Errorf("lastUsed = %d, want >= %d", r.LastUsed, before)
+			}
+			// Global defaults updated.
+			if p.Harness != "claude" {
+				t.Errorf("global harness = %q, want %q", p.Harness, "claude")
+			}
+			if p.Models["claude"] != "opus" {
+				t.Errorf("global models[claude] = %q, want %q", p.Models["claude"], "opus")
+			}
+		})
+		t.Run("move_to_front_preserves_existing", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "github/a"},
+					{Path: "github/b", BaseBranch: "develop", Harness: "codex", Model: "o3"},
+					{Path: "github/c"},
+				},
+			}
+			// Touch with only harness override; model and baseBranch preserved.
+			p.TouchRepo("github/b", &RepoPrefs{Harness: "claude"})
+			want := []string{"github/b", "github/a", "github/c"}
+			for i, r := range p.Repositories {
+				if r.Path != want[i] {
+					t.Errorf("repos[%d] = %q, want %q", i, r.Path, want[i])
+				}
+			}
+			r := p.Repositories[0]
+			if r.BaseBranch != "develop" {
+				t.Errorf("baseBranch = %q, want %q", r.BaseBranch, "develop")
+			}
+			if r.Harness != "claude" {
+				t.Errorf("harness = %q, want %q", r.Harness, "claude")
+			}
+			// Model preserved from before (override was empty).
+			if r.Model != "o3" {
+				t.Errorf("model = %q, want %q", r.Model, "o3")
+			}
+		})
+		t.Run("already_first", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "github/a", Harness: "claude"},
+					{Path: "github/b"},
+				},
+			}
+			p.TouchRepo("github/a", &RepoPrefs{Model: "sonnet"})
+			if p.Repositories[0].Path != "github/a" || p.Repositories[1].Path != "github/b" {
+				t.Fatalf("got %v", p.Repositories)
+			}
+			if p.Repositories[0].Model != "sonnet" {
+				t.Errorf("model = %q, want %q", p.Repositories[0].Model, "sonnet")
+			}
+			// Harness preserved.
+			if p.Repositories[0].Harness != "claude" {
+				t.Errorf("harness = %q, want %q", p.Repositories[0].Harness, "claude")
+			}
+		})
+		t.Run("clear_model_after_touch", func(t *testing.T) {
+			t.Parallel()
+			// Simulate the server clearing model when the user selects "default".
+			// TouchRepo alone can't clear model (empty = don't override), so the
+			// caller must clear it explicitly after TouchRepo.
+			p := &Preferences{
+				Version: 1,
+				Models:  map[string]string{"claude": "opus"},
+				Repositories: []RepoPrefs{
+					{Path: "github/a", Harness: "claude", Model: "opus"},
+				},
+			}
+			p.TouchRepo("github/a", &RepoPrefs{Harness: "claude"})
+			// Caller clears model explicitly.
+			p.Repositories[0].Model = ""
+			p.Models["claude"] = ""
+			if p.Repositories[0].Model != "" {
+				t.Errorf("repo model = %q, want empty", p.Repositories[0].Model)
+			}
+			if p.Models["claude"] != "" {
+				t.Errorf("global models[claude] = %q, want empty", p.Models["claude"])
+			}
+		})
+		t.Run("empty_overrides_preserve_all", func(t *testing.T) {
+			t.Parallel()
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "github/a", Harness: "codex", Model: "o3", BaseBranch: "dev"},
+				},
+			}
+			p.TouchRepo("github/a", &RepoPrefs{})
+			r := p.Repositories[0]
+			if r.Harness != "codex" || r.Model != "o3" || r.BaseBranch != "dev" {
+				t.Fatalf("fields clobbered: %+v", r)
+			}
+		})
+	})
+
+	t.Run("RecentRepos", func(t *testing.T) {
+		t.Parallel()
+		now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+		recent := now.Add(-3 * 24 * time.Hour).Unix() // 3 days ago — within window
+		old := now.Add(-10 * 24 * time.Hour).Unix()   // 10 days ago — outside window
+
+		t.Run("all_recent_under_min", func(t *testing.T) {
+			t.Parallel()
+			// Fewer than minRecentRepos repos, all old: all returned.
+			p := &Preferences{
+				Version: 1,
+				Repositories: []RepoPrefs{
+					{Path: "a", LastUsed: old},
+					{Path: "b", LastUsed: old},
+				},
+			}
+			got := p.RecentRepos(now)
+			if len(got) != 2 {
+				t.Fatalf("got %d repos, want 2", len(got))
+			}
+		})
+
+		t.Run("keeps_min_10_regardless_of_age", func(t *testing.T) {
+			t.Parallel()
+			repos := make([]RepoPrefs, 15)
+			for i := range repos {
+				repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
+			}
+			p := &Preferences{Version: 1, Repositories: repos}
+			got := p.RecentRepos(now)
+			if len(got) != 10 {
+				t.Fatalf("got %d repos, want 10", len(got))
+			}
+			// First 10 preserved in order.
+			for i, r := range got {
+				if r.Path != repos[i].Path {
+					t.Errorf("repos[%d] = %q, want %q", i, r.Path, repos[i].Path)
+				}
+			}
+		})
+
+		t.Run("recent_beyond_min_included", func(t *testing.T) {
+			t.Parallel()
+			repos := make([]RepoPrefs, 12)
+			for i := range repos {
+				repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
+			}
+			// Make repo at index 11 (beyond min 10) recently used.
+			repos[11].LastUsed = recent
+			p := &Preferences{Version: 1, Repositories: repos}
+			got := p.RecentRepos(now)
+			if len(got) != 11 {
+				t.Fatalf("got %d repos, want 11", len(got))
+			}
+			if got[10].Path != repos[11].Path {
+				t.Errorf("repos[10] = %q, want %q", got[10].Path, repos[11].Path)
+			}
+		})
+
+		t.Run("no_timestamp_falls_back_to_min", func(t *testing.T) {
+			t.Parallel()
+			// Repos with no LastUsed (zero) beyond index 10 are excluded.
+			repos := make([]RepoPrefs, 15)
+			for i := range repos {
+				repos[i] = RepoPrefs{Path: string(rune('a' + i))}
+			}
+			p := &Preferences{Version: 1, Repositories: repos}
+			got := p.RecentRepos(now)
+			if len(got) != 10 {
+				t.Fatalf("got %d repos, want 10", len(got))
+			}
+		})
+	})
 }
 
-func TestUsersFileValidate(t *testing.T) {
+func TestSettings(t *testing.T) {
 	t.Parallel()
-	t.Run("valid_empty_map", func(t *testing.T) {
+	t.Run("Validate", func(t *testing.T) {
 		t.Parallel()
-		f := &usersFile{Users: map[string]Preferences{}}
-		if err := f.Validate(); err != nil {
-			t.Fatal(err)
+		for _, delay := range []time.Duration{MinPurgeDelay, 91 * time.Second, MaxPurgeDelay} {
+			t.Run("valid_"+delay.String(), func(t *testing.T) {
+				t.Parallel()
+				s := defaultSettings()
+				s.PurgeDelay = delay
+				if err := s.Validate(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+		for _, tc := range []struct {
+			name  string
+			delay time.Duration
+		}{
+			{name: "below_minimum", delay: MinPurgeDelay - time.Second},
+			{name: "above_maximum", delay: MaxPurgeDelay + time.Second},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				s := defaultSettings()
+				s.PurgeDelay = tc.delay
+				if err := s.Validate(); err == nil {
+					t.Fatal("expected error for invalid purge delay")
+				}
+			})
 		}
 	})
-	t.Run("valid_nil_map", func(t *testing.T) {
+}
+
+func TestUsersFile(t *testing.T) {
+	t.Parallel()
+	t.Run("Validate", func(t *testing.T) {
 		t.Parallel()
-		f := &usersFile{}
-		if err := f.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("valid_users", func(t *testing.T) {
-		t.Parallel()
-		f := &usersFile{Users: map[string]Preferences{
-			"alice": *newPreferences(),
-			"bob":   *newPreferences(),
-		}}
-		if err := f.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("empty_user_id", func(t *testing.T) {
-		t.Parallel()
-		f := &usersFile{Users: map[string]Preferences{
-			"": {Version: currentVersion},
-		}}
-		if err := f.Validate(); err == nil {
-			t.Fatal("expected error for empty user ID key")
-		}
-	})
-	t.Run("invalid_prefs_propagate", func(t *testing.T) {
-		t.Parallel()
-		f := &usersFile{Users: map[string]Preferences{
-			"alice": {Version: 99},
-		}}
-		if err := f.Validate(); err == nil {
-			t.Fatal("expected error for invalid prefs")
-		}
+		t.Run("valid_empty_map", func(t *testing.T) {
+			t.Parallel()
+			f := &usersFile{Users: map[string]Preferences{}}
+			if err := f.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("valid_nil_map", func(t *testing.T) {
+			t.Parallel()
+			f := &usersFile{}
+			if err := f.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("valid_users", func(t *testing.T) {
+			t.Parallel()
+			f := &usersFile{Users: map[string]Preferences{
+				"alice": *newPreferences(),
+				"bob":   *newPreferences(),
+			}}
+			if err := f.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("empty_user_id", func(t *testing.T) {
+			t.Parallel()
+			f := &usersFile{Users: map[string]Preferences{
+				"": {Version: currentVersion},
+			}}
+			if err := f.Validate(); err == nil {
+				t.Fatal("expected error for empty user ID key")
+			}
+		})
+		t.Run("invalid_prefs_propagate", func(t *testing.T) {
+			t.Parallel()
+			f := &usersFile{Users: map[string]Preferences{
+				"alice": {Version: 99},
+			}}
+			if err := f.Validate(); err == nil {
+				t.Fatal("expected error for invalid prefs")
+			}
+		})
 	})
 }
 
@@ -509,195 +708,6 @@ func TestUsers(t *testing.T) {
 		snapshot.Settings.CustomMounts[0].HostPath = "mutated"
 		if got := s.Get("u"); got.Settings.CustomMounts[0].HostPath == "mutated" {
 			t.Error("customMounts slice aliased")
-		}
-	})
-}
-
-func TestTouchRepo(t *testing.T) {
-	t.Parallel()
-	t.Run("new_repo_with_overrides", func(t *testing.T) {
-		t.Parallel()
-		before := time.Now().Unix()
-		p := &Preferences{Version: currentVersion}
-		p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
-		if len(p.Repositories) != 1 {
-			t.Fatalf("got %d repos", len(p.Repositories))
-		}
-		r := p.Repositories[0]
-		if r.Path != "github/foo" || r.Harness != "claude" || r.Model != "opus" {
-			t.Fatalf("got %+v", r)
-		}
-		if r.LastUsed < before {
-			t.Errorf("lastUsed = %d, want >= %d", r.LastUsed, before)
-		}
-		// Global defaults updated.
-		if p.Harness != "claude" {
-			t.Errorf("global harness = %q, want %q", p.Harness, "claude")
-		}
-		if p.Models["claude"] != "opus" {
-			t.Errorf("global models[claude] = %q, want %q", p.Models["claude"], "opus")
-		}
-	})
-	t.Run("move_to_front_preserves_existing", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "github/a"},
-				{Path: "github/b", BaseBranch: "develop", Harness: "codex", Model: "o3"},
-				{Path: "github/c"},
-			},
-		}
-		// Touch with only harness override; model and baseBranch preserved.
-		p.TouchRepo("github/b", &RepoPrefs{Harness: "claude"})
-		want := []string{"github/b", "github/a", "github/c"}
-		for i, r := range p.Repositories {
-			if r.Path != want[i] {
-				t.Errorf("repos[%d] = %q, want %q", i, r.Path, want[i])
-			}
-		}
-		r := p.Repositories[0]
-		if r.BaseBranch != "develop" {
-			t.Errorf("baseBranch = %q, want %q", r.BaseBranch, "develop")
-		}
-		if r.Harness != "claude" {
-			t.Errorf("harness = %q, want %q", r.Harness, "claude")
-		}
-		// Model preserved from before (override was empty).
-		if r.Model != "o3" {
-			t.Errorf("model = %q, want %q", r.Model, "o3")
-		}
-	})
-	t.Run("already_first", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "github/a", Harness: "claude"},
-				{Path: "github/b"},
-			},
-		}
-		p.TouchRepo("github/a", &RepoPrefs{Model: "sonnet"})
-		if p.Repositories[0].Path != "github/a" || p.Repositories[1].Path != "github/b" {
-			t.Fatalf("got %v", p.Repositories)
-		}
-		if p.Repositories[0].Model != "sonnet" {
-			t.Errorf("model = %q, want %q", p.Repositories[0].Model, "sonnet")
-		}
-		// Harness preserved.
-		if p.Repositories[0].Harness != "claude" {
-			t.Errorf("harness = %q, want %q", p.Repositories[0].Harness, "claude")
-		}
-	})
-	t.Run("clear_model_after_touch", func(t *testing.T) {
-		t.Parallel()
-		// Simulate the server clearing model when the user selects "default".
-		// TouchRepo alone can't clear model (empty = don't override), so the
-		// caller must clear it explicitly after TouchRepo.
-		p := &Preferences{
-			Version: 1,
-			Models:  map[string]string{"claude": "opus"},
-			Repositories: []RepoPrefs{
-				{Path: "github/a", Harness: "claude", Model: "opus"},
-			},
-		}
-		p.TouchRepo("github/a", &RepoPrefs{Harness: "claude"})
-		// Caller clears model explicitly.
-		p.Repositories[0].Model = ""
-		p.Models["claude"] = ""
-		if p.Repositories[0].Model != "" {
-			t.Errorf("repo model = %q, want empty", p.Repositories[0].Model)
-		}
-		if p.Models["claude"] != "" {
-			t.Errorf("global models[claude] = %q, want empty", p.Models["claude"])
-		}
-	})
-	t.Run("empty_overrides_preserve_all", func(t *testing.T) {
-		t.Parallel()
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "github/a", Harness: "codex", Model: "o3", BaseBranch: "dev"},
-			},
-		}
-		p.TouchRepo("github/a", &RepoPrefs{})
-		r := p.Repositories[0]
-		if r.Harness != "codex" || r.Model != "o3" || r.BaseBranch != "dev" {
-			t.Fatalf("fields clobbered: %+v", r)
-		}
-	})
-}
-
-func TestRecentRepos(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
-	recent := now.Add(-3 * 24 * time.Hour).Unix() // 3 days ago — within window
-	old := now.Add(-10 * 24 * time.Hour).Unix()   // 10 days ago — outside window
-
-	t.Run("all_recent_under_min", func(t *testing.T) {
-		t.Parallel()
-		// Fewer than minRecentRepos repos, all old: all returned.
-		p := &Preferences{
-			Version: 1,
-			Repositories: []RepoPrefs{
-				{Path: "a", LastUsed: old},
-				{Path: "b", LastUsed: old},
-			},
-		}
-		got := p.RecentRepos(now)
-		if len(got) != 2 {
-			t.Fatalf("got %d repos, want 2", len(got))
-		}
-	})
-
-	t.Run("keeps_min_10_regardless_of_age", func(t *testing.T) {
-		t.Parallel()
-		repos := make([]RepoPrefs, 15)
-		for i := range repos {
-			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
-		}
-		p := &Preferences{Version: 1, Repositories: repos}
-		got := p.RecentRepos(now)
-		if len(got) != 10 {
-			t.Fatalf("got %d repos, want 10", len(got))
-		}
-		// First 10 preserved in order.
-		for i, r := range got {
-			if r.Path != repos[i].Path {
-				t.Errorf("repos[%d] = %q, want %q", i, r.Path, repos[i].Path)
-			}
-		}
-	})
-
-	t.Run("recent_beyond_min_included", func(t *testing.T) {
-		t.Parallel()
-		repos := make([]RepoPrefs, 12)
-		for i := range repos {
-			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
-		}
-		// Make repo at index 11 (beyond min 10) recently used.
-		repos[11].LastUsed = recent
-		p := &Preferences{Version: 1, Repositories: repos}
-		got := p.RecentRepos(now)
-		if len(got) != 11 {
-			t.Fatalf("got %d repos, want 11", len(got))
-		}
-		if got[10].Path != repos[11].Path {
-			t.Errorf("repos[10] = %q, want %q", got[10].Path, repos[11].Path)
-		}
-	})
-
-	t.Run("no_timestamp_falls_back_to_min", func(t *testing.T) {
-		t.Parallel()
-		// Repos with no LastUsed (zero) beyond index 10 are excluded.
-		repos := make([]RepoPrefs, 15)
-		for i := range repos {
-			repos[i] = RepoPrefs{Path: string(rune('a' + i))}
-		}
-		p := &Preferences{Version: 1, Repositories: repos}
-		got := p.RecentRepos(now)
-		if len(got) != 10 {
-			t.Fatalf("got %d repos, want 10", len(got))
 		}
 	})
 }

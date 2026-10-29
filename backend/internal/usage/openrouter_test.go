@@ -55,53 +55,56 @@ func stubOpenRouterFetcher(t *testing.T, server *httptest.Server) *OpenRouterFet
 	return f
 }
 
-func TestOpenRouterFetcherModelPrice(t *testing.T) {
+func TestOpenRouterFetcher(t *testing.T) {
 	t.Parallel()
-	t.Run("FetchAndLookup", func(t *testing.T) {
+	t.Run("ModelPrice", func(t *testing.T) {
 		t.Parallel()
-		var hits int
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			hits++
-			_, _ = w.Write([]byte(openRouterModelsPayload))
-		}))
-		t.Cleanup(server.Close)
-		f := stubOpenRouterFetcher(t, server)
+		t.Run("FetchAndLookup", func(t *testing.T) {
+			t.Parallel()
+			var hits int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits++
+				_, _ = w.Write([]byte(openRouterModelsPayload))
+			}))
+			t.Cleanup(server.Close)
+			f := stubOpenRouterFetcher(t, server)
 
-		price, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now())
-		if !ok {
-			t.Fatal("priced model not found")
-		}
-		want := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, CacheWritePerMTok: 0.15, OutputPerMTok: 0.50}
-		if !reflect.DeepEqual(price, want) {
-			t.Errorf("price = %+v, want %+v", price, want)
-		}
+			price, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now())
+			if !ok {
+				t.Fatal("priced model not found")
+			}
+			want := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, CacheWritePerMTok: 0.15, OutputPerMTok: 0.50}
+			if !reflect.DeepEqual(price, want) {
+				t.Errorf("price = %+v, want %+v", price, want)
+			}
 
-		// Variant suffixes resolve to the base model; lookups stay cached.
-		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash:free", time.Now()); !ok {
-			t.Error("variant-suffixed model not priced")
-		}
-		if hits != 1 {
-			t.Errorf("models endpoint hit %d times, want 1 (cached)", hits)
-		}
-	})
-	t.Run("FetchErrorBackoff", func(t *testing.T) {
-		t.Parallel()
-		var hits int
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			hits++
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		t.Cleanup(server.Close)
-		f := stubOpenRouterFetcher(t, server)
+			// Variant suffixes resolve to the base model; lookups stay cached.
+			if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash:free", time.Now()); !ok {
+				t.Error("variant-suffixed model not priced")
+			}
+			if hits != 1 {
+				t.Errorf("models endpoint hit %d times, want 1 (cached)", hits)
+			}
+		})
+		t.Run("FetchErrorBackoff", func(t *testing.T) {
+			t.Parallel()
+			var hits int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits++
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(server.Close)
+			f := stubOpenRouterFetcher(t, server)
 
-		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
-			t.Error("priced a model despite fetch failure")
-		}
-		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
-			t.Error("priced a model on retry within backoff window")
-		}
-		if hits != 1 {
-			t.Errorf("models endpoint hit %d times, want 1 (backed off)", hits)
-		}
+			if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
+				t.Error("priced a model despite fetch failure")
+			}
+			if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
+				t.Error("priced a model on retry within backoff window")
+			}
+			if hits != 1 {
+				t.Errorf("models endpoint hit %d times, want 1 (backed off)", hits)
+			}
+		})
 	})
 }

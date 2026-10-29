@@ -253,14 +253,15 @@ func newTestAgentRuntime(t testing.TB, checkout *repo.Checkout, logDir string, b
 		runtimes, _ = value.(*runtime.Router)
 	}
 	return &AgentRuntime{
-		Backends:            backends,
-		LogStore:            taskslog.NewStore(testLogger(), logDir),
-		LogPath:             &taskslog.Path{},
-		Runtimes:            runtimes,
-		Log:                 logtest.Logger(t),
-		NotifyTaskChange:    func() {},
-		Checkout:            checkout,
-		RuntimeStartTimeout: time.Hour,
+		Backends:             backends,
+		LogStore:             taskslog.NewStore(testLogger(), logDir),
+		LogPath:              &taskslog.Path{},
+		Runtimes:             runtimes,
+		Log:                  logtest.Logger(t),
+		NotifyTaskChange:     func() {},
+		Checkout:             checkout,
+		RuntimeStartTimeout:  time.Hour,
+		EnsureSessionTimeout: 30 * time.Millisecond,
 	}
 }
 

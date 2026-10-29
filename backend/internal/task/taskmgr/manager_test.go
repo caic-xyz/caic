@@ -153,6 +153,9 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
 	}
+	if cfg.EnsureSessionTimeout == 0 {
+		cfg.EnsureSessionTimeout = 30 * time.Millisecond
+	}
 	m, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -6434,12 +6437,16 @@ func TestManager(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("LoadUnsettledTasks", runLoadUnsettledTasksTests)
+	t.Run("allocateBranches", runAllocateBranchesTests)
+	t.Run("RegisteredLogPaths", runRegisteredLogPathsTests)
 }
 
 // TestLoadUnsettledTasks covers LoadUnsettledTasks: the plain (uncompressed)
 // scan is loaded uncapped, so live and just-terminal tasks are not lost, and
 // running tasks are coerced to failed.
-func TestLoadUnsettledTasks(t *testing.T) {
+func runLoadUnsettledTasksTests(t *testing.T) {
 	t.Parallel()
 	t.Run("UncappedPerRepo", func(t *testing.T) {
 		t.Parallel()
@@ -6508,7 +6515,16 @@ func TestLoadUnsettledTasks(t *testing.T) {
 	})
 }
 
-func TestAllocateBranches(t *testing.T) {
+func runAllocateBranchesTests(t *testing.T) {
+	t.Parallel()
+	t.Run("basic", runAllocateBranchesBasic)
+	t.Run("adoptsAvailableLocalBranch", runAllocateBranchesAdoptsAvailableLocalBranch)
+	t.Run("sharesBranchNameAcrossRepos", runAllocateBranchesSharesBranchNameAcrossRepos)
+	t.Run("fallsBackWhenSharedNameTaken", runAllocateBranchesFallsBackWhenSharedNameTaken)
+	t.Run("adoptionDisablesSharing", runAllocateBranchesAdoptionDisablesSharing)
+}
+
+func runAllocateBranchesBasic(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	// Fake dirs: Init's branch scan fails and is ignored, leaving nextID at 0, so
@@ -6547,7 +6563,7 @@ func TestAllocateBranches(t *testing.T) {
 	}
 }
 
-func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
+func runAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -6642,7 +6658,7 @@ func initTaskRepo(t *testing.T, dir string, args ...[]string) {
 // sequence number across the involved checkouts, so it is free in each. The
 // reservation also advances the low counter, so a later single-repo task on
 // that repo cannot reissue the shared name.
-func TestAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
+func runAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
 	t.Parallel()
 	dirApp, dirLib := t.TempDir(), t.TempDir()
 	initTaskRepo(t, dirApp)
@@ -6696,7 +6712,7 @@ func TestAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
 // A repo whose shared name already exists in its git — a stale branch from an
 // older task the in-memory counter does not know about — falls back to its own
 // next sequential name.
-func TestAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
+func runAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
 	t.Parallel()
 	dirApp, dirLib := t.TempDir(), t.TempDir()
 	initTaskRepo(t, dirApp)
@@ -6725,7 +6741,7 @@ func TestAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
 
 // An adopted local branch keeps its own name and disables sharing for that
 // repo; the remaining repos still share a name among themselves.
-func TestAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
+func runAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
 	t.Parallel()
 	dirApp, dirLib := t.TempDir(), t.TempDir()
 	initTaskRepo(t, dirApp, []string{"branch", "local-work"}, []string{"branch", "--set-upstream-to", "origin/main", "local-work"})
@@ -6852,7 +6868,7 @@ func TestRestorationState(t *testing.T) {
 	}
 }
 
-func TestRegisteredLogPaths(t *testing.T) {
+func runRegisteredLogPathsTests(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	logStore := taskslog.NewStore(testLogger(), dir)

@@ -1483,190 +1483,190 @@ func TestCheckout(t *testing.T) {
 			t.Error("BranchDiffStat with no instance succeeded")
 		}
 	})
-}
 
-// TestDiffStatAndRepoStates covers the compact card probe: the combined diff
-// stat, the per-repo state summary, and how partial probe failures degrade so
-// one failing repository cannot blank the whole task card.
-func TestDiffStatAndRepoStates(t *testing.T) {
-	t.Parallel()
-	status := runtime.RepositoryStatus{
-		Branch:   "caic-3",
-		Upstream: "origin/main",
-		Ahead:    2,
-		Behind:   1,
-		DiffStat: []runtime.GitFileStat{
-			{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
-			{Path: "logo.png", Binary: true, OldSize: 10, NewSize: 20},
-		},
-		Uncommitted: []runtime.GitFileStatus{
-			{Path: "main.go", WorktreeStatus: "M"},
-			{Path: "conflict.txt", IndexStatus: "U", WorktreeStatus: "U"},
-		},
-	}
-
-	t.Run("single repo", func(t *testing.T) {
+	// DiffStatAndRepoStates covers the compact card probe: the combined diff
+	// stat, the per-repo state summary, and how partial probe failures degrade so
+	// one failing repository cannot blank the whole task card.
+	t.Run("DiffStatAndRepoStates", func(t *testing.T) {
 		t.Parallel()
-		sc := newRecordingContainer()
-		sc.RepositoryStatusValue = status
-		r := newTestCheckout("/repo")
-		tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}}
-
-		snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
-		ds, states := snapshot.DiffStat, snapshot.RepoStates
-		if snapshot.Read.InstanceID != tv.instanceID {
-			t.Fatalf("snapshot instance = %q", snapshot.Read.InstanceID)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		wantDS := v3.DiffStat{
-			{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
-			{Path: "logo.png", Binary: true, OldSize: 10, NewSize: 20},
-		}
-		if !slices.Equal(ds, wantDS) {
-			t.Errorf("DiffStat = %+v, want %+v", ds, wantDS)
-		}
-		wantStates := []v3.RepoState{{
-			RepoIndex:        0,
-			Branch:           "caic-3",
-			Ahead:            2,
-			Behind:           1,
-			ChangedFiles:     2,
-			LinesAdded:       5,
-			LinesDeleted:     1,
-			UncommittedFiles: 2,
-			Conflicts:        1,
-		}}
-		if !slices.Equal(states, wantStates) {
-			t.Errorf("RepoStates = %+v, want %+v", states, wantStates)
-		}
-	})
-
-	t.Run("multi repo prefixes paths and aligns indexes", func(t *testing.T) {
-		t.Parallel()
-		sc := newRecordingContainer()
-		sc.RepositoryStatusValue = status
-		r := newTestCheckout("/home/user/src/caic")
-		repos := []runtime.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
+		status := runtime.RepositoryStatus{
+			Branch:   "caic-3",
+			Upstream: "origin/main",
+			Ahead:    2,
+			Behind:   1,
+			DiffStat: []runtime.GitFileStat{
+				{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
+				{Path: "logo.png", Binary: true, OldSize: 10, NewSize: 20},
+			},
+			Uncommitted: []runtime.GitFileStatus{
+				{Path: "main.go", WorktreeStatus: "M"},
+				{Path: "conflict.txt", IndexStatus: "U", WorktreeStatus: "U"},
+			},
 		}
 
-		snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
-		ds, states := snapshot.DiffStat, snapshot.RepoStates
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(ds) != 4 {
-			t.Fatalf("DiffStat len = %d, want 4", len(ds))
-		}
-		if ds[2].Path != "genai/main.go" {
-			t.Errorf("third path = %q, want genai/main.go", ds[2].Path)
-		}
-		for i, state := range states {
-			if state.RepoIndex != i {
-				t.Errorf("state %d RepoIndex = %d", i, state.RepoIndex)
+		t.Run("single repo", func(t *testing.T) {
+			t.Parallel()
+			sc := newRecordingContainer()
+			sc.RepositoryStatusValue = status
+			r := newTestCheckout("/repo")
+			tv := &fakeTaskView{instanceID: runtime.NewID("test-runtime", "ctr-1"), repo: []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}}
+
+			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget())
+			ds, states := snapshot.DiffStat, snapshot.RepoStates
+			if snapshot.Read.InstanceID != tv.instanceID {
+				t.Fatalf("snapshot instance = %q", snapshot.Read.InstanceID)
 			}
-		}
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantDS := v3.DiffStat{
+				{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
+				{Path: "logo.png", Binary: true, OldSize: 10, NewSize: 20},
+			}
+			if !slices.Equal(ds, wantDS) {
+				t.Errorf("DiffStat = %+v, want %+v", ds, wantDS)
+			}
+			wantStates := []v3.RepoState{{
+				RepoIndex:        0,
+				Branch:           "caic-3",
+				Ahead:            2,
+				Behind:           1,
+				ChangedFiles:     2,
+				LinesAdded:       5,
+				LinesDeleted:     1,
+				UncommittedFiles: 2,
+				Conflicts:        1,
+			}}
+			if !slices.Equal(states, wantStates) {
+				t.Errorf("RepoStates = %+v, want %+v", states, wantStates)
+			}
+		})
+
+		t.Run("multi repo prefixes paths and aligns indexes", func(t *testing.T) {
+			t.Parallel()
+			sc := newRecordingContainer()
+			sc.RepositoryStatusValue = status
+			r := newTestCheckout("/home/user/src/caic")
+			repos := []runtime.Repo{
+				{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
+				{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
+			}
+
+			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
+			ds, states := snapshot.DiffStat, snapshot.RepoStates
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ds) != 4 {
+				t.Fatalf("DiffStat len = %d, want 4", len(ds))
+			}
+			if ds[2].Path != "genai/main.go" {
+				t.Errorf("third path = %q, want genai/main.go", ds[2].Path)
+			}
+			for i, state := range states {
+				if state.RepoIndex != i {
+					t.Errorf("state %d RepoIndex = %d", i, state.RepoIndex)
+				}
+			}
+		})
+
+		t.Run("partial probe failure keeps the other repositories", func(t *testing.T) {
+			t.Parallel()
+			sc := newRecordingContainer()
+			sc.RepositoryStatusValue = status
+			r := newTestCheckout("/home/user/src/caic")
+			repos := []runtime.Repo{
+				{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
+				{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
+			}
+			runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 1})
+
+			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
+			ds, states := snapshot.DiffStat, snapshot.RepoStates
+			if err == nil {
+				t.Fatal("want the probe error")
+			}
+			// The successful repository must still reach the card instead of the
+			// whole update being dropped.
+			if len(ds) != 2 || slices.ContainsFunc(ds, func(f v3.DiffFileStat) bool { return f.Path == "genai/main.go" }) {
+				t.Errorf("DiffStat = %+v, want only the first repository", ds)
+			}
+			if len(states) != 1 || states[0].RepoIndex != 0 {
+				t.Errorf("RepoStates = %+v, want only repo 0", states)
+			}
+		})
+
+		t.Run("all probes fail", func(t *testing.T) {
+			t.Parallel()
+			sc := newRecordingContainer()
+			r := newTestCheckout("/repo")
+			repos := []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}
+			runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 0})
+
+			snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-1", Repos: repos})
+			ds, states := snapshot.DiffStat, snapshot.RepoStates
+			if err == nil {
+				t.Fatal("want the probe error")
+			}
+			// With nothing to report the caller must not emit an update, so a
+			// transient failure keeps the previously pushed card stats.
+			if len(ds) != 0 || len(states) != 0 {
+				t.Errorf("DiffStat = %+v, RepoStates = %+v, want both empty", ds, states)
+			}
+		})
 	})
 
-	t.Run("partial probe failure keeps the other repositories", func(t *testing.T) {
+	t.Run("queryRuntime", func(t *testing.T) {
 		t.Parallel()
-		sc := newRecordingContainer()
-		sc.RepositoryStatusValue = status
-		r := newTestCheckout("/home/user/src/caic")
-		repos := []runtime.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", ContainerPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", ContainerPath: "/home/user/src/genai"},
-		}
-		runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 1})
+		t.Run("valid_preserves_mounted_path", func(t *testing.T) {
+			t.Parallel()
+			r := newTestCheckout("/home/user/src/caic-xyz/caic")
+			tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
+				{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
+				{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
+			}}
 
-		snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-2", Repos: repos})
-		ds, states := snapshot.DiffStat, snapshot.RepoStates
-		if err == nil {
-			t.Fatal("want the probe error")
-		}
-		// The successful repository must still reach the card instead of the
-		// whole update being dropped.
-		if len(ds) != 2 || slices.ContainsFunc(ds, func(f v3.DiffFileStat) bool { return f.Path == "genai/main.go" }) {
-			t.Errorf("DiffStat = %+v, want only the first repository", ds)
-		}
-		if len(states) != 1 || states[0].RepoIndex != 0 {
-			t.Errorf("RepoStates = %+v, want only repo 0", states)
-		}
-	})
-
-	t.Run("all probes fail", func(t *testing.T) {
-		t.Parallel()
-		sc := newRecordingContainer()
-		r := newTestCheckout("/repo")
-		repos := []runtime.Repo{{GitRoot: "/repo", Branch: "feature", ContainerPath: "/repo"}}
-		runtimes := newTestRuntime(t, &compactFailingBackend{FakeBackend: sc.FakeBackend, failIdx: 0})
-
-		snapshot, err := r.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, GitTarget{InstanceID: "test-runtime:ctr-1", Repos: repos})
-		ds, states := snapshot.DiffStat, snapshot.RepoStates
-		if err == nil {
-			t.Fatal("want the probe error")
-		}
-		// With nothing to report the caller must not emit an update, so a
-		// transient failure keeps the previously pushed card stats.
-		if len(ds) != 0 || len(states) != 0 {
-			t.Errorf("DiffStat = %+v, RepoStates = %+v, want both empty", ds, states)
-		}
-	})
-}
-
-func TestQueryRuntime(t *testing.T) {
-	t.Parallel()
-	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
-		t.Parallel()
-		r := newTestCheckout("/home/user/src/caic-xyz/caic")
-		tv := &fakeTaskView{instanceID: "ctr-1", repo: []runtime.Repo{
-			{Branch: "caic-7", ContainerPath: "/home/user/src/caic-xyz/caic"},
-			{Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", ContainerPath: "/home/user/src/caic-xyz/md"},
-		}}
-
-		id, repos, err := r.queryRuntime(tv.GitTarget())
-		if err != nil {
-			t.Fatalf("queryRuntime: %v", err)
-		}
-		if id != "ctr-1" {
-			t.Errorf("id = %q, want ctr-1", id)
-		}
-		if len(repos) != 2 {
-			t.Fatalf("repos len = %d, want 2", len(repos))
-		}
-		if repos[0].GitRoot != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want checkout dir", repos[0].GitRoot)
-		}
-		if repos[0].ContainerPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary ContainerPath = %q, want qualified path", repos[0].ContainerPath)
-		}
-		if repos[1].ContainerPath != "/home/user/src/caic-xyz/md" {
-			t.Errorf("extra ContainerPath = %q, want qualified path", repos[1].ContainerPath)
-		}
-	})
-	t.Run("valid_no_repos", func(t *testing.T) {
-		t.Parallel()
-		r := newTestCheckout("/repo")
-		tv := &fakeTaskView{instanceID: "ctr-1"}
-		id, repos, err := r.queryRuntime(tv.GitTarget())
-		if err != nil {
-			t.Fatalf("queryRuntime: %v", err)
-		}
-		if id != "ctr-1" {
-			t.Errorf("id = %q, want ctr-1", id)
-		}
-		if repos != nil {
-			t.Fatalf("repos = %+v, want nil", repos)
-		}
-	})
-	t.Run("error_no_instance", func(t *testing.T) {
-		t.Parallel()
-		if _, _, err := newTestCheckout(t.TempDir()).queryRuntime(GitTarget{}); err == nil {
-			t.Fatal("want error")
-		}
+			id, repos, err := r.queryRuntime(tv.GitTarget())
+			if err != nil {
+				t.Fatalf("queryRuntime: %v", err)
+			}
+			if id != "ctr-1" {
+				t.Errorf("id = %q, want ctr-1", id)
+			}
+			if len(repos) != 2 {
+				t.Fatalf("repos len = %d, want 2", len(repos))
+			}
+			if repos[0].GitRoot != "/home/user/src/caic-xyz/caic" {
+				t.Errorf("primary HostPath = %q, want checkout dir", repos[0].GitRoot)
+			}
+			if repos[0].ContainerPath != "/home/user/src/caic-xyz/caic" {
+				t.Errorf("primary ContainerPath = %q, want qualified path", repos[0].ContainerPath)
+			}
+			if repos[1].ContainerPath != "/home/user/src/caic-xyz/md" {
+				t.Errorf("extra ContainerPath = %q, want qualified path", repos[1].ContainerPath)
+			}
+		})
+		t.Run("valid_no_repos", func(t *testing.T) {
+			t.Parallel()
+			r := newTestCheckout("/repo")
+			tv := &fakeTaskView{instanceID: "ctr-1"}
+			id, repos, err := r.queryRuntime(tv.GitTarget())
+			if err != nil {
+				t.Fatalf("queryRuntime: %v", err)
+			}
+			if id != "ctr-1" {
+				t.Errorf("id = %q, want ctr-1", id)
+			}
+			if repos != nil {
+				t.Fatalf("repos = %+v, want nil", repos)
+			}
+		})
+		t.Run("error_no_instance", func(t *testing.T) {
+			t.Parallel()
+			if _, _, err := newTestCheckout(t.TempDir()).queryRuntime(GitTarget{}); err == nil {
+				t.Fatal("want error")
+			}
+		})
 	})
 }
 

@@ -17,89 +17,142 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-func TestModelPriceCost(t *testing.T) {
+func TestModelPrice(t *testing.T) {
 	t.Parallel()
-	t.Run("ArbitraryCacheDuration", func(t *testing.T) {
+	t.Run("Cost", func(t *testing.T) {
 		t.Parallel()
-		p := ModelPrice{CacheWritePerMTok: 2, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 7200, PerMTok: 7}}, LongContext: LongContextPrice{InputTokensAbove: 100_000, InputMultiplier: 5, OutputMultiplier: 5}}
-		u := agent.Usage{CacheCreationInputTokens: 200_000, CacheWrites: tokens.CacheWrites{{Tokens: 100_000}, {TTL: 2 * time.Hour, Tokens: 100_000}}}
-		for range 2 {
-			if got := p.RequestCost(u); math.Abs(got-4.5) > 1e-9 {
-				t.Fatalf("tiered cost = %v, want 4.5", got)
+		t.Run("ArbitraryCacheDuration", func(t *testing.T) {
+			t.Parallel()
+			p := ModelPrice{CacheWritePerMTok: 2, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 7200, PerMTok: 7}}, LongContext: LongContextPrice{InputTokensAbove: 100_000, InputMultiplier: 5, OutputMultiplier: 5}}
+			u := agent.Usage{CacheCreationInputTokens: 200_000, CacheWrites: tokens.CacheWrites{{Tokens: 100_000}, {TTL: 2 * time.Hour, Tokens: 100_000}}}
+			for range 2 {
+				if got := p.RequestCost(u); math.Abs(got-4.5) > 1e-9 {
+					t.Fatalf("tiered cost = %v, want 4.5", got)
+				}
 			}
-		}
-		if got := p.Cost(u); math.Abs(got-.9) > 1e-9 {
-			t.Fatalf("base price was mutated: %v", got)
-		}
-	})
+			if got := p.Cost(u); math.Abs(got-.9) > 1e-9 {
+				t.Fatalf("base price was mutated: %v", got)
+			}
+		})
 
-	t.Run("Tokens", func(t *testing.T) {
-		t.Parallel()
-		p := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}
-		u := agent.Usage{InputTokens: 1_000_000, OutputTokens: 2_000_000, CacheReadInputTokens: 3_000_000}
-		want := 0.15 + 2*0.50 + 3*0.03
-		if got := p.Cost(u); !reflect.DeepEqual(got, want) {
-			t.Errorf("Cost = %v, want %v", got, want)
-		}
-	})
-	t.Run("CacheWriteDefaultsToInput", func(t *testing.T) {
-		t.Parallel()
-		p := ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}
-		u := agent.Usage{InputTokens: 100_000, CacheCreationInputTokens: 400_000}
-		want := 0.1*0.30 + 0.4*0.30
-		if got := p.Cost(u); !reflect.DeepEqual(got, want) {
-			t.Errorf("Cost = %v, want %v", got, want)
-		}
-	})
-	t.Run("DifferentDurationDoesNotInheritOneHourRate", func(t *testing.T) {
-		t.Parallel()
-		p := ModelPrice{CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}}
-		if got := p.Cost(agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 7200}); got != 5 {
-			t.Fatalf("cost = %v, want default rate 5", got)
-		}
-	})
+		t.Run("Tokens", func(t *testing.T) {
+			t.Parallel()
+			p := ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}
+			u := agent.Usage{InputTokens: 1_000_000, OutputTokens: 2_000_000, CacheReadInputTokens: 3_000_000}
+			want := 0.15 + 2*0.50 + 3*0.03
+			if got := p.Cost(u); !reflect.DeepEqual(got, want) {
+				t.Errorf("Cost = %v, want %v", got, want)
+			}
+		})
+		t.Run("CacheWriteDefaultsToInput", func(t *testing.T) {
+			t.Parallel()
+			p := ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}
+			u := agent.Usage{InputTokens: 100_000, CacheCreationInputTokens: 400_000}
+			want := 0.1*0.30 + 0.4*0.30
+			if got := p.Cost(u); !reflect.DeepEqual(got, want) {
+				t.Errorf("Cost = %v, want %v", got, want)
+			}
+		})
+		t.Run("DifferentDurationDoesNotInheritOneHourRate", func(t *testing.T) {
+			t.Parallel()
+			p := ModelPrice{CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}}
+			if got := p.Cost(agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 7200}); got != 5 {
+				t.Fatalf("cost = %v, want default rate 5", got)
+			}
+		})
 
-	t.Run("OneHourCacheWrite", func(t *testing.T) {
+		t.Run("OneHourCacheWrite", func(t *testing.T) {
+			t.Parallel()
+			p := ModelPrice{InputPerMTok: 4, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, CachedInputPerMTok: 0.2, OutputPerMTok: 20}
+			got := p.CostBuckets(1_000_000, tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 1_000_000}, {TTL: time.Hour, Tokens: 1_000_000}}, 1_000_000, 1_000_000)
+			if want := 37.2; !reflect.DeepEqual(got, want) {
+				t.Errorf("CostBuckets = %v, want %v", got, want)
+			}
+			usage := agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 3600}
+			if got := p.Cost(usage); got != 8 {
+				t.Errorf("Cost with one-hour cache = %v, want 8", got)
+			}
+		})
+	})
+	t.Run("Validate", func(t *testing.T) {
 		t.Parallel()
-		p := ModelPrice{InputPerMTok: 4, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, CachedInputPerMTok: 0.2, OutputPerMTok: 20}
-		got := p.CostBuckets(1_000_000, tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 1_000_000}, {TTL: time.Hour, Tokens: 1_000_000}}, 1_000_000, 1_000_000)
-		if want := 37.2; !reflect.DeepEqual(got, want) {
-			t.Errorf("CostBuckets = %v, want %v", got, want)
-		}
-		usage := agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 3600}
-		if got := p.Cost(usage); got != 8 {
-			t.Errorf("Cost with one-hour cache = %v, want 8", got)
-		}
+		t.Run("Valid", func(t *testing.T) {
+			t.Parallel()
+			tests := []struct {
+				name string
+				p    ModelPrice
+			}{
+				{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 2.5}}, OutputPerMTok: 5}},
+				// A free model prices every field at zero.
+				{"Free", ModelPrice{}},
+				{"LongContext", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			}
+			for _, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					if err := tc.p.Validate(); err != nil {
+						t.Errorf("Validate() = %v, want nil", err)
+					}
+				})
+			}
+		})
+		t.Run("Errors", func(t *testing.T) {
+			t.Parallel()
+			tests := []struct {
+				name string
+				p    ModelPrice
+			}{
+				{"Input", ModelPrice{InputPerMTok: -1}},
+				{"CachedInput", ModelPrice{CachedInputPerMTok: -0.01}},
+				{"CacheWrite", ModelPrice{CacheWritePerMTok: -0.01}},
+				{"CacheWrite1h", ModelPrice{CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: -0.01}}}},
+				{"Output", ModelPrice{OutputPerMTok: -1}},
+				{"LongContextThreshold", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: -1, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+				{"LongContextInput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, OutputMultiplier: 1.5}}},
+				{"LongContextOutput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2}}},
+			}
+			for _, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					if err := tc.p.Validate(); err == nil {
+						t.Error("Validate() = nil, want error")
+					}
+				})
+			}
+		})
 	})
 }
 
-func TestModelPricingPrice(t *testing.T) {
+func TestModelPricing(t *testing.T) {
 	t.Parallel()
-	t.Run("CalendarEffectiveChange", func(t *testing.T) {
+	t.Run("Price", func(t *testing.T) {
 		t.Parallel()
-		pricing := ModelPricing{
-			{Price: ModelPrice{InputPerMTok: 1.0, OutputPerMTok: 2.0}},
-			{EffectiveFrom: "2026-09-01", Price: ModelPrice{InputPerMTok: 1.5, OutputPerMTok: 3.0}},
-		}
-		before := time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC)
-		after := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-		if got, _ := pricing.Price(before); got.InputPerMTok != 1.0 {
-			t.Errorf("price before effective date = %+v, want old price", got)
-		}
-		if got, _ := pricing.Price(after); got.InputPerMTok != 1.5 {
-			t.Errorf("price on effective date = %+v, want new price", got)
-		}
-	})
-	t.Run("NoMatchingTier", func(t *testing.T) {
-		t.Parallel()
-		// A schedule with only peak-windowed tiers prices nothing outside
-		// its windows.
-		pricing := ModelPricing{
-			{PeakWindows: []PeakWindow{{Start: "01:00", End: "02:00"}}, Price: ModelPrice{InputPerMTok: 1.0}},
-		}
-		if _, ok := pricing.Price(time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)); ok {
-			t.Error("priced outside every peak window, want unpriced")
-		}
+		t.Run("CalendarEffectiveChange", func(t *testing.T) {
+			t.Parallel()
+			pricing := ModelPricing{
+				{Price: ModelPrice{InputPerMTok: 1.0, OutputPerMTok: 2.0}},
+				{EffectiveFrom: "2026-09-01", Price: ModelPrice{InputPerMTok: 1.5, OutputPerMTok: 3.0}},
+			}
+			before := time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC)
+			after := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+			if got, _ := pricing.Price(before); got.InputPerMTok != 1.0 {
+				t.Errorf("price before effective date = %+v, want old price", got)
+			}
+			if got, _ := pricing.Price(after); got.InputPerMTok != 1.5 {
+				t.Errorf("price on effective date = %+v, want new price", got)
+			}
+		})
+		t.Run("NoMatchingTier", func(t *testing.T) {
+			t.Parallel()
+			// A schedule with only peak-windowed tiers prices nothing outside
+			// its windows.
+			pricing := ModelPricing{
+				{PeakWindows: []PeakWindow{{Start: "01:00", End: "02:00"}}, Price: ModelPrice{InputPerMTok: 1.0}},
+			}
+			if _, ok := pricing.Price(time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)); ok {
+				t.Error("priced outside every peak window, want unpriced")
+			}
+		})
 	})
 }
 
@@ -637,54 +690,6 @@ func TestParsePricingJSON(t *testing.T) {
 				t.Parallel()
 				if tables, err := parsePricingJSON([]byte(tc.data)); err == nil {
 					t.Errorf("parsePricingJSON(%s) = %+v, want error", tc.name, tables)
-				}
-			})
-		}
-	})
-}
-
-func TestModelPriceValidate(t *testing.T) {
-	t.Parallel()
-	t.Run("Valid", func(t *testing.T) {
-		t.Parallel()
-		tests := []struct {
-			name string
-			p    ModelPrice
-		}{
-			{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 2.5}}, OutputPerMTok: 5}},
-			// A free model prices every field at zero.
-			{"Free", ModelPrice{}},
-			{"LongContext", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
-		}
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				if err := tc.p.Validate(); err != nil {
-					t.Errorf("Validate() = %v, want nil", err)
-				}
-			})
-		}
-	})
-	t.Run("Errors", func(t *testing.T) {
-		t.Parallel()
-		tests := []struct {
-			name string
-			p    ModelPrice
-		}{
-			{"Input", ModelPrice{InputPerMTok: -1}},
-			{"CachedInput", ModelPrice{CachedInputPerMTok: -0.01}},
-			{"CacheWrite", ModelPrice{CacheWritePerMTok: -0.01}},
-			{"CacheWrite1h", ModelPrice{CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: -0.01}}}},
-			{"Output", ModelPrice{OutputPerMTok: -1}},
-			{"LongContextThreshold", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: -1, InputMultiplier: 2, OutputMultiplier: 1.5}}},
-			{"LongContextInput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, OutputMultiplier: 1.5}}},
-			{"LongContextOutput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2}}},
-		}
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				if err := tc.p.Validate(); err == nil {
-					t.Error("Validate() = nil, want error")
 				}
 			})
 		}

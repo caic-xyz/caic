@@ -21,13 +21,21 @@ func stubRunInfraFetcher(t *testing.T, server *httptest.Server, apiKey string) *
 	return f
 }
 
-func TestRunInfraFetcherGet(t *testing.T) {
+func TestRunInfraFetcher(t *testing.T) {
 	t.Parallel()
-	t.Run("balance and spend cap", func(t *testing.T) {
+	t.Run("New", func(t *testing.T) {
 		t.Parallel()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
+		if f := NewRunInfraFetcher(""); f != nil {
+			t.Fatalf("NewRunInfraFetcher(\"\") = %v, want nil", f)
+		}
+	})
+	t.Run("Get", func(t *testing.T) {
+		t.Parallel()
+		t.Run("balance and spend cap", func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
 				"object": "credits",
 				"balance_cents": 5476,
 				"held_cents": 34,
@@ -37,45 +45,39 @@ func TestRunInfraFetcherGet(t *testing.T) {
 				"spend_cap": {"limit_cents": 20000, "hard": false, "used_cents": 1620, "remaining_cents": 18380, "gates_inference": false},
 				"plan_tier": "pro"
 			}`))
-		}))
-		t.Cleanup(server.Close)
+			}))
+			t.Cleanup(server.Close)
 
-		f := stubRunInfraFetcher(t, server, "runinfra-key")
-		quota := f.Get(t.Context())
-		if quota == nil || quota.Provider != agent.QuotaProviderRunInfra {
-			t.Fatalf("Get() = %#v, want runinfra provider quota", quota)
-		}
-		if quota.Balance.Currency != "USD" || quota.Balance.Total != 54.42 {
-			t.Fatalf("balance = %#v, want USD 54.42", quota.Balance)
-		}
-		if quota.Balance.MonthlyLimit != 200 || quota.Balance.UsedCredits != 16.20 {
-			t.Fatalf("spend cap = %#v, want limit 200 used 16.20", quota.Balance)
-		}
-		if quota.Balance.Utilization != 0.081 {
-			t.Errorf("balance utilization = %v, want 1620/20000 = 0.081", quota.Balance.Utilization)
-		}
-	})
+			f := stubRunInfraFetcher(t, server, "runinfra-key")
+			quota := f.Get(t.Context())
+			if quota == nil || quota.Provider != agent.QuotaProviderRunInfra {
+				t.Fatalf("Get() = %#v, want runinfra provider quota", quota)
+			}
+			if quota.Balance.Currency != "USD" || quota.Balance.Total != 54.42 {
+				t.Fatalf("balance = %#v, want USD 54.42", quota.Balance)
+			}
+			if quota.Balance.MonthlyLimit != 200 || quota.Balance.UsedCredits != 16.20 {
+				t.Fatalf("spend cap = %#v, want limit 200 used 16.20", quota.Balance)
+			}
+			if quota.Balance.Utilization != 0.081 {
+				t.Errorf("balance utilization = %v, want 1620/20000 = 0.081", quota.Balance.Utilization)
+			}
+		})
 
-	t.Run("no spend cap", func(t *testing.T) {
-		t.Parallel()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"balance_cents":100,"available_cents":100,"currency":"usd","spend_cap":null}`))
-		}))
-		t.Cleanup(server.Close)
+		t.Run("no spend cap", func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"balance_cents":100,"available_cents":100,"currency":"usd","spend_cap":null}`))
+			}))
+			t.Cleanup(server.Close)
 
-		quota := stubRunInfraFetcher(t, server, "key").Get(t.Context())
-		if quota == nil {
-			t.Fatal("Get() = nil")
-		}
-		if quota.Balance.Total != 1 || quota.Balance.MonthlyLimit != 0 {
-			t.Fatalf("quota = %#v, want balance 1 without extra usage", quota)
-		}
-	})
-
-	t.Run("empty key returns no fetcher", func(t *testing.T) {
-		t.Parallel()
-		if f := NewRunInfraFetcher(""); f != nil {
-			t.Fatalf("NewRunInfraFetcher(\"\") = %v, want nil", f)
-		}
+			quota := stubRunInfraFetcher(t, server, "key").Get(t.Context())
+			if quota == nil {
+				t.Fatal("Get() = nil")
+			}
+			if quota.Balance.Total != 1 || quota.Balance.MonthlyLimit != 0 {
+				t.Fatalf("quota = %#v, want balance 1 without extra usage", quota)
+			}
+		})
 	})
 }

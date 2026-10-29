@@ -110,4 +110,35 @@ exit 0
 			}
 		})
 	})
+	t.Run("AgentArgs", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+		t.Run("AppServer", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			args := New("", nil).AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
+			want := []string{
+				"codex", "--no-daemon", "app-server",
+				"-c", `approval_policy="never"`,
+				"-c", `model_auto_compact_token_limit=244800`,
+				"-c", `model_auto_compact_token_limit_scope="total"`,
+				"-c", `sandbox_mode="danger-full-access"`,
+			}
+			if !slices.Equal(args, want) {
+				t.Errorf("args = %v, want %v", args, want)
+			}
+		})
+		t.Run("WidgetMCPConfig", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			// Widget MCP is disabled for codex; AgentArgs should not include
+			// mcp_servers config.
+			args := New("", nil).AgentArgs(agent.HarnessArgs{})
+			for _, arg := range args {
+				if strings.Contains(arg, "mcp_servers") {
+					t.Errorf("unexpected widget MCP config in args %v", args)
+				}
+			}
+		})
+	})
+	t.Run("NewWire", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+		wire := New("", nil).NewWire()
+		if wire == nil {
+			t.Fatal("NewWire returned nil")
+		}
+	})
 }

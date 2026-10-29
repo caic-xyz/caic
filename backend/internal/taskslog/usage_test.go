@@ -28,214 +28,218 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
-func TestStoreUsageRows(t *testing.T) {
+func TestStore(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Pi contributions survive native replay", func(t *testing.T) {
+	t.Run("UsageRows", func(t *testing.T) {
 		t.Parallel()
-		_, logStore, rollup := newUsageStores(t)
-		if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		events := []string{
-			`{"type":"agent_start"}`,
-			`{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10}}}`,
-			`{"type":"compaction_end","reason":"manual","result":{"usage":{"input":3,"totalTokens":3}}}`,
-			`{"type":"turn_end","message":{"role":"assistant","usage":{"input":20,"totalTokens":20}}}`,
-			`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10}},{"role":"assistant","usage":{"input":20}}]}`,
-			`{"type":"agent_start"}`,
-			`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":7}}]}`,
-		}
-		for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
-			header, err := agent.MarshalLogMessage(version, &agent.MetaMessage{MessageType: "caic_meta", Version: int(version), Harness: string(harness.Pi), Prompt: "usage", StartedAt: usageAt(5), RequestedModel: "anthropic/claude-opus-4-6"})
+
+		t.Run("Pi contributions survive native replay", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, rollup := newUsageStores(t)
+			if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			events := []string{
+				`{"type":"agent_start"}`,
+				`{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10}}}`,
+				`{"type":"compaction_end","reason":"manual","result":{"usage":{"input":3,"totalTokens":3}}}`,
+				`{"type":"turn_end","message":{"role":"assistant","usage":{"input":20,"totalTokens":20}}}`,
+				`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10}},{"role":"assistant","usage":{"input":20}}]}`,
+				`{"type":"agent_start"}`,
+				`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":7}}]}`,
+			}
+			for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+				header, err := agent.MarshalLogMessage(version, &agent.MetaMessage{MessageType: "caic_meta", Version: int(version), Harness: string(harness.Pi), Prompt: "usage", StartedAt: usageAt(5), RequestedModel: "anthropic/claude-opus-4-6"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw := header
+				raw = append(raw, '\n')
+				for _, event := range events {
+					raw = append(raw, fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`+"\n", usageAt(5).Unix(), event)...)
+				}
+				if err := os.WriteFile(filepath.Join(logStore.LogDir, ksid.NewID().String()+".jsonl"), raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), agent.Backends{harness.Pi: pi.New("pi", nil)})); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 1 || days[0].Tokens.Input != 80 || days[0].Turns != 4 || days[0].Compactions != 2 {
+				t.Fatalf("restored accounting = %+v", days)
+			}
+		})
+
+		t.Run("reconstructs mixed cache duration counts", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, rollup := newUsageStores(t)
+			for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+				writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), version, usageAt(5), usageAt(5),
+					`{"type":"result","num_turns":1,"usage":{"cache_creation_input_tokens":110,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":100}}}`)
+			}
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 1 || days[0].Tokens.CacheWriteCount(5*time.Minute) != 20 || days[0].Tokens.CacheWriteCount(time.Hour) != 200 {
+				t.Fatalf("mixed cache tokens = %+v", days)
+			}
+		})
+
+		t.Run("reconstructs v2 and v3 by producer day and skips v1", func(t *testing.T) {
+			t.Parallel()
+			usageDir, logStore, rollup := newUsageStores(t)
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV1, usageAt(4), usageAt(4))
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV2, usageAt(5), usageAt(5))
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(6), usageAt(6))
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 2 || days[0].Day != "2026-02-05" || days[1].Day != "2026-02-06" {
+				t.Fatalf("days = %+v", days)
+			}
+			for _, day := range days {
+				if day.Tokens.Output != 7 || day.Turns != 1 || day.CostUSD != 0 || len(day.Skills) != 0 {
+					t.Errorf("day %s = %+v", day.Day, day)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
+				t.Fatalf("backfill sentinel: %v", err)
+			}
+		})
+
+		t.Run("counts reconstructed skill reads by name", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, rollup := newUsageStores(t)
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+				usageSkillUse("sk_1", `{"skill":"go-code-quality"}`),
+				usageSkillUse("sk_2", `{"skill":"go-code-quality"}`),
+				usageSkillUse("sk_3", `{"skill":"review"}`),
+				// A Skill block naming no skill is machinery, not a read.
+				usageSkillUse("sk_4", `{}`),
+			)
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 1 {
+				t.Fatalf("days = %+v", days)
+			}
+			// The leaderboard counts tasks, so the repeated read folds into one.
+			want := map[string]int{"go-code-quality": 1, "review": 1}
+			if !maps.Equal(days[0].Skills, want) {
+				t.Errorf("Skills = %v, want %v", days[0].Skills, want)
+			}
+			if len(days[0].Tools) != 0 {
+				t.Errorf("Tools = %v, want none", days[0].Tools)
+			}
+		})
+
+		t.Run("reconstructed inferred reads require successful result", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, rollup := newUsageStores(t)
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"failed","name":"Read","input":{"file_path":"/home/user/.agents/skills/review/SKILL.md"}}],"usage":{}}}`,
+				`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"failed","is_error":true,"content":"missing file"}]}}`,
+				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"ok","name":"Read","input":{"file_path":"/home/user/.agents/skills/go-code-quality/SKILL.md"}}],"usage":{}}}`,
+				`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ok","content":"loaded"}]}}`,
+			)
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 1 || days[0].Skills["review"] != 0 || days[0].Skills["go-code-quality"] != 1 {
+				t.Errorf("confirmed skill reads = %+v", days)
+			}
+		})
+
+		t.Run("reconstructs measured tool duration from producer timestamps", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, rollup := newUsageStores(t)
+			id := ksid.NewID().String()
+			at := usageAt(5)
+			writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV3, at, at,
+				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"/tmp/example"}}],"usage":{}}}`,
+				`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"ok"}]}}`,
+			)
+			path := filepath.Join(logStore.LogDir, id+".jsonl")
+			raw, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw := header
-			raw = append(raw, '\n')
-			for _, event := range events {
-				raw = append(raw, fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`+"\n", usageAt(5).Unix(), event)...)
-			}
-			if err := os.WriteFile(filepath.Join(logStore.LogDir, ksid.NewID().String()+".jsonl"), raw, 0o600); err != nil {
+			lines := strings.Split(string(raw), "\n")
+			lines[2] = strings.Replace(lines[2], fmt.Sprintf(`"ts":%d.000`, at.Unix()), fmt.Sprintf(`"ts":%d.500`, at.Unix()+2), 1)
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
 				t.Fatal(err)
 			}
-		}
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), agent.Backends{harness.Pi: pi.New("pi", nil)})); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 || days[0].Tokens.Input != 80 || days[0].Turns != 4 || days[0].Compactions != 2 {
-			t.Fatalf("restored accounting = %+v", days)
-		}
-	})
-
-	t.Run("reconstructs mixed cache duration counts", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, rollup := newUsageStores(t)
-		for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), version, usageAt(5), usageAt(5),
-				`{"type":"result","num_turns":1,"usage":{"cache_creation_input_tokens":110,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":100}}}`)
-		}
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 || days[0].Tokens.CacheWriteCount(5*time.Minute) != 20 || days[0].Tokens.CacheWriteCount(time.Hour) != 200 {
-			t.Fatalf("mixed cache tokens = %+v", days)
-		}
-	})
-
-	t.Run("reconstructs v2 and v3 by producer day and skips v1", func(t *testing.T) {
-		t.Parallel()
-		usageDir, logStore, rollup := newUsageStores(t)
-		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV1, usageAt(4), usageAt(4))
-		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV2, usageAt(5), usageAt(5))
-		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(6), usageAt(6))
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 2 || days[0].Day != "2026-02-05" || days[1].Day != "2026-02-06" {
-			t.Fatalf("days = %+v", days)
-		}
-		for _, day := range days {
-			if day.Tokens.Output != 7 || day.Turns != 1 || day.CostUSD != 0 || len(day.Skills) != 0 {
-				t.Errorf("day %s = %+v", day.Day, day)
-			}
-		}
-		if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
-			t.Fatalf("backfill sentinel: %v", err)
-		}
-	})
-
-	t.Run("counts reconstructed skill reads by name", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, rollup := newUsageStores(t)
-		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
-			usageSkillUse("sk_1", `{"skill":"go-code-quality"}`),
-			usageSkillUse("sk_2", `{"skill":"go-code-quality"}`),
-			usageSkillUse("sk_3", `{"skill":"review"}`),
-			// A Skill block naming no skill is machinery, not a read.
-			usageSkillUse("sk_4", `{}`),
-		)
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 {
-			t.Fatalf("days = %+v", days)
-		}
-		// The leaderboard counts tasks, so the repeated read folds into one.
-		want := map[string]int{"go-code-quality": 1, "review": 1}
-		if !maps.Equal(days[0].Skills, want) {
-			t.Errorf("Skills = %v, want %v", days[0].Skills, want)
-		}
-		if len(days[0].Tools) != 0 {
-			t.Errorf("Tools = %v, want none", days[0].Tools)
-		}
-	})
-
-	t.Run("reconstructed inferred reads require successful result", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, rollup := newUsageStores(t)
-		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
-			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"failed","name":"Read","input":{"file_path":"/home/user/.agents/skills/review/SKILL.md"}}],"usage":{}}}`,
-			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"failed","is_error":true,"content":"missing file"}]}}`,
-			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"ok","name":"Read","input":{"file_path":"/home/user/.agents/skills/go-code-quality/SKILL.md"}}],"usage":{}}}`,
-			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ok","content":"loaded"}]}}`,
-		)
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 || days[0].Skills["review"] != 0 || days[0].Skills["go-code-quality"] != 1 {
-			t.Errorf("confirmed skill reads = %+v", days)
-		}
-	})
-
-	t.Run("reconstructs measured tool duration from producer timestamps", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, rollup := newUsageStores(t)
-		id := ksid.NewID().String()
-		at := usageAt(5)
-		writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV3, at, at,
-			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"/tmp/example"}}],"usage":{}}}`,
-			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"ok"}]}}`,
-		)
-		path := filepath.Join(logStore.LogDir, id+".jsonl")
-		raw, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines := strings.Split(string(raw), "\n")
-		lines[2] = strings.Replace(lines[2], fmt.Sprintf(`"ts":%d.000`, at.Unix()), fmt.Sprintf(`"ts":%d.500`, at.Unix()+2), 1)
-		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
-			t.Fatal(err)
-		}
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (data.ToolTiming{Count: 1, DurationMs: 2500}) {
-			t.Errorf("backfilled tool totals = %+v", days)
-		}
-	})
-
-	t.Run("skips unreadable logs and backfills valid history", func(t *testing.T) {
-		t.Parallel()
-		usageDir, logStore, rollup := newUsageStores(t)
-		if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		writeUsageLog(t, logStore.LogDir, "valid", agent.LogVersionV2, usageAt(5), usageAt(5))
-		if err := os.WriteFile(filepath.Join(logStore.LogDir, "broken.jsonl"), []byte("not json\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
-			t.Fatal(err)
-		}
-		days := rollup.Days()
-		if len(days) != 1 || days[0].Day != "2026-02-05" || days[0].Tokens.Output != 7 {
-			t.Errorf("days = %+v", days)
-		}
-		if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
-			t.Fatalf("backfill sentinel: %v", err)
-		}
-	})
-
-	t.Run("reports cancellation before an empty scan", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, _ := newUsageStores(t)
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		var got error
-		for _, err := range logStore.UsageRows(ctx, usageResolver()) {
-			got = err
-		}
-		if !errors.Is(got, context.Canceled) {
-			t.Fatalf("UsageRows error = %v, want context.Canceled", got)
-		}
-	})
-
-	t.Run("orders tasks by start time across header batches", func(t *testing.T) {
-		t.Parallel()
-		_, logStore, _ := newUsageStores(t)
-		const tasks = 9
-		for i := range tasks {
-			id := fmt.Sprintf("task%02d", i)
-			writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV2, usageAt(5), usageAt(tasks-i))
-		}
-		var got []string
-		for row, err := range logStore.UsageRows(t.Context(), usageResolver()) {
-			if err != nil {
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
 				t.Fatal(err)
 			}
-			got = append(got, row.TaskID)
-		}
-		want := []string{"task08", "task07", "task06", "task05", "task04", "task03", "task02", "task01", "task00"}
-		if !slices.Equal(got, want) {
-			t.Errorf("TaskIDs = %v, want %v", got, want)
-		}
+			days := rollup.Days()
+			if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (data.ToolTiming{Count: 1, DurationMs: 2500}) {
+				t.Errorf("backfilled tool totals = %+v", days)
+			}
+		})
+
+		t.Run("skips unreadable logs and backfills valid history", func(t *testing.T) {
+			t.Parallel()
+			usageDir, logStore, rollup := newUsageStores(t)
+			if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeUsageLog(t, logStore.LogDir, "valid", agent.LogVersionV2, usageAt(5), usageAt(5))
+			if err := os.WriteFile(filepath.Join(logStore.LogDir, "broken.jsonl"), []byte("not json\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+				t.Fatal(err)
+			}
+			days := rollup.Days()
+			if len(days) != 1 || days[0].Day != "2026-02-05" || days[0].Tokens.Output != 7 {
+				t.Errorf("days = %+v", days)
+			}
+			if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
+				t.Fatalf("backfill sentinel: %v", err)
+			}
+		})
+
+		t.Run("reports cancellation before an empty scan", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, _ := newUsageStores(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			var got error
+			for _, err := range logStore.UsageRows(ctx, usageResolver()) {
+				got = err
+			}
+			if !errors.Is(got, context.Canceled) {
+				t.Fatalf("UsageRows error = %v, want context.Canceled", got)
+			}
+		})
+
+		t.Run("orders tasks by start time across header batches", func(t *testing.T) {
+			t.Parallel()
+			_, logStore, _ := newUsageStores(t)
+			const tasks = 9
+			for i := range tasks {
+				id := fmt.Sprintf("task%02d", i)
+				writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV2, usageAt(5), usageAt(tasks-i))
+			}
+			var got []string
+			for row, err := range logStore.UsageRows(t.Context(), usageResolver()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, row.TaskID)
+			}
+			want := []string{"task08", "task07", "task06", "task05", "task04", "task03", "task02", "task01", "task00"}
+			if !slices.Equal(got, want) {
+				t.Errorf("TaskIDs = %v, want %v", got, want)
+			}
+		})
 	})
 }
 

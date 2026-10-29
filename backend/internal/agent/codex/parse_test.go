@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1057,35 +1056,6 @@ func TestParseMessage(t *testing.T) {
 		for i, msg := range got {
 			if msg.Type() != wantTypes[i] {
 				t.Errorf("msg[%d]: Type() = %q, want %q", i, msg.Type(), wantTypes[i])
-			}
-		}
-	})
-}
-
-func TestAgentArgs(t *testing.T) {
-	t.Parallel()
-	t.Run("AppServer", func(t *testing.T) {
-		t.Parallel()
-		args := New("", nil).AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
-		want := []string{
-			"codex", "--no-daemon", "app-server",
-			"-c", `approval_policy="never"`,
-			"-c", `model_auto_compact_token_limit=244800`,
-			"-c", `model_auto_compact_token_limit_scope="total"`,
-			"-c", `sandbox_mode="danger-full-access"`,
-		}
-		if !slices.Equal(args, want) {
-			t.Errorf("args = %v, want %v", args, want)
-		}
-	})
-	t.Run("WidgetMCPConfig", func(t *testing.T) {
-		t.Parallel()
-		// Widget MCP is disabled for codex; AgentArgs should not include
-		// mcp_servers config.
-		args := New("", nil).AgentArgs(agent.HarnessArgs{})
-		for _, arg := range args {
-			if strings.Contains(arg, "mcp_servers") {
-				t.Errorf("unexpected widget MCP config in args %v", args)
 			}
 		}
 	})
