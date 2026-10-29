@@ -112,7 +112,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		return nil, err
 	}
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
+	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
 
 	// Attach to the live relay. If the relay is dead, the session is lost.
 	var primaryBranch string
@@ -131,7 +131,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	session, err := r.Backends[t.Harness].AttachRelay(ctx, opts)
 	if err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		_ = log.Close()
 		// An attachment failure cannot resolve a pending question or plan.
 		t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
@@ -139,7 +139,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 	return h, nil
 }
@@ -267,9 +267,10 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	t.SetState(taskslog.StateStarting)
 	var msgCh chan agent.TimedMessage
 	var dispatchDone <-chan struct{}
+	var dispatchWork *sync.WaitGroup
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
-		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, log)
+		msgCh, dispatchDone, dispatchWork = r.startMessageDispatch(ctx, t, log)
 		region.End()
 	}
 
@@ -291,20 +292,20 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "task-scoped MCP setup", Err: err})
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	region.End()
 	if err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		tlog.Error("session start failed", "err", err)
 		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "agent startup", Err: err})
 	}
 
 	// Store handle so SendInput can reach it.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 
 	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt))
@@ -627,7 +628,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
 	}
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
+	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
 
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -642,17 +643,17 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		return nil, r.finishReviveFailure(ctx, t, err, log)
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("resume session after revive: %w", err), log)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	// Resume has no prompt. Publish idle before exposing the handle, so
 	// input during the readiness wait owns the next Running transition.
 	t.SetStateIf(taskslog.StateStarting, taskslog.StateWaiting)
@@ -949,7 +950,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	defer t.SetStateUnless(taskslog.StateCrashed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 	if h := t.CloseAndDetachSession(context.WithoutCancel(ctx)); h != nil {
 		h.CloseMsgCh()
-		<-h.DispatchDone
+		h.WaitDispatch()
 		if log == nil {
 			log = h.Log
 		}
@@ -1049,7 +1050,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
 	r.recordCommitBaseline(ctx, t, log, instanceID)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
+	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -1064,18 +1065,18 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		return nil, err
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		tlog.Error("session start failed", "err", err)
 		return nil, err
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
 		t.addMessage(ctx, syntheticUserInput(prompt))
@@ -1112,7 +1113,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	oldH := t.CloseAndDetachSession(ctx)
 	if oldH != nil {
 		oldH.CloseMsgCh()
-		<-oldH.DispatchDone
+		oldH.WaitDispatch()
 		if oldH.Log != nil {
 			err := r.LogStore.WriteContextCleared(oldH.Log)
 			err = errors.Join(err, oldH.Log.Close())
@@ -1129,7 +1130,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 	// Start new session.
 	t.SetState(taskslog.StateStarting)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
+	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
 
 	var branch string
 	if p := t.Primary(); p != nil {
@@ -1154,7 +1155,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, err
@@ -1162,7 +1163,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	backend := r.Backends[t.Harness]
 	if backend == nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, fmt.Errorf("unknown harness %q", t.Harness)
@@ -1170,13 +1171,13 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	session, err := backend.Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
-		<-dispatchDone
+		dispatchWork.Wait()
 		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 	if mode == replaceSessionRestart {
 		t.addMessage(ctx, syntheticUserInput(prompt))
@@ -1191,7 +1192,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
+func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}, work *sync.WaitGroup) {
 	// Capture all repos outside the goroutine to avoid races.
 	target := t.GitTarget()
 	allRepos := target.Repos
@@ -1199,7 +1200,8 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log ag
 	msgCh = make(chan agent.TimedMessage, 256)
 	done := make(chan struct{})
 	dispatchDone = done
-	go func() {
+	work = &sync.WaitGroup{}
+	work.Go(func() {
 		defer close(done)
 		var titleWork sync.WaitGroup
 		defer titleWork.Wait()
@@ -1256,8 +1258,8 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log ag
 				r.emitDiffStatBranch(ctx, t, instanceID, allRepos, log)
 			}
 		}
-	}()
-	return msgCh, dispatchDone
+	})
+	return msgCh, dispatchDone, work
 }
 
 // fetchTurnCommits makes the finished turn's committed work durable on the

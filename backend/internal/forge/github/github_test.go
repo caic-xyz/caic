@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -207,9 +208,16 @@ func TestJobExcerptDownloadFailures(t *testing.T) {
 			t.Cleanup(api.Close)
 			client := NewClientForTest("token", api.URL)
 			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
+			var workers sync.WaitGroup
+			t.Cleanup(func() { cancel(); workers.Wait() })
 			if mode == "cancel" {
-				go func() { <-started; cancel() }()
+				workers.Go(func() {
+					select {
+					case <-started:
+						cancel()
+					case <-ctx.Done():
+					}
+				})
 			}
 			got, err := client.GetJobLog(ctx, "owner", "repo", 1, true)
 			if err == nil || got != "" {

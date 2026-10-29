@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/maruel/genai"
@@ -49,8 +50,9 @@ type Router struct {
 	// Immutable.
 	TaskMCPScoper taskmgr.TaskMCPScoper // Scopes the normal MCP registry for task agents.
 
-	log *slog.Logger
-	ctx context.Context // server-lifetime context; outlives individual HTTP requests
+	log     *slog.Logger
+	ctx     context.Context // server-lifetime context; outlives individual HTTP requests
+	workers *backgroundWorkers
 
 	// Route handler concerns.
 	authHandlers     *authHandlers
@@ -92,7 +94,7 @@ type Router struct {
 // New creates a new HTTP router from already-assembled dependencies. It wires
 // the injected services into HTTP handler concerns and the webhook endpoint; it
 // does not construct or own application services.
-func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
+func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retErr error) { //nolint:gocritic // Dependencies is a startup value bag.
 	if log == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -157,9 +159,17 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		return nil, err
 	}
 	webFetch := &webFetchHandlers{}
+	workers := newBackgroundWorkers(ctx)
+	defer func() {
+		if retErr != nil {
+			workers.Close()
+		}
+	}()
+	ctx = workers.ctx
 	svc := &taskService{
-		history:   newTaskHistory(ctx, log.With("scope", "task-history"), d.TaskMgr),
+		history:   newTaskHistory(ctx, log.With("scope", "task-history"), d.TaskMgr, workers), //nolint:contextcheck // router context derives from the caller and ends at shutdown
 		ctx:       ctx,
+		workers:   workers,
 		taskMgr:   d.TaskMgr,
 		prefs:     d.Preferences,
 		checkouts: d.Checkouts,
@@ -172,11 +182,12 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)
-	systemStats := newSystemStats(ctx)
+	systemStats := newSystemStats(ctx, workers) //nolint:contextcheck // router context derives from the caller and ends at shutdown
 
 	s := &Router{
-		log: log,
-		ctx: ctx,
+		log:     log,
+		ctx:     ctx,
+		workers: workers,
 		authHandlers: &authHandlers{
 			log:                log.With("handler", "auth"),
 			store:              d.AuthStore,
@@ -208,6 +219,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		serverHandlers: &serverHandlers{
 			log:                log.With("handler", "server"),
 			serverCtx:          ctx,
+			workers:            workers,
 			runtimes:           d.Runtimes,
 			tailscaleAvailable: d.Tailscale,
 			forgeMgr:           d.ForgeMgr,
@@ -229,6 +241,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
+			workers:     workers,
 			systemStats: systemStats,
 			log:         log.With("handler", "tasks"),
 			taskMgr:     d.TaskMgr,
@@ -279,7 +292,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			return nil, err
 		}
 	} else if d.AuthStore != nil {
-		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
+		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions") //nolint:contextcheck // router context derives from the caller and ends at shutdown
 	}
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
 
@@ -319,6 +332,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	s.webhooks = &WebhookHandlers{
 		log:              log.With("handler", "webhook"),
 		serverCtx:        ctx,
+		workers:          workers,
 		githubSecret:     d.GitHubWebhookSecret,
 		gitlabSecret:     d.GitLabWebhookSecret,
 		appAllowedOwners: d.GitHubAppAllowedOwners,
@@ -334,11 +348,18 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	return s, nil
 }
 
+// Close cancels and waits for router-owned background work. Serve calls Close
+// when it returns; callers must also close a router that is never served.
+func (r *Router) Close() {
+	r.workers.Close()
+}
+
 // Serve starts the HTTP server on an already-open listener and blocks until
 // ctx is cancelled. Opening the listener early (before calling New) lets the
 // caller detect port conflicts at startup instead of after lengthy
 // initialisation.
 func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
+	defer r.Close()
 	if r.authStore == nil && !hostIsLoopback(hostOnly(ln.Addr().String())) {
 		r.mcpDisabled = true
 		r.log.WarnContext(ctx, "MCP endpoint disabled: no OAuth login configured and the server binds a non-loopback address; configure OAuth login or bind to localhost to enable MCP",
@@ -357,18 +378,19 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener) error {
 		},
 	}
 	shutdownBase := context.WithoutCancel(ctx)
-	shutdownDone := make(chan struct{})
-	go func() {
-		defer close(shutdownDone)
-		<-ctx.Done()
+	shutdownWatch, stopShutdownWatch := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		<-shutdownWatch.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(shutdownBase, 5*time.Second)
 		_ = srv.Shutdown(shutdownCtx)
 		shutdownCancel()
-	}()
+	})
 	r.log.InfoContext(ctx, "listening", "addr", ln.Addr())
 	err = srv.Serve(ln)
+	stopShutdownWatch()
+	workers.Wait()
 	if errors.Is(err, http.ErrServerClosed) {
-		<-shutdownDone
 		return nil
 	}
 	return err
@@ -582,6 +604,37 @@ func (r *Router) httpLogAttrs(req *http.Request) []slog.Attr {
 		slog.String("ip", logCtx.clientIP),
 		slog.String("origin", logCtx.origin),
 	}
+}
+
+// backgroundWorkers owns work that must outlive individual HTTP requests.
+// Closing prevents new work, cancels existing work, and joins all workers.
+type backgroundWorkers struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	closed bool
+	wg     sync.WaitGroup
+}
+
+func newBackgroundWorkers(ctx context.Context) *backgroundWorkers {
+	ctx, cancel := context.WithCancel(ctx)
+	return &backgroundWorkers{ctx: ctx, cancel: cancel}
+}
+
+func (w *backgroundWorkers) Go(f func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.closed {
+		w.wg.Go(f)
+	}
+}
+
+func (w *backgroundWorkers) Close() {
+	w.mu.Lock()
+	w.closed = true
+	w.cancel()
+	w.mu.Unlock()
+	w.wg.Wait()
 }
 
 func httpLogContextFromRequest(r *http.Request) *httpLogContext {

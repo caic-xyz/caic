@@ -62,10 +62,10 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
 // (initialize → initialized → thread/start) for golden-file trace recording.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
 	log := agent.DiscardLogSink{Version: version}
-	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: dir, Model: model, Log: log})
+	wire, _, continuation, err := handshake(ctx, stdin, br, stdout, &agent.Options{Dir: dir, Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +99,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(rp.Stdout, 1<<16)
 
-	wire, models, continuation, err := handshake(ctx, rp.Stdin, br, opts)
+	wire, models, continuation, err := handshake(ctx, rp.Stdin, br, rp.Stdout, opts)
 	if err != nil {
 		// Kill the process on handshake failure.
 		_ = rp.Cmd.Process.Kill()
@@ -180,6 +180,8 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
+	stopRead := agent.InterruptReadOnCancel(ctx, stdout)
+	defer stopRead()
 
 	nextID := atomic.Int64{}
 	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
@@ -315,9 +317,11 @@ type wireFormat struct {
 // handshake performs the JSON-RPC initialize → initialized → model/list →
 // thread/start (or thread/resume) sequence and returns a wireFormat with the
 // thread ID set, plus model metadata from model/list.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, closer io.Closer, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	stopRead := agent.InterruptReadOnCancel(ctx, closer)
+	defer stopRead()
 
 	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
 	relayLog := agent.LogSink(agent.DiscardLogSink{Version: opts.Log.LogVersion()})
@@ -847,49 +851,37 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
 func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*codex.JSONRPCMessage, error) {
-	type result struct {
-		msg *codex.JSONRPCMessage
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		for {
-			line, controls, err := r.ReadRecord()
-			if err != nil {
-				ch <- result{nil, fmt.Errorf("read response: %w", err)}
-				return
+	for {
+		line, controls, err := r.ReadRecord()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("handshake: %w", ctx.Err())
 			}
-			for _, control := range controls {
-				if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
-					ch <- result{nil, errors.New(exit.ExitError())}
-					return
-				}
-			}
-			if len(line) == 0 {
-				continue
-			}
-			var msg codex.JSONRPCMessage
-			if err := json.Unmarshal(line, &msg); err != nil {
-				ch <- result{nil, fmt.Errorf("unmarshal response: %w", err)}
-				return
-			}
-			if msg.IsResponse() {
-				if msg.Error != nil {
-					ch <- result{nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)}
-					return
-				}
-				ch <- result{&msg, nil}
-				return
-			}
-			// Skip notifications during handshake.
-			slog.DebugContext(ctx, "codex handshake: skipping notification", "method", msg.Method)
+			return nil, fmt.Errorf("read response: %w", err)
 		}
-	}()
-	select {
-	case res := <-ch:
-		return res.msg, res.err
-	case <-ctx.Done():
-		return nil, fmt.Errorf("handshake: %w", ctx.Err())
+		for _, control := range controls {
+			if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+				return nil, errors.New(exit.ExitError())
+			}
+		}
+		if len(line) == 0 {
+			continue
+		}
+		var msg codex.JSONRPCMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		if msg.IsResponse() {
+			if msg.Error != nil {
+				return nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)
+			}
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("handshake: %w", ctx.Err())
+			}
+			return &msg, nil
+		}
+		// Skip notifications during handshake.
+		slog.DebugContext(ctx, "codex handshake: skipping notification", "method", msg.Method)
 	}
 }
 

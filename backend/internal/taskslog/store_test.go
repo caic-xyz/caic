@@ -671,15 +671,12 @@ func TestStore(t *testing.T) {
 				// converge on one compressed log.
 				var errs [2]error
 				var wg sync.WaitGroup
-				wg.Add(2)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					errs[0] = st.SettleTerminal(nil)
-				}()
-				go func() {
-					defer wg.Done()
+				})
+				wg.Go(func() {
 					_, errs[1] = st.Compress(path, nil, StatePurged)
-				}()
+				})
 				wg.Wait()
 				if errs[0] != nil || errs[1] != nil {
 					t.Fatalf("iteration %d: SettleTerminal = %v, Compress = %v, want both nil", i, errs[0], errs[1])

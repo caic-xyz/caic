@@ -35,9 +35,9 @@ type taskHistory struct {
 	clock   uint64
 }
 
-func newTaskHistory(ctx context.Context, log *slog.Logger, manager *taskmgr.Manager) *taskHistory {
+func newTaskHistory(ctx context.Context, log *slog.Logger, manager *taskmgr.Manager, workers *backgroundWorkers) *taskHistory {
 	h := &taskHistory{ctx: ctx, log: log, manager: manager, sources: make(map[ksid.ID]*taskHistorySource)}
-	go func() {
+	workers.Go(func() {
 		for {
 			_, changed := manager.ChangeSnapshot()
 			h.prune(ctx.Err() != nil)
@@ -49,7 +49,7 @@ func newTaskHistory(ctx context.Context, log *slog.Logger, manager *taskmgr.Mana
 			case <-changed:
 			}
 		}
-	}()
+	})
 	return h
 }
 

@@ -59,6 +59,8 @@ type App struct {
 	metricsLog      *metricsdb.Log
 	taskMgr         *taskmgr.Manager
 	providerClosers []io.Closer
+	ciService       *ci.Service
+	botService      *bot.Bot
 }
 
 // New creates the caic backend server application.
@@ -125,12 +127,18 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	repoCh := make(chan repoDiscoveryResult, 1)
-
-	go func() {
-		defer trace.StartRegion(ctx, "discover-repos").End()
+	discoveryCtx, cancelDiscovery := context.WithCancel(ctx)
+	discovery, discoveryCtx := errgroup.WithContext(discoveryCtx)
+	defer func() {
+		cancelDiscovery()
+		_ = discovery.Wait()
+	}()
+	discovery.Go(func() error {
+		defer trace.StartRegion(discoveryCtx, "discover-repos").End()
 		paths, err := git.DiscoverCheckouts(rootDir, repoDiscoveryDepth)
 		repoCh <- repoDiscoveryResult{paths, err}
-	}()
+		return nil
+	})
 	settings, err := loadSettings(appLog, filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
@@ -327,6 +335,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 	ciService := ci.NewService(log, cache, provider, ciAdapter)
 	botService := bot.New(ctx, log, botClient)
+	keepAutomation := false
+	defer func() {
+		if !keepAutomation {
+			botService.Close()
+			ciService.Close()
+		}
+	}()
 
 	ipgeoChecker, err := ipgeo.NewChecker(ctx, log.With("cmp", "ipgeo"), cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
 	if err != nil {
@@ -385,17 +400,26 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err != nil {
 		return nil, err
 	}
+	keepServer := false
+	defer func() {
+		if !keepServer {
+			s.Close()
+		}
+	}()
 	if err := taskMgr.Start(s.TaskMCPScoper); err != nil {
 		appLog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
 	}
 	instanceCh := make(chan instanceDiscoveryResult, 1)
-	go func() {
-		defer trace.StartRegion(ctx, "list-runtime-instances").End()
-		instances, err := runtimes.List(ctx)
+	discovery.Go(func() error {
+		defer trace.StartRegion(discoveryCtx, "list-runtime-instances").End()
+		instances, err := runtimes.List(discoveryCtx)
 		instanceCh <- instanceDiscoveryResult{instances, err}
-	}()
+		return nil
+	})
 	repoRes := <-repoCh
 	if repoRes.err != nil {
+		cancelDiscovery()
+		_ = discovery.Wait()
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
 	}
 	instanceRes := <-instanceCh
@@ -526,8 +550,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			appLog.ErrorContext(ctx, "usage rollup cost backfill failed", "err", err)
 		}
 		return nil
-	})
-
+	}, imageRefresh.Run)
 	if !cfg.Runtime.SkipWarmup {
 		backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "warmup-images")
@@ -566,7 +589,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		},
 	)
 	keepTaskMgr = true
+	keepServer = true
 	keepProviders = true
+	keepAutomation = true
 	return &App{
 		Server:          s,
 		voiceBridge:     voiceBridge,
@@ -574,12 +599,16 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		metricsLog:      metricsLog,
 		taskMgr:         taskMgr,
 		providerClosers: providerClosers,
+		ciService:       ciService,
+		botService:      botService,
 	}, nil
 }
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 	defer func() {
+		a.botService.Close()
+		a.ciService.Close()
 		err = errors.Join(err, a.taskMgr.Close(), a.metricsLog.Close())
 		for _, c := range a.providerClosers {
 			err = errors.Join(err, c.Close())

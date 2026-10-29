@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,10 +91,12 @@ func TestUsageHandlersHandleEvents(t *testing.T) {
 			},
 		}
 		done := make(chan struct{})
-		go func() {
+		var workers sync.WaitGroup
+		t.Cleanup(func() { cancel(); workers.Wait() })
+		workers.Go(func() {
 			s.usageHandlers.handleEvents(writer, httptest.NewRequestWithContext(ctx, "GET", "/usage/events", nil))
 			close(done)
-		}()
+		})
 
 		select {
 		case <-writer.secondEvent:

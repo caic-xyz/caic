@@ -289,8 +289,9 @@ func TestCIPollWarnings(t *testing.T) {
 		svc := ci.NewService(testLogger(), cache, nil, b)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		t.Cleanup(cancel)
-		done := make(chan struct{})
-		go func() { svc.PollCIForActiveRepos(ctx); close(done) }()
+		var workers sync.WaitGroup
+		t.Cleanup(func() { cancel(); workers.Wait() })
+		workers.Go(func() { svc.PollCIForActiveRepos(ctx) })
 		select {
 		case <-f.entered:
 		case <-ctx.Done():
@@ -303,7 +304,7 @@ func TestCIPollWarnings(t *testing.T) {
 		default:
 		}
 		close(f.release)
-		<-done
+		workers.Wait()
 	})
 	t.Run("different accounts can poll concurrently", func(t *testing.T) {
 		t.Parallel()

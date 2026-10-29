@@ -346,11 +346,16 @@ func (r *Router) WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSampl
 	if len(groups) == 0 {
 		return func(func(StatsSample, error) bool) {}, nil
 	}
+	watchCtx, cancel := context.WithCancel(ctx)
 	streams := make([]statsStream, 0, len(groups))
 	for runtimeName, runtimeIDs := range groups {
 		rt := r.ByName[runtimeName]
-		seq, err := rt.WatchStats(ctx, runtimeIDs)
+		seq, err := rt.WatchStats(watchCtx, runtimeIDs)
 		if err != nil {
+			cancel()
+			for _, stream := range streams {
+				stream.seq(func(StatsSample, error) bool { return false })
+			}
 			return nil, fmt.Errorf("watch stats %s: %w", runtimeName, err)
 		}
 		streams = append(streams, statsStream{runtimeName: runtimeName, seq: seq})
@@ -358,29 +363,34 @@ func (r *Router) WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSampl
 	return func(yield func(StatsSample, error) bool) {
 		out := make(chan statsItem, len(streams))
 		var wg sync.WaitGroup
+		var closer sync.WaitGroup
+		defer func() {
+			cancel()
+			closer.Wait()
+		}()
 		for _, st := range streams {
 			wg.Go(func() {
 				for sample, err := range st.seq {
 					if err != nil {
 						select {
 						case out <- statsItem{err: fmt.Errorf("watch stats %s: %w", st.runtimeName, err)}:
-						case <-ctx.Done():
+						case <-watchCtx.Done():
 						}
 						return
 					}
 					sample.InstanceID = qualifyID(st.runtimeName, sample.InstanceID)
 					select {
 					case out <- statsItem{sample: sample}:
-					case <-ctx.Done():
+					case <-watchCtx.Done():
 						return
 					}
 				}
 			})
 		}
-		go func() {
+		closer.Go(func() {
 			wg.Wait()
 			close(out)
-		}()
+		})
 		for it := range out {
 			if !yield(it.sample, it.err) || it.err != nil {
 				return
@@ -390,38 +400,66 @@ func (r *Router) WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSampl
 }
 
 // WatchEvents streams lifecycle events across all runtime backends.
-func (r *Router) WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error) {
+func (r *Router) WatchEvents(ctx context.Context, filter EventFilter) (iter.Seq2[Event, error], error) {
 	watchCtx, cancel := context.WithCancel(ctx)
 	var watches []eventWatch
 	for _, rt := range r.Runtimes {
-		ch, err := rt.WatchEvents(watchCtx, filter)
+		seq, err := rt.WatchEvents(watchCtx, filter)
 		if err != nil {
 			cancel()
+			for _, watch := range watches {
+				watch.seq(func(Event, error) bool { return false })
+			}
 			return nil, fmt.Errorf("watch events %s: %w", rt.Name(), err)
 		}
-		watches = append(watches, eventWatch{runtimeName: rt.Name(), ch: ch})
+		watches = append(watches, eventWatch{runtimeName: rt.Name(), seq: seq})
 	}
-
-	out := make(chan Event, 16)
-	var wg sync.WaitGroup
-	for _, watch := range watches {
-		wg.Go(func() {
-			for ev := range watch.ch {
-				ev.InstanceID = qualifyID(watch.runtimeName, ev.InstanceID)
-				select {
-				case out <- ev:
-				case <-watchCtx.Done():
+	return func(yield func(Event, error) bool) {
+		defer cancel()
+		out := make(chan eventItem, 16)
+		done := make(chan struct{}, len(watches))
+		var wg sync.WaitGroup
+		defer func() { cancel(); wg.Wait() }()
+		for _, watch := range watches {
+			wg.Go(func() {
+				defer func() { done <- struct{}{} }()
+				for ev, err := range watch.seq {
+					if err != nil {
+						err = fmt.Errorf("watch events %s: %w", watch.runtimeName, err)
+					} else {
+						ev.InstanceID = qualifyID(watch.runtimeName, ev.InstanceID)
+					}
+					select {
+					case out <- eventItem{event: ev, err: err}:
+					case <-watchCtx.Done():
+						return
+					}
+					if err != nil {
+						return
+					}
+				}
+			})
+		}
+		remaining := len(watches)
+		for remaining > 0 {
+			select {
+			case item := <-out:
+				if !yield(item.event, item.err) || item.err != nil {
 					return
 				}
+			case <-done:
+				remaining--
+			case <-watchCtx.Done():
+				return
 			}
-		})
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-		cancel()
-	}()
-	return out, nil
+		}
+		for len(out) > 0 {
+			item := <-out
+			if !yield(item.event, item.err) || item.err != nil {
+				return
+			}
+		}
+	}, nil
 }
 
 // List returns known runtime instances from all inventory backends.
@@ -596,7 +634,12 @@ type statsItem struct {
 
 type eventWatch struct {
 	runtimeName Name
-	ch          <-chan Event
+	seq         iter.Seq2[Event, error]
+}
+
+type eventItem struct {
+	event Event
+	err   error
 }
 
 func qualifyID(name Name, id ID) ID {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/sync/errgroup"
 )
 
 // dayFileRe matches plain and compressed rollup day file names.
@@ -61,9 +62,8 @@ type Store struct {
 	toolTimings       map[string]*ToolTimingTracker // task id -> unmatched tool starts
 	lastQuota         map[quotaKey]quotaSeen        // provider window -> last written quota state
 	closed            bool
-	stopFlush         chan struct{}
-	flushDone         chan struct{}
-	compressionDone   chan struct{}
+	cancelMaintenance context.CancelFunc
+	maintenance       *errgroup.Group
 }
 
 // New opens the rollup store: it recovers aggregates and watermarks from any
@@ -90,16 +90,22 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		pending:           make(map[string]*taskPending),
 		toolTimings:       make(map[string]*ToolTimingTracker),
 		lastQuota:         make(map[quotaKey]quotaSeen),
-		stopFlush:         make(chan struct{}),
-		flushDone:         make(chan struct{}),
-		compressionDone:   make(chan struct{}),
 	}
 	s.recover(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	go s.flushLoop()
-	go s.compressionLoop()
+	maintenanceCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	s.cancelMaintenance = cancel
+	s.maintenance, maintenanceCtx = errgroup.WithContext(maintenanceCtx)
+	s.maintenance.Go(func() error {
+		s.flushLoop(maintenanceCtx)
+		return nil
+	})
+	s.maintenance.Go(func() error {
+		s.compressionLoop(maintenanceCtx)
+		return nil
+	})
 	return s, nil
 }
 
@@ -211,16 +217,14 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
-	close(s.stopFlush)
+	s.cancelMaintenance()
 	for id := range s.pending {
 		s.flushTaskLocked(id)
 	}
 	files := s.files
 	s.files = make(map[string]*os.File)
 	s.mu.Unlock()
-	<-s.flushDone
-	<-s.compressionDone
-	var errs []error
+	errs := []error{s.maintenance.Wait()}
 	for day, f := range files {
 		if err := f.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close usage rollup day file %s: %w", day, err))
@@ -698,13 +702,12 @@ func writeFirstRowLocked(dir, target string, encoded []byte) error {
 
 // flushLoop flushes pending deltas periodically so long turns without a
 // result still reach storage bounded by flushInterval.
-func (s *Store) flushLoop() {
-	defer close(s.flushDone)
+func (s *Store) flushLoop(ctx context.Context) {
 	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.stopFlush:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.flushAll()
@@ -713,14 +716,13 @@ func (s *Store) flushLoop() {
 }
 
 // compressionLoop handles daily maintenance without delaying periodic flushes.
-func (s *Store) compressionLoop() {
-	defer close(s.compressionDone)
+func (s *Store) compressionLoop(ctx context.Context) {
 	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 	lastCompressionDay := ""
 	for {
 		select {
-		case <-s.stopFlush:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			now := time.Now().UTC()

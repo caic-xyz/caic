@@ -171,7 +171,7 @@ type Conn interface {
 	// to msgCh.
 	ReadMessages(r io.Reader, msgCh chan<- TimedMessage) error
 	// SendStop sends the null-byte sentinel to trigger graceful agent shutdown.
-	// Best-effort: returns when ctx is done if the write blocks.
+	// Close must interrupt a blocked SendStop.
 	SendStop(ctx context.Context)
 	// Close closes the stdin pipe.
 	Close() error
@@ -221,18 +221,8 @@ func (c *conn) ReadMessages(r io.Reader, msgCh chan<- TimedMessage) error {
 	return DefaultReadMessages(c.ctx, c.logger, r, func(m TimedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
 }
 
-func (c *conn) SendStop(ctx context.Context) {
-	// Best-effort — the pipe may be broken or blocked (e.g. the SSH
-	// process is gone). Returns when ctx is done if the write blocks.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = c.stdin.Write([]byte{0, '\n'})
-	}()
-	select {
-	case <-done:
-	case <-ctx.Done():
-	}
+func (c *conn) SendStop(_ context.Context) {
+	_, _ = c.stdin.Write([]byte{0, '\n'})
 }
 
 func (c *conn) Close() error {
@@ -265,6 +255,8 @@ func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest
 }
 
 // NewConn creates a connection using the task log's physical record version.
+//
+// Closing stdin must unblock a pending write so session shutdown can finish.
 // log and sink must be non-nil; use DiscardLogSink{Version: version} when
 // persistence is unnecessary.
 func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
@@ -276,6 +268,7 @@ func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink L
 
 // NewMCPConn creates a connection that services a task-scoped MCP registry.
 //
+// Closing stdin must unblock a pending write so session shutdown can finish.
 // A nil registry leaves task-local MCP requests unavailable.
 func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat, registry mcp.Registry) Conn {
 	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire, mcp: registry}
@@ -336,10 +329,11 @@ func isMCPResponse(data []byte) bool {
 type Session struct {
 	Conn
 
-	cmd  *exec.Cmd
-	log  *slog.Logger
-	done chan struct{} // closed when readMessages goroutine exits
-	err  error
+	cmd     *exec.Cmd
+	log     *slog.Logger
+	done    chan struct{} // closed when readMessages goroutine exits
+	err     error
+	workers sync.WaitGroup
 }
 
 // NewSession creates a Session from an already-started command. Messages read
@@ -363,7 +357,7 @@ func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.Reader, ms
 		done: make(chan struct{}),
 	}
 
-	go func() {
+	s.workers.Go(func() {
 		defer close(s.done)
 		parseErr := s.ReadMessages(stdout, msgCh)
 		waitErr := cmd.Wait()
@@ -383,7 +377,7 @@ func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.Reader, ms
 		default:
 			log.InfoContext(ctx, "session done")
 		}
-	}()
+	})
 
 	return s
 }
@@ -487,13 +481,24 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 // restarts where the container should keep running.
 func (s *Session) Stop(ctx context.Context) error {
 	s.log.Debug("session: sending stop sentinel")
-	s.SendStop(ctx)
+	stopDone := make(chan struct{})
+	var stopWork sync.WaitGroup
+	stopWork.Go(func() {
+		defer close(stopDone)
+		s.SendStop(ctx)
+	})
+	select {
+	case <-stopDone:
+	case <-ctx.Done():
+	}
 	// Close stdin so attach_client sees EOF and exits. The sentinel is
 	// already in the pipe buffer; the OS delivers it before the EOF.
 	_ = s.Close()
+	stopWork.Wait()
 	s.log.Debug("session: waiting for process exit")
 	select {
 	case <-s.done:
+		s.workers.Wait()
 		s.log.Debug("session: process exited", "err", s.err)
 		return s.err
 	case <-ctx.Done():
@@ -510,6 +515,7 @@ func (s *Session) Done() <-chan struct{} {
 // Wait blocks until the agent process exits.
 func (s *Session) Wait() error {
 	<-s.done
+	s.workers.Wait()
 	return s.err
 }
 
@@ -1134,7 +1140,7 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 type RelayProcess struct {
 	Cmd    *exec.Cmd
 	Stdin  io.WriteCloser
-	Stdout io.Reader
+	Stdout io.ReadCloser
 }
 
 // ShellQuote preserves one argument through a POSIX shell without expansion.

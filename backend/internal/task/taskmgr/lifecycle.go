@@ -731,7 +731,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 			t.DetachSession()
 			sessionErr := h.Session.Wait()
 			h.CloseMsgCh()
-			<-h.DispatchDone
+			h.WaitDispatch()
 			if h.Log != nil {
 				_ = h.Log.Close()
 			}

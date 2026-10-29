@@ -102,7 +102,8 @@ func (c *controlConn) SendPrompt(p agent.Prompt) error {
 func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
 	proxy := make(chan agent.TimedMessage, 1)
 	errc := make(chan error, 1)
-	go func() {
+	var workers sync.WaitGroup
+	workers.Go(func() {
 		defer close(errc)
 		var controlErr error
 		for parsed := range proxy {
@@ -118,10 +119,12 @@ func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage)
 		if controlErr != nil {
 			errc <- controlErr
 		}
-	}()
+	})
 	err := c.Conn.ReadMessages(r, proxy)
 	close(proxy)
-	if controlErr := <-errc; controlErr != nil {
+	controlErr := <-errc
+	workers.Wait()
+	if controlErr != nil {
 		return errors.Join(err, controlErr)
 	}
 	return err

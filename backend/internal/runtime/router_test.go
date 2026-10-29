@@ -9,6 +9,7 @@ import (
 	"iter"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,29 @@ import (
 
 func TestRouter(t *testing.T) {
 	t.Parallel()
+	t.Run("stopping stats joins other runtime streams", func(t *testing.T) {
+		t.Parallel()
+		started := make(chan struct{})
+		stopped := make(chan struct{})
+		blocking := &routerStatsBackend{routerFakeBackend: newRouterFakeBackend("docker"), started: started, stopped: stopped}
+		emitting := &routerStatsBackend{routerFakeBackend: newRouterFakeBackend("podman"), started: started}
+		router, err := runtime.NewRouter([]runtime.System{blocking, emitting}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream, err := router.WatchStats(t.Context(), []runtime.ID{"docker:one", "podman:two"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range stream {
+			break
+		}
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("stats stream returned before the other runtime stopped")
+		}
+	})
 	t.Run("instance ID exposes runtime and local instance", func(t *testing.T) {
 		t.Parallel()
 		id := runtime.NewID("podman", "podman-1")
@@ -153,6 +177,105 @@ func TestRouter(t *testing.T) {
 		}
 		events <- runtime.Event{InstanceID: "md-agent-1"}
 	})
+	t.Run("watch events failure stops other sources", func(t *testing.T) {
+		t.Parallel()
+		failure := errors.New("stream failure")
+		done := make(chan struct{})
+		docker := &routerEventSystem{RuntimeName: "docker"}
+		docker.streamErr = failure
+		podman := &routerEventSystem{RuntimeName: "podman"}
+		podman.events, podman.ctxDone = make(chan runtime.Event), done
+		router, err := runtime.NewRouter([]runtime.System{docker, podman}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream, err := router.WatchEvents(t.Context(), runtime.EventFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got error
+		for _, streamErr := range stream {
+			got = streamErr
+		}
+		if !errors.Is(got, failure) {
+			t.Fatalf("stream error = %v, want %v", got, failure)
+		}
+		select {
+		case <-done:
+		default:
+			t.Fatal("other source was not joined")
+		}
+	})
+	t.Run("watch events joins sources when consumer stops", func(t *testing.T) {
+		t.Parallel()
+		events := make(chan runtime.Event, 1)
+		events <- runtime.Event{InstanceID: "md-agent-1"}
+		dockerDone := make(chan struct{})
+		podmanDone := make(chan struct{})
+		router, err := runtime.NewRouter([]runtime.System{
+			&routerEventSystem{RuntimeName: "docker", events: events, ctxDone: dockerDone},
+			&routerEventSystem{RuntimeName: "podman", events: make(chan runtime.Event), ctxDone: podmanDone},
+		}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream, err := router.WatchEvents(t.Context(), runtime.EventFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for event, err := range stream {
+			if err != nil || event.InstanceID != "docker:md-agent-1" {
+				t.Fatalf("event = %+v, %v", event, err)
+			}
+			break
+		}
+		for _, done := range []<-chan struct{}{dockerDone, podmanDone} {
+			select {
+			case <-done:
+			default:
+				t.Fatal("source was not joined")
+			}
+		}
+	})
+	t.Run("watch events closes on cancellation even if runtime stays open", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		router, err := runtime.NewRouter([]runtime.System{
+			&routerEventSystem{RuntimeName: "docker", events: make(chan runtime.Event)},
+		}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := router.WatchEvents(ctx, runtime.EventFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		for range events {
+			t.Fatal("unexpected event after cancellation")
+		}
+	})
+}
+
+func TestRouterWatchStatsSetupFailure(t *testing.T) {
+	t.Parallel()
+	var starts atomic.Int32
+	drained := make(chan struct{})
+	router, err := runtime.NewRouter([]runtime.System{
+		&setupFailStatsBackend{routerFakeBackend: newRouterFakeBackend("docker"), starts: &starts, drained: drained},
+		&setupFailStatsBackend{routerFakeBackend: newRouterFakeBackend("podman"), starts: &starts, drained: drained},
+	}, metrics.Nop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.WatchStats(t.Context(), []runtime.ID{"docker:one", "podman:two"}); err == nil {
+		t.Fatal("WatchStats succeeded, want setup failure")
+	}
+	select {
+	case <-drained:
+	default:
+		t.Fatal("prior stream was not drained")
+	}
 }
 
 func TestRouterList(t *testing.T) {
@@ -361,9 +484,10 @@ type routerEventSystem struct {
 }
 
 type routerEventMonitor struct {
-	events  <-chan runtime.Event
-	err     error
-	ctxDone chan<- struct{}
+	events    <-chan runtime.Event
+	err       error
+	streamErr error
+	ctxDone   chan<- struct{}
 }
 
 func (m *routerEventMonitor) WatchStats(context.Context, []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
@@ -374,17 +498,29 @@ func (m *routerEventMonitor) DiskUsage(context.Context, []runtime.ID) (map[runti
 	return map[runtime.ID]int64{}, nil
 }
 
-func (m *routerEventMonitor) WatchEvents(ctx context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
+func (m *routerEventMonitor) WatchEvents(ctx context.Context, _ runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	if m.ctxDone != nil {
-		go func() {
-			<-ctx.Done()
-			close(m.ctxDone)
-		}()
-	}
-	return m.events, nil
+	return func(yield func(runtime.Event, error) bool) {
+		if m.ctxDone != nil {
+			defer close(m.ctxDone)
+		}
+		if m.streamErr != nil {
+			yield(runtime.Event{}, m.streamErr)
+			return
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-m.events:
+				if !ok || !yield(event, nil) {
+					return
+				}
+			}
+		}
+	}, nil
 }
 
 type routerFakeBackend struct {
@@ -445,8 +581,43 @@ func (f *routerFakeBackend) DiskUsage(_ context.Context, ids []runtime.ID) (map[
 	return usage, nil
 }
 
-func (f *routerFakeBackend) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
-	ch := make(chan runtime.Event)
-	close(ch)
-	return ch, nil
+func (f *routerFakeBackend) WatchEvents(context.Context, runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
+	return func(func(runtime.Event, error) bool) {}, nil
+}
+
+type setupFailStatsBackend struct {
+	*routerFakeBackend
+
+	starts  *atomic.Int32
+	drained chan struct{}
+}
+
+func (f *setupFailStatsBackend) WatchStats(ctx context.Context, _ []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
+	if f.starts.Add(1) == 2 {
+		return nil, errors.New("setup failure")
+	}
+	return func(func(runtime.StatsSample, error) bool) {
+		<-ctx.Done()
+		close(f.drained)
+	}, nil
+}
+
+type routerStatsBackend struct {
+	*routerFakeBackend
+
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (f *routerStatsBackend) WatchStats(ctx context.Context, _ []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
+	return func(yield func(runtime.StatsSample, error) bool) {
+		if f.stopped != nil {
+			close(f.started)
+			<-ctx.Done()
+			close(f.stopped)
+			return
+		}
+		<-f.started
+		yield(runtime.StatsSample{}, nil)
+	}, nil
 }

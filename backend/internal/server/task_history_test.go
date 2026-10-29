@@ -43,7 +43,9 @@ func TestTaskHistory(t *testing.T) {
 	entry.LogPath.Set(path)
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	owner := newTaskHistory(ctx, s.log, s.taskMgr)
+	workers := newBackgroundWorkers(ctx)
+	t.Cleanup(workers.Close)
+	owner := newTaskHistory(workers.ctx, s.log, s.taskMgr, workers)
 	first, release, err := owner.acquire(t.Context(), entry)
 	if err != nil {
 		t.Fatal(err)

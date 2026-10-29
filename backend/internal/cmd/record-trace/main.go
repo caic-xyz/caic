@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+
 	"encoding/json"
 	"errors"
 	"flag"
@@ -29,6 +30,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -201,23 +204,26 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 			return fmt.Errorf("detect tool paths: %w", err)
 		}
 	}
-	cmd, stdin, stdout, err := startRelayAgent(ctx, ctr, workDir, relayDir, b, model, binDirs, local)
+	cmd, stdin, stdoutPipe, err := startRelayAgent(ctx, ctr, workDir, relayDir, b, model, binDirs, local)
 	if err != nil {
 		return err
 	}
+	var stdout io.Reader = stdoutPipe
 	var wire agent.WireFormat
 	if hs, ok := b.(agent.RecordHandshaker); ok {
-		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdout, harnessWorkDir(local, workDir), model, version)
+		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, harnessWorkDir(local, workDir), model, version)
 		if err != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 			return err
 		}
 	}
 	if err := sendCommands(stdin, b, model, sc.prompt, wire); err != nil {
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer, version); err != nil {
+	if err := waitAndShutdown(ctx, cmd, stdin, stdout, stdoutPipe, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer, version); err != nil {
 		return err
 	}
 	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc, outputPath, version)
@@ -383,7 +389,7 @@ func relayAttachArgs(dir string, agentArgs []string) []string {
 
 // startRelayAgent launches the relay with the agent process inside the container,
 // or on this machine when local is set.
-func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent.Backend, model, binDirs string, local bool) (*exec.Cmd, io.WriteCloser, io.Reader, error) {
+func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent.Backend, model, binDirs string, local bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	slog.InfoContext(ctx, "Starting agent via relay", "harness", b.Harness(), "local", local)
 	agentArgs := b.AgentArgs(agent.HarnessArgs{Model: model})
 	var cmd *exec.Cmd
@@ -434,11 +440,20 @@ func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText strin
 }
 
 // waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr, localOutput string, wire agent.WireFormat, askAnswer string, version agent.LogVersion) error {
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, stdoutPipe io.Closer, b agent.Backend, ctr, localOutput string, wire agent.WireFormat, askAnswer string, version agent.LogVersion) error {
 	if wire == nil {
 		wire = b.NewWire()
 	}
-	agentDone := watchAgent(stdout, stdin, wire.ParseMessage, askAnswer, version)
+	watchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(watchCtx, func() { _ = cmd.Process.Kill() })
+	defer stop()
+	group, watchCtx := errgroup.WithContext(watchCtx)
+	defer func() {
+		_ = stdoutPipe.Close()
+		_ = group.Wait()
+	}()
+	agentDone := watchAgent(group, stdout, stdin, wire.ParseMessage, askAnswer, version)
 
 	slog.InfoContext(ctx, "Waiting for agent to finish")
 	select {
@@ -448,11 +463,10 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 			return err
 		}
 		slog.InfoContext(ctx, "Agent completed, stopping relay")
-	case <-time.After(120 * time.Second):
-		slog.WarnContext(ctx, "Timeout waiting for agent, terminating")
-	case <-ctx.Done():
+	case <-watchCtx.Done():
 		_ = cmd.Process.Kill()
-		return ctx.Err()
+		_ = cmd.Wait()
+		return watchCtx.Err()
 	}
 
 	_, _ = stdin.Write([]byte("\x00\n"))
@@ -485,23 +499,23 @@ func waitForLocalFile(ctx context.Context, path string, timeout time.Duration) e
 // watchAgent reads physical relay records, answers Claude control requests, and
 // signals when a ResultMessage is parsed. version selects the record format the
 // relay writes, so the recorded trace is read exactly like a live task session.
-func watchAgent(stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string, version agent.LogVersion) <-chan error {
+func watchAgent(group *errgroup.Group, stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string, version agent.LogVersion) <-chan error {
 	done := make(chan error, 1)
 	reader, err := agent.NewRelayRecordReader(stdout, version, agent.DiscardLogSink{Version: version})
 	if err != nil {
 		done <- err
 		return done
 	}
-	go func() {
+	group.Go(func() error {
 		defer close(done)
 		for {
 			native, _, err := reader.ReadRecord()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					return
+					return nil
 				}
 				done <- err
-				return
+				return nil
 			}
 			if native == nil {
 				continue
@@ -509,7 +523,7 @@ func watchAgent(stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.M
 			line := append([]byte(nil), native...)
 			if err := answerClaudeControlRequest(stdin, line, askAnswer); err != nil {
 				done <- err
-				return
+				return nil
 			}
 			msgs, err := parse(line)
 			if err != nil {
@@ -518,11 +532,11 @@ func watchAgent(stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.M
 			for _, m := range msgs {
 				if _, ok := m.(*agent.ResultMessage); ok {
 					done <- nil
-					return
+					return nil
 				}
 			}
 		}
-	}()
+	})
 	return done
 }
 

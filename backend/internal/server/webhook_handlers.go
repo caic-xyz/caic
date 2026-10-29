@@ -36,9 +36,10 @@ const maxWebhookBodyBytes = 10 << 20 // 10 MB
 type WebhookHandlers struct {
 	log              *slog.Logger
 	serverCtx        context.Context // dispatch context that outlives individual webhook requests
-	githubSecret     []byte          // nil when the GitHub webhook is not configured
-	gitlabSecret     []byte          // nil when the GitLab webhook is not configured
-	appAllowedOwners []string        // nil = allow all GitHub App installs
+	workers          *backgroundWorkers
+	githubSecret     []byte   // nil when the GitHub webhook is not configured
+	gitlabSecret     []byte   // nil when the GitLab webhook is not configured
+	appAllowedOwners []string // nil = allow all GitHub App installs
 
 	bot        *bot.Bot
 	ciService  *ci.Service
@@ -121,7 +122,7 @@ func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
 		if ev.CheckRun.Status == "completed" {
 			owner, repoName, _ := strings.Cut(ev.Repository.FullName, "/")
 			if owner != "" && repoName != "" && ev.CheckRun.HeadSHA != "" {
-				go h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repoName, ev.CheckRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+				h.workers.Go(func() { h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repoName, ev.CheckRun.HeadSHA) })
 			}
 		}
 	case "workflow_run":
@@ -133,7 +134,7 @@ func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
 		if ev.WorkflowRun.Status == "completed" {
 			owner, repoName, _ := strings.Cut(ev.Repository.FullName, "/")
 			if owner != "" && repoName != "" && ev.WorkflowRun.HeadSHA != "" {
-				go h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repoName, ev.WorkflowRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+				h.workers.Go(func() { h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repoName, ev.WorkflowRun.HeadSHA) })
 			}
 		}
 	default:
@@ -187,7 +188,7 @@ func (h *WebhookHandlers) HandleGitLab(w http.ResponseWriter, r *http.Request) {
 		sha := ev.ObjectAttributes.SHA
 		owner, repoName, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
 		if owner != "" && repoName != "" && sha != "" {
-			go h.webhookOnCI(h.serverCtx, forge.KindGitLab, owner, repoName, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+			h.workers.Go(func() { h.webhookOnCI(h.serverCtx, forge.KindGitLab, owner, repoName, sha) })
 		}
 	case "Merge Request Hook":
 		var ev gitlab.MergeRequestEvent
@@ -364,14 +365,15 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 				f := h.forgeMgr.ForgeFor(ctx, ri.ForgeKind)
 				if f != nil {
 					entry.SetMonitorBranch(branch)
-					go h.ciService.MonitorCI(ctx, entry, f, owner, repoName, sha)
+					h.workers.Go(func() { h.ciService.MonitorCI(h.serverCtx, entry, f, owner, repoName, sha) })
 				}
 			}
 		} else if snap.ForgePR == prNumber && ev.Action == "synchronize" {
 			// PR already exists, but new commits were pushed — restart CI monitoring.
 			h.log.InfoContext(ctx, "restarting CI monitor", "task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
-				go h.ciService.MonitorCI(ctx, entry, h.forgeMgr.ForgeFor(ctx, ri.ForgeKind), owner, repoName, sha)
+				f := h.forgeMgr.ForgeFor(h.serverCtx, ri.ForgeKind) //nolint:contextcheck // monitoring outlives the webhook request
+				h.workers.Go(func() { h.ciService.MonitorCI(h.serverCtx, entry, f, owner, repoName, sha) })
 			}
 		}
 	}
@@ -530,7 +532,9 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 	// Deliver the result to any task monitoring this SHA.
 	// Match by branch since multiple commits can have the same SHA across different branches.
 	for _, entry := range h.taskMgr.FindTasksMonitoringBranch(repoInfo.ForgeOwner, repoInfo.ForgeRepo) {
-		go h.ciService.ApplyMonitorCIResult(h.serverCtx, entry, client, repoInfo.ForgeOwner, repoInfo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
+		h.workers.Go(func() {
+			h.ciService.ApplyMonitorCIResult(h.serverCtx, entry, client, repoInfo.ForgeOwner, repoInfo.ForgeRepo, sha, result)
+		})
 	}
 }
 

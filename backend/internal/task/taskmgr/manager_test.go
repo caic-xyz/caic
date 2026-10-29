@@ -1592,7 +1592,15 @@ func TestManager(t *testing.T) {
 		}
 
 		closed := make(chan error, 1)
-		go func() { closed <- m.Close() }()
+		var workers sync.WaitGroup
+		workers.Go(func() { closed <- m.Close() })
+		t.Cleanup(func() {
+			select {
+			case backend.release <- struct{}{}:
+			default:
+			}
+			workers.Wait()
+		})
 		select {
 		case err := <-closed:
 			t.Fatalf("Close() returned before lifecycle stopped: %v", err)
@@ -1787,7 +1795,8 @@ func TestManager(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 		done := make(chan struct{})
-		go func() {
+		var workers sync.WaitGroup
+		workers.Go(func() {
 			m.Range(func(_ ksid.ID, _ *Entry) bool {
 				_, _ = m.Checkouts.Checkout("repo")
 				return true
@@ -1797,9 +1806,10 @@ func TestManager(t *testing.T) {
 				_, _ = m.GetEntry(tk.ID)
 			}
 			close(done)
-		}()
+		})
 		select {
 		case <-done:
+			workers.Wait()
 		case <-time.After(5 * time.Second):
 			t.Fatal("Range/Checkouts deadlocked when iteration called back into Manager")
 		}
@@ -2185,11 +2195,13 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.SetState(taskslog.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
-			go func() {
+			var workers sync.WaitGroup
+			workers.Go(func() {
 				time.Sleep(50 * time.Millisecond)
 				tk.SetState(taskslog.StateStopped)
 				m.NotifyTaskChange()
-			}()
+			})
+			t.Cleanup(workers.Wait)
 			state, _, err := m.WatchTaskCompletion(t.Context(), tk.ID)
 			if err != nil {
 				t.Fatalf("WatchTaskCompletion error: %v", err)
@@ -4637,10 +4649,12 @@ func TestManager(t *testing.T) {
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
 			done := make(chan error, 1)
-			go func() {
+			var workers sync.WaitGroup
+			workers.Go(func() {
 				_, importErr := m.ImportInstances(t.Context(), instances, logs)
 				done <- importErr
-			}()
+			})
+			t.Cleanup(func() { releaseImports(); workers.Wait() })
 			for range maxConcurrentTaskImports {
 				select {
 				case <-started:
@@ -6093,7 +6107,6 @@ func TestManager(t *testing.T) {
 	t.Run("watchStats", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
 		started := make(chan []runtime.ID, 1)
 		fake := &runtimetest.FakeInfo{
 			WatchStarted: started,
@@ -6105,7 +6118,9 @@ func TestManager(t *testing.T) {
 		tk.SetState(taskslog.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
-		go m.watchStats(ctx)
+		var workers sync.WaitGroup
+		workers.Go(func() { m.watchStats(ctx) })
+		t.Cleanup(func() { cancel(); workers.Wait() })
 		select {
 		case ids := <-started:
 			if !slices.Equal(ids, []runtime.ID{"test-runtime:ctr-1"}) {
@@ -6147,12 +6162,9 @@ func TestManager(t *testing.T) {
 		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			m.watchStats(ctx)
-		}()
-		t.Cleanup(func() { cancel(); <-done })
+		var workers sync.WaitGroup
+		workers.Go(func() { m.watchStats(ctx) })
+		t.Cleanup(func() { cancel(); workers.Wait() })
 		select {
 		case <-started:
 		case <-time.After(2 * time.Second):
@@ -6205,12 +6217,9 @@ func TestManager(t *testing.T) {
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			m.watchStats(ctx)
-		}()
-		t.Cleanup(func() { cancel(); <-done })
+		var workers sync.WaitGroup
+		workers.Go(func() { m.watchStats(ctx) })
+		t.Cleanup(func() { cancel(); workers.Wait() })
 		select {
 		case <-started:
 		case <-time.After(2 * time.Second):
@@ -6237,7 +6246,6 @@ func TestManager(t *testing.T) {
 	t.Run("watchDiskUsage", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
 		started := make(chan []runtime.ID, 4)
 		id := runtime.NewID("test-runtime", "ctr-1")
 		fake := &runtimetest.FakeInfo{
@@ -6251,7 +6259,9 @@ func TestManager(t *testing.T) {
 		tk.PushStats(&runtime.Stats{CPUPerc: 2.5, DiskUsed: -1})
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
-		go m.watchDiskUsage(ctx)
+		var workers sync.WaitGroup
+		workers.Go(func() { m.watchDiskUsage(ctx) })
+		t.Cleanup(func() { cancel(); workers.Wait() })
 		select {
 		case ids := <-started:
 			if !slices.Equal(ids, []runtime.ID{id}) {
@@ -6356,8 +6366,9 @@ func TestManager(t *testing.T) {
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 			ctx, cancel := context.WithCancel(t.Context())
-			t.Cleanup(cancel)
-			go m.watchRuntimeEvents(ctx, nil)
+			var workers sync.WaitGroup
+			workers.Go(func() { m.watchRuntimeEvents(ctx, nil) })
+			t.Cleanup(func() { cancel(); workers.Wait() })
 
 			events <- runtime.Event{InstanceID: "ctr-dead", Kind: runtime.EventDie}
 
@@ -6895,9 +6906,7 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -6919,9 +6928,8 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 				return
 			}
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -6933,7 +6941,7 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 				t.Error(err)
 			}
 		}
-	}()
+	})
 	time.Sleep(200 * time.Millisecond)
 	close(stop)
 	wg.Wait()
@@ -7365,7 +7373,16 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	entry.LogPath.Set(path)
 	m.Insert(tk.ID, entry)
 	result := make(chan error, 1)
-	go func() { result <- entry.Lifecycle.recoverImportedSession(taskslog.StateFailed) }()
+	var workers sync.WaitGroup
+	workers.Go(func() { result <- entry.Lifecycle.recoverImportedSession(taskslog.StateFailed) })
+	t.Cleanup(func() {
+		select {
+		case <-rb.release:
+		default:
+			close(rb.release)
+		}
+		workers.Wait()
+	})
 	select {
 	case <-rb.started:
 	case <-time.After(time.Second):

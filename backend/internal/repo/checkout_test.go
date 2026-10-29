@@ -361,12 +361,13 @@ func TestCheckout(t *testing.T) {
 						writePushFile(t, root, ".git/hooks/"+hookName, hook, 0o700)
 					}
 					ctx, cancel := context.WithCancel(t.Context())
-					t.Cleanup(cancel)
+					var workers sync.WaitGroup
+					t.Cleanup(func() { cancel(); workers.Wait() })
 					// Cancel only once the hook runs; a fixed timer can expire before
 					// the operation directory exists on a loaded machine.
 					canceled := make(chan time.Time, 1)
 					if tc.hang {
-						go func() {
+						workers.Go(func() {
 							for ctx.Err() == nil {
 								if _, err := os.Stat(hookStarted); err == nil {
 									canceled <- time.Now()
@@ -375,7 +376,7 @@ func TestCheckout(t *testing.T) {
 								}
 								time.Sleep(10 * time.Millisecond)
 							}
-						}()
+						})
 					}
 					err := w.pushWorktree(ctx, logtest.Logger(t), root, tc.commit, PushDestination{Remote: "origin", Branch: "task"}, false)
 					if err == nil {
@@ -841,14 +842,24 @@ func TestCheckout(t *testing.T) {
 				release := make(chan struct{})
 				finished := make(chan struct{})
 				done := make(chan error, 1)
-				go func() {
+				var workers sync.WaitGroup
+				t.Cleanup(func() {
+					cancel()
+					select {
+					case <-release:
+					default:
+						close(release)
+					}
+					workers.Wait()
+				})
+				workers.Go(func() {
 					done <- finishPushCleanup(ctx, dir, func() error {
 						close(started)
 						<-release
 						close(finished)
 						return nil
 					})
-				}()
+				})
 				<-started
 				cancel()
 				if err := <-done; !errors.Is(err, context.Canceled) {

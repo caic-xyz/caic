@@ -26,9 +26,9 @@ type systemStats struct {
 	changed chan struct{}
 }
 
-func newSystemStats(ctx context.Context) *systemStats {
+func newSystemStats(ctx context.Context, workers *backgroundWorkers) *systemStats {
 	s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
-	go s.run(ctx)
+	workers.Go(func() { s.run(ctx) })
 	return s
 }
 

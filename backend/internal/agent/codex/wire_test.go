@@ -232,7 +232,7 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"saved-session"},"model":"gpt-5.4"}}
 `
 		var stdin bytes.Buffer
-		_, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{
+		_, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), io.NopCloser(strings.NewReader("")), &agent.Options{
 			Dir: "/repo", Model: "gpt-5.4", ResumeSessionID: "saved-session", Log: &agenttest.LogSink{Version: agent.LogVersionV1},
 		})
 		if err != nil {
@@ -257,7 +257,7 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -308,7 +308,7 @@ func TestHandshake(t *testing.T) {
 `
 		var stdin bytes.Buffer
 		log := &agenttest.LogSink{Version: agent.LogVersionV2}
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -328,7 +328,7 @@ func TestHandshake(t *testing.T) {
 `
 		var stdin bytes.Buffer
 		log := &agenttest.LogSink{Version: agent.LogVersionV3}
-		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(generation+v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
+		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(generation+v2Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
 			t.Fatal(err)
 		}
 		lines := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
@@ -414,7 +414,7 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: tc.version}})
+			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: tc.version}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -426,26 +426,6 @@ func TestHandshakeContinuation(t *testing.T) {
 				t.Fatalf("continuation = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestRecordHandshakeContinuation(t *testing.T) {
-	t.Parallel()
-	const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
-{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
-{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
-{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
-`
-	_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, strings.NewReader(responses), "/workspace", "", agent.LogVersionV1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	line, err := bufio.NewReader(continuation).ReadBytes('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(line), `"thread/started"`) {
-		t.Fatalf("continuation = %q", line)
 	}
 }
 

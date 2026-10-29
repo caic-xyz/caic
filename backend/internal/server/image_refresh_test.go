@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -21,9 +22,14 @@ type imageWarmerFake struct {
 	release chan error
 }
 
-func (f *imageWarmerFake) Warmup(_ context.Context, _, _ io.Writer, opts *md.WarmupOpts) (bool, error) {
+func (f *imageWarmerFake) Warmup(ctx context.Context, _, _ io.Writer, opts *md.WarmupOpts) (bool, error) {
 	f.opts <- *opts
-	return true, <-f.release
+	select {
+	case err := <-f.release:
+		return true, err
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 }
 
 func TestImageRefresh(t *testing.T) {
@@ -116,8 +122,9 @@ func TestImageRefresh(t *testing.T) {
 			Log: testLogger(), Prefs: prefs,
 			Clients: map[string]ImageWarmer{"docker": docker, "podman": podman},
 		}
-		done := make(chan error, 1)
-		go func() { done <- scheduler.RunScheduled(ctx, time.Hour) }()
+		group, runCtx := errgroup.WithContext(ctx)
+		t.Cleanup(func() { cancel(); _ = group.Wait() })
+		group.Go(func() error { return scheduler.RunScheduled(runCtx, time.Hour) })
 		for _, ch := range []<-chan md.WarmupOpts{docker.opts, podman.opts} {
 			select {
 			case opts := <-ch:
@@ -137,13 +144,37 @@ func TestImageRefresh(t *testing.T) {
 		cancel()
 		docker.release <- nil
 		podman.release <- nil
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("RunScheduled after cancellation = %v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("scheduled warmup did not stop")
+		if err := group.Wait(); err != nil {
+			t.Errorf("RunScheduled after cancellation = %v", err)
 		}
 	})
+}
+
+func TestImageRefreshShutdown(t *testing.T) {
+	t.Parallel()
+	prefs, err := preferences.Open(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	warmer := &imageWarmerFake{opts: make(chan md.WarmupOpts, 1), release: make(chan error)}
+	r := &ImageRefresh{Log: testLogger(), Prefs: prefs, Clients: map[string]ImageWarmer{"docker": warmer}}
+	ctx, cancel := context.WithCancel(t.Context())
+	group, ctx := errgroup.WithContext(ctx)
+	group.Go(func() error { return r.Run(ctx) })
+	if _, err := r.Start(t.Context(), "alice", "docker"); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	<-warmer.opts
+	cancel()
+	if err := group.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	status, err := r.Status("alice", "docker")
+	if err != nil || status.State != v1.ImageRefreshFailed {
+		t.Fatalf("status after shutdown = %+v, %v", status, err)
+	}
+	if _, err := r.Start(t.Context(), "alice", "docker"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("start after shutdown = %v, want cancellation", err)
+	}
 }

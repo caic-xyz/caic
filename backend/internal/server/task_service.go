@@ -49,6 +49,7 @@ type FakeCIHook func(ctx context.Context, t *task.Task)
 // server route code stays focused on protocol concerns.
 type taskService struct {
 	ctx       context.Context
+	workers   *backgroundWorkers
 	log       *slog.Logger
 	taskMgr   *taskmgr.Manager
 	prefs     *preferences.Store
@@ -568,7 +569,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created task not found"}
 	}
 
-	go s.maybeFakeCI(entry.Task())
+	s.workers.Go(func() { s.maybeFakeCI(entry.Task()) })
 
 	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
 		harnessName := string(req.Harness)

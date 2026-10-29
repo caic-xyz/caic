@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -236,13 +239,11 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	serverCtx, cancel := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() {
-		done <- router.Serve(serverCtx, ln)
-	}()
+	group, serverCtx := errgroup.WithContext(serverCtx)
+	group.Go(func() error { return router.Serve(serverCtx, ln) })
 	shutdown = func() {
 		cancel()
-		if err := <-done; err != nil {
+		if err := group.Wait(); err != nil {
 			slog.WarnContext(ctx, "mcp auth smoke server shutdown", "err", err)
 		}
 		if err := usageRollup.Close(); err != nil {

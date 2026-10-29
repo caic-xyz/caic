@@ -1214,9 +1214,8 @@ func (m *Manager) watchStats(ctx context.Context) {
 		}
 
 		streamCtx, cancel := context.WithCancel(ctx)
-		changedDone := make(chan struct{})
-		go func() {
-			defer close(changedDone)
+		var changedWatch sync.WaitGroup
+		changedWatch.Go(func() {
 			// Task data changes frequently without changing the sampled containers.
 			// Preserve the stream's CPU measurement interval across those updates.
 			ch := changed
@@ -1233,12 +1232,12 @@ func (m *Manager) watchStats(ctx context.Context) {
 					return
 				}
 			}
-		}()
+		})
 
 		stats, err := m.Runtimes.WatchStats(streamCtx, ids)
 		if err != nil {
 			cancel()
-			<-changedDone
+			changedWatch.Wait()
 			m.log.WarnContext(ctx, "stats stream failed", "err", err)
 			if !m.waitStatsRetry(ctx, ids, retryDelay) {
 				return
@@ -1258,7 +1257,7 @@ func (m *Manager) watchStats(ctx context.Context) {
 		// unexpected stream end would look interrupted and skip the retry delay.
 		interrupted := streamCtx.Err() != nil
 		cancel()
-		<-changedDone
+		changedWatch.Wait()
 		if ctx.Err() != nil {
 			return
 		}
@@ -1457,7 +1456,7 @@ func diskUsageStateActive(st taskslog.State) bool {
 }
 
 // watchRuntimeEvents reconnects the runtime event stream after interruption.
-func (m *Manager) watchRuntimeEvents(ctx context.Context, events <-chan runtime.Event) {
+func (m *Manager) watchRuntimeEvents(ctx context.Context, events iter.Seq2[runtime.Event, error]) {
 	for {
 		if events == nil {
 			var err error
@@ -1475,18 +1474,17 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context, events <-chan runtime.
 				}
 			}
 		}
-		streamEnded := false
-		for !streamEnded {
-			select {
-			case event, ok := <-events:
-				if !ok {
-					streamEnded = true
-					continue
+		for event, err := range events {
+			if err != nil {
+				if ctx.Err() == nil {
+					m.log.WarnContext(ctx, "runtime events stream failed", "err", err)
 				}
-				m.handleRuntimeEvent(ctx, event)
-			case <-ctx.Done():
+				break
+			}
+			if ctx.Err() != nil {
 				return
 			}
+			m.handleRuntimeEvent(ctx, event)
 		}
 		if ctx.Err() != nil {
 			return

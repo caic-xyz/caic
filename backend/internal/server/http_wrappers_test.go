@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,9 +142,11 @@ func TestEmitTaskListEvent(t *testing.T) {
 		}
 		before := time.Now()
 		errs := make(chan error, 1)
-		go func() {
+		var workers sync.WaitGroup
+		t.Cleanup(func() { _ = server.Close(); workers.Wait() })
+		workers.Go(func() {
 			errs <- emitTaskListEvent(sse.New(w), &v1.TaskListEvent{Kind: "snapshot"})
-		}()
+		})
 
 		var deadline time.Time
 		select {
@@ -245,9 +248,11 @@ func TestTaskEventStreamWriteDeadline(t *testing.T) {
 	}
 	stream := sse.New(w)
 	errs := make(chan error, 1)
-	go func() {
+	var workers sync.WaitGroup
+	t.Cleanup(func() { _ = server.Close(); workers.Wait() })
+	workers.Go(func() {
 		errs <- historyFrame(stream, "checkpoint", "", v1.HistoryCheckpoint{Cursor: "1.g.0.end"})
-	}()
+	})
 
 	select {
 	case <-w.deadlineSet:

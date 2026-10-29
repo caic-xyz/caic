@@ -83,17 +83,14 @@ func TestRepoStatusStore(t *testing.T) {
 		s := NewRepoStatusStore()
 		var wg sync.WaitGroup
 		for i := range 50 {
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				rel := fmt.Sprintf("r-%d", i)
 				s.SetResultIfChanged(rel, "sha", forgecache.Result{Status: forge.CIStatusSuccess})
-			}()
-			go func() {
-				defer wg.Done()
+			})
+			wg.Go(func() {
 				_, _ = s.StateFor("r-0")
 				_ = s.PathsAtSHA([]RepoRef{{RelPath: "r-0", ForgeOwner: "o", ForgeRepo: "p"}}, "o", "p", "sha")
-			}()
+			})
 			_ = i
 		}
 		wg.Wait()

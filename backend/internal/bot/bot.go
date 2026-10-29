@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/maruel/ksid"
+	"golang.org/x/sync/errgroup"
 )
 
 // RepoInfo is the forge identity of a managed repository, returned by Client.ResolveRepo.
@@ -86,6 +88,10 @@ type Bot struct {
 	log    *slog.Logger
 	ctx    context.Context // server-lifetime context for background goroutines
 	client Client
+	cancel context.CancelFunc
+	group  *errgroup.Group
+	mu     sync.Mutex
+	closed bool
 }
 
 // New returns a Bot backed by the given client.
@@ -94,7 +100,18 @@ func New(ctx context.Context, log *slog.Logger, c Client) *Bot {
 	if log == nil {
 		panic("logger is required")
 	}
-	return &Bot{log: log.With("cmp", "bot"), ctx: ctx, client: c}
+	ctx, cancel := context.WithCancel(ctx)
+	group, ctx := errgroup.WithContext(ctx)
+	return &Bot{log: log.With("cmp", "bot"), ctx: ctx, client: c, cancel: cancel, group: group}
+}
+
+// Close cancels and waits for all comment watchers.
+func (b *Bot) Close() {
+	b.mu.Lock()
+	b.closed = true
+	b.cancel()
+	b.mu.Unlock()
+	_ = b.group.Wait()
 }
 
 // ResumePendingComments re-attaches watchAndComment goroutines for tasks
@@ -109,7 +126,7 @@ func (b *Bot) ResumePendingComments() {
 			continue
 		}
 		b.log.InfoContext(b.ctx, "resuming comment watcher", "task", pt.TaskID, "issue", pt.IssueNumber)
-		go b.watchAndComment(pt.TaskID, commenter, pt.ForgeOwner, pt.ForgeRepo, pt.IssueNumber)
+		b.startWatcher(pt.TaskID, commenter, pt.ForgeOwner, pt.ForgeRepo, pt.IssueNumber)
 	}
 }
 
@@ -158,6 +175,17 @@ func (b *Bot) OnIssueComment(ctx context.Context, ev CommentEvent, commenter for
 	b.dispatch(ctx, repo, prompt, commenter, ev.IssueNumber, "")
 }
 
+func (b *Bot) startWatcher(taskID ksid.ID, commenter forge.Commenter, owner, repo string, issueNumber int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.group.Go(func() error {
+			b.watchAndComment(taskID, commenter, owner, repo, issueNumber)
+			return nil
+		})
+	}
+}
+
 // postTaskComment posts a completion comment on the originating issue or PR.
 func (b *Bot) postTaskComment(ctx context.Context, commenter forge.Commenter, owner, repo string, issueNumber int, state, agentResult string) {
 	var body string
@@ -184,7 +212,7 @@ func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, comme
 	}
 	b.log.InfoContext(ctx, "task created", "id", taskID, "repo", repo.RelPath)
 	if commenter != nil && issueNumber > 0 {
-		go b.watchAndComment(taskID, commenter, repo.ForgeOwner, repo.ForgeRepo, issueNumber)
+		b.startWatcher(taskID, commenter, repo.ForgeOwner, repo.ForgeRepo, issueNumber)
 	}
 }
 

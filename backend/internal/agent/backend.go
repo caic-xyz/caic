@@ -164,7 +164,23 @@ type PrePromptWriter interface {
 // io.Reader replaces the original stdout for subsequent reads (it may be a
 // buffered reader that consumed bytes beyond the handshake response).
 type RecordHandshaker interface {
-	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, dir, model string, version LogVersion) (WireFormat, io.Reader, error)
+	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string, version LogVersion) (WireFormat, io.Reader, error)
+}
+
+// InterruptReadOnCancel closes the stream when ctx ends. The returned function
+// detaches the cancellation hook and waits for an in-flight close, preserving
+// successful handoff of the stream to its next reader.
+func InterruptReadOnCancel(ctx context.Context, stream io.Closer) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		_ = stream.Close()
+	})
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}
 }
 
 // Base provides default implementations for metadata-only Backend methods.

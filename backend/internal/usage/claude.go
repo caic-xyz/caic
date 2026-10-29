@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/sync/errgroup"
 )
 
 const claudeCodeUsageAPIURL = "https://api.anthropic.com/api/oauth/usage"
@@ -48,6 +49,8 @@ type ClaudeCodeFetcher struct {
 	watcher  *fsnotify.Watcher
 	credPath string
 	token    string
+	cancel   context.CancelFunc
+	workers  *errgroup.Group
 }
 
 // NewClaudeCodeFetcher creates a fetcher and starts watching
@@ -66,17 +69,27 @@ func NewClaudeCodeFetcher(ctx context.Context) *ClaudeCodeFetcher {
 		slog.InfoContext(ctx, "no Claude Code OAuth token found; usage disabled (will watch for credentials)")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	workers, ctx := errgroup.WithContext(ctx)
 	f := &ClaudeCodeFetcher{
 		baseFetcher: newBaseFetcher(agent.QuotaProviderClaudeCode, AuthKindOAuth, "https://claude.ai/settings/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		credPath:    credPath,
+		cancel:      cancel,
+		workers:     workers,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
 		slog.WarnContext(ctx, "failed to watch Claude Code credentials file", "err", err)
 	}
 	return f
+}
+
+// Close stops and joins the credentials watcher.
+func (f *ClaudeCodeFetcher) Close() error {
+	f.cancel()
+	return f.workers.Wait()
 }
 
 // Get returns the cached quota data, refreshing if stale. Returns nil when
@@ -153,7 +166,7 @@ func (f *ClaudeCodeFetcher) startWatcher(ctx context.Context) error {
 		return err
 	}
 	f.watcher = w
-	go f.watchLoop(ctx)
+	f.workers.Go(func() error { f.watchLoop(ctx); return nil })
 	return nil
 }
 

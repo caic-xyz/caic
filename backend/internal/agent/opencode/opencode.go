@@ -48,10 +48,10 @@ func New(cacheDir string, envVars []string) *Backend {
 // optional set_model) over stdin/stdout for record-trace golden-file
 // generation. It returns a populated wireFormat and a buffered reader that
 // replaces the original stdout for subsequent reads.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
 	log := agent.DiscardLogSink{Version: version}
-	hs, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: dir, Model: model, Log: log})
+	hs, continuation, err := handshake(ctx, stdin, br, stdout, &agent.Options{Dir: dir, Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,7 +82,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(rp.Stdout, 1<<16)
 
-	hs, continuation, err := handshake(ctx, rp.Stdin, br, opts)
+	hs, continuation, err := handshake(ctx, rp.Stdin, br, rp.Stdout, opts)
 	if err != nil {
 		_ = rp.Cmd.Process.Kill()
 		_ = rp.Cmd.Wait()
@@ -102,7 +102,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		shutdownErr := agent.StopRelay(shutdownCtx, opts.Target)
 		closeErr := rp.Stdin.Close()
 		waitCh := make(chan error, 1)
-		go func() { waitCh <- rp.Cmd.Wait() }()
+		var workers sync.WaitGroup
+		workers.Go(func() { waitCh <- rp.Cmd.Wait() })
 		var waitErr error
 		select {
 		case waitErr = <-waitCh:
@@ -110,6 +111,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			_ = rp.Cmd.Process.Kill()
 			waitErr = <-waitCh
 		}
+		workers.Wait()
 		return nil, fmt.Errorf("write session metadata: %w", errors.Join(err, shutdownErr, closeErr, waitErr))
 	}
 
@@ -449,9 +451,11 @@ type handshakeResult struct {
 
 // handshake performs the ACP initialize → session/new sequence and returns
 // a handshakeResult with the wireFormat, model list, and agent metadata.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*handshakeResult, *bufio.Reader, error) {
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, closer io.Closer, opts *agent.Options) (*handshakeResult, *bufio.Reader, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	stopRead := agent.InterruptReadOnCancel(ctx, closer)
+	defer stopRead()
 
 	w := &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 	relayLog := agent.LogSink(agent.DiscardLogSink{Version: opts.Log.LogVersion()})
@@ -723,58 +727,45 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 // (has "id" field). It services task-scoped MCP controls so an eager MCP
 // client cannot block the ACP handshake; other notifications are skipped.
 func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, handleMCP func(agent.MCPRequest) error) (*opencode.JSONRPCMessage, error) {
-	type result struct {
-		msg *opencode.JSONRPCMessage
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		for {
-			line, controls, err := r.ReadRecord()
-			if err != nil {
-				ch <- result{nil, fmt.Errorf("read response: %w", err)}
-				return
+	for {
+		line, controls, err := r.ReadRecord()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("handshake: %w", ctx.Err())
 			}
-			for _, control := range controls {
-				if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
-					ch <- result{nil, errors.New(exit.ExitError())}
-					return
-				}
-				if request, ok := control.Message.(*agent.MCPRequestMessage); ok {
-					if handleMCP == nil {
-						continue
-					}
-					if err := handleMCP(agent.MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}); err != nil {
-						ch <- result{nil, fmt.Errorf("respond task-scoped MCP: %w", err)}
-						return
-					}
-				}
-			}
-			if len(line) == 0 {
-				continue
-			}
-			var msg opencode.JSONRPCMessage
-			if err := json.Unmarshal(line, &msg); err != nil {
-				ch <- result{nil, fmt.Errorf("unmarshal response: %w", err)}
-				return
-			}
-			if msg.IsResponse() {
-				if msg.Error != nil {
-					ch <- result{nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)}
-					return
-				}
-				ch <- result{&msg, nil}
-				return
-			}
-			// Skip notifications during handshake.
-			slog.DebugContext(ctx, "opencode handshake: skipping notification", "method", msg.Method)
+			return nil, fmt.Errorf("read response: %w", err)
 		}
-	}()
-	select {
-	case res := <-ch:
-		return res.msg, res.err
-	case <-ctx.Done():
-		return nil, fmt.Errorf("handshake: %w", ctx.Err())
+		for _, control := range controls {
+			if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+				return nil, errors.New(exit.ExitError())
+			}
+			if request, ok := control.Message.(*agent.MCPRequestMessage); ok {
+				if handleMCP == nil {
+					continue
+				}
+				if err := handleMCP(agent.MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}); err != nil {
+					return nil, fmt.Errorf("respond task-scoped MCP: %w", err)
+				}
+			}
+		}
+		if len(line) == 0 {
+			continue
+		}
+		var msg opencode.JSONRPCMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		if msg.IsResponse() {
+			if msg.Error != nil {
+				return nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)
+			}
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("handshake: %w", ctx.Err())
+			}
+			return &msg, nil
+		}
+		// Skip notifications during handshake.
+		slog.DebugContext(ctx, "opencode handshake: skipping notification", "method", msg.Method)
 	}
 }
 

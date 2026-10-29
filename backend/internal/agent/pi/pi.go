@@ -235,7 +235,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		_ = rp.Cmd.Wait()
 		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", sessionID, opts.ResumeSessionID)
 	}
-	rp.Stdout = records.Reader()
+	rp.Stdout = bufferedRelayOutput{Reader: records.Reader(), Closer: rp.Stdout}
 	wire.sessionID = sessionID
 
 	if sessionID != "" {
@@ -260,6 +260,11 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	return sess, nil
+}
+
+type bufferedRelayOutput struct {
+	io.Reader
+	io.Closer
 }
 
 // commandDiscriminator is a Pi command without parameters or a correlation ID.
@@ -925,10 +930,12 @@ func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd
 		err  error
 	}
 	ch := make(chan result, 1)
-	go func() {
+	var reader sync.WaitGroup
+	reader.Go(func() {
 		resp, err := waitForResponse(r, cmd)
 		ch <- result{resp: resp, err: err}
-	}()
+	})
+	defer reader.Wait()
 	select {
 	case res := <-ch:
 		return res.resp, res.err

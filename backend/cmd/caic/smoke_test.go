@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
@@ -330,7 +333,7 @@ type smokeServer struct {
 	addr    string
 	baseURL string
 	cancel  context.CancelFunc
-	done    chan error
+	group   *errgroup.Group
 
 	serverLog     *os.File
 	serverLogPath string
@@ -374,10 +377,8 @@ func (s *smokeServer) start() {
 	s.addr = ln.Addr().String()
 	s.baseURL = "http://" + s.addr
 	s.cancel = cancel
-	s.done = make(chan error, 1)
-	go func() {
-		s.done <- srv.Serve(ctx, ln)
-	}()
+	s.group, ctx = errgroup.WithContext(ctx)
+	s.group.Go(func() error { return srv.Serve(ctx, ln) })
 	if err := waitForReady(ctx, s.baseURL); err != nil {
 		s.stop()
 		s.t.Fatalf("server not ready: %v", err)
@@ -389,9 +390,9 @@ func (s *smokeServer) stop() {
 		return
 	}
 	s.cancel()
-	err := <-s.done
+	err := s.group.Wait()
 	s.cancel = nil
-	s.done = nil
+	s.group = nil
 	if err != nil && !errors.Is(err, context.Canceled) {
 		s.t.Errorf("server.Serve: %v", err)
 	}

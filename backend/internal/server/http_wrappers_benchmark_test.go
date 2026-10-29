@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,9 +57,8 @@ func TestRequestBodyPeak(t *testing.T) {
 	var peak atomic.Uint64
 	peak.Store(before.HeapAlloc)
 	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	var workers sync.WaitGroup
+	workers.Go(func() {
 		ticker := time.NewTicker(time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -73,11 +73,11 @@ func TestRequestBodyPeak(t *testing.T) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 	var in v1.CreateTaskReq
 	ok := readAndDecodeBody(httptest.NewRecorder(), req, &in)
 	close(stop)
-	<-done
+	workers.Wait()
 	var final runtime.MemStats
 	runtime.ReadMemStats(&final)
 	if final.HeapAlloc > peak.Load() {

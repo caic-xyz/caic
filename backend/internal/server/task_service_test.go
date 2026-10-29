@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"path/filepath"
@@ -148,13 +149,23 @@ func TestTaskService(t *testing.T) {
 					cancel()
 				}
 				sent := make(chan error, 1)
-				go func() {
+				var workers sync.WaitGroup
+				t.Cleanup(func() {
+					cancel()
+					select {
+					case <-conn.release:
+					default:
+						close(conn.release)
+					}
+					workers.Wait()
+				})
+				workers.Go(func() {
 					response, err := testTaskHandlers(s).taskSvc.sendInput(ctx, e, &v1.InputReq{Prompt: v1.Prompt{Text: "accepted input"}})
 					if err == nil && (response == nil || response.Status != "sent") {
 						err = fmt.Errorf("input response = %+v", response)
 					}
 					sent <- err
-				}()
+				})
 				if when == "during_send" {
 					select {
 					case <-conn.started:

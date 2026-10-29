@@ -41,6 +41,7 @@ import (
 type serverHandlers struct {
 	log                *slog.Logger
 	serverCtx          context.Context
+	workers            *backgroundWorkers
 	runtimes           *caicruntime.Router
 	tailscaleAvailable bool
 	forgeMgr           *forgemgr.Manager
@@ -141,12 +142,12 @@ func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v
 	if !autoupdate.IsNewer(latest, current) {
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
 	}
-	go func() {
+	h.workers.Go(func() {
 		h.log.InfoContext(h.serverCtx, "update triggered by user", "current", current, "latest", latest)
 		if err := autoupdate.CheckAndUpdate(h.serverCtx, gh); err != nil {
 			h.log.WarnContext(h.serverCtx, "background update failed", "err", err)
 		}
-	}()
+	})
 	return &v1.UpdateResp{Status: "started"}, nil
 }
 

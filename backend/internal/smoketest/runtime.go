@@ -354,13 +354,8 @@ func (*RuntimeBackend) DiskUsage(_ context.Context, ids []runtime.ID) (map[runti
 }
 
 // WatchEvents implements runtime.Monitor.
-func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
-	ch := make(chan runtime.Event)
-	go func() {
-		defer close(ch)
-		<-ctx.Done()
-	}()
-	return ch, nil
+func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
+	return func(func(runtime.Event, error) bool) { <-ctx.Done() }, nil
 }
 
 // SudoPassword implements runtime.PrivilegeInfo.

@@ -3858,6 +3858,10 @@ func TestTask(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timed out waiting for live stat")
 			}
+			unsub()
+			if _, ok := <-live; ok {
+				t.Fatal("unsubscribe left the live stats channel open")
+			}
 		})
 
 		t.Run("RingOverflow", func(t *testing.T) {
@@ -4101,12 +4105,14 @@ func TestSessionHandle(t *testing.T) {
 		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 		ch := make(chan agent.TimedMessage)
 		done := make(chan struct{})
-		go func() {
+		var workers sync.WaitGroup
+		workers.Go(func() {
 			for range ch {
 			}
 			close(done)
-		}()
+		})
 		h := &SessionHandle{Session: s, MsgCh: ch, DispatchDone: done}
+		t.Cleanup(func() { h.CloseMsgCh(); workers.Wait() })
 		_ = stdin.Close()
 		_ = h.Drain()
 		select {

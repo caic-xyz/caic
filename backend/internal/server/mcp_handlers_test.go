@@ -190,14 +190,16 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatal(err)
 		}
 		updateC := make(chan mcp.ResourceUpdate, 1)
-		go func() {
+		var workers sync.WaitGroup
+		t.Cleanup(func() { cancel(); workers.Wait() })
+		workers.Go(func() {
 			for update, iterErr := range updates {
 				if iterErr == nil {
 					updateC <- update
 				}
 				return
 			}
-		}()
+		})
 		registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
 		select {
 		case update := <-updateC:

@@ -32,7 +32,9 @@ type ImageRefresh struct {
 	Clients map[string]ImageWarmer
 	Prefs   *preferences.Store
 
+	workers  sync.WaitGroup
 	mu       sync.Mutex
+	closed   bool
 	running  map[string]imageRefreshRun
 	statuses map[imageRefreshKey]v1.ImageRefreshStatus
 }
@@ -75,6 +77,10 @@ func (r *ImageRefresh) Start(ctx context.Context, userID, runtime string) (v1.Im
 	}
 	platform := p.Settings.RuntimeSettings[runtime].ContainerPlatform.String()
 	r.mu.Lock()
+	if r.closed || ctx.Err() != nil {
+		r.mu.Unlock()
+		return v1.ImageRefreshStatus{}, context.Canceled
+	}
 	if _, ok := r.running[runtime]; ok {
 		r.mu.Unlock()
 		return v1.ImageRefreshStatus{}, errImageRefreshBusy
@@ -82,17 +88,18 @@ func (r *ImageRefresh) Start(ctx context.Context, userID, runtime string) (v1.Im
 	if r.running == nil {
 		r.running = make(map[string]imageRefreshRun)
 	}
-	run := imageRefreshRun{done: make(chan struct{})}
+	buildCtx, cancel := context.WithCancel(ctx)
+	run := imageRefreshRun{done: make(chan struct{}), cancel: cancel}
 	r.running[runtime] = run
 	if r.statuses == nil {
 		r.statuses = make(map[imageRefreshKey]v1.ImageRefreshStatus)
 	}
 	key := imageRefreshKey{userID: userID, runtime: runtime}
 	r.statuses[key] = v1.ImageRefreshStatus{State: v1.ImageRefreshRunning}
-	r.mu.Unlock()
-	go func() {
-		w := &mdruntime.SlogWriter{Context: ctx, Logger: r.Log, Phase: "image-refresh"}
-		_, buildErr := client.Warmup(ctx, w, w, &md.WarmupOpts{
+	r.workers.Go(func() {
+		defer cancel()
+		w := &mdruntime.SlogWriter{Context: buildCtx, Logger: r.Log, Phase: "image-refresh"}
+		_, buildErr := client.Warmup(buildCtx, w, w, &md.WarmupOpts{
 			BaseImage: image, Platform: platform,
 			Caches: mdCaches, Quiet: true, Force: true,
 		})
@@ -105,8 +112,24 @@ func (r *ImageRefresh) Start(ctx context.Context, userID, runtime string) (v1.Im
 			r.statuses[key] = v1.ImageRefreshStatus{State: v1.ImageRefreshSucceeded}
 		}
 		r.mu.Unlock()
-	}()
+	})
+	r.mu.Unlock()
 	return v1.ImageRefreshStatus{State: v1.ImageRefreshRunning}, nil
+}
+
+// Run owns requested refreshes until the application stops.
+func (r *ImageRefresh) Run(ctx context.Context) error {
+	<-ctx.Done()
+	r.mu.Lock()
+	r.closed = true
+	for _, run := range r.running {
+		if run.cancel != nil {
+			run.cancel()
+		}
+	}
+	r.mu.Unlock()
+	r.workers.Wait()
+	return nil
 }
 
 // RunScheduled checks configured images at startup and at each interval for
@@ -201,6 +224,7 @@ func (r *ImageRefresh) warmScheduledImages(ctx context.Context, runtime string, 
 
 type imageRefreshRun struct {
 	done      chan struct{}
+	cancel    context.CancelFunc
 	scheduled bool
 }
 

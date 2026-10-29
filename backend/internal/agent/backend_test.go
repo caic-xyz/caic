@@ -39,18 +39,15 @@ func TestBase(t *testing.T) {
 
 		var wg sync.WaitGroup
 		for range 50 {
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				b.SetModelInventory(ModelInventory{Models: []Model{{ID: "refreshed"}}})
-			}()
-			go func() {
-				defer wg.Done()
+			})
+			wg.Go(func() {
 				inv := b.ModelInventory()
 				if len(inv.Models) == 0 {
 					t.Error("ModelInventory() returned no models mid-refresh")
 				}
-			}()
+			})
 		}
 		wg.Wait()
 	})

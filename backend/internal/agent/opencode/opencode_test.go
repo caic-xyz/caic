@@ -1,4 +1,4 @@
-// Tests OpenCode model discovery, ACP capabilities, and task MCP registration.
+// Tests OpenCode handshakes, model discovery, ACP capabilities, and task MCP registration.
 
 package opencode
 
@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -24,6 +25,24 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
+
+func TestBackend(t *testing.T) {
+	t.Parallel()
+	t.Run("RecordHandshake", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Cancellation", func(t *testing.T) {
+			t.Parallel()
+			r, w := io.Pipe()
+			t.Cleanup(func() { _ = w.Close() })
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "", agent.LogVersionV1)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("handshake error = %v, want cancellation", err)
+			}
+		})
+	})
+}
 
 func TestParseModels(t *testing.T) {
 	t.Parallel()
@@ -103,7 +122,7 @@ func TestHandshake(t *testing.T) {
 				if enabled {
 					opts.MCP = &mcptest.FakeRegistry{}
 				}
-				if _, _, err := handshake(t.Context(), &stdin, stdout, opts); err != nil {
+				if _, _, err := handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), opts); err != nil {
 					t.Fatal(err)
 				}
 				lines := strings.Split(strings.TrimSpace(stdin.String()), "\n")
@@ -156,7 +175,7 @@ func TestHandshake(t *testing.T) {
 		}, "\n")+"\n")))
 
 		log := &agenttest.LogSink{Version: agent.LogVersionV3}
-		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
+		hs, _, err := handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -221,7 +240,7 @@ func TestHandshake(t *testing.T) {
 `
 		var stdin bytes.Buffer
 		log := &agenttest.LogSink{Version: agent.LogVersionV2}
-		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", Log: log})
+		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: log})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +261,7 @@ func TestHandshake(t *testing.T) {
 			`{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n" +
 			v2Records(sessionResponse)
 		var stdin bytes.Buffer
-		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -299,7 +318,7 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: tc.version}})
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: tc.version}})
 			if err != nil {
 				t.Fatal(err)
 			}

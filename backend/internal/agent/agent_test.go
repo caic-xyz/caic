@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,6 +306,44 @@ func TestExitMessage(t *testing.T) {
 
 func TestSession(t *testing.T) {
 	t.Parallel()
+	t.Run("Stop", func(t *testing.T) {
+		t.Parallel()
+		t.Run("sentinel before EOF", func(t *testing.T) {
+			t.Parallel()
+			r, w := io.Pipe()
+			done := make(chan struct{})
+			close(done)
+			s := &Session{Conn: NewConn(t.Context(), testLogger(), w, DiscardLogSink{Version: LogVersionV1}, testWire{}), log: testLogger(), done: done}
+			got := make(chan []byte, 1)
+			var reader sync.WaitGroup
+			reader.Go(func() { data, _ := io.ReadAll(r); got <- data })
+			if err := s.Stop(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			reader.Wait()
+			if data := <-got; !bytes.Equal(data, []byte{0, '\n'}) {
+				t.Fatalf("stdin = %q, want stop sentinel", data)
+			}
+		})
+		t.Run("blocked write", func(t *testing.T) {
+			t.Parallel()
+			r, w := io.Pipe()
+			t.Cleanup(func() { _ = r.Close() })
+			started := make(chan struct{})
+			writer := &stopTestWriter{PipeWriter: w, started: started}
+			s := &Session{Conn: NewConn(t.Context(), testLogger(), writer, DiscardLogSink{Version: LogVersionV1}, testWire{}), log: testLogger(), done: make(chan struct{})}
+			ctx, cancel := context.WithCancel(t.Context())
+			result := make(chan error, 1)
+			var stopper sync.WaitGroup
+			stopper.Go(func() { result <- s.Stop(ctx) })
+			<-started
+			cancel()
+			stopper.Wait()
+			if err := <-result; !errors.Is(err, context.Canceled) {
+				t.Fatalf("Stop error = %v, want canceled", err)
+			}
+		})
+	})
 	t.Run("Lifecycle", func(t *testing.T) {
 		t.Parallel()
 		stdinR, stdinW := io.Pipe()
@@ -315,19 +355,21 @@ func TestSession(t *testing.T) {
 		}
 
 		msgCh := make(chan Message, 16)
+		var workers sync.WaitGroup
+		t.Cleanup(func() { _ = stdinW.Close(); _ = stdoutW.Close(); workers.Wait() })
 
-		go func() {
+		workers.Go(func() {
 			defer close(s.done)
 			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m TimedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); parseErr != nil {
 				s.err = parseErr
 			}
-		}()
+		})
 
 		stdinBuf := make(chan string, 1)
-		go func() {
+		workers.Go(func() {
 			data, _ := io.ReadAll(stdinR)
 			stdinBuf <- string(data)
-		}()
+		})
 
 		if err := s.SendPrompt(Prompt{Text: "test prompt"}); err != nil {
 			t.Fatal(err)
@@ -426,10 +468,12 @@ func TestSession(t *testing.T) {
 			}
 
 			stdinBuf := make(chan string, 1)
-			go func() {
+			var workers sync.WaitGroup
+			t.Cleanup(func() { _ = stdinW.Close(); workers.Wait() })
+			workers.Go(func() {
 				data, _ := io.ReadAll(stdinR)
 				stdinBuf <- string(data)
-			}()
+			})
 
 			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
 			if err := s.SendRaw(payload); err != nil {
@@ -468,7 +512,9 @@ func TestSession(t *testing.T) {
 	t.Run("CloseIdempotent", func(t *testing.T) {
 		t.Parallel()
 		stdinR, stdinW := io.Pipe()
-		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
+		var workers sync.WaitGroup
+		t.Cleanup(func() { _ = stdinW.Close(); workers.Wait() })
+		workers.Go(func() { _, _ = io.Copy(io.Discard, stdinR) })
 		s := &Session{
 			Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
 			done: make(chan struct{}),
@@ -513,6 +559,17 @@ func TestSession(t *testing.T) {
 			t.Errorf("killed process should not produce ERROR log:\n%s", logOutput)
 		}
 	})
+}
+
+type stopTestWriter struct {
+	*io.PipeWriter
+
+	started chan struct{}
+}
+
+func (w *stopTestWriter) Write(p []byte) (int, error) {
+	close(w.started)
+	return w.PipeWriter.Write(p)
 }
 
 func TestRelayNativeRecordEncoding(t *testing.T) {

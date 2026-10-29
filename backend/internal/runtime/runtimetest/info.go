@@ -49,11 +49,11 @@ func (f *FakeInfo) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtime.I
 }
 
 // WatchEvents implements runtime.Monitor.
-func (f *FakeInfo) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
+func (f *FakeInfo) WatchEvents(ctx context.Context, _ runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
 	if f.WatchErr != nil {
 		return nil, f.WatchErr
 	}
-	return f.Events, nil
+	return fakeEvents(ctx, f.Events), nil
 }
 
 // List implements runtime.Inventory.
@@ -104,11 +104,11 @@ func (f *FakeMonitor) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtim
 }
 
 // WatchEvents implements runtime.Monitor.
-func (f *FakeMonitor) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
+func (f *FakeMonitor) WatchEvents(ctx context.Context, _ runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
 	if f.WatchErr != nil {
 		return nil, f.WatchErr
 	}
-	return f.Events, nil
+	return fakeEvents(ctx, f.Events), nil
 }
 
 // FakeInventory is an in-memory runtime.Inventory test double.
@@ -175,4 +175,19 @@ func metadataValue(meta map[string]string, id runtime.ID, key runtime.MetadataKe
 		return value
 	}
 	return meta[string(id.InstanceID())+"\x00"+string(key)]
+}
+
+func fakeEvents(ctx context.Context, events <-chan runtime.Event) iter.Seq2[runtime.Event, error] {
+	return func(yield func(runtime.Event, error) bool) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-events:
+				if !ok || !yield(event, nil) {
+					return
+				}
+			}
+		}
+	}
 }

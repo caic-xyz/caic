@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/sync/errgroup"
 )
 
 const codexUsageAPIURL = "https://chatgpt.com/backend-api/wham/usage"
@@ -61,6 +62,8 @@ type CodexFetcher struct {
 	authPath  string
 	token     string
 	accountID string
+	cancel    context.CancelFunc
+	workers   *errgroup.Group
 }
 
 // NewCodexFetcher creates a fetcher and starts watching ~/.codex/auth.json.
@@ -77,18 +80,28 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 		slog.InfoContext(ctx, "no Codex OAuth token found; Codex usage disabled (will watch for credentials)")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	workers, ctx := errgroup.WithContext(ctx)
 	f := &CodexFetcher{
 		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "https://chatgpt.com/settings/usage?tab=overview"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		accountID:   accountID,
 		authPath:    authPath,
+		cancel:      cancel,
+		workers:     workers,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
 		slog.WarnContext(ctx, "failed to watch Codex auth file", "err", err)
 	}
 	return f
+}
+
+// Close stops and joins the auth watcher.
+func (f *CodexFetcher) Close() error {
+	f.cancel()
+	return f.workers.Wait()
 }
 
 // Get returns the cached quota data, refreshing if stale.
@@ -184,7 +197,7 @@ func (f *CodexFetcher) startWatcher(ctx context.Context) error {
 		return err
 	}
 	f.watcher = w
-	go f.watchLoop(ctx)
+	f.workers.Go(func() error { f.watchLoop(ctx); return nil })
 	return nil
 }
 

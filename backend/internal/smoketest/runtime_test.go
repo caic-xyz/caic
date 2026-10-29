@@ -5,13 +5,16 @@ package smoketest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -373,4 +376,32 @@ func TestInitHarnessCache(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestVNCServerClose(t *testing.T) {
+	t.Parallel()
+	server, err := StartVNC(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", server.Port()))
+	if err != nil {
+		_ = server.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var version [12]byte
+	if _, err := io.ReadFull(conn, version[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Read(version[:]); !errors.Is(err, io.EOF) {
+		t.Fatalf("connection after close: %v, want EOF", err)
+	}
 }

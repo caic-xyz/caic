@@ -4,6 +4,7 @@ package taskmgr
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,14 +42,15 @@ func TestLifecycle(t *testing.T) {
 					m.Insert(tk.ID, e)
 					recordTestTaskLog(t, m, e)
 					sent := make(chan error, 1)
-					go func() { sent <- e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "reconnect input"}) }()
+					var workers sync.WaitGroup
+					workers.Go(func() { sent <- e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "reconnect input"}) })
 					select {
 					case <-started:
 					case <-time.After(5 * time.Second):
 						t.Fatal("reconnect did not start")
 					}
 					closed := make(chan error, 1)
-					go func() { closed <- m.Close() }()
+					workers.Go(func() { closed <- m.Close() })
 					select {
 					case err := <-closed:
 						if err != nil {
@@ -67,6 +69,7 @@ func TestLifecycle(t *testing.T) {
 					case <-time.After(5 * time.Second):
 						t.Fatalf("%s ignored shutdown cancellation", stage)
 					}
+					workers.Wait()
 					if tk.HasSession() {
 						t.Fatal("shutdown left an attached local session")
 					}

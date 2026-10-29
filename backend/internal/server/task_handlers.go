@@ -18,7 +18,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -43,6 +43,7 @@ import (
 // raw HTTP response writing. Task command orchestration and DTO assembly belong
 // to taskService.
 type taskHandlers struct {
+	workers    *backgroundWorkers
 	log        *slog.Logger
 	taskMgr    *taskmgr.Manager
 	checkouts  *repo.Registry
@@ -53,6 +54,16 @@ type taskHandlers struct {
 
 	warnings    *WarningStore
 	systemStats *systemStats
+}
+
+func (h *taskHandlers) pollCI(ctx context.Context) {
+	h.workers.Go(func() {
+		pollCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		stop := context.AfterFunc(h.workers.ctx, cancel) //nolint:contextcheck // preserve request identity while binding polling to router shutdown
+		defer stop()
+		defer cancel()
+		h.ciSvc.PollCIForActiveRepos(pollCtx)
+	})
 }
 
 func (h *taskHandlers) notifyTaskChange() {
@@ -95,7 +106,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		return emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "health", Health: &health})
 	}
 	if h.ciSvc != nil {
-		go h.ciSvc.PollCIForActiveRepos(context.WithoutCancel(ctx))
+		h.pollCI(ctx)
 	}
 
 	// prevByID tracks the last marshalled JSON for each task ID.
@@ -319,7 +330,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			case <-ticker.C:
 				break waitForTaskChange
 			case <-ciTickerC:
-				go h.ciSvc.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
+				h.pollCI(r.Context())
 			}
 		}
 	}
@@ -431,9 +442,10 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	var written atomic.Int64
-	go func() {
+	var workers sync.WaitGroup
+	workers.Go(func() {
 		defer cancel()
+		defer func() { _ = vncConn.SetDeadline(time.Now()) }()
 		for {
 			_, buf, err := wsConn.Read(ctx)
 			if err != nil {
@@ -445,9 +457,11 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 				return
 			}
 		}
-	}()
+	})
 	n, cpErr := io.Copy(wsNetConn{wsConn, ctx}, vncConn)
-	written.Store(n)
+	cancel()
+	_ = vncConn.SetDeadline(time.Now())
+	workers.Wait()
 	log.InfoContext(ctx, "VNC proxy done", "vnc_to_ws_bytes", n, "err", cpErr)
 }
 

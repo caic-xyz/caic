@@ -464,7 +464,7 @@ type Monitor interface {
 	// batch. Missing entries have no available measurement.
 	DiskUsage(ctx context.Context, ids []ID) (map[ID]int64, error)
 	WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSample, error], error)
-	WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error)
+	WatchEvents(ctx context.Context, filter EventFilter) (iter.Seq2[Event, error], error)
 }
 
 // Inventory lists runtime instances and their observed metadata.

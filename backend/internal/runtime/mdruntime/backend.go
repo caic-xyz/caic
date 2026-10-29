@@ -59,7 +59,7 @@ type mdClient interface {
 	Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error)
 	DiskUsage(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]int64, error)
 	WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error)
-	WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error)
+	WatchEvents(ctx context.Context, filter runtime.EventFilter) (iter.Seq2[runtime.Event, error], error)
 	SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error)
 }
 
@@ -214,9 +214,8 @@ func (a mdClientAdapter) WatchStats(ctx context.Context, ids []runtime.InstanceI
 		ctx, cancel := context.WithCancel(ctx)
 		var mu sync.Mutex
 		var metadata map[string]cpuInfo
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
+		var observer sync.WaitGroup
+		observer.Go(func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
 			for {
@@ -230,10 +229,10 @@ func (a mdClientAdapter) WatchStats(ctx context.Context, ids []runtime.InstanceI
 				case <-ticker.C:
 				}
 			}
-		}()
+		})
 		defer func() {
 			cancel()
-			<-done
+			observer.Wait()
 		}()
 		for sample, err := range stats {
 			if err != nil {
@@ -283,29 +282,25 @@ func (a mdClientAdapter) Metadata(ctx context.Context, id runtime.InstanceID, _ 
 	return maps.Clone(ct.Labels), nil
 }
 
-func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
+func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
 	events, err := a.c.Runtime.WatchDieEvents(ctx, string(filter.MetadataKey))
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan runtime.Event, 16)
-	go func() {
-		defer close(out)
+	return func(yield func(runtime.Event, error) bool) {
 		for ev, err := range events {
 			if err != nil {
 				if ctx.Err() == nil {
 					a.log.WarnContext(ctx, "runtime events stream failed", "err", err)
+					yield(runtime.Event{}, err)
 				}
 				return
 			}
-			select {
-			case out <- runtime.Event{InstanceID: runtime.ID(ev.Name), Kind: runtime.EventDie}:
-			case <-ctx.Done():
+			if !yield(runtime.Event{InstanceID: runtime.ID(ev.Name), Kind: runtime.EventDie}, nil) {
 				return
 			}
 		}
-	}()
-	return out, nil
+	}, nil
 }
 
 // cpuInfo contains runtime-reported CPU configuration. Its ceiling excludes
@@ -1061,24 +1056,21 @@ func (b *Backend) Metadata(ctx context.Context, id runtime.ID, key runtime.Metad
 }
 
 // WatchEvents streams lifecycle events for instances matching filter.
-func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error) {
+func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
 	ch, err := b.client.WatchEvents(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan runtime.Event, 16)
-	go func() {
-		defer close(out)
-		for ev := range ch {
-			ev.InstanceID = runtime.NewID(b.Name(), ev.InstanceID.InstanceID())
-			select {
-			case out <- ev:
-			case <-ctx.Done():
+	return func(yield func(runtime.Event, error) bool) {
+		for ev, err := range ch {
+			if err == nil {
+				ev.InstanceID = runtime.NewID(b.Name(), ev.InstanceID.InstanceID())
+			}
+			if !yield(ev, err) || err != nil {
 				return
 			}
 		}
-	}()
-	return out, nil
+	}, nil
 }
 
 // ReadFile implements runtime.Files with one reusable 64 KiB buffer. Relative

@@ -206,14 +206,18 @@ func (*fakeMDClient) WatchStats(context.Context, []runtime.InstanceID) (iter.Seq
 	return func(func(runtime.StatsSample, error) bool) {}, nil
 }
 
-func (*fakeMDClient) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
-	ch := make(chan runtime.Event)
-	close(ch)
-	return ch, nil
+func (*fakeMDClient) WatchEvents(context.Context, runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
+	return func(func(runtime.Event, error) bool) {}, nil
 }
 
 func (*fakeMDClient) SudoPassword(context.Context, runtime.InstanceID) (string, error) {
 	return "", nil
+}
+
+type idleEventsClient struct{ fakeMDClient }
+
+func (*idleEventsClient) WatchEvents(ctx context.Context, _ runtime.EventFilter) (iter.Seq2[runtime.Event, error], error) {
+	return func(func(runtime.Event, error) bool) { <-ctx.Done() }, nil
 }
 
 func newTestBackend(c mdClient) *Backend {
@@ -406,6 +410,19 @@ func TestMDClientAdapter(t *testing.T) {
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("WatchEvents cancellation closes an idle stream", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		stream, err := newTestBackend(&idleEventsClient{}).WatchEvents(ctx, runtime.EventFilter{})
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		cancel()
+		for range stream {
+			t.Fatal("unexpected event after cancellation")
+		}
+	})
 	t.Run("WatchStats", func(t *testing.T) {
 		t.Parallel()
 		b := newTestBackend(&statsCapacityClient{})

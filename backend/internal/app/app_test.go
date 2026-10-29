@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,9 +103,11 @@ func TestRuntimeRestoreMissingLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- a.Server.Serve(ctx, ln) }()
+	var workers sync.WaitGroup
+	workers.Go(func() { done <- a.Server.Serve(ctx, ln) })
 	t.Cleanup(func() {
 		cancel()
+		workers.Wait()
 		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 			t.Error(err)
 		}
@@ -195,6 +198,18 @@ func (s *slowImportSystem) Metadata(ctx context.Context, _ runtime.ID, _ runtime
 	return "", nil
 }
 
+type cancellationListSystem struct {
+	runtimetest.FakeSystem
+
+	done chan struct{}
+}
+
+func (s *cancellationListSystem) List(ctx context.Context) ([]runtime.Instance, error) {
+	<-ctx.Done()
+	close(s.done)
+	return nil, ctx.Err()
+}
+
 func TestStartupReadiness(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -209,7 +224,9 @@ func TestStartupReadiness(t *testing.T) {
 		err error
 	}
 	created := make(chan result, 1)
-	go func() { a, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg); created <- result{a, err} }()
+	var startup sync.WaitGroup
+	t.Cleanup(func() { cancel(); startup.Wait() })
+	startup.Go(func() { a, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg); created <- result{a, err} })
 	var a *App
 	select {
 	case res := <-created:
@@ -231,9 +248,11 @@ func TestStartupReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- a.Serve(ctx, ln) }()
+	var workers sync.WaitGroup
+	workers.Go(func() { done <- a.Serve(ctx, ln) })
 	t.Cleanup(func() {
 		cancel()
+		workers.Wait()
 		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 			t.Error(err)
 		}
@@ -393,6 +412,21 @@ func closeSpyConfig(t *testing.T, providerName string) *server.Config {
 
 func TestApp(t *testing.T) {
 	// Registry mutation requires a non-parallel test.
+	t.Run("NewCancelsDiscoveryOnRepoFailure", func(t *testing.T) { //nolint:paralleltest // Siblings mutate the provider registry.
+		cfg := closeSpyConfig(t, "")
+		cfg.LLM.Disable = true
+		system := &cancellationListSystem{done: make(chan struct{})}
+		cfg.Runtime.System = system
+		_, err := New(t.Context(), slog.New(slog.DiscardHandler), filepath.Join(t.TempDir(), "missing"), cfg)
+		if err == nil || !strings.Contains(err.Error(), "discover repos") {
+			t.Fatalf("New() = %v, want repo discovery failure", err)
+		}
+		select {
+		case <-system.done:
+		default:
+			t.Fatal("New returned before runtime discovery stopped")
+		}
+	})
 	t.Run("NewClosesProviderOnStartupFailure", func(t *testing.T) {
 		t.Setenv("TEST_KEY", "test-key")
 		spy := &closeSpyProvider{}
@@ -425,7 +459,9 @@ func TestApp(t *testing.T) {
 			t.Fatal(err)
 		}
 		done := make(chan error, 1)
-		go func() { done <- srv.Serve(ctx, ln) }()
+		var workers sync.WaitGroup
+		t.Cleanup(func() { cancel(); workers.Wait() })
+		workers.Go(func() { done <- srv.Serve(ctx, ln) })
 		cancel()
 		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 			t.Errorf("Serve() = %v", err)

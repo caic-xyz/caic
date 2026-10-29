@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maruel/genai"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -34,6 +35,12 @@ type Service struct {
 
 	pollMu  sync.Mutex
 	polling map[string]struct{}
+
+	workerMu  sync.Mutex
+	closed    bool
+	cancel    context.CancelFunc
+	workerCtx context.Context
+	workers   *errgroup.Group
 }
 
 // NewService creates a CI service.
@@ -42,13 +49,27 @@ func NewService(log *slog.Logger, cache *forgecache.Cache, provider genai.Provid
 	if log == nil {
 		panic("logger is required")
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	workers, ctx := errgroup.WithContext(ctx)
 	return &Service{
-		log:      log.With("cmp", "ci"),
-		cache:    cache,
-		provider: provider,
-		backend:  backend,
-		polling:  make(map[string]struct{}),
+		log:       log.With("cmp", "ci"),
+		cache:     cache,
+		provider:  provider,
+		backend:   backend,
+		polling:   make(map[string]struct{}),
+		cancel:    cancel,
+		workerCtx: ctx,
+		workers:   workers,
 	}
+}
+
+// Close cancels and waits for background CI work.
+func (svc *Service) Close() {
+	svc.workerMu.Lock()
+	svc.closed = true
+	svc.cancel()
+	svc.workerMu.Unlock()
+	_ = svc.workers.Wait()
 }
 
 // StartPRFlow creates a PR/MR for the synced branch, records it on the task,
@@ -79,7 +100,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 	}
 	svc.backend.SetTaskMonitorBranch(entry, branch)
 	svc.backend.NotifyTaskChange()
-	go svc.MonitorCI(context.WithoutCancel(ctx), entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA)
+	svc.startWorker(ctx, func(ctx context.Context) { svc.MonitorCI(ctx, entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA) })
 	return pr.Number, nil
 }
 
@@ -249,7 +270,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
 	if ciStatus == forge.CIStatusFailure {
-		go svc.autoResync(ctx, entry, f, owner, repoName)
+		svc.startWorker(ctx, func(ctx context.Context) { svc.autoResync(ctx, entry, f, owner, repoName) })
 	}
 }
 
@@ -321,6 +342,23 @@ func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Resul
 	if svc.backend.SetRepoCIStatusIfChanged(relPath, sha, result) {
 		svc.backend.NotifyTaskChange()
 	}
+}
+
+// startWorker retains request values while binding work to the service lifetime.
+func (svc *Service) startWorker(ctx context.Context, fn func(context.Context)) {
+	svc.workerMu.Lock()
+	defer svc.workerMu.Unlock()
+	if svc.closed {
+		return
+	}
+	svc.workers.Go(func() error {
+		workerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		stop := context.AfterFunc(svc.workerCtx, cancel) //nolint:contextcheck // Service shutdown cancels work that retains request values.
+		defer stop()
+		defer cancel()
+		fn(workerCtx)
+		return nil
+	})
 }
 
 // waitForAgentResult subscribes to task messages and blocks until the agent
@@ -404,7 +442,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 
 	svc.log.InfoContext(ctx, "restarting monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
 	svc.backend.NotifyTaskChange()
-	go svc.MonitorCI(ctx, entry, f, owner, repoName, newSHA)
+	svc.MonitorCI(ctx, entry, f, owner, repoName, newSHA)
 }
 
 // maybeAutoFix creates a new task to fix CI failures when auto-fix is enabled

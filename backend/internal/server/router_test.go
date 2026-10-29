@@ -20,6 +20,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3199,6 +3200,32 @@ func TestCreateTaskRuntimeCPUSettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBackgroundWorkers(t *testing.T) {
+	t.Parallel()
+	w := newBackgroundWorkers(t.Context())
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	w.Go(func() {
+		close(started)
+		<-w.ctx.Done()
+		close(canceled)
+		<-release
+	})
+	<-started
+	closed := make(chan struct{})
+	var closer sync.WaitGroup
+	closer.Go(func() { w.Close(); close(closed) })
+	<-canceled
+	select {
+	case <-closed:
+		t.Fatal("Close returned before the worker finished")
+	default:
+	}
+	close(release)
+	closer.Wait()
 }
 
 // recordRouterTaskLog gives retained-task fixtures the durable history required by lifecycle operations.

@@ -12,6 +12,9 @@ import (
 	"image/draw"
 	"io"
 	"net"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -24,10 +27,15 @@ const (
 // VNCServer listens on a random localhost port and serves a single
 // generated screenshot to every connecting VNC client.
 type VNCServer struct {
-	ln   net.Listener
-	port int
-	img  []byte // raw RGBA pixel data
-	w, h uint16
+	ln     net.Listener
+	port   int
+	img    []byte // raw RGBA pixel data
+	w, h   uint16
+	cancel context.CancelFunc
+	group  *errgroup.Group
+
+	mu    sync.Mutex
+	conns map[net.Conn]struct{}
 }
 
 // StartVNC creates the fake VNC server and starts accepting connections.
@@ -50,26 +58,59 @@ func StartVNC(ctx context.Context) (*VNCServer, error) {
 		w:    framebufferW,
 		h:    framebufferH,
 	}
-	go fv.serve()
+	serverCtx, cancel := context.WithCancel(ctx)
+	fv.cancel = cancel
+	fv.conns = make(map[net.Conn]struct{})
+	fv.group, serverCtx = errgroup.WithContext(serverCtx)
+	fv.group.Go(func() error {
+		<-serverCtx.Done()
+		err := fv.ln.Close()
+		fv.mu.Lock()
+		defer fv.mu.Unlock()
+		for conn := range fv.conns {
+			_ = conn.Close()
+		}
+		return err
+	})
+	fv.group.Go(func() error { return fv.serve(serverCtx) })
 	return fv, nil
 }
 
 // Port returns the TCP port the server is listening on.
 func (fv *VNCServer) Port() int { return fv.port }
 
-// Close stops the VNC listener.
+// Close stops the listener and all active VNC connections.
 func (fv *VNCServer) Close() error {
-	return fv.ln.Close()
+	fv.cancel()
+	return fv.group.Wait()
 }
 
-func (fv *VNCServer) serve() {
+func (fv *VNCServer) serve(ctx context.Context) error {
 	for {
 		conn, err := fv.ln.Accept()
 		if err != nil {
-			return
+			if ctx.Err() != nil {
+				break
+			}
+			return fmt.Errorf("accept VNC connection: %w", err)
 		}
-		go fv.handle(conn)
+		fv.mu.Lock()
+		if ctx.Err() != nil {
+			fv.mu.Unlock()
+			_ = conn.Close()
+			break
+		}
+		fv.conns[conn] = struct{}{}
+		fv.mu.Unlock()
+		fv.group.Go(func() error {
+			fv.handle(conn)
+			fv.mu.Lock()
+			delete(fv.conns, conn)
+			fv.mu.Unlock()
+			return nil
+		})
 	}
+	return nil //nolint:nilerr // Cancellation closes the listener to stop Accept.
 }
 
 // handle runs the RFB protocol handshake and serves the screenshot.

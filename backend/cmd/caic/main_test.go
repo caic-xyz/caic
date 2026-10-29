@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func TestIsNormalShutdown(t *testing.T) {
@@ -53,13 +55,17 @@ func TestWatchForRestart(t *testing.T) {
 				}
 			}
 			ctx, cancel := context.WithCancelCause(t.Context())
-			w, err := watchForRestart(ctx, cancel, dir)
+			group, ctx := errgroup.WithContext(ctx)
+			w, err := watchForRestart(ctx, cancel, group, dir)
 			if err != nil {
 				cancel(nil)
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				cancel(nil)
+				if err := group.Wait(); err != nil {
+					t.Error(err)
+				}
 				if action != "watcher failure" {
 					if err := w.Close(); err != nil {
 						t.Error(err)

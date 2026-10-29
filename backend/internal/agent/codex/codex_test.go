@@ -1,8 +1,12 @@
-// Tests Codex subprocess failures and shell-safe task MCP launch arguments.
+// Tests Codex backend handshakes, subprocess failures, and shell-safe task MCP launch arguments.
 
 package codex
 
 import (
+	"bufio"
+	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,6 +22,36 @@ import (
 )
 
 func TestBackend(t *testing.T) {
+	t.Run("RecordHandshake", func(t *testing.T) { //nolint:paralleltest // Other Backend cases change the process environment.
+		t.Run("Continuation", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
+`
+			_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, io.NopCloser(strings.NewReader(responses)), "/workspace", "", agent.LogVersionV1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := bufio.NewReader(continuation).ReadBytes('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(line), `"thread/started"`) {
+				t.Fatalf("continuation = %q", line)
+			}
+		})
+		t.Run("Cancellation", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			r, w := io.Pipe()
+			t.Cleanup(func() { _ = w.Close() })
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "", agent.LogVersionV1)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("handshake error = %v, want cancellation", err)
+			}
+		})
+	})
 	t.Run("Start", func(t *testing.T) {
 		dir := t.TempDir()
 		for name, script := range map[string]string{

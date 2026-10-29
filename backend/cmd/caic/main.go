@@ -25,6 +25,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -61,18 +62,17 @@ func localizeAddr(addr string) string {
 }
 
 func mainImpl() (err error) {
-	ctx, cancel := context.WithCancelCause(context.Background())
-	defer cancel(nil)
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		select {
-		case s := <-sig:
-			slog.InfoContext(ctx, "shutdown", "signal", s)
-			cancel(nil)
-		case <-ctx.Done():
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancelCause(signalCtx)
+	group, ctx := errgroup.WithContext(ctx)
+	var watcher *fsnotify.Watcher
+	defer func() {
+		cancel(nil)
+		err = errors.Join(err, group.Wait())
+		if watcher != nil {
+			err = errors.Join(err, watcher.Close())
 		}
-		signal.Stop(sig)
 	}()
 
 	flag.Usage = func() {
@@ -231,11 +231,10 @@ Flags:
 	slog.InfoContext(ctx, "port acquired", "addr", ln.Addr())
 
 	// Exit when executable or config is modified (systemd/launchd restarts the service).
-	w, err := watchForRestart(ctx, cancel, cfgDir)
+	watcher, err = watchForRestart(ctx, cancel, group, cfgDir)
 	if err != nil {
 		return fmt.Errorf("failed to set up file watcher: %w", err)
 	}
-	defer func() { err = errors.Join(err, w.Close()) }()
 	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
 	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
 		sched, err := autoUpdateSchedule(&tc)
@@ -243,7 +242,10 @@ Flags:
 			return err
 		}
 		if sched != nil {
-			go autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
+			group.Go(func() error {
+				autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
+				return nil
+			})
 		}
 	}
 	err = serveHTTP(ctx, log, ln, root, cfg)
@@ -403,7 +405,7 @@ func isNormalShutdown(err error) bool {
 // failures cancel with an error cause so the process exits 1. Combined with
 // systemd's Restart=always or launchd's KeepAlive, this enables seamless
 // restarts after a rebuild or config change.
-func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, cfgDir string) (*fsnotify.Watcher, error) {
+func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, group *errgroup.Group, cfgDir string) (*fsnotify.Watcher, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("get executable path: %w", err)
@@ -437,17 +439,17 @@ func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, cfgDir
 		}
 		break
 	}
-	go func() {
+	group.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case event, ok := <-w.Events:
 				if !ok {
 					if ctx.Err() == nil {
 						cancel(errors.New("restart watcher closed"))
 					}
-					return
+					return nil
 				}
 				var reason string
 				switch {
@@ -474,18 +476,18 @@ func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, cfgDir
 				}
 				slog.InfoContext(ctx, "shutdown", "reason", reason, "ev", event)
 				cancel(nil)
-				return
+				return nil
 			case err, ok := <-w.Errors:
 				if !ok {
 					if ctx.Err() == nil {
 						cancel(errors.New("restart watcher stopped"))
 					}
-					return
+					return nil
 				}
 				cancel(fmt.Errorf("watch restart: %w", err))
-				return
+				return nil
 			}
 		}
-	}()
+	})
 	return w, nil
 }

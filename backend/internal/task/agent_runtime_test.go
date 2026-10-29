@@ -1934,7 +1934,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
 			log := &agenttest.LogSink{Version: agent.LogVersionV2}
 			opts := agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: log}
 			var v2Message agent.Message
@@ -2059,7 +2059,7 @@ func testRunnerSessions(t *testing.T) {
 							tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", "", 0)
 						}
 					}
-					msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+					msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
 					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
 					msgCh <- agent.TimedMessage{Message: result}
 					close(msgCh)
@@ -2157,7 +2157,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, persisted)
+			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, persisted)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- agent.TimedMessage{Message: rm}
@@ -2242,7 +2242,7 @@ func testRunnerSessions(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh, _ := r.startMessageDispatch(t.Context(), tk, nil)
+					msgCh, _, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -2296,7 +2296,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, _, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 			toolID := "tool_read_1"
 			msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{
@@ -2392,7 +2392,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			p := &titleBlockingProvider{started: make(chan struct{}), release: make(chan struct{})}
 			tk.Provider = p
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
 			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{}}
 			close(msgCh)
 			<-p.started
@@ -2423,7 +2423,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
@@ -2449,7 +2449,7 @@ func testRunnerSessions(t *testing.T) {
 			if got := tk.Title(); got != "Stable title" {
 				t.Errorf("Title = %q, want Stable title", got)
 			}
-			msgCh, done = r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, done, _ = r.startMessageDispatch(t.Context(), tk, nil)
 			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{}}
 			close(msgCh)
 			<-done
@@ -2467,7 +2467,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 			// Buffer several messages, then close without draining.
 			msgs := []*agent.TextMessage{

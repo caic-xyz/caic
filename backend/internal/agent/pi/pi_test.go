@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -285,7 +286,9 @@ func TestReapPiProcessExit(t *testing.T) {
 	}
 	rp := &agent.RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}
 	done := make(chan error, 1)
-	go func() { done <- reapPiProcessExit(rp, err) }()
+	var workers sync.WaitGroup
+	t.Cleanup(func() { _ = stdin.Close(); workers.Wait() })
+	workers.Go(func() { done <- reapPiProcessExit(rp, err) })
 	select {
 	case got := <-done:
 		if !errors.Is(got, err) {

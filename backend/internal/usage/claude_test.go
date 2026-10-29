@@ -5,10 +5,39 @@ package usage
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
+
+func TestCredentialWatchersClose(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{".claude", ".codex"} {
+		if err := os.Mkdir(filepath.Join(home, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := NewClaudeCodeFetcher(t.Context())
+	codex := NewCodexFetcher(t.Context())
+	if claude.watcher == nil || codex.watcher == nil {
+		t.Fatal("credential watchers failed to start")
+	}
+	if err := claude.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := codex.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := <-claude.watcher.Events; ok {
+		t.Fatal("Claude watcher remained open after Close")
+	}
+	if _, ok := <-codex.watcher.Events; ok {
+		t.Fatal("Codex watcher remained open after Close")
+	}
+}
 
 func TestClaudeCodeFetcherGet(t *testing.T) {
 	t.Parallel()

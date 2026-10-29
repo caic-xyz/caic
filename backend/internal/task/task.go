@@ -72,6 +72,7 @@ type SessionHandle struct {
 	DispatchDone <-chan struct{}
 	Log          agent.LogSink
 	closeMsgCh   sync.Once
+	dispatchWork *sync.WaitGroup
 }
 
 // CloseMsgCh closes MsgCh exactly once. Safe to call concurrently; subsequent
@@ -111,8 +112,17 @@ func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration)
 func (h *SessionHandle) Drain() error {
 	err := h.Session.Wait()
 	h.CloseMsgCh()
-	<-h.DispatchDone
+	h.WaitDispatch()
 	return err
+}
+
+// WaitDispatch waits until message dispatch has stopped.
+func (h *SessionHandle) WaitDispatch() {
+	if h.dispatchWork != nil {
+		h.dispatchWork.Wait()
+	} else {
+		<-h.DispatchDone
+	}
 }
 
 // Task represents a single unit of work.
@@ -1429,8 +1439,8 @@ func (t *Task) DiskUsage() (int64, bool) {
 }
 
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that
-// receives only live stats arriving after the snapshot. The context cancellation
-// closes the channel and removes the subscriber.
+// receives only live stats arriving after the snapshot. Cancellation or
+// unsubscribing closes the channel and removes the subscriber.
 func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, live <-chan runtime.Stats, unsubFn func()) {
 	s := &statsSub{ch: make(chan runtime.Stats, 64)}
 	t.mu.Lock()
@@ -1453,13 +1463,13 @@ func unsubscribeStats(t *Task, ctx context.Context, s *statsSub) func() {
 				break
 			}
 		}
-	}
-	go func() {
-		<-ctx.Done()
-		unsub()
 		s.close()
-	}()
-	return unsub
+	}
+	stop := context.AfterFunc(ctx, unsub)
+	return func() {
+		stop()
+		unsub()
+	}
 }
 
 // SessionStatus describes why SendInput could not deliver a message.
