@@ -1343,7 +1343,9 @@ it("shares conversation and numeric statistics subscriptions across task switche
     return new FakeEventSource("", []) as unknown as EventSource;
   });
   const { history } = renderApp("/task/@first/stats");
-  await screen.findByText("Transcript for first");
+  // Initial history loading shares the CI worker with the rest of the suite.
+  // Allow it to complete under concurrent load.
+  await screen.findByText("Transcript for first", {}, { timeout: 5000 });
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("11.0%"));
   history.set({ value: "/task/@second/stats" });
   await screen.findByText("Transcript for second");
