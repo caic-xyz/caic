@@ -7,6 +7,7 @@ import { validateHistoryEvent, validateTask } from "../sdk/caic/ts/v1/validate.g
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
 import type { ImageRefreshStatus } from "../sdk/caic/ts/v1/types.gen";
 import { resourceHistory, usageHistory } from "./visual-fixtures";
+import { historyArray } from "../frontend/tests/history";
 
 const visualTime = "2026-09-02T12:00:00.000Z";
 
@@ -45,7 +46,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     return route.fulfill({ json: status });
   });
   await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: usageHistory() }));
-  await page.route("**/api/caic/v1/tasks/*/history/*/chunks/*/*", async (route) => {
+  await page.route("**/api/caic/v1/tasks/*/history/**/chunks/*/*", async (route) => {
     const response = await route.fetch();
     if (!response.ok()) throw new Error(`Visual history fetch failed: ${response.status()}`);
     const taskURL = route.request().url().split("/history/")[0];
@@ -58,17 +59,28 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     if (!Array.isArray(values)) throw new Error("Visual history must be an array");
     const events = values.map((value: unknown) => {
       const event = validateHistoryEvent(value);
-      event.message.ts = start + (event.recordID - 1) * 150 + event.index;
+      // Raw record 1 is the log header; the first projected record starts at
+      // task creation rather than adding a fictitious header interval.
+      event.message.ts = start + (event.recordID - 2) * 150 + event.index;
       return event;
     });
-    await route.fulfill({ json: events });
+    await route.fulfill({ contentType: "application/json", body: historyArray(events) });
   });
-  await page.route("**/api/caic/v1/tasks/*/history/events?*", (route) =>
-    route.fulfill({
-      contentType: "text/event-stream",
-      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: resourceHistory() })}\n\n`,
-    }),
-  );
+  // Keep the real SSE connection, checkpoints, and failures. Only resource
+  // samples are fixed; fulfilling a finite SSE body would manufacture EOF.
+  await page.addInitScript((samples) => {
+    const NativeEventSource = window.EventSource;
+    window.EventSource = class extends NativeEventSource {
+      constructor(url: string | URL, options?: EventSourceInit) {
+        super(url, options);
+        if (!/^\/api\/caic\/v1\/tasks\/[^/]+\/history\/events$/.test(new URL(url, location.href).pathname)) return;
+        this.addEventListener("statsSnapshot", (event) => {
+          Object.defineProperty(event, "data", { value: JSON.stringify({ samples }) });
+        });
+        this.addEventListener("stats", (event) => event.stopImmediatePropagation());
+      }
+    };
+  }, resourceHistory());
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 
@@ -76,6 +88,11 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   const connection = page.getByTestId("new-task-button");
   if ((await connection.count()) > 0) {
     await expect(connection).toHaveAttribute("data-status", "connected");
+  }
+  const history = page.getByTestId("task-message-area");
+  if ((await history.count()) > 0) {
+    await expect(history).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByRole("button", { name: "Retry history", exact: true })).toHaveCount(0);
   }
   if ((await page.locator("#caic-visual-test-style").count()) === 0) {
     const style = await page.addStyleTag({

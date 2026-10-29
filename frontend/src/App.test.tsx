@@ -1,6 +1,7 @@
 // Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
 
 import assert from "node:assert/strict";
+import { historyResponse } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSignal, Show } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -657,10 +658,10 @@ it("aborts old-account history and opens the same task through the new account's
       pendingSignals.push(init.signal);
       return delayed.promise;
     }
-    if (!url.endsWith("/chunks/513/520")) return Promise.resolve(Response.json([]));
+    if (!url.endsWith("/chunks/513/520")) return Promise.resolve(historyResponse([]));
     const scope = url.startsWith("/history/a/") ? "a" : "b";
     return Promise.resolve(
-      Response.json([
+      historyResponse([
         {
           recordID: 520,
           index: 0,
@@ -690,7 +691,7 @@ it("aborts old-account history and opens the same task through the new account's
   expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/b/chunks/"))).toBe(true);
   expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/a/"))).toBe(false);
   delayed.resolve(
-    Response.json([
+    historyResponse([
       {
         recordID: 300,
         index: 0,

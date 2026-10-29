@@ -1,24 +1,40 @@
-// Streams validated history outputs one event at a time without materializing oversized chunk arrays.
+// Streams bounded batches from line-framed JSON history without retaining complete chunk bodies.
 import type { HistoryEvent } from "@sdk/types.gen";
 import { validateHistoryEvent } from "@sdk/validate.gen";
 
-export async function* readHistoryArray(
+type FramingState = "opening" | "first" | "next" | "end";
+
+// Immutable history is a valid JSON array: opening bracket on its own line,
+// one compact event per line (leading comma after the first), then closing
+// bracket. The projection version owns this framing, including its end marker.
+export async function* readHistoryBatches(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-): AsyncGenerator<HistoryEvent> {
+): AsyncGenerator<HistoryEvent[]> {
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let state: "array" | "value" | "event" | "separator" | "end" = "array";
-  let depth = 0;
-  let quoted = false;
-  let escaped = false;
-  let allowEnd = true;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let phase: FramingState = "opening";
   let parts: string[] = [];
+  let batch: HistoryEvent[] = [];
   let finished = false;
   let cancellation: Promise<void> | null = null;
   const abort = () => {
     cancellation = reader.cancel(signal.reason);
   };
+  function line(text: string, state: FramingState): FramingState {
+    const value = text.trim();
+    if (!value) return state;
+    if (state === "opening") {
+      if (value !== "[") throw new Error("Invalid history array opening");
+      return "first";
+    } else if (state === "end") throw new Error("Unexpected data after history array");
+    else if (value === "]") return "end";
+    else {
+      if (state === "next" && value[0] !== ",") throw new Error("Missing history output separator");
+      batch.push(validateHistoryEvent(JSON.parse(state === "next" ? value.slice(1) : value)));
+      return "next";
+    }
+  }
   signal.addEventListener("abort", abort, { once: true });
   try {
     for (;;) {
@@ -26,47 +42,39 @@ export async function* readHistoryArray(
       const chunk = await reader.read();
       signal.throwIfAborted();
       const text = decoder.decode(chunk.value, { stream: !chunk.done });
-      let start = state === "event" ? 0 : -1;
-      for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        if (state === "event") {
-          if (quoted) {
-            if (escaped) escaped = false;
-            else if (ch === "\\") escaped = true;
-            else if (ch === '"') quoted = false;
-          } else if (ch === '"') quoted = true;
-          else if (ch === "{" || ch === "[") depth++;
-          else if (ch === "}" || ch === "]") depth--;
-          if (depth === 0) {
-            parts.push(text.slice(start, i + 1));
-            const json = parts.join("");
-            parts = [];
-            state = "separator";
-            start = -1;
-            yield validateHistoryEvent(JSON.parse(json));
-          }
-          continue;
+      let start = 0;
+      for (let end = text.indexOf("\n"); end !== -1; end = text.indexOf("\n", start)) {
+        const part = text.slice(start, end);
+        if (parts.length) {
+          parts.push(part);
+          phase = line(parts.join(""), phase);
+          parts = [];
+        } else phase = line(part, phase);
+        start = end + 1;
+        // Raw-record count does not bound normalized output count. Yield a
+        // bounded batch even when one response read contains many outputs.
+        if (batch.length === 256) {
+          yield batch;
+          batch = [];
+          signal.throwIfAborted();
         }
-        if (/\s/.test(ch ?? "")) continue;
-        if (state === "array" && ch === "[") state = "value";
-        else if (state === "value" && ch === "{") {
-          state = "event";
-          start = i;
-          depth = 1;
-        } else if ((state === "separator" || (state === "value" && allowEnd)) && ch === "]") state = "end";
-        else if (state === "separator" && ch === ",") {
-          state = "value";
-          allowEnd = false;
-        } else throw new Error("Invalid history JSON array");
       }
-      if (state === "event" && start >= 0) parts.push(text.slice(start));
+      if (start < text.length) parts.push(text.slice(start));
+      if (chunk.done) {
+        if (parts.length) phase = line(parts.join(""), phase);
+        if (phase !== "end") throw new Error("Incomplete history array");
+      }
+      if (batch.length) {
+        yield batch;
+        batch = [];
+      }
       if (chunk.done) break;
     }
-    if (state !== "end") throw new Error("Incomplete history JSON array");
     finished = true;
   } finally {
     signal.removeEventListener("abort", abort);
     parts = [];
+    batch = [];
     if (!finished) await (cancellation ?? reader.cancel());
     reader.releaseLock();
   }

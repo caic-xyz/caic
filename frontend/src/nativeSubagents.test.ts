@@ -53,14 +53,14 @@ describe("NativeActivityTracker", () => {
     const activities = tracker.derive(mapped);
     expect(tracker.ownerFor(a)).toBe("native:a");
     expect(tracker.ownerFor(b)).toBe("native:b");
-    expect(activities.map((entry) => entry.transcript?.[0]?.events[0]?.text?.text)).toEqual(["From A", "From B"]);
+    expect(activities.map((entry) => entry.messages?.[0]?.text?.text)).toEqual(["From A", "From B"]);
     expect(new NativeActivityTracker().derive(mapped)).toEqual(activities);
     const unknown = new NativeActivityTracker();
     const ambiguous = unknown.derive([a, b, event("native:unknown", "running", 3, { toolUseID: "spawn" })]);
     expect(unknown.ownerFor(a)).toBeNull();
     expect(unknown.ownerFor(b)).toBeNull();
     assert.ok(ambiguous[0]);
-    expect(ambiguous[0].transcript).toBeUndefined();
+    expect(ambiguous[0].messages).toBeUndefined();
   });
   it("correlates early delegation output and folds a grandchild lifecycle before actor routing", () => {
     const source = { delegationToolUseID: "spawn", turnID: "turn" };
@@ -91,11 +91,11 @@ describe("NativeActivityTracker", () => {
     const activities = tracker.derive(messages);
     expect(activities.map((a) => a.id)).toEqual(["native:child", "native:grandchild"]);
     expect(tracker.ownerFor(early)).toBe("native:child");
-    expect(activities[0]?.transcript?.[0]?.toolCalls[0]).toMatchObject({ output: "early output", done: true });
+    expect(activities[0]?.messages).toEqual([early, messages[2]]);
     expect(new NativeActivityTracker().derive(messages)).toEqual(activities);
   });
 
-  it("extends a long child message without rereading its prior fragments", () => {
+  it("routes long child messages without reading or grouping their text payloads", () => {
     const source = {
       agentID: "codex:thread:child",
       threadID: "child",
@@ -103,29 +103,27 @@ describe("NativeActivityTracker", () => {
       turnID: "turn",
       itemID: "answer",
     };
+    let reads = 0;
     const messages: EventMessage[] = Array.from({ length: 10000 }, (_, i) => ({
       kind: "textDelta",
       ts: i + 1,
       source,
-      textDelta: { text: "word " },
+      get textDelta() {
+        reads++;
+        return { text: "word " };
+      },
     }));
     const tracker = new NativeActivityTracker();
-    const previous = tracker.derive(messages)[0]?.transcript?.[0];
-    if (!previous) throw new Error("Missing child message");
-    let priorReads = 0;
-    previous.events = new Proxy(previous.events, {
-      get(target, key, receiver) {
-        if (typeof key === "string" && /^\d+$/.test(key)) priorReads++;
-        return Reflect.get(target, key, receiver);
-      },
-    });
-    messages.push({ kind: "textDelta", ts: 10001, source, textDelta: { text: "continued" } });
-    const current = tracker.derive(messages)[0]?.transcript?.[0];
-    expect(priorReads).toBeLessThanOrEqual(4);
-    expect(previous.content?.text).toBe("word ".repeat(10000));
-    expect(current?.content?.text).toBe("word ".repeat(10000) + "continued");
-    expect(current?.content?.range).toEqual({ start: 1, end: 10001 });
-    expect(current?.events.length).toBeLessThanOrEqual(2);
+    const initial = tracker.derive(messages)[0];
+    expect(initial?.messages).toHaveLength(10000);
+    expect(initial?.messages?.[0]).toBe(messages[0]);
+    expect(reads).toBe(0);
+    const next: EventMessage = { kind: "textDelta", ts: 10001, source, textDelta: { text: "continued" } };
+    messages.push(next);
+    const current = tracker.derive(messages)[0];
+    expect(current?.messages?.at(-1)).toBe(next);
+    expect(current?.messages).toHaveLength(10001);
+    expect(reads).toBe(0);
   });
 
   it("folds child content before lifecycle, keeps its anchor and clears on replaced history", () => {
@@ -148,12 +146,7 @@ describe("NativeActivityTracker", () => {
     const child = tracker.derive(messages)[0];
     assert.ok(child);
     expect(child).toMatchObject({ status: "completed", label: "Research", anchorTs: 1000 });
-    expect(child.transcript).toHaveLength(1);
-    expect(child.transcript?.[0]?.content).toEqual({
-      text: "A bowtie.",
-      complete: true,
-      range: { start: 1000, end: 3000 },
-    });
+    expect(child.messages).toEqual([messages[0], messages[2], messages[3]]);
     expect(new NativeActivityTracker().derive(messages)).toEqual([child]);
     expect(tracker.derive([{ kind: "text", ts: 10, text: { text: "Other history" } }])).toEqual([]);
   });
@@ -188,11 +181,13 @@ describe("NativeActivityTracker", () => {
       { kind: "text", ts: 5, source: second, text: { text: "Second complete" } },
     ];
     const tracker = new NativeActivityTracker();
-    const initial = tracker.derive(messages.slice(0, 2))[0]?.transcript;
-    const final = tracker.derive(messages)[0]?.transcript;
-    expect(final?.map((message) => message.content?.text)).toEqual(["First complete", "Second complete"]);
-    expect(initial?.map((message) => message.content?.text)).toEqual(["First partial", "Second partial"]);
-    expect(new NativeActivityTracker().derive(messages)[0]?.transcript).toEqual(final);
+    const initial = tracker.derive(messages.slice(0, 2))[0]?.messages;
+    expect(initial).toEqual(messages.slice(0, 2));
+    const final = tracker.derive(messages)[0]?.messages;
+    expect(final).toEqual(messages);
+    expect(final?.[0]).toBe(messages[0]);
+    expect(final?.at(-1)).toBe(messages.at(-1));
+    expect(new NativeActivityTracker().derive(messages)[0]?.messages).toEqual(final);
   });
   it("folds concurrent agents and a batch across compaction without reopening terminal work", () => {
     const tracker = new NativeActivityTracker();

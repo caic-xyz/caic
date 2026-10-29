@@ -1,6 +1,7 @@
 // Tests automatic history, task-owned plan updates, parent/child tools, and SSE lifecycle.
 
 import assert from "node:assert/strict";
+import { historyResponse } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
@@ -8,7 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-lib
 import userEvent from "@testing-library/user-event";
 
 import { createSignal } from "solid-js";
-import type { EventMessage, ISOTimestamp, TaskPlan } from "@sdk/types.gen";
+import type { EventMessage, HistoryEvent, ISOTimestamp, TaskPlan } from "@sdk/types.gen";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 
 import TaskDetail from "./TaskDetail";
@@ -145,7 +146,7 @@ it("updates only the task-owned root plan while preserving canonical history and
       });
     if (url.endsWith("/stats")) return Response.json({ samples: [] });
     if (url.includes("/chunks/"))
-      return Response.json(events.map((message, index) => ({ recordID: index + 1, index: 0, message })));
+      return historyResponse(events.map((message, index) => ({ recordID: index + 1, index: 0, message })));
     throw new Error(`Unexpected history request: ${url}`);
   });
   const [plan, setPlan] = createSignal<TaskPlan | null>({ toolUseID: "owned", content: "Original root plan" });
@@ -246,31 +247,30 @@ it("retries live history and automatically loads the full tool output", async ()
     if (url.includes("/chunks/")) {
       if (++chunkRequests === 1) return new Response("temporarily unavailable", { status: 503 });
       const earlier = url.endsWith("/1/256");
-      if (url.endsWith("/257/512")) return Response.json([]);
-      return Response.json([
-        ...(earlier
-          ? [
-              {
-                recordID: 2,
-                index: 0,
-                message: {
-                  kind: "toolUse",
-                  ts: startedAt,
-                  toolUse: { toolUseID: "tool", name: "Bash", input: { command: "echo old" } },
-                },
+      if (url.endsWith("/257/512")) return historyResponse([]);
+      const events: HistoryEvent[] = earlier
+        ? [
+            {
+              recordID: 2,
+              index: 0,
+              message: {
+                kind: "toolUse",
+                ts: startedAt,
+                toolUse: { toolUseID: "tool", name: "Bash", input: { command: "echo old" } },
               },
-            ]
-          : []),
-        {
-          recordID: earlier ? 3 : 520,
-          index: 0,
-          message: {
-            kind: "toolOutputDelta",
-            ts: 520,
-            toolOutputDelta: { toolUseID: "tool", delta: earlier ? "old output" : "tail output" },
-          },
+            },
+          ]
+        : [];
+      events.push({
+        recordID: earlier ? 3 : 520,
+        index: 0,
+        message: {
+          kind: "toolOutputDelta",
+          ts: 520,
+          toolOutputDelta: { toolUseID: "tool", delta: earlier ? "old output" : "tail output" },
         },
-      ]);
+      });
+      return historyResponse(events);
     }
     throw new Error(`Unexpected history request: ${url}`);
   });
@@ -334,7 +334,7 @@ it("automatically restores completed activity timing while keeping live observat
       });
     if (url.endsWith("/stats")) return Response.json({ samples: [] });
     if (url.includes("/chunks/"))
-      return Response.json(
+      return historyResponse(
         url.endsWith("/1/256")
           ? seeds
           : finishes.map((message, index) => ({ recordID: 257 + index, index: 0, message })),
@@ -1414,6 +1414,10 @@ describe("TaskDetail", () => {
     // The canonical card anchors to the transcript where the lifecycle settled.
     const anchored = getByTestId("native-subagents");
     expect(within(anchored).getByText("Completed")).toBeInTheDocument();
+    expect(within(anchored).queryByText("Read me before you judge me.")).not.toBeInTheDocument();
+    const summary = anchored.querySelector("summary");
+    if (!summary) throw new Error("Missing native summary");
+    await userEvent.setup().click(summary);
     expect(within(anchored).getByText("Read me before you judge me.")).toBeInTheDocument();
     // The spawning tool call carries the same correlated status.
     const call = getByText("Agent").closest("details");

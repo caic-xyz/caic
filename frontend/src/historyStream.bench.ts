@@ -1,9 +1,10 @@
-// Measures recent-first rendering and complete automatic backlog decoding from cached chunks.
+// Benchmarks line-framed cached history decoding and conversation grouping.
 import { bench } from "@tests/bench";
+import { historyArray } from "@tests/history";
 import type { HistoryEvent } from "@sdk/types.gen";
 import { validateHistoryEvent } from "@sdk/validate.gen";
 import { groupMessages } from "./grouping";
-import { readHistoryArray } from "./historyStream";
+import { readHistoryBatches } from "./historyStream";
 
 // Many modest text/tool records match the switching baseline's transcript shape.
 const events: HistoryEvent[] = Array.from({ length: 13353 }, (_, i) => ({
@@ -23,9 +24,9 @@ const events: HistoryEvent[] = Array.from({ length: 13353 }, (_, i) => ({
         },
 }));
 const full = JSON.stringify(events);
-const recent = JSON.stringify(events.slice(-256));
+const recent = historyArray(events.slice(-256));
 const chunks: string[] = [];
-for (let first = 0; first < events.length; first += 256) chunks.push(JSON.stringify(events.slice(first, first + 256)));
+for (let first = 0; first < events.length; first += 256) chunks.push(historyArray(events.slice(first, first + 256)));
 
 bench(
   "complete replay decode/group (13,353 events)",
@@ -42,7 +43,7 @@ bench(
     const body = new Response(recent).body;
     if (!body) throw new Error("Missing benchmark response body");
     const decoded: HistoryEvent[] = [];
-    for await (const event of readHistoryArray(body, new AbortController().signal)) decoded.push(event);
+    for await (const batch of readHistoryBatches(body, new AbortController().signal)) decoded.push(...batch);
     groupMessages(decoded.map((event) => event.message));
   },
   { time: 500, warmupTime: 100 },
@@ -55,7 +56,7 @@ bench(
     for (const chunk of chunks) {
       const body = new Response(chunk).body;
       if (!body) throw new Error("Missing benchmark response body");
-      for await (const event of readHistoryArray(body, new AbortController().signal)) decoded.push(event);
+      for await (const batch of readHistoryBatches(body, new AbortController().signal)) decoded.push(...batch);
     }
     groupMessages(decoded.map((event) => event.message));
   },

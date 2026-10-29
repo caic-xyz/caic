@@ -169,6 +169,10 @@ func TestSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		lines := strings.Split(body, "\n")
+		if len(lines) != 5 || lines[0] != "[" || !strings.HasPrefix(lines[2], ",") || lines[3] != "]" || lines[4] != "" {
+			t.Fatalf("history is not one output per line: %q", body)
+		}
 		var events []Event
 		if err := json.Unmarshal([]byte(body), &events); err != nil {
 			t.Fatal(err)

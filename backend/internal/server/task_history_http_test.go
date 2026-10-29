@@ -523,7 +523,7 @@ func TestHistorySharedRecovery(t *testing.T) {
 	}
 	// Obtain the resource identity without projecting; concurrent missing-range
 	// requests must create one shared source and parse each native record once.
-	base := "/tasks/" + tk.ID.String() + "/history/" + historyScope(t.Context()) + "/1/" + tk.TimelineID()
+	base := "/tasks/" + tk.ID.String() + "/history/" + historyScope(t.Context()) + "/" + historyProjectionVersion + "/" + tk.TimelineID()
 	var wg sync.WaitGroup
 	responses := make(chan *httptest.ResponseRecorder, 8)
 	for range 8 {

@@ -192,7 +192,7 @@ class ApiClient(
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
     /** Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. */
     suspend fun getHistoryBootstrap(id: String): HistoryBootstrap = request("GET", "/api/caic/v1/tasks/$id/history/bootstrap")
-    /** Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. */
+    /** Returns immutable normalized outputs as a JSON array with one output per line and leading commas after the first. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. */
     suspend fun getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/chunks/$first/$last")
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
     suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate> = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")

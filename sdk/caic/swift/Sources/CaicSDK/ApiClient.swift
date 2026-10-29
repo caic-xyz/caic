@@ -503,7 +503,7 @@ public final class ApiClient {
     public func getHistoryBootstrap(id: String) async throws -> HistoryBootstrap {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/bootstrap")
     }
-    /// Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery.
+    /// Returns immutable normalized outputs as a JSON array with one output per line and leading commas after the first. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery.
     public func getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String) async throws -> [HistoryEvent] {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/chunks/\(first)/\(last)")
     }

@@ -1,13 +1,13 @@
-// Folds global native lifecycles and source-owned child transcripts with reported delegation correlation.
+// Folds native lifecycles and routes canonical child messages without building undisclosed transcripts.
 
 import type { EventBackgroundCommand, EventMessage, EventMessageSource, EventNativeSubagent } from "@sdk/types.gen";
 
 import type { MessageGroup, MsgItem, Session, Turn } from "./grouping";
-import { aggregateToolGroups, childAgentID, IncrementalMessageGrouper } from "./grouping";
+import { childAgentID } from "./grouping";
 
 export interface NativeActivity extends EventNativeSubagent {
   source?: EventMessageSource;
-  transcript?: MessageGroup[];
+  messages?: EventMessage[];
   startedAt: number | null;
   endedAt: number | null;
   // anchorTs positions the card in the transcript: the observation that created
@@ -35,7 +35,7 @@ export class NativeActivityTracker {
   private lastEvent: EventMessage | null = null;
   private byID = new Map<string, NativeActivity>();
   private snapshot: NativeActivity[] = [];
-  private transcripts = new Map<string, { events: EventMessage[]; grouper: IncrementalMessageGrouper }>();
+  private messagesByAgent = new Map<string, EventMessage[]>();
   private byDelegation = new Map<string, Map<string, Set<string>>>();
   private pendingNamespaces = new Map<string, Set<string>>();
   routingRevision = 0;
@@ -62,7 +62,7 @@ export class NativeActivityTracker {
     let changed = reset;
     if (reset) {
       this.byID.clear();
-      this.transcripts.clear();
+      this.messagesByAgent.clear();
       this.byDelegation.clear();
       this.pendingNamespaces.clear();
       this.routingRevision++;
@@ -95,23 +95,23 @@ export class NativeActivityTracker {
       this.routingRevision++;
       if (this.processed > 0) {
         this.byID.clear();
-        this.transcripts.clear();
+        this.messagesByAgent.clear();
         this.processed = 0;
       }
       changed = true;
     }
-    const changedTranscripts = new Set<string>();
-    const appendTranscript = (id: string, event: EventMessage): void => {
-      let transcript = this.transcripts.get(id);
+    const changedChildren = new Set<string>();
+    const appendChildMessage = (id: string, event: EventMessage): void => {
+      let transcript = this.messagesByAgent.get(id);
       if (!transcript) {
-        transcript = { events: [], grouper: new IncrementalMessageGrouper() };
-        this.transcripts.set(id, transcript);
+        transcript = [];
+        this.messagesByAgent.set(id, transcript);
         const existing = this.byID.get(id);
         if (existing) this.byID.set(id, { ...existing, anchorTs: existing.startedAt ?? event.ts });
         else this.byID.set(id, { id, status: "unknown", startedAt: null, endedAt: null, anchorTs: event.ts });
       }
-      transcript.events.push(event);
-      changedTranscripts.add(id);
+      transcript.push(event);
+      changedChildren.add(id);
       changed = true;
     };
     for (let i = this.processed; i < messages.length; i++) {
@@ -121,7 +121,7 @@ export class NativeActivityTracker {
       const lifecycle = ev.kind === "nativeSubagent" || ev.kind === "backgroundCommand";
       const childID = lifecycle ? null : this.ownerFor(ev);
       if (childID !== null) {
-        if (ev.kind !== "rateLimit" || ev.rateLimit?.rateLimitType === "thread_goal") appendTranscript(childID, ev);
+        if (ev.kind !== "rateLimit" || ev.rateLimit?.rateLimitType === "thread_goal") appendChildMessage(childID, ev);
         continue;
       }
       const s = ev.nativeSubagent;
@@ -131,7 +131,7 @@ export class NativeActivityTracker {
       const next: NativeActivity = {
         ...s,
         source: old?.source ?? ev.source,
-        transcript: old?.transcript,
+        messages: old?.messages,
         toolUseID: old?.toolUseID || s.toolUseID,
         scope: old?.scope || s.scope,
         groupID: old?.groupID || s.groupID,
@@ -149,7 +149,7 @@ export class NativeActivityTracker {
         // Reposition only on creation or a folded status change, so running
         // heartbeats do not drag an active card toward the newest content.
         anchorTs:
-          old && this.transcripts.has(s.id)
+          old && this.messagesByAgent.has(s.id)
             ? old.anchorTs
             : !old || status !== old.status
               ? ev.ts > 0
@@ -165,18 +165,14 @@ export class NativeActivityTracker {
       )
         continue;
       this.byID.set(s.id, next);
-      if (this.transcripts.has(s.id)) changedTranscripts.add(s.id);
+      if (this.messagesByAgent.has(s.id)) changedChildren.add(s.id);
       changed = true;
     }
-    for (const id of changedTranscripts) {
-      const transcript = this.transcripts.get(id);
+    for (const id of changedChildren) {
+      const transcript = this.messagesByAgent.get(id);
       const activity = this.byID.get(id);
       if (transcript && activity) {
-        const groups = transcript.grouper.group(transcript.events);
-        this.byID.set(id, {
-          ...activity,
-          transcript: aggregateToolGroups(nativeTerminal(activity.status) ? transcript.grouper.finish() : groups),
-        });
+        this.byID.set(id, { ...activity, messages: transcript });
       }
     }
     this.processed = messages.length;

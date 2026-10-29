@@ -929,7 +929,7 @@ export default function TaskDetail(props: Props) {
     const firstRootTs = firstRoot?.kind === "group" ? (firstRoot.group.events[0]?.ts ?? 0) : 0;
     const early = new Set(
       nativeActivities()
-        .filter((activity) => activity.transcript && firstRootTs > activity.anchorTs)
+        .filter((activity) => activity.messages && firstRootTs > activity.anchorTs)
         .map((activity) => activity.id),
     );
     const nativeItem = (activity: NativeActivity): TranscriptItem => ({

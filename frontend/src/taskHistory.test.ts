@@ -1,5 +1,6 @@
 // Tests recent-first history loading, bounded ordered batches, exact live handoff, resource isolation, and failure cancellation.
 import assert from "node:assert/strict";
+import { historyResponse } from "@tests/history";
 import { setImmediate as yieldToTasks } from "node:timers/promises";
 import { afterEach, describe, it } from "node:test";
 import { createRoot } from "solid-js";
@@ -43,7 +44,7 @@ function capture(events: HistoryEvent[], through: number) {
     assert.ok(bounds, url);
     const first = Number(bounds[1]),
       last = Number(bounds[2]);
-    return Response.json(events.filter((e) => e.recordID >= first && e.recordID <= last));
+    return historyResponse(events.filter((e) => e.recordID >= first && e.recordID <= last));
   });
   return connections;
 }
@@ -137,7 +138,7 @@ describe("createTaskEventTimeline", () => {
       assert.deepEqual(values(owner), []);
       assert.deepEqual(owner.preview(), { prompt: "during backfill", response: "" });
       const before = owner.epoch();
-      release.resolve(Response.json([events[0]]));
+      release.resolve(historyResponse(events.slice(0, 1)));
       await loaded(owner);
       assert.deepEqual(values(owner), ["old", "recent", "during backfill"]);
       assert.ok(owner.epoch() > before);
@@ -182,12 +183,12 @@ describe("createTaskEventTimeline", () => {
       assert.equal(owner.preview()?.response, "recent");
       connections[0]?.handlers.onMessage(input(1283, "live"));
       assert.equal(owner.preview()?.prompt, "live");
-      release.resolve(Response.json([events[0]]));
+      release.resolve(historyResponse(events.slice(0, 1)));
       await loaded(owner);
       assert.deepEqual(values(owner), ["first", "second", "third", "fourth", "fifth", "recent", "live"]);
     } finally {
       owner.dispose();
-      release.resolve(Response.json([]));
+      release.resolve(historyResponse([]));
     }
   });
 
@@ -235,7 +236,7 @@ describe("createTaskEventTimeline", () => {
       assert.equal(owner.preview()?.response, "recent");
     } finally {
       owner.dispose();
-      reject.resolve(Response.json([]));
+      reject.resolve(historyResponse([]));
     }
   });
 
@@ -319,7 +320,7 @@ describe("createTaskEventTimeline", () => {
       for (let index = 0; index < 2600; index++) connections[0]?.handlers.onMessage(text(2, index, `pending ${index}`));
       connections[0]?.handlers.onMessage(input(3, "after pending"));
       assert.deepEqual(owner.messages(), []);
-      release.resolve(Response.json([text(1, 0, "snapshot")]));
+      release.resolve(historyResponse([text(1, 0, "snapshot")]));
       await loaded(owner);
       assert.equal(owner.messages().length, 2602);
       assert.deepEqual(values(owner).slice(0, 3), ["snapshot", "pending 0", "pending 1"]);
@@ -370,7 +371,7 @@ describe("createTaskEventTimeline", () => {
       await requested.promise;
       assert.deepEqual(owner.messages(), []);
       assert.equal(owner.preview()?.response, "x".repeat(16_000));
-      release.resolve(Response.json([old]));
+      release.resolve(historyResponse([old]));
       await loaded(owner);
       assert.equal(owner.preview(), null);
       assert.equal(owner.messages().length, 4);
@@ -447,7 +448,7 @@ describe("createTaskEventTimeline", () => {
       await loaded(owner);
       assert.equal(connections[0]?.close.mock.calls.length, 1);
       assert.equal(connections.length, 2);
-      release.resolve(Response.json([text(2, 0, "obsolete response")]));
+      release.resolve(historyResponse([text(2, 0, "obsolete response")]));
       connections[0]?.handlers.onMessage(input(521, "obsolete stream"));
       connections[1]?.handlers.onMessage(input(521, "current stream"));
       await yieldToTasks();
@@ -479,7 +480,7 @@ describe("createTaskEventTimeline", () => {
     assert.equal(owner.preview()?.response, "recent");
     owner.dispose();
     assert.equal(connections[0]?.close.mock.calls.length, 1);
-    release.resolve(Response.json([text(2, 0, "obsolete")]));
+    release.resolve(historyResponse([text(2, 0, "obsolete")]));
     connections[0]?.handlers.onMessage(input(521, "obsolete stream"));
     await yieldToTasks();
     assert.deepEqual(owner.messages(), []);

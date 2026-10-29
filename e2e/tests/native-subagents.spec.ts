@@ -16,6 +16,11 @@ for (const width of [390, 1280]) {
     await summary.focus();
     await page.keyboard.press("Enter");
     await expect(cards.first().getByText("Read me before you judge me.")).toBeVisible();
+    await summary.press("Enter");
+    await expect(cards.first().locator("pre")).toHaveCount(0);
+    await expect(summary).toBeFocused();
+    await summary.press("Enter");
+    await expect(cards.first().getByText("Read me before you judge me.")).toBeVisible();
     for (const card of await cards.all()) {
       await expect(card.getByRole("link")).toHaveCount(0);
       expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);

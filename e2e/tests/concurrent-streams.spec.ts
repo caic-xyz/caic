@@ -225,6 +225,16 @@ for (const width of [390, 1280]) {
       expect((await api.getTask(id)).reportedModel).toBe("root-model");
       await expect(page.getByTestId("tool-call")).toHaveCount(3);
 
+      await cardA.locator(":scope > summary").press("Enter");
+      await expect(answerA).toHaveCount(0);
+      await expect(toolA).toHaveCount(0);
+      await expect(cardA.locator(":scope > summary")).toContainText("Completed");
+      await cardA.locator(":scope > summary").press("Enter");
+      await expect(answerA.locator("li")).toHaveText([
+        "A bowtie uses Earcut.",
+        "Validate contours before triangulation.",
+      ]);
+
       await page.reload();
       await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
       // The complete backlog returns automatically on reload, without

@@ -15,7 +15,7 @@ import type { ResultEstimate } from "./taskAnalytics";
 import type { TaskHistory } from "./taskEventTimeline";
 import { api } from "./api";
 import { RecentTextPreview, type PreviewText } from "./recentTextPreview";
-import { readHistoryArray } from "./historyStream";
+import { readHistoryBatches } from "./historyStream";
 import { compareHistoryPosition, historyChunkFirst, historyPositionKey } from "./historyPosition";
 
 const backfillChunks = 4;
@@ -93,14 +93,16 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     if (!result.body) throw new Error("Task history response has no body");
     const decoded: EventMessage[] = [];
     let previous: HistoryPosition | null = null;
-    for await (const event of readHistoryArray(result.body, signal)) {
-      if (event.recordID < first || event.recordID > last)
-        throw new Error("History output is outside its requested range");
-      if (previous && compareHistoryPosition(event, previous) <= 0) continue;
-      previous = event;
-      decoded.push(event.message);
-      if (event.message.result && !isChildEvent(event.message))
-        positions.set(historyPositionKey(event), event.message.result);
+    for await (const events of readHistoryBatches(result.body, signal)) {
+      for (const event of events) {
+        if (event.recordID < first || event.recordID > last)
+          throw new Error("History output is outside its requested range");
+        if (previous && compareHistoryPosition(event, previous) <= 0) continue;
+        previous = event;
+        decoded.push(event.message);
+        if (event.message.result && !isChildEvent(event.message))
+          positions.set(historyPositionKey(event), event.message.result);
+      }
     }
     return decoded;
   }

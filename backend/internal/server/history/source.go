@@ -108,6 +108,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 	if s.err != nil {
 		return Snapshot{}, s.err
 	}
+	var encoded bytes.Buffer
 	for record, err := range s.cursor.Read(ctx) {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -141,29 +142,34 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 				events = append(events, Event{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			}
 		}
-		encoded := []byte("[]")
-		if len(events) != 0 {
-			var err error
-			encoded, err = json.Marshal(events)
-			if err != nil {
+		encoded.Reset()
+		encoded.WriteByte('[')
+		encoder := json.NewEncoder(&encoded)
+		for i := range events {
+			if i != 0 {
+				encoded.WriteByte(',')
+			}
+			if err := encoder.Encode(&events[i]); err != nil {
 				s.err = fmt.Errorf("encode projected history: %w", err)
 				return Snapshot{}, s.err
 			}
 		}
+		encoded.WriteByte(']')
+		payload := encoded.Bytes()
 		var frame [8]byte
-		binary.LittleEndian.PutUint64(frame[:], uint64(len(encoded)))
+		binary.LittleEndian.PutUint64(frame[:], uint64(len(payload)))
 		if _, err := s.writer.Write(frame[:]); err != nil {
 			s.err = err
 			return Snapshot{}, err
 		}
-		if _, err := s.writer.Write(encoded); err != nil {
+		if _, err := s.writer.Write(payload); err != nil {
 			s.err = err
 			return Snapshot{}, err
 		}
 		if (record.ID-1)%RecordsPerChunk == 0 {
 			s.starts = append(s.starts, s.end)
 		}
-		s.end += int64(len(frame)) + int64(len(encoded))
+		s.end += int64(len(frame)) + int64(len(payload))
 		s.through = record.ID
 	}
 	if err := s.writer.Flush(); err != nil {
@@ -173,12 +179,15 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 	return Snapshot{Through: s.through}, nil
 }
 
-// WriteRange streams compact JSON Event[] for one inclusive chunk range. Its
+// WriteRange streams line-framed JSON Event[] for one inclusive chunk range.
+// Each output occupies one line; commas lead every output after the first.
+// The brackets provide completion framing while ordinary JSON clients can
+// decode the complete body. Projection versions also version this layout. Its
 // memory use is bounded by one physical record rather than the chunk's total
 // payload. HTTP consumers should use it instead of materializing a large range.
 func (s *Source) WriteRange(ctx context.Context, snapshot Snapshot, first, last uint64, w io.Writer) error {
 	writer := bufio.NewWriterSize(w, 32<<10)
-	if err := writer.WriteByte('['); err != nil {
+	if _, err := writer.WriteString("[\n"); err != nil {
 		return err
 	}
 	comma := false
@@ -198,7 +207,7 @@ func (s *Source) WriteRange(ctx context.Context, snapshot Snapshot, first, last 
 			comma = true
 		}
 	}
-	if err := writer.WriteByte(']'); err != nil {
+	if _, err := writer.WriteString("]\n"); err != nil {
 		return err
 	}
 	return writer.Flush()

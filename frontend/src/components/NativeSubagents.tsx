@@ -1,13 +1,14 @@
-// Expandable native activity cards with child transcripts, lifecycle timing, and background results.
+// Native activity disclosures keep summaries mounted and build child transcripts and results only while open.
 
-import { createMemo, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import type { BackgroundCommandActivity, NativeActivity } from "../nativeSubagents";
-import { backgroundCommandStatus, nativeActivityStatus } from "../nativeSubagents";
+import { backgroundCommandStatus, nativeActivityStatus, nativeTerminal } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
 import { createLiveDuration } from "../liveDuration";
 import styles from "./NativeSubagents.module.css";
 import type { MessageGroup } from "../grouping";
+import { aggregateToolGroups, IncrementalMessageGrouper } from "../grouping";
 
 type TranscriptRenderer = (groups: () => MessageGroup[]) => JSX.Element;
 
@@ -28,6 +29,7 @@ export function NativeAgentCard(props: {
   renderTranscript?: TranscriptRenderer;
 }) {
   const activity = () => props.activity;
+  const [open, setOpen] = createSignal(false);
   const duration = createLiveDuration(
     () => activity().startedAt,
     () => {
@@ -36,22 +38,13 @@ export function NativeAgentCard(props: {
     },
     () => !props.settled && activity().status === "running",
   );
-  const hasTranscript = () => !!(activity().transcript?.length && props.renderTranscript);
-  const showResult = createMemo(() => {
-    if (!hasTranscript()) return true;
-    const result = activity().result?.trim();
-    if (!result) return false;
-    return !activity().transcript?.some((group) => {
-      if (group.content) return group.kind === "text" && group.content.complete && group.content.text.trim() === result;
-      return group.events.findLast((event) => event.kind === "text")?.text?.text.trim() === result;
-    });
-  });
   return (
     <details
       class={styles.card}
       data-testid="native-subagent-card"
       data-native-id={activity().id}
       data-background={activity().background ? "true" : undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
         <span>
@@ -67,24 +60,50 @@ export function NativeAgentCard(props: {
           </span>
         </Show>
       </summary>
-      <dl>
-        <dt>Identity</dt>
-        <dd>{activity().id}</dd>
-        <Show when={activity().groupID}>
-          <dt>Group</dt>
-          <dd>{activity().groupID}</dd>
-        </Show>
-      </dl>
-      <Show when={activity().prompt}>
-        <h4>Prompt</h4>
-        <pre>{activity().prompt}</pre>
-      </Show>
-      <Show when={hasTranscript()}>{props.renderTranscript?.(() => activity().transcript ?? [])}</Show>
-      <Show when={showResult()}>
-        <h4>Result</h4>
-        <pre>{activity().result || "No result reported by the harness."}</pre>
+      <Show when={open()}>
+        <NativeAgentDetails activity={activity()} renderTranscript={props.renderTranscript} />
       </Show>
     </details>
+  );
+}
+
+function NativeAgentDetails(props: { activity: NativeActivity; renderTranscript?: TranscriptRenderer }) {
+  const grouper = new IncrementalMessageGrouper();
+  const groups = createMemo(() => {
+    if (!props.renderTranscript) return [];
+    const activity = props.activity;
+    const grouped = grouper.group(activity.messages ?? []);
+    return aggregateToolGroups(nativeTerminal(activity.status) ? grouper.finish() : grouped);
+  });
+  const showResult = createMemo(() => {
+    if (!groups().length) return true;
+    const result = props.activity.result?.trim();
+    if (!result) return false;
+    return !groups().some((group) => {
+      if (group.content) return group.kind === "text" && group.content.complete && group.content.text.trim() === result;
+      return group.events.findLast((event) => event.kind === "text")?.text?.text.trim() === result;
+    });
+  });
+  return (
+    <>
+      <dl>
+        <dt>Identity</dt>
+        <dd>{props.activity.id}</dd>
+        <Show when={props.activity.groupID}>
+          <dt>Group</dt>
+          <dd>{props.activity.groupID}</dd>
+        </Show>
+      </dl>
+      <Show when={props.activity.prompt}>
+        <h4>Prompt</h4>
+        <pre>{props.activity.prompt}</pre>
+      </Show>
+      <Show when={groups().length}>{props.renderTranscript?.(groups)}</Show>
+      <Show when={showResult()}>
+        <h4>Result</h4>
+        <pre>{props.activity.result || "No result reported by the harness."}</pre>
+      </Show>
+    </>
   );
 }
 
@@ -146,6 +165,7 @@ export function BackgroundCommandStatusChip(props: { command: BackgroundCommandA
 // details/summary so keyboard users can expand it without a pointer.
 export function BackgroundCommandCard(props: { command: BackgroundCommandActivity; settled: boolean }) {
   const command = () => props.command;
+  const [open, setOpen] = createSignal(false);
   const duration = createLiveDuration(
     () => command().startedAt,
     () => {
@@ -155,7 +175,12 @@ export function BackgroundCommandCard(props: { command: BackgroundCommandActivit
     () => !props.settled && command().status === "running",
   );
   return (
-    <details class={styles.card} data-testid="background-command-card" data-command-id={command().id}>
+    <details
+      class={styles.card}
+      data-testid="background-command-card"
+      data-command-id={command().id}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         <span>Background command: {command().label || "Shell command"}</span>
         <span class={styles.status} data-state={command().status}>
@@ -172,16 +197,18 @@ export function BackgroundCommandCard(props: { command: BackgroundCommandActivit
           </span>
         </Show>
       </summary>
-      <dl>
-        <dt>Identity</dt>
-        <dd>{command().id}</dd>
-        <Show when={command().outputRef}>
-          <dt>Output</dt>
-          <dd>{command().outputRef}</dd>
-        </Show>
-      </dl>
-      <h4>Result</h4>
-      <pre>{command().result || "No result reported by the harness."}</pre>
+      <Show when={open()}>
+        <dl>
+          <dt>Identity</dt>
+          <dd>{command().id}</dd>
+          <Show when={command().outputRef}>
+            <dt>Output</dt>
+            <dd>{command().outputRef}</dd>
+          </Show>
+        </dl>
+        <h4>Result</h4>
+        <pre>{command().result || "No result reported by the harness."}</pre>
+      </Show>
     </details>
   );
 }

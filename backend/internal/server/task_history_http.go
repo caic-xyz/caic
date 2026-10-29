@@ -25,10 +25,10 @@ import (
 )
 
 // historyProjectionVersion versions canonical normalized event bytes.
-// Change it whenever event conversion or serialization changes.
+// Change it whenever event conversion, serialization, or line framing changes.
 // Generation is the task object's random incarnation, invalidated on restart;
 // deterministic same-generation reconstruction can reuse published range URLs.
-const historyProjectionVersion = "1"
+const historyProjectionVersion = "2"
 
 // historyHandlers serves task history for every task state.
 type historyHandlers struct{ *taskHandlers }
