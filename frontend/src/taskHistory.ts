@@ -1,4 +1,4 @@
-// Owns bounded cached backfill, canonical task messages, root-result pricing positions, resources, and an exact live tail.
+// Owns cached backfill, an append-only canonical message view, root-result pricing positions, resources, and an exact live tail.
 import { batch, createSignal, onCleanup } from "solid-js";
 import type {
   EventMessage,
@@ -21,7 +21,7 @@ import { compareHistoryPosition, historyChunkFirst, historyPositionKey } from ".
 const backfillChunks = 4;
 
 export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
-  const [messages, setMessages] = createSignal<EventMessage[]>([]);
+  const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
   const [preview, setPreview] = createSignal<PreviewText | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
   const [epoch, setEpoch] = createSignal(0);
@@ -72,7 +72,12 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       if (replace) {
         setEpoch((previous) => previous + 1);
         setMessages(added);
-      } else if (added.length) setMessages((previous) => [...previous, ...added]);
+      } else if (added.length) {
+        setMessages((previous) => {
+          for (const message of added) previous.push(message);
+          return previous;
+        });
+      }
     });
   }
 

@@ -21,7 +21,7 @@ export class ContextSkillsTracker {
     this.snapshot = { current: [], closed: new Map() };
   }
 
-  derive(taskId: string, epoch: number, messages: EventMessage[]): ContextSkills {
+  derive(taskId: string, epoch: number, messages: readonly EventMessage[]): ContextSkills {
     let changed = false;
     if (taskId !== this.taskId || epoch !== this.epoch || messages.length < this.processed) {
       this.taskId = taskId;

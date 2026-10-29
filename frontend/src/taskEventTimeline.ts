@@ -6,7 +6,8 @@ import { type PreviewText } from "./recentTextPreview";
 import type { ResultEstimate } from "./taskAnalytics";
 
 export interface TaskHistory {
-  messages: Accessor<EventMessage[]>;
+  // Read-only owner view: live publications append in place; replacements use a new array.
+  messages: Accessor<readonly EventMessage[]>;
   preview: Accessor<PreviewText | null>;
   stats: Accessor<EventStats[]>;
   // Replacements change epoch; messages within an epoch only append.

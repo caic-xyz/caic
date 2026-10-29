@@ -1,4 +1,4 @@
-// Browser coverage for context-scoped skill loads, compaction, replay, and recursive Markdown navigation.
+// Browser coverage for context skills, stable disclosures through later turns, compaction, and recursive Markdown navigation.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
@@ -38,6 +38,26 @@ for (const width of [390, 1280]) {
     await expect(prior).toHaveCount(0);
     await page.getByRole("button", { name: /Compacted session/ }).click();
     await expect(prior.getByRole("link")).toHaveCount(2);
+    // A later root completion must not replace a disclosed older context or
+    // steal focus while the user is reading its skills.
+    const turns = page.getByRole("button", { name: /^[▶▼]\s*\d+ messages?/ });
+    const turnCount = await turns.count();
+    const context = page.getByRole("button", { name: /Compacted session/ });
+    await context.focus();
+    await api.sendInput(id, { prompt: { text: "continue current context" } });
+    await waitForTaskState(api, id, "waiting");
+    await expect(turns).toHaveCount(turnCount + 1);
+    await expect(context).toBeFocused();
+    await expect(prior.getByRole("link")).toHaveCount(2);
+    // Closing a second context must retain the older section's DOM ownership.
+    const oldHeader = await context.elementHandle();
+    const oldSkill = await prior.getByRole("link", { name: "review", exact: true }).elementHandle();
+    await prior.getByRole("link", { name: "review", exact: true }).focus();
+    await api.sendInput(id, { prompt: { text: "FAKE_SKILLS compact" } });
+    await waitForTaskState(api, id, "waiting");
+    await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(2);
+    expect(await oldHeader?.evaluate((element) => element.isConnected)).toBe(true);
+    expect(await oldSkill?.evaluate((element) => element.isConnected && element === document.activeElement)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath("skill-context.png") });
     expect(errors).toEqual([]);

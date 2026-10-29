@@ -55,7 +55,7 @@ export class NativeActivityTracker {
     return candidates.size === 1 ? (candidates.values().next().value ?? null) : null;
   }
 
-  derive(messages: EventMessage[]): NativeActivity[] {
+  derive(messages: readonly EventMessage[]): NativeActivity[] {
     const reset =
       messages.length < this.processed ||
       (this.processed > 0 && (messages[0] !== this.firstEvent || messages[this.processed - 1] !== this.lastEvent));
@@ -288,7 +288,7 @@ export class BackgroundCommandTracker {
   private byID = new Map<string, BackgroundCommandActivity>();
   private snapshot: BackgroundCommandActivity[] = [];
 
-  derive(messages: EventMessage[]): BackgroundCommandActivity[] {
+  derive(messages: readonly EventMessage[]): BackgroundCommandActivity[] {
     const reset =
       messages.length < this.processed ||
       (this.processed > 0 && (messages[0] !== this.firstEvent || messages[this.processed - 1] !== this.lastEvent));

@@ -32,7 +32,7 @@ function todoStatusClass(status: string): string {
 
 const DETAILS_KEY = "progress";
 
-export default function ProgressPanel(props: { messages: EventMessage[] }) {
+export default function ProgressPanel(props: { messages: readonly EventMessage[] }) {
   let processed = 0;
   let lastEvent: EventMessage | null = null;
   const todos = createMemo<EventTodo["todos"]>((previous) => {

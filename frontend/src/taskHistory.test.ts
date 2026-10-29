@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { historyResponse } from "@tests/history";
 import { setImmediate as yieldToTasks } from "node:timers/promises";
 import { afterEach, describe, it } from "node:test";
-import { createRoot } from "solid-js";
+import { createRoot, createEffect, createMemo, onCleanup } from "solid-js";
 import { vi } from "@tests/expect";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
-import type { EventStats, HistoryEvent } from "@sdk/types.gen";
+import type { EventStats, EventResult, HistoryEvent } from "@sdk/types.gen";
 import { api } from "./api";
 import type { TaskHistory } from "./taskEventTimeline";
 import { createTaskEventTimeline } from "./taskEventTimeline";
+import { createTaskAnalytics } from "./createTaskAnalytics";
+import { RootConversationProjection } from "./rootConversation";
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
 const streamMock = vi.spyOn(api, "historyEvents");
@@ -80,6 +82,107 @@ const sample: EventStats = {
 };
 
 describe("createTaskEventTimeline", () => {
+  it("publishes one owned live view to conversation and analytics, replacing it on retry and disposal", async () => {
+    vi.useFakeTimers();
+    const connections = capture([input(1, "initial prompt")], 1);
+    const original = fetchMock.getMockImplementation();
+    assert.ok(original);
+    let priceCalls = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (!String(url).includes("/costs?")) return original(url, init);
+      priceCalls++;
+      return Promise.resolve(
+        Response.json([
+          { recordID: 3, index: 0, model: "priced", cost: { usd: 1, source: "reported" }, totalUSD: 1 },
+          { recordID: 4, index: 0, model: "priced", cost: { usd: 2, source: "reported" }, totalUSD: 3 },
+        ]),
+      );
+    });
+    const lengths: number[] = [];
+    const owner = createRoot((dispose) => {
+      const history = createTaskEventTimeline({ taskId: () => "task" });
+      const projection = new RootConversationProjection();
+      let epoch = -1;
+      const conversation = createMemo(() => {
+        const next = history.epoch();
+        const reset = next !== epoch;
+        epoch = next;
+        return projection.derive(history.messages(), () => true, reset);
+      });
+      createEffect(() => {
+        lengths.push(history.messages().length);
+        conversation();
+      });
+      onCleanup(() => projection.clear());
+      return { ...history, conversation, analytics: createTaskAnalytics(history), dispose };
+    });
+    try {
+      await loaded(owner);
+      await yieldToTasks();
+      const initial = owner.messages();
+      const epoch = owner.epoch();
+      assert.equal(priceCalls, 1);
+      connections[0]?.handlers.onMessage(text(2, 0, "live response"));
+      assert.equal(initial.length, 1);
+      vi.advanceTimersByTime(100);
+      assert.equal(owner.messages(), initial);
+      assert.equal(initial.length, 2);
+      assert.equal(lengths.at(-1), 2);
+      assert.equal(
+        owner.conversation().groups.some((group) => group.events.some((event) => event.text?.text === "live response")),
+        true,
+      );
+      const result: EventResult = {
+        subtype: "success",
+        isError: false,
+        result: "done",
+        totalCostUSD: 0,
+        duration: 1,
+        durationAPI: 1,
+        numTurns: 1,
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          reportedModel: "",
+        },
+      };
+      const later = { ...result };
+      connections[0]?.handlers.onMessage({ recordID: 3, index: 0, message: { kind: "result", ts: 3, result } });
+      connections[0]?.handlers.onMessage({ recordID: 4, index: 0, message: { kind: "result", ts: 4, result: later } });
+      assert.equal(owner.messages(), initial);
+      assert.equal(owner.epoch(), epoch);
+      assert.equal(lengths.at(-1), 4);
+      assert.equal(owner.conversation().sessions.at(-1)?.turns.length, 2);
+      assert.equal(owner.analytics.snapshot().turns.length, 2);
+      assert.equal(priceCalls, 1);
+      vi.advanceTimersByTime(250);
+      await yieldToTasks();
+      assert.equal(priceCalls, 2);
+      assert.equal(owner.analytics.snapshot().costUSD, 3);
+      assert.equal(owner.analytics.snapshot().costComplete, true);
+      const estimates = await owner.readCosts(new AbortController().signal);
+      assert.equal(estimates[0]?.result, result);
+      assert.equal(estimates[1]?.result, later);
+      owner.retry();
+      assert.notEqual(owner.messages(), initial);
+      assert.ok(owner.epoch() > epoch);
+      await loaded(owner);
+      connections[0]?.handlers.onMessage(input(5, "stale stream"));
+      assert.equal(initial.length, 4);
+      assert.deepEqual(values(owner), ["initial prompt"]);
+      assert.equal(owner.analytics.snapshot().turns.length, 0);
+      const replacement = owner.messages();
+      owner.dispose();
+      assert.notEqual(owner.messages(), replacement);
+      assert.deepEqual(owner.messages(), []);
+      assert.equal(connections[1]?.close.mock.calls.length, 1);
+    } finally {
+      owner.dispose();
+    }
+  });
+
   it("automatically loads the complete backlog without navigation, including outputless chunks", async () => {
     const connections = capture([text(2, 0, "old"), text(520, 0, "recent")], 520);
     const owner = createRoot((dispose) => ({
@@ -592,6 +695,13 @@ describe("createTaskEventTimeline", () => {
         refreshed.map((value) => value.result),
         [costs[0]?.result, live, later],
       );
+      delayed = Promise.withResolvers<Response>();
+      const caller = new AbortController();
+      const cancelled = owner.readCosts(caller.signal);
+      caller.abort();
+      assert.equal((priceSignal as AbortSignal | null)?.aborted, true);
+      delayed.resolve(Response.json([]));
+      await assert.rejects(cancelled, { name: "AbortError" });
       delayed = Promise.withResolvers<Response>();
       const stale = owner.readCosts(new AbortController().signal);
       owner.retry();

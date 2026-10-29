@@ -1,4 +1,4 @@
-// Tests automatic history, task-owned plan updates, parent/child tools, and SSE lifecycle.
+// Tests coherent history publication, stable context disclosures, task-owned plans, scoped tools, and SSE lifecycle.
 
 import assert from "node:assert/strict";
 import { historyResponse } from "@tests/history";
@@ -115,6 +115,60 @@ async function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]>
   await waitFor(() => expect(screen.queryByRole("status", { name: "Loading history" })).not.toBeInTheDocument());
   return view;
 }
+
+it("never mounts completed context content while canonical history is published", async () => {
+  const init = (sessionID: string): EventMessage => ({
+    kind: "init",
+    ts: 1,
+    init: { reportedModel: "model", agentVersion: "v", sessionID, tools: [], cwd: "/workspace", harness: "claude" },
+  });
+  const events: EventMessage[] = [
+    init("past"),
+    { kind: "text", ts: 2, text: { text: "![Historical render probe](/historical-image.png)" } },
+    resultEvent(3),
+    { kind: "system", ts: 4, system: { subtype: "compact_boundary" } },
+    init("current"),
+    { kind: "text", ts: 6, text: { text: "Current context response" } },
+    resultEvent(7),
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input).endsWith("/bootstrap")
+      ? Response.json({
+          projectionVersion: "2",
+          generation: "test",
+          scope: "owner",
+          recordsPerChunk: 256,
+          through: events.length,
+          cursor: "2.test.7.end",
+          resourceBase: "/history/owner/test",
+        })
+      : historyResponse(events.map((message, index) => ({ recordID: index + 1, index: 0, message }))),
+  );
+  const rendered: string[] = [];
+  const innerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+  assert.ok(innerHTML?.set);
+  const original = innerHTML.set;
+  const renderedHTML = vi.spyOn(Element.prototype, "innerHTML", "set").mockImplementation(function (
+    this: Element,
+    value: string,
+  ) {
+    if (value.includes("Historical render probe")) rendered.push(value);
+    original.call(this, value);
+  });
+  let view: Awaited<ReturnType<typeof renderTaskDetail>> | null = null;
+  try {
+    view = await renderTaskDetail({ taskId: "canonical-publication" });
+    expect(screen.getByText("Current context response")).toBeInTheDocument();
+    expect(rendered).toHaveLength(0);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Compacted session/ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /^1 message/ }));
+    expect(screen.getByRole("img", { name: "Historical render probe" })).toBeInTheDocument();
+    expect(rendered.length).toBeGreaterThan(0);
+  } finally {
+    view?.unmount();
+    renderedHTML.mockRestore();
+  }
+});
 
 it("updates only the task-owned root plan while preserving canonical history and transport", async () => {
   const events: EventMessage[] = [
@@ -586,6 +640,86 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
+  it("keeps the current separator and focused skill link mounted during live flushes", async () => {
+    let send: ((message: EventMessage) => void) | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      for (const message of [
+        {
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "a", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "codex" },
+        },
+        { kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } },
+        { kind: "text", ts: 3, text: { text: "first response" } },
+        resultEvent(4),
+      ] satisfies EventMessage[])
+        emit(handlers, message);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    await renderTaskDetail({ taskId: "separator-identity" });
+    const separator = await screen.findByText(/^Session started · m/);
+    const link = within(screen.getByRole("navigation", { name: "Loaded skills" })).getByRole("link", {
+      name: "review",
+    });
+    await userEvent.setup().tab();
+    link.focus();
+    send?.({ kind: "text", ts: 5, text: { text: "streamed response" } });
+    await screen.findByText("streamed response", { exact: true });
+    expect(screen.getAllByText(/^Session started · m/)).toHaveLength(1);
+    expect(screen.getByText(/^Session started · m/)).toBe(separator);
+    expect(
+      within(screen.getByRole("navigation", { name: "Loaded skills" })).getByRole("link", { name: "review" }),
+    ).toBe(link);
+    expect(link).toHaveFocus();
+  });
+
+  it("keeps an expanded earlier context mounted and focused as later contexts close", async () => {
+    let send: ((message: EventMessage) => void) | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      for (const message of [
+        {
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "a", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "codex" },
+        },
+        { kind: "text", ts: 2, text: { text: "old context" } },
+        resultEvent(3),
+        { kind: "system", ts: 4, system: { subtype: "compact_boundary" } },
+        { kind: "text", ts: 5, text: { text: "current context" } },
+        resultEvent(6),
+      ] satisfies EventMessage[])
+        emit(handlers, message);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    await renderTaskDetail({ taskId: "closed-context-identity" });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /^Compacted session · 1 turn/ }));
+    await user.click(screen.getByRole("button", { name: /^1 message/ }));
+    const body = screen.getByText("old context", { exact: true });
+    const toggle = screen.getByRole("button", { name: /^Compacted session · 1 turn/ });
+    toggle.focus();
+    const boundaries: EventMessage[] = [
+      { kind: "system", ts: 10, system: { subtype: "compact_boundary" } },
+      { kind: "system", ts: 20, system: { subtype: "context_cleared" } },
+      {
+        kind: "init",
+        ts: 30,
+        init: { sessionID: "new", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "codex" },
+      },
+    ];
+    for (const boundary of boundaries) {
+      send?.(boundary);
+      send?.({ kind: "text", ts: boundary.ts + 1, text: { text: `later response ${boundary.ts}` } });
+      send?.(resultEvent(boundary.ts + 2));
+      await screen.findByText(`later response ${boundary.ts}`, { exact: true });
+      expect(screen.getByText("old context", { exact: true })).toBe(body);
+      expect(screen.getAllByRole("button", { name: /^Compacted session · 1 turn/ })[0]).toBe(toggle);
+      expect(toggle).toHaveFocus();
+    }
+  });
+
   it("keeps child tool DOM, output, errors, and scoped input separate from a simultaneous same-ID root tool", async (t) => {
     const root = { threadID: "root", turnID: "turn" };
     const child = { threadID: "child", turnID: "turn", agentID: "native:child", delegationToolUseID: "spawn" };

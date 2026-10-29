@@ -1,4 +1,4 @@
-// Source-scoped text and tool grouping with bounded stream snapshots and compact display aggregates.
+// Source-scoped message grouping, incremental context sections, and compact display aggregates.
 
 import type {
   EventMessage,
@@ -246,18 +246,11 @@ export function rateLimitPercentage(utilization: number): number {
   return Math.round(utilization * 100);
 }
 
-function rateLimitWarningPercentagesAfter(msgs: ReadonlyArray<EventMessage>): Map<string, number> {
-  const percentages = new Map<string, number>();
-  for (const ev of msgs) {
-    const rl = ev.rateLimit;
-    if (ev.kind !== "rateLimit" || !rl) continue;
-    if (rl.status === "allowed_warning") {
-      percentages.set(rl.rateLimitType, rateLimitPercentage(rl.utilization));
-    } else {
-      percentages.delete(rl.rateLimitType);
-    }
-  }
-  return percentages;
+function updateWarningPercentages(percentages: Map<string, number>, ev: EventMessage): void {
+  const rl = ev.rateLimit;
+  if (ev.kind !== "rateLimit" || !rl) return;
+  if (rl.status === "allowed_warning") percentages.set(rl.rateLimitType, rateLimitPercentage(rl.utilization));
+  else percentages.delete(rl.rateLimitType);
 }
 
 // Groups consecutive events for cohesive rendering.
@@ -566,7 +559,7 @@ function groupMessagesAfter(
         break;
       }
       case "system": {
-        // Compaction and clear are consumed by groupSessions() before reaching here.
+        // Compaction and clear are consumed by SessionGrouper before reaching here.
         // Thread status changes (active, idle, etc.) duplicate information
         // already in the task state — skip them to avoid noisy "other" groups.
         // model_rerouted and other informational subtypes are rendered via MessageItem.
@@ -917,9 +910,9 @@ export class IncrementalMessageGrouper {
   private firstEvent: EventMessage | null = null;
   private lastEvent: EventMessage | null = null;
 
-  reset(): void {
+  reset(warnings: ReadonlyMap<string, number>): void {
     this.previousLength = 0;
-    this.previousWarningPercentages.clear();
+    this.previousWarningPercentages = new Map(warnings);
     this.result = null;
     this.byIdentity.clear();
     this.byTool.clear();
@@ -927,11 +920,6 @@ export class IncrementalMessageGrouper {
     this.ended = false;
     this.firstEvent = null;
     this.lastEvent = null;
-  }
-
-  resetAfter(msgs: ReadonlyArray<EventMessage>): void {
-    this.reset();
-    this.previousWarningPercentages = rateLimitWarningPercentagesAfter(msgs);
   }
 
   group(msgs: EventMessage[]): MessageGroup[] {
@@ -1193,75 +1181,91 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   return turns;
 }
 
-const groupSessionsCache = new WeakMap<ReadonlyArray<EventMessage>, Session[]>();
+// SessionGrouper consumes root events once and reuses contexts closed by a
+// compaction, clear, or changed session identity. Structural changes regroup
+// only the active context so cross-turn tool and message identities still join.
+export class SessionGrouper {
+  private closed: Session[] = [];
+  private segment: EventMessage[] = [];
+  private boundary: EventMessage | null = null;
+  private sessionID: string | undefined;
+  private lastResult = -1;
+  private active: Session | null = null;
+  private activeLength = -1;
+  private result: Session[] = [];
+  private warnings = new Map<string, number>();
 
-// Splits messages into sessions at init (only when sessionID changes) and compaction/clear events.
-// The boundary event starts the new session and is NOT passed to groupMessages.
-// Re-invocations of Claude Code that share the same sessionID are NOT new sessions — they are
-// just new turns within the same session.
-export function groupSessions(msgs: EventMessage[]): Session[] {
-  const cached = groupSessionsCache.get(msgs);
-  if (cached !== undefined) return cached;
-  const sessions: Session[] = [];
-  let segment: EventMessage[] = [];
-  let boundaryEvent: EventMessage | undefined;
-  let currentSessionID: string | undefined;
+  get pastSessions(): Session[] {
+    return this.closed;
+  }
 
-  function flushSession() {
-    const groups = aggregateToolGroups(groupMessages(segment));
-    const turns = groupTurns(groups);
+  get warningPercentages(): ReadonlyMap<string, number> {
+    return this.warnings;
+  }
+
+  append(events: readonly EventMessage[]): Session[] {
+    let changed = false;
+    for (const event of events) {
+      updateWarningPercentages(this.warnings, event);
+      if (event.kind === "init" && !isChildEvent(event)) {
+        const id = event.init?.sessionID;
+        if (id !== this.sessionID) {
+          const openContext = this.boundary?.kind === "system" && this.lastResult < 0;
+          if (!openContext) {
+            if (this.boundary !== null) this.close();
+            this.boundary = event;
+            changed = true;
+          }
+          this.sessionID = id;
+        }
+      } else if (event.kind === "system" && isSessionBoundary(event)) {
+        if (this.boundary !== null) this.close();
+        this.boundary = event;
+        this.sessionID = undefined;
+        changed = true;
+      } else {
+        this.segment.push(event);
+        if (event.kind === "result" && !isChildEvent(event)) this.lastResult = this.segment.length - 1;
+        changed = true;
+      }
+    }
+    if (changed) {
+      // A changed boundary or segment always leaves a current context.
+      this.result = [...this.closed, this.current()];
+    }
+    return this.result;
+  }
+
+  private close(): void {
+    const carry = this.lastResult >= 0 ? this.segment.splice(this.lastResult + 1) : [];
+    this.closed = [...this.closed, this.current()];
+    this.segment = carry;
+    this.boundary = null;
+    this.lastResult = -1;
+    this.active = null;
+    this.activeLength = -1;
+  }
+
+  private current(): Session {
+    if (
+      this.active !== null &&
+      this.activeLength === this.segment.length &&
+      this.active.boundaryEvent === (this.boundary ?? undefined)
+    )
+      return this.active;
+    const turns = groupTurns(aggregateToolGroups(groupMessages(this.segment)));
     let toolCount = 0;
     let textCount = 0;
     let durationMs = 0;
-    for (const t of turns) {
-      toolCount += t.toolCount;
-      textCount += t.textCount;
-      durationMs += t.durationMs;
+    for (const turn of turns) {
+      toolCount += turn.toolCount;
+      textCount += turn.textCount;
+      durationMs += turn.durationMs;
     }
-    sessions.push({ boundaryEvent, turns, toolCount, textCount, durationMs });
-    boundaryEvent = undefined;
-    segment = [];
+    this.activeLength = this.segment.length;
+    this.active = { boundaryEvent: this.boundary ?? undefined, turns, toolCount, textCount, durationMs };
+    return this.active;
   }
-
-  function flushAndCarry() {
-    // Carry post-result events forward into the new session (e.g. a userInput sent just
-    // before the new boundary). They belong to the session they triggered.
-    const lastResultIdx = segment.findLastIndex((e) => e.kind === "result");
-    const carry = lastResultIdx >= 0 ? segment.splice(lastResultIdx + 1) : [];
-    flushSession();
-    segment = carry;
-  }
-
-  for (const ev of msgs) {
-    if (ev.kind === "init" && !isChildEvent(ev)) {
-      const newID = ev.init?.sessionID;
-      if (newID !== currentSessionID) {
-        // Restart init supplies the identity of the context just opened by a
-        // clear or compaction. Its prompt may already precede this init.
-        const openContext = boundaryEvent?.kind === "system" && !segment.some((event) => event.kind === "result");
-        if (!openContext) {
-          if (boundaryEvent !== undefined) flushAndCarry();
-          boundaryEvent = ev;
-        }
-        currentSessionID = newID;
-      }
-      // Same sessionID: re-invocation within the same session; skip the init event entirely.
-    } else if (
-      ev.kind === "system" &&
-      (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared")
-    ) {
-      if (boundaryEvent !== undefined) flushAndCarry();
-      boundaryEvent = ev;
-      currentSessionID = undefined; // The restarted init supplies this context's identity.
-    } else {
-      segment.push(ev);
-    }
-  }
-  if (segment.length > 0 || boundaryEvent !== undefined) {
-    flushSession();
-  }
-  groupSessionsCache.set(msgs, sessions);
-  return sessions;
 }
 
 // Flat display item for the message list.
@@ -1315,24 +1319,19 @@ export function buildTurnItems(
   return items;
 }
 
-// Builds flat items for past (non-current) sessions.
-// Each past session is elided to a single row by default; click to expand.
-export function buildPastSessionItems(
-  sessions: Session[],
-  expandedSessionKeys: ReadonlySet<string>,
+// Builds the rows of one closed context, collapsed unless explicitly expanded.
+export function buildSessionItems(
+  session: Session,
+  sessionKey: string,
+  expanded: boolean,
   expandedTurnKeys: ReadonlySet<string>,
 ): MsgItem[] {
-  const items: MsgItem[] = [];
-  for (const [i, session] of sessions.entries()) {
-    const sessionKey = `session:${i}:${session.boundaryEvent?.ts ?? ""}`;
-    if (expandedSessionKeys.has(sessionKey)) {
-      items.push({ kind: "sessionHeader", session, sessionKey, key: `hdr:${sessionKey}` });
-      items.push(...buildTurnItems(session.turns, expandedTurnKeys, sessionKey, true));
-    } else {
-      items.push({ kind: "sessionElided", session, sessionKey, key: sessionKey });
-    }
-  }
-  return items;
+  return expanded
+    ? [
+        { kind: "sessionHeader", session, sessionKey, key: `hdr:${sessionKey}` },
+        ...buildTurnItems(session.turns, expandedTurnKeys, sessionKey, true),
+      ]
+    : [{ kind: "sessionElided", session, sessionKey, key: sessionKey }];
 }
 
 export function toolCountSummary(calls: ToolCall[]): string {

@@ -1,4 +1,4 @@
-// Tests for groupMessages and groupTurns logic.
+// Tests source-scoped message grouping, incremental contexts, and turn summaries.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -13,13 +13,13 @@ import {
   messageIdentity,
   groupMessages,
   groupTurns,
-  groupSessions,
+  SessionGrouper,
   sessionSummary,
   turnSummary,
   toolCallDurationMs,
   toolCallDurations,
   buildTurnItems,
-  buildPastSessionItems,
+  buildSessionItems,
 } from "./grouping";
 
 function toolUseEvent(id: string, name: string): EventMessage {
@@ -646,7 +646,7 @@ describe("groupMessages", () => {
       { kind: "textDelta", ts: 2, textDelta: { text: "answer" } },
     ] satisfies EventMessage[];
 
-    grouper.reset();
+    grouper.reset(new Map());
     grouper.group(thinkingThenText.slice(0, 1));
     inc = grouper.group(thinkingThenText);
     full = groupMessages(thinkingThenText);
@@ -823,14 +823,7 @@ describe("groupMessages", () => {
 
   it("filters a live warning that repeats the previous completed turn", () => {
     const grouper = new IncrementalMessageGrouper();
-    grouper.resetAfter([
-      {
-        kind: "rateLimit",
-        ts: 1,
-        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 },
-      },
-      resultEvent(),
-    ]);
+    grouper.reset(new Map([["five_hour", 80]]));
 
     expect(
       grouper.group([
@@ -887,7 +880,7 @@ describe("groupMessages", () => {
   });
 });
 
-describe("groupSessions", () => {
+describe("SessionGrouper", () => {
   it("splits on init events", () => {
     const msgs: EventMessage[] = [
       {
@@ -918,7 +911,7 @@ describe("groupSessions", () => {
       },
       textDeltaEvent("session 2"),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(2);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
@@ -939,7 +932,7 @@ describe("groupSessions", () => {
         const prompt: EventMessage = { kind: "userInput", ts: 3, userInput: { text: "new prompt" } };
         const restart = init("s2");
         const boundary: EventMessage = { kind: "system", ts: 2, system: { subtype } };
-        const sessions = groupSessions([
+        const sessions = new SessionGrouper().append([
           init("s1"),
           textDeltaEvent("old response"),
           resultEvent(),
@@ -980,7 +973,7 @@ describe("groupSessions", () => {
       { kind: "system", ts: 2, system: { subtype: "compact_boundary" } },
       textDeltaEvent("after compact"),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(2);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
@@ -990,7 +983,7 @@ describe("groupSessions", () => {
 
   it("no boundary events produces one session with no boundaryEvent", () => {
     const msgs: EventMessage[] = [textDeltaEvent("hello"), resultEvent(), textDeltaEvent("world")];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(1);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent).toBeUndefined();
@@ -1016,7 +1009,7 @@ describe("groupSessions", () => {
       },
       textDeltaEvent("response"),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(1);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
@@ -1058,7 +1051,7 @@ describe("groupSessions", () => {
       },
       textDeltaEvent("session 2 response"),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(2);
     assert.ok(sessions[0] !== undefined);
     const s1Events = sessions[0].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
@@ -1102,7 +1095,7 @@ describe("groupSessions", () => {
       textDeltaEvent("second response"),
       resultEvent(),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(2);
     assert.ok(sessions[1] !== undefined);
     const lastTurn = sessions[1].turns[sessions[1].turns.length - 1];
@@ -1131,7 +1124,7 @@ describe("groupSessions", () => {
         { kind: "system", ts: 3, system: { subtype } },
         textDeltaEvent("compacted response"),
       ];
-      const sessions = groupSessions(msgs);
+      const sessions = new SessionGrouper().append(msgs);
       expect(sessions).toHaveLength(2);
       assert.ok(sessions[1] !== undefined);
       expect(sessions[1].boundaryEvent?.system?.subtype).toBe(subtype);
@@ -1173,7 +1166,7 @@ describe("groupSessions", () => {
       textDeltaEvent("second response"),
       resultEvent(),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(1);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].turns).toHaveLength(2);
@@ -1194,7 +1187,7 @@ describe("groupSessions", () => {
         },
       },
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(1);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].turns).toHaveLength(0);
@@ -1219,7 +1212,7 @@ describe("groupSessions", () => {
       textDeltaEvent("text"),
       resultEvent(),
     ];
-    const sessions = groupSessions(msgs);
+    const sessions = new SessionGrouper().append(msgs);
     expect(sessions).toHaveLength(1);
     assert.ok(sessions[0] !== undefined);
     expect(sessions[0].toolCount).toBe(1);
@@ -1235,7 +1228,7 @@ describe("groupSessions", () => {
     secondResult.ts = 65_000;
     secondResult.result.duration = 3;
 
-    const sessions = groupSessions([
+    const sessions = new SessionGrouper().append([
       {
         kind: "init",
         ts: 1_000,
@@ -1482,80 +1475,24 @@ describe("buildTurnItems", () => {
   });
 });
 
-describe("buildPastSessionItems", () => {
-  it("produces identical keys for two calls with the same inputs", () => {
-    // Past sessions are memoized via createMemo in TaskDetail. If keys change
-    // identity between calls, the keyed Match components remount and cause flickering.
-    const msgs: EventMessage[] = [
-      {
-        kind: "init",
-        ts: 1,
-        init: {
-          reportedModel: "m",
-          agentVersion: "1",
-          sessionID: "s1",
-          tools: [],
-          cwd: "/",
-          harness: "claude",
-        },
-      },
-      textDeltaEvent("session 1"),
-      resultEvent(),
-      {
-        kind: "init",
-        ts: 2,
-        init: {
-          reportedModel: "m",
-          agentVersion: "1",
-          sessionID: "s2",
-          tools: [],
-          cwd: "/",
-          harness: "claude",
-        },
-      },
-      textDeltaEvent("session 2"),
-    ];
-    const sessions = groupSessions(msgs);
-    const a = buildPastSessionItems(sessions, new Set(), new Set());
-    const b = buildPastSessionItems(sessions, new Set(), new Set());
-    expect(a.length).toBe(b.length);
-    for (let i = 0; i < a.length; i++) {
-      const bItem = b[i];
-      assert.ok(bItem !== undefined);
-      const aItem = a[i];
-      assert.ok(aItem !== undefined);
-      expect(aItem.key).toBe(bItem.key);
-    }
-  });
-
-  it("session keys from different calls with same inputs are stable", () => {
-    // When a past session is collapsed (sessionElided), its key must not change
-    // across recomputation frames, otherwise the elided row remounts.
-    const msgs: EventMessage[] = [
-      {
-        kind: "init",
-        ts: 10,
-        init: {
-          reportedModel: "m",
-          agentVersion: "1",
-          sessionID: "s1",
-          tools: [],
-          cwd: "/",
-          harness: "claude",
-        },
-      },
-      textDeltaEvent("text"),
-      resultEvent(),
-    ];
-    const sessions = groupSessions(msgs);
-    const items = buildPastSessionItems(sessions, new Set(), new Set());
-    // All items from past sessions should be sessionElided when not expanded.
-    expect(items.every((i) => i.kind === "sessionElided")).toBe(true);
-    const keys = items.map((i) => i.key);
-    // Keys should be unique.
-    expect(new Set(keys).size).toBe(keys.length);
-    // Session key should include the boundary event timestamp.
-    expect(keys[0]).toContain("10");
+describe("buildSessionItems", () => {
+  it("builds a collapsed context or its header and turn disclosures", () => {
+    const session = new SessionGrouper().append([textDeltaEvent("response"), resultEvent()])[0];
+    assert.ok(session);
+    expect(buildSessionItems(session, "session:0:", false, new Set())).toEqual([
+      { kind: "sessionElided", session, sessionKey: "session:0:", key: "session:0:" },
+    ]);
+    const expanded = buildSessionItems(session, "session:0:", true, new Set());
+    expect(expanded.map((item) => item.kind)).toEqual(["sessionHeader", "elided"]);
+    expect(expanded[0]).toEqual({ kind: "sessionHeader", session, sessionKey: "session:0:", key: "hdr:session:0:" });
+    const turn = expanded[1];
+    assert.ok(turn?.kind === "elided");
+    expect(buildSessionItems(session, "session:0:", true, new Set([turn.key])).map((item) => item.kind)).toEqual([
+      "sessionHeader",
+      "expandedHeader",
+      "group",
+      "group",
+    ]);
   });
 });
 

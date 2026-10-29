@@ -4,12 +4,12 @@ import {
   createSignal,
   createMemo,
   createEffect,
+  mapArray,
   For,
   Index,
   Show,
   onCleanup,
   onMount,
-  untrack,
   Switch,
   Match,
   type Accessor,
@@ -42,6 +42,7 @@ import type {
   TaskRateLimit,
   GitRepositoryState,
 } from "@sdk/types.gen";
+import { RootConversationProjection } from "../rootConversation";
 import type { DraftImage } from "../images";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
@@ -49,14 +50,11 @@ import { useHostMode } from "@maruel/gomode/web/HostMode";
 import { notifications } from "@maruel/gomode/web/notifications";
 
 import {
-  IncrementalMessageGrouper,
-  aggregateToolGroups,
   isChildEvent,
   toolIdentity,
   messageIdentity,
-  groupSessions,
   isSessionBoundary,
-  buildPastSessionItems,
+  buildSessionItems,
   buildTurnItems,
   rateLimitPercentage,
   toolCallDurationMs,
@@ -426,38 +424,22 @@ export default function TaskDetail(props: Props) {
     });
   }
 
-  // Incremental grouping: cache completed-turn groups so streaming only reprocesses the current turn.
-  // splitIdx is the index into messages() where the current (incomplete) turn starts.
-  // It advances only when a "result" event arrives, keeping completedMsgs stable during streaming.
-  const messageGrouper = new IncrementalMessageGrouper();
-  const [splitIdx, setSplitIdx] = createSignal(0);
-  const [completedMsgs, setCompletedMsgs] = createSignal<EventMessage[]>([]);
+  // Project root ownership and completed/live contexts atomically before
+  // presentation consumes them. Closed contexts keep their object identities.
+  const rootProjection = new RootConversationProjection();
   let derivedTaskId = "";
   let derivedEpoch = -1;
   let derivedRouting = -1;
-  createEffect(() => {
+  const conversation = createMemo(() => {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     nativeActivities();
     const routing = nativeTracker.routingRevision;
-    const msgs = messages();
-    const taskChanged = taskId !== derivedTaskId;
-    const reset = taskChanged || epoch !== derivedEpoch || routing !== derivedRouting;
-    const previousIdx = untrack(splitIdx);
-    let idx = reset ? 0 : previousIdx;
-    if (reset) {
-      derivedTaskId = taskId;
-      derivedEpoch = epoch;
-      derivedRouting = routing;
-    }
-    for (let i = idx; i < msgs.length; i++) {
-      const event = msgs[i];
-      if (event?.kind === "result" && !isChildEvent(event)) idx = i + 1;
-    }
-    if (reset || idx !== previousIdx) {
-      setSplitIdx(idx);
-      setCompletedMsgs(msgs.slice(0, idx).filter(displayedAtRoot));
-    }
+    const reset = taskId !== derivedTaskId || epoch !== derivedEpoch || routing !== derivedRouting;
+    derivedTaskId = taskId;
+    derivedEpoch = epoch;
+    derivedRouting = routing;
+    return rootProjection.derive(messages(), displayedAtRoot, reset);
   });
 
   // Fold task timing incrementally so live flushes process only appended events.
@@ -555,29 +537,12 @@ export default function TaskDetail(props: Props) {
   const contextSkills = createMemo(() => skillsTracker.derive(props.taskId, timeline.epoch(), messages()));
   const hasSessionStarted = () => setupInfo().firstInit !== null;
 
-  // Sessions from completed messages: stable during streaming (only updates on turn completion).
-  // groupSessions extracts init/compaction/clear events as session headers, not message groups.
-  const allCompletedSessions = createMemo(() => groupSessions(completedMsgs()));
-  // Past sessions: all sessions before the current (last) one.
-  const pastSessions = createMemo(() => allCompletedSessions().slice(0, -1));
-  // Current session: the last session in completedMsgs (contains its completed turns + boundary event).
-  const currentSessionEntry = createMemo((): Session | null => {
-    const sessions = allCompletedSessions();
-    return sessions.at(-1) ?? null;
-  });
+  const allCompletedSessions = createMemo(() => conversation().sessions);
+  const pastSessions = createMemo(() => conversation().pastSessions);
+  const currentSessionEntry = createMemo((): Session | null => allCompletedSessions().at(-1) ?? null);
   const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
-  // Boundary event for the current session from completed messages.
-  const currentSessionBoundaryFromCompleted = createMemo(() => currentSessionEntry()?.boundaryEvent);
+  const currentSessionBoundaryEvent = createMemo(() => conversation().boundary);
 
-  // A completed section keeps its separator and turn keys throughout a live
-  // turn. Before the first result, the initial init supplies its separator.
-  const currentSessionBoundaryEvent = createMemo(
-    () =>
-      currentSessionBoundaryFromCompleted() ??
-      messages()
-        .slice(splitIdx())
-        .find((event) => event.kind === "init" && !isChildEvent(event)),
-  );
   // Closed context metadata belongs to the session preceding its boundary.
   const sessionEndBoundaries = createMemo(() => {
     const sessions = allCompletedSessions();
@@ -599,47 +564,23 @@ export default function TaskDetail(props: Props) {
     return `session:${Math.max(0, idx)}:${ev?.ts ?? ""}`;
   });
 
-  // Live groups retain compaction/clear events at their position in the stream.
-  // Init metadata is rendered by the section separator. The memo owns its stateful
-  // grouper reset so Solid cannot evaluate it before a sibling reset effect.
-  let groupedTaskId = "";
-  let groupedEpoch = -1;
-  let groupedSplitIdx = -1;
-  let groupedThrough = 0;
-  let groupedMessages: EventMessage[] = [];
-  let groupedRouting = -1;
-  const currentGroups = createMemo(() => {
-    const taskId = props.taskId;
-    const epoch = timeline.epoch();
-    const start = splitIdx();
-    nativeActivities();
-    const routing = nativeTracker.routingRevision;
-    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx || routing !== groupedRouting) {
-      groupedTaskId = taskId;
-      groupedEpoch = epoch;
-      groupedSplitIdx = start;
-      groupedRouting = routing;
-      messageGrouper.resetAfter(completedMsgs());
-      groupedThrough = start;
-      groupedMessages = [];
-    }
-    const history = messages();
-    for (let i = groupedThrough; i < history.length; i++) {
-      const event = history[i];
-      if (!event) throw new Error("Missing timeline event");
-      if (event.kind !== "init" && displayedAtRoot(event)) groupedMessages.push(event);
-    }
-    groupedThrough = history.length;
-    return aggregateToolGroups(messageGrouper.group(groupedMessages));
-  });
+  const currentGroups = createMemo(() => conversation().groups);
 
-  // Past session items: stable during streaming (only change on turn completion or expansion toggle).
-  // Memoized separately so MsgItem object references persist across streaming flushes — the
-  // <Match when={..} keyed> pattern uses reference equality as the DOM key, and new
-  // object identities on every flush would cause remounting (flickering + unclickable).
-  const pastSessionItems = createMemo(() =>
-    buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
-  );
+  // Own each closed context's rows by Session identity. Later contexts and unrelated
+  // disclosure changes must preserve keyed Match values, DOM nodes, and focus.
+  const sessionItems = mapArray(pastSessions, (session, index) => {
+    const key = createMemo(() => `session:${index()}:${session.boundaryEvent?.ts ?? ""}`);
+    const expanded = createMemo(() => expandedSessionKeys().has(key()));
+    const turns = createMemo<ReadonlySet<string>>((previous) => {
+      const prefix = `${key()}:turn:`;
+      const selected = [...expandedTurnKeys()].filter((turn) => turn.startsWith(prefix));
+      return previous && previous.size === selected.length && selected.every((turn) => previous.has(turn))
+        ? previous
+        : new Set(selected);
+    });
+    return createMemo(() => buildSessionItems(session, key(), expanded(), turns()));
+  });
+  const pastSessionItems = createMemo(() => sessionItems().flatMap((rows) => rows()));
   // Whether a live turn is currently streaming. Mirrors Android's hasLiveTurn.
   const hasLiveTurn = createMemo(() => currentGroups().length > 0);
   // Elidable turns (all completed turns except the last, which is always expanded).
@@ -724,10 +665,8 @@ export default function TaskDetail(props: Props) {
     timingTracker.derive([], true);
     backgroundTracker.derive([]);
     skillsTracker.clear();
-    messageGrouper.resetAfter([]);
-    groupedMessages = [];
+    rootProjection.clear();
     setupLogs = [];
-    setCompletedMsgs([]);
     props.onCancelInputConversion();
   });
   async function sendInput() {
