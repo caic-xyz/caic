@@ -17,25 +17,34 @@ import { api } from "../api";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 
 // Spies on the real api singleton replace the former module mocks.
-const taskEventStreamMock = vi.spyOn(api, "taskEvents");
+let taskEventStreamMock = vi.spyOn(api, "historyEvents");
 const clearContextMock = vi.spyOn(api, "clearContext");
 const compactContextMock = vi.spyOn(api, "compactContext");
 const getTaskDiffMock = vi.spyOn(api, "getTaskDiff");
 const getTaskDiffIndexMock = vi.spyOn(api, "getTaskDiffIndex");
 const getTaskFileDiffMock = vi.spyOn(api, "getTaskFileDiff");
 
-taskEventStreamMock.mockImplementation(((_id: string, _backward: string, handlers: { onReady?: () => void }) => {
-  const fakeES = {
-    addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
-    close: vi.fn(),
-    onerror: null as ((e: Event) => void) | null,
-  };
-  // Fire "ready" asynchronously so the component transitions to live mode.
-  setTimeout(() => {
-    handlers.onReady?.();
-  }, 0);
-  return fakeES as unknown as EventSource;
-}) as typeof api.taskEvents);
+beforeEach(() => {
+  taskEventStreamMock = vi
+    .spyOn(api, "historyEvents")
+    .mockImplementation(() => ({ close: vi.fn(), onerror: null }) as unknown as EventSource);
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json({
+      projectionVersion: "1",
+      generation: "test",
+      scope: "owner",
+      recordsPerChunk: 256,
+      through: 0,
+      cursor: "1.test.0.end",
+      resourceBase: "/history/owner/test",
+    }),
+  );
+});
+let fixtureRecord = 0;
+function emit(handlers: HistoryEventsHandlers, message: EventMessage) {
+  handlers.onMessage({ recordID: ++fixtureRecord, index: 0, message });
+}
+
 clearContextMock.mockImplementation(() => Promise.resolve({ status: "cleared" }) as never);
 compactContextMock.mockImplementation(() => Promise.resolve({ status: "compacting" }) as never);
 getTaskDiffMock.mockImplementation(() => Promise.resolve({} as never));
@@ -86,15 +95,15 @@ const baseProps = {
   onError: () => {},
 };
 
-function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}, timelineState?: string) {
+async function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
   window.history.replaceState(null, "", "/task/@abc+test-task");
-  return render(() => (
+  const view = render(() => (
     <Router>
       <Route
         path="/*"
         component={() => (
           <HostModeProvider>
-            <TaskTimelineProvider taskId={props.taskId ?? baseProps.taskId} taskState={timelineState ?? "stopped"}>
+            <TaskTimelineProvider taskId={props.taskId ?? baseProps.taskId}>
               <TaskDetail {...baseProps} {...props} />
             </TaskTimelineProvider>
           </HostModeProvider>
@@ -102,6 +111,8 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {},
       />
     </Router>
   ));
+  await waitFor(() => expect(screen.queryByRole("status", { name: "Loading history" })).not.toBeInTheDocument());
+  return view;
 }
 
 it("updates only the task-owned root plan while preserving canonical history and transport", async () => {
@@ -150,7 +161,7 @@ it("updates only the task-owned root plan while preserving canonical history and
         path="/*"
         component={() => (
           <HostModeProvider>
-            <TaskTimelineProvider taskId="abc" taskState="has_plan">
+            <TaskTimelineProvider taskId="abc">
               <Probe />
               <TaskDetail {...baseProps} taskState="has_plan" currentPlan={plan()} />
             </TaskTimelineProvider>
@@ -189,7 +200,7 @@ it("updates only the task-owned root plan while preserving canonical history and
 });
 
 it("keeps a single-call plan dormant inside a collapsed past turn", async () => {
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
     for (const event of [
       { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "past-plan", name: "ExitPlanMode", input: {} } },
       resultEvent(2000),
@@ -197,11 +208,13 @@ it("keeps a single-call plan dormant inside a collapsed past turn", async () => 
       { kind: "text", ts: 4000, text: { text: "Current response" } },
       resultEvent(5000),
     ] satisfies EventMessage[])
-      handlers.onMessage(event);
-    handlers.onReady?.();
+      emit(handlers, event);
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail({ taskId: "plan-disclosure", currentPlan: { toolUseID: "past-plan", content: "Dormant plan" } });
+  await renderTaskDetail({
+    taskId: "plan-disclosure",
+    currentPlan: { toolUseID: "past-plan", content: "Dormant plan" },
+  });
   expect(screen.queryByTestId("plan-content")).not.toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole("button", { name: /1 tool call/ }));
   expect(screen.getByTestId("plan-content")).toHaveTextContent("Dormant plan");
@@ -261,7 +274,7 @@ it("retries live history and automatically loads the full tool output", async ()
     }
     throw new Error(`Unexpected history request: ${url}`);
   });
-  const view = renderTaskDetail({}, "running");
+  const view = await renderTaskDetail({});
   try {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("History request failed (503)"));
     const user = userEvent.setup();
@@ -328,7 +341,7 @@ it("automatically restores completed activity timing while keeping live observat
       );
     throw new Error(`Unexpected history request: ${url}`);
   });
-  const view = renderTaskDetail({}, "running");
+  const view = await renderTaskDetail({});
   try {
     await vi.waitFor(() => expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01"));
     await vi.waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
@@ -374,8 +387,8 @@ it("automatically restores completed activity timing while keeping live observat
 
 it("links a sent image to its document view at the conversation width", async () => {
   const hash = "a".repeat(64);
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-    handlers.onMessage({
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    emit(handlers, {
       kind: "userInput",
       ts: 1000,
       userInput: {
@@ -383,10 +396,9 @@ it("links a sent image to its document view at the conversation width", async ()
         images: [{ mediaType: "image/png", data: "aW1n", hash }],
       },
     });
-    handlers.onReady?.();
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail();
+  await renderTaskDetail();
   const image = await screen.findByRole("img", { name: "attached" });
   expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${hash}?w=480`);
   const link = screen.getByRole("link", { name: "Open attached image" });
@@ -395,16 +407,15 @@ it("links a sent image to its document view at the conversation width", async ()
 
 it("falls back to the inline image when the attachment cannot load", async () => {
   const hash = "a".repeat(64);
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-    handlers.onMessage({
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    emit(handlers, {
       kind: "userInput",
       ts: 1000,
       userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n", hash }] },
     });
-    handlers.onReady?.();
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail();
+  await renderTaskDetail();
   const image = await screen.findByRole("img", { name: "attached" });
   const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(image) as object, "src");
   if (!descriptor?.get || !descriptor.set) throw new Error("Missing HTMLImageElement.src accessors");
@@ -425,16 +436,15 @@ it("falls back to the inline image when the attachment cannot load", async () =>
 });
 
 it("keeps rendering an image inline when it has no digest", async () => {
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-    handlers.onMessage({
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    emit(handlers, {
       kind: "userInput",
       ts: 1000,
       userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n" }] },
     });
-    handlers.onReady?.();
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail();
+  await renderTaskDetail();
   const image = await screen.findByRole("img", { name: "attached" });
   expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1n");
   expect(screen.queryByRole("link", { name: "Open attached image" })).not.toBeInTheDocument();
@@ -449,13 +459,12 @@ it("keeps a child-first card mounted and open as parent content and lifecycle me
     itemID: "answer",
   };
   let send: ((message: EventMessage) => void) | undefined;
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-    send = handlers.onMessage;
-    handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Child first" } });
-    handlers.onReady?.();
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    send = (message) => emit(handlers, message);
+    emit(handlers, { kind: "textDelta", ts: 1000, source, textDelta: { text: "Child first" } });
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail();
+  await renderTaskDetail();
   const card = screen.getByTestId("native-subagent-card");
   const summary = card.querySelector("summary");
   if (!summary) throw new Error("Missing native summary");
@@ -485,8 +494,8 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
   const parent = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "reason" };
   const child = { ...parent, agentID: "codex:thread:child", threadID: "child", itemID: "answer" };
   let send: ((message: EventMessage) => void) | undefined;
-  taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-    send = handlers.onMessage;
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    send = (message) => emit(handlers, message);
     const initial: EventMessage[] = [
       { kind: "thinkingDelta", ts: 1000, source: parent, thinkingDelta: { text: "Consider " } },
       {
@@ -496,11 +505,10 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
       },
       { kind: "textDelta", ts: 1200, source: child, textDelta: { text: "- A **bow" } },
     ];
-    initial.forEach(handlers.onMessage);
-    handlers.onReady?.();
+    initial.forEach((message) => emit(handlers, message));
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
-  renderTaskDetail();
+  await renderTaskDetail();
   const card = screen.getByTestId("native-subagent-card");
   const summary = card.querySelector("summary");
   if (!summary) throw new Error("Missing native summary");
@@ -538,8 +546,8 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
   expect(parentBlock?.textContent).toBe("");
 });
 
-it("shows retained disk usage for a stopped task", () => {
-  renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
+it("shows retained disk usage for a stopped task", async () => {
+  await renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
 
   expect(screen.getByText("Disk 2.0 MiB")).toHaveAttribute(
     "title",
@@ -547,8 +555,8 @@ it("shows retained disk usage for a stopped task", () => {
   );
 });
 
-it("hides unavailable disk usage for an old stopped task", () => {
-  renderTaskDetail({ taskState: "stopped" });
+it("hides unavailable disk usage for an old stopped task", async () => {
+  await renderTaskDetail({ taskState: "stopped" });
 
   expect(screen.queryByText(/^Disk /)).not.toBeInTheDocument();
 });
@@ -587,37 +595,36 @@ describe("TaskDetail", () => {
       .spyOn(api, "getTaskToolInput")
       .mockResolvedValue({ toolUseID: "same", input: { scoped: "child input" } });
     t.after(() => inputSpy.mockRestore());
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      send = handlers.onMessage;
-      handlers.onMessage({
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      emit(handlers, {
         kind: "toolUse",
         ts: 1000,
         source: root,
         toolUse: { toolUseID: "same", name: "Parent tool", input: {} },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "toolUse",
         ts: 2000,
         source: child,
         toolUse: { toolUseID: "same", name: "Child tool", input: {}, inputTruncated: true },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "toolUse",
         ts: 2100,
         source: sibling,
         toolUse: { toolUseID: "same", name: "Sibling tool", input: {} },
       });
-      handlers.onMessage({ kind: "skillLoad", ts: 2200, source: root, skillLoad: { skill: "root-skill" } });
-      handlers.onMessage({
+      emit(handlers, { kind: "skillLoad", ts: 2200, source: root, skillLoad: { skill: "root-skill" } });
+      emit(handlers, {
         kind: "todo",
         ts: 2300,
         source: root,
         todo: { toolUseID: "todo", todos: [{ content: "Root todo", activeForm: "Root todo", status: "pending" }] },
       });
-      handlers.onReady?.();
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const user = userEvent.setup();
     const card = screen
       .getAllByTestId("native-subagent-card")
@@ -693,13 +700,12 @@ describe("TaskDetail", () => {
   it("keeps an identified answer mounted when the successful result repeats it", async () => {
     const source = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "answer" };
     let send: ((message: EventMessage) => void) | undefined;
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      send = handlers.onMessage;
-      handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Finished." } });
-      handlers.onReady?.();
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      emit(handlers, { kind: "textDelta", ts: 1000, source, textDelta: { text: "Finished." } });
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const block = screen.getByTestId("stream-message");
     send?.({ kind: "text", ts: 2000, source, text: { text: "Finished." } });
     const completion = resultEvent(3000);
@@ -712,8 +718,8 @@ describe("TaskDetail", () => {
   });
 
   it("omits empty session metadata without leaving extra separators", async () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "init",
         ts: 1_000,
         init: {
@@ -725,16 +731,15 @@ describe("TaskDetail", () => {
           harness: "antigravity",
         },
       });
-      handlers.onMessage({ kind: "text", ts: 2_000, text: { text: "Verification is running." } });
-      handlers.onReady?.();
+      emit(handlers, { kind: "text", ts: 2_000, text: { text: "Verification is running." } });
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     expect(await screen.findByText("Session started · gemini-3.8-flash-high · session-one")).toBeInTheDocument();
   });
 
   it("replaces the Diff link with a repository state marker", async () => {
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(
       await screen.findByRole("link", {
@@ -744,15 +749,15 @@ describe("TaskDetail", () => {
     expect(screen.queryByText("Diff")).not.toBeInTheDocument();
   });
 
-  it("links task statistics to the full detail route", () => {
-    renderTaskDetail();
+  it("links task statistics to the full detail route", async () => {
+    await renderTaskDetail();
 
     expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute("href", "/task/@abc+test-task/stats");
   });
 
   it("keeps header Git line totals when its capped title ellipsizes", async () => {
     const title = "OAuth security hardening and migration";
-    renderTaskDetail({ title });
+    await renderTaskDetail({ title });
 
     const titleElement = screen.getByText(title);
     Object.defineProperties(titleElement, {
@@ -769,7 +774,7 @@ describe("TaskDetail", () => {
   });
 
   it("elides header Git line totals when repository context ellipsizes", async () => {
-    renderTaskDetail();
+    await renderTaskDetail();
 
     const repoLink = await screen.findByRole("link", { name: "my-repo" });
     const headerMeta = repoLink.parentElement;
@@ -788,7 +793,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps header Git line totals on one center-aligned flex line", async () => {
-    renderTaskDetail();
+    await renderTaskDetail();
 
     const header = screen.getByTestId("task-detail-header");
     Array.from(header.children).forEach((child, index) => {
@@ -814,19 +819,18 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
   });
 
-  it("opens agent screenshot links in the file viewer", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("opens agent screenshot links in the file viewer", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "text",
         ts: 1000,
         text: {
           text: "[Screenshot: General](/home/user/src/caic/test-results/settings-general-desktop.png)",
         },
       });
-      handlers.onReady?.();
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const link = screen.getByRole("link", { name: "Screenshot: General" });
     expect(link).toHaveAttribute(
       "href",
@@ -836,19 +840,18 @@ describe("TaskDetail", () => {
     expect(link).toHaveAttribute("data-app-link");
   });
 
-  it("resolves file URIs and relative paths while preserving web links", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("resolves file URIs and relative paths while preserving web links", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "text",
         ts: 1000,
         text: {
           text: "[Skill](file:///home/user/skill%20notes.md) [Source](./src/App.tsx:12) [Website](https://example.com) [Mail](mailto:user@example.com) [Section](#section)",
         },
       });
-      handlers.onReady?.();
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     // Markdown documents open in the in-app viewer, not a new tab.
     const skill = screen.getByRole("link", { name: "Skill" });
     expect(skill).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fskill+notes.md");
@@ -862,28 +865,27 @@ describe("TaskDetail", () => {
     expect(screen.getByRole("link", { name: "Section" })).toHaveAttribute("href", "#section");
   });
 
-  it("links distinct skill paths and enriches a uniquely named skill", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({ kind: "skillLoad", ts: 1000, skillLoad: { skill: "review" } });
-      handlers.onMessage({
+  it("links distinct skill paths and enriches a uniquely named skill", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, { kind: "skillLoad", ts: 1000, skillLoad: { skill: "review" } });
+      emit(handlers, {
         kind: "skillLoad",
         ts: 1001,
         skillLoad: { skill: "code-quality", path: "/home/user/.claude/skills/code-quality/SKILL.md" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "skillLoad",
         ts: 1002,
         skillLoad: { skill: "code-quality", path: "/elsewhere/code-quality/SKILL.md" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "skillLoad",
         ts: 1003,
         skillLoad: { skill: "review", path: "~/.agents/skills/review/SKILL.md" },
       });
-      handlers.onReady?.();
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const nav = screen.getByRole("navigation", { name: "Loaded skills" });
     const links = within(nav).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["review", "code-quality", "code-quality"]);
@@ -897,18 +899,17 @@ describe("TaskDetail", () => {
   for (const subtype of ["compact_boundary", "context_cleared"]) {
     it(`keeps prior skill links at the ${subtype} separator and empties the header`, async () => {
       let send: ((message: EventMessage) => void) | undefined;
-      taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-        send = handlers.onMessage;
-        handlers.onMessage({
+      taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+        send = (message) => emit(handlers, message);
+        emit(handlers, {
           kind: "init",
           ts: 1,
           init: { sessionID: "skills-session", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
         });
-        handlers.onMessage({ kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } });
-        handlers.onReady?.();
+        emit(handlers, { kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } });
         return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
       });
-      renderTaskDetail();
+      await renderTaskDetail();
       expect(screen.getByRole("navigation", { name: "Loaded skills" })).toBeInTheDocument();
       send?.({ kind: "system", ts: 3, system: { subtype } });
       await waitFor(() => expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument());
@@ -928,7 +929,7 @@ describe("TaskDetail", () => {
   }
 
   it("reveals each closed section's skill links when its session expands", async () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       for (const message of [
         {
           kind: "init",
@@ -956,11 +957,10 @@ describe("TaskDetail", () => {
           result: { subtype: "success", result: "", durationMs: 0, totalCostUSD: 0, numTurns: 1, isError: false },
         },
       ] as EventMessage[])
-        handlers.onMessage(message);
-      handlers.onReady?.();
+        emit(handlers, message);
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const user = userEvent.setup();
     expect(screen.queryByRole("navigation", { name: "Previous context skills" })).not.toBeInTheDocument();
     const sessions = screen.getAllByRole("button", { name: /^Compacted session/ });
@@ -978,8 +978,8 @@ describe("TaskDetail", () => {
     expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument();
   });
 
-  it("keeps a cleared prompt and restarted response in the same visible section", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("keeps a cleared prompt and restarted response in the same visible section", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "init",
@@ -1036,11 +1036,10 @@ describe("TaskDetail", () => {
           },
         },
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     expect(screen.getByText("Execute the new plan", { exact: true })).toBeVisible();
     expect(screen.getByText("Executing the new plan", { exact: true })).toBeVisible();
     expect(screen.getAllByRole("button", { name: /^Compacted session/ })).toHaveLength(1);
@@ -1048,8 +1047,8 @@ describe("TaskDetail", () => {
 
   it("preserves completed boundaries and turn expansion across live boundaries and same-session init", async () => {
     let send: ((event: EventMessage) => void) | undefined;
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      send = handlers.onMessage;
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
       const events: EventMessage[] = [
         {
           kind: "init",
@@ -1127,11 +1126,10 @@ describe("TaskDetail", () => {
           },
         },
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
-    renderTaskDetail();
+    await renderTaskDetail();
     const user = userEvent.setup();
     expect(screen.queryByText(/Conversation compacted/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Session invocation details" }));
@@ -1176,15 +1174,14 @@ describe("TaskDetail", () => {
     });
 
     try {
-      taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-        handlers.onMessage({
+      taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+        emit(handlers, {
           kind: "text",
           ts: 1_000,
           text: {
             text: "Run this:\n\n```ts\nconst answer = 42;\n```\n\nThen continue.",
           },
         });
-        handlers.onReady?.();
         return {
           addEventListener: vi.fn(),
           close: vi.fn(),
@@ -1192,7 +1189,7 @@ describe("TaskDetail", () => {
         } as unknown as EventSource;
       });
 
-      renderTaskDetail();
+      await renderTaskDetail();
 
       const copyButton = screen.getByRole("button", {
         name: "Copy code block",
@@ -1209,8 +1206,8 @@ describe("TaskDetail", () => {
     }
   });
 
-  it("renders parent and child task navigation", () => {
-    renderTaskDetail({
+  it("renders parent and child task navigation", async () => {
+    await renderTaskDetail({
       parentTaskID: "parent",
       childTasks: [{ id: "child", title: "Review tests" }],
     });
@@ -1220,8 +1217,8 @@ describe("TaskDetail", () => {
     expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute("href", "/task/@child");
   });
 
-  it("uses a child ID when its title is empty", () => {
-    renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
+  it("uses a child ID when its title is empty", async () => {
+    await renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
 
     expect(screen.getByRole("link", { name: "Child: untitled-child" })).toHaveAttribute(
       "href",
@@ -1233,7 +1230,7 @@ describe("TaskDetail", () => {
     const user = userEvent.setup();
     const onQuotaRecovery = vi.fn();
     const onFork = vi.fn();
-    renderTaskDetail({
+    await renderTaskDetail({
       taskState: "waiting",
       rateLimit: {
         blocked: true,
@@ -1253,8 +1250,8 @@ describe("TaskDetail", () => {
     expect(onFork).toHaveBeenCalledWith("abc");
   });
 
-  it("shows quota status without an unavailable recovery action when there is no repository", () => {
-    renderTaskDetail({
+  it("shows quota status without an unavailable recovery action when there is no repository", async () => {
+    await renderTaskDetail({
       repo: "",
       rateLimit: {
         blocked: true,
@@ -1271,7 +1268,7 @@ describe("TaskDetail", () => {
   it("allows dismissing the quota warning", async () => {
     const user = userEvent.setup();
     const onDismissQuotaWarning = vi.fn();
-    renderTaskDetail({
+    await renderTaskDetail({
       taskId: "task-quota",
       taskState: "waiting",
       rateLimit: {
@@ -1290,8 +1287,8 @@ describe("TaskDetail", () => {
     expect(screen.queryByTestId("quota-recovery-detail")).not.toBeInTheDocument();
   });
 
-  it("hides the quota warning when quotaDismissed is true", () => {
-    renderTaskDetail({
+  it("hides the quota warning when quotaDismissed is true", async () => {
+    await renderTaskDetail({
       taskState: "waiting",
       rateLimit: {
         blocked: true,
@@ -1305,7 +1302,7 @@ describe("TaskDetail", () => {
   });
 
   it("repository state diff link href ends with /diff", async () => {
-    renderTaskDetail();
+    await renderTaskDetail();
     const link = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
     });
@@ -1314,13 +1311,13 @@ describe("TaskDetail", () => {
 
   it("clicking a repository state marker navigates to the diff", async () => {
     const user = userEvent.setup();
-    renderTaskDetail();
+    await renderTaskDetail();
     await user.click(await screen.findByRole("link", { name: /my-repo: 2 changed files/ }));
     await waitFor(() => expect(window.location.pathname).toBe("/task/@abc+test-task/diff"));
   });
 
-  it("renders Codex file-change diffs with colored lines", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("renders Codex file-change diffs with colored lines", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -1353,8 +1350,7 @@ describe("TaskDetail", () => {
           toolResult: { toolUseID: "edit-1", duration: 0.1 },
         },
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1362,7 +1358,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByText, getByText } = renderTaskDetail({ harness: "codex" });
+    const { getAllByText, getByText } = await renderTaskDetail({ harness: "codex" });
 
     expect(getAllByText("100ms")).toHaveLength(1);
     expect(getByText("/workspace/main.go")).toBeInTheDocument();
@@ -1372,8 +1368,8 @@ describe("TaskDetail", () => {
     expect(deleted.className).toMatch(/lineDeleted/);
   });
 
-  it("shows canonical native status on the tool call that spawned it", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("shows canonical native status on the tool call that spawned it", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -1405,8 +1401,7 @@ describe("TaskDetail", () => {
           },
         },
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1414,7 +1409,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText, getByTestId } = renderTaskDetail();
+    const { getByText, getByTestId } = await renderTaskDetail();
 
     // The canonical card anchors to the transcript where the lifecycle settled.
     const anchored = getByTestId("native-subagents");
@@ -1426,14 +1421,13 @@ describe("TaskDetail", () => {
     expect(within(call).getByText("Completed")).toBeInTheDocument();
   });
 
-  it("renders a native card that has no transcript item to anchor to", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("renders a native card that has no transcript item to anchor to", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "nativeSubagent",
         ts: 1_000,
         nativeSubagent: { id: "orphan", label: "Orphan", status: "running" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1441,23 +1435,22 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByTestId } = renderTaskDetail();
+    const { getByTestId } = await renderTaskDetail();
     expect(within(getByTestId("native-subagents")).getByText("Subagent: Orphan")).toBeInTheDocument();
   });
 
-  it("updates a pending tool duration without new events and freezes it on completion", () => {
+  it("updates a pending tool duration without new events and freezes it on completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     let complete = () => {};
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "toolUse",
         ts: 8_000,
         toolUse: { toolUseID: "live-shell", name: "Bash", input: { command: "sleep 10" } },
       });
-      handlers.onReady?.();
       complete = () =>
-        handlers.onMessage({
+        emit(handlers, {
           kind: "toolResult",
           ts: 13_000,
           toolResult: { toolUseID: "live-shell", duration: 5 },
@@ -1465,7 +1458,7 @@ describe("TaskDetail", () => {
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
     try {
-      renderTaskDetail();
+      await renderTaskDetail();
       expect(screen.getByTestId("tool-duration")).toHaveTextContent("0:02");
       vi.advanceTimersByTime(2_000);
       expect(screen.getByTestId("tool-duration")).toHaveTextContent("0:04");
@@ -1477,19 +1470,18 @@ describe("TaskDetail", () => {
     }
   });
 
-  it("shows elapsed time on a single-event message block", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("shows elapsed time on a single-event message block", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "userInput",
         ts: 1_000,
         userInput: { text: "prompt" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "text",
         ts: 2_500,
         text: { text: "response" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1497,24 +1489,23 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    const { getByText } = await renderTaskDetail();
 
     expect(getByText("0:02")).toBeInTheDocument();
   });
 
-  it("shows one timing control for a thinking-only block", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("shows one timing control for a thinking-only block", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "userInput",
         ts: 1_000,
         userInput: { text: "prompt" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "thinking",
         ts: 2_000,
         thinking: { text: "checking the implementation" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1522,7 +1513,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByLabelText } = renderTaskDetail();
+    const { getAllByLabelText } = await renderTaskDetail();
 
     const timing = getAllByLabelText("Timing details");
     expect(timing).toHaveLength(1);
@@ -1530,8 +1521,8 @@ describe("TaskDetail", () => {
     expect(timing[0].querySelector("svg")).toBeNull();
   });
 
-  it("shows one summed timing control for collapsed Codex thinking", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("shows one summed timing control for collapsed Codex thinking", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const usage = (ts: number): EventMessage => ({
         kind: "usage",
         ts,
@@ -1564,8 +1555,7 @@ describe("TaskDetail", () => {
         usage(8_000),
         { kind: "text", ts: 9_000, text: { text: "done" } },
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1573,7 +1563,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByLabelText } = renderTaskDetail({ harness: "codex" });
+    const { getAllByLabelText } = await renderTaskDetail({ harness: "codex" });
 
     const timings = getAllByLabelText("Timing details");
     expect(timings).toHaveLength(2);
@@ -1581,13 +1571,12 @@ describe("TaskDetail", () => {
     expect(timings[1]).toHaveTextContent("0:03");
   });
 
-  it("formats short result durations without misleading zero seconds", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("formats short result durations without misleading zero seconds", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.duration = 0.125;
-      handlers.onMessage(event);
-      handlers.onReady?.();
+      emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1595,16 +1584,16 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText, queryByText } = renderTaskDetail();
+    const { getByText, queryByText } = await renderTaskDetail();
 
     expect(getByText("125ms")).toBeInTheDocument();
     expect(getByText("1 turn")).toBeInTheDocument();
     expect(queryByText("0.0s")).not.toBeInTheDocument();
   });
 
-  it("does not repeat a successful assistant response from the result payload", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("does not repeat a successful assistant response from the result payload", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "text",
         ts: 1_000,
         text: { text: "Finished the requested change." },
@@ -1612,8 +1601,7 @@ describe("TaskDetail", () => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.result = "Finished the requested change.";
-      handlers.onMessage(event);
-      handlers.onReady?.();
+      emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1621,19 +1609,18 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByText } = renderTaskDetail();
+    const { getAllByText } = await renderTaskDetail();
 
     expect(getAllByText("Finished the requested change.")).toHaveLength(1);
   });
 
-  it("keeps result payload text for failed turns", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("keeps result payload text for failed turns", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.isError = true;
       event.result.result = "Provider request failed.";
-      handlers.onMessage(event);
-      handlers.onReady?.();
+      emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1641,20 +1628,19 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    const { getByText } = await renderTaskDetail();
 
     expect(getByText("Provider request failed.")).toBeInTheDocument();
   });
 
   it("opens invocation details from a completed turn's result card", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.usage.inputTokens = 1_000;
       event.result.usage.reportedModel = "turn-model";
-      handlers.onMessage(event);
-      handlers.onReady?.();
+      emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1662,7 +1648,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
     await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
@@ -1671,7 +1657,7 @@ describe("TaskDetail", () => {
 
   it("opens invocation details from a collapsed turn without expanding it", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(2_000);
       const latestResult = resultEvent(4_000);
       if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
@@ -1683,8 +1669,7 @@ describe("TaskDetail", () => {
         { kind: "userInput", ts: 3_000, userInput: { text: "continue" } },
         latestResult,
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1692,7 +1677,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     const [collapsedTurn] = screen.getAllByRole("button", {
       name: "Turn invocation details",
@@ -1703,8 +1688,8 @@ describe("TaskDetail", () => {
     expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
   });
 
-  it("right-aligns the duration on collapsed turns", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("right-aligns the duration on collapsed turns", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(333_000);
       if (firstResult.result) firstResult.result.duration = 332;
       const events: EventMessage[] = [
@@ -1715,8 +1700,7 @@ describe("TaskDetail", () => {
         { kind: "text", ts: 335_000, text: { text: "second response" } },
         resultEvent(336_000),
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1724,13 +1708,13 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    const { getByText } = await renderTaskDetail();
     const duration = getByText("5:32");
     expect(duration.className).toMatch(/turnDuration/);
   });
 
-  it("shows an explicit zero duration on collapsed turns without timing metadata", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+  it("shows an explicit zero duration on collapsed turns without timing metadata", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(0);
       const secondResult = resultEvent(0);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -1743,8 +1727,7 @@ describe("TaskDetail", () => {
         { kind: "text", ts: 0, text: { text: "second response" } },
         secondResult,
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1752,14 +1735,14 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getAllByText } = renderTaskDetail();
+    const { getAllByText } = await renderTaskDetail();
 
     expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
   });
 
   it("summarizes every turn in the collapsed session details", async () => {
     const user = userEvent.setup();
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -1814,8 +1797,7 @@ describe("TaskDetail", () => {
         },
         resultEvent(68_000),
       ];
-      for (const event of events) handlers.onMessage(event);
-      handlers.onReady?.();
+      for (const event of events) emit(handlers, event);
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1823,7 +1805,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText, queryByText } = renderTaskDetail();
+    const { getByText, queryByText } = await renderTaskDetail();
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     expect(getByText("0:05").className).toMatch(/sessionDuration/);
@@ -1841,7 +1823,7 @@ describe("TaskDetail", () => {
   it("shows recover actions for crashed tasks", async () => {
     const user = userEvent.setup();
     const onRevive = vi.fn();
-    const { getByLabelText, getByText, getByTestId } = renderTaskDetail({
+    const { getByLabelText, getByText, getByTestId } = await renderTaskDetail({
       taskState: "crashed",
       onRevive,
     });
@@ -1853,9 +1835,9 @@ describe("TaskDetail", () => {
     expect(onRevive).toHaveBeenCalledWith("abc");
   });
 
-  it("shows the complete task error", () => {
+  it("shows the complete task error", async () => {
     const error = "Error: failed to load extension from a very long runtime path";
-    const { getByRole, getByText } = renderTaskDetail({
+    const { getByRole, getByText } = await renderTaskDetail({
       taskState: "failed",
       error,
     });
@@ -1864,19 +1846,18 @@ describe("TaskDetail", () => {
     expect(getByText(error)).toBeInTheDocument();
   });
 
-  it("keeps the prompt visible when a later input repeats it", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("keeps the prompt visible when a later input repeats it", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "text",
         ts: 1,
         text: { text: "agent reply" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "userInput",
         ts: 2,
         userInput: { text: "same prompt" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1884,24 +1865,23 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByRole } = renderTaskDetail({ initialPrompt: "same prompt" });
+    const { getByRole } = await renderTaskDetail({ initialPrompt: "same prompt" });
 
     expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
   });
 
-  it("shows setup logs inside task details", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("shows setup logs inside task details", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "log",
         ts: 1,
         log: { line: "starting runtime" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "error",
         ts: 2,
         error: { err: "agent extension failed to load", line: "" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1909,7 +1889,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByRole, getByTestId, getByText } = renderTaskDetail({
+    const { getByRole, getByTestId, getByText } = await renderTaskDetail({
       taskState: "crashed",
       initialPrompt: "fetch origin then rebase on origin/main",
     });
@@ -1923,14 +1903,14 @@ describe("TaskDetail", () => {
     expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
   });
 
-  it("shows zero instead of an implausible reconstructed setup duration", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("shows zero instead of an implausible reconstructed setup duration", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "log",
         ts: 1_500,
         log: { line: "starting runtime" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "init",
         ts: 46 * 60 * 60 * 1000,
         init: {
@@ -1941,7 +1921,6 @@ describe("TaskDetail", () => {
           harness: "test",
         },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1949,21 +1928,21 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail({
+    const { getByText } = await renderTaskDetail({
       startedAt: new Date(1_000).toISOString(),
     });
 
     expect(getByText("0s")).toBeInTheDocument();
   });
 
-  it("collapses setup logs after the agent session starts", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("collapses setup logs after the agent session starts", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "log",
         ts: 1_500,
         log: { line: "starting runtime" },
       });
-      handlers.onMessage({
+      emit(handlers, {
         kind: "init",
         ts: 6_500,
         init: {
@@ -1974,7 +1953,6 @@ describe("TaskDetail", () => {
           harness: "test",
         },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -1982,7 +1960,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByTestId, getByText } = renderTaskDetail({
+    const { getByTestId, getByText } = await renderTaskDetail({
       startedAt: new Date(1_000).toISOString(),
     });
 
@@ -1990,14 +1968,13 @@ describe("TaskDetail", () => {
     expect(getByText("0:06")).toBeInTheDocument();
   });
 
-  it("shows in-progress context compaction", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("shows in-progress context compaction", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "system",
         ts: 1_000,
         system: { subtype: "compact_start", detail: "manual" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -2005,14 +1982,14 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(screen.getByTestId("compact-start")).toHaveTextContent("Compacting context… (manual)");
   });
 
-  it("reports the harness context size on a compaction boundary", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("reports the harness context size on a compaction boundary", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "system",
         ts: 1_000,
         system: {
@@ -2021,7 +1998,6 @@ describe("TaskDetail", () => {
           contextTokensAfter: 20_000,
         },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -2029,21 +2005,20 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(screen.getByText(/Conversation compacted/)).toHaveTextContent(
       "Conversation compacted · 128kt → 20kt tokens",
     );
   });
 
-  it("surfaces a failed context compaction", () => {
-    taskEventStreamMock.mockImplementationOnce((_id, _backward, handlers) => {
-      handlers.onMessage({
+  it("surfaces a failed context compaction", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      emit(handlers, {
         kind: "system",
         ts: 1_000,
         system: { subtype: "compact_error", detail: "summarizer unavailable" },
       });
-      handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
         close: vi.fn(),
@@ -2051,7 +2026,7 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(screen.getByTestId("compact-error")).toHaveTextContent("Context compaction failed: summarizer unavailable");
   });
@@ -2067,27 +2042,8 @@ type FakeES = {
 // Build a mock that fires the "ready" event synchronously so tests don't need
 // to advance timers just to get the component into live mode.
 function makeSyncReadyMock(created: FakeES[], capturedCb?: { value: ((ev: EventMessage) => void) | null }) {
-  taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
-    if (capturedCb) capturedCb.value = handlers.onMessage;
-    const fakeES: FakeES = {
-      addEventListener: vi.fn(),
-      close: vi.fn(),
-      onerror: null,
-    };
-    created.push(fakeES);
-    handlers.onReady?.();
-    return fakeES as unknown as EventSource;
-  });
-}
-
-function makeManualReadyMock(
-  created: FakeES[],
-  capturedCb: { value: ((ev: EventMessage) => void) | null },
-  readyHandler: { value: (() => void) | null },
-) {
-  taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
-    capturedCb.value = handlers.onMessage;
-    readyHandler.value = handlers.onReady ?? null;
+  taskEventStreamMock.mockImplementation((_id, _cursor, handlers) => {
+    if (capturedCb) capturedCb.value = (message) => emit(handlers, message);
     const fakeES: FakeES = {
       addEventListener: vi.fn(),
       close: vi.fn(),
@@ -2098,213 +2054,23 @@ function makeManualReadyMock(
   });
 }
 
-describe("SSE connection", () => {
+describe("streamed conversation", () => {
   beforeEach(() => {
-    // Fake timers so we can control setTimeout for reconnect delays.
     vi.useFakeTimers();
   });
-
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("leaves a nonterminal EventSource open for native Last-Event-ID retry", () => {
-    const created: FakeES[] = [];
-    makeSyncReadyMock(created);
-
-    renderTaskDetail();
-
-    expect(created).toHaveLength(1);
-    const es = created[0];
-    assert.ok(es !== undefined);
-    if (!es.onerror) throw new Error("onerror not set");
-    es.onerror(new Event("error"));
-    es.onerror(new Event("error"));
-    vi.advanceTimersByTime(60_000);
-
-    expect(es.close).not.toHaveBeenCalled();
-    expect(created).toHaveLength(1);
-  });
-
-  it("keeps buffered replay events across a native resume", () => {
-    const created: FakeES[] = [];
-    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
-    const readyHandler = { value: null as (() => void) | null };
-    makeManualReadyMock(created, capturedCb, readyHandler);
-
-    renderTaskDetail();
-    assert.ok(created[0] !== undefined);
-    if (!capturedCb.value || !readyHandler.value || !created[0].onerror) {
-      throw new Error("SSE callbacks not captured");
-    }
-    capturedCb.value({
-      kind: "text",
-      ts: 1,
-      text: { text: "before disconnect" },
-    });
-    created[0].onerror(new Event("error"));
-    capturedCb.value({ kind: "text", ts: 2, text: { text: "after resume" } });
-    readyHandler.value();
-
-    expect(document.body).toHaveTextContent("before disconnect");
-    expect(document.body).toHaveTextContent("after resume");
-    expect(created[0].close).not.toHaveBeenCalled();
-  });
-
-  it("replaces rendered history after a stale resume cursor reset", () => {
-    const created: FakeES[] = [];
-    let onMessage: ((ev: EventMessage) => void) | undefined;
-    let onReady: (() => void) | undefined;
-    let onReset: (() => void) | undefined;
-    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
-      onMessage = handlers.onMessage;
-      onReady = handlers.onReady;
-      onReset = handlers.onReset;
-      const fakeES: FakeES = {
-        addEventListener: vi.fn(),
-        close: vi.fn(),
-        onerror: null,
-      };
-      created.push(fakeES);
-      return fakeES as unknown as EventSource;
-    });
-
-    const { getByRole } = renderTaskDetail();
-    if (!onMessage || !onReady || !onReset) throw new Error("SSE callbacks not captured");
-    const emitCompletedTurn = (prompt: string, text: string, ts: number) => {
-      onMessage?.({ kind: "userInput", ts, userInput: { text: prompt } });
-      onMessage?.({ kind: "text", ts: ts + 1, text: { text } });
-      onMessage?.(resultEvent(ts + 2));
-    };
-    emitCompletedTurn("old prompt 1", "old history", 1);
-    emitCompletedTurn("old prompt 2", "old reply 2", 4);
-    onMessage({
-      kind: "textDelta",
-      ts: 7,
-      textDelta: { text: "old live tail" },
-    });
-    onReady();
-
-    onReset();
-    emitCompletedTurn("replacement prompt 1", "replacement history", 10);
-    emitCompletedTurn("replacement prompt 2", "replacement reply 2", 13);
-    onMessage({
-      kind: "textDelta",
-      ts: 16,
-      textDelta: { text: "replacement live a" },
-    });
-    onMessage({ kind: "textDelta", ts: 17, textDelta: { text: " + b" } });
-    onReady();
-
-    expect(document.body).not.toHaveTextContent("old live tail");
-    expect(document.body).toHaveTextContent("replacement live a + b");
-    expect(getByRole("button", { name: /^1 message/ })).toBeInTheDocument();
-
-    onReset();
-    emitCompletedTurn("shorter prompt", "shorter completed reply", 20);
-    for (let i = 1; i <= 5; i++) {
-      onMessage({
-        kind: "textDelta",
-        ts: 22 + i,
-        textDelta: { text: `lower-split-${i} ` },
-      });
-    }
-    onReady();
-
-    expect(document.body).not.toHaveTextContent("replacement live a");
-    expect(document.body).toHaveTextContent("lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5");
-  });
-
-  it("reports terminal history errors and does not retry after the native error", () => {
-    const created: FakeES[] = [];
-    let historyError: ((error: { message: string }) => void) | undefined;
-    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
-      historyError = handlers.onHistoryError;
-      const fakeES: FakeES = {
-        addEventListener: vi.fn(),
-        close: vi.fn(),
-        onerror: null,
-      };
-      created.push(fakeES);
-      return fakeES as unknown as EventSource;
-    });
-    renderTaskDetail();
-    if (!historyError) throw new Error("history error callback not captured");
-    historyError({ message: "task history is unavailable" });
-
-    expect(screen.getByRole("alert")).toHaveTextContent("task history is unavailable");
-    assert.ok(created[0] !== undefined);
-    expect(created[0].close).toHaveBeenCalledOnce();
-    if (!created[0].onerror) throw new Error("onerror not set");
-    created[0].onerror(new Event("error"));
-    vi.advanceTimersByTime(60_000);
-    // Resuming visibility or network connectivity must not reconnect after the
-    // server explicitly reported that this task's history is unavailable.
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.dispatchEvent(new Event("online"));
-    expect(created).toHaveLength(1);
-  });
-
-  it("keeps a stopped task EventSource available for native retry", () => {
-    const created: FakeES[] = [];
-    makeSyncReadyMock(created);
-
-    renderTaskDetail({ taskState: "stopped" });
-    const es = created[0];
-    assert.ok(es !== undefined);
-    if (!es.onerror) throw new Error("onerror not set");
-    es.onerror(new Event("error"));
-
-    expect(es.close).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(60_000);
-    expect(created).toHaveLength(1);
-  });
-
-  it("keeps the native resumable EventSource across visibility and network changes", () => {
-    const created: FakeES[] = [];
-    const callbacks: Array<(ev: EventMessage) => void> = [];
-    const readyHandlers: Array<() => void> = [];
-    taskEventStreamMock.mockImplementation((_id, _backward, handlers) => {
-      callbacks.push(handlers.onMessage);
-      if (handlers.onReady) readyHandlers.push(handlers.onReady);
-      const fakeES: FakeES = {
-        addEventListener: vi.fn(),
-        close: vi.fn(),
-        onerror: null,
-      };
-      created.push(fakeES);
-      return fakeES as unknown as EventSource;
-    });
-
-    renderTaskDetail();
-    assert.ok(readyHandlers[0] !== undefined);
-    readyHandlers[0]();
-
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.dispatchEvent(new Event("offline"));
-    window.dispatchEvent(new Event("online"));
-
-    expect(created).toHaveLength(1);
-    assert.ok(created[0] !== undefined);
-    expect(created[0].close).not.toHaveBeenCalled();
-    assert.ok(callbacks[0] !== undefined);
-    callbacks[0]({
-      kind: "userInput",
-      ts: 1,
-      userInput: { text: "prompt sent before lock" },
-    });
-    expect(document.body).toHaveTextContent("prompt sent before lock");
-  });
-
-  it("multiple thinking blocks across tool calls are both visible", () => {
+  it("multiple thinking blocks across tool calls are both visible", async () => {
     // Regression: ThinkingCard used findLast, so when thinking-1 → tool-1 → thinking-2 → tool-2
     // merged into one action group, only thinking-2 was rendered and thinking-1 was dropped.
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    await renderTaskDetail();
+    if (!capturedCb.value) throw new Error("history callback not captured");
 
     const cb = capturedCb.value;
     cb({ kind: "thinking", ts: 1, thinking: { text: "planning tool 1" } });
@@ -2336,13 +2102,13 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("planning tool 2");
   });
 
-  it("labels overage as a reached 5-hour quota", () => {
+  it("labels overage as a reached 5-hour quota", async () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    await renderTaskDetail();
+    if (!capturedCb.value) throw new Error("history callback not captured");
 
     capturedCb.value({
       kind: "rateLimit",
@@ -2363,14 +2129,14 @@ describe("SSE connection", () => {
     expect(document.body.textContent).not.toContain("monthly");
   });
 
-  it("counts the local midnights crossed before a quota reset", () => {
+  it("counts the local midnights crossed before a quota reset", async () => {
     vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    await renderTaskDetail();
+    if (!capturedCb.value) throw new Error("history callback not captured");
 
     capturedCb.value({
       kind: "rateLimit",
@@ -2388,14 +2154,14 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain(`resets in 2 days at ${resetTime}`);
   });
 
-  it("labels a reset on the next calendar day as tomorrow", () => {
+  it("labels a reset on the next calendar day as tomorrow", async () => {
     vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    await renderTaskDetail();
+    if (!capturedCb.value) throw new Error("history callback not captured");
 
     capturedCb.value({
       kind: "rateLimit",
@@ -2414,14 +2180,14 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
   });
 
-  it("omits the percentage when a warning reports no utilization", () => {
+  it("omits the percentage when a warning reports no utilization", async () => {
     vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    await renderTaskDetail();
+    if (!capturedCb.value) throw new Error("history callback not captured");
 
     capturedCb.value({
       kind: "rateLimit",
@@ -2439,43 +2205,18 @@ describe("SSE connection", () => {
     expect(document.body.textContent).not.toContain("-100%");
   });
 
-  it("replayed textDelta events render once the SSE ready marker arrives", () => {
-    // Replayed history can be huge; keep it off the DOM until the server sends
-    // ready so grouping and reconciliation run once for the replay.
-    const created: FakeES[] = [];
-    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
-    const readyHandler = { value: null as (() => void) | null };
-    makeManualReadyMock(created, capturedCb, readyHandler);
-
-    renderTaskDetail();
-
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
-    capturedCb.value({
-      kind: "textDelta",
-      ts: 1,
-      textDelta: { text: "replayed output" },
-    });
-
-    expect(document.body.textContent).not.toContain("replayed output");
-    expect(readyHandler.value).not.toBeNull();
-
-    readyHandler.value?.();
-
-    expect(document.body.textContent).toContain("replayed output");
-  });
-
-  it("live textDelta events render before the turn ends", () => {
+  it("live textDelta events render before the turn ends", async () => {
     // Regression: initial task detail streaming must show output while the
     // first agent turn is still running, not only after the result event.
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
     expect(capturedCb.value).not.toBeNull();
 
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    if (!capturedCb.value) throw new Error("history callback not captured");
     capturedCb.value({
       kind: "textDelta",
       ts: 1,
@@ -2488,14 +2229,14 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("agent reply");
   });
 
-  it("renders every live textDelta batch after a follow-up prompt", () => {
+  it("renders every live textDelta batch after a follow-up prompt", async () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    renderTaskDetail();
+    await renderTaskDetail();
 
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    if (!capturedCb.value) throw new Error("history callback not captured");
     capturedCb.value(resultEvent(1));
     capturedCb.value({
       kind: "userInput",
@@ -2520,14 +2261,14 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("first batch then second batch");
   });
 
-  it("live ask events render immediately so the user can answer", () => {
+  it("live ask events render immediately so the user can answer", async () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    const { getByTestId } = renderTaskDetail({ taskState: "pending" });
+    const { getByTestId } = await renderTaskDetail({ taskState: "pending" });
 
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    if (!capturedCb.value) throw new Error("history callback not captured");
     capturedCb.value({
       kind: "ask",
       ts: 1,
@@ -2553,7 +2294,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = renderTaskDetail({
+    const { getByLabelText, getByText, queryByText } = await renderTaskDetail({
       taskState: "waiting",
       supportsCompact: true,
       autoFocusPrompt: false,
@@ -2589,7 +2330,7 @@ describe("SSE connection", () => {
     const user = userEvent.setup();
     const sendInput = vi.fn(async () => {});
     {
-      renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: sendInput });
+      await renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: sendInput });
       const actions = screen.getByRole("button", { name: "Context actions" });
       actions.focus();
 
@@ -2606,7 +2347,7 @@ describe("SSE connection", () => {
     const user = userEvent.setup();
     const sendInput = vi.fn(async () => {});
     {
-      renderTaskDetail({
+      await renderTaskDetail({
         taskState: "crashed",
         inputDraft: "follow up",
         autoFocusPrompt: false,
@@ -2627,7 +2368,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText } = renderTaskDetail({
+    const { getByLabelText, getByText } = await renderTaskDetail({
       taskState: "running",
       supportsCompact: true,
     });
@@ -2651,7 +2392,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = renderTaskDetail({
+    const { getByLabelText, getByText, queryByText } = await renderTaskDetail({
       taskState: "waiting",
       supportsCompact: false,
     });
@@ -2662,57 +2403,11 @@ describe("SSE connection", () => {
     expect(queryByText("Compact context")).not.toBeInTheDocument();
   });
 
-  it("stops reconnecting for failed task with no messages after ready", () => {
-    // Regression: before the fix, the stop condition required messages().length > 0,
-    // so a failed task that produced no agent output would reconnect indefinitely.
+  it("shows initial prompt for failed task with no messages", async () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    renderTaskDetail({ taskState: "failed" });
-    expect(created).toHaveLength(1);
-
-    // ready fired synchronously; now simulate SSE close (server closes after ready for failed tasks).
-    const es1 = created[0];
-    assert.ok(es1 !== undefined);
-    if (!es1.onerror) throw new Error("onerror not set");
-    es1.onerror(new Event("error"));
-
-    // Advance well past any reconnect delay — no new connection should be created.
-    vi.advanceTimersByTime(60_000);
-    expect(created).toHaveLength(1);
-  });
-
-  it("stops reconnecting for failed task with messages after ready", () => {
-    // Existing behaviour: with messages this already worked; verify it still does.
-    const created: FakeES[] = [];
-    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
-    makeSyncReadyMock(created, capturedCb);
-
-    renderTaskDetail({ taskState: "failed" });
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
-
-    // Deliver a message so messages().length > 0.
-    capturedCb.value({
-      kind: "textDelta",
-      ts: 1,
-      textDelta: { text: "some output" },
-    });
-    vi.advanceTimersByTime(20);
-
-    const es1 = created[0];
-    assert.ok(es1 !== undefined);
-    if (!es1.onerror) throw new Error("onerror not set");
-    es1.onerror(new Event("error"));
-
-    vi.advanceTimersByTime(60_000);
-    expect(created).toHaveLength(1);
-  });
-
-  it("shows initial prompt for failed task with no messages", () => {
-    const created: FakeES[] = [];
-    makeSyncReadyMock(created);
-
-    const { getByText } = renderTaskDetail({
+    const { getByText } = await renderTaskDetail({
       taskState: "failed",
       initialPrompt: "Fix the login bug",
     });

@@ -5,13 +5,11 @@ import TaskDetailPage from "../pages/TaskDetailPage";
 import { taskIdFromParam, taskIdFromPath } from "../taskPath";
 import { taskViewMode, rememberTaskViewOrigin, restoreTaskViewOrigin, type TaskViewMode } from "../taskView";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
-import { useAppState } from "../AppState";
 import styles from "./TaskWorkspace.module.css";
 
 export default function TaskWorkspace(props: { children?: JSX.Element }) {
   const location = useLocation();
   const params = useParams();
-  const state = useAppState();
   function bindConversation(pane: HTMLDivElement) {
     const remember = (event: MouseEvent) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -53,7 +51,7 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
   return (
     <Show when={taskIdFromParam(params.taskId)}>
       {(taskId) => (
-        <TaskTimelineProvider taskId={taskId()} taskState={state.taskById(taskId())?.state ?? "pending"}>
+        <TaskTimelineProvider taskId={taskId()}>
           <div
             class={`${styles.workspace} ${mode() === "fullscreen" ? styles.fullscreen : ""}`}
 

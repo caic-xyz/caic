@@ -1970,461 +1970,6 @@ data class CreateTaskReq(
     @SerialName("caicMCP") val caicMCP: Boolean? = null,
 )
 
-/**
- * EventMessageSource identifies the provider origin of any normalized event.
- * AgentID and DelegationToolUseID identify child ownership independently of native
- * item identity. RootThreadID is an authoritative session owner when reported.
- * Fields remain absent when the harness does not supply them.
- */
-@Serializable
-data class EventMessageSource(
-    @SerialName("agentID") val agentID: String? = null,
-    @SerialName("delegationToolUseID") val delegationToolUseID: String? = null,
-    @SerialName("threadID") val threadID: String? = null,
-    @SerialName("turnID") val turnID: String? = null,
-    @SerialName("itemID") val itemID: String? = null,
-    @SerialName("rootThreadID") val rootThreadID: String? = null,
-)
-
-/**
- * EventInit is emitted once at the start of a session. It includes a Harness
- * field so the client knows which backend produced the stream.
- */
-@Serializable
-data class EventInit(
-    val reportedModel: String,
-    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
-    val reportedEffort: String? = null,
-    val agentVersion: String,
-    @SerialName("sessionID") val sessionID: String,
-    val tools: List<String>? = null,
-    val cwd: String,
-    val harness: String,
-)
-
-/** EventText is an assistant text block. */
-@Serializable
-data class EventText(val text: String)
-
-/** EventTextDelta is a streaming text fragment from --include-partial-messages. */
-@Serializable
-data class EventTextDelta(val text: String)
-
-/** EventFileChange is one changed file rendered from a unified patch. */
-@Serializable
-data class EventFileChange(val path: String, val patch: String)
-
-/** EventSubagentSpawn is one backend-normalized subagent invocation. */
-@Serializable
-data class EventSubagentSpawn(
-    val agent: String,
-    val task: String,
-    val label: String? = null,
-    val phase: String? = null,
-)
-
-/**
- * EventToolInputView is a backend-normalized rendering model for known tool
- * inputs. It keeps harness-specific tool schemas out of clients.
- */
-@Serializable
-data class EventToolInputView(
-    val kind: EventToolInputKind,
-    val files: List<EventFileChange>? = null,
-    val subagents: List<EventSubagentSpawn>? = null,
-)
-
-/** EventToolUse is emitted when the assistant invokes a tool. */
-@Serializable
-data class EventToolUse(
-    @SerialName("toolUseID") val toolUseID: String,
-    val name: String,
-    val input: JsonElement,
-    /** Backend-normalized short display detail for tool headers. */
-    val detail: String? = null,
-    /** Backend-normalized structured input for tool-card rendering. */
-    val inputView: EventToolInputView? = null,
-    /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
-    val inputTruncated: Boolean? = null,
-    /** True when the tool runs in the background (Bash/Agent run_in_background). */
-    val background: Boolean? = null,
-)
-
-/** EventToolResult is emitted when a tool call completes. */
-@Serializable
-data class EventToolResult(
-    @SerialName("toolUseID") val toolUseID: String,
-    /** Seconds; server-computed; 0 if unknown. */
-    val duration: Double,
-    val error: String? = null,
-)
-
-/** AskOption is a single option in an AskUserQuestion. */
-@Serializable
-data class AskOption(val label: String, val description: String? = null)
-
-/** AskQuestion is a single question from AskUserQuestion. */
-@Serializable
-data class AskQuestion(
-    val question: String,
-    val header: String? = null,
-    val options: List<AskOption>,
-    val multiSelect: Boolean? = null,
-)
-
-/** EventAsk is emitted when the agent asks the user a question. */
-@Serializable
-data class EventAsk(
-    @SerialName("toolUseID") val toolUseID: String,
-    val questions: List<AskQuestion>,
-)
-
-/**
- * EventUsage reports per-turn token usage.
- * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
- * or reasoning summaries (Codex). Zero when the harness does not report it.
- */
-@Serializable
-data class EventUsage(
-    val inputTokens: Int,
-    val outputTokens: Int,
-    val cacheCreationInputTokens: Int,
-    val cacheReadInputTokens: Int,
-    val reasoningOutputTokens: Int? = null,
-    val reportedModel: String,
-)
-
-/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
-@Serializable
-data class EventCost(val usd: Double, val source: EventCostSource)
-
-/** EventResult is emitted when the task reaches a terminal state. */
-@Serializable
-data class EventResult(
-    val cost: EventCost? = null,
-    val subtype: String,
-    val isError: Boolean,
-    val result: String,
-    val diffStat: DiffStat? = null,
-    @SerialName("totalCostUSD") val totalCostUSD: Double,
-    /** Seconds. */
-    val duration: Double,
-    /** Seconds. */
-    @SerialName("durationAPI") val durationAPI: Double,
-    val numTurns: Int,
-    val usage: EventUsage,
-)
-
-/** EventSystem is a system event (status, compact_boundary, etc.). */
-@Serializable
-data class EventSystem(
-    val subtype: String,
-    /** Optional human-readable detail (e.g. model names for model_rerouted). */
-    val detail: String? = null,
-    /**
-     * ContextTokensBefore is the context size the harness reported before a
-     * compact_boundary. Zero means the harness did not report it.
-     */
-    val contextTokensBefore: Long? = null,
-    /**
-     * ContextTokensAfter is the context size the harness reported after a
-     * compact_boundary, measured or estimated. Zero means it did not report it.
-     */
-    val contextTokensAfter: Long? = null,
-)
-
-/**
- * EventImageData describes one prompt image carried by a user-input event.
- *
- * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
- * task attachment route. Data stays until clients fetch images only by Hash.
- */
-@Serializable
-data class EventImageData(
-    val mediaType: String,
-    val data: String,
-    val hash: String? = null,
-)
-
-/** EventUserInput is emitted when a user sends a text message to the agent. */
-@Serializable
-data class EventUserInput(val text: String, val images: List<EventImageData>? = null)
-
-/** TodoItem is a single todo entry from a TodoWrite tool call. */
-@Serializable
-data class TodoItem(
-    val content: String,
-    /** "pending", "in_progress", "completed". */
-    val status: String,
-    val activeForm: String? = null,
-)
-
-/** EventTodo is emitted when the agent writes/updates its todo list. */
-@Serializable
-data class EventTodo(
-    @SerialName("toolUseID") val toolUseID: String,
-    val todos: List<TodoItem>,
-)
-
-/** EventDiffStat is emitted when the relay reports updated diff statistics. */
-@Serializable
-data class EventDiffStat(val diffStat: DiffStat? = null)
-
-/** EventError is emitted when the backend fails to parse an agent output line. */
-@Serializable
-data class EventError(val err: String, val line: String)
-
-/** EventThinking is an assistant thinking block. */
-@Serializable
-data class EventThinking(val text: String)
-
-/** EventThinkingDelta is a streaming thinking fragment. */
-@Serializable
-data class EventThinkingDelta(val text: String)
-
-/**
- * EventSubagentStart is emitted when a subagent task begins. It is the legacy
- * harness-agnostic shape: no current parser produces it, and clients should
- * render EventNativeSubagent instead. It stays in the v1 event union and the
- * generated SDKs so existing clients that switch on these kinds keep compiling.
- */
-@Serializable
-data class EventSubagentStart(
-    @SerialName("taskID") val taskID: String,
-    val description: String,
-)
-
-/**
- * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
- * It is the legacy harness-agnostic shape: no current parser produces it, and
- * clients should render EventNativeSubagent instead. It stays in the v1 event
- * union and the generated SDKs so existing clients that switch on these kinds
- * keep compiling.
- */
-@Serializable
-data class EventSubagentEnd(
-    @SerialName("taskID") val taskID: String,
-    /** "completed", "failed", "stopped" */
-    val status: String,
-)
-
-/**
- * EventNativeSubagent is one lifecycle update for a harness native subagent.
- * ID and GroupID are opaque harness identities. Optional fields remain absent
- * when the harness did not expose them.
- */
-@Serializable
-data class EventNativeSubagent(
-    @SerialName("toolUseID") val toolUseID: String? = null,
-    val scope: EventNativeSubagentScope? = null,
-    val id: String,
-    @SerialName("groupID") val groupID: String? = null,
-    val label: String? = null,
-    val prompt: String? = null,
-    val status: EventNativeSubagentStatus,
-    val result: String? = null,
-    /**
-     * Background reports that the harness launched the delegation detached from
-     * the parent turn, so it can outlive that turn's result.
-     */
-    val background: Boolean? = null,
-)
-
-/**
- * EventBackgroundCommand reports one harness-native detached shell command's
- * folded lifecycle. ExitCode is the command's numeric outcome when the harness
- * reported one; OutputRef is an opaque harness-owned output reference, not a
- * caic resource.
- */
-@Serializable
-data class EventBackgroundCommand(
-    val id: String,
-    val label: String? = null,
-    val status: String,
-    val result: String? = null,
-    val exitCode: Int? = null,
-    val outputRef: String? = null,
-    @SerialName("toolUseID") val toolUseID: String? = null,
-)
-
-/** EventLog is a provisioning/startup log line from the runtime backend. */
-@Serializable
-data class EventLog(val line: String)
-
-/**
- * EventToolOutputDelta is a streaming output fragment from a running tool.
- * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
- * MCP tool progress messages (item/mcpToolCall/progress).
- */
-@Serializable
-data class EventToolOutputDelta(
-    @SerialName("toolUseID") val toolUseID: String,
-    val delta: String,
-    val contentType: ToolOutputContentType? = null,
-    /** Pretty-printed JSON or other transformation. */
-    val formatted: String? = null,
-)
-
-/** EventWidget is emitted when the agent produces a complete HTML widget. */
-@Serializable
-data class EventWidget(
-    @SerialName("toolUseID") val toolUseID: String,
-    val title: String,
-    val html: String,
-)
-
-/** EventWidgetDelta is a streaming HTML fragment for progressive widget rendering. */
-@Serializable
-data class EventWidgetDelta(
-    @SerialName("toolUseID") val toolUseID: String,
-    val delta: String,
-)
-
-/** EventRateLimit is emitted when the agent's rate limit status changes. */
-@Serializable
-data class EventRateLimit(
-    val status: EventRateLimitStatus,
-    /** When the limit resets; zero if unknown. */
-    val resetsAt: Instant? = null,
-    /** "five_hour", "seven_day", etc. */
-    val rateLimitType: String,
-    /** 0.0–1.0; -1 when unknown. */
-    val utilization: Double,
-    /** True when extra/overage usage is active. */
-    val isUsingOverage: Boolean? = null,
-    /** When overage resets; zero if not using overage. */
-    val overageResetsAt: Instant? = null,
-)
-
-/**
- * EventRepositoryCommit identifies one immutable repository branch tip in a
- * commit snapshot.
- */
-@Serializable
-data class EventRepositoryCommit(
-    /** RepositoryPath is the repository's absolute path inside the task runtime. */
-    val repositoryPath: String,
-    /** BranchName is the short local branch name, such as "main" or "caic-1". */
-    val branchName: String,
-    /** CommitHash is the full Git object ID of the branch tip. */
-    val commitHash: String,
-)
-
-/** EventChangeStat summarizes a completed turn's net committed change. */
-@Serializable
-data class EventChangeStat(
-    val files: Int,
-    val linesAdded: Int,
-    val linesDeleted: Int,
-    val binaryFiles: Int,
-)
-
-/**
- * EventCommitSnapshot records the exact committed repository branch tips
- * fetched from the runtime when a turn finishes.
- */
-@Serializable
-data class EventCommitSnapshot(
-    val repositoryCommits: List<EventRepositoryCommit>,
-    val baseline: Boolean? = null,
-    val changeStat: EventChangeStat? = null,
-)
-
-/**
- * EventSkillLoad is emitted when a skill enters the main agent's context. A
- * failed call and a subagent's load emit none; an inferred load is emitted
- * once the tool that opened the file succeeds.
- */
-@Serializable
-data class EventSkillLoad(
-    val skill: String,
-    /** SKILL.md in the task runtime; empty when the harness did not report it. */
-    val path: String? = null,
-)
-
-// Backend-neutral event types
-
-/**
- * EventMessage is a single SSE event in the backend-neutral stream
- * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
- */
-@Serializable
-data class EventMessage(
-    val source: EventMessageSource? = null,
-    val kind: EventKind,
-    val ts: Long,
-    val init: EventInit? = null,
-    val text: EventText? = null,
-    val textDelta: EventTextDelta? = null,
-    val toolUse: EventToolUse? = null,
-    val toolResult: EventToolResult? = null,
-    val ask: EventAsk? = null,
-    val usage: EventUsage? = null,
-    val result: EventResult? = null,
-    val system: EventSystem? = null,
-    val userInput: EventUserInput? = null,
-    val todo: EventTodo? = null,
-    val diffStat: EventDiffStat? = null,
-    val error: EventError? = null,
-    val thinking: EventThinking? = null,
-    val thinkingDelta: EventThinkingDelta? = null,
-    val subagentStart: EventSubagentStart? = null,
-    val subagentEnd: EventSubagentEnd? = null,
-    val nativeSubagent: EventNativeSubagent? = null,
-    val backgroundCommand: EventBackgroundCommand? = null,
-    val log: EventLog? = null,
-    val toolOutputDelta: EventToolOutputDelta? = null,
-    val widget: EventWidget? = null,
-    val widgetDelta: EventWidgetDelta? = null,
-    val rateLimit: EventRateLimit? = null,
-    val commitSnapshot: EventCommitSnapshot? = null,
-    val skillLoad: EventSkillLoad? = null,
-)
-
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-@Serializable
-data class EventStats(
-    val ts: Long,
-    /** 100% is one fully busy logical CPU. */
-    val cpuPerc: Double,
-    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-    val cpuCeiling: Double? = null,
-    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-    val cpuQuota: Double? = null,
-    /** Owning runtime's logical CPU count; null when unknown. */
-    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
-    /** Runtime CPU metadata observation failure; usage samples remain usable. */
-    val cpuError: String? = null,
-    val memUsed: Long,
-    val memLimit: Long,
-    val memPerc: Double,
-    val netRx: Long,
-    val netTx: Long,
-    val blockRead: Long,
-    val blockWrite: Long,
-    val diskUsed: Long,
-)
-
-/**
- * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
- * Replace samples sharing a timestamp: disk usage can revise the latest sample.
- * These host observations are separate from immutable raw task history.
- */
-@Serializable
-data class HistoryStats(val samples: List<EventStats>)
-
-/**
- * TaskEventBackward carries a chronological recent disk preview before canonical
- * history on the same connection. EventID is empty. Memory-backed streams send
- * canonical history and support normal event-ID resume.
- */
-@Serializable
-data class TaskEventBackward(val messages: List<EventMessage>, val eventId: String)
-
-/** TaskHistoryStreamError reports that task history could not be replayed. */
-@Serializable
-data class TaskHistoryStreamError(val message: String)
-
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 @Serializable
 data class InputReq(val prompt: Prompt)
@@ -2968,7 +2513,7 @@ data class WebFetchReq(val url: String)
 data class WebFetchResp(val title: String, val content: String)
 
 /**
- * HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+ * HistoryBootstrap is small revalidated discovery for task history. ResourceBase
  * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
  * for direct arithmetic access. Scope isolates the
  * authenticated account, including legacy shared tasks. Browser HTTP caching
@@ -2987,6 +2532,414 @@ data class HistoryBootstrap(
     val through: Long,
     val cursor: String,
     val resourceBase: String,
+)
+
+/**
+ * EventMessageSource identifies the provider origin of any normalized event.
+ * AgentID and DelegationToolUseID identify child ownership independently of native
+ * item identity. RootThreadID is an authoritative session owner when reported.
+ * Fields remain absent when the harness does not supply them.
+ */
+@Serializable
+data class EventMessageSource(
+    @SerialName("agentID") val agentID: String? = null,
+    @SerialName("delegationToolUseID") val delegationToolUseID: String? = null,
+    @SerialName("threadID") val threadID: String? = null,
+    @SerialName("turnID") val turnID: String? = null,
+    @SerialName("itemID") val itemID: String? = null,
+    @SerialName("rootThreadID") val rootThreadID: String? = null,
+)
+
+/**
+ * EventInit is emitted once at the start of a session. It includes a Harness
+ * field so the client knows which backend produced the stream.
+ */
+@Serializable
+data class EventInit(
+    val reportedModel: String,
+    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
+    val reportedEffort: String? = null,
+    val agentVersion: String,
+    @SerialName("sessionID") val sessionID: String,
+    val tools: List<String>? = null,
+    val cwd: String,
+    val harness: String,
+)
+
+/** EventText is an assistant text block. */
+@Serializable
+data class EventText(val text: String)
+
+/** EventTextDelta is a streaming text fragment from --include-partial-messages. */
+@Serializable
+data class EventTextDelta(val text: String)
+
+/** EventFileChange is one changed file rendered from a unified patch. */
+@Serializable
+data class EventFileChange(val path: String, val patch: String)
+
+/** EventSubagentSpawn is one backend-normalized subagent invocation. */
+@Serializable
+data class EventSubagentSpawn(
+    val agent: String,
+    val task: String,
+    val label: String? = null,
+    val phase: String? = null,
+)
+
+/**
+ * EventToolInputView is a backend-normalized rendering model for known tool
+ * inputs. It keeps harness-specific tool schemas out of clients.
+ */
+@Serializable
+data class EventToolInputView(
+    val kind: EventToolInputKind,
+    val files: List<EventFileChange>? = null,
+    val subagents: List<EventSubagentSpawn>? = null,
+)
+
+/** EventToolUse is emitted when the assistant invokes a tool. */
+@Serializable
+data class EventToolUse(
+    @SerialName("toolUseID") val toolUseID: String,
+    val name: String,
+    val input: JsonElement,
+    /** Backend-normalized short display detail for tool headers. */
+    val detail: String? = null,
+    /** Backend-normalized structured input for tool-card rendering. */
+    val inputView: EventToolInputView? = null,
+    /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
+    val inputTruncated: Boolean? = null,
+    /** True when the tool runs in the background (Bash/Agent run_in_background). */
+    val background: Boolean? = null,
+)
+
+/** EventToolResult is emitted when a tool call completes. */
+@Serializable
+data class EventToolResult(
+    @SerialName("toolUseID") val toolUseID: String,
+    /** Seconds; server-computed; 0 if unknown. */
+    val duration: Double,
+    val error: String? = null,
+)
+
+/** AskOption is a single option in an AskUserQuestion. */
+@Serializable
+data class AskOption(val label: String, val description: String? = null)
+
+/** AskQuestion is a single question from AskUserQuestion. */
+@Serializable
+data class AskQuestion(
+    val question: String,
+    val header: String? = null,
+    val options: List<AskOption>,
+    val multiSelect: Boolean? = null,
+)
+
+/** EventAsk is emitted when the agent asks the user a question. */
+@Serializable
+data class EventAsk(
+    @SerialName("toolUseID") val toolUseID: String,
+    val questions: List<AskQuestion>,
+)
+
+/**
+ * EventUsage reports per-turn token usage.
+ * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+ * or reasoning summaries (Codex). Zero when the harness does not report it.
+ */
+@Serializable
+data class EventUsage(
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val reasoningOutputTokens: Int? = null,
+    val reportedModel: String,
+)
+
+/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
+@Serializable
+data class EventCost(val usd: Double, val source: EventCostSource)
+
+/** EventResult is emitted when the task reaches a terminal state. */
+@Serializable
+data class EventResult(
+    val cost: EventCost? = null,
+    val subtype: String,
+    val isError: Boolean,
+    val result: String,
+    val diffStat: DiffStat? = null,
+    @SerialName("totalCostUSD") val totalCostUSD: Double,
+    /** Seconds. */
+    val duration: Double,
+    /** Seconds. */
+    @SerialName("durationAPI") val durationAPI: Double,
+    val numTurns: Int,
+    val usage: EventUsage,
+)
+
+/** EventSystem is a system event (status, compact_boundary, etc.). */
+@Serializable
+data class EventSystem(
+    val subtype: String,
+    /** Optional human-readable detail (e.g. model names for model_rerouted). */
+    val detail: String? = null,
+    /**
+     * ContextTokensBefore is the context size the harness reported before a
+     * compact_boundary. Zero means the harness did not report it.
+     */
+    val contextTokensBefore: Long? = null,
+    /**
+     * ContextTokensAfter is the context size the harness reported after a
+     * compact_boundary, measured or estimated. Zero means it did not report it.
+     */
+    val contextTokensAfter: Long? = null,
+)
+
+/**
+ * EventImageData describes one prompt image carried by a user-input event.
+ *
+ * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+ * task attachment route. Data stays until clients fetch images only by Hash.
+ */
+@Serializable
+data class EventImageData(
+    val mediaType: String,
+    val data: String,
+    val hash: String? = null,
+)
+
+/** EventUserInput is emitted when a user sends a text message to the agent. */
+@Serializable
+data class EventUserInput(val text: String, val images: List<EventImageData>? = null)
+
+/** TodoItem is a single todo entry from a TodoWrite tool call. */
+@Serializable
+data class TodoItem(
+    val content: String,
+    /** "pending", "in_progress", "completed". */
+    val status: String,
+    val activeForm: String? = null,
+)
+
+/** EventTodo is emitted when the agent writes/updates its todo list. */
+@Serializable
+data class EventTodo(
+    @SerialName("toolUseID") val toolUseID: String,
+    val todos: List<TodoItem>,
+)
+
+/** EventDiffStat is emitted when the relay reports updated diff statistics. */
+@Serializable
+data class EventDiffStat(val diffStat: DiffStat? = null)
+
+/** EventError is emitted when the backend fails to parse an agent output line. */
+@Serializable
+data class EventError(val err: String, val line: String)
+
+/** EventThinking is an assistant thinking block. */
+@Serializable
+data class EventThinking(val text: String)
+
+/** EventThinkingDelta is a streaming thinking fragment. */
+@Serializable
+data class EventThinkingDelta(val text: String)
+
+/**
+ * EventSubagentStart is emitted when a subagent task begins. It is the legacy
+ * harness-agnostic shape: no current parser produces it, and clients should
+ * render EventNativeSubagent instead. It stays in the v1 event union and the
+ * generated SDKs so existing clients that switch on these kinds keep compiling.
+ */
+@Serializable
+data class EventSubagentStart(
+    @SerialName("taskID") val taskID: String,
+    val description: String,
+)
+
+/**
+ * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+ * It is the legacy harness-agnostic shape: no current parser produces it, and
+ * clients should render EventNativeSubagent instead. It stays in the v1 event
+ * union and the generated SDKs so existing clients that switch on these kinds
+ * keep compiling.
+ */
+@Serializable
+data class EventSubagentEnd(
+    @SerialName("taskID") val taskID: String,
+    /** "completed", "failed", "stopped" */
+    val status: String,
+)
+
+/**
+ * EventNativeSubagent is one lifecycle update for a harness native subagent.
+ * ID and GroupID are opaque harness identities. Optional fields remain absent
+ * when the harness did not expose them.
+ */
+@Serializable
+data class EventNativeSubagent(
+    @SerialName("toolUseID") val toolUseID: String? = null,
+    val scope: EventNativeSubagentScope? = null,
+    val id: String,
+    @SerialName("groupID") val groupID: String? = null,
+    val label: String? = null,
+    val prompt: String? = null,
+    val status: EventNativeSubagentStatus,
+    val result: String? = null,
+    /**
+     * Background reports that the harness launched the delegation detached from
+     * the parent turn, so it can outlive that turn's result.
+     */
+    val background: Boolean? = null,
+)
+
+/**
+ * EventBackgroundCommand reports one harness-native detached shell command's
+ * folded lifecycle. ExitCode is the command's numeric outcome when the harness
+ * reported one; OutputRef is an opaque harness-owned output reference, not a
+ * caic resource.
+ */
+@Serializable
+data class EventBackgroundCommand(
+    val id: String,
+    val label: String? = null,
+    val status: String,
+    val result: String? = null,
+    val exitCode: Int? = null,
+    val outputRef: String? = null,
+    @SerialName("toolUseID") val toolUseID: String? = null,
+)
+
+/** EventLog is a provisioning/startup log line from the runtime backend. */
+@Serializable
+data class EventLog(val line: String)
+
+/**
+ * EventToolOutputDelta is a streaming output fragment from a running tool.
+ * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+ * MCP tool progress messages (item/mcpToolCall/progress).
+ */
+@Serializable
+data class EventToolOutputDelta(
+    @SerialName("toolUseID") val toolUseID: String,
+    val delta: String,
+    val contentType: ToolOutputContentType? = null,
+    /** Pretty-printed JSON or other transformation. */
+    val formatted: String? = null,
+)
+
+/** EventWidget is emitted when the agent produces a complete HTML widget. */
+@Serializable
+data class EventWidget(
+    @SerialName("toolUseID") val toolUseID: String,
+    val title: String,
+    val html: String,
+)
+
+/** EventWidgetDelta is a streaming HTML fragment for progressive widget rendering. */
+@Serializable
+data class EventWidgetDelta(
+    @SerialName("toolUseID") val toolUseID: String,
+    val delta: String,
+)
+
+/** EventRateLimit is emitted when the agent's rate limit status changes. */
+@Serializable
+data class EventRateLimit(
+    val status: EventRateLimitStatus,
+    /** When the limit resets; zero if unknown. */
+    val resetsAt: Instant? = null,
+    /** "five_hour", "seven_day", etc. */
+    val rateLimitType: String,
+    /** 0.0–1.0; -1 when unknown. */
+    val utilization: Double,
+    /** True when extra/overage usage is active. */
+    val isUsingOverage: Boolean? = null,
+    /** When overage resets; zero if not using overage. */
+    val overageResetsAt: Instant? = null,
+)
+
+/**
+ * EventRepositoryCommit identifies one immutable repository branch tip in a
+ * commit snapshot.
+ */
+@Serializable
+data class EventRepositoryCommit(
+    /** RepositoryPath is the repository's absolute path inside the task runtime. */
+    val repositoryPath: String,
+    /** BranchName is the short local branch name, such as "main" or "caic-1". */
+    val branchName: String,
+    /** CommitHash is the full Git object ID of the branch tip. */
+    val commitHash: String,
+)
+
+/** EventChangeStat summarizes a completed turn's net committed change. */
+@Serializable
+data class EventChangeStat(
+    val files: Int,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    val binaryFiles: Int,
+)
+
+/**
+ * EventCommitSnapshot records the exact committed repository branch tips
+ * fetched from the runtime when a turn finishes.
+ */
+@Serializable
+data class EventCommitSnapshot(
+    val repositoryCommits: List<EventRepositoryCommit>,
+    val baseline: Boolean? = null,
+    val changeStat: EventChangeStat? = null,
+)
+
+/**
+ * EventSkillLoad is emitted when a skill enters the main agent's context. A
+ * failed call and a subagent's load emit none; an inferred load is emitted
+ * once the tool that opened the file succeeds.
+ */
+@Serializable
+data class EventSkillLoad(
+    val skill: String,
+    /** SKILL.md in the task runtime; empty when the harness did not report it. */
+    val path: String? = null,
+)
+
+// Backend-neutral event types
+
+/** EventMessage is one backend-neutral message in cached history and its live stream. */
+@Serializable
+data class EventMessage(
+    val source: EventMessageSource? = null,
+    val kind: EventKind,
+    val ts: Long,
+    val init: EventInit? = null,
+    val text: EventText? = null,
+    val textDelta: EventTextDelta? = null,
+    val toolUse: EventToolUse? = null,
+    val toolResult: EventToolResult? = null,
+    val ask: EventAsk? = null,
+    val usage: EventUsage? = null,
+    val result: EventResult? = null,
+    val system: EventSystem? = null,
+    val userInput: EventUserInput? = null,
+    val todo: EventTodo? = null,
+    val diffStat: EventDiffStat? = null,
+    val error: EventError? = null,
+    val thinking: EventThinking? = null,
+    val thinkingDelta: EventThinkingDelta? = null,
+    val subagentStart: EventSubagentStart? = null,
+    val subagentEnd: EventSubagentEnd? = null,
+    val nativeSubagent: EventNativeSubagent? = null,
+    val backgroundCommand: EventBackgroundCommand? = null,
+    val log: EventLog? = null,
+    val toolOutputDelta: EventToolOutputDelta? = null,
+    val widget: EventWidget? = null,
+    val widgetDelta: EventWidgetDelta? = null,
+    val rateLimit: EventRateLimit? = null,
+    val commitSnapshot: EventCommitSnapshot? = null,
+    val skillLoad: EventSkillLoad? = null,
 )
 
 /**
@@ -3036,11 +2989,47 @@ data class HistoryTurnEstimate(
 @Serializable
 data class HistoryCheckpoint(val cursor: String)
 
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+@Serializable
+data class EventStats(
+    val ts: Long,
+    /** 100% is one fully busy logical CPU. */
+    val cpuPerc: Double,
+    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+    val cpuCeiling: Double? = null,
+    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+    val cpuQuota: Double? = null,
+    /** Owning runtime's logical CPU count; null when unknown. */
+    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
+    /** Runtime CPU metadata observation failure; usage samples remain usable. */
+    val cpuError: String? = null,
+    val memUsed: Long,
+    val memLimit: Long,
+    val memPerc: Double,
+    val netRx: Long,
+    val netTx: Long,
+    val blockRead: Long,
+    val blockWrite: Long,
+    val diskUsed: Long,
+)
+
+/**
+ * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * Replace samples sharing a timestamp: disk usage can revise the latest sample.
+ * These host observations are separate from immutable raw task history.
+ */
+@Serializable
+data class HistoryStats(val samples: List<EventStats>)
+
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
 @Serializable
 data class HistoryReset(
     @SerialName("bootstrapURL") val bootstrapURL: String,
 )
+
+/** TaskHistoryStreamError reports that task history could not be replayed. */
+@Serializable
+data class TaskHistoryStreamError(val message: String)
 
 @Serializable
 data class ErrorDetails(val code: ErrorCode, val message: String)

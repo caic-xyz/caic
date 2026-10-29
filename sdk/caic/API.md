@@ -61,7 +61,6 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
-| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. |  | `EventMessage` SSE<br>Named events: `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `backward` (`TaskEventBackward`), `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
 | POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
@@ -78,10 +77,10 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
-| GET | `/api/caic/v1/tasks/{id}/history/bootstrap` | Returns small live-task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. |  | `HistoryBootstrap` |
+| GET | `/api/caic/v1/tasks/{id}/history/bootstrap` | Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. |  | `HistoryBootstrap` |
 | GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/chunks/{first}/{last}` | Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. |  | `HistoryEvent[]` |
 | GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[]` |
-| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
+| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
 ## Processes
 
@@ -1250,510 +1249,6 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `gitHubToken` | `boolean` |  |  |
 | `caicMCP` | `boolean` | Enables task-scoped CAIC MCP delegation. |  |
 
-### EventMessageSource
-
-EventMessageSource identifies the provider origin of any normalized event.
-AgentID and DelegationToolUseID identify child ownership independently of native
-item identity. RootThreadID is an authoritative session owner when reported.
-Fields remain absent when the harness does not supply them.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `agentID` | `string` |  |  |
-| `delegationToolUseID` | `string` |  |  |
-| `threadID` | `string` |  |  |
-| `turnID` | `string` |  |  |
-| `itemID` | `string` |  |  |
-| `rootThreadID` | `string` |  |  |
-
-### EventInit
-
-EventInit is emitted once at the start of a session. It includes a Harness
-field so the client knows which backend produced the stream.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `reportedModel` | `string` |  | yes |
-| `reportedEffort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
-| `agentVersion` | `string` |  | yes |
-| `sessionID` | `string` |  | yes |
-| `tools` | `string[]` |  |  |
-| `cwd` | `string` |  | yes |
-| `harness` | `string` |  | yes |
-
-### EventText
-
-EventText is an assistant text block.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-
-### EventTextDelta
-
-EventTextDelta is a streaming text fragment from --include-partial-messages.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-
-### EventFileChange
-
-EventFileChange is one changed file rendered from a unified patch.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `path` | `string` |  | yes |
-| `patch` | `string` |  | yes |
-
-### EventSubagentSpawn
-
-EventSubagentSpawn is one backend-normalized subagent invocation.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `agent` | `string` |  | yes |
-| `task` | `string` |  | yes |
-| `label` | `string` |  |  |
-| `phase` | `string` |  |  |
-
-### EventToolInputView
-
-EventToolInputView is a backend-normalized rendering model for known tool
-inputs. It keeps harness-specific tool schemas out of clients.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `kind` | `EventToolInputKind` |  | yes |
-| `files` | `EventFileChange[]` |  |  |
-| `subagents` | `EventSubagentSpawn[]` |  |  |
-
-### EventToolUse
-
-EventToolUse is emitted when the assistant invokes a tool.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `name` | `string` |  | yes |
-| `input` | `JSONValue` |  | yes |
-| `detail` | `string` | Backend-normalized short display detail for tool headers. |  |
-| `inputView` | `EventToolInputView` | Backend-normalized structured input for tool-card rendering. |  |
-| `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
-| `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |
-
-### EventToolResult
-
-EventToolResult is emitted when a tool call completes.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `duration` | `float64` | Seconds; server-computed; 0 if unknown. | yes |
-| `error` | `string` |  |  |
-
-### AskOption
-
-AskOption is a single option in an AskUserQuestion.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `label` | `string` |  | yes |
-| `description` | `string` |  |  |
-
-### AskQuestion
-
-AskQuestion is a single question from AskUserQuestion.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `question` | `string` |  | yes |
-| `header` | `string` |  |  |
-| `options` | `AskOption[]` |  | yes |
-| `multiSelect` | `boolean` |  |  |
-
-### EventAsk
-
-EventAsk is emitted when the agent asks the user a question.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `questions` | `AskQuestion[]` |  | yes |
-
-### EventUsage
-
-EventUsage reports per-turn token usage.
-ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
-or reasoning summaries (Codex). Zero when the harness does not report it.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `inputTokens` | `int` |  | yes |
-| `outputTokens` | `int` |  | yes |
-| `cacheCreationInputTokens` | `int` |  | yes |
-| `cacheReadInputTokens` | `int` |  | yes |
-| `reasoningOutputTokens` | `int` |  |  |
-| `reportedModel` | `string` |  | yes |
-
-### EventCost
-
-EventCost is one completed turn's reported or API-equivalent estimated cost.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `usd` | `float64` |  | yes |
-| `source` | `EventCostSource` |  | yes |
-
-### EventResult
-
-EventResult is emitted when the task reaches a terminal state.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `cost` | `EventCost` |  |  |
-| `subtype` | `string` |  | yes |
-| `isError` | `boolean` |  | yes |
-| `result` | `string` |  | yes |
-| `diffStat` | `DiffStat` |  |  |
-| `totalCostUSD` | `float64` |  | yes |
-| `duration` | `float64` | Seconds. | yes |
-| `durationAPI` | `float64` | Seconds. | yes |
-| `numTurns` | `int` |  | yes |
-| `usage` | `EventUsage` |  | yes |
-
-### EventSystem
-
-EventSystem is a system event (status, compact_boundary, etc.).
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `subtype` | `string` |  | yes |
-| `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
-| `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a
-compact_boundary. Zero means the harness did not report it. |  |
-| `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
-compact_boundary, measured or estimated. Zero means it did not report it. |  |
-
-### EventImageData
-
-EventImageData describes one prompt image carried by a user-input event.
-
-Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
-task attachment route. Data stays until clients fetch images only by Hash.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `mediaType` | `string` |  | yes |
-| `data` | `string` |  | yes |
-| `hash` | `string` |  |  |
-
-### EventUserInput
-
-EventUserInput is emitted when a user sends a text message to the agent.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-| `images` | `EventImageData[]` |  |  |
-
-### TodoItem
-
-TodoItem is a single todo entry from a TodoWrite tool call.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `content` | `string` |  | yes |
-| `status` | `string` | "pending", "in_progress", "completed". | yes |
-| `activeForm` | `string` |  |  |
-
-### EventTodo
-
-EventTodo is emitted when the agent writes/updates its todo list.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `todos` | `TodoItem[]` |  | yes |
-
-### EventDiffStat
-
-EventDiffStat is emitted when the relay reports updated diff statistics.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `diffStat` | `DiffStat` |  |  |
-
-### EventError
-
-EventError is emitted when the backend fails to parse an agent output line.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `err` | `string` |  | yes |
-| `line` | `string` |  | yes |
-
-### EventThinking
-
-EventThinking is an assistant thinking block.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-
-### EventThinkingDelta
-
-EventThinkingDelta is a streaming thinking fragment.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-
-### EventSubagentStart
-
-EventSubagentStart is emitted when a subagent task begins. It is the legacy
-harness-agnostic shape: no current parser produces it, and clients should
-render EventNativeSubagent instead. It stays in the v1 event union and the
-generated SDKs so existing clients that switch on these kinds keep compiling.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `taskID` | `string` |  | yes |
-| `description` | `string` |  | yes |
-
-### EventSubagentEnd
-
-EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
-It is the legacy harness-agnostic shape: no current parser produces it, and
-clients should render EventNativeSubagent instead. It stays in the v1 event
-union and the generated SDKs so existing clients that switch on these kinds
-keep compiling.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `taskID` | `string` |  | yes |
-| `status` | `string` | "completed", "failed", "stopped" | yes |
-
-### EventNativeSubagent
-
-EventNativeSubagent is one lifecycle update for a harness native subagent.
-ID and GroupID are opaque harness identities. Optional fields remain absent
-when the harness did not expose them.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  |  |
-| `scope` | `EventNativeSubagentScope` |  |  |
-| `id` | `string` |  | yes |
-| `groupID` | `string` |  |  |
-| `label` | `string` |  |  |
-| `prompt` | `string` |  |  |
-| `status` | `EventNativeSubagentStatus` |  | yes |
-| `result` | `string` |  |  |
-| `background` | `boolean` | Background reports that the harness launched the delegation detached from
-the parent turn, so it can outlive that turn's result. |  |
-
-### EventBackgroundCommand
-
-EventBackgroundCommand reports one harness-native detached shell command's
-folded lifecycle. ExitCode is the command's numeric outcome when the harness
-reported one; OutputRef is an opaque harness-owned output reference, not a
-caic resource.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `id` | `string` |  | yes |
-| `label` | `string` |  |  |
-| `status` | `string` |  | yes |
-| `result` | `string` |  |  |
-| `exitCode` | `int` |  |  |
-| `outputRef` | `string` |  |  |
-| `toolUseID` | `string` |  |  |
-
-### EventLog
-
-EventLog is a provisioning/startup log line from the runtime backend.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `line` | `string` |  | yes |
-
-### EventToolOutputDelta
-
-EventToolOutputDelta is a streaming output fragment from a running tool.
-Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
-MCP tool progress messages (item/mcpToolCall/progress).
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `delta` | `string` |  | yes |
-| `contentType` | `ToolOutputContentType` |  |  |
-| `formatted` | `string` | Pretty-printed JSON or other transformation. |  |
-
-### EventWidget
-
-EventWidget is emitted when the agent produces a complete HTML widget.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `title` | `string` |  | yes |
-| `html` | `string` |  | yes |
-
-### EventWidgetDelta
-
-EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `toolUseID` | `string` |  | yes |
-| `delta` | `string` |  | yes |
-
-### EventRateLimit
-
-EventRateLimit is emitted when the agent's rate limit status changes.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `status` | `EventRateLimitStatus` |  | yes |
-| `resetsAt` | `ISOTimestamp` | When the limit resets; zero if unknown. |  |
-| `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
-| `utilization` | `float64` | 0.0–1.0; -1 when unknown. | yes |
-| `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
-| `overageResetsAt` | `ISOTimestamp` | When overage resets; zero if not using overage. |  |
-
-### EventRepositoryCommit
-
-EventRepositoryCommit identifies one immutable repository branch tip in a
-commit snapshot.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `repositoryPath` | `string` | RepositoryPath is the repository's absolute path inside the task runtime. | yes |
-| `branchName` | `string` | BranchName is the short local branch name, such as "main" or "caic-1". | yes |
-| `commitHash` | `string` | CommitHash is the full Git object ID of the branch tip. | yes |
-
-### EventChangeStat
-
-EventChangeStat summarizes a completed turn's net committed change.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `files` | `int` |  | yes |
-| `linesAdded` | `int` |  | yes |
-| `linesDeleted` | `int` |  | yes |
-| `binaryFiles` | `int` |  | yes |
-
-### EventCommitSnapshot
-
-EventCommitSnapshot records the exact committed repository branch tips
-fetched from the runtime when a turn finishes.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `repositoryCommits` | `EventRepositoryCommit[]` |  | yes |
-| `baseline` | `boolean` |  |  |
-| `changeStat` | `EventChangeStat` |  |  |
-
-### EventSkillLoad
-
-EventSkillLoad is emitted when a skill enters the main agent's context. A
-failed call and a subagent's load emit none; an inferred load is emitted
-once the tool that opened the file succeeds.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `skill` | `string` |  | yes |
-| `path` | `string` | SKILL.md in the task runtime; empty when the harness did not report it. |  |
-
-### EventMessage
-
-EventMessage is a single SSE event in the backend-neutral stream
-(/api/caic/v1/tasks/{id}/events). All backends produce these events.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `source` | `EventMessageSource` |  |  |
-| `kind` | `EventKind` |  | yes |
-| `ts` | `int64` |  | yes |
-| `init` | `EventInit` |  |  |
-| `text` | `EventText` |  |  |
-| `textDelta` | `EventTextDelta` |  |  |
-| `toolUse` | `EventToolUse` |  |  |
-| `toolResult` | `EventToolResult` |  |  |
-| `ask` | `EventAsk` |  |  |
-| `usage` | `EventUsage` |  |  |
-| `result` | `EventResult` |  |  |
-| `system` | `EventSystem` |  |  |
-| `userInput` | `EventUserInput` |  |  |
-| `todo` | `EventTodo` |  |  |
-| `diffStat` | `EventDiffStat` |  |  |
-| `error` | `EventError` |  |  |
-| `thinking` | `EventThinking` |  |  |
-| `thinkingDelta` | `EventThinkingDelta` |  |  |
-| `subagentStart` | `EventSubagentStart` |  |  |
-| `subagentEnd` | `EventSubagentEnd` |  |  |
-| `nativeSubagent` | `EventNativeSubagent` |  |  |
-| `backgroundCommand` | `EventBackgroundCommand` |  |  |
-| `log` | `EventLog` |  |  |
-| `toolOutputDelta` | `EventToolOutputDelta` |  |  |
-| `widget` | `EventWidget` |  |  |
-| `widgetDelta` | `EventWidgetDelta` |  |  |
-| `rateLimit` | `EventRateLimit` |  |  |
-| `commitSnapshot` | `EventCommitSnapshot` |  |  |
-| `skillLoad` | `EventSkillLoad` |  |  |
-
-### EventStats
-
-EventStats is a runtime resource usage snapshot emitted periodically.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `ts` | `int64` |  | yes |
-| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
-| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
-| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
-| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
-| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
-| `memUsed` | `uint64` |  | yes |
-| `memLimit` | `uint64` |  | yes |
-| `memPerc` | `float64` |  | yes |
-| `netRx` | `uint64` |  | yes |
-| `netTx` | `uint64` |  | yes |
-| `blockRead` | `uint64` |  | yes |
-| `blockWrite` | `uint64` |  | yes |
-| `diskUsed` | `int64` |  | yes |
-
-### HistoryStats
-
-HistoryStats contains the bounded 60-sample runtime ring, oldest first.
-Replace samples sharing a timestamp: disk usage can revise the latest sample.
-These host observations are separate from immutable raw task history.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `samples` | `EventStats[]` |  | yes |
-
-### TaskEventBackward
-
-TaskEventBackward carries a chronological recent disk preview before canonical
-history on the same connection. EventID is empty. Memory-backed streams send
-canonical history and support normal event-ID resume.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `messages` | `EventMessage[]` |  | yes |
-| `eventId` | `string` |  | yes |
-
-### TaskHistoryStreamError
-
-TaskHistoryStreamError reports that task history could not be replayed.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `message` | `string` |  | yes |
-
 ### InputReq
 
 InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
@@ -2349,7 +1844,7 @@ WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 
 ### HistoryBootstrap
 
-HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+HistoryBootstrap is small revalidated discovery for task history. ResourceBase
 ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
 for direct arithmetic access. Scope isolates the
 authenticated account, including legacy shared tasks. Browser HTTP caching
@@ -2368,6 +1863,459 @@ and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
 | `through` | `uint64` |  | yes |
 | `cursor` | `string` |  | yes |
 | `resourceBase` | `string` |  | yes |
+
+### EventMessageSource
+
+EventMessageSource identifies the provider origin of any normalized event.
+AgentID and DelegationToolUseID identify child ownership independently of native
+item identity. RootThreadID is an authoritative session owner when reported.
+Fields remain absent when the harness does not supply them.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `agentID` | `string` |  |  |
+| `delegationToolUseID` | `string` |  |  |
+| `threadID` | `string` |  |  |
+| `turnID` | `string` |  |  |
+| `itemID` | `string` |  |  |
+| `rootThreadID` | `string` |  |  |
+
+### EventInit
+
+EventInit is emitted once at the start of a session. It includes a Harness
+field so the client knows which backend produced the stream.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `reportedModel` | `string` |  | yes |
+| `reportedEffort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
+| `agentVersion` | `string` |  | yes |
+| `sessionID` | `string` |  | yes |
+| `tools` | `string[]` |  |  |
+| `cwd` | `string` |  | yes |
+| `harness` | `string` |  | yes |
+
+### EventText
+
+EventText is an assistant text block.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+
+### EventTextDelta
+
+EventTextDelta is a streaming text fragment from --include-partial-messages.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+
+### EventFileChange
+
+EventFileChange is one changed file rendered from a unified patch.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `patch` | `string` |  | yes |
+
+### EventSubagentSpawn
+
+EventSubagentSpawn is one backend-normalized subagent invocation.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `agent` | `string` |  | yes |
+| `task` | `string` |  | yes |
+| `label` | `string` |  |  |
+| `phase` | `string` |  |  |
+
+### EventToolInputView
+
+EventToolInputView is a backend-normalized rendering model for known tool
+inputs. It keeps harness-specific tool schemas out of clients.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `EventToolInputKind` |  | yes |
+| `files` | `EventFileChange[]` |  |  |
+| `subagents` | `EventSubagentSpawn[]` |  |  |
+
+### EventToolUse
+
+EventToolUse is emitted when the assistant invokes a tool.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `name` | `string` |  | yes |
+| `input` | `JSONValue` |  | yes |
+| `detail` | `string` | Backend-normalized short display detail for tool headers. |  |
+| `inputView` | `EventToolInputView` | Backend-normalized structured input for tool-card rendering. |  |
+| `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
+| `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |
+
+### EventToolResult
+
+EventToolResult is emitted when a tool call completes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `duration` | `float64` | Seconds; server-computed; 0 if unknown. | yes |
+| `error` | `string` |  |  |
+
+### AskOption
+
+AskOption is a single option in an AskUserQuestion.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `label` | `string` |  | yes |
+| `description` | `string` |  |  |
+
+### AskQuestion
+
+AskQuestion is a single question from AskUserQuestion.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `question` | `string` |  | yes |
+| `header` | `string` |  |  |
+| `options` | `AskOption[]` |  | yes |
+| `multiSelect` | `boolean` |  |  |
+
+### EventAsk
+
+EventAsk is emitted when the agent asks the user a question.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `questions` | `AskQuestion[]` |  | yes |
+
+### EventUsage
+
+EventUsage reports per-turn token usage.
+ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+or reasoning summaries (Codex). Zero when the harness does not report it.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `inputTokens` | `int` |  | yes |
+| `outputTokens` | `int` |  | yes |
+| `cacheCreationInputTokens` | `int` |  | yes |
+| `cacheReadInputTokens` | `int` |  | yes |
+| `reasoningOutputTokens` | `int` |  |  |
+| `reportedModel` | `string` |  | yes |
+
+### EventCost
+
+EventCost is one completed turn's reported or API-equivalent estimated cost.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `usd` | `float64` |  | yes |
+| `source` | `EventCostSource` |  | yes |
+
+### EventResult
+
+EventResult is emitted when the task reaches a terminal state.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `cost` | `EventCost` |  |  |
+| `subtype` | `string` |  | yes |
+| `isError` | `boolean` |  | yes |
+| `result` | `string` |  | yes |
+| `diffStat` | `DiffStat` |  |  |
+| `totalCostUSD` | `float64` |  | yes |
+| `duration` | `float64` | Seconds. | yes |
+| `durationAPI` | `float64` | Seconds. | yes |
+| `numTurns` | `int` |  | yes |
+| `usage` | `EventUsage` |  | yes |
+
+### EventSystem
+
+EventSystem is a system event (status, compact_boundary, etc.).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `subtype` | `string` |  | yes |
+| `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
+| `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a
+compact_boundary. Zero means the harness did not report it. |  |
+| `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
+compact_boundary, measured or estimated. Zero means it did not report it. |  |
+
+### EventImageData
+
+EventImageData describes one prompt image carried by a user-input event.
+
+Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+task attachment route. Data stays until clients fetch images only by Hash.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `mediaType` | `string` |  | yes |
+| `data` | `string` |  | yes |
+| `hash` | `string` |  |  |
+
+### EventUserInput
+
+EventUserInput is emitted when a user sends a text message to the agent.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+| `images` | `EventImageData[]` |  |  |
+
+### TodoItem
+
+TodoItem is a single todo entry from a TodoWrite tool call.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `content` | `string` |  | yes |
+| `status` | `string` | "pending", "in_progress", "completed". | yes |
+| `activeForm` | `string` |  |  |
+
+### EventTodo
+
+EventTodo is emitted when the agent writes/updates its todo list.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `todos` | `TodoItem[]` |  | yes |
+
+### EventDiffStat
+
+EventDiffStat is emitted when the relay reports updated diff statistics.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `diffStat` | `DiffStat` |  |  |
+
+### EventError
+
+EventError is emitted when the backend fails to parse an agent output line.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `err` | `string` |  | yes |
+| `line` | `string` |  | yes |
+
+### EventThinking
+
+EventThinking is an assistant thinking block.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+
+### EventThinkingDelta
+
+EventThinkingDelta is a streaming thinking fragment.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+
+### EventSubagentStart
+
+EventSubagentStart is emitted when a subagent task begins. It is the legacy
+harness-agnostic shape: no current parser produces it, and clients should
+render EventNativeSubagent instead. It stays in the v1 event union and the
+generated SDKs so existing clients that switch on these kinds keep compiling.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskID` | `string` |  | yes |
+| `description` | `string` |  | yes |
+
+### EventSubagentEnd
+
+EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+It is the legacy harness-agnostic shape: no current parser produces it, and
+clients should render EventNativeSubagent instead. It stays in the v1 event
+union and the generated SDKs so existing clients that switch on these kinds
+keep compiling.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskID` | `string` |  | yes |
+| `status` | `string` | "completed", "failed", "stopped" | yes |
+
+### EventNativeSubagent
+
+EventNativeSubagent is one lifecycle update for a harness native subagent.
+ID and GroupID are opaque harness identities. Optional fields remain absent
+when the harness did not expose them.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  |  |
+| `scope` | `EventNativeSubagentScope` |  |  |
+| `id` | `string` |  | yes |
+| `groupID` | `string` |  |  |
+| `label` | `string` |  |  |
+| `prompt` | `string` |  |  |
+| `status` | `EventNativeSubagentStatus` |  | yes |
+| `result` | `string` |  |  |
+| `background` | `boolean` | Background reports that the harness launched the delegation detached from
+the parent turn, so it can outlive that turn's result. |  |
+
+### EventBackgroundCommand
+
+EventBackgroundCommand reports one harness-native detached shell command's
+folded lifecycle. ExitCode is the command's numeric outcome when the harness
+reported one; OutputRef is an opaque harness-owned output reference, not a
+caic resource.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `label` | `string` |  |  |
+| `status` | `string` |  | yes |
+| `result` | `string` |  |  |
+| `exitCode` | `int` |  |  |
+| `outputRef` | `string` |  |  |
+| `toolUseID` | `string` |  |  |
+
+### EventLog
+
+EventLog is a provisioning/startup log line from the runtime backend.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `line` | `string` |  | yes |
+
+### EventToolOutputDelta
+
+EventToolOutputDelta is a streaming output fragment from a running tool.
+Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+MCP tool progress messages (item/mcpToolCall/progress).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `delta` | `string` |  | yes |
+| `contentType` | `ToolOutputContentType` |  |  |
+| `formatted` | `string` | Pretty-printed JSON or other transformation. |  |
+
+### EventWidget
+
+EventWidget is emitted when the agent produces a complete HTML widget.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `title` | `string` |  | yes |
+| `html` | `string` |  | yes |
+
+### EventWidgetDelta
+
+EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `delta` | `string` |  | yes |
+
+### EventRateLimit
+
+EventRateLimit is emitted when the agent's rate limit status changes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `EventRateLimitStatus` |  | yes |
+| `resetsAt` | `ISOTimestamp` | When the limit resets; zero if unknown. |  |
+| `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
+| `utilization` | `float64` | 0.0–1.0; -1 when unknown. | yes |
+| `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
+| `overageResetsAt` | `ISOTimestamp` | When overage resets; zero if not using overage. |  |
+
+### EventRepositoryCommit
+
+EventRepositoryCommit identifies one immutable repository branch tip in a
+commit snapshot.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositoryPath` | `string` | RepositoryPath is the repository's absolute path inside the task runtime. | yes |
+| `branchName` | `string` | BranchName is the short local branch name, such as "main" or "caic-1". | yes |
+| `commitHash` | `string` | CommitHash is the full Git object ID of the branch tip. | yes |
+
+### EventChangeStat
+
+EventChangeStat summarizes a completed turn's net committed change.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `files` | `int` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `binaryFiles` | `int` |  | yes |
+
+### EventCommitSnapshot
+
+EventCommitSnapshot records the exact committed repository branch tips
+fetched from the runtime when a turn finishes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositoryCommits` | `EventRepositoryCommit[]` |  | yes |
+| `baseline` | `boolean` |  |  |
+| `changeStat` | `EventChangeStat` |  |  |
+
+### EventSkillLoad
+
+EventSkillLoad is emitted when a skill enters the main agent's context. A
+failed call and a subagent's load emit none; an inferred load is emitted
+once the tool that opened the file succeeds.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `skill` | `string` |  | yes |
+| `path` | `string` | SKILL.md in the task runtime; empty when the harness did not report it. |  |
+
+### EventMessage
+
+EventMessage is one backend-neutral message in cached history and its live stream.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `source` | `EventMessageSource` |  |  |
+| `kind` | `EventKind` |  | yes |
+| `ts` | `int64` |  | yes |
+| `init` | `EventInit` |  |  |
+| `text` | `EventText` |  |  |
+| `textDelta` | `EventTextDelta` |  |  |
+| `toolUse` | `EventToolUse` |  |  |
+| `toolResult` | `EventToolResult` |  |  |
+| `ask` | `EventAsk` |  |  |
+| `usage` | `EventUsage` |  |  |
+| `result` | `EventResult` |  |  |
+| `system` | `EventSystem` |  |  |
+| `userInput` | `EventUserInput` |  |  |
+| `todo` | `EventTodo` |  |  |
+| `diffStat` | `EventDiffStat` |  |  |
+| `error` | `EventError` |  |  |
+| `thinking` | `EventThinking` |  |  |
+| `thinkingDelta` | `EventThinkingDelta` |  |  |
+| `subagentStart` | `EventSubagentStart` |  |  |
+| `subagentEnd` | `EventSubagentEnd` |  |  |
+| `nativeSubagent` | `EventNativeSubagent` |  |  |
+| `backgroundCommand` | `EventBackgroundCommand` |  |  |
+| `log` | `EventLog` |  |  |
+| `toolOutputDelta` | `EventToolOutputDelta` |  |  |
+| `widget` | `EventWidget` |  |  |
+| `widgetDelta` | `EventWidgetDelta` |  |  |
+| `rateLimit` | `EventRateLimit` |  |  |
+| `commitSnapshot` | `EventCommitSnapshot` |  |  |
+| `skillLoad` | `EventSkillLoad` |  |  |
 
 ### HistoryEvent
 
@@ -2418,6 +2366,37 @@ cursor query on reconnect. Named stats events never replace this raw cursor.
 |-------|------|-------------|----------|
 | `cursor` | `string` |  | yes |
 
+### EventStats
+
+EventStats is a runtime resource usage snapshot emitted periodically.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `ts` | `int64` |  | yes |
+| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
+| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
+| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
+| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
+| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
+| `memUsed` | `uint64` |  | yes |
+| `memLimit` | `uint64` |  | yes |
+| `memPerc` | `float64` |  | yes |
+| `netRx` | `uint64` |  | yes |
+| `netTx` | `uint64` |  | yes |
+| `blockRead` | `uint64` |  | yes |
+| `blockWrite` | `uint64` |  | yes |
+| `diskUsed` | `int64` |  | yes |
+
+### HistoryStats
+
+HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+Replace samples sharing a timestamp: disk usage can revise the latest sample.
+These host observations are separate from immutable raw task history.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `samples` | `EventStats[]` |  | yes |
+
 ### HistoryReset
 
 HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
@@ -2425,4 +2404,12 @@ HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `bootstrapURL` | `string` |  | yes |
+
+### TaskHistoryStreamError
+
+TaskHistoryStreamError reports that task history could not be replayed.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `message` | `string` |  | yes |
 

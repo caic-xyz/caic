@@ -1,4 +1,4 @@
-// Tests automatic recent-first cached backlog loading, exact live handoff, resource isolation, and task disposal.
+// Tests recent-first history loading, bounded ordered batches, exact live handoff, resource isolation, and failure cancellation.
 import assert from "node:assert/strict";
 import { setImmediate as yieldToTasks } from "node:timers/promises";
 import { afterEach, describe, it } from "node:test";
@@ -7,7 +7,7 @@ import { vi } from "@tests/expect";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 import type { EventStats, HistoryEvent } from "@sdk/types.gen";
 import { api } from "./api";
-import type { TaskHistory as LiveHistory } from "./taskEventTimeline";
+import type { TaskHistory } from "./taskEventTimeline";
 import { createTaskEventTimeline } from "./taskEventTimeline";
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -56,12 +56,12 @@ function input(recordID: number, value: string): HistoryEvent {
   return { recordID, index: 0, message: { kind: "userInput", ts: recordID, userInput: { text: value } } };
 }
 
-async function loaded(owner: LiveHistory) {
+async function loaded(owner: TaskHistory) {
   for (let attempt = 0; owner.loading() && attempt < 20; attempt++) await yieldToTasks();
   assert.equal(owner.loading(), false);
 }
 
-function values(owner: LiveHistory) {
+function values(owner: TaskHistory) {
   return owner.messages().map((event) => event.text?.text ?? event.userInput?.text);
 }
 
@@ -78,12 +78,12 @@ const sample: EventStats = {
   diskUsed: 10,
 };
 
-describe("createLiveTaskHistory", () => {
+describe("createTaskEventTimeline", () => {
   it("automatically loads the complete backlog without navigation, including outputless chunks", async () => {
     const connections = capture([text(2, 0, "old"), text(520, 0, "recent")], 520);
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -126,7 +126,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await requested.promise;
@@ -148,6 +148,123 @@ describe("createLiveTaskHistory", () => {
     }
   });
 
+  it("bounds out-of-order backfill while preserving recent/live display and canonical order", async () => {
+    const events = [
+      text(2, 0, "first"),
+      text(258, 0, "second"),
+      text(514, 0, "third"),
+      text(770, 0, "fourth"),
+      text(1026, 0, "fifth"),
+      text(1282, 0, "recent"),
+    ];
+    const connections = capture(events, 1282);
+    const original = fetchMock.getMockImplementation();
+    assert.ok(original);
+    const release = Promise.withResolvers<Response>();
+    fetchMock.mockImplementation((url, init) =>
+      String(url).endsWith("/chunks/1/256") ? release.promise : original(url, init),
+    );
+    const owner = createRoot((dispose) => ({ dispose, ...createTaskEventTimeline({ taskId: () => "task" }) }));
+    try {
+      for (let i = 0; i < 20; i++) await yieldToTasks();
+      const requested = fetchMock.mock.calls
+        .filter(([url]) => String(url).includes("/chunks/"))
+        .map(([url]) => String(url));
+      assert.deepEqual(requested, [
+        "/history/account/v1/generation/chunks/1281/1282",
+        "/history/account/v1/generation/chunks/1/256",
+        "/history/account/v1/generation/chunks/257/512",
+        "/history/account/v1/generation/chunks/513/768",
+        "/history/account/v1/generation/chunks/769/1024",
+      ]);
+      assert.equal(owner.loading(), true);
+      assert.deepEqual(values(owner), []);
+      assert.equal(owner.preview()?.response, "recent");
+      connections[0]?.handlers.onMessage(input(1283, "live"));
+      assert.equal(owner.preview()?.prompt, "live");
+      release.resolve(Response.json([events[0]]));
+      await loaded(owner);
+      assert.deepEqual(values(owner), ["first", "second", "third", "fourth", "fifth", "recent", "live"]);
+    } finally {
+      owner.dispose();
+      release.resolve(Response.json([]));
+    }
+  });
+
+  it("cancels every backfill sibling when a range fails", async () => {
+    capture([text(1282, 0, "recent")], 1282);
+    const original = fetchMock.getMockImplementation();
+    assert.ok(original);
+    const requests: AbortSignal[] = [];
+    let cancelled = false;
+    const reject = Promise.withResolvers<Response>();
+    fetchMock.mockImplementation((url, init) => {
+      if (!String(url).includes("/chunks/") || String(url).endsWith("/chunks/1281/1282")) return original(url, init);
+      const signal = init?.signal;
+      assert.ok(signal);
+      requests.push(signal);
+      if (String(url).endsWith("/chunks/1/256"))
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("["));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+        );
+      if (String(url).endsWith("/chunks/257/512")) return reject.promise;
+      return new Promise<Response>((_resolve, fail) =>
+        signal.addEventListener("abort", () => fail(signal.reason), { once: true }),
+      );
+    });
+    const owner = createRoot((dispose) => ({ dispose, ...createTaskEventTimeline({ taskId: () => "task" }) }));
+    try {
+      for (let i = 0; i < 20; i++) await yieldToTasks();
+      assert.equal(requests.length, 4);
+      reject.reject(new Error("range unavailable"));
+      await loaded(owner);
+      assert.equal(owner.error(), "range unavailable");
+      assert.ok(requests.every((signal) => signal.aborted));
+      await yieldToTasks();
+      assert.equal(cancelled, true);
+      assert.deepEqual(values(owner), []);
+      assert.equal(owner.preview()?.response, "recent");
+    } finally {
+      owner.dispose();
+      reject.resolve(Response.json([]));
+    }
+  });
+
+  it("cancels every backfill sibling on task disposal", async () => {
+    capture([text(1282, 0, "recent")], 1282);
+    const original = fetchMock.getMockImplementation();
+    assert.ok(original);
+    const requests: AbortSignal[] = [];
+    fetchMock.mockImplementation((url, init) => {
+      if (!String(url).includes("/chunks/") || String(url).endsWith("/chunks/1281/1282")) return original(url, init);
+      const signal = init?.signal;
+      assert.ok(signal);
+      requests.push(signal);
+      return new Promise<Response>((_resolve, fail) =>
+        signal.addEventListener("abort", () => fail(signal.reason), { once: true }),
+      );
+    });
+    const owner = createRoot((dispose) => ({ dispose, ...createTaskEventTimeline({ taskId: () => "task" }) }));
+    try {
+      for (let i = 0; i < 20; i++) await yieldToTasks();
+      assert.equal(requests.length, 4);
+    } finally {
+      owner.dispose();
+    }
+    assert.ok(requests.every((signal) => signal.aborted));
+    await yieldToTasks();
+    assert.deepEqual(values(owner), []);
+  });
+
   it("retains the complete active transcript from a physical record with thousands of outputs", async () => {
     const events: HistoryEvent[] = [
       {
@@ -165,7 +282,7 @@ describe("createLiveTaskHistory", () => {
     capture(events, 1);
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -195,7 +312,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await requested.promise;
@@ -247,7 +364,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await requested.promise;
@@ -279,7 +396,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -320,7 +437,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await requested.promise;
@@ -355,7 +472,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     await requested.promise;
     assert.deepEqual(owner.messages(), []);
@@ -372,7 +489,7 @@ describe("createLiveTaskHistory", () => {
     const connections = capture([text(2, 0, "recent")], 2);
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -390,7 +507,7 @@ describe("createLiveTaskHistory", () => {
     }
   });
 
-  it("joins prices by exact raw result position and aborts them when the owner changes", async () => {
+  it("joins initial and live prices by exact captured result position and aborts replaced owners", async () => {
     const root = {
       subtype: "success",
       isError: false,
@@ -408,7 +525,7 @@ describe("createLiveTaskHistory", () => {
       },
     };
     const child = { ...root, result: "child" };
-    capture(
+    const connections = capture(
       [
         { recordID: 2, index: 0, message: { kind: "result", ts: 2, result: child, source: { agentID: "child" } } },
         { recordID: 2, index: 1, message: { kind: "result", ts: 2, result: root } },
@@ -417,14 +534,14 @@ describe("createLiveTaskHistory", () => {
     );
     const original = fetchMock.getMockImplementation();
     assert.ok(original);
-    const delayed = Promise.withResolvers<Response>();
+    let delayed = Promise.withResolvers<Response>();
     let priceSignal: AbortSignal | null = null;
     let pending = false;
     fetchMock.mockImplementation((url, init) => {
       if (!String(url).includes("/costs?")) return original(url, init);
       priceSignal = init?.signal ?? null;
       return pending
-        ? delayed.promise
+        ? delayed.promise.then((response) => response.clone())
         : Promise.resolve(
             Response.json([
               { recordID: 2, index: 0, model: "child", cost: { usd: 99, source: "reported" }, totalUSD: 99 },
@@ -434,7 +551,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -443,7 +560,38 @@ describe("createLiveTaskHistory", () => {
       assert.equal(costs[0]?.result, owner.messages()[1]?.result);
       assert.equal(costs[0]?.model, "rerouted");
       assert.equal(costs[0]?.cost?.usd, 0);
+      const live = { ...root, result: "live root" };
+      const later = { ...root, result: "later output from the same raw record" };
+      connections[0]?.handlers.onMessage({
+        recordID: 3,
+        index: 0,
+        message: { kind: "result", ts: 3, result: child, source: { agentID: "child" } },
+      });
+      connections[0]?.handlers.onMessage({ recordID: 3, index: 1, message: { kind: "result", ts: 3, result: live } });
       pending = true;
+      const updating = owner.readCosts(new AbortController().signal);
+      connections[0]?.handlers.onMessage({ recordID: 3, index: 2, message: { kind: "result", ts: 3, result: later } });
+      delayed.resolve(
+        Response.json([
+          { recordID: 2, index: 1, model: "original", totalUSD: 0 },
+          { recordID: 3, index: 0, model: "child", totalUSD: 99 },
+          { recordID: 3, index: 1, model: "live", totalUSD: 1 },
+          { recordID: 3, index: 2, model: "later", totalUSD: 2 },
+        ]),
+      );
+      const updates = await updating;
+      assert.deepEqual(
+        updates.map((value) => value.result),
+        [costs[0]?.result, live],
+      );
+      assert.equal(updates[0]?.result, costs[0]?.result);
+      assert.equal(updates[1]?.result, owner.messages()[3]?.result);
+      const refreshed = await owner.readCosts(new AbortController().signal);
+      assert.deepEqual(
+        refreshed.map((value) => value.result),
+        [costs[0]?.result, live, later],
+      );
+      delayed = Promise.withResolvers<Response>();
       const stale = owner.readCosts(new AbortController().signal);
       owner.retry();
       assert.equal((priceSignal as AbortSignal | null)?.aborted, true);
@@ -458,7 +606,7 @@ describe("createLiveTaskHistory", () => {
     const connections = capture([text(2, 0, "history")], 2);
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -510,7 +658,7 @@ describe("createLiveTaskHistory", () => {
     });
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);
@@ -527,7 +675,7 @@ describe("createLiveTaskHistory", () => {
     const connections = capture([], 0);
     const owner = createRoot((dispose) => ({
       dispose,
-      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "running" }),
+      ...createTaskEventTimeline({ taskId: () => "task" }),
     }));
     try {
       await loaded(owner);

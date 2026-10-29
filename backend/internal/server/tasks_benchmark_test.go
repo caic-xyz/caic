@@ -1,30 +1,20 @@
-// Benchmarks for task snapshots, MCP result bounding, and SSE event replay performance.
+// Benchmarks task snapshots, bounded MCP results, and task-list SSE publication.
 
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -140,237 +130,6 @@ func BenchmarkMCPRepoListPage(b *testing.B) {
 			b.Fatal("repository-list page has unexpected size")
 		}
 	}
-}
-
-func BenchmarkHandleTaskEventsPurgedReplay(b *testing.B) {
-	b.Run("ClaudeSmallOutputManyDeltas", func(b *testing.B) {
-		const deltaCount = 10_000
-		taskID, s := benchmarkPurgedTaskEventServer(b, deltaCount)
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
-			req.SetPathValue("id", taskID.String())
-			w := httptest.NewRecorder()
-
-			testTaskHandlers(s).handleTaskEvents(w, req)
-
-			if w.Code != http.StatusOK {
-				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-			}
-			if !bytes.Contains(w.Body.Bytes(), []byte("final compact response")) {
-				b.Fatal("SSE body did not contain final response")
-			}
-			b.ReportMetric(float64(w.Body.Len()), "response-B/op")
-		}
-	})
-
-	b.Run("ClaudeResumeAfterAll", func(b *testing.B) {
-		const deltaCount = 10_000
-		taskID, s := benchmarkPurgedTaskEventServer(b, deltaCount)
-		entry, ok := s.taskMgr.GetEntry(taskID)
-		if !ok {
-			b.Fatal("benchmark task disappeared")
-		}
-		lastEventID := taskEventID{
-			timeline: entry.Task().TimelineID(),
-			source:   taskEventSourceDisk,
-			message:  deltaCount + 4,
-		}.String()
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
-			req.SetPathValue("id", taskID.String())
-			req.Header.Set("Last-Event-ID", lastEventID)
-			w := httptest.NewRecorder()
-
-			testTaskHandlers(s).handleTaskEvents(w, req)
-
-			if w.Code != http.StatusOK {
-				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-			}
-			if bytes.Contains(w.Body.Bytes(), []byte("final compact response")) || !bytes.Contains(w.Body.Bytes(), []byte("event: ready")) {
-				b.Fatal("resumed SSE body did not contain only the ready tail")
-			}
-			b.ReportMetric(float64(w.Body.Len()), "response-B/op")
-		}
-	})
-
-	b.Run("PiAccumulatedDeltas", func(b *testing.B) {
-		const deltaCount = 2_000
-		taskID, s := benchmarkPurgedPiTaskEventServer(b, deltaCount)
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
-			req.SetPathValue("id", taskID.String())
-			w := httptest.NewRecorder()
-
-			testTaskHandlers(s).handleTaskEvents(w, req)
-
-			if w.Code != http.StatusOK {
-				b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-			}
-			if !bytes.Contains(w.Body.Bytes(), []byte("final compact response")) {
-				b.Fatal("SSE body did not contain final response")
-			}
-		}
-	})
-}
-
-var benchmarkReplaySkipped int
-
-func BenchmarkHistoryReplayFilter(b *testing.B) {
-	const deltaCount = 100_000
-	for _, final := range []bool{true, false} {
-		name := "Unterminated"
-		if final {
-			name = "Finalized"
-		}
-		b.Run(name, func(b *testing.B) {
-			messages := make([]agent.Message, 0, deltaCount+1)
-			for range deltaCount {
-				messages = append(messages, &agent.TextDeltaMessage{Text: "x"})
-			}
-			if final {
-				messages = append(messages, &agent.TextMessage{Text: "complete"})
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				filter := newHistoryReplayFilter(agentReplayHistory(messages))
-				skipped := 0
-				for i := range messages {
-					if filter.Skip(i) {
-						skipped++
-					}
-				}
-				benchmarkReplaySkipped = skipped
-			}
-		})
-	}
-}
-
-func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *testRouter) {
-	logDir := b.TempDir()
-	taskID := ksid.NewID()
-	finalText := "final compact response " + strings.Repeat("x", 42<<10)
-
-	path := filepath.Join(logDir, taskID.String()+".jsonl")
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		b.Fatal(err)
-	}
-	lines := []string{
-		benchJSON(b, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     1,
-			Prompt:      "benchmark replay",
-			Repos:       []v3.MetaRepo{{Name: "r", Branch: "caic-0"}},
-			Harness:     string(harness.Claude),
-			StartedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		}),
-		benchJSON(b, map[string]any{
-			"type":                "system",
-			"subtype":             "init",
-			"model":               "claude-opus-4-6",
-			"claude_code_version": "2.0",
-			"session_id":          "s1",
-		}),
-	}
-	for _, line := range lines {
-		_, _ = f.WriteString(line + "\n")
-	}
-	for i := range deltaCount {
-		_, _ = fmt.Fprintf(f, `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"delta-%05d "}}}`+"\n", i)
-	}
-	for _, line := range []string{
-		benchJSON(b, map[string]any{
-			"type": "assistant",
-			"message": map[string]any{
-				"model": "claude-opus-4-6",
-				"content": []map[string]any{
-					{"type": "text", "text": finalText},
-				},
-				"usage": map[string]any{
-					"input_tokens": 100, "output_tokens": 50,
-				},
-			},
-		}),
-		benchJSON(b, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1}),
-		benchJSON(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", CostUSD: 0.05, Duration: 1}),
-	} {
-		_, _ = f.WriteString(line + "\n")
-	}
-	if err := f.Close(); err != nil {
-		b.Fatal(err)
-	}
-
-	s := newTestRouter(b, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
-	if err := loadPurgedTasksForTest(s, logDir); err != nil {
-		b.Fatal(err)
-	}
-	return taskID, s
-}
-
-func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *testRouter) {
-	logDir := b.TempDir()
-	taskID := ksid.NewID()
-	finalText := "final compact response " + strings.Repeat("x", 42<<10)
-
-	path := filepath.Join(logDir, taskID.String()+".jsonl")
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		b.Fatal(err)
-	}
-	for _, line := range []string{
-		benchJSON(b, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     1,
-			Prompt:      "benchmark pi replay",
-			Repos:       []v3.MetaRepo{{Name: "r", Branch: "caic-0"}},
-			Harness:     string(harness.Pi),
-			StartedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		}),
-		`{"type":"message_start","message":{"role":"assistant","model":"gpt-5.5"}}`,
-	} {
-		_, _ = f.WriteString(line + "\n")
-	}
-	var accumulated strings.Builder
-	for i := range deltaCount {
-		delta := fmt.Sprintf("delta-%05d ", i)
-		accumulated.WriteString(delta)
-		_, _ = fmt.Fprintf(f, `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":%q},"message":{"role":"assistant","content":[{"type":"text","text":%q}]}}`+"\n", delta, accumulated.String())
-	}
-	for _, line := range []string{
-		fmt.Sprintf(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":%q}],"stopReason":"stop"}}`, finalText),
-		benchJSON(b, agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1}),
-		benchJSON(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", CostUSD: 0.05, Duration: 1}),
-	} {
-		_, _ = f.WriteString(line + "\n")
-	}
-	if err := f.Close(); err != nil {
-		b.Fatal(err)
-	}
-
-	s := newTestRouter(b, map[harness.Name]agent.Backend{harness.Pi: capipi.New("", nil)})
-	if err := loadPurgedTasksForTest(s, logDir); err != nil {
-		b.Fatal(err)
-	}
-	return taskID, s
-}
-
-func benchJSON(b *testing.B, v any) string {
-	data, err := json.Marshal(v)
-	if err != nil {
-		b.Fatal(err)
-	}
-	return string(data)
 }
 
 func BenchmarkTaskListStreamInitialBatch(b *testing.B) {

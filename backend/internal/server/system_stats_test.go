@@ -373,3 +373,24 @@ func TestTaskListServerHealth(t *testing.T) {
 		})
 	})
 }
+
+type flushRecordingWriter struct {
+	*httptest.ResponseRecorder
+
+	onWrite func(data []byte)
+	writes  []time.Time
+	flushes []time.Time
+}
+
+func (w *flushRecordingWriter) Write(data []byte) (int, error) {
+	w.writes = append(w.writes, time.Now())
+	if w.onWrite != nil {
+		w.onWrite(data)
+	}
+	return w.ResponseRecorder.Write(data)
+}
+
+func (w *flushRecordingWriter) Flush() {
+	w.flushes = append(w.flushes, time.Now())
+	w.ResponseRecorder.Flush()
+}

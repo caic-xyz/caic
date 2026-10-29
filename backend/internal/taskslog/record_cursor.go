@@ -1,4 +1,4 @@
-// Reads appended physical task-log records with stable ordinals, metadata, and retained native parser state.
+// Reads plain and compressed physical task-log records with stable ordinals and retained native parser state.
 
 package taskslog
 
@@ -25,28 +25,49 @@ type HistoryRecord struct {
 	Messages []agent.TimedMessage
 }
 
-// RecordCursor incrementally parses an append-only plain task log. Its owner
+// RecordCursor incrementally parses physical task-log records. Its owner
 // serializes calls and closes it when the task's history generation changes.
 // An incomplete trailing line is left for the next read. Existing task-log
-// schemas are unchanged; compressed history is handled by the ordinary loader.
+// schemas are unchanged. Compressed streams release their decoder and parsing
+// buffers at EOF; their already projected records remain available to the owner.
 type RecordCursor struct {
 	// Harness and RequestedModel are immutable values from the physical header.
 	Harness        harness.Name
 	RequestedModel string
 
-	file      *os.File
-	parser    *agent.LogRecordParser
-	reader    *bufio.Reader
-	authority logAuthority
-	header    [32]byte
-	offset    int64
-	count     uint64
+	file       *os.File
+	compressed io.ReadCloser
+	scanner    *physicalLogScanner
+	pending    []byte
+	parser     *agent.LogRecordParser
+	reader     *bufio.Reader
+	authority  logAuthority
+	header     [32]byte
+	offset     int64
+	count      uint64
 }
 
-// OpenRecordCursor validates a plain task log and creates its retained parser.
+// OpenRecordCursor validates a plain or compressed task log and retains its parser.
 func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retErr error) {
 	if isLogCompressed(path) {
-		return nil, errors.New("incremental history requires a plain task log")
+		r, err := openCompressedLogReader(path)
+		if err != nil {
+			return nil, err
+		}
+		scanner := newPhysicalLogScanner(r, path)
+		meta, err := scanner.ReadHeader()
+		if err != nil {
+			return nil, errors.Join(err, r.Close())
+		}
+		wire, err := resolver.ResolveWire(scanner.authority.Harness)
+		if err != nil {
+			return nil, errors.Join(err, r.Close())
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+		if err != nil {
+			return nil, errors.Join(err, r.Close())
+		}
+		return &RecordCursor{Harness: scanner.authority.Harness, RequestedModel: meta.RequestedModel, compressed: r, scanner: scanner, pending: scanner.headerRaw, parser: parser, authority: scanner.authority, header: sha256.Sum256(scanner.headerRaw)}, nil
 	}
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -82,25 +103,27 @@ func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retE
 // last yielded record. Errors require the owner to discard this cursor.
 func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[HistoryRecord, error] {
 	return func(yield func(HistoryRecord, error) bool) {
-		info, err := c.file.Stat()
-		if err != nil {
-			yield(HistoryRecord{}, err)
-			return
+		if c.file != nil {
+			info, err := c.file.Stat()
+			if err != nil {
+				yield(HistoryRecord{}, err)
+				return
+			}
+			if info.Size() < c.offset {
+				yield(HistoryRecord{}, errors.New("task log truncated during incremental history"))
+				return
+			}
+			if info.Size() == c.offset {
+				return
+			}
+			c.reader.Reset(io.NewSectionReader(c.file, c.offset, info.Size()-c.offset))
 		}
-		if info.Size() < c.offset {
-			yield(HistoryRecord{}, errors.New("task log truncated during incremental history"))
-			return
-		}
-		if info.Size() == c.offset {
-			return
-		}
-		c.reader.Reset(io.NewSectionReader(c.file, c.offset, info.Size()-c.offset))
 		for {
 			if err := ctx.Err(); err != nil {
 				yield(HistoryRecord{}, err)
 				return
 			}
-			line, err := readCursorLine(c.reader)
+			line, err := c.nextLine()
 			if errors.Is(err, io.EOF) {
 				return
 			}
@@ -108,8 +131,6 @@ func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[HistoryRecord, error]
 				yield(HistoryRecord{}, err)
 				return
 			}
-			c.offset += int64(len(line))
-			line = line[:len(line)-1]
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
@@ -145,7 +166,50 @@ func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[HistoryRecord, error]
 }
 
 // Close releases the underlying log file.
-func (c *RecordCursor) Close() error { return c.file.Close() }
+func (c *RecordCursor) Close() error {
+	if c.compressed != nil {
+		return c.closeCompressed()
+	}
+	if c.file != nil {
+		return c.file.Close()
+	}
+	return nil
+}
+
+func (c *RecordCursor) nextLine() ([]byte, error) {
+	if c.scanner != nil {
+		if c.pending != nil {
+			line := c.pending
+			c.pending = nil
+			return line, nil
+		}
+		if c.scanner.Scan() {
+			return c.scanner.Bytes(), nil
+		}
+		if err := errors.Join(c.scanner.Err(), c.closeCompressed()); err != nil {
+			return nil, err
+		}
+		return nil, io.EOF
+	}
+	if c.file == nil {
+		return nil, io.EOF
+	}
+	line, err := readCursorLine(c.reader)
+	if err != nil {
+		return nil, err
+	}
+	c.offset += int64(len(line))
+	return line[:len(line)-1], nil
+}
+
+func (c *RecordCursor) closeCompressed() error {
+	r := c.compressed
+	c.compressed = nil
+	c.scanner = nil
+	c.parser = nil
+	c.pending = nil
+	return r.Close()
+}
 
 func (c *RecordCursor) validateAuthority(line []byte) error {
 	if c.count == 0 {

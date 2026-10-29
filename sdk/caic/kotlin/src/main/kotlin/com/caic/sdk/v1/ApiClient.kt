@@ -190,7 +190,7 @@ class ApiClient(
     suspend fun getUsageDashboard(): UsageDashboardResp = request("GET", "/api/caic/v1/usage/dashboard")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
-    /** Returns small live-task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. */
+    /** Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. */
     suspend fun getHistoryBootstrap(id: String): HistoryBootstrap = request("GET", "/api/caic/v1/tasks/$id/history/bootstrap")
     /** Returns immutable normalized outputs for one exact physical raw-record chunk range. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. */
     suspend fun getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/chunks/$first/$last")
@@ -198,24 +198,11 @@ class ApiClient(
     suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate> = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
 
     // SSE endpoints
-    /** Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
-    fun taskEvents(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onBackward: ((TaskEventBackward) -> Unit)? = null, onReady: (() -> Unit)? = null, onReset: (() -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<EventMessage> = namedSSEFlow("/api/caic/v1/tasks/$id/events?backward=${java.net.URLEncoder.encode(backward, "UTF-8")}", lastEventID, onEventID) { type, data ->
-        when (type) {
-            "message" -> json.decodeFromString<EventMessage>(data)
-            "statsSnapshot" -> { val payload = json.decodeFromString<HistoryStats>(data); onStatsSnapshot?.invoke(payload); null }
-            "stats" -> { val payload = json.decodeFromString<EventStats>(data); onStats?.invoke(payload); null }
-            "backward" -> { val payload = json.decodeFromString<TaskEventBackward>(data); onBackward?.invoke(payload); null }
-            "ready" -> { onReady?.invoke(); null }
-            "reset" -> { onReset?.invoke(); null }
-            "error" -> { val payload = json.decodeFromString<TaskHistoryStreamError>(data); onHistoryError?.invoke(payload); null }
-            else -> null
-        }
-    }
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/tasks/events")
     /** Streams usage quota updates via SSE. */
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/usage/events")
-    /** Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
     fun historyEvents(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = namedSSEFlow("/api/caic/v1/tasks/$id/history/events?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}", lastEventID, onEventID) { type, data ->
         when (type) {
             "message" -> json.decodeFromString<HistoryEvent>(data)
@@ -350,16 +337,11 @@ class ApiClient(
     }
 
     // Reconnecting SSE wrappers with exponential backoff.
-    /** Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
-    fun taskEventsReconnecting(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onBackward: ((TaskEventBackward) -> Unit)? = null, onReady: (() -> Unit)? = null, onReset: (() -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<EventMessage> = flow {
-        val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
-        reconnectingNamedFlow { taskEvents(id, backward, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onBackward = onBackward, onReady = onReady, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
-    }
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }
     /** Streams usage quota updates via SSE. */
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
-    /** Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
     fun historyEventsReconnecting(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
         val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
         reconnectingNamedFlow { historyEvents(id, cursor, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }

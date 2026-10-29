@@ -22,7 +22,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // historyProjectionVersion versions canonical normalized event bytes.
@@ -31,33 +30,29 @@ import (
 // deterministic same-generation reconstruction can reuse published range URLs.
 const historyProjectionVersion = "1"
 
-// historyHandlers owns the new history protocol independently of legacy SSE.
+// historyHandlers serves task history for every task state.
 type historyHandlers struct{ *taskHandlers }
 
 // historySource uses normal task authorization and validates resource identity
 // before opening/projecting logs. Failed responses never enter the HTTP cache.
-func (h *historyHandlers) historySource(w http.ResponseWriter, r *http.Request, immutable bool) (*taskmgr.Entry, *history.Source, error) {
+func (h *historyHandlers) historySource(w http.ResponseWriter, r *http.Request, immutable bool) (*taskmgr.Entry, *history.Source, func(), error) {
 	historyCacheHeaders(w)
 	e, err := h.getTask(r)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if immutable {
 		if r.PathValue("scope") != historyScope(r.Context()) {
-			return nil, nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "history cache scope mismatch"}
+			return nil, nil, nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "history cache scope mismatch"}
 		}
 		if r.PathValue("version") != historyProjectionVersion || r.PathValue("generation") != e.Task().TimelineID() {
-			return nil, nil, historyConflict()
+			return nil, nil, nil, historyConflict()
 		}
 	} else if g := r.URL.Query().Get("generation"); g != "" && g != e.Task().TimelineID() {
-		return nil, nil, historyConflict()
+		return nil, nil, nil, historyConflict()
 	}
-	state := e.Task().GetState()
-	if state.IsTerminal() || state == taskslog.StateStopped {
-		return nil, nil, historyConflict()
-	}
-	s, err := h.taskSvc.history.Source(r.Context(), e)
-	return e, s, err
+	s, release, err := h.taskSvc.history.acquire(r.Context(), e)
+	return e, s, release, err
 }
 
 func (h *historyHandlers) historySnapshot(ctx context.Context, e *taskmgr.Entry, s *history.Source, through uint64, latest bool) (history.Snapshot, error) {
@@ -66,7 +61,7 @@ func (h *historyHandlers) historySnapshot(ctx context.Context, e *taskmgr.Entry,
 		snap, err = s.Refresh(ctx)
 	}
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		h.taskSvc.history.Invalidate(e, s)
+		h.taskSvc.history.invalidate(e, s)
 	}
 	if err == nil && snap.Through < through {
 		return history.Snapshot{}, historyConflict()
@@ -95,11 +90,12 @@ func writeHistoryJSON(w http.ResponseWriter, r *http.Request, value any) {
 }
 
 func (h *historyHandlers) handleHistoryBootstrap(w http.ResponseWriter, r *http.Request) {
-	e, s, err := h.historySource(w, r, false)
+	e, s, release, err := h.historySource(w, r, false)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
+	defer release()
 	snap, err := h.historySnapshot(r.Context(), e, s, 0, true)
 	if err != nil {
 		writeError(r.Context(), w, err)
@@ -113,11 +109,12 @@ func (h *historyHandlers) handleHistoryBootstrap(w http.ResponseWriter, r *http.
 }
 
 func (h *historyHandlers) handleHistoryChunk(w http.ResponseWriter, r *http.Request) {
-	e, s, err := h.historySource(w, r, true)
+	e, s, release, err := h.historySource(w, r, true)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
+	defer release()
 	first, last, err := historyRange(r.PathValue("first"), r.PathValue("last"))
 	if err == nil && (first-1)%history.RecordsPerChunk != 0 {
 		err = historyBadRange()
@@ -155,11 +152,12 @@ func historyEstimate(c history.TurnEstimate) v1.HistoryTurnEstimate {
 }
 
 func (h *historyHandlers) handleHistoryCosts(w http.ResponseWriter, r *http.Request) {
-	e, s, err := h.historySource(w, r, false)
+	e, s, release, err := h.historySource(w, r, false)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
+	defer release()
 	through, err := historyUint(r.URL.Query().Get("through"))
 	if err != nil {
 		writeError(r.Context(), w, err)
@@ -243,11 +241,12 @@ func historyRange(first, last string) (firstID, lastID uint64, err error) {
 }
 
 func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Request) {
-	e, s, err := h.historySource(w, r, false)
+	e, s, release, err := h.historySource(w, r, false)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
+	defer release()
 	value := r.Header.Get("Last-Event-ID")
 	if value == "" {
 		value = r.URL.Query().Get("cursor")
@@ -260,7 +259,7 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 			h.log.DebugContext(ctx, "write history reset", "err", err)
 		}
 	}
-	if err != nil || cursor.generation != e.Task().TimelineID() {
+	if err != nil || cursor.generation != e.Task().TimelineID() || !h.taskSvc.history.isCurrent(e, s) {
 		reset(r.Context())
 		return
 	}
@@ -328,8 +327,7 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 			continue
 		case <-poll.C:
 		}
-		current, ok := h.taskMgr.GetEntry(e.Task().ID)
-		if !ok || current != e || e.Task().TimelineID() != cursor.generation || e.Task().GetState().IsTerminal() || e.Task().GetState() == taskslog.StateStopped {
+		if !h.taskSvc.history.isCurrent(e, s) {
 			reset(r.Context())
 			return
 		}

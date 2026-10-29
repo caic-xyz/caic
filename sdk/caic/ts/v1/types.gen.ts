@@ -493,10 +493,7 @@ export interface EventSkillLoad {
   path?: string;
 }
 
-/**
- * EventMessage is a single SSE event in the backend-neutral stream
- * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
- */
+/** EventMessage is one backend-neutral message in cached history and its live stream. */
 export interface EventMessage {
   source?: EventMessageSource;
   kind: EventKind;
@@ -550,16 +547,6 @@ export interface EventStats {
   blockRead: number /* uint64 */;
   blockWrite: number /* uint64 */;
   diskUsed: number /* int64 */;
-}
-
-/**
- * TaskEventBackward carries a chronological recent disk preview before canonical
- * history on the same connection. EventID is empty. Memory-backed streams send
- * canonical history and support normal event-ID resume.
- */
-export interface TaskEventBackward {
-  messages: EventMessage[];
-  eventId: string;
 }
 
 /** TaskHistoryStreamError reports that task history could not be replayed. */
@@ -1595,15 +1582,6 @@ export interface CreateTaskReq {
   caicMCP?: boolean;
 }
 
-/**
- * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
- * Replace samples sharing a timestamp: disk usage can revise the latest sample.
- * These host observations are separate from immutable raw task history.
- */
-export interface HistoryStats {
-  samples: EventStats[];
-}
-
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 export interface InputReq {
   prompt: Prompt;
@@ -2153,7 +2131,7 @@ export interface WebFetchResp {
 }
 
 /**
- * HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+ * HistoryBootstrap is small revalidated discovery for task history. ResourceBase
  * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
  * for direct arithmetic access. Scope isolates the
  * authenticated account, including legacy shared tasks. Browser HTTP caching
@@ -2216,6 +2194,15 @@ export interface HistoryTurnEstimate {
  */
 export interface HistoryCheckpoint {
   cursor: string;
+}
+
+/**
+ * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * Replace samples sharing a timestamp: disk usage can revise the latest sample.
+ * These host observations are separate from immutable raw task history.
+ */
+export interface HistoryStats {
+  samples: EventStats[];
 }
 
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */

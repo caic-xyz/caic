@@ -15,17 +15,21 @@ for (const width of [390, 1280]) {
         );
       }
       let streams = 0;
+      let historyReads = 0;
       page.on("request", (request) => {
         if (/\/tasks\/[^/]+\/history\/events\?/.test(request.url())) streams++;
+        if (/\/history\/(?:bootstrap$|.*\/chunks\/)/.test(request.url())) historyReads++;
       });
       await page.goto(`/task/@${id}`);
       const conversation = page.getByTestId("conversation-pane");
       const prompt = page.getByTestId("task-detail-prompt");
       await expect(prompt).toBeVisible();
+      await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
       await prompt.fill("Keep this draft");
       const taskURL = page.url();
       const taskNode = await conversation.elementHandle();
       const initialStreams = streams;
+      const initialReads = historyReads;
       const link = conversation.locator(`a[href$="/${subview}"]`).first();
       await link.click();
       await expect(page).toHaveURL(new RegExp(`/${subview}$`));
@@ -87,9 +91,9 @@ for (const width of [390, 1280]) {
       await page.goBack();
       await expect(page).toHaveURL(taskURL);
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
-      // Each mounted statistics view owns its independent numeric-fold stream.
-      // Other subviews leave the conversation subscription untouched.
+      // Subviews reuse the conversation owner, including its decoded history.
       expect(streams).toBe(initialStreams);
+      expect(historyReads).toBe(initialReads);
       if (subview === "stats" && width === 1280) {
         await link.click();
         await page.getByRole("button", { name: "Full screen", exact: true }).click();

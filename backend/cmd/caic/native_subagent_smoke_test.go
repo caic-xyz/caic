@@ -311,10 +311,14 @@ func readTaskHistory(t *testing.T, baseURL, taskID string) []agent.NativeSubagen
 }
 
 // readTaskEvents reads one task's canonical event stream, collecting the native
-// observations it carries, until stop reports it may stop. ready reports that
-// the stream finished replaying history, so nothing before it is a live view.
+// observations it carries until stop accepts them. The first checkpoint makes
+// the retained prefix authoritative; following records are live output.
 func readTaskEvents(ctx context.Context, baseURL, taskID string, stop func(ready bool, observations []agent.NativeSubagent) bool) ([]agent.NativeSubagent, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/events", http.NoBody)
+	streamURL, err := smokeHistoryStreamURL(ctx, baseURL, taskID)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -346,13 +350,14 @@ func readTaskEvents(ctx context.Context, baseURL, taskID string, stop func(ready
 				eventName = "message"
 			}
 			switch eventName {
-			case "ready":
+			case "checkpoint":
 				ready = true
 			case "message":
-				var ev v1.EventMessage
-				if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+				var output v1.HistoryEvent
+				if err := json.Unmarshal([]byte(payload), &output); err != nil {
 					return observations, fmt.Errorf("decode task event: %w", err)
 				}
+				ev := output.Message
 				if ev.NativeSubagent != nil {
 					observations = append(observations, nativeSubagent(ev.NativeSubagent))
 				}

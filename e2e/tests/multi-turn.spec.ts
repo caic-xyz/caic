@@ -85,19 +85,22 @@ test("SSE event stream delivers text deltas", async ({ page, api, baseURL }) => 
   });
   await page.exposeFunction("__sseReady", () => resolveReady());
 
-  // Collect only live events (after the server "ready" sentinel).
+  // Collect only live events after the bootstrap cursor is acknowledged.
   const eventsPromise = page.evaluate(
     async ({ taskId, base }) => {
+      const bootstrap = await (await fetch(`${base}/api/caic/v1/tasks/${taskId}/history/bootstrap`)).json();
       return new Promise<string[]>((resolve) => {
         const collected: string[] = [];
         let live = false;
-        const es = new EventSource(`${base}/api/caic/v1/tasks/${taskId}/events`);
-        es.addEventListener("ready", () => {
+        const es = new EventSource(
+          `${base}/api/caic/v1/tasks/${taskId}/history/events?cursor=${encodeURIComponent(bootstrap.cursor)}`,
+        );
+        es.addEventListener("checkpoint", () => {
           live = true;
           (window as unknown as { __sseReady: () => void }).__sseReady();
         });
         es.addEventListener("message", (e) => {
-          const msg = JSON.parse(e.data);
+          const msg = JSON.parse(e.data).message;
           if (live) {
             collected.push(msg.kind);
             if (msg.kind === "result") {

@@ -56,8 +56,13 @@ test("recent history stays usable while the full backlog loads automatically", a
   }
 });
 
-for (const width of [390, 1280]) {
-  test(`live history is cached across task switches and reload at ${width}px`, async ({ api, page }, testInfo) => {
+for (const { width, state } of [
+  { width: 390, state: "waiting" },
+  { width: 1280, state: "waiting" },
+  { width: 1280, state: "stopped" },
+  { width: 1280, state: "purged" },
+]) {
+  test(`${state} history is cached across task switches and reload at ${width}px`, async ({ api, page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     const chunkRequests: string[] = [];
@@ -73,6 +78,14 @@ for (const width of [390, 1280]) {
       await api.sendInput(id, { prompt: { text: `FAKE_CONCURRENT_STREAMS_${gate}` } });
     }
     await waitForTaskState(api, id, "waiting");
+    if (state !== "waiting") {
+      await api.stopTask(id);
+      await waitForTaskState(api, id, "stopped");
+    }
+    if (state === "purged") {
+      await api.purgeTask(id);
+      await waitForTaskState(api, id, "purged");
+    }
     const other = await createTaskAPI(api, "other cached conversation");
     await waitForTaskState(api, other, "waiting");
     const bootstrap = await api.getHistoryBootstrap(id);
@@ -115,6 +128,8 @@ for (const width of [390, 1280]) {
         await expect(page).toHaveURL(/\/$/);
         await page.evaluate(() => performance.clearResourceTimings());
         const card = page.locator(`[data-task-id='${taskID}']`);
+        if (taskID === id && state === "purged" && !(await card.isVisible()))
+          for (const group of await page.getByRole("button", { name: /^Purged \(/ }).all()) await group.click();
         await card.focus();
         await card.press("Enter");
       }
@@ -172,7 +187,7 @@ for (const width of [390, 1280]) {
     expect(lastInactive?.count).toBeLessThanOrEqual((firstInactive?.count ?? 0) + 32);
     expect(lastInactive?.bytes).toBeLessThanOrEqual((firstInactive?.bytes ?? 0) + (16 << 10));
     const evidencePath = testInfo.outputPath("history-cache-heap.json");
-    await writeFile(evidencePath, JSON.stringify({ activeHeap, inactiveHeap, timings, warmChunks }));
+    await writeFile(evidencePath, JSON.stringify({ state, activeHeap, inactiveHeap, timings, warmChunks }));
     await testInfo.attach("history-cache-heap.json", { path: evidencePath, contentType: "application/json" });
     await page.reload();
     await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
@@ -194,12 +209,14 @@ for (const width of [390, 1280]) {
     await writeFile(evictionPath, JSON.stringify({ evictedTransferBytes, rewarmedTransferBytes: 0 }));
     await testInfo.attach("history-cache-eviction.json", { path: evictionPath, contentType: "application/json" });
     await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
-    const followup = `cached history follow-up ${width}`;
-    const chunksBeforeLive = chunkRequests.length;
-    await api.sendInput(id, { prompt: { text: followup } });
-    await expect(page.getByText(followup, { exact: true })).toBeVisible();
-    await waitForTaskState(api, id, "waiting");
-    expect(chunkRequests).toHaveLength(chunksBeforeLive);
+    if (state === "waiting") {
+      const followup = `cached history follow-up ${width}`;
+      const chunksBeforeLive = chunkRequests.length;
+      await api.sendInput(id, { prompt: { text: followup } });
+      await expect(page.getByText(followup, { exact: true })).toBeVisible();
+      await waitForTaskState(api, id, "waiting");
+      expect(chunkRequests).toHaveLength(chunksBeforeLive);
+    }
     expect(errors).toEqual([]);
   });
 }

@@ -492,11 +492,6 @@ func TodoItems(items []agent.TodoItem) []v1.TodoItem {
 	return out
 }
 
-// MarshalEvent marshals an EventMessage.
-func MarshalEvent(ev *v1.EventMessage) ([]byte, error) {
-	return json.Marshal(ev)
-}
-
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.
 type toolInputProbe struct {
 	RunInBackground bool `json:"run_in_background"`

@@ -499,7 +499,7 @@ public final class ApiClient {
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
         try await request("POST", path: "/api/caic/v1/web/fetch", body: try encoder.encode(req))
     }
-    /// Returns small live-task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest.
+    /// Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest.
     public func getHistoryBootstrap(id: String) async throws -> HistoryBootstrap {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/bootstrap")
     }
@@ -513,21 +513,6 @@ public final class ApiClient {
     }
 
     // SSE endpoints
-    /// Streams backend-neutral task events via SSE. For disk-backed tasks, backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history on the same connection. Disk previews have an empty event ID. Memory-backed tasks stream canonical history with normal event-ID resume. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged.
-    public func taskEvents(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onBackward: ((TaskEventBackward) -> Void)? = nil, onReady: (() -> Void)? = nil, onReset: (() -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<EventMessage, Error> {
-        namedSSEStream(path: "/api/caic/v1/tasks/\(id)/events?backward=\(backward.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")", lastEventID: lastEventID, onEventID: onEventID) { type, data in
-            switch type {
-            case "message": return try self.decoder.decode(EventMessage.self, from: data)
-            case "statsSnapshot": let payload = try self.decoder.decode(HistoryStats.self, from: data); onStatsSnapshot?(payload); return nil
-            case "stats": let payload = try self.decoder.decode(EventStats.self, from: data); onStats?(payload); return nil
-            case "backward": let payload = try self.decoder.decode(TaskEventBackward.self, from: data); onBackward?(payload); return nil
-            case "ready": onReady?(); return nil
-            case "reset": onReset?(); return nil
-            case "error": let payload = try self.decoder.decode(TaskHistoryStreamError.self, from: data); onHistoryError?(payload); return nil
-            default: return nil
-            }
-        }
-    }
     /// Streams task list updates for all tasks via SSE.
     public func globalTaskEvents() -> AsyncThrowingStream<TaskListEvent, Error> {
         sseStream(path: "/api/caic/v1/tasks/events")
@@ -536,7 +521,7 @@ public final class ApiClient {
     public func globalUsageEvents() -> AsyncThrowingStream<UsageResp, Error> {
         sseStream(path: "/api/caic/v1/usage/events")
     }
-    /// Streams strictly after an opaque raw-record cursor, distinct from semantic taskEvents IDs. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error.
+    /// Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error.
     public func historyEvents(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
         namedSSEStream(path: "/api/caic/v1/tasks/\(id)/history/events?cursor=\(cursor.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")", lastEventID: lastEventID, onEventID: onEventID) { type, data in
             switch type {
@@ -552,10 +537,6 @@ public final class ApiClient {
     }
 
     // Reconnecting SSE wrappers with exponential backoff
-    public func taskEventsReconnecting(id: String, backward: String, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onBackward: ((TaskEventBackward) -> Void)? = nil, onReady: (() -> Void)? = nil, onReset: (() -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<EventMessage, Error> {
-        let resumeID = SSECursor(lastEventID)
-        return namedReconnectingStream { self.taskEvents(id: id, backward: backward, onStatsSnapshot: onStatsSnapshot, onStats: onStats, onBackward: onBackward, onReady: onReady, onReset: onReset, onHistoryError: onHistoryError, lastEventID: resumeID.get(), onEventID: { resumeID.set($0); onEventID?($0) }) }
-    }
     public func globalTaskEventsReconnecting() -> AsyncThrowingStream<TaskListEvent, Error> {
         reconnectingStream { self.globalTaskEvents() }
     }

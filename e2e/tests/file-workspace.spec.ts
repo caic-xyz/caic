@@ -69,7 +69,7 @@ for (const width of [390, 1000, 1440]) {
     let documentReads = 0;
     let streams = 0;
     page.on("request", (request) => {
-      if (/\/tasks\/[^/]+\/events\?/.test(request.url())) streams++;
+      if (/\/tasks\/[^/]+\/history\/events\?/.test(request.url())) streams++;
     });
     await page.route("**/raw?*", async (route) => {
       const path = new URL(route.request().url()).searchParams.get("path");

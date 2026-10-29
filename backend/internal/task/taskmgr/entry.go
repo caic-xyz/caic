@@ -55,14 +55,14 @@ type Entry struct {
 func (e *Entry) Task() *task.Task { return e.task }
 
 // LoadedTask returns the on-disk log handle, or nil before a task log has been
-// validated for disk replay.
+// validated for stored-history reads.
 func (e *Entry) LoadedTask() *taskslog.LoadedTask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.loadedTask
 }
 
-// SetLoadedTask records a freshly validated on-disk log handle for disk replay.
+// SetLoadedTask records a freshly validated on-disk log handle for stored-history reads.
 func (e *Entry) SetLoadedTask(lt *taskslog.LoadedTask) {
 	e.mu.Lock()
 	e.loadedTask = lt

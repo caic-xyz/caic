@@ -3,6 +3,7 @@
 package taskslog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -200,5 +201,43 @@ func TestRecordCursorAuthority(t *testing.T) {
 				t.Fatalf("segment authority result: %v", readErr)
 			}
 		})
+	}
+}
+
+func TestRecordCursorCompressedEOF(t *testing.T) {
+	t.Parallel()
+	path := writePhysicalTestLog(t, true, `{"t":"caic_meta","version":3,"harness":"claude","prompt":"test"}`, `{"t":"text","text":"answer"}`)
+	cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cursor.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	stream, ok := cursor.compressed.(*zstdReadCloser)
+	if !ok {
+		t.Fatal("compressed cursor has no streaming decoder")
+	}
+	file := stream.file
+	count := 0
+	for _, err := range cursor.Read(t.Context()) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+	}
+	if count != 2 {
+		t.Fatalf("read %d physical records", count)
+	}
+	if _, err := file.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("completed compressed descriptor retained: %v", err)
+	}
+	if cursor.scanner != nil || cursor.parser != nil || cursor.compressed != nil {
+		t.Fatal("completed compressed parsing buffers retained")
+	}
+	for _, err := range cursor.Read(t.Context()) {
+		t.Fatalf("settled read produced another record: %v", err)
 	}
 }

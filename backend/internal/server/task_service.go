@@ -1,4 +1,4 @@
-// Task commands, shared live-history projections, frontend focus, runtime artifacts, API DTOs, and Git summaries.
+// Task commands, shared task-history projections, frontend focus, runtime artifacts, API DTOs, and Git summaries.
 
 package server
 

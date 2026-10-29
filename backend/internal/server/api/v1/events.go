@@ -2,7 +2,7 @@
 // Types are generated into TypeScript, Kotlin, and Swift via gen-api-sdk.
 //
 // EventMessage is the backend-neutral SSE contract consumed by the frontend
-// via /api/caic/v1/tasks/{id}/events.
+// via immutable history chunks and the live history stream.
 // Every agent harness (Claude, Codex, …) produces these events through its
 // converter. EventInit includes a Harness field so the client knows which
 // backend produced the stream.
@@ -54,16 +54,7 @@ type TaskHistoryStreamError struct {
 	Message string `json:"message"`
 }
 
-// TaskEventBackward carries a chronological recent disk preview before canonical
-// history on the same connection. EventID is empty. Memory-backed streams send
-// canonical history and support normal event-ID resume.
-type TaskEventBackward struct {
-	Messages []EventMessage `json:"messages"`
-	EventID  string         `json:"eventId"`
-}
-
-// EventMessage is a single SSE event in the backend-neutral stream
-// (/api/caic/v1/tasks/{id}/events). All backends produce these events.
+// EventMessage is one backend-neutral message in cached history and its live stream.
 type EventMessage struct {
 	Source            EventMessageSource      `json:"source,omitzero"`
 	Kind              EventKind               `json:"kind"`

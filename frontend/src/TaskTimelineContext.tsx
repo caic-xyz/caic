@@ -4,10 +4,9 @@ import { createTaskEventTimeline } from "./taskEventTimeline";
 
 const TaskTimelineContext = createContext<ReturnType<typeof createTaskEventTimeline>>();
 
-export function TaskTimelineProvider(props: { taskId: string; taskState: string; children: JSX.Element }) {
+export function TaskTimelineProvider(props: { taskId: string; children: JSX.Element }) {
   const timeline = createTaskEventTimeline({
     taskId: () => props.taskId,
-    taskState: () => props.taskState,
   });
   return <TaskTimelineContext.Provider value={timeline}>{props.children}</TaskTimelineContext.Provider>;
 }

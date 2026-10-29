@@ -195,7 +195,6 @@ const apiSpyNames = [
   "reviveTask",
   "globalTaskEvents",
   "globalUsageEvents",
-  "taskEvents",
   "historyEvents",
   "sendInput",
   "restartTask",
@@ -311,7 +310,6 @@ beforeEach(() => {
     es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     return es;
   }) as unknown as typeof api.globalUsageEvents);
-  vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
   vi.mocked(api.listCaches).mockResolvedValue(null as never);
   vi.mocked(api.getCacheSizes).mockResolvedValue(null as never);
   vi.mocked(api.getMetrics).mockResolvedValue({ series: [] } as never);
@@ -1351,7 +1349,6 @@ it("shares conversation and numeric statistics subscriptions across task switche
   await screen.findByText("Transcript for second");
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("88.0%"));
   expect(screen.queryByText("Transcript for first")).not.toBeInTheDocument();
-  expect(api.taskEvents).not.toHaveBeenCalled();
   expect(api.historyEvents).toHaveBeenCalledTimes(2);
 });
 

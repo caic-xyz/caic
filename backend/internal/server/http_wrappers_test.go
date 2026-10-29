@@ -243,13 +243,10 @@ func TestTaskEventStreamWriteDeadline(t *testing.T) {
 		deadlineSet:  make(chan time.Time, 1),
 		writeStarted: make(chan struct{}, 1),
 	}
-	stream := taskEventStream{
-		w:      w,
-		writer: sse.New(w),
-	}
+	stream := sse.New(w)
 	errs := make(chan error, 1)
 	go func() {
-		errs <- stream.writeReady()
+		errs <- historyFrame(stream, "checkpoint", "", v1.HistoryCheckpoint{Cursor: "1.g.0.end"})
 	}()
 
 	select {
@@ -267,8 +264,8 @@ func TestTaskEventStreamWriteDeadline(t *testing.T) {
 	}
 	select {
 	case err := <-errs:
-		if !strings.Contains(err.Error(), "write SSE ready event") {
-			t.Errorf("writeReady error = %v, want write context", err)
+		if err == nil {
+			t.Fatal("expected blocked write failure")
 		}
 		netErr, ok := errors.AsType[net.Error](err)
 		if !ok || !netErr.Timeout() {

@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryCheckpoint, HistoryEvent, HistoryReset, HistoryStats, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryCheckpoint, HistoryEvent, HistoryReset, HistoryStats, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -56,6 +56,313 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
     result[k] = valValidator((v as ObjectValue)[k]);
   }
   return result;
+}
+
+export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
+  const obj = asObject(raw, "TaskRepo");
+  return {
+    name: asString(obj["name"], "TaskRepo.name"),
+    baseBranch: (obj["baseBranch"] === undefined || obj["baseBranch"] === null ? undefined : asString(obj["baseBranch"], "TaskRepo.baseBranch")),
+    branch: asString(obj["branch"], "TaskRepo.branch"),
+    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "TaskRepo.remoteURL")),
+    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "TaskRepo.forge") as Forge)),
+  };
+}
+
+export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
+  const obj = asObject(raw, "DiffFileStat");
+  return {
+    path: asString(obj["path"], "DiffFileStat.path"),
+    linesAdded: asNumber(obj["linesAdded"], "DiffFileStat.linesAdded"),
+    linesDeleted: asNumber(obj["linesDeleted"], "DiffFileStat.linesDeleted"),
+    oldSize: asNumber(obj["oldSize"], "DiffFileStat.oldSize"),
+    newSize: asNumber(obj["newSize"], "DiffFileStat.newSize"),
+    diff: (obj["diff"] === undefined || obj["diff"] === null ? undefined : asString(obj["diff"], "DiffFileStat.diff")),
+  };
+}
+
+export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
+  const obj = asObject(raw, "GitRepositoryState");
+  return {
+    stale: (obj["stale"] === undefined || obj["stale"] === null ? undefined : asBoolean(obj["stale"], "GitRepositoryState.stale")),
+    name: asString(obj["name"], "GitRepositoryState.name"),
+    branch: asString(obj["branch"], "GitRepositoryState.branch"),
+    ahead: asNumber(obj["ahead"], "GitRepositoryState.ahead"),
+    behind: asNumber(obj["behind"], "GitRepositoryState.behind"),
+    changedFiles: asNumber(obj["changedFiles"], "GitRepositoryState.changedFiles"),
+    linesAdded: asNumber(obj["linesAdded"], "GitRepositoryState.linesAdded"),
+    linesDeleted: asNumber(obj["linesDeleted"], "GitRepositoryState.linesDeleted"),
+    uncommittedFiles: asNumber(obj["uncommittedFiles"], "GitRepositoryState.uncommittedFiles"),
+    conflicts: asNumber(obj["conflicts"], "GitRepositoryState.conflicts"),
+    operation: (obj["operation"] === undefined || obj["operation"] === null ? undefined : (asString(obj["operation"], "GitRepositoryState.operation") as GitOperation)),
+  };
+}
+
+export function validateTaskStartupFailure(raw: ValidatorInput): TaskStartupFailure {
+  const obj = asObject(raw, "TaskStartupFailure");
+  return {
+    harness: (asString(obj["harness"], "TaskStartupFailure.harness") as Harness),
+    phase: asString(obj["phase"], "TaskStartupFailure.phase"),
+    cause: asString(obj["cause"], "TaskStartupFailure.cause"),
+  };
+}
+
+export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
+  const obj = asObject(raw, "ForgeCheck");
+  return {
+    name: asString(obj["name"], "ForgeCheck.name"),
+    owner: asString(obj["owner"], "ForgeCheck.owner"),
+    repo: asString(obj["repo"], "ForgeCheck.repo"),
+    runID: asNumber(obj["runID"], "ForgeCheck.runID"),
+    jobID: asNumber(obj["jobID"], "ForgeCheck.jobID"),
+    status: (asString(obj["status"], "ForgeCheck.status") as CheckStatus),
+    conclusion: (asString(obj["conclusion"], "ForgeCheck.conclusion") as CheckConclusion),
+    queuedAt: (obj["queuedAt"] === undefined || obj["queuedAt"] === null ? undefined : asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp),
+    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp),
+    completedAt: (obj["completedAt"] === undefined || obj["completedAt"] === null ? undefined : asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp),
+  };
+}
+
+export function validateTaskPlan(raw: ValidatorInput): TaskPlan {
+  const obj = asObject(raw, "TaskPlan");
+  return {
+    toolUseID: asString(obj["toolUseID"], "TaskPlan.toolUseID"),
+    content: asString(obj["content"], "TaskPlan.content"),
+  };
+}
+
+export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
+  const obj = asObject(raw, "RuntimeInstance");
+  return {
+    id: asString(obj["id"], "RuntimeInstance.id"),
+    runtimeName: (obj["runtimeName"] === undefined || obj["runtimeName"] === null ? undefined : asString(obj["runtimeName"], "RuntimeInstance.runtimeName")),
+    tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
+    usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
+    display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),
+    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "RuntimeInstance.sudo")),
+    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "RuntimeInstance.sudoPassword")),
+    vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "RuntimeInstance.vncPort")),
+  };
+}
+
+export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
+  const obj = asObject(raw, "TaskRateLimit");
+  return {
+    blocked: asBoolean(obj["blocked"], "TaskRateLimit.blocked"),
+    quotaGroup: (obj["quotaGroup"] === undefined || obj["quotaGroup"] === null ? undefined : (asString(obj["quotaGroup"], "TaskRateLimit.quotaGroup") as QuotaProvider)),
+    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "TaskRateLimit.window")),
+    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp),
+  };
+}
+
+export function validateTask(raw: ValidatorInput): Task {
+  const obj = asObject(raw, "Task");
+  return {
+    id: asString(obj["id"], "Task.id"),
+    initialPrompt: asString(obj["initialPrompt"], "Task.initialPrompt"),
+    title: asString(obj["title"], "Task.title"),
+    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "Task.repos", validateTaskRepo) as TaskRepo[]),
+    state: (asString(obj["state"], "Task.state") as TaskState),
+    stateUpdatedAt: asString(obj["stateUpdatedAt"], "Task.stateUpdatedAt") as ISOTimestamp,
+    diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
+    repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
+    costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
+    duration: asNumber(obj["duration"], "Task.duration"),
+    numTurns: asNumber(obj["numTurns"], "Task.numTurns"),
+    cumulativeInputTokens: asNumber(obj["cumulativeInputTokens"], "Task.cumulativeInputTokens"),
+    cumulativeOutputTokens: asNumber(obj["cumulativeOutputTokens"], "Task.cumulativeOutputTokens"),
+    cumulativeCacheCreationInputTokens: asNumber(obj["cumulativeCacheCreationInputTokens"], "Task.cumulativeCacheCreationInputTokens"),
+    cumulativeCacheReadInputTokens: asNumber(obj["cumulativeCacheReadInputTokens"], "Task.cumulativeCacheReadInputTokens"),
+    activeInputTokens: asNumber(obj["activeInputTokens"], "Task.activeInputTokens"),
+    activeCacheReadTokens: asNumber(obj["activeCacheReadTokens"], "Task.activeCacheReadTokens"),
+    cacheTTLSeconds: (obj["cacheTTLSeconds"] === undefined || obj["cacheTTLSeconds"] === null ? undefined : asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds")),
+    cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
+    stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
+    contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
+    autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
+    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
+    startupFailure: (obj["startupFailure"] === undefined || obj["startupFailure"] === null ? undefined : validateTaskStartupFailure(obj["startupFailure"])),
+    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),
+    forgeOwner: (obj["forgeOwner"] === undefined || obj["forgeOwner"] === null ? undefined : asString(obj["forgeOwner"], "Task.forgeOwner")),
+    forgeRepo: (obj["forgeRepo"] === undefined || obj["forgeRepo"] === null ? undefined : asString(obj["forgeRepo"], "Task.forgeRepo")),
+    forgePR: (obj["forgePR"] === undefined || obj["forgePR"] === null ? undefined : asNumber(obj["forgePR"], "Task.forgePR")),
+    forgePRState: (obj["forgePRState"] === undefined || obj["forgePRState"] === null ? undefined : (asString(obj["forgePRState"], "Task.forgePRState") as ForgePRState)),
+    forgeIssue: (obj["forgeIssue"] === undefined || obj["forgeIssue"] === null ? undefined : asNumber(obj["forgeIssue"], "Task.forgeIssue")),
+    ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus)),
+    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Task.ciChecks", validateForgeCheck) as ForgeCheck[]),
+    owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
+    forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
+    parentTaskID: (obj["parentTaskID"] === undefined || obj["parentTaskID"] === null ? undefined : asString(obj["parentTaskID"], "Task.parentTaskID")),
+    caicMCP: (obj["caicMCP"] === undefined || obj["caicMCP"] === null ? undefined : asBoolean(obj["caicMCP"], "Task.caicMCP")),
+    harness: (asString(obj["harness"], "Task.harness") as Harness),
+    requestedModel: (obj["requestedModel"] === undefined || obj["requestedModel"] === null ? undefined : asString(obj["requestedModel"], "Task.requestedModel")),
+    requestedEffort: (obj["requestedEffort"] === undefined || obj["requestedEffort"] === null ? undefined : asString(obj["requestedEffort"], "Task.requestedEffort")),
+    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "Task.reportedModel")),
+    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "Task.reportedEffort")),
+    agentVersion: (obj["agentVersion"] === undefined || obj["agentVersion"] === null ? undefined : asString(obj["agentVersion"], "Task.agentVersion")),
+    sessionID: (obj["sessionID"] === undefined || obj["sessionID"] === null ? undefined : asString(obj["sessionID"], "Task.sessionID")),
+    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp),
+    turnStartedAt: (obj["turnStartedAt"] === undefined || obj["turnStartedAt"] === null ? undefined : asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp),
+    inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
+    currentPlan: (obj["currentPlan"] === undefined || obj["currentPlan"] === null ? undefined : validateTaskPlan(obj["currentPlan"])),
+    runtime: validateRuntimeInstance(obj["runtime"]),
+    rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
+    gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
+  };
+}
+
+export function validateBranchInfo(raw: ValidatorInput): BranchInfo {
+  const obj = asObject(raw, "BranchInfo");
+  return {
+    name: asString(obj["name"], "BranchInfo.name"),
+    remote: (obj["remote"] === undefined || obj["remote"] === null ? undefined : asString(obj["remote"], "BranchInfo.remote")),
+    action: (obj["action"] === undefined || obj["action"] === null ? undefined : (asString(obj["action"], "BranchInfo.action") as BranchAction)),
+  };
+}
+
+export function validateRepo(raw: ValidatorInput): Repo {
+  const obj = asObject(raw, "Repo");
+  return {
+    path: asString(obj["path"], "Repo.path"),
+    branch: asString(obj["branch"], "Repo.branch"),
+    baseBranch: validateBranchInfo(obj["baseBranch"]),
+    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "Repo.remoteURL")),
+    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "Repo.forge") as Forge)),
+    ci: (obj["ci"] === undefined || obj["ci"] === null ? undefined : (asString(obj["ci"], "Repo.ci") as CIStatus)),
+    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Repo.ciChecks", validateForgeCheck) as ForgeCheck[]),
+    checksDate: (obj["checksDate"] === undefined || obj["checksDate"] === null ? undefined : asString(obj["checksDate"], "Repo.checksDate") as ISOTimestamp),
+  };
+}
+
+export function validateWarningDetail(raw: ValidatorInput): WarningDetail {
+  const obj = asObject(raw, "WarningDetail");
+  return {
+    repo: asString(obj["repo"], "WarningDetail.repo"),
+    error: asString(obj["error"], "WarningDetail.error"),
+  };
+}
+
+export function validateWarning(raw: ValidatorInput): Warning {
+  const obj = asObject(raw, "Warning");
+  return {
+    id: asString(obj["id"], "Warning.id"),
+    category: (asString(obj["category"], "Warning.category") as WarningCategory),
+    message: asString(obj["message"], "Warning.message"),
+    details: validateArray(obj["details"], "Warning.details", validateWarningDetail) as WarningDetail[],
+  };
+}
+
+export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskListRestorationStatus {
+  const obj = asObject(raw, "TaskListRestorationStatus");
+  return {
+    loading: asBoolean(obj["loading"], "TaskListRestorationStatus.loading"),
+    error: asString(obj["error"], "TaskListRestorationStatus.error"),
+  };
+}
+
+export function validateServerHealth(raw: ValidatorInput): ServerHealth {
+  const obj = asObject(raw, "ServerHealth");
+  return {
+    time: (obj["time"] === undefined || obj["time"] === null ? undefined : asString(obj["time"], "ServerHealth.time") as ISOTimestamp),
+    cpuPerc: asNumber(obj["cpuPerc"], "ServerHealth.cpuPerc"),
+    cpuCount: asNumber(obj["cpuCount"], "ServerHealth.cpuCount"),
+    memUsed: asNumber(obj["memUsed"], "ServerHealth.memUsed"),
+    memTotal: asNumber(obj["memTotal"], "ServerHealth.memTotal"),
+    cpuHigh: asBoolean(obj["cpuHigh"], "ServerHealth.cpuHigh"),
+    memHigh: asBoolean(obj["memHigh"], "ServerHealth.memHigh"),
+    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "ServerHealth.error")),
+  };
+}
+
+export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
+  const obj = asObject(raw, "TaskListEvent");
+  return {
+    focus: (obj["focus"] === undefined || obj["focus"] === null ? undefined : asString(obj["focus"], "TaskListEvent.focus")),
+    complete: (obj["complete"] === undefined || obj["complete"] === null ? undefined : asBoolean(obj["complete"], "TaskListEvent.complete")),
+    kind: asString(obj["kind"], "TaskListEvent.kind"),
+    snapshot: (obj["snapshot"] === undefined || obj["snapshot"] === null ? undefined : validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[]),
+    upsert: (obj["upsert"] === undefined || obj["upsert"] === null ? undefined : validateTask(obj["upsert"])),
+    patch: (obj["patch"] === undefined || obj["patch"] === null ? undefined : validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ }),
+    delete: (obj["delete"] === undefined || obj["delete"] === null ? undefined : asString(obj["delete"], "TaskListEvent.delete")),
+    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[]),
+    warning: (obj["warning"] === undefined || obj["warning"] === null ? undefined : validateWarning(obj["warning"])),
+    status: (obj["status"] === undefined || obj["status"] === null ? undefined : validateTaskListRestorationStatus(obj["status"])),
+    health: (obj["health"] === undefined || obj["health"] === null ? undefined : validateServerHealth(obj["health"])),
+  };
+}
+
+export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
+  const obj = asObject(raw, "QuotaRateLimit");
+  return {
+    label: asString(obj["label"], "QuotaRateLimit.label"),
+    window: asString(obj["window"], "QuotaRateLimit.window"),
+    utilization: asNumber(obj["utilization"], "QuotaRateLimit.utilization"),
+    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp),
+  };
+}
+
+export function validateUnassessedQuotaWindow(raw: ValidatorInput): UnassessedQuotaWindow {
+  const obj = asObject(raw, "UnassessedQuotaWindow");
+  return {
+    group: asString(obj["group"], "UnassessedQuotaWindow.group"),
+    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "UnassessedQuotaWindow.window")),
+  };
+}
+
+export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
+  const obj = asObject(raw, "QuotaBalance");
+  return {
+    currency: asString(obj["currency"], "QuotaBalance.currency"),
+    total: asNumber(obj["total"], "QuotaBalance.total"),
+    granted: (obj["granted"] === undefined || obj["granted"] === null ? undefined : asNumber(obj["granted"], "QuotaBalance.granted")),
+    toppedUp: (obj["toppedUp"] === undefined || obj["toppedUp"] === null ? undefined : asNumber(obj["toppedUp"], "QuotaBalance.toppedUp")),
+    extraEnabled: (obj["extraEnabled"] === undefined || obj["extraEnabled"] === null ? undefined : asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled")),
+    usedCredits: (obj["usedCredits"] === undefined || obj["usedCredits"] === null ? undefined : asNumber(obj["usedCredits"], "QuotaBalance.usedCredits")),
+    monthlyLimit: (obj["monthlyLimit"] === undefined || obj["monthlyLimit"] === null ? undefined : asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit")),
+    utilization: (obj["utilization"] === undefined || obj["utilization"] === null ? undefined : asNumber(obj["utilization"], "QuotaBalance.utilization")),
+  };
+}
+
+export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
+  const obj = asObject(raw, "ProviderQuota");
+  return {
+    provider: (asString(obj["provider"], "ProviderQuota.provider") as QuotaProvider),
+    label: asString(obj["label"], "ProviderQuota.label"),
+    logoUrl: asString(obj["logoUrl"], "ProviderQuota.logoUrl"),
+    authKind: (asString(obj["authKind"], "ProviderQuota.authKind") as ProviderAuthKind),
+    usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
+    fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
+    rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
+    unassessedWindows: (obj["unassessedWindows"] === undefined || obj["unassessedWindows"] === null ? undefined : validateArray(obj["unassessedWindows"], "ProviderQuota.unassessedWindows", validateUnassessedQuotaWindow) as UnassessedQuotaWindow[]),
+    balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
+    pricingPhase: (obj["pricingPhase"] === undefined || obj["pricingPhase"] === null ? undefined : asString(obj["pricingPhase"], "ProviderQuota.pricingPhase")),
+    pricingTransitionAt: (obj["pricingTransitionAt"] === undefined || obj["pricingTransitionAt"] === null ? undefined : asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp),
+  };
+}
+
+export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
+  const obj = asObject(raw, "LocalWindow");
+  return {
+    duration: asString(obj["duration"], "LocalWindow.duration"),
+    costUSD: asNumber(obj["costUSD"], "LocalWindow.costUSD"),
+    inputTokens: asNumber(obj["inputTokens"], "LocalWindow.inputTokens"),
+    outputTokens: asNumber(obj["outputTokens"], "LocalWindow.outputTokens"),
+  };
+}
+
+export function validateLocalUsage(raw: ValidatorInput): LocalUsage {
+  const obj = asObject(raw, "LocalUsage");
+  return {
+    windows: validateArray(obj["windows"], "LocalUsage.windows", validateLocalWindow) as LocalWindow[],
+  };
+}
+
+export function validateUsageResp(raw: ValidatorInput): UsageResp {
+  const obj = asObject(raw, "UsageResp");
+  return {
+    providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),
+    local: validateLocalUsage(obj["local"]),
+  };
 }
 
 export function validateEventMessageSource(raw: ValidatorInput): EventMessageSource {
@@ -189,18 +496,6 @@ export function validateEventCost(raw: ValidatorInput): EventCost {
   return {
     usd: asNumber(obj["usd"], "EventCost.usd"),
     source: (asString(obj["source"], "EventCost.source") as EventCostSource),
-  };
-}
-
-export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
-  const obj = asObject(raw, "DiffFileStat");
-  return {
-    path: asString(obj["path"], "DiffFileStat.path"),
-    linesAdded: asNumber(obj["linesAdded"], "DiffFileStat.linesAdded"),
-    linesDeleted: asNumber(obj["linesDeleted"], "DiffFileStat.linesDeleted"),
-    oldSize: asNumber(obj["oldSize"], "DiffFileStat.oldSize"),
-    newSize: asNumber(obj["newSize"], "DiffFileStat.newSize"),
-    diff: (obj["diff"] === undefined || obj["diff"] === null ? undefined : asString(obj["diff"], "DiffFileStat.diff")),
   };
 }
 
@@ -510,6 +805,22 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
   return result;
 }
 
+export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
+  const obj = asObject(raw, "HistoryEvent");
+  return {
+    recordID: asNumber(obj["recordID"], "HistoryEvent.recordID"),
+    index: asNumber(obj["index"], "HistoryEvent.index"),
+    message: validateEventMessage(obj["message"]),
+  };
+}
+
+export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoint {
+  const obj = asObject(raw, "HistoryCheckpoint");
+  return {
+    cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
+  };
+}
+
 export function validateEventStats(raw: ValidatorInput): EventStats {
   const obj = asObject(raw, "EventStats");
   return {
@@ -537,11 +848,10 @@ export function validateHistoryStats(raw: ValidatorInput): HistoryStats {
   };
 }
 
-export function validateTaskEventBackward(raw: ValidatorInput): TaskEventBackward {
-  const obj = asObject(raw, "TaskEventBackward");
+export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
+  const obj = asObject(raw, "HistoryReset");
   return {
-    messages: validateArray(obj["messages"], "TaskEventBackward.messages", validateEventMessage) as EventMessage[],
-    eventId: asString(obj["eventId"], "TaskEventBackward.eventId"),
+    bootstrapURL: asString(obj["bootstrapURL"], "HistoryReset.bootstrapURL"),
   };
 }
 
@@ -549,324 +859,6 @@ export function validateTaskHistoryStreamError(raw: ValidatorInput): TaskHistory
   const obj = asObject(raw, "TaskHistoryStreamError");
   return {
     message: asString(obj["message"], "TaskHistoryStreamError.message"),
-  };
-}
-
-export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
-  const obj = asObject(raw, "TaskRepo");
-  return {
-    name: asString(obj["name"], "TaskRepo.name"),
-    baseBranch: (obj["baseBranch"] === undefined || obj["baseBranch"] === null ? undefined : asString(obj["baseBranch"], "TaskRepo.baseBranch")),
-    branch: asString(obj["branch"], "TaskRepo.branch"),
-    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "TaskRepo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "TaskRepo.forge") as Forge)),
-  };
-}
-
-export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
-  const obj = asObject(raw, "GitRepositoryState");
-  return {
-    stale: (obj["stale"] === undefined || obj["stale"] === null ? undefined : asBoolean(obj["stale"], "GitRepositoryState.stale")),
-    name: asString(obj["name"], "GitRepositoryState.name"),
-    branch: asString(obj["branch"], "GitRepositoryState.branch"),
-    ahead: asNumber(obj["ahead"], "GitRepositoryState.ahead"),
-    behind: asNumber(obj["behind"], "GitRepositoryState.behind"),
-    changedFiles: asNumber(obj["changedFiles"], "GitRepositoryState.changedFiles"),
-    linesAdded: asNumber(obj["linesAdded"], "GitRepositoryState.linesAdded"),
-    linesDeleted: asNumber(obj["linesDeleted"], "GitRepositoryState.linesDeleted"),
-    uncommittedFiles: asNumber(obj["uncommittedFiles"], "GitRepositoryState.uncommittedFiles"),
-    conflicts: asNumber(obj["conflicts"], "GitRepositoryState.conflicts"),
-    operation: (obj["operation"] === undefined || obj["operation"] === null ? undefined : (asString(obj["operation"], "GitRepositoryState.operation") as GitOperation)),
-  };
-}
-
-export function validateTaskStartupFailure(raw: ValidatorInput): TaskStartupFailure {
-  const obj = asObject(raw, "TaskStartupFailure");
-  return {
-    harness: (asString(obj["harness"], "TaskStartupFailure.harness") as Harness),
-    phase: asString(obj["phase"], "TaskStartupFailure.phase"),
-    cause: asString(obj["cause"], "TaskStartupFailure.cause"),
-  };
-}
-
-export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
-  const obj = asObject(raw, "ForgeCheck");
-  return {
-    name: asString(obj["name"], "ForgeCheck.name"),
-    owner: asString(obj["owner"], "ForgeCheck.owner"),
-    repo: asString(obj["repo"], "ForgeCheck.repo"),
-    runID: asNumber(obj["runID"], "ForgeCheck.runID"),
-    jobID: asNumber(obj["jobID"], "ForgeCheck.jobID"),
-    status: (asString(obj["status"], "ForgeCheck.status") as CheckStatus),
-    conclusion: (asString(obj["conclusion"], "ForgeCheck.conclusion") as CheckConclusion),
-    queuedAt: (obj["queuedAt"] === undefined || obj["queuedAt"] === null ? undefined : asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp),
-    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp),
-    completedAt: (obj["completedAt"] === undefined || obj["completedAt"] === null ? undefined : asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp),
-  };
-}
-
-export function validateTaskPlan(raw: ValidatorInput): TaskPlan {
-  const obj = asObject(raw, "TaskPlan");
-  return {
-    toolUseID: asString(obj["toolUseID"], "TaskPlan.toolUseID"),
-    content: asString(obj["content"], "TaskPlan.content"),
-  };
-}
-
-export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
-  const obj = asObject(raw, "RuntimeInstance");
-  return {
-    id: asString(obj["id"], "RuntimeInstance.id"),
-    runtimeName: (obj["runtimeName"] === undefined || obj["runtimeName"] === null ? undefined : asString(obj["runtimeName"], "RuntimeInstance.runtimeName")),
-    tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
-    usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
-    display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),
-    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "RuntimeInstance.sudo")),
-    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "RuntimeInstance.sudoPassword")),
-    vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "RuntimeInstance.vncPort")),
-  };
-}
-
-export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
-  const obj = asObject(raw, "TaskRateLimit");
-  return {
-    blocked: asBoolean(obj["blocked"], "TaskRateLimit.blocked"),
-    quotaGroup: (obj["quotaGroup"] === undefined || obj["quotaGroup"] === null ? undefined : (asString(obj["quotaGroup"], "TaskRateLimit.quotaGroup") as QuotaProvider)),
-    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "TaskRateLimit.window")),
-    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp),
-  };
-}
-
-export function validateTask(raw: ValidatorInput): Task {
-  const obj = asObject(raw, "Task");
-  return {
-    id: asString(obj["id"], "Task.id"),
-    initialPrompt: asString(obj["initialPrompt"], "Task.initialPrompt"),
-    title: asString(obj["title"], "Task.title"),
-    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "Task.repos", validateTaskRepo) as TaskRepo[]),
-    state: (asString(obj["state"], "Task.state") as TaskState),
-    stateUpdatedAt: asString(obj["stateUpdatedAt"], "Task.stateUpdatedAt") as ISOTimestamp,
-    diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
-    repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
-    costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
-    duration: asNumber(obj["duration"], "Task.duration"),
-    numTurns: asNumber(obj["numTurns"], "Task.numTurns"),
-    cumulativeInputTokens: asNumber(obj["cumulativeInputTokens"], "Task.cumulativeInputTokens"),
-    cumulativeOutputTokens: asNumber(obj["cumulativeOutputTokens"], "Task.cumulativeOutputTokens"),
-    cumulativeCacheCreationInputTokens: asNumber(obj["cumulativeCacheCreationInputTokens"], "Task.cumulativeCacheCreationInputTokens"),
-    cumulativeCacheReadInputTokens: asNumber(obj["cumulativeCacheReadInputTokens"], "Task.cumulativeCacheReadInputTokens"),
-    activeInputTokens: asNumber(obj["activeInputTokens"], "Task.activeInputTokens"),
-    activeCacheReadTokens: asNumber(obj["activeCacheReadTokens"], "Task.activeCacheReadTokens"),
-    cacheTTLSeconds: (obj["cacheTTLSeconds"] === undefined || obj["cacheTTLSeconds"] === null ? undefined : asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds")),
-    cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
-    stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
-    contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
-    autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
-    startupFailure: (obj["startupFailure"] === undefined || obj["startupFailure"] === null ? undefined : validateTaskStartupFailure(obj["startupFailure"])),
-    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),
-    forgeOwner: (obj["forgeOwner"] === undefined || obj["forgeOwner"] === null ? undefined : asString(obj["forgeOwner"], "Task.forgeOwner")),
-    forgeRepo: (obj["forgeRepo"] === undefined || obj["forgeRepo"] === null ? undefined : asString(obj["forgeRepo"], "Task.forgeRepo")),
-    forgePR: (obj["forgePR"] === undefined || obj["forgePR"] === null ? undefined : asNumber(obj["forgePR"], "Task.forgePR")),
-    forgePRState: (obj["forgePRState"] === undefined || obj["forgePRState"] === null ? undefined : (asString(obj["forgePRState"], "Task.forgePRState") as ForgePRState)),
-    forgeIssue: (obj["forgeIssue"] === undefined || obj["forgeIssue"] === null ? undefined : asNumber(obj["forgeIssue"], "Task.forgeIssue")),
-    ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus)),
-    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Task.ciChecks", validateForgeCheck) as ForgeCheck[]),
-    owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
-    forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
-    parentTaskID: (obj["parentTaskID"] === undefined || obj["parentTaskID"] === null ? undefined : asString(obj["parentTaskID"], "Task.parentTaskID")),
-    caicMCP: (obj["caicMCP"] === undefined || obj["caicMCP"] === null ? undefined : asBoolean(obj["caicMCP"], "Task.caicMCP")),
-    harness: (asString(obj["harness"], "Task.harness") as Harness),
-    requestedModel: (obj["requestedModel"] === undefined || obj["requestedModel"] === null ? undefined : asString(obj["requestedModel"], "Task.requestedModel")),
-    requestedEffort: (obj["requestedEffort"] === undefined || obj["requestedEffort"] === null ? undefined : asString(obj["requestedEffort"], "Task.requestedEffort")),
-    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "Task.reportedModel")),
-    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "Task.reportedEffort")),
-    agentVersion: (obj["agentVersion"] === undefined || obj["agentVersion"] === null ? undefined : asString(obj["agentVersion"], "Task.agentVersion")),
-    sessionID: (obj["sessionID"] === undefined || obj["sessionID"] === null ? undefined : asString(obj["sessionID"], "Task.sessionID")),
-    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp),
-    turnStartedAt: (obj["turnStartedAt"] === undefined || obj["turnStartedAt"] === null ? undefined : asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp),
-    inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
-    currentPlan: (obj["currentPlan"] === undefined || obj["currentPlan"] === null ? undefined : validateTaskPlan(obj["currentPlan"])),
-    runtime: validateRuntimeInstance(obj["runtime"]),
-    rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
-    gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
-  };
-}
-
-export function validateBranchInfo(raw: ValidatorInput): BranchInfo {
-  const obj = asObject(raw, "BranchInfo");
-  return {
-    name: asString(obj["name"], "BranchInfo.name"),
-    remote: (obj["remote"] === undefined || obj["remote"] === null ? undefined : asString(obj["remote"], "BranchInfo.remote")),
-    action: (obj["action"] === undefined || obj["action"] === null ? undefined : (asString(obj["action"], "BranchInfo.action") as BranchAction)),
-  };
-}
-
-export function validateRepo(raw: ValidatorInput): Repo {
-  const obj = asObject(raw, "Repo");
-  return {
-    path: asString(obj["path"], "Repo.path"),
-    branch: asString(obj["branch"], "Repo.branch"),
-    baseBranch: validateBranchInfo(obj["baseBranch"]),
-    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "Repo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "Repo.forge") as Forge)),
-    ci: (obj["ci"] === undefined || obj["ci"] === null ? undefined : (asString(obj["ci"], "Repo.ci") as CIStatus)),
-    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Repo.ciChecks", validateForgeCheck) as ForgeCheck[]),
-    checksDate: (obj["checksDate"] === undefined || obj["checksDate"] === null ? undefined : asString(obj["checksDate"], "Repo.checksDate") as ISOTimestamp),
-  };
-}
-
-export function validateWarningDetail(raw: ValidatorInput): WarningDetail {
-  const obj = asObject(raw, "WarningDetail");
-  return {
-    repo: asString(obj["repo"], "WarningDetail.repo"),
-    error: asString(obj["error"], "WarningDetail.error"),
-  };
-}
-
-export function validateWarning(raw: ValidatorInput): Warning {
-  const obj = asObject(raw, "Warning");
-  return {
-    id: asString(obj["id"], "Warning.id"),
-    category: (asString(obj["category"], "Warning.category") as WarningCategory),
-    message: asString(obj["message"], "Warning.message"),
-    details: validateArray(obj["details"], "Warning.details", validateWarningDetail) as WarningDetail[],
-  };
-}
-
-export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskListRestorationStatus {
-  const obj = asObject(raw, "TaskListRestorationStatus");
-  return {
-    loading: asBoolean(obj["loading"], "TaskListRestorationStatus.loading"),
-    error: asString(obj["error"], "TaskListRestorationStatus.error"),
-  };
-}
-
-export function validateServerHealth(raw: ValidatorInput): ServerHealth {
-  const obj = asObject(raw, "ServerHealth");
-  return {
-    time: (obj["time"] === undefined || obj["time"] === null ? undefined : asString(obj["time"], "ServerHealth.time") as ISOTimestamp),
-    cpuPerc: asNumber(obj["cpuPerc"], "ServerHealth.cpuPerc"),
-    cpuCount: asNumber(obj["cpuCount"], "ServerHealth.cpuCount"),
-    memUsed: asNumber(obj["memUsed"], "ServerHealth.memUsed"),
-    memTotal: asNumber(obj["memTotal"], "ServerHealth.memTotal"),
-    cpuHigh: asBoolean(obj["cpuHigh"], "ServerHealth.cpuHigh"),
-    memHigh: asBoolean(obj["memHigh"], "ServerHealth.memHigh"),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "ServerHealth.error")),
-  };
-}
-
-export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
-  const obj = asObject(raw, "TaskListEvent");
-  return {
-    focus: (obj["focus"] === undefined || obj["focus"] === null ? undefined : asString(obj["focus"], "TaskListEvent.focus")),
-    complete: (obj["complete"] === undefined || obj["complete"] === null ? undefined : asBoolean(obj["complete"], "TaskListEvent.complete")),
-    kind: asString(obj["kind"], "TaskListEvent.kind"),
-    snapshot: (obj["snapshot"] === undefined || obj["snapshot"] === null ? undefined : validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[]),
-    upsert: (obj["upsert"] === undefined || obj["upsert"] === null ? undefined : validateTask(obj["upsert"])),
-    patch: (obj["patch"] === undefined || obj["patch"] === null ? undefined : validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ }),
-    delete: (obj["delete"] === undefined || obj["delete"] === null ? undefined : asString(obj["delete"], "TaskListEvent.delete")),
-    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[]),
-    warning: (obj["warning"] === undefined || obj["warning"] === null ? undefined : validateWarning(obj["warning"])),
-    status: (obj["status"] === undefined || obj["status"] === null ? undefined : validateTaskListRestorationStatus(obj["status"])),
-    health: (obj["health"] === undefined || obj["health"] === null ? undefined : validateServerHealth(obj["health"])),
-  };
-}
-
-export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
-  const obj = asObject(raw, "QuotaRateLimit");
-  return {
-    label: asString(obj["label"], "QuotaRateLimit.label"),
-    window: asString(obj["window"], "QuotaRateLimit.window"),
-    utilization: asNumber(obj["utilization"], "QuotaRateLimit.utilization"),
-    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp),
-  };
-}
-
-export function validateUnassessedQuotaWindow(raw: ValidatorInput): UnassessedQuotaWindow {
-  const obj = asObject(raw, "UnassessedQuotaWindow");
-  return {
-    group: asString(obj["group"], "UnassessedQuotaWindow.group"),
-    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "UnassessedQuotaWindow.window")),
-  };
-}
-
-export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
-  const obj = asObject(raw, "QuotaBalance");
-  return {
-    currency: asString(obj["currency"], "QuotaBalance.currency"),
-    total: asNumber(obj["total"], "QuotaBalance.total"),
-    granted: (obj["granted"] === undefined || obj["granted"] === null ? undefined : asNumber(obj["granted"], "QuotaBalance.granted")),
-    toppedUp: (obj["toppedUp"] === undefined || obj["toppedUp"] === null ? undefined : asNumber(obj["toppedUp"], "QuotaBalance.toppedUp")),
-    extraEnabled: (obj["extraEnabled"] === undefined || obj["extraEnabled"] === null ? undefined : asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled")),
-    usedCredits: (obj["usedCredits"] === undefined || obj["usedCredits"] === null ? undefined : asNumber(obj["usedCredits"], "QuotaBalance.usedCredits")),
-    monthlyLimit: (obj["monthlyLimit"] === undefined || obj["monthlyLimit"] === null ? undefined : asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit")),
-    utilization: (obj["utilization"] === undefined || obj["utilization"] === null ? undefined : asNumber(obj["utilization"], "QuotaBalance.utilization")),
-  };
-}
-
-export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
-  const obj = asObject(raw, "ProviderQuota");
-  return {
-    provider: (asString(obj["provider"], "ProviderQuota.provider") as QuotaProvider),
-    label: asString(obj["label"], "ProviderQuota.label"),
-    logoUrl: asString(obj["logoUrl"], "ProviderQuota.logoUrl"),
-    authKind: (asString(obj["authKind"], "ProviderQuota.authKind") as ProviderAuthKind),
-    usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
-    fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
-    rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
-    unassessedWindows: (obj["unassessedWindows"] === undefined || obj["unassessedWindows"] === null ? undefined : validateArray(obj["unassessedWindows"], "ProviderQuota.unassessedWindows", validateUnassessedQuotaWindow) as UnassessedQuotaWindow[]),
-    balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
-    pricingPhase: (obj["pricingPhase"] === undefined || obj["pricingPhase"] === null ? undefined : asString(obj["pricingPhase"], "ProviderQuota.pricingPhase")),
-    pricingTransitionAt: (obj["pricingTransitionAt"] === undefined || obj["pricingTransitionAt"] === null ? undefined : asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp),
-  };
-}
-
-export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
-  const obj = asObject(raw, "LocalWindow");
-  return {
-    duration: asString(obj["duration"], "LocalWindow.duration"),
-    costUSD: asNumber(obj["costUSD"], "LocalWindow.costUSD"),
-    inputTokens: asNumber(obj["inputTokens"], "LocalWindow.inputTokens"),
-    outputTokens: asNumber(obj["outputTokens"], "LocalWindow.outputTokens"),
-  };
-}
-
-export function validateLocalUsage(raw: ValidatorInput): LocalUsage {
-  const obj = asObject(raw, "LocalUsage");
-  return {
-    windows: validateArray(obj["windows"], "LocalUsage.windows", validateLocalWindow) as LocalWindow[],
-  };
-}
-
-export function validateUsageResp(raw: ValidatorInput): UsageResp {
-  const obj = asObject(raw, "UsageResp");
-  return {
-    providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),
-    local: validateLocalUsage(obj["local"]),
-  };
-}
-
-export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
-  const obj = asObject(raw, "HistoryEvent");
-  return {
-    recordID: asNumber(obj["recordID"], "HistoryEvent.recordID"),
-    index: asNumber(obj["index"], "HistoryEvent.index"),
-    message: validateEventMessage(obj["message"]),
-  };
-}
-
-export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoint {
-  const obj = asObject(raw, "HistoryCheckpoint");
-  return {
-    cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
-  };
-}
-
-export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
-  const obj = asObject(raw, "HistoryReset");
-  return {
-    bootstrapURL: asString(obj["bootstrapURL"], "HistoryReset.bootstrapURL"),
   };
 }
 

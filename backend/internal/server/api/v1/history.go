@@ -18,7 +18,7 @@ type HistoryEvent struct {
 	Message  EventMessage `json:"message"`
 }
 
-// HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+// HistoryBootstrap is small revalidated discovery for task history. ResourceBase
 // ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
 // for direct arithmetic access. Scope isolates the
 // authenticated account, including legacy shared tasks. Browser HTTP caching

@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
@@ -720,6 +722,22 @@ func BenchmarkSource(b *testing.B) {
 			noOutput)
 	}
 	path := writeFixture(b, lines...)
+	encoded, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		b.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	compressed := path + ".zst"
+	if err := os.WriteFile(filepath.Clean(compressed), encoder.EncodeAll(encoded, nil), 0o600); err != nil { //nolint:gosec // Compressed fixture path belongs to this test's private temporary directory.
+		b.Fatal(err)
+	}
+	if err := encoder.Close(); err != nil {
+		b.Fatal(err)
+	}
+	b.Run("Compressed", func(b *testing.B) { benchmarkSource(b, compressed, lines[1:]) })
 	// Cycle through complete varied turns, including their large output records.
 	benchmarkSource(b, path, lines[1:])
 }
@@ -979,4 +997,79 @@ func readRange(s *Source, ctx context.Context, snapshot Snapshot, first, last ui
 		return "", err
 	}
 	return result.String(), nil
+}
+
+func TestSourceCompressed(t *testing.T) {
+	t.Parallel()
+	lines := []string{claudeHeader, twoTexts, noOutput, `{"t":"agent","ts":4.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1.25,"usage":{"input_tokens":42}}}`}
+	plain := writeFixture(t, lines...)
+	encoded, err := os.ReadFile(filepath.Clean(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := plain + ".zst"
+	compressedBytes := encoder.EncodeAll(encoded, nil)
+	if err := os.WriteFile(filepath.Clean(compressed), compressedBytes, 0o600); err != nil { //nolint:gosec // Compressed fixture path belongs to this test's private temporary directory.
+		t.Fatal(err)
+	}
+	if err := encoder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var previous string
+	var previousCosts []TurnEstimate
+	for _, path := range []string{plain, compressed} {
+		source, _ := newFixtureSource(t, path)
+		snapshot, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.Through != 4 {
+			t.Fatalf("physical records: %+v", snapshot)
+		}
+		output, err := readRange(source, t.Context(), snapshot, 1, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var costs []TurnEstimate
+		for cost, err := range source.TurnCosts(t.Context(), snapshot, 4, nil) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			costs = append(costs, cost)
+		}
+		if previous != "" && (output != previous || !reflect.DeepEqual(costs, previousCosts)) {
+			t.Fatal("compressed projection differs in messages, positions or prices")
+		}
+		if len(costs) != 1 || costs[0].Cost.USD != 1.25 {
+			t.Fatalf("pricing: %+v", costs)
+		}
+		previous, previousCosts = output, costs
+		again, err := source.Refresh(t.Context())
+		if err != nil || again != snapshot {
+			t.Fatalf("settled refresh: %+v %v", again, err)
+		}
+	}
+	t.Run("error/truncated compressed stream", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "truncated.jsonl.zst")
+		if err := os.WriteFile(path, compressedBytes[:len(compressedBytes)-4], 0o600); err != nil { //nolint:gosec // Path is generated inside this test's private temporary directory.
+			t.Fatal(err)
+		}
+		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() {
+			if err := source.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if _, err := source.Refresh(t.Context()); err == nil {
+			t.Fatal("truncated compression stream accepted")
+		}
+	})
 }

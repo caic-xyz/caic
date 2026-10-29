@@ -1,4 +1,4 @@
-// Tests shared live-history source ownership, invalidation, and terminal task cleanup.
+// Tests bounded history leases, invalidation, and immutable projection inputs.
 
 package server
 
@@ -44,11 +44,11 @@ func TestTaskHistory(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	owner := newTaskHistory(ctx, s.log, s.taskMgr)
-	first, err := owner.Source(t.Context(), entry)
+	first, release, err := owner.acquire(t.Context(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := owner.Source(t.Context(), entry)
+	again, againRelease, err := owner.acquire(t.Context(), entry)
 	if err != nil || again != first {
 		t.Fatalf("source not shared: %p/%p, %v", first, again, err)
 	}
@@ -56,26 +56,36 @@ func TestTaskHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner.Invalidate(entry, first)
+	againRelease()
+	owner.invalidate(entry, first)
+	if _, err := first.Snapshot(t.Context()); err != nil {
+		t.Fatalf("retirement closed leased source: %v", err)
+	}
+	release()
 	if _, err := readHistoryRange(first, t.Context(), snapshot, 1, 2); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("invalidated source remains readable: %v", err)
 	}
-	second, err := owner.Source(t.Context(), entry)
+	second, secondRelease, err := owner.acquire(t.Context(), entry)
 	if err != nil || second == first {
 		t.Fatalf("source did not recover: %p/%p, %v", first, second, err)
 	}
-	owner.Invalidate(entry, first)
-	if same, err := owner.Source(t.Context(), entry); err != nil || same != second {
+	owner.invalidate(entry, first)
+	same, sameRelease, err := owner.acquire(t.Context(), entry)
+	if err != nil || same != second {
 		t.Fatalf("late invalidation removed replacement: %p/%p, %v", second, same, err)
 	}
+	sameRelease()
+	secondRelease()
 	tk.SetState(taskslog.StatePurged)
 	owner.prune(false)
-	if _, err := owner.Source(t.Context(), entry); err == nil {
-		t.Fatal("terminal task accepted a live projector")
+	if same, release, err := owner.acquire(t.Context(), entry); err != nil || same != second {
+		t.Fatalf("state-only transition lost projection: %v", err)
+	} else {
+		release()
 	}
 	tk.SetState(taskslog.StateRunning)
 	cancel()
-	if _, err := owner.Source(t.Context(), entry); !errors.Is(err, context.Canceled) {
+	if _, _, err := owner.acquire(t.Context(), entry); !errors.Is(err, context.Canceled) {
 		t.Fatalf("source created after shutdown: %v", err)
 	}
 }
@@ -123,10 +133,11 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	entry.LogPath.Set(path)
 	owner := testTaskHandlers(s).taskSvc.history
 	t.Cleanup(func() { owner.prune(true) })
-	first, err := owner.Source(t.Context(), entry)
+	first, release, err := owner.acquire(t.Context(), entry)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(release)
 	snapshot, err := first.Refresh(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -159,17 +170,18 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	}
 	price.calls.Store(0)
 	generation := tk.TimelineID()
-	owner.Invalidate(entry, first)
+	owner.invalidate(entry, first)
 	for _, revive := range []bool{false, true} {
 		if revive {
 			tk.SetState(taskslog.StateStopped)
 			owner.prune(false)
 			tk.SetState(taskslog.StateRunning)
 		}
-		rebuilt, err := owner.Source(t.Context(), entry)
+		rebuilt, release, err := owner.acquire(t.Context(), entry)
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(release)
 		rebuiltSnapshot, err := rebuilt.Refresh(t.Context())
 		if err != nil {
 			t.Fatal(err)
@@ -190,4 +202,52 @@ func readHistoryRange(s *history.Source, ctx context.Context, snapshot history.S
 		return "", err
 	}
 	return result.String(), nil
+}
+
+func TestTaskHistoryBoundedLeases(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
+	path := filepath.Join(t.TempDir(), "task.jsonl")
+	if err := os.WriteFile(path, []byte(`{"t":"caic_meta","version":3,"harness":"claude","prompt":"history"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner := testTaskHandlers(s).taskSvc.history
+	t.Cleanup(func() { owner.prune(true) })
+	var held *history.Source
+	var releaseHeld func()
+	for i := range 10 {
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "history"}, harness.Claude)
+		tk.SetState(taskslog.StatePurged)
+		entry := s.taskMgr.NewEntry(tk, nil)
+		entry.LogPath.Set(path)
+		s.taskMgr.Insert(tk.ID, entry)
+		source, release, err := owner.acquire(t.Context(), entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			held, releaseHeld = source, release
+		} else {
+			release()
+		}
+	}
+	if _, err := held.Refresh(t.Context()); err != nil {
+		t.Fatalf("evicted active lease: %v", err)
+	}
+	owner.mu.Lock()
+	retained := len(owner.sources)
+	owner.mu.Unlock()
+	if retained != 9 {
+		t.Fatalf("retained %d projectors, want eight idle and one active", retained)
+	}
+	releaseHeld()
+	if _, err := held.Snapshot(t.Context()); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("oldest idle projector not closed: %v", err)
+	}
+	owner.mu.Lock()
+	retained = len(owner.sources)
+	owner.mu.Unlock()
+	if retained != 8 {
+		t.Fatalf("retained %d idle projectors", retained)
+	}
 }

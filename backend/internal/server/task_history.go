@@ -1,10 +1,9 @@
-// Owns live-task history sources and generation-scoped cleanup.
+// Owns bounded task-history projections and leases across task lifecycle changes.
 
 package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 
@@ -12,7 +11,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 type taskHistorySource struct {
@@ -20,24 +18,25 @@ type taskHistorySource struct {
 	generation string
 	path       string
 	source     *history.Source
+	users      int
+	used       uint64
+	retired    bool
 }
 
-// taskHistory owns source lifetime independently of individual HTTP requests.
-// The manager change channel releases terminal/deleted tasks and invalidated
-// generations; server context cancellation releases every remaining source.
+// taskHistory retains at most eight idle projections in addition to currently
+// leased sources. Retirement prevents new use; the last caller closes the
+// projector after its request finishes, including requests spanning compression.
 type taskHistory struct {
 	ctx     context.Context
 	log     *slog.Logger
 	manager *taskmgr.Manager
-
 	mu      sync.Mutex
-	sources map[ksid.ID]taskHistorySource
+	sources map[ksid.ID]*taskHistorySource
+	clock   uint64
 }
 
 func newTaskHistory(ctx context.Context, log *slog.Logger, manager *taskmgr.Manager) *taskHistory {
-	h := &taskHistory{ctx: ctx, log: log, manager: manager, sources: make(map[ksid.ID]taskHistorySource)}
-	// This watcher ends with the owning server context; it has no independent
-	// worker lifetime or shutdown wait contract.
+	h := &taskHistory{ctx: ctx, log: log, manager: manager, sources: make(map[ksid.ID]*taskHistorySource)}
 	go func() {
 		for {
 			_, changed := manager.ChangeSnapshot()
@@ -54,77 +53,107 @@ func newTaskHistory(ctx context.Context, log *slog.Logger, manager *taskmgr.Mana
 	return h
 }
 
-// Source returns one shared projector for this live task incarnation. The
-// caller must perform normal task authorization before using its payloads.
-// Source.Refresh and Source.WriteRange accept request cancellation separately.
-func (h *taskHistory) Source(ctx context.Context, entry *taskmgr.Entry) (*history.Source, error) {
+// acquire leases a shared projector until release. Callers authorize the task
+// before acquisition and must release once, after all source operations finish.
+func (h *taskHistory) acquire(ctx context.Context, entry *taskmgr.Entry) (*history.Source, func(), error) {
 	h.mu.Lock()
-	var retired *history.Source
-	defer func() {
-		h.mu.Unlock()
-		if retired != nil {
-			h.closeSource(retired)
-		}
-	}()
+	defer h.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := h.ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	t := entry.Task()
-	if state := t.GetState(); state.IsTerminal() || state == taskslog.StateStopped {
-		return nil, errors.New("chunk projection requires a live task")
-	}
 	id, generation, path := t.ID, t.TimelineID(), entry.LogPath.Get()
-	if cached, ok := h.sources[id]; ok {
-		if cached.entry == entry && cached.generation == generation && cached.path == path {
-			return cached.source, nil
+	cached := h.sources[id]
+	if cached != nil && (cached.entry != entry || cached.generation != generation || cached.path != path) {
+		h.retireLocked(id, cached)
+		cached = nil
+	}
+	if cached == nil {
+		source, err := history.NewSource(ctx, path, h.manager.Backends)
+		if err != nil {
+			return nil, nil, err
 		}
-		retired = cached.source
-		delete(h.sources, id)
+		cached = &taskHistorySource{entry: entry, generation: generation, path: path, source: source}
+		h.sources[id] = cached
 	}
-	source, err := history.NewSource(ctx, path, h.manager.Backends)
-	if err != nil {
-		return nil, err
-	}
-	h.sources[id] = taskHistorySource{entry: entry, generation: generation, path: path, source: source}
-	return source, nil
+	h.clock++
+	cached.used = h.clock
+	cached.users++
+	return cached.source, func() { h.release(cached) }, nil
 }
 
-// Invalidate withdraws a failed projector so the next request can reconstruct
-// it. A late failure from an older generation cannot remove its replacement.
-func (h *taskHistory) Invalidate(entry *taskmgr.Entry, source *history.Source) {
+// isCurrent compares the acquired source with its bound entry, path, and
+// generation, including replacement that occurred while the source opened.
+func (h *taskHistory) isCurrent(entry *taskmgr.Entry, source *history.Source) bool {
 	h.mu.Lock()
-	id := entry.Task().ID
-	if cached, ok := h.sources[id]; ok && cached.source == source {
-		delete(h.sources, id)
-		h.mu.Unlock()
-		h.closeSource(source)
-		return
+	defer h.mu.Unlock()
+	t := entry.Task()
+	cached := h.sources[t.ID]
+	current, exists := h.manager.GetEntry(t.ID)
+	return exists && current == entry && cached != nil && cached.source == source && cached.path == entry.LogPath.Get() && cached.generation == t.TimelineID()
+}
+
+func (h *taskHistory) release(cached *taskHistorySource) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cached.users--
+	if cached.retired && cached.users == 0 {
+		h.closeSource(cached.source)
 	}
-	h.mu.Unlock()
+	h.evictLocked()
+}
+
+// invalidate withdraws a failed projector. Existing leases remain safe until
+// their requests finish; a late failure cannot remove a replacement source.
+func (h *taskHistory) invalidate(entry *taskmgr.Entry, source *history.Source) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	id := entry.Task().ID
+	if cached := h.sources[id]; cached != nil && cached.source == source {
+		h.retireLocked(id, cached)
+	}
+}
+
+func (h *taskHistory) retireLocked(id ksid.ID, cached *taskHistorySource) {
+	delete(h.sources, id)
+	cached.retired = true
+	if cached.users == 0 {
+		h.closeSource(cached.source)
+	}
+}
+
+func (h *taskHistory) evictLocked() {
+	for {
+		idle := 0
+		var oldest *taskHistorySource
+		var key ksid.ID
+		for id, cached := range h.sources {
+			if cached.users != 0 {
+				continue
+			}
+			idle++
+			if oldest == nil || cached.used < oldest.used {
+				oldest, key = cached, id
+			}
+		}
+		if idle <= 8 {
+			return
+		}
+		h.retireLocked(key, oldest)
+	}
 }
 
 func (h *taskHistory) prune(all bool) {
 	h.mu.Lock()
-	var retired []*history.Source
+	defer h.mu.Unlock()
 	for id, cached := range h.sources {
 		entry, exists := h.manager.GetEntry(id)
-		remove := all || !exists || entry != cached.entry
-		if !remove {
-			t := entry.Task()
-			state := t.GetState()
-			remove = state.IsTerminal() || state == taskslog.StateStopped || t.TimelineID() != cached.generation || entry.LogPath.Get() != cached.path
+		if all || !exists || entry != cached.entry || entry.Task().TimelineID() != cached.generation || entry.LogPath.Get() != cached.path {
+			h.retireLocked(id, cached)
 		}
-		if remove {
-			delete(h.sources, id)
-			retired = append(retired, cached.source)
-		}
-	}
-	h.mu.Unlock()
-	for _, source := range retired {
-		h.closeSource(source)
 	}
 }
 

@@ -1363,415 +1363,6 @@ public struct CreateTaskReq: Codable {
     public let caicMCP: Bool?
 }
 
-/// EventMessageSource identifies the provider origin of any normalized event.
-/// AgentID and DelegationToolUseID identify child ownership independently of native
-/// item identity. RootThreadID is an authoritative session owner when reported.
-/// Fields remain absent when the harness does not supply them.
-public struct EventMessageSource: Codable {
-    public let agentID: String?
-    public let delegationToolUseID: String?
-    public let threadID: String?
-    public let turnID: String?
-    public let itemID: String?
-    public let rootThreadID: String?
-}
-
-/// EventInit is emitted once at the start of a session. It includes a Harness
-/// field so the client knows which backend produced the stream.
-public struct EventInit: Codable {
-    public let reportedModel: String
-    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
-    public let reportedEffort: String?
-    public let agentVersion: String
-    public let sessionID: String
-    public let tools: [String]?
-    public let cwd: String
-    public let harness: String
-}
-
-/// EventText is an assistant text block.
-public struct EventText: Codable {
-    public let text: String
-}
-
-/// EventTextDelta is a streaming text fragment from --include-partial-messages.
-public struct EventTextDelta: Codable {
-    public let text: String
-}
-
-/// EventFileChange is one changed file rendered from a unified patch.
-public struct EventFileChange: Codable {
-    public let path: String
-    public let patch: String
-}
-
-/// EventSubagentSpawn is one backend-normalized subagent invocation.
-public struct EventSubagentSpawn: Codable {
-    public let agent: String
-    public let task: String
-    public let label: String?
-    public let phase: String?
-}
-
-/// EventToolInputView is a backend-normalized rendering model for known tool
-/// inputs. It keeps harness-specific tool schemas out of clients.
-public struct EventToolInputView: Codable {
-    public let kind: EventToolInputKind
-    public let files: [EventFileChange]?
-    public let subagents: [EventSubagentSpawn]?
-}
-
-/// EventToolUse is emitted when the assistant invokes a tool.
-public struct EventToolUse: Codable {
-    public let toolUseID: String
-    public let name: String
-    public let input: JSONValue
-    /// Backend-normalized short display detail for tool headers.
-    public let detail: String?
-    /// Backend-normalized structured input for tool-card rendering.
-    public let inputView: EventToolInputView?
-    /// True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
-    public let inputTruncated: Bool?
-    /// True when the tool runs in the background (Bash/Agent run_in_background).
-    public let background: Bool?
-}
-
-/// EventToolResult is emitted when a tool call completes.
-public struct EventToolResult: Codable {
-    public let toolUseID: String
-    /// Seconds; server-computed; 0 if unknown.
-    public let duration: Double
-    public let error: String?
-}
-
-/// AskOption is a single option in an AskUserQuestion.
-public struct AskOption: Codable {
-    public let label: String
-    public let description: String?
-}
-
-/// AskQuestion is a single question from AskUserQuestion.
-public struct AskQuestion: Codable {
-    public let question: String
-    public let header: String?
-    public let options: [AskOption]
-    public let multiSelect: Bool?
-}
-
-/// EventAsk is emitted when the agent asks the user a question.
-public struct EventAsk: Codable {
-    public let toolUseID: String
-    public let questions: [AskQuestion]
-}
-
-/// EventUsage reports per-turn token usage.
-/// ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
-/// or reasoning summaries (Codex). Zero when the harness does not report it.
-public struct EventUsage: Codable {
-    public let inputTokens: Int
-    public let outputTokens: Int
-    public let cacheCreationInputTokens: Int
-    public let cacheReadInputTokens: Int
-    public let reasoningOutputTokens: Int?
-    public let reportedModel: String
-}
-
-/// EventCost is one completed turn's reported or API-equivalent estimated cost.
-public struct EventCost: Codable {
-    public let usd: Double
-    public let source: EventCostSource
-}
-
-/// EventResult is emitted when the task reaches a terminal state.
-public struct EventResult: Codable {
-    public let cost: EventCost?
-    public let subtype: String
-    public let isError: Bool
-    public let result: String
-    public let diffStat: DiffStat?
-    public let totalCostUSD: Double
-    /// Seconds.
-    public let duration: Double
-    /// Seconds.
-    public let durationAPI: Double
-    public let numTurns: Int
-    public let usage: EventUsage
-}
-
-/// EventSystem is a system event (status, compact_boundary, etc.).
-public struct EventSystem: Codable {
-    public let subtype: String
-    /// Optional human-readable detail (e.g. model names for model_rerouted).
-    public let detail: String?
-    /// ContextTokensBefore is the context size the harness reported before a
-    /// compact_boundary. Zero means the harness did not report it.
-    public let contextTokensBefore: Int?
-    /// ContextTokensAfter is the context size the harness reported after a
-    /// compact_boundary, measured or estimated. Zero means it did not report it.
-    public let contextTokensAfter: Int?
-}
-
-/// EventImageData describes one prompt image carried by a user-input event.
-///
-/// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
-/// task attachment route. Data stays until clients fetch images only by Hash.
-public struct EventImageData: Codable {
-    public let mediaType: String
-    public let data: String
-    public let hash: String?
-}
-
-/// EventUserInput is emitted when a user sends a text message to the agent.
-public struct EventUserInput: Codable {
-    public let text: String
-    public let images: [EventImageData]?
-}
-
-/// TodoItem is a single todo entry from a TodoWrite tool call.
-public struct TodoItem: Codable {
-    public let content: String
-    /// "pending", "in_progress", "completed".
-    public let status: String
-    public let activeForm: String?
-}
-
-/// EventTodo is emitted when the agent writes/updates its todo list.
-public struct EventTodo: Codable {
-    public let toolUseID: String
-    public let todos: [TodoItem]
-}
-
-/// EventDiffStat is emitted when the relay reports updated diff statistics.
-public struct EventDiffStat: Codable {
-    public let diffStat: DiffStat?
-}
-
-/// EventError is emitted when the backend fails to parse an agent output line.
-public struct EventError: Codable {
-    public let err: String
-    public let line: String
-}
-
-/// EventThinking is an assistant thinking block.
-public struct EventThinking: Codable {
-    public let text: String
-}
-
-/// EventThinkingDelta is a streaming thinking fragment.
-public struct EventThinkingDelta: Codable {
-    public let text: String
-}
-
-/// EventSubagentStart is emitted when a subagent task begins. It is the legacy
-/// harness-agnostic shape: no current parser produces it, and clients should
-/// render EventNativeSubagent instead. It stays in the v1 event union and the
-/// generated SDKs so existing clients that switch on these kinds keep compiling.
-public struct EventSubagentStart: Codable {
-    public let taskID: String
-    public let description: String
-}
-
-/// EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
-/// It is the legacy harness-agnostic shape: no current parser produces it, and
-/// clients should render EventNativeSubagent instead. It stays in the v1 event
-/// union and the generated SDKs so existing clients that switch on these kinds
-/// keep compiling.
-public struct EventSubagentEnd: Codable {
-    public let taskID: String
-    /// "completed", "failed", "stopped"
-    public let status: String
-}
-
-/// EventNativeSubagent is one lifecycle update for a harness native subagent.
-/// ID and GroupID are opaque harness identities. Optional fields remain absent
-/// when the harness did not expose them.
-public struct EventNativeSubagent: Codable {
-    public let toolUseID: String?
-    public let scope: EventNativeSubagentScope?
-    public let id: String
-    public let groupID: String?
-    public let label: String?
-    public let prompt: String?
-    public let status: EventNativeSubagentStatus
-    public let result: String?
-    /// Background reports that the harness launched the delegation detached from
-    /// the parent turn, so it can outlive that turn's result.
-    public let background: Bool?
-}
-
-/// EventBackgroundCommand reports one harness-native detached shell command's
-/// folded lifecycle. ExitCode is the command's numeric outcome when the harness
-/// reported one; OutputRef is an opaque harness-owned output reference, not a
-/// caic resource.
-public struct EventBackgroundCommand: Codable {
-    public let id: String
-    public let label: String?
-    public let status: String
-    public let result: String?
-    public let exitCode: Int?
-    public let outputRef: String?
-    public let toolUseID: String?
-}
-
-/// EventLog is a provisioning/startup log line from the runtime backend.
-public struct EventLog: Codable {
-    public let line: String
-}
-
-/// EventToolOutputDelta is a streaming output fragment from a running tool.
-/// Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
-/// MCP tool progress messages (item/mcpToolCall/progress).
-public struct EventToolOutputDelta: Codable {
-    public let toolUseID: String
-    public let delta: String
-    public let contentType: ToolOutputContentType?
-    /// Pretty-printed JSON or other transformation.
-    public let formatted: String?
-}
-
-/// EventWidget is emitted when the agent produces a complete HTML widget.
-public struct EventWidget: Codable {
-    public let toolUseID: String
-    public let title: String
-    public let html: String
-}
-
-/// EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
-public struct EventWidgetDelta: Codable {
-    public let toolUseID: String
-    public let delta: String
-}
-
-/// EventRateLimit is emitted when the agent's rate limit status changes.
-public struct EventRateLimit: Codable {
-    public let status: EventRateLimitStatus
-    /// When the limit resets; zero if unknown.
-    public let resetsAt: ISOTimestamp?
-    /// "five_hour", "seven_day", etc.
-    public let rateLimitType: String
-    /// 0.0–1.0; -1 when unknown.
-    public let utilization: Double
-    /// True when extra/overage usage is active.
-    public let isUsingOverage: Bool?
-    /// When overage resets; zero if not using overage.
-    public let overageResetsAt: ISOTimestamp?
-}
-
-/// EventRepositoryCommit identifies one immutable repository branch tip in a
-/// commit snapshot.
-public struct EventRepositoryCommit: Codable {
-    /// RepositoryPath is the repository's absolute path inside the task runtime.
-    public let repositoryPath: String
-    /// BranchName is the short local branch name, such as "main" or "caic-1".
-    public let branchName: String
-    /// CommitHash is the full Git object ID of the branch tip.
-    public let commitHash: String
-}
-
-/// EventChangeStat summarizes a completed turn's net committed change.
-public struct EventChangeStat: Codable {
-    public let files: Int
-    public let linesAdded: Int
-    public let linesDeleted: Int
-    public let binaryFiles: Int
-}
-
-/// EventCommitSnapshot records the exact committed repository branch tips
-/// fetched from the runtime when a turn finishes.
-public struct EventCommitSnapshot: Codable {
-    public let repositoryCommits: [EventRepositoryCommit]
-    public let baseline: Bool?
-    public let changeStat: EventChangeStat?
-}
-
-/// EventSkillLoad is emitted when a skill enters the main agent's context. A
-/// failed call and a subagent's load emit none; an inferred load is emitted
-/// once the tool that opened the file succeeds.
-public struct EventSkillLoad: Codable {
-    public let skill: String
-    /// SKILL.md in the task runtime; empty when the harness did not report it.
-    public let path: String?
-}
-
-// Backend-neutral event types
-
-/// EventMessage is a single SSE event in the backend-neutral stream
-/// (/api/caic/v1/tasks/{id}/events). All backends produce these events.
-public struct EventMessage: Codable {
-    public let source: EventMessageSource?
-    public let kind: EventKind
-    public let ts: Int
-    public let `init`: EventInit?
-    public let text: EventText?
-    public let textDelta: EventTextDelta?
-    public let toolUse: EventToolUse?
-    public let toolResult: EventToolResult?
-    public let ask: EventAsk?
-    public let usage: EventUsage?
-    public let result: EventResult?
-    public let system: EventSystem?
-    public let userInput: EventUserInput?
-    public let todo: EventTodo?
-    public let diffStat: EventDiffStat?
-    public let error: EventError?
-    public let thinking: EventThinking?
-    public let thinkingDelta: EventThinkingDelta?
-    public let subagentStart: EventSubagentStart?
-    public let subagentEnd: EventSubagentEnd?
-    public let nativeSubagent: EventNativeSubagent?
-    public let backgroundCommand: EventBackgroundCommand?
-    public let log: EventLog?
-    public let toolOutputDelta: EventToolOutputDelta?
-    public let widget: EventWidget?
-    public let widgetDelta: EventWidgetDelta?
-    public let rateLimit: EventRateLimit?
-    public let commitSnapshot: EventCommitSnapshot?
-    public let skillLoad: EventSkillLoad?
-}
-
-/// EventStats is a runtime resource usage snapshot emitted periodically.
-public struct EventStats: Codable {
-    public let ts: Int
-    /// 100% is one fully busy logical CPU.
-    public let cpuPerc: Double
-    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
-    public let cpuCeiling: Double?
-    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
-    public let cpuQuota: Double?
-    /// Owning runtime's logical CPU count; null when unknown.
-    public let runtimeCPUs: Int?
-    /// Runtime CPU metadata observation failure; usage samples remain usable.
-    public let cpuError: String?
-    public let memUsed: Int
-    public let memLimit: Int
-    public let memPerc: Double
-    public let netRx: Int
-    public let netTx: Int
-    public let blockRead: Int
-    public let blockWrite: Int
-    public let diskUsed: Int
-}
-
-/// HistoryStats contains the bounded 60-sample runtime ring, oldest first.
-/// Replace samples sharing a timestamp: disk usage can revise the latest sample.
-/// These host observations are separate from immutable raw task history.
-public struct HistoryStats: Codable {
-    public let samples: [EventStats]
-}
-
-/// TaskEventBackward carries a chronological recent disk preview before canonical
-/// history on the same connection. EventID is empty. Memory-backed streams send
-/// canonical history and support normal event-ID resume.
-public struct TaskEventBackward: Codable {
-    public let messages: [EventMessage]
-    public let eventId: String
-}
-
-/// TaskHistoryStreamError reports that task history could not be replayed.
-public struct TaskHistoryStreamError: Codable {
-    public let message: String
-}
-
 /// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 public struct InputReq: Codable {
     public let prompt: Prompt
@@ -2284,7 +1875,7 @@ public struct WebFetchResp: Codable {
     public let content: String
 }
 
-/// HistoryBootstrap is small revalidated discovery for live tasks. ResourceBase
+/// HistoryBootstrap is small revalidated discovery for task history. ResourceBase
 /// ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
 /// for direct arithmetic access. Scope isolates the
 /// authenticated account, including legacy shared tasks. Browser HTTP caching
@@ -2301,6 +1892,371 @@ public struct HistoryBootstrap: Codable {
     public let through: Int
     public let cursor: String
     public let resourceBase: String
+}
+
+/// EventMessageSource identifies the provider origin of any normalized event.
+/// AgentID and DelegationToolUseID identify child ownership independently of native
+/// item identity. RootThreadID is an authoritative session owner when reported.
+/// Fields remain absent when the harness does not supply them.
+public struct EventMessageSource: Codable {
+    public let agentID: String?
+    public let delegationToolUseID: String?
+    public let threadID: String?
+    public let turnID: String?
+    public let itemID: String?
+    public let rootThreadID: String?
+}
+
+/// EventInit is emitted once at the start of a session. It includes a Harness
+/// field so the client knows which backend produced the stream.
+public struct EventInit: Codable {
+    public let reportedModel: String
+    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+    public let reportedEffort: String?
+    public let agentVersion: String
+    public let sessionID: String
+    public let tools: [String]?
+    public let cwd: String
+    public let harness: String
+}
+
+/// EventText is an assistant text block.
+public struct EventText: Codable {
+    public let text: String
+}
+
+/// EventTextDelta is a streaming text fragment from --include-partial-messages.
+public struct EventTextDelta: Codable {
+    public let text: String
+}
+
+/// EventFileChange is one changed file rendered from a unified patch.
+public struct EventFileChange: Codable {
+    public let path: String
+    public let patch: String
+}
+
+/// EventSubagentSpawn is one backend-normalized subagent invocation.
+public struct EventSubagentSpawn: Codable {
+    public let agent: String
+    public let task: String
+    public let label: String?
+    public let phase: String?
+}
+
+/// EventToolInputView is a backend-normalized rendering model for known tool
+/// inputs. It keeps harness-specific tool schemas out of clients.
+public struct EventToolInputView: Codable {
+    public let kind: EventToolInputKind
+    public let files: [EventFileChange]?
+    public let subagents: [EventSubagentSpawn]?
+}
+
+/// EventToolUse is emitted when the assistant invokes a tool.
+public struct EventToolUse: Codable {
+    public let toolUseID: String
+    public let name: String
+    public let input: JSONValue
+    /// Backend-normalized short display detail for tool headers.
+    public let detail: String?
+    /// Backend-normalized structured input for tool-card rendering.
+    public let inputView: EventToolInputView?
+    /// True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
+    public let inputTruncated: Bool?
+    /// True when the tool runs in the background (Bash/Agent run_in_background).
+    public let background: Bool?
+}
+
+/// EventToolResult is emitted when a tool call completes.
+public struct EventToolResult: Codable {
+    public let toolUseID: String
+    /// Seconds; server-computed; 0 if unknown.
+    public let duration: Double
+    public let error: String?
+}
+
+/// AskOption is a single option in an AskUserQuestion.
+public struct AskOption: Codable {
+    public let label: String
+    public let description: String?
+}
+
+/// AskQuestion is a single question from AskUserQuestion.
+public struct AskQuestion: Codable {
+    public let question: String
+    public let header: String?
+    public let options: [AskOption]
+    public let multiSelect: Bool?
+}
+
+/// EventAsk is emitted when the agent asks the user a question.
+public struct EventAsk: Codable {
+    public let toolUseID: String
+    public let questions: [AskQuestion]
+}
+
+/// EventUsage reports per-turn token usage.
+/// ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+/// or reasoning summaries (Codex). Zero when the harness does not report it.
+public struct EventUsage: Codable {
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheCreationInputTokens: Int
+    public let cacheReadInputTokens: Int
+    public let reasoningOutputTokens: Int?
+    public let reportedModel: String
+}
+
+/// EventCost is one completed turn's reported or API-equivalent estimated cost.
+public struct EventCost: Codable {
+    public let usd: Double
+    public let source: EventCostSource
+}
+
+/// EventResult is emitted when the task reaches a terminal state.
+public struct EventResult: Codable {
+    public let cost: EventCost?
+    public let subtype: String
+    public let isError: Bool
+    public let result: String
+    public let diffStat: DiffStat?
+    public let totalCostUSD: Double
+    /// Seconds.
+    public let duration: Double
+    /// Seconds.
+    public let durationAPI: Double
+    public let numTurns: Int
+    public let usage: EventUsage
+}
+
+/// EventSystem is a system event (status, compact_boundary, etc.).
+public struct EventSystem: Codable {
+    public let subtype: String
+    /// Optional human-readable detail (e.g. model names for model_rerouted).
+    public let detail: String?
+    /// ContextTokensBefore is the context size the harness reported before a
+    /// compact_boundary. Zero means the harness did not report it.
+    public let contextTokensBefore: Int?
+    /// ContextTokensAfter is the context size the harness reported after a
+    /// compact_boundary, measured or estimated. Zero means it did not report it.
+    public let contextTokensAfter: Int?
+}
+
+/// EventImageData describes one prompt image carried by a user-input event.
+///
+/// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+/// task attachment route. Data stays until clients fetch images only by Hash.
+public struct EventImageData: Codable {
+    public let mediaType: String
+    public let data: String
+    public let hash: String?
+}
+
+/// EventUserInput is emitted when a user sends a text message to the agent.
+public struct EventUserInput: Codable {
+    public let text: String
+    public let images: [EventImageData]?
+}
+
+/// TodoItem is a single todo entry from a TodoWrite tool call.
+public struct TodoItem: Codable {
+    public let content: String
+    /// "pending", "in_progress", "completed".
+    public let status: String
+    public let activeForm: String?
+}
+
+/// EventTodo is emitted when the agent writes/updates its todo list.
+public struct EventTodo: Codable {
+    public let toolUseID: String
+    public let todos: [TodoItem]
+}
+
+/// EventDiffStat is emitted when the relay reports updated diff statistics.
+public struct EventDiffStat: Codable {
+    public let diffStat: DiffStat?
+}
+
+/// EventError is emitted when the backend fails to parse an agent output line.
+public struct EventError: Codable {
+    public let err: String
+    public let line: String
+}
+
+/// EventThinking is an assistant thinking block.
+public struct EventThinking: Codable {
+    public let text: String
+}
+
+/// EventThinkingDelta is a streaming thinking fragment.
+public struct EventThinkingDelta: Codable {
+    public let text: String
+}
+
+/// EventSubagentStart is emitted when a subagent task begins. It is the legacy
+/// harness-agnostic shape: no current parser produces it, and clients should
+/// render EventNativeSubagent instead. It stays in the v1 event union and the
+/// generated SDKs so existing clients that switch on these kinds keep compiling.
+public struct EventSubagentStart: Codable {
+    public let taskID: String
+    public let description: String
+}
+
+/// EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+/// It is the legacy harness-agnostic shape: no current parser produces it, and
+/// clients should render EventNativeSubagent instead. It stays in the v1 event
+/// union and the generated SDKs so existing clients that switch on these kinds
+/// keep compiling.
+public struct EventSubagentEnd: Codable {
+    public let taskID: String
+    /// "completed", "failed", "stopped"
+    public let status: String
+}
+
+/// EventNativeSubagent is one lifecycle update for a harness native subagent.
+/// ID and GroupID are opaque harness identities. Optional fields remain absent
+/// when the harness did not expose them.
+public struct EventNativeSubagent: Codable {
+    public let toolUseID: String?
+    public let scope: EventNativeSubagentScope?
+    public let id: String
+    public let groupID: String?
+    public let label: String?
+    public let prompt: String?
+    public let status: EventNativeSubagentStatus
+    public let result: String?
+    /// Background reports that the harness launched the delegation detached from
+    /// the parent turn, so it can outlive that turn's result.
+    public let background: Bool?
+}
+
+/// EventBackgroundCommand reports one harness-native detached shell command's
+/// folded lifecycle. ExitCode is the command's numeric outcome when the harness
+/// reported one; OutputRef is an opaque harness-owned output reference, not a
+/// caic resource.
+public struct EventBackgroundCommand: Codable {
+    public let id: String
+    public let label: String?
+    public let status: String
+    public let result: String?
+    public let exitCode: Int?
+    public let outputRef: String?
+    public let toolUseID: String?
+}
+
+/// EventLog is a provisioning/startup log line from the runtime backend.
+public struct EventLog: Codable {
+    public let line: String
+}
+
+/// EventToolOutputDelta is a streaming output fragment from a running tool.
+/// Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+/// MCP tool progress messages (item/mcpToolCall/progress).
+public struct EventToolOutputDelta: Codable {
+    public let toolUseID: String
+    public let delta: String
+    public let contentType: ToolOutputContentType?
+    /// Pretty-printed JSON or other transformation.
+    public let formatted: String?
+}
+
+/// EventWidget is emitted when the agent produces a complete HTML widget.
+public struct EventWidget: Codable {
+    public let toolUseID: String
+    public let title: String
+    public let html: String
+}
+
+/// EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
+public struct EventWidgetDelta: Codable {
+    public let toolUseID: String
+    public let delta: String
+}
+
+/// EventRateLimit is emitted when the agent's rate limit status changes.
+public struct EventRateLimit: Codable {
+    public let status: EventRateLimitStatus
+    /// When the limit resets; zero if unknown.
+    public let resetsAt: ISOTimestamp?
+    /// "five_hour", "seven_day", etc.
+    public let rateLimitType: String
+    /// 0.0–1.0; -1 when unknown.
+    public let utilization: Double
+    /// True when extra/overage usage is active.
+    public let isUsingOverage: Bool?
+    /// When overage resets; zero if not using overage.
+    public let overageResetsAt: ISOTimestamp?
+}
+
+/// EventRepositoryCommit identifies one immutable repository branch tip in a
+/// commit snapshot.
+public struct EventRepositoryCommit: Codable {
+    /// RepositoryPath is the repository's absolute path inside the task runtime.
+    public let repositoryPath: String
+    /// BranchName is the short local branch name, such as "main" or "caic-1".
+    public let branchName: String
+    /// CommitHash is the full Git object ID of the branch tip.
+    public let commitHash: String
+}
+
+/// EventChangeStat summarizes a completed turn's net committed change.
+public struct EventChangeStat: Codable {
+    public let files: Int
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    public let binaryFiles: Int
+}
+
+/// EventCommitSnapshot records the exact committed repository branch tips
+/// fetched from the runtime when a turn finishes.
+public struct EventCommitSnapshot: Codable {
+    public let repositoryCommits: [EventRepositoryCommit]
+    public let baseline: Bool?
+    public let changeStat: EventChangeStat?
+}
+
+/// EventSkillLoad is emitted when a skill enters the main agent's context. A
+/// failed call and a subagent's load emit none; an inferred load is emitted
+/// once the tool that opened the file succeeds.
+public struct EventSkillLoad: Codable {
+    public let skill: String
+    /// SKILL.md in the task runtime; empty when the harness did not report it.
+    public let path: String?
+}
+
+// Backend-neutral event types
+
+/// EventMessage is one backend-neutral message in cached history and its live stream.
+public struct EventMessage: Codable {
+    public let source: EventMessageSource?
+    public let kind: EventKind
+    public let ts: Int
+    public let `init`: EventInit?
+    public let text: EventText?
+    public let textDelta: EventTextDelta?
+    public let toolUse: EventToolUse?
+    public let toolResult: EventToolResult?
+    public let ask: EventAsk?
+    public let usage: EventUsage?
+    public let result: EventResult?
+    public let system: EventSystem?
+    public let userInput: EventUserInput?
+    public let todo: EventTodo?
+    public let diffStat: EventDiffStat?
+    public let error: EventError?
+    public let thinking: EventThinking?
+    public let thinkingDelta: EventThinkingDelta?
+    public let subagentStart: EventSubagentStart?
+    public let subagentEnd: EventSubagentEnd?
+    public let nativeSubagent: EventNativeSubagent?
+    public let backgroundCommand: EventBackgroundCommand?
+    public let log: EventLog?
+    public let toolOutputDelta: EventToolOutputDelta?
+    public let widget: EventWidget?
+    public let widgetDelta: EventWidgetDelta?
+    public let rateLimit: EventRateLimit?
+    public let commitSnapshot: EventCommitSnapshot?
+    public let skillLoad: EventSkillLoad?
 }
 
 /// HistoryEvent is an immutable normalized output; the identity is scoped to the
@@ -2340,9 +2296,44 @@ public struct HistoryCheckpoint: Codable {
     public let cursor: String
 }
 
+/// EventStats is a runtime resource usage snapshot emitted periodically.
+public struct EventStats: Codable {
+    public let ts: Int
+    /// 100% is one fully busy logical CPU.
+    public let cpuPerc: Double
+    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
+    public let cpuCeiling: Double?
+    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
+    public let cpuQuota: Double?
+    /// Owning runtime's logical CPU count; null when unknown.
+    public let runtimeCPUs: Int?
+    /// Runtime CPU metadata observation failure; usage samples remain usable.
+    public let cpuError: String?
+    public let memUsed: Int
+    public let memLimit: Int
+    public let memPerc: Double
+    public let netRx: Int
+    public let netTx: Int
+    public let blockRead: Int
+    public let blockWrite: Int
+    public let diskUsed: Int
+}
+
+/// HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+/// Replace samples sharing a timestamp: disk usage can revise the latest sample.
+/// These host observations are separate from immutable raw task history.
+public struct HistoryStats: Codable {
+    public let samples: [EventStats]
+}
+
 /// HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
 public struct HistoryReset: Codable {
     public let bootstrapURL: String
+}
+
+/// TaskHistoryStreamError reports that task history could not be replayed.
+public struct TaskHistoryStreamError: Codable {
+    public let message: String
 }
 
 public struct ErrorDetails: Codable {

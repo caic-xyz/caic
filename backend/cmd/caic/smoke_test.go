@@ -265,33 +265,27 @@ func TestSmoke(t *testing.T) {
 
 		t.Run("TerminalHistoryRestart", func(t *testing.T) {
 			history := func() string {
-				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/events", http.NoBody)
-				if err != nil {
-					t.Fatal(err)
+				var bootstrap v1.HistoryBootstrap
+				getJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/history/bootstrap", &bootstrap)
+				var body strings.Builder
+				for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
+					last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
+					var events []v1.HistoryEvent
+					getJSON(t, baseURL, fmt.Sprintf("%s/chunks/%d/%d", bootstrap.ResourceBase, first, last), &events)
+					data, err := json.Marshal(events)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body.Write(data)
 				}
-				resp, err := http.DefaultClient.Do(req)
-				if err != nil {
-					t.Fatal(err)
-				}
-				data, readErr := io.ReadAll(resp.Body)
-				closeErr := resp.Body.Close()
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				if closeErr != nil {
-					t.Fatal(closeErr)
-				}
-				if resp.StatusCode != http.StatusOK {
-					t.Fatalf("terminal history status = %d, body = %q", resp.StatusCode, data)
-				}
-				return string(data)
+				return body.String()
 			}
 			first := history()
 			baseURL = smoke.restart()
 			waitForTaskState(t, smoke, taskID, "purged")
 			second := history()
 			for name, history := range map[string]string{"before restart": first, "after restart": second} {
-				for _, want := range []string{"event: ready", initialPrompt, "smoke agent received: " + initialPrompt, resumePrompt, "smoke agent received: " + resumePrompt} {
+				for _, want := range []string{initialPrompt, "smoke agent received: " + initialPrompt, resumePrompt, "smoke agent received: " + resumePrompt} {
 					if !strings.Contains(history, want) {
 						t.Fatalf("terminal raw history %s missing %q:\n%s", name, want, history)
 					}
@@ -818,4 +812,26 @@ func postJSON(t *testing.T, baseURL, path string, reqBody, dst any) {
 	if err := resp.Body.Close(); err != nil {
 		t.Fatalf("close POST %s: %v", path, err)
 	}
+}
+
+// smokeHistoryStreamURL starts before the first physical record so smoke checks
+// inspect both the retained transcript and subsequent live output.
+func smokeHistoryStreamURL(ctx context.Context, baseURL, taskID string) (_ string, retErr error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/history/bootstrap", http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { retErr = errors.Join(retErr, resp.Body.Close()) }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("history bootstrap status %d", resp.StatusCode)
+	}
+	var bootstrap v1.HistoryBootstrap
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&bootstrap); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/api/caic/v1/tasks/%s/history/events?cursor=%s.%s.0.end", baseURL, taskID, bootstrap.ProjectionVersion, bootstrap.Generation), nil
 }

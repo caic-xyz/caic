@@ -1,4 +1,4 @@
-// Owns cached history, resource samples, source-associated prices, and an exact live tail.
+// Owns bounded cached backfill, canonical task messages, root-result pricing positions, resources, and an exact live tail.
 import { batch, createSignal, onCleanup } from "solid-js";
 import type {
   EventMessage,
@@ -9,7 +9,7 @@ import type {
   HistoryPosition,
 } from "@sdk/types.gen";
 import { createApiClient } from "@sdk/api.gen";
-import { isChildEvent } from "./grouping";
+import { isChildEvent, isSessionBoundary } from "./grouping";
 import { mergeStats } from "./taskStats";
 import type { ResultEstimate } from "./taskAnalytics";
 import type { TaskHistory } from "./taskEventTimeline";
@@ -18,17 +18,19 @@ import { RecentTextPreview, type PreviewText } from "./recentTextPreview";
 import { readHistoryArray } from "./historyStream";
 import { compareHistoryPosition, historyChunkFirst, historyPositionKey } from "./historyPosition";
 
-export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
+const backfillChunks = 4;
+
+export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [preview, setPreview] = createSignal<PreviewText | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
   const [epoch, setEpoch] = createSignal(0);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
-  let events: HistoryEvent[] = [];
+  let pending: EventMessage[] = [];
+  let results = new Map<string, EventResult>();
   let discovery: HistoryBootstrap | null = null;
   let failure: "history" | "connection" | null = null;
-  let published = 0;
   let source: EventSource | null = null;
   let controller = new AbortController();
   let active = true;
@@ -62,8 +64,9 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       setPreview(excerpt.value);
       return;
     }
-    const added = events.slice(replace ? 0 : published).map((event) => event.message);
-    published = events.length;
+    const added = pending;
+    pending = [];
+    excerpt.value = null;
     batch(() => {
       setPreview(null);
       if (replace) {
@@ -85,14 +88,19 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   }
 
   async function range(bootstrap: HistoryBootstrap, first: number, last: number, signal: AbortSignal) {
+    const positions = results;
     const result = await response(`${bootstrap.resourceBase}/chunks/${first}/${last}`, signal);
     if (!result.body) throw new Error("Task history response has no body");
-    const decoded: HistoryEvent[] = [];
+    const decoded: EventMessage[] = [];
+    let previous: HistoryPosition | null = null;
     for await (const event of readHistoryArray(result.body, signal)) {
       if (event.recordID < first || event.recordID > last)
         throw new Error("History output is outside its requested range");
-      const previous = decoded.at(-1);
-      if (!previous || compareHistoryPosition(event, previous) > 0) decoded.push(event);
+      if (previous && compareHistoryPosition(event, previous) <= 0) continue;
+      previous = event;
+      decoded.push(event.message);
+      if (event.message.result && !isChildEvent(event.message))
+        positions.set(historyPositionKey(event), event.message.result);
     }
     return decoded;
   }
@@ -109,15 +117,23 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
 
   function live(event: HistoryEvent, signal: AbortSignal) {
     if (lastLive && compareHistoryPosition(event, lastLive) <= 0) return;
-    lastLive = event;
-    events.push(event);
+    lastLive = { recordID: event.recordID, index: event.index };
+    pending.push(event.message);
+    if (event.message.result && !isChildEvent(event.message))
+      results.set(historyPositionKey(event), event.message.result);
     if (!complete) excerpt.append(event.message);
     if (timer === null)
       timer = setTimeout(() => {
         timer = null;
         if (current(signal)) publish(false);
       }, 100);
-    if (event.message.kind === "result" || event.message.kind === "ask" || event.message.kind === "userInput") {
+    if (
+      event.message.kind === "result" ||
+      event.message.kind === "ask" ||
+      event.message.kind === "userInput" ||
+      event.message.kind === "error" ||
+      isSessionBoundary(event.message)
+    ) {
       clearTimeout(timer);
       timer = null;
       publish(false);
@@ -134,10 +150,10 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     if (retryTimer !== null) clearTimeout(retryTimer);
     retryTimer = null;
     const signal = controller.signal;
-    events = [];
+    pending = [];
+    results = new Map();
     discovery = null;
     failure = null;
-    published = 0;
     complete = false;
     excerpt = new RecentTextPreview();
     lastLive = null;
@@ -201,22 +217,33 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
         if (!current(signal)) return;
         // SSE is connected before the first immutable request. Its outputs are
         // strictly beyond the bootstrap cursor and remain visible during backfill.
-        events = [...tail, ...events];
+        pending = [...tail, ...pending];
         excerpt = new RecentTextPreview();
-        for (const event of events) excerpt.append(event.message);
+        for (const message of pending) excerpt.append(message);
         if (firstRecent > 1) publish(false);
-        // Decode each immutable range once, then replace the preview atomically.
-        // The active transcript needs the complete backlog; only one chunk's
-        // transport/decoder buffers are added to that owned transcript at a time.
-        const prefix: HistoryEvent[] = [];
-        for (let first = 1; first < firstRecent; first += bootstrap.recordsPerChunk) {
-          const last = Math.min(first + bootstrap.recordsPerChunk - 1, firstRecent - 1);
-          const chunk = await range(bootstrap, first, last, signal);
-          if (!current(signal)) return;
-          for (const event of chunk) prefix.push(event);
+        // Fixed batches bound both active readers and completed chunks waiting
+        // behind a slow earlier range. Canonical history publishes once, in order.
+        const prefix: EventMessage[] = [];
+        for (let first = 1; first < firstRecent; first += bootstrap.recordsPerChunk * backfillChunks) {
+          const group = new AbortController();
+          const reading = AbortSignal.any([signal, group.signal]);
+          try {
+            const requests: Promise<EventMessage[]>[] = [];
+            for (let i = 0; i < backfillChunks; i++) {
+              const start = first + i * bootstrap.recordsPerChunk;
+              if (start >= firstRecent) break;
+              const last = Math.min(start + bootstrap.recordsPerChunk - 1, firstRecent - 1);
+              requests.push(range(bootstrap, start, last, reading));
+            }
+            const chunks = await Promise.all(requests);
+            if (!current(signal)) return;
+            for (const chunk of chunks) for (const message of chunk) prefix.push(message);
+          } finally {
+            group.abort();
+          }
         }
         if (!current(signal)) return;
-        events = [...prefix, ...events];
+        pending = [...prefix, ...pending];
       }
       if (!current(signal)) return;
       complete = true;
@@ -236,17 +263,19 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     const signal = AbortSignal.any([owner, request]);
     signal.throwIfAborted();
     const bootstrap = discovery;
-    if (!complete || !bootstrap) throw new Error("Task history is still loading");
-    const through = Math.max(bootstrap.through, lastLive?.recordID ?? 0);
-    const results = new Map<string, EventResult>();
-    for (const event of events)
-      if (event.message.result && !isChildEvent(event.message))
-        results.set(historyPositionKey(event), event.message.result);
+    const boundary = lastLive;
+    if (!complete || !bootstrap || !boundary) throw new Error("Task history is still loading");
+    // Reset replaces the index; live appends can add later outputs from the
+    // same raw record while this request is pending, beyond its exact boundary.
+    const positions = results;
     const estimates =
-      through === 0 ? [] : await client(signal).getHistoryCosts(id, bootstrap.generation, String(through));
+      boundary.recordID === 0
+        ? []
+        : await client(signal).getHistoryCosts(id, bootstrap.generation, String(boundary.recordID));
     signal.throwIfAborted();
     return estimates.flatMap((estimate) => {
-      const result = results.get(historyPositionKey(estimate));
+      if (compareHistoryPosition(estimate, boundary) > 0) return [];
+      const result = positions.get(historyPositionKey(estimate));
       return result ? [{ result, model: estimate.model ?? null, cost: estimate.cost ?? null }] : [];
     });
   }
@@ -258,9 +287,11 @@ export function createLiveTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     source = null;
     if (timer !== null) clearTimeout(timer);
     if (retryTimer !== null) clearTimeout(retryTimer);
-    events = [];
+    pending = [];
+    results = new Map();
     discovery = null;
-    excerpt = new RecentTextPreview();
+    excerpt.value = null;
+    lastLive = null;
     batch(() => {
       setMessages([]);
       setPreview(null);

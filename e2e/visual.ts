@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { validateEventMessage, validateTask } from "../sdk/caic/ts/v1/validate.gen";
+import { validateHistoryEvent, validateTask } from "../sdk/caic/ts/v1/validate.gen";
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
 import type { ImageRefreshStatus } from "../sdk/caic/ts/v1/types.gen";
 import { resourceHistory, usageHistory } from "./visual-fixtures";
@@ -45,62 +45,30 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     return route.fulfill({ json: status });
   });
   await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: usageHistory() }));
-  await page.route("**/api/caic/v1/tasks/*/events*", async (route) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    try {
-      // Replay the complete snapshot, including pending tools after the latest
-      // narration. Browser pagination and reconnect cursors can omit that tail.
-      const snapshotURL = new URL(route.request().url());
-      snapshotURL.searchParams.delete("backward");
-      snapshotURL.searchParams.delete("last-event-id");
-      const response = await fetch(snapshotURL, { signal: controller.signal });
-      if (!response.ok || !response.body) throw new Error(`Visual history fetch failed: ${response.status}`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let body = "";
-      try {
-        while (!body.includes("event: ready\n")) {
-          const chunk = await reader.read();
-          if (chunk.done) throw new Error("Visual history ended before ready");
-          body += decoder.decode(chunk.value, { stream: true });
-          if (body.length > 2 * 1024 * 1024) throw new Error("Visual history exceeds 2 MiB");
-        }
-      } finally {
-        await reader.cancel();
-      }
-      const taskResponse = await fetch(
-        route
-          .request()
-          .url()
-          .replace(/\/events.*$/, ""),
-        { signal: controller.signal },
-      );
-      if (!taskResponse.ok) throw new Error(`Visual task fetch failed: ${taskResponse.status}`);
-      const task = validateTask(await taskResponse.json());
-      const start = Date.parse(task.startedAt ?? "");
-      if (!Number.isFinite(start)) throw new Error("Visual task has no start timestamp");
-      let index = 0;
-      const frames = body
-        .split("\n\n")
-        .filter((frame) => frame.split("\n").some((line) => line.startsWith("data: ")) && !/^event:/m.test(frame));
-      const events = frames.map((frame) => {
-        const data = frame.split("\n").find((line) => line.startsWith("data: "));
-        if (!data) throw new Error("Visual event has no data");
-        const event = validateEventMessage(JSON.parse(data.slice(6)));
-        event.ts = start + index++ * 150;
-        return `data: ${JSON.stringify(event)}\n\n`;
-      });
-      events.unshift(`event: statsSnapshot\ndata: ${JSON.stringify({ samples: resourceHistory() })}\n\n`);
-      await route.fulfill({
-        contentType: "text/event-stream",
-        body: `retry: 600000\n\n${events.join("")}event: ready\ndata: {}\n\n`,
-      });
-    } finally {
-      clearTimeout(timeout);
-      controller.abort();
-    }
+  await page.route("**/api/caic/v1/tasks/*/history/*/chunks/*/*", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) throw new Error(`Visual history fetch failed: ${response.status()}`);
+    const taskURL = route.request().url().split("/history/")[0];
+    const taskResponse = await route.fetch({ url: taskURL });
+    if (!taskResponse.ok()) throw new Error(`Visual task fetch failed: ${taskResponse.status()}`);
+    const task = validateTask(await taskResponse.json());
+    const start = Date.parse(task.startedAt ?? "");
+    if (!Number.isFinite(start)) throw new Error("Visual task has no start timestamp");
+    const values: unknown = await response.json();
+    if (!Array.isArray(values)) throw new Error("Visual history must be an array");
+    const events = values.map((value: unknown) => {
+      const event = validateHistoryEvent(value);
+      event.message.ts = start + (event.recordID - 1) * 150 + event.index;
+      return event;
+    });
+    await route.fulfill({ json: events });
   });
+  await page.route("**/api/caic/v1/tasks/*/history/events?*", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: resourceHistory() })}\n\n`,
+    }),
+  );
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 

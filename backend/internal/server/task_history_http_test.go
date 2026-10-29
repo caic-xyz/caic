@@ -4,8 +4,10 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -58,8 +61,19 @@ func TestTaskHistoryHTTP(t *testing.T) {
 		t.Parallel()
 		s, tk, _ := historyHTTPFixture(t)
 		b := historyBootstrap(t, s, tk, "")
+		entry, _ := s.taskMgr.GetEntry(tk.ID)
+		owner := s.taskHandlers.taskSvc.history
+		source, release, err := owner.acquire(t.Context(), entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		release()
 		if got := historyRequest(t, s, b.ResourceBase+"/chunks/2/2", ""); got.Code != http.StatusBadRequest {
 			t.Fatalf("unaligned chunk: %d %s", got.Code, got.Body)
+		}
+		owner.invalidate(entry, source)
+		if _, err := source.Snapshot(t.Context()); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("malformed request retained its source lease: %v", err)
 		}
 	})
 	t.Run("bootstrap", func(t *testing.T) {
@@ -234,11 +248,12 @@ func TestHistoryResources(t *testing.T) {
 		b := historyBootstrap(t, s, tk, "")
 		first := historyRequest(t, s, recentHistoryURL(&b), "")
 		e, _ := s.taskMgr.GetEntry(tk.ID)
-		source, err := s.taskHandlers.taskSvc.history.Source(t.Context(), e)
+		source, release, err := s.taskHandlers.taskSvc.history.acquire(t.Context(), e)
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.taskHandlers.taskSvc.history.Invalidate(e, source)
+		release()
+		s.taskHandlers.taskSvc.history.invalidate(e, source)
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, strings.TrimPrefix(recentHistoryURL(&b), "/api/caic/v1"), http.NoBody)
 		ctx, cancel := context.WithCancel(r.Context())
 		cancel()
@@ -341,7 +356,7 @@ func TestTaskResourceSnapshot(t *testing.T) {
 				t.Cleanup(cancel)
 				server := httptest.NewServer(s.taskHandlers.routes())
 				t.Cleanup(server.Close)
-				req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/tasks/"+tk.ID.String()+"/events?backward=1", http.NoBody)
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/tasks/"+tk.ID.String()+"/history/events?cursor="+historyCursor{generation: tk.TimelineID(), end: true}.String(), http.NoBody)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -369,20 +384,15 @@ func TestTaskResourceSnapshot(t *testing.T) {
 				if retained && (len(snapshot.Samples) != 1 || snapshot.Samples[0].DiskUsed != 42 || snapshot.Samples[0].CPUQuota == nil || *snapshot.Samples[0].CPUQuota != 0 || snapshot.Samples[0].CPUCeiling != nil) {
 					t.Fatalf("retained resources: %+v", snapshot)
 				}
-				for frame.name != "ready" {
+				for frame.name != "checkpoint" {
 					frame = readHistoryFrame(t, reader)
 				}
-				if state == taskslog.StatePurged {
-					if _, err := reader.ReadByte(); err != io.EOF {
-						t.Fatalf("terminal stream should end after ready: %v", err)
-					}
-				} else {
-					tk.PushStats(&runtime.Stats{Ts: time.Unix(2, 0), DiskUsed: -1})
-					frame = readHistoryFrame(t, reader)
-					if frame.name != "stats" || frame.id != "" {
-						t.Fatalf("live resource update: %+v", frame)
-					}
+				tk.PushStats(&runtime.Stats{Ts: time.Unix(2, 0), DiskUsed: -1})
+				frame = readHistoryFrame(t, reader)
+				if frame.name != "stats" || frame.id != "" {
+					t.Fatalf("live resource update: %+v", frame)
 				}
+
 				cancel()
 			})
 		}
@@ -789,4 +799,211 @@ func TestHistoryRecoveryCancellation(t *testing.T) {
 func recentHistoryURL(b *v1.HistoryBootstrap) string {
 	first := ((b.Through-1)/b.RecordsPerChunk)*b.RecordsPerChunk + 1
 	return fmt.Sprintf("%s/chunks/%d/%d", b.ResourceBase, first, b.Through)
+}
+
+func TestHistoryCompressionAndRevival(t *testing.T) {
+	t.Parallel()
+	s, tk, path := historyHTTPFixture(t)
+	initial := historyBootstrap(t, s, tk, "")
+	original := historyRequest(t, s, recentHistoryURL(&initial), "")
+	entry, _ := s.taskMgr.GetEntry(tk.ID)
+	owner := s.taskHandlers.taskSvc.history
+	leased, release, err := owner.acquire(t.Context(), entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := path + ".zst"
+	if err := os.WriteFile(filepath.Clean(compressed), encoder.EncodeAll(data, nil), 0o600); err != nil { //nolint:gosec // Fixture path belongs to this test's private temporary directory.
+		t.Fatal(err)
+	}
+	if err := encoder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tk.SetState(taskslog.StatePurged)
+	entry.LogPath.Set(compressed)
+	owner.prune(false)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leased.Snapshot(t.Context()); err != nil {
+		t.Fatalf("compression retired an active request: %v", err)
+	}
+	closed := historyBootstrap(t, s, tk, "")
+	if closed.ResourceBase != initial.ResourceBase || closed.Through != initial.Through {
+		t.Fatal("compression changed immutable history identity")
+	}
+	projected := historyRequest(t, s, recentHistoryURL(&initial), "")
+	if projected.Code != 200 || projected.Body.String() != original.Body.String() {
+		t.Fatalf("compressed history changed: %d %s", projected.Code, projected.Body)
+	}
+	if err := os.WriteFile(path, append(data, []byte(historyTextRecord+"\n")...), 0o600); err != nil { //nolint:gosec // Fixture path belongs to this test's private temporary directory.
+		t.Fatal(err)
+	}
+	entry.LogPath.Set(path)
+	tk.SetState(taskslog.StateRunning)
+	revived := historyBootstrap(t, s, tk, "")
+	if revived.Through != initial.Through+1 {
+		t.Fatalf("revived prefix: %+v", revived)
+	}
+	retained := historyRequest(t, s, recentHistoryURL(&initial), "")
+	if retained.Code != 200 || retained.Body.String() != original.Body.String() {
+		t.Fatal("revival changed an earlier immutable chunk")
+	}
+}
+
+func TestHistoryStreamAcquisitionReplacement(t *testing.T) {
+	t.Parallel()
+	s, tk, path := historyHTTPFixture(t)
+	bootstrap := historyBootstrap(t, s, tk, "")
+	entry, _ := s.taskMgr.GetEntry(tk.ID)
+	owner := s.taskHandlers.taskSvc.history
+	source, release, err := owner.acquire(t.Context(), entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	owner.invalidate(entry, source)
+	replacement := filepath.Join(t.TempDir(), "replacement.jsonl")
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(replacement, append(raw, []byte(historyTextRecord+"\n")...), 0o600); err != nil { //nolint:gosec // Private generated test fixture.
+		t.Fatal(err)
+	}
+	s.taskMgr.Backends[harness.Claude] = &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+		entry.LogPath.Set(replacement)
+		return claudecode.New().NewWire()
+	}}
+	reader, cancel := historyStream(t, s, tk, bootstrap.Cursor, "")
+	t.Cleanup(cancel)
+	frame := readHistoryFrame(t, reader)
+	if frame.name != "reset" {
+		t.Fatalf("source replaced during acquisition was accepted: %+v", frame)
+	}
+}
+
+// BenchmarkHistoryTaskOpen measures server-side task-open transport only. Cold
+// opens project and read every immutable chunk; cached opens omit chunk requests,
+// as a browser with the same immutable URLs would. Both include discovery and
+// the resource snapshot/checkpoint stream. Browser JSON decoding and rendering
+// are excluded.
+func BenchmarkHistoryTaskOpen(b *testing.B) {
+	for _, compressed := range []bool{false, true} {
+		format := "plain"
+		if compressed {
+			format = "compressed"
+		}
+		b.Run(format, func(b *testing.B) {
+			s, tk, path := historyHTTPFixture(b)
+			tk.SetState(taskslog.StatePurged)
+			var raw strings.Builder
+			raw.WriteString(`{"t":"caic_meta","version":3,"harness":"claude","prompt":"history"}` + "\n")
+			for i := range 1000 {
+				fmt.Fprintf(&raw, `{"t":"user_input","text":"turn %d"}`+"\n", i)
+				fmt.Fprintf(&raw, `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-%d","name":"Bash","input":{"command":"git status"}}]}}}`+"\n", i)
+				fmt.Fprintf(&raw, `{"t":"agent","ts":2.000,"msg":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-%d","content":%q}]}}}`+"\n", i, strings.Repeat("tool output ", 16))
+				fmt.Fprintf(&raw, `{"t":"agent","ts":3.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":%q}],"usage":{"input_tokens":10000,"output_tokens":1000}}}}`+"\n", strings.Repeat("Completed validation. ", 8))
+				fmt.Fprintf(&raw, `{"t":"agent","ts":4.000,"msg":{"type":"result","subtype":"success","total_cost_usd":%.3f,"usage":{"input_tokens":10000,"output_tokens":1000}}}`+"\n", float64(i+1)*0.01)
+			}
+			data := []byte(raw.String())
+			if compressed {
+				encoder, err := zstd.NewWriter(nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+				data = encoder.EncodeAll(data, nil)
+				if err := encoder.Close(); err != nil {
+					b.Fatal(err)
+				}
+				path += ".zst"
+			}
+			if err := os.WriteFile(filepath.Clean(path), data, 0o600); err != nil {
+				b.Fatal(err)
+			}
+			entry, _ := s.taskMgr.GetEntry(tk.ID)
+			entry.LogPath.Set(path)
+			handler := s.taskHandlers.routes()
+			open := func(cold bool) int {
+				response := historyRequest(b, s, "/tasks/"+tk.ID.String()+"/history/bootstrap", "")
+				if response.Code != http.StatusOK {
+					b.Fatal(response.Code, response.Body.String())
+				}
+				var bootstrap v1.HistoryBootstrap
+				if err := json.Unmarshal(response.Body.Bytes(), &bootstrap); err != nil {
+					b.Fatal(err)
+				}
+				total := response.Body.Len()
+				if cold {
+					for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
+						last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
+						writer := &historyOpenWriter{header: make(http.Header)}
+						request := httptest.NewRequestWithContext(b.Context(), http.MethodGet, strings.TrimPrefix(fmt.Sprintf("%s/chunks/%d/%d", bootstrap.ResourceBase, first, last), "/api/caic/v1"), http.NoBody)
+						handler.ServeHTTP(writer, request)
+						if writer.code != http.StatusOK {
+							b.Fatal(writer.code)
+						}
+						total += writer.bytes
+					}
+				}
+				ctx, cancel := context.WithCancel(b.Context())
+				writer := &historyOpenWriter{header: make(http.Header), cancel: cancel}
+				request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/"+tk.ID.String()+"/history/events?cursor="+bootstrap.Cursor, http.NoBody)
+				handler.ServeHTTP(writer, request)
+				cancel()
+				if writer.code != http.StatusOK {
+					b.Fatal(writer.code)
+				}
+				return total + writer.bytes
+			}
+			for _, cold := range []bool{true, false} {
+				name := "cached"
+				if cold {
+					name = "cold"
+				}
+				b.Run(name, func(b *testing.B) {
+					_ = open(true)
+					b.ReportAllocs()
+					total := 0
+					for b.Loop() {
+						if cold {
+							s.taskHandlers.taskSvc.history.prune(true)
+						}
+						total = open(cold)
+					}
+					b.ReportMetric(float64(total), "response-B/op")
+				})
+			}
+		})
+	}
+}
+
+type historyOpenWriter struct {
+	header http.Header
+	code   int
+	bytes  int
+	cancel context.CancelFunc
+}
+
+func (w *historyOpenWriter) Header() http.Header  { return w.header }
+func (w *historyOpenWriter) WriteHeader(code int) { w.code = code }
+func (w *historyOpenWriter) Flush()               {}
+func (w *historyOpenWriter) Write(data []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
+	}
+	w.bytes += len(data)
+	if w.cancel != nil && bytes.Contains(data, []byte("event: checkpoint")) {
+		w.cancel()
+	}
+	return len(data), nil
 }
