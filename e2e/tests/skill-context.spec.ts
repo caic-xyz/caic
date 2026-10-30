@@ -41,6 +41,8 @@ for (const width of [390, 1280]) {
     // A later root completion must not replace a disclosed older context or
     // steal focus while the user is reading its skills.
     const turns = page.getByRole("button", { name: /^[▶▼]\s*\d+ messages?/ });
+    // Skill metadata appears before the disclosed transcript finishes loading.
+    await expect(turns).toHaveCount(1);
     const turnCount = await turns.count();
     const context = page.getByRole("button", { name: /Compacted session/ });
     await context.focus();

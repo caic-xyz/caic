@@ -521,7 +521,9 @@ func TestSource(t *testing.T) {
 		writer := &pausedWriter{started: make(chan struct{}), release: releaseContext.Done()}
 		done := make(chan error, 1)
 		var wg sync.WaitGroup
-		wg.Go(func() { done <- source.WriteRange(t.Context(), snapshot, 1, snapshot.Through, writer) })
+		wg.Go(func() {
+			done <- source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: Position{RecordID: 1}, Last: Position{RecordID: snapshot.Through, Index: RecordEndIndex}}, writer)
+		})
 		<-writer.started
 		appendFixture(t, path, delta+"\n")
 		refreshCtx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -619,8 +621,8 @@ func assertSourcePoisoned(t *testing.T, source *Source, snapshot Snapshot, want 
 		t.Fatalf("ReadRange after failure: %v", err)
 	}
 	var output bytes.Buffer
-	if err := source.WriteRange(t.Context(), snapshot, 1, 1, &output); !errors.Is(err, want) {
-		t.Fatalf("WriteRange after failure: %v", err)
+	if err := source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: Position{RecordID: 1}, Last: Position{RecordID: 1, Index: RecordEndIndex}}, &output); !errors.Is(err, want) {
+		t.Fatalf("WriteSlice after failure: %v", err)
 	}
 	for _, bounds := range [][2]uint64{{1, snapshot.Through}, {1, 0}} {
 		for _, sequence := range []func(func(Event, error) bool){source.Events(t.Context(), snapshot, bounds[0], bounds[1])} {
@@ -689,13 +691,14 @@ func TestSourceStickyFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		end := source.end
+		offsets := len(source.starts)
 		appendFixture(t, path, `{"t":"agent","ts":1,"msg":{"type":"invalid_cost"}}`+"\n")
 		_, err = source.Refresh(t.Context())
 		if err == nil {
 			t.Fatal("accepted unencodable native cost")
 		}
-		if source.through != 256 || len(source.starts) != 1 || source.end != end {
-			t.Fatal("failed frame published a sparse offset or progress")
+		if source.through != 256 || len(source.starts) != offsets || source.end != end {
+			t.Fatal("failed frame published an offset or progress")
 		}
 		assertSourcePoisoned(t, source, snapshot, err)
 	})
@@ -795,6 +798,30 @@ func benchmarkSource(b *testing.B, path string, appends []string) {
 		b.ReportAllocs()
 		for b.Loop() {
 			if _, err := source.Refresh(b.Context()); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("WarmManifest", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if _, _, _, err := source.Sections(b.Context(), "history"); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("WarmCurrentSection", func(b *testing.B) {
+		_, sections, _, err := source.Sections(b.Context(), "history")
+		if err != nil {
+			b.Fatal(err)
+		}
+		body := sections[len(sections)-1].Body
+		if body == nil {
+			b.Fatal("missing current body")
+		}
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := source.WriteSlice(b.Context(), snapshot, *body, io.Discard); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -994,10 +1021,10 @@ func TestSourceLocalChunkSizes(t *testing.T) {
 }
 
 // readRange materializes test output through the same builder path used by the
-// cold/warm benchmark baseline; production callers stream through WriteRange.
+// cold/warm benchmark baseline; production callers stream through WriteSlice.
 func readRange(s *Source, ctx context.Context, snapshot Snapshot, first, last uint64) (string, error) {
 	var result strings.Builder
-	if err := s.WriteRange(ctx, snapshot, first, last, &result); err != nil {
+	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: Position{RecordID: first}, Last: Position{RecordID: last, Index: RecordEndIndex}}, &result); err != nil {
 		return "", err
 	}
 	return result.String(), nil

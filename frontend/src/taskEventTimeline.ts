@@ -1,22 +1,37 @@
-// Owns cached task history and resource samples for the selected task.
+// Shares current-context history, server summaries, and disclosure reads across selected-task subviews.
 import { createMemo, createSignal, untrack, type Accessor } from "solid-js";
-import type { EventMessage, EventStats } from "@sdk/types.gen";
+import type {
+  EventMessage,
+  EventStats,
+  HistoryActivity,
+  HistoryEvent,
+  HistoryManifest,
+  HistoryPosition,
+  HistorySection,
+  HistoryTurnEstimate,
+} from "@sdk/types.gen";
 import { createTaskHistory } from "./taskHistory";
-import { type PreviewText } from "./recentTextPreview";
-import type { ResultEstimate } from "./taskAnalytics";
 
 export interface TaskHistory {
-  // Read-only owner view: live publications append in place; replacements use a new array.
+  // Read-only owner view: live publications append in place; context replacement changes epoch.
   messages: Accessor<readonly EventMessage[]>;
-  preview: Accessor<PreviewText | null>;
+  manifest: Accessor<HistoryManifest | null>;
   stats: Accessor<EventStats[]>;
-  // Replacements change epoch; messages within an epoch only append.
+  through: Accessor<number>;
   epoch: Accessor<number>;
   loading: Accessor<boolean>;
   error: Accessor<string | null>;
   retry: () => void;
-  // Prices refer to source-owned root result objects, never public raw positions.
-  readCosts: (signal: AbortSignal) => Promise<readonly ResultEstimate[]>;
+  position: (message: EventMessage) => HistoryPosition | null;
+  readSection: (section: HistorySection, signal: AbortSignal) => Promise<HistoryEvent[]>;
+  readSetup: (signal: AbortSignal) => Promise<HistoryEvent[]>;
+  readActivity: (
+    activity: HistoryActivity,
+    through: number,
+    after: HistoryPosition | null,
+    signal: AbortSignal,
+  ) => Promise<HistoryEvent[]>;
+  readCosts: (signal: AbortSignal) => Promise<HistoryTurnEstimate[]>;
 }
 
 export function createTaskEventTimeline(options: { taskId: Accessor<string> }): TaskHistory {
@@ -33,12 +48,17 @@ export function createTaskEventTimeline(options: { taskId: Accessor<string> }): 
   });
   return {
     messages: () => source().messages(),
-    preview: () => source().preview(),
+    manifest: () => source().manifest(),
     stats: () => source().stats(),
+    through: () => source().through(),
     epoch,
     loading: () => source().loading(),
     error: () => source().error(),
     retry: () => setAttempt((previous) => previous + 1),
+    position: (message) => source().position(message),
+    readSection: (section, signal) => source().readSection(section, signal),
+    readSetup: (signal) => source().readSetup(signal),
+    readActivity: (activity, through, after, signal) => source().readActivity(activity, through, after, signal),
     readCosts: (signal) => source().readCosts(signal),
   };
 }

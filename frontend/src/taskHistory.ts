@@ -1,117 +1,203 @@
-// Owns cached backfill, an append-only canonical message view, root-result pricing positions, resources, and an exact live tail.
+// Owns the current context, compact server metadata, immutable disclosure reads, and exact live handoff.
 import { batch, createSignal, onCleanup } from "solid-js";
 import type {
   EventMessage,
-  EventResult,
   EventStats,
-  HistoryBootstrap,
   HistoryEvent,
+  HistoryManifest,
   HistoryPosition,
+  HistorySection,
 } from "@sdk/types.gen";
 import { createApiClient } from "@sdk/api.gen";
-import { isChildEvent, isSessionBoundary } from "./grouping";
+import { isChildEvent } from "./grouping";
 import { mergeStats } from "./taskStats";
-import type { ResultEstimate } from "./taskAnalytics";
 import type { TaskHistory } from "./taskEventTimeline";
 import { api } from "./api";
-import { RecentTextPreview, type PreviewText } from "./recentTextPreview";
 import { readHistoryBatches } from "./historyStream";
-import { compareHistoryPosition, historyChunkFirst, historyPositionKey } from "./historyPosition";
-
-const backfillChunks = 4;
+import { compareHistoryPosition, historyChunkFirst } from "./historyPosition";
 
 export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
-  const [preview, setPreview] = createSignal<PreviewText | null>(null);
+  const [manifest, setManifest] = createSignal<HistoryManifest | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
+  const [through, setThrough] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
-  let pending: EventMessage[] = [];
-  let results = new Map<string, EventResult>();
-  let discovery: HistoryBootstrap | null = null;
-  let failure: "history" | "connection" | null = null;
+  let positions = new WeakMap<EventMessage, HistoryPosition>();
+  let pending: HistoryEvent[] = [];
+  let discovery: HistoryManifest | null = null;
+  let currentID: string | null = null;
+  let lastLive: HistoryPosition | null = null;
   let source: EventSource | null = null;
   let controller = new AbortController();
+  let bodyRequest: AbortController | null = null;
   let active = true;
   let complete = false;
-  let excerpt = new RecentTextPreview();
-  let lastLive: HistoryPosition | null = null;
+  let waitingManifest = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = 500;
 
-  function current(signal: AbortSignal): boolean {
-    return active && !signal.aborted && signal === controller.signal;
-  }
-
-  function client(signal: AbortSignal) {
-    return createApiClient((url, init) =>
-      fetch(url, {
-        ...init,
-        signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
-      }),
-    );
-  }
-
+  const current = (signal: AbortSignal) => active && !signal.aborted && signal === controller.signal;
+  const client = (signal: AbortSignal) => createApiClient((url, init) => fetch(url, { ...init, signal }));
   function fail(value: unknown) {
-    failure = "history";
     setError(value instanceof Error ? value.message : String(value));
   }
-
-  function publish(replace: boolean) {
-    if (!complete) {
-      setPreview(excerpt.value);
-      return;
-    }
-    const added = pending;
-    pending = [];
-    excerpt.value = null;
-    batch(() => {
-      setPreview(null);
-      if (replace) {
-        setEpoch((previous) => previous + 1);
-        setMessages(added);
-      } else if (added.length) {
-        setMessages((previous) => {
-          for (const message of added) previous.push(message);
-          return previous;
-        });
-      }
-    });
-  }
-
-  async function response(url: string, signal: AbortSignal) {
-    const result = await fetch(url, { signal, headers: { Accept: "application/json" } });
+  async function resource(url: string, signal: AbortSignal): Promise<HistoryEvent[]> {
+    const response = await fetch(url, { signal, headers: { Accept: "application/json" } });
     signal.throwIfAborted();
-    if (result.status === 409) {
+    if (response.status === 409) {
       void discover();
       throw new Error("Task history changed; refreshing history");
     }
-    if (!result.ok) throw new Error(`History request failed (${result.status})`);
-    return result;
+    if (!response.ok) throw new Error(`History request failed (${response.status})`);
+    if (!response.body) throw new Error("Task history response has no body");
+    const events: HistoryEvent[] = [];
+    for await (const outputs of readHistoryBatches(response.body, signal))
+      for (const event of outputs) events.push(event);
+    return events;
   }
-
-  async function range(bootstrap: HistoryBootstrap, first: number, last: number, signal: AbortSignal) {
-    const positions = results;
-    const result = await response(`${bootstrap.resourceBase}/chunks/${first}/${last}`, signal);
-    if (!result.body) throw new Error("Task history response has no body");
-    const decoded: EventMessage[] = [];
-    let previous: HistoryPosition | null = null;
-    for await (const events of readHistoryBatches(result.body, signal)) {
-      for (const event of events) {
-        if (event.recordID < first || event.recordID > last)
-          throw new Error("History output is outside its requested range");
-        if (previous && compareHistoryPosition(event, previous) <= 0) continue;
-        previous = event;
-        decoded.push(event.message);
-        if (event.message.result && !isChildEvent(event.message))
-          positions.set(historyPositionKey(event), event.message.result);
+  async function sectionBody(value: HistoryManifest, section: HistorySection, signal: AbortSignal) {
+    const events: HistoryEvent[] = [];
+    if (!section.body) return events;
+    const body = section.body;
+    const size = value.bootstrap.recordsPerChunk;
+    // Stable raw-record pages share browser cache entries as the current context grows.
+    // Only the first and last pages use exact section output boundaries.
+    let first = body.first.recordID;
+    while (first <= body.last.recordID) {
+      const group = new AbortController();
+      const reading = AbortSignal.any([signal, group.signal]);
+      try {
+        const requests: Promise<HistoryEvent[]>[] = [];
+        for (let count = 0; count < 4 && first <= body.last.recordID; count++) {
+          const last = Math.min(historyChunkFirst(first, size) + size - 1, body.last.recordID);
+          const firstIndex = first === body.first.recordID ? body.first.index : 0;
+          const lastIndex = last === body.last.recordID ? String(body.last.index) : "end";
+          requests.push(
+            resource(`${value.bootstrap.resourceBase}/slice/${first}/${firstIndex}/${last}/${lastIndex}`, reading),
+          );
+          first = last + 1;
+        }
+        for (const page of await Promise.all(requests))
+          for (const event of page) {
+            if (compareHistoryPosition(event, body.first) < 0 || compareHistoryPosition(event, body.last) > 0)
+              throw new Error("History output is outside its requested section");
+            const previous = events.at(-1);
+            if (previous && compareHistoryPosition(event, previous) <= 0)
+              throw new Error("History outputs are out of order");
+            events.push(event);
+          }
+      } finally {
+        group.abort();
       }
     }
-    return decoded;
+    return events;
   }
-
+  function awaitingBoundary() {
+    return pending.some(
+      (event) =>
+        !isChildEvent(event.message) &&
+        (event.message.init ||
+          event.message.system?.subtype === "compact_boundary" ||
+          event.message.system?.subtype === "context_cleared") &&
+        event.recordID > (discovery?.bootstrap.through ?? 0),
+    );
+  }
+  function publish() {
+    if (!complete || !discovery) return;
+    // A boundary changes the owning section. Wait for its paired manifest so old
+    // transcripts never briefly enter the current conversation DOM.
+    if (awaitingBoundary()) return;
+    const added = pending;
+    pending = [];
+    if (!added.length) return;
+    setMessages((previous) => {
+      for (const event of added) {
+        positions.set(event.message, { recordID: event.recordID, index: event.index });
+        previous.push(event.message);
+      }
+      return previous;
+    });
+  }
+  function reconcile(value: HistoryManifest) {
+    if (discovery && value.bootstrap.generation !== discovery.bootstrap.generation) {
+      void discover();
+      return;
+    }
+    if (discovery && value.bootstrap.through < discovery.bootstrap.through) return;
+    const section = value.sections.at(-1);
+    const changed = section?.id !== currentID;
+    discovery = value;
+    batch(() => {
+      setManifest(value);
+      setThrough((previous) => Math.max(previous, value.bootstrap.through));
+      if (!complete) {
+        if (changed || waitingManifest) {
+          waitingManifest = false;
+          void loadCurrent(value);
+        }
+        return;
+      }
+      if (changed) {
+        const first = section?.body?.first;
+        const retained: EventMessage[] = [];
+        const nextPositions = new WeakMap<EventMessage, HistoryPosition>();
+        for (const message of messages()) {
+          const position = positions.get(message);
+          if (first && position && compareHistoryPosition(position, first) >= 0) {
+            retained.push(message);
+            nextPositions.set(message, position);
+          }
+        }
+        pending = pending.filter((event) => first && compareHistoryPosition(event, first) >= 0);
+        positions = nextPositions;
+        currentID = section?.id ?? null;
+        setEpoch((previous) => previous + 1);
+        setMessages(retained);
+      }
+      publish();
+    });
+  }
+  async function loadCurrent(value: HistoryManifest) {
+    bodyRequest?.abort();
+    const request = new AbortController();
+    bodyRequest = request;
+    const signal = AbortSignal.any([controller.signal, request.signal]);
+    const section = value.sections.at(-1);
+    currentID = section?.id ?? null;
+    try {
+      const events = section ? await sectionBody(value, section, signal) : [];
+      signal.throwIfAborted();
+      if (!active || bodyRequest !== request) return;
+      if (awaitingBoundary()) {
+        waitingManifest = true;
+        return;
+      }
+      positions = new WeakMap();
+      const decoded: EventMessage[] = [];
+      for (const event of events) {
+        positions.set(event.message, { recordID: event.recordID, index: event.index });
+        decoded.push(event.message);
+      }
+      pending = pending.filter((event) => event.recordID > value.bootstrap.through);
+      complete = true;
+      batch(() => {
+        setEpoch((previous) => previous + 1);
+        setMessages(decoded);
+        publish();
+        setLoading(false);
+        setError(null);
+      });
+      retryDelay = 500;
+    } catch (err) {
+      if (signal.aborted || !active) return;
+      fail(err);
+      setLoading(false);
+      scheduleRetry(controller.signal);
+    }
+  }
   function scheduleRetry(signal: AbortSignal) {
     if (!current(signal)) return;
     if (retryTimer !== null) clearTimeout(retryTimer);
@@ -121,142 +207,90 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     }, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 10_000);
   }
-
-  function live(event: HistoryEvent, signal: AbortSignal) {
-    if (lastLive && compareHistoryPosition(event, lastLive) <= 0) return;
-    lastLive = { recordID: event.recordID, index: event.index };
-    pending.push(event.message);
-    if (event.message.result && !isChildEvent(event.message))
-      results.set(historyPositionKey(event), event.message.result);
-    if (!complete) excerpt.append(event.message);
-    if (timer === null)
-      timer = setTimeout(() => {
-        timer = null;
-        if (current(signal)) publish(false);
-      }, 100);
-    if (
-      event.message.kind === "result" ||
-      event.message.kind === "ask" ||
-      event.message.kind === "userInput" ||
-      event.message.kind === "error" ||
-      isSessionBoundary(event.message)
-    ) {
-      clearTimeout(timer);
-      timer = null;
-      publish(false);
-    }
-  }
-
   async function discover() {
     controller.abort();
+    bodyRequest?.abort();
     controller = new AbortController();
     source?.close();
     source = null;
     if (timer !== null) clearTimeout(timer);
-    timer = null;
     if (retryTimer !== null) clearTimeout(retryTimer);
-    retryTimer = null;
+    timer = retryTimer = null;
     const signal = controller.signal;
-    pending = [];
-    results = new Map();
-    discovery = null;
-    failure = null;
     complete = false;
-    excerpt = new RecentTextPreview();
+    waitingManifest = false;
+    currentID = null;
+    discovery = null;
     lastLive = null;
+    pending = [];
+    positions = new WeakMap();
     batch(() => {
+      setManifest(null);
       setMessages([]);
-      setPreview(null);
       setStats([]);
+      setThrough(0);
       setLoading(true);
       setError(null);
       setEpoch((previous) => previous + 1);
     });
     try {
-      const bootstrap = await client(signal).getHistoryBootstrap(id);
+      const value = await client(signal).getHistoryManifest(id);
       if (!current(signal)) return;
-      discovery = bootstrap;
-      lastLive = { recordID: bootstrap.through, index: Number.MAX_SAFE_INTEGER };
-      source = api.historyEvents(id, bootstrap.cursor, {
+      discovery = value;
+      currentID = value.sections.at(-1)?.id ?? null;
+      lastLive = { recordID: value.bootstrap.through, index: Number.MAX_SAFE_INTEGER };
+      batch(() => {
+        setManifest(value);
+        setThrough(value.bootstrap.through);
+      });
+      source = api.historyEvents(id, value.bootstrap.cursor, {
         onMessage: (event) => {
-          if (current(signal)) live(event, signal);
+          if (!current(signal) || (lastLive && compareHistoryPosition(event, lastLive) <= 0)) return;
+          lastLive = { recordID: event.recordID, index: event.index };
+          pending.push(event);
+          if (event.message.ask || event.message.error || event.message.userInput) publish();
+          if (timer === null)
+            timer = setTimeout(() => {
+              timer = null;
+              if (current(signal)) publish();
+            }, 100);
         },
-        onStatsSnapshot: (value) => {
-          if (current(signal)) setStats(mergeStats([], value.samples));
+        onManifest: (next) => {
+          if (current(signal)) reconcile(next);
         },
-        onCheckpoint: () => {
-          if (current(signal) && failure === "connection") {
-            failure = null;
-            setError(null);
-          }
+        onCheckpoint: (checkpoint) => {
+          if (!current(signal)) return;
+          setThrough((previous) => Math.max(previous, checkpoint.through));
+          if (complete) setError(null);
         },
-        onStats: (value) => {
-          if (current(signal)) setStats((previous) => mergeStats(previous, [value]));
+        onStatsSnapshot: (snapshot) => {
+          if (current(signal)) setStats(mergeStats([], snapshot.samples));
+        },
+        onStats: (sample) => {
+          if (current(signal)) setStats((previous) => mergeStats(previous, [sample]));
         },
         onReset: () => {
           if (current(signal)) void discover();
         },
         onError: (err) => {
-          if (!current(signal)) return;
-          source?.close();
-          source = null;
-          fail(err);
-          scheduleRetry(signal);
+          if (current(signal)) {
+            fail(err);
+            source?.close();
+            scheduleRetry(signal);
+          }
         },
         onHistoryError: (err) => {
-          if (!current(signal)) return;
-          source?.close();
-          source = null;
-          fail(err.message);
-          scheduleRetry(signal);
+          if (current(signal)) {
+            fail(err.message);
+            source?.close();
+            scheduleRetry(signal);
+          }
         },
       });
       source.onerror = (event) => {
-        if (!current(signal) || event instanceof MessageEvent) return;
-        if (failure !== "history") {
-          failure = "connection";
-          setError("Task history stream disconnected");
-        }
+        if (current(signal) && !(event instanceof MessageEvent)) setError("Task history stream disconnected");
       };
-      if (bootstrap.through > 0) {
-        const firstRecent = historyChunkFirst(bootstrap.through, bootstrap.recordsPerChunk);
-        const tail = await range(bootstrap, firstRecent, bootstrap.through, signal);
-        if (!current(signal)) return;
-        // SSE is connected before the first immutable request. Its outputs are
-        // strictly beyond the bootstrap cursor and remain visible during backfill.
-        pending = [...tail, ...pending];
-        excerpt = new RecentTextPreview();
-        for (const message of pending) excerpt.append(message);
-        if (firstRecent > 1) publish(false);
-        // Fixed batches bound both active readers and completed chunks waiting
-        // behind a slow earlier range. Canonical history publishes once, in order.
-        const prefix: EventMessage[] = [];
-        for (let first = 1; first < firstRecent; first += bootstrap.recordsPerChunk * backfillChunks) {
-          const group = new AbortController();
-          const reading = AbortSignal.any([signal, group.signal]);
-          try {
-            const requests: Promise<EventMessage[]>[] = [];
-            for (let i = 0; i < backfillChunks; i++) {
-              const start = first + i * bootstrap.recordsPerChunk;
-              if (start >= firstRecent) break;
-              const last = Math.min(start + bootstrap.recordsPerChunk - 1, firstRecent - 1);
-              requests.push(range(bootstrap, start, last, reading));
-            }
-            const chunks = await Promise.all(requests);
-            if (!current(signal)) return;
-            for (const chunk of chunks) for (const message of chunk) prefix.push(message);
-          } finally {
-            group.abort();
-          }
-        }
-        if (!current(signal)) return;
-        pending = [...prefix, ...pending];
-      }
-      if (!current(signal)) return;
-      complete = true;
-      publish(true);
-      retryDelay = 500;
-      setLoading(false);
+      void loadCurrent(discovery ?? value);
     } catch (err) {
       if (!current(signal)) return;
       fail(err);
@@ -264,55 +298,59 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       scheduleRetry(signal);
     }
   }
-
-  async function readCosts(request: AbortSignal): Promise<readonly ResultEstimate[]> {
-    const owner = controller.signal;
-    const signal = AbortSignal.any([owner, request]);
-    signal.throwIfAborted();
-    const bootstrap = discovery;
-    const boundary = lastLive;
-    if (!complete || !bootstrap || !boundary) throw new Error("Task history is still loading");
-    // Reset replaces the index; live appends can add later outputs from the
-    // same raw record while this request is pending, beyond its exact boundary.
-    const positions = results;
-    const estimates =
-      boundary.recordID === 0
-        ? []
-        : await client(signal).getHistoryCosts(id, bootstrap.generation, String(boundary.recordID));
-    signal.throwIfAborted();
-    return estimates.flatMap((estimate) => {
-      if (compareHistoryPosition(estimate, boundary) > 0) return [];
-      const result = positions.get(historyPositionKey(estimate));
-      return result ? [{ result, model: estimate.model ?? null, cost: estimate.cost ?? null }] : [];
-    });
+  function capture(signal: AbortSignal) {
+    const value = discovery;
+    if (!value) throw new Error("Task history is still loading");
+    return { value, signal: AbortSignal.any([signal, controller.signal]) };
   }
-
   onCleanup(() => {
     active = false;
     controller.abort();
+    bodyRequest?.abort();
     source?.close();
-    source = null;
     if (timer !== null) clearTimeout(timer);
     if (retryTimer !== null) clearTimeout(retryTimer);
     pending = [];
-    results = new Map();
     discovery = null;
-    excerpt.value = null;
-    lastLive = null;
+    positions = new WeakMap();
     batch(() => {
       setMessages([]);
-      setPreview(null);
+      setManifest(null);
       setStats([]);
     });
   });
   void discover();
   return {
     messages,
-    preview,
+    manifest,
     stats,
+    through,
     epoch,
     loading,
     error,
-    readCosts,
+    position: (message) => positions.get(message) ?? null,
+    readSection: (section, request) => {
+      const { value, signal } = capture(request);
+      return sectionBody(value, section, signal);
+    },
+    readSetup: (request) => {
+      const { value, signal } = capture(request);
+      const end = Math.max(value.metadata.setup?.last.recordID ?? 0, value.metadata.initialInit?.recordID ?? 0);
+      return end ? resource(`${value.bootstrap.resourceBase}/setup/${end}`, signal) : Promise.resolve([]);
+    },
+    readActivity: (activity, end, after, request) => {
+      const { value, signal } = capture(request);
+      const query = after ? `?afterRecordID=${after.recordID}&afterIndex=${after.index}` : "";
+      return resource(
+        `${value.bootstrap.resourceBase}/activity/${activity.kind}/${encodeURIComponent(activity.id)}/${end}${query}`,
+        signal,
+      );
+    },
+    readCosts: (request) => {
+      const { value, signal } = capture(request);
+      return through() === 0
+        ? Promise.resolve([])
+        : client(signal).getHistoryCosts(id, value.bootstrap.generation, String(through()));
+    },
   };
 }

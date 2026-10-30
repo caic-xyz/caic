@@ -1,91 +1,106 @@
-// Derives view-scoped numeric statistics from the active history with lazy, cancellable pricing.
-import { createEffect, createSignal, onCleanup, untrack } from "solid-js";
-import { isChildEvent } from "./grouping";
-import { TaskAnalytics } from "./taskAnalytics";
+// Reads server-owned numeric statistics and lazily refreshes prices by exact history position.
+import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import type { HistoryTurn, HistoryToolTiming, HistoryTurnEstimate } from "@sdk/types.gen";
 import type { TaskHistory } from "./taskEventTimeline";
+import { historyPositionKey } from "./historyPosition";
+
+function sameFacts<T extends object>(a: T | undefined, b: T | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  for (const key in a) if (a[key] !== b[key]) return false;
+  for (const key in b) if (a[key] !== b[key]) return false;
+  return true;
+}
+
+function sameTurn(a: HistoryTurn, b: HistoryTurn | undefined): boolean {
+  return (
+    b !== undefined &&
+    a.recordID === b.recordID &&
+    a.index === b.index &&
+    a.sectionID === b.sectionID &&
+    a.at === b.at &&
+    a.model === b.model &&
+    a.durationMs === b.durationMs &&
+    a.durationAPIMs === b.durationAPIMs &&
+    a.waitMs === b.waitMs &&
+    sameFacts(a.waitInput, b.waitInput) &&
+    sameFacts(a.usage, b.usage) &&
+    sameFacts(a.changeStat, b.changeStat) &&
+    sameFacts(a.cost, b.cost)
+  );
+}
 
 export function createTaskAnalytics(history: TaskHistory) {
-  const [snapshot, setSnapshot] = createSignal(new TaskAnalytics().snapshot());
+  const [estimates, setEstimates] = createSignal<ReadonlyMap<string, HistoryTurnEstimate>>(new Map());
   const [pricing, setPricing] = createSignal(false);
   const [pricingError, setPricingError] = createSignal<string | null>(null);
-  let fold = new TaskAnalytics();
-  let epoch = -1;
-  let offset = 0;
-  let priced = false;
-  let active = true;
-  let timer: ReturnType<typeof setTimeout> | null = null;
   let request: AbortController | null = null;
-  function cancel() {
-    request?.abort();
-    request = null;
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
-  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
   async function prices() {
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
     request?.abort();
     const controller = new AbortController();
     request = controller;
     setPricing(true);
     try {
-      const estimates = await history.readCosts(controller.signal);
-      if (!active || controller.signal.aborted) return;
-      if (fold.estimates(estimates)) setSnapshot(fold.snapshot());
+      const values = await history.readCosts(controller.signal);
+      if (controller.signal.aborted) return;
+      setEstimates(new Map(values.map((value) => [historyPositionKey(value), value])));
       setPricingError(null);
     } catch (error) {
-      if (!active || controller.signal.aborted) return;
-      setPricingError(error instanceof Error ? error.message : String(error));
+      if (!controller.signal.aborted) setPricingError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (active && request === controller) setPricing(false);
+      if (request === controller && !controller.signal.aborted) setPricing(false);
     }
   }
+  const boundary = createMemo(() => {
+    const value = history.manifest();
+    const last = value?.metadata.turns.at(-1);
+    return value ? `${value.bootstrap.generation}:${last ? historyPositionKey(last) : ""}` : null;
+  });
   createEffect(() => {
-    const current = history.epoch();
-    const messages = history.messages();
-    const loading = history.loading();
-    untrack(() => {
-      let changed = false;
-      if (epoch !== current) {
-        cancel();
-        epoch = current;
-        offset = 0;
-        priced = false;
-        fold = new TaskAnalytics();
-        setPricing(false);
-        setPricingError(null);
-        changed = true;
-      }
-      let results = false;
-      for (; offset < messages.length; offset++) {
-        const event = messages[offset];
-        if (!event) throw new Error("Missing task history event");
-        changed = fold.append(event) || changed;
-        if (event.result && !isChildEvent(event)) results = true;
-      }
-      if (changed) setSnapshot(fold.snapshot());
-      if (loading) return;
-      if (!priced) {
-        priced = true;
-        void prices();
-      } else if (results) {
-        cancel();
-        setPricing(true);
-        timer = setTimeout(() => {
-          timer = null;
-          void prices();
-        }, 250);
-      }
+    const value = boundary();
+    request?.abort();
+    if (timer !== null) clearTimeout(timer);
+    if (value === null) {
+      setEstimates(new Map());
+      setPricing(false);
+      return;
+    }
+    timer = setTimeout(() => {
+      timer = null;
+      void prices();
+    }, 250);
+    onCleanup(() => {
+      request?.abort();
+      if (timer !== null) clearTimeout(timer);
     });
   });
-  onCleanup(() => {
-    active = false;
-    cancel();
-  });
+  const turns = createMemo<readonly HistoryTurn[]>((previous) => {
+    const amounts = estimates();
+    const next = (history.manifest()?.metadata.turns ?? []).map((turn) => {
+      const estimate = amounts.get(historyPositionKey(turn));
+      return estimate ? { ...turn, model: estimate.model ?? turn.model, cost: estimate.cost ?? turn.cost } : turn;
+    });
+    return next.length === previous.length && next.every((turn, index) => sameTurn(turn, previous[index]))
+      ? previous
+      : next;
+  }, []);
+  const tools = createMemo<readonly HistoryToolTiming[]>((previous) => {
+    const next = history.manifest()?.metadata.tools ?? [];
+    return next.length === previous.length && next.every((tool, index) => sameFacts(tool, previous[index]))
+      ? previous
+      : next;
+  }, []);
+  const snapshot = createMemo(() => ({
+    turns: turns(),
+    tools: tools(),
+    costUSD: turns().reduce((sum, turn) => sum + (turn.cost?.usd ?? 0), 0),
+    costComplete: turns().every((turn) => turn.cost !== undefined),
+  }));
   return {
     snapshot,
     stats: history.stats,
-    loading: history.loading,
+    loading: () => history.manifest() === null,
     pricing,
     error: () => history.error() ?? pricingError(),
     retry: () => {

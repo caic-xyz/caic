@@ -1875,15 +1875,11 @@ public struct WebFetchResp: Codable {
     public let content: String
 }
 
-/// HistoryBootstrap is small revalidated discovery for task history. ResourceBase
-/// ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
-/// for direct arithmetic access. Scope isolates the
-/// authenticated account, including legacy shared tasks. Browser HTTP caching
-/// owns storage/eviction; clients need no inactive decoded transcript cache.
-/// Generation changes on server restart/task replacement. A stale reference
-/// returns 409; bootstrap again and discard old cursor metadata.
-/// For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
-/// and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+/// HistoryBootstrap identifies the raw prefix captured with a HistoryManifest.
+/// ResourceBase scopes immutable resources to the account, projection version,
+/// and task generation. Generation changes on server restart/task replacement;
+/// a stale reference returns 409 and requires manifest rediscovery.
+/// RecordsPerChunk defines fixed raw-record page alignment for section slices.
 public struct HistoryBootstrap: Codable {
     public let projectionVersion: String
     public let generation: String
@@ -1892,6 +1888,21 @@ public struct HistoryBootstrap: Codable {
     public let through: Int
     public let cursor: String
     public let resourceBase: String
+}
+
+/// HistoryPosition identifies one normalized output in a one-based physical raw
+/// record. Index is zero-based across every output of that record. Metadata and
+/// zero-output controls occupy record IDs too; IDs are not semantic event counts.
+public struct HistoryPosition: Codable {
+    public let recordID: Int
+    public let index: UInt32
+}
+
+/// HistorySlice selects inclusive normalized positions, independently of raw
+/// chunk alignment. An absent slice denotes an empty section.
+public struct HistorySlice: Codable {
+    public let first: HistoryPosition
+    public let last: HistoryPosition
 }
 
 /// EventMessageSource identifies the provider origin of any normalized event.
@@ -2267,12 +2278,110 @@ public struct HistoryEvent: Codable {
     public let message: EventMessage
 }
 
-/// HistoryPosition identifies one normalized output in a one-based physical raw
-/// record. Index is zero-based across every output of that record. Metadata and
-/// zero-output controls occupy record IDs too; IDs are not semantic event counts.
-public struct HistoryPosition: Codable {
+/// HistorySection describes one root context. Only the final section is current.
+/// Boundary and EndBoundary contain init/system metadata, never transcript text.
+public struct HistorySection: Codable {
+    public let id: String
+    public let body: HistorySlice?
+    public let boundary: HistoryEvent?
+    public let endBoundary: HistoryEvent?
+    public let reportedModel: String?
+    public let turnCount: Int
+    public let textCount: Int
+    public let toolCount: Int
+    public let durationMs: Int
+    public let skills: [EventSkillLoad]
+}
+
+/// HistoryRoute is one authoritative delegation relation or namespace observation.
+/// An absent AgentID records a namespace that participates in ambiguity checks.
+public struct HistoryRoute: Codable {
+    public let toolUseID: String
+    public let namespace: String
+    public let agentID: String?
+}
+
+/// HistoryTurn retains numeric invocation facts independently of transcript
+/// lifetime. SectionID associates the turn with its context. Pricing is obtained
+/// separately through getHistoryCosts using the embedded exact position.
+public struct HistoryTurn: Codable {
     public let recordID: Int
     public let index: UInt32
+    public let sectionID: String
+    public let at: ISOTimestamp
+    public let model: String
+    public let usage: EventUsage
+    public let durationMs: Int
+    public let durationAPIMs: Int
+    public let waitInput: HistoryPosition?
+    public let waitMs: Int?
+    public let changeStat: EventChangeStat?
+    public let cost: EventCost?
+}
+
+/// HistoryToolTiming aggregates completed tools across root and child actors.
+public struct HistoryToolTiming: Codable {
+    public let name: String
+    public let calls: Int
+    public let durationMs: Int
+}
+
+/// HistoryActivity is payload-free lifecycle and routing state. Kind is
+/// nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
+/// are fetched through the finite activity resource only on disclosure.
+/// BodyThrough is a stable finite prefix containing all actor payload and
+/// ownership observations known at the manifest snapshot. Unrelated task
+/// records do not change it, allowing disclosures to reuse the HTTP cache.
+/// OwnershipThrough advances only for related routing/namespace observations;
+/// clients use it to distinguish ownership revisions from new actor output.
+public struct HistoryActivity: Codable {
+    public let kind: EventKind
+    public let id: String
+    /// SectionID identifies the body containing the earliest actual lifecycle or
+    /// resolved transcript origin, including an unfinished turn carried forward.
+    public let sectionID: String
+    public let source: EventMessageSource?
+    public let toolUseID: String?
+    public let scope: EventNativeSubagentScope?
+    public let groupID: String?
+    public let label: String?
+    public let status: String
+    public let background: Bool?
+    public let startedAt: ISOTimestamp?
+    public let endedAt: ISOTimestamp?
+    public let anchorAt: ISOTimestamp
+    public let first: HistoryPosition
+    public let bodyThrough: Int
+    public let ownershipThrough: Int
+    public let exitCode: Int?
+    public let outputRef: String?
+}
+
+/// HistoryMetadata contains compact task-wide facts needed without archived
+/// bodies. Setup bounds the separately disclosed, filtered getHistorySetup
+/// resource; it must not be fetched as an unfiltered slice. InitialInput
+/// identifies the first root input, permitting prompt deduplication by position.
+public struct HistoryMetadata: Codable {
+    /// RoutingRevision changes when earlier delegated ownership may have changed.
+    public let routingRevision: Int
+    public let routing: [HistoryRoute]
+    public let hasInitialPrompt: Bool
+    public let setupEndedAt: ISOTimestamp?
+    public let turns: [HistoryTurn]
+    public let tools: [HistoryToolTiming]
+    public let activities: [HistoryActivity]
+    public let initialInit: HistoryEvent?
+    public let initialInput: HistoryPosition?
+    public let setup: HistorySlice?
+    public let todo: EventTodo?
+}
+
+/// HistoryManifest discovers context sections without downloading their bodies.
+/// Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
+public struct HistoryManifest: Codable {
+    public let bootstrap: HistoryBootstrap
+    public let sections: [HistorySection]
+    public let metadata: HistoryMetadata
 }
 
 /// HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
@@ -2294,6 +2403,7 @@ public struct HistoryTurnEstimate: Codable {
 /// cursor query on reconnect. Named stats events never replace this raw cursor.
 public struct HistoryCheckpoint: Codable {
     public let cursor: String
+    public let through: Int
 }
 
 /// EventStats is a runtime resource usage snapshot emitted periodically.
@@ -2328,7 +2438,7 @@ public struct HistoryStats: Codable {
 
 /// HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
 public struct HistoryReset: Codable {
-    public let bootstrapURL: String
+    public let manifestURL: String
 }
 
 /// TaskHistoryStreamError reports that task history could not be replayed.

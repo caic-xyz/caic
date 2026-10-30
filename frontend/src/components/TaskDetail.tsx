@@ -1,10 +1,9 @@
-// TaskDetail renders a recent text preview, complete task history, stable scrolling, and task actions.
+// TaskDetail renders current-context history, server-summarized archived disclosures, stable scrolling, and task actions.
 
 import {
   createSignal,
   createMemo,
   createEffect,
-  mapArray,
   For,
   Index,
   Show,
@@ -13,6 +12,8 @@ import {
   Switch,
   Match,
   type Accessor,
+  type JSX,
+  untrack,
 } from "solid-js";
 import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -26,6 +27,10 @@ import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
 import type {
   EventMessage,
+  HistoryActivity,
+  HistoryEvent,
+  HistorySection,
+  HistoryTurn,
   TaskPlan,
   EventResult,
   AskQuestion,
@@ -54,27 +59,29 @@ import {
   toolIdentity,
   messageIdentity,
   isSessionBoundary,
-  buildSessionItems,
   buildTurnItems,
+  groupMessages,
+  aggregateToolGroups,
+  groupTurns,
   rateLimitPercentage,
   toolCallDurationMs,
   toolCallDurations,
   toolCountSummary,
   turnSummary,
-  sessionSummary,
   type MsgItem,
   type MessageGroup,
-  type Session,
   type Turn,
 } from "../grouping";
-import { ContextSkillsTracker } from "../contextSkills";
+import { displayedAtRoot as historyRoot } from "../historyRouting";
+import { createHistoryDisclosure } from "../historyDisclosure";
+import { compareHistoryPosition, historyPositionKey } from "../historyPosition";
 import { createLiveDuration } from "../liveDuration";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { createHistoryScroll } from "../historyScroll";
 import { attachmentThumbnailWidth, taskAttachmentURL, taskAttachmentViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
-import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
+import { VisualTimingTracker, formatTimingDuration } from "../timing";
 import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
@@ -84,13 +91,7 @@ import Markdown, { MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import NativeAgents, { BackgroundCommands, BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
-import {
-  BackgroundCommandTracker,
-  NativeActivityTracker,
-  assignNativeAnchors,
-  type BackgroundCommandActivity,
-  type NativeActivity,
-} from "../nativeSubagents";
+import { assignNativeAnchors } from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import ActionButton from "./ActionButton";
 import TimingIcon from "./TimingIcon";
@@ -233,15 +234,54 @@ export default function TaskDetail(props: Props) {
   const taskPath = () => location.pathname.split("/").slice(0, 3).join("/");
   const timeline = useTaskTimeline();
   const messages = timeline.messages;
-  const nativeTracker = new NativeActivityTracker();
-  const nativeActivities = createMemo(() => nativeTracker.derive(messages()));
-  const displayedAtRoot = (event: EventMessage): boolean => {
-    nativeActivities();
-    return (
-      (event.kind === "rateLimit" && event.rateLimit?.rateLimitType !== "thread_goal") ||
-      nativeTracker.ownerFor(event) === null
-    );
+  const metadata = () => timeline.manifest()?.metadata;
+  const sections = () => timeline.manifest()?.sections ?? [];
+  const currentSection = () => sections().at(-1) ?? null;
+  const archivedIDs = createMemo(() =>
+    sections()
+      .slice(0, -1)
+      .map((section) => section.id),
+  );
+  const [openActivityIDs, setOpenActivityIDs] = createSignal<ReadonlySet<string>>(new Set());
+  const incarnation = createMemo(() => `${props.taskId}:${timeline.manifest()?.bootstrap.generation ?? ""}`);
+  createEffect(() => {
+    incarnation();
+    setOpenActivityIDs(new Set<string>());
+  });
+  const pinActivity = (id: string, open: boolean) => {
+    const activity = metadata()?.activities.find((value) => value.kind === "nativeSubagent" && value.id === id);
+    const home = activity ? activity.sectionID : null;
+    const focused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest<HTMLElement>("[data-native-id]")
+        : null;
+    const restore =
+      !open && activity?.status !== "running" && home !== currentSection()?.id && focused?.dataset.nativeId === id;
+    setOpenActivityIDs((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    if (restore && home)
+      queueMicrotask(() => {
+        if (!messageAreaRef?.isConnected) return;
+        messageAreaRef
+          .querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(`session:${home}`)}"] button`)
+          ?.focus();
+      });
   };
+  const currentActivities = () =>
+    (metadata()?.activities ?? []).filter(
+      (activity) =>
+        activity.status === "running" ||
+        (activity.kind === "nativeSubagent" && openActivityIDs().has(activity.id)) ||
+        activity.sectionID === currentSection()?.id,
+    );
+  const nativeActivities = createMemo(() =>
+    currentActivities().filter((activity) => activity.kind === "nativeSubagent"),
+  );
+  const displayedAtRoot = (event: EventMessage) => historyRoot(event, metadata()?.routing ?? []);
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -372,7 +412,7 @@ export default function TaskDetail(props: Props) {
     () => messageAreaRef,
     () => props.taskId,
     timeline.epoch,
-    () => [messages(), timeline.preview(), props.currentPlan],
+    () => [messages(), metadata()?.activities, props.currentPlan],
   );
 
   // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
@@ -433,8 +473,7 @@ export default function TaskDetail(props: Props) {
   const conversation = createMemo(() => {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
-    nativeActivities();
-    const routing = nativeTracker.routingRevision;
+    const routing = metadata()?.routingRevision ?? 0;
     const reset = taskId !== derivedTaskId || epoch !== derivedEpoch || routing !== derivedRouting;
     derivedTaskId = taskId;
     derivedEpoch = epoch;
@@ -443,144 +482,78 @@ export default function TaskDetail(props: Props) {
   });
 
   // Fold task timing incrementally so live flushes process only appended events.
-  const timingTracker = new IncrementalTaskTimingTracker();
+  const timingTracker = new VisualTimingTracker();
   let timingTaskId = "";
   let timingEpoch = -1;
-  const taskTimings = createMemo(() => {
+  const previousVisualTimes = createMemo(() => {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const reset = taskId !== timingTaskId || epoch !== timingEpoch;
     timingTaskId = taskId;
     timingEpoch = epoch;
-    return timingTracker.derive(messages(), reset);
+    const first = currentSection()?.body?.first;
+    const previous = first ? metadata()?.turns.findLast((turn) => compareHistoryPosition(turn, first) < 0) : null;
+    return timingTracker.derive(messages(), reset, previous ? Date.parse(previous.at) : 0);
   });
-  const turnTimingsByResultEvent = createMemo(() => new Map(taskTimings().turns.map((turn) => [turn.event, turn])));
-  const turnTimingsByResult = createMemo(() => new Map(taskTimings().turns.map((turn) => [turn.result, turn])));
-  const turnTiming = (turn: Turn) => (turn.result ? turnTimingsByResult().get(turn.result) : undefined);
-  const sessionTimings = (session: Session) => {
-    const timings: TurnTiming[] = [];
-    const timingsByResult = turnTimingsByResult();
-    for (const turn of session.turns) {
-      const timing = turn.result ? timingsByResult.get(turn.result) : undefined;
-      if (timing) timings.push(timing);
-    }
-    return timings;
+  const numericTurns = createMemo(
+    () => new Map((metadata()?.turns ?? []).map((turn) => [historyPositionKey(turn), turn])),
+  );
+  const turnForEvent = (event: EventMessage) => {
+    const position = timeline.position(event);
+    return position ? numericTurns().get(historyPositionKey(position)) : undefined;
   };
-  const statsHistory = timeline.stats;
-  // The agent normally emits the initial prompt as its first user-input event.
-  // Setup can fail before that happens, so retain the recorded prompt as task context.
-  const hasInitialPromptEvent = createMemo(() => {
-    const history = messages();
-    const firstInput = history.findIndex((event) => event.kind === "userInput" && !isChildEvent(event));
-    if (firstInput < 0 || history[firstInput]?.userInput?.text !== props.initialPrompt) return false;
-    return !history
-      .slice(0, firstInput)
-      .some(
-        (event) =>
-          !isChildEvent(event) &&
-          (event.kind === "text" ||
-            event.kind === "textDelta" ||
-            event.kind === "thinking" ||
-            event.kind === "thinkingDelta" ||
-            event.kind === "toolUse" ||
-            event.kind === "toolResult" ||
-            event.kind === "result"),
-      );
-  });
-  // Fold setup metadata incrementally; large retained histories must not be
-  // rescanned on each live flush.
-  let setupTaskId = "";
-  let setupEpoch = -1;
-  let setupProcessed = 0;
-  let setupLogs: EventMessage[] = [];
-  let firstInit: EventMessage | null = null;
-  let firstSetupEndTs = Number.POSITIVE_INFINITY;
-  const setupInfo = createMemo(() => {
-    const taskId = props.taskId;
+  const numericWaits = createMemo(
+    () =>
+      new Map(
+        (metadata()?.turns ?? []).flatMap((turn) =>
+          turn.waitInput && turn.waitMs !== undefined
+            ? [[historyPositionKey(turn.waitInput), turn.waitMs] as const]
+            : [],
+        ),
+      ),
+  );
+  let inputEpoch = -1;
+  let inputOffset = 0;
+  const loadedInputs = createMemo<readonly EventMessage[]>((previous) => {
     const epoch = timeline.epoch();
     const history = messages();
-    if (taskId !== setupTaskId || epoch !== setupEpoch || history.length < setupProcessed) {
-      setupTaskId = taskId;
-      setupEpoch = epoch;
-      setupProcessed = 0;
-      setupLogs = [];
-      firstInit = null;
-      firstSetupEndTs = Number.POSITIVE_INFINITY;
+    if (inputEpoch !== epoch || history.length < inputOffset) {
+      inputOffset = 0;
+      inputEpoch = epoch;
+      previous = [];
     }
-    for (let i = setupProcessed; i < history.length; i++) {
-      const event = history[i];
-      if (!event || isChildEvent(event)) continue;
-      if (event.kind === "log" && event.log) setupLogs.push(event);
-      if (firstInit === null && event.kind === "init") firstInit = event;
-      if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
-        firstSetupEndTs = Math.min(firstSetupEndTs, event.ts);
-      }
+    const added: EventMessage[] = [];
+    for (; inputOffset < history.length; inputOffset++) {
+      const message = history[inputOffset];
+      if (message?.userInput) added.push(message);
     }
-    setupProcessed = history.length;
-
-    const taskStartTs = props.startedAt ? Date.parse(props.startedAt) : 0;
-    const durationMs = firstSetupEndTs - taskStartTs;
-    const range =
-      taskStartTs > 0 && Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= maxCredibleSetupDurationMs
-        ? { start: taskStartTs, end: firstSetupEndTs }
-        : null;
-    return {
-      events: firstInit ? [...setupLogs, firstInit] : [...setupLogs],
-      lines: setupLogs.map((event) => event.log?.line ?? ""),
-      firstInit,
-      range,
-    };
+    return added.length ? [...previous, ...added] : previous;
+  }, []);
+  const userWaits = createMemo(() => {
+    const values = new Map<EventMessage, number>();
+    const waits = numericWaits();
+    for (const message of loadedInputs()) {
+      const position = timeline.position(message);
+      const wait = position ? waits.get(historyPositionKey(position)) : undefined;
+      if (wait !== undefined) values.set(message, wait);
+    }
+    return values;
   });
-  const setupLogLines = () => setupInfo().lines;
-
-  const skillsTracker = new ContextSkillsTracker();
-  const contextSkills = createMemo(() => skillsTracker.derive(props.taskId, timeline.epoch(), messages()));
-  const hasSessionStarted = () => setupInfo().firstInit !== null;
-
-  const allCompletedSessions = createMemo(() => conversation().sessions);
-  const pastSessions = createMemo(() => conversation().pastSessions);
-  const currentSessionEntry = createMemo((): Session | null => allCompletedSessions().at(-1) ?? null);
-  const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
-  const currentSessionBoundaryEvent = createMemo(() => conversation().boundary);
-
-  // Closed context metadata belongs to the session preceding its boundary.
-  const sessionEndBoundaries = createMemo(() => {
-    const sessions = allCompletedSessions();
-    return new Map(pastSessions().map((session, i) => [session, sessions[i + 1]?.boundaryEvent]));
-  });
-  const sessionCompactionSummary = (session: Session) => {
-    const boundary = sessionEndBoundaries().get(session);
-    return boundary?.system?.subtype === "compact_boundary"
-      ? compactTokenSummary(boundary.system.contextTokensBefore, boundary.system.contextTokensAfter)
-      : "";
+  const turnTiming = (turn: Turn) => {
+    const event = turn.groups.flatMap((group) => group.events).find((item) => item.result === turn.result);
+    return event ? turnForEvent(event) : undefined;
   };
-  const sessionSkills = (session: Session) => {
-    const boundary = sessionEndBoundaries().get(session);
-    return boundary ? (contextSkills().closed.get(boundary) ?? []) : [];
-  };
-  const currentSessionKey = createMemo(() => {
-    const idx = allCompletedSessions().length - 1;
-    const ev = currentSessionBoundaryEvent();
-    return `session:${Math.max(0, idx)}:${ev?.ts ?? ""}`;
-  });
-
+  const statsHistory = timeline.stats;
+  const hasInitialPromptEvent = () => !timeline.loading() && (metadata()?.hasInitialPrompt ?? false);
+  const currentSessionCompletedTurns = createMemo(() => conversation().turns);
+  const currentBoundary = createMemo<HistoryEvent | null>((previous) => {
+    const next = currentSection()?.boundary ?? null;
+    return previous && next && historyPositionKey(previous) === historyPositionKey(next) ? previous : next;
+  }, null);
+  const currentSessionBoundaryEvent = () => currentBoundary()?.message ?? null;
+  const currentSessionKey = createMemo(() => `session:${currentSection()?.id ?? "current"}`);
   const currentGroups = createMemo(() => conversation().groups);
 
-  // Own each closed context's rows by Session identity. Later contexts and unrelated
-  // disclosure changes must preserve keyed Match values, DOM nodes, and focus.
-  const sessionItems = mapArray(pastSessions, (session, index) => {
-    const key = createMemo(() => `session:${index()}:${session.boundaryEvent?.ts ?? ""}`);
-    const expanded = createMemo(() => expandedSessionKeys().has(key()));
-    const turns = createMemo<ReadonlySet<string>>((previous) => {
-      const prefix = `${key()}:turn:`;
-      const selected = [...expandedTurnKeys()].filter((turn) => turn.startsWith(prefix));
-      return previous && previous.size === selected.length && selected.every((turn) => previous.has(turn))
-        ? previous
-        : new Set(selected);
-    });
-    return createMemo(() => buildSessionItems(session, key(), expanded(), turns()));
-  });
-  const pastSessionItems = createMemo(() => sessionItems().flatMap((rows) => rows()));
   // Whether a live turn is currently streaming. Mirrors Android's hasLiveTurn.
   const hasLiveTurn = createMemo(() => currentGroups().length > 0);
   // Elidable turns (all completed turns except the last, which is always expanded).
@@ -624,18 +597,22 @@ export default function TaskDetail(props: Props) {
   // Live turn groups: incomplete turn groups flushed on structural boundaries.
   const liveItems = createMemo((): MsgItem[] => {
     const liveGroups = currentGroups();
-    return liveGroups.map((g, j) => {
-      const event = g.events[0];
-      if (g.kind === "other" && g.events.length === 1 && event?.kind === "system" && isSessionBoundary(event)) {
-        return { kind: "sessionBoundary", event, key: `g:${j}` };
-      }
-      return { kind: "group", group: g, isLive: true, key: g.messageKey ? `message:${g.messageKey}` : `g:${j}` };
-    });
+    return liveGroups
+      .filter(
+        (group) =>
+          !(
+            group.kind === "other" &&
+            group.events.length === 1 &&
+            group.events[0]?.kind === "system" &&
+            isSessionBoundary(group.events[0])
+          ),
+      )
+      .map((g, j) => {
+        return { kind: "group", group: g, isLive: true, key: g.messageKey ? `message:${g.messageKey}` : `g:${j}` };
+      });
   });
-  // Flat item model: past sessions (elided) + current session boundary + current session
-  // completed turns (elided) + last completed turn (always expanded) + live turn groups.
+  // Current boundary, collapsed completed turns, expanded latest turn, and live groups.
   const transcriptItems = createMemo((): MsgItem[] => [
-    ...pastSessionItems(),
     ...sessionBoundaryItems(),
     ...completedTurnItems(),
     ...lastTurnItems(),
@@ -645,7 +622,7 @@ export default function TaskDetail(props: Props) {
   // Last ask group: only the most recent ask is interactive.
   // Flatten all groups from all sessions + current live turn for ask detection.
   const allGroups = createMemo(() => {
-    const sessionGroups = allCompletedSessions().flatMap((s) => s.turns.flatMap((t) => t.groups));
+    const sessionGroups = currentSessionCompletedTurns().flatMap((turn) => turn.groups);
     return [...sessionGroups, ...currentGroups()];
   });
   const lastAskGroup = createMemo((): MessageGroup | null => {
@@ -661,12 +638,8 @@ export default function TaskDetail(props: Props) {
   let inputActive = true;
   onCleanup(() => {
     inputActive = false;
-    nativeTracker.derive([]);
-    timingTracker.derive([], true);
-    backgroundTracker.derive([]);
-    skillsTracker.clear();
+    timingTracker.derive([], true, 0);
     rootProjection.clear();
-    setupLogs = [];
     props.onCancelInputConversion();
   });
   async function sendInput() {
@@ -802,8 +775,7 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  // One tracker per mount folds canonical native activity across turns,
-  // compaction, and replaced history without regrouping the transcript.
+  // Payload-free lifecycle summaries remain available across context boundaries.
   const nativeSettled = () => !isActive();
   const renderNativeTranscript = (groups: () => MessageGroup[]) => (
     <Index each={groups()}>
@@ -839,8 +811,8 @@ export default function TaskDetail(props: Props) {
   );
   // Correlate canonical native activity with the tool card that spawned it.
   const nativeByToolUseID = createMemo(() => {
-    const byTool = new Map<string, NativeActivity[]>();
-    for (const activity of nativeActivities()) {
+    const byTool = new Map<string, HistoryActivity[]>();
+    for (const activity of (metadata()?.activities ?? []).filter((value) => value.kind === "nativeSubagent")) {
       if (!activity.toolUseID) continue;
       const key = toolIdentity(activity.source, activity.toolUseID);
       const list = byTool.get(key);
@@ -851,7 +823,12 @@ export default function TaskDetail(props: Props) {
   });
   // Anchor each card to the transcript item it settled at, or spawned at while
   // running, so agents render in the flow instead of a task-wide panel.
-  const nativeByAnchor = createMemo(() => assignNativeAnchors(transcriptItems(), nativeActivities()));
+  const nativeByAnchor = createMemo(() =>
+    assignNativeAnchors(
+      transcriptItems(),
+      nativeActivities().map((activity) => ({ ...activity, anchorTs: Date.parse(activity.anchorAt) })),
+    ),
+  );
   // An activity whose turn produced no anchorable transcript item still needs a
   // home, so it renders after the transcript instead of disappearing.
   const nativeUnanchored = createMemo(() => {
@@ -859,7 +836,7 @@ export default function TaskDetail(props: Props) {
     for (const list of nativeByAnchor().values()) for (const a of list) anchored.add(a.id);
     return nativeActivities().filter((activity) => !anchored.has(activity.id));
   });
-  type TranscriptItem = MsgItem | { kind: "native"; activity: NativeActivity; key: string };
+  type TranscriptItem = MsgItem | { kind: "native"; activity: HistoryActivity; key: string };
   // Native cards are keyed siblings, including when no parent content exists
   // yet. Adding root content or folding lifecycle updates retains their DOM.
   const items = createMemo((): TranscriptItem[] => {
@@ -868,10 +845,10 @@ export default function TaskDetail(props: Props) {
     const firstRootTs = firstRoot?.kind === "group" ? (firstRoot.group.events[0]?.ts ?? 0) : 0;
     const early = new Set(
       nativeActivities()
-        .filter((activity) => activity.messages && firstRootTs > activity.anchorTs)
+        .filter((activity) => firstRootTs > Date.parse(activity.anchorAt))
         .map((activity) => activity.id),
     );
-    const nativeItem = (activity: NativeActivity): TranscriptItem => ({
+    const nativeItem = (activity: HistoryActivity): TranscriptItem => ({
       kind: "native",
       activity,
       key: `native:${activity.id}`,
@@ -898,15 +875,14 @@ export default function TaskDetail(props: Props) {
     Object.fromEntries(items().map((item) => [item.key, item])),
   );
   const itemKeys = createMemo(() => items().map((item) => item.key));
-  // One tracker per mount folds canonical background commands across turns,
-  // compaction, and replaced history. A detached shell never drives task state,
-  // so this is presentation-only folding.
-  const backgroundTracker = new BackgroundCommandTracker();
-  const backgroundCommands = createMemo(() => backgroundTracker.derive(messages()));
+  // Detached command summaries share the server-owned lifecycle metadata.
+  const backgroundCommands = createMemo(() =>
+    currentActivities().filter((activity) => activity.kind === "backgroundCommand"),
+  );
   const backgroundSettled = () => !isActive();
   const backgroundByToolUseID = createMemo(() => {
-    const byTool = new Map<string, BackgroundCommandActivity[]>();
-    for (const command of backgroundCommands()) {
+    const byTool = new Map<string, HistoryActivity[]>();
+    for (const command of (metadata()?.activities ?? []).filter((value) => value.kind === "backgroundCommand")) {
       if (!command.toolUseID) continue;
       const key = toolIdentity(command.source, command.toolUseID);
       const list = byTool.get(key);
@@ -915,12 +891,90 @@ export default function TaskDetail(props: Props) {
     }
     return byTool;
   });
-  const backgroundByAnchor = createMemo(() => assignNativeAnchors(transcriptItems(), backgroundCommands()));
+  const backgroundByAnchor = createMemo(() =>
+    assignNativeAnchors(
+      transcriptItems(),
+      backgroundCommands().map((activity) => ({ ...activity, anchorTs: Date.parse(activity.anchorAt) })),
+    ),
+  );
   const backgroundUnanchored = createMemo(() => {
     const anchored = new Set<string>();
     for (const list of backgroundByAnchor().values()) for (const c of list) anchored.add(c.id);
     return backgroundCommands().filter((command) => !anchored.has(command.id));
   });
+
+  const renderArchivedGroups = (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => {
+    const waits = createMemo(() => {
+      const values = new Map<EventMessage, number>();
+      const facts = numericWaits();
+      for (const group of groups())
+        for (const event of group.events) {
+          const key = position(event);
+          const wait = key ? facts.get(key) : undefined;
+          if (wait !== undefined) values.set(event, wait);
+        }
+      return values;
+    });
+    return (
+      <Index each={groups()}>
+        {(group) => (
+          <div class={styles.timedItemContent}>
+            <Show when={hasGroupTiming(group()) && !group().events.some((event) => event.kind === "result")}>
+              <span class={styles.messageTiming}>
+                <TimingIcon
+                  events={group().events}
+                  range={group().content?.range ?? group().tool?.range ?? group().range}
+                  segments={group().timingSegments}
+                  userWaitMs={waits()}
+                />
+              </span>
+            </Show>
+            <GroupContent
+              group={group}
+              taskId={props.taskId}
+              isWaiting={() => false}
+              lastAskGroup={() => null}
+              onAskAnswer={sendAskAnswer}
+              currentPlan={null}
+              onClearAndExecutePlan={clearAndExecutePlan}
+              pendingAction={pendingAction}
+              model={props.model ?? null}
+              turnTiming={(event) => {
+                const key = position(event);
+                return key ? numericTurns().get(key) : undefined;
+              }}
+              nativeByToolUseID={nativeByToolUseID}
+              nativeSettled={nativeSettled}
+              backgroundByToolUseID={backgroundByToolUseID}
+              backgroundSettled={backgroundSettled}
+            />
+          </div>
+        )}
+      </Index>
+    );
+  };
+  const renderArchivedActivities = (id: string) => {
+    const activities = () =>
+      (metadata()?.activities ?? []).filter(
+        (activity) =>
+          activity.status !== "running" &&
+          activity.sectionID === id &&
+          !(activity.kind === "nativeSubagent" && openActivityIDs().has(activity.id)),
+      );
+    return (
+      <>
+        <NativeAgents
+          activities={activities().filter((activity) => activity.kind === "nativeSubagent")}
+          settled={nativeSettled()}
+          renderTranscript={renderNativeTranscript}
+        />
+        <BackgroundCommands
+          commands={activities().filter((activity) => activity.kind === "backgroundCommand")}
+          settled={backgroundSettled()}
+        />
+      </>
+    );
+  };
 
   const markdownTaskId = createMemo(() => props.taskId);
   return (
@@ -1180,7 +1234,7 @@ export default function TaskDetail(props: Props) {
             </For>
           </nav>
         </Show>
-        <SkillStrip taskId={props.taskId} skills={contextSkills().current} label="Loaded skills" />
+        <SkillStrip taskId={props.taskId} skills={currentSection()?.skills ?? []} label="Loaded skills" />
         <Show when={props.rateLimit?.blocked && !isQuotaDismissed()}>
           <section
             class={styles.quotaRecovery}
@@ -1268,33 +1322,27 @@ export default function TaskDetail(props: Props) {
               </section>
             )}
           </Show>
-          <Show when={timeline.preview()}>
-            {(preview) => (
-              <section aria-label="Recent activity">
-                <Show when={preview().prompt && preview().prompt !== props.initialPrompt}>
-                  <div class={styles.userInputMsg}>
-                    <Markdown text={preview().prompt.slice(-4_000)} />
-                  </div>
-                </Show>
-                <Show when={preview().response}>
-                  <div class={styles.assistantMsg}>
-                    <Markdown text={preview().response} />
-                  </div>
-                </Show>
-              </section>
+          <Show when={metadata()?.setup}>
+            <SetupHistory startedAt={props.startedAt} />
+          </Show>
+          <For each={archivedIDs()}>
+            {(id) => (
+              <Show when={sections().find((section) => section.id === id)}>
+                {(section) => (
+                  <ArchivedSession
+                    section={section()}
+                    taskId={props.taskId}
+                    open={expandedSessionKeys().has(id)}
+                    expandedTurns={expandedTurnKeys()}
+                    onToggleTurn={anchoredToggleTurn}
+                    onToggle={(event) => anchoredToggleSession(event, id)}
+                    renderGroups={renderArchivedGroups}
+                    renderActivities={() => renderArchivedActivities(id)}
+                  />
+                )}
+              </Show>
             )}
-          </Show>
-          <Show when={setupLogLines().length > 0}>
-            <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
-              <summary class={styles.taskSetupTitle}>
-                <span>Setup logs</span>
-                <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
-              </summary>
-              <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
-                {setupLogLines().join("\n")}
-              </pre>
-            </details>
-          </Show>
+          </For>
           <For each={itemKeys()}>
             {(key) => {
               const item = (): TranscriptItem => {
@@ -1303,10 +1351,6 @@ export default function TaskDetail(props: Props) {
                 return current;
               };
               // Type-narrowing accessors for the MsgItem discriminated union.
-              const sessElided = () =>
-                item().kind === "sessionElided" ? (item() as Extract<MsgItem, { kind: "sessionElided" }>) : null;
-              const sessHdr = () =>
-                item().kind === "sessionHeader" ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>) : null;
               const sessBoundary = () =>
                 item().kind === "sessionBoundary" ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>) : null;
               const elided = () => (item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null);
@@ -1319,9 +1363,6 @@ export default function TaskDetail(props: Props) {
                 const current = item();
                 if (current.kind === "group") {
                   return current.indent === "turn" ? styles.indentTurn : undefined;
-                }
-                if (current.kind === "elided" || current.kind === "expandedHeader") {
-                  return current.indent === "session" ? styles.indentSession : undefined;
                 }
                 return undefined;
               };
@@ -1337,88 +1378,22 @@ export default function TaskDetail(props: Props) {
                         }
                         settled={nativeSettled()}
                         renderTranscript={renderNativeTranscript}
+                        onOpenChange={pinActivity}
                       />
-                    </Match>
-                    {/* Collapsed past session: single clickable row. */}
-                    <Match when={sessElided()} keyed>
-                      {(se) => (
-                        <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
-                          <button
-                            type="button"
-                            class={styles.sessionToggle}
-                            onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
-                          >
-                            <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
-                            <span class={styles.sessionDuration}>
-                              {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
-                            </span>
-                          </button>
-                          <SessionInvocationIcon
-                            turns={sessionTimings(se.session)}
-                            model={props.model ?? null}
-                            compactionSummary={sessionCompactionSummary(se.session)}
-                          />
-                        </div>
-                      )}
-                    </Match>
-                    {/* Expanded past session header: click to collapse. */}
-                    <Match when={sessHdr()} keyed>
-                      {(sh) => (
-                        <>
-                          <div
-                            class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
-                            data-anchor-key={`session:${sh.sessionKey}`}
-                          >
-                            <button
-                              type="button"
-                              class={styles.sessionToggle}
-                              onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
-                            >
-                              <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
-                              <span class={styles.sessionDuration}>
-                                {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
-                              </span>
-                            </button>
-                            <SessionInvocationIcon
-                              turns={sessionTimings(sh.session)}
-                              model={props.model ?? null}
-                              compactionSummary={sessionCompactionSummary(sh.session)}
-                            />
-                          </div>
-                          <Show when={sessionSkills(sh.session).length > 0}>
-                            <div class={`${styles.indentSession} ${styles.sessionSkills}`}>
-                              <SkillStrip
-                                taskId={props.taskId}
-                                skills={sessionSkills(sh.session)}
-                                label="Previous context skills"
-                              />
-                            </div>
-                          </Show>
-                        </>
-                      )}
                     </Match>
                     {/* Session boundary: init, compaction, or clear rendered as a separator. */}
                     <Match when={sessBoundary()} keyed>
                       {(sb) => (
                         <SessionBoundaryItem
                           event={sb.event}
-                          grouped={sb.event === currentSessionBoundaryEvent() && pastSessions().length > 0}
-                          taskId={props.taskId}
-                          skills={
-                            sb.event === currentSessionBoundaryEvent() && pastSessions().length > 0
-                              ? []
-                              : (contextSkills().closed.get(sb.event) ?? [])
-                          }
+                          grouped={sb.event === currentSessionBoundaryEvent() && archivedIDs().length > 0}
                         />
                       )}
                     </Match>
                     {/* Collapsed past turn: single clickable row. */}
                     <Match when={elided()} keyed>
                       {(e) => (
-                        <div
-                          class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
-                          data-anchor-key={`turn:${e.key}`}
-                        >
+                        <div class={styles.elidedTurn} data-anchor-key={`turn:${e.key}`}>
                           <button
                             type="button"
                             class={styles.turnToggle}
@@ -1429,8 +1404,8 @@ export default function TaskDetail(props: Props) {
                               {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
                             </span>
                           </button>
-                          <Show when={turnTiming(e.turn)} keyed>
-                            {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                          <Show when={turnTiming(e.turn)}>
+                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
                           </Show>
                         </div>
                       )}
@@ -1439,7 +1414,7 @@ export default function TaskDetail(props: Props) {
                     <Match when={expHdr()} keyed>
                       {(h) => (
                         <div
-                          class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                          class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}`}
                           data-anchor-key={`turn:${h.turnKey}`}
                         >
                           <button
@@ -1452,8 +1427,8 @@ export default function TaskDetail(props: Props) {
                               {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
                             </span>
                           </button>
-                          <Show when={turnTiming(h.turn)} keyed>
-                            {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                          <Show when={turnTiming(h.turn)}>
+                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
                           </Show>
                         </div>
                       )}
@@ -1479,8 +1454,8 @@ export default function TaskDetail(props: Props) {
                                   events={gi().group.events}
                                   range={gi().group.content?.range ?? gi().group.tool?.range ?? gi().group.range}
                                   segments={gi().group.timingSegments}
-                                  userWaitMs={taskTimings().userWaitMs}
-                                  previousEventTs={taskTimings().previousEventTs}
+                                  userWaitMs={userWaits()}
+                                  previousEventTs={previousVisualTimes()}
                                 />
                               </span>
                             </Show>
@@ -1494,7 +1469,7 @@ export default function TaskDetail(props: Props) {
                               onClearAndExecutePlan={clearAndExecutePlan}
                               pendingAction={pendingAction}
                               model={props.model ?? null}
-                              turnTiming={(event) => turnTimingsByResultEvent().get(event)}
+                              turnTiming={(event) => turnForEvent(event)}
                               nativeByToolUseID={nativeByToolUseID}
                               nativeSettled={nativeSettled}
                               backgroundByToolUseID={backgroundByToolUseID}
@@ -1525,7 +1500,7 @@ export default function TaskDetail(props: Props) {
           </Show>
         </div>
 
-        <ProgressPanel messages={messages()} />
+        <ProgressPanel todos={metadata()?.todo?.todos ?? []} />
 
         <Show when={isActive() || isRecoverable() || !!pendingAction()}>
           <form
@@ -1672,6 +1647,242 @@ export default function TaskDetail(props: Props) {
 
 // Renders the content for a single message group.
 // group is a reactive accessor so group().kind etc track correctly in JSX.
+function ArchivedSession(props: {
+  section: HistorySection;
+  taskId: string;
+  open: boolean;
+  onToggle: (event: MouseEvent) => void;
+  expandedTurns: ReadonlySet<string>;
+  onToggleTurn: (event: MouseEvent, key: string) => void;
+  renderGroups: (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => JSX.Element;
+  renderActivities: () => JSX.Element;
+}) {
+  const timeline = useTaskTimeline();
+  const turns = () => (timeline.manifest()?.metadata.turns ?? []).filter((turn) => turn.sectionID === props.section.id);
+  const summary = () => {
+    const section = props.section;
+    const parts = [
+      section.boundary?.message.system?.subtype === "context_cleared" ? "Cleared session" : "Compacted session",
+      `${section.turnCount} ${section.turnCount === 1 ? "turn" : "turns"}`,
+    ];
+    if (section.textCount) parts.push(`${section.textCount} ${section.textCount === 1 ? "message" : "messages"}`);
+    if (section.toolCount) parts.push(`${section.toolCount} ${section.toolCount === 1 ? "tool call" : "tool calls"}`);
+    return parts.join(" · ");
+  };
+  const compaction = () => {
+    const boundary = props.section.endBoundary?.message.system;
+    return boundary?.subtype === "compact_boundary"
+      ? compactTokenSummary(boundary.contextTokensBefore, boundary.contextTokensAfter)
+      : "";
+  };
+  return (
+    <section data-testid="history-section" data-section-id={props.section.id}>
+      <div
+        class={`${styles.sessionElided}${props.open ? ` ${styles.sessionElidedExpanded}` : ""}`}
+        data-anchor-key={`session:${props.section.id}`}
+      >
+        <button
+          type="button"
+          class={styles.sessionToggle}
+          onClick={(event) => props.onToggle(event)}
+          aria-expanded={props.open}
+        >
+          <span class={styles.turnSummaryText}>{summary()}</span>
+          <span class={styles.sessionDuration}>
+            {props.section.durationMs > 0 ? formatTimingDuration(props.section.durationMs) : "0s"}
+          </span>
+        </button>
+        <SessionInvocationIcon
+          turns={turns()}
+          model={props.section.reportedModel ?? null}
+          compactionSummary={compaction()}
+        />
+      </div>
+      <Show when={props.open}>
+        <div class={styles.indentSession}>
+          <SkillStrip taskId={props.taskId} skills={props.section.skills} label="Previous context skills" />
+          <ArchivedSessionBody
+            section={props.section}
+            renderGroups={props.renderGroups}
+            expandedTurns={props.expandedTurns}
+            onToggleTurn={props.onToggleTurn}
+          />
+          {props.renderActivities()}
+        </div>
+      </Show>
+    </section>
+  );
+}
+
+function ArchivedSessionBody(props: {
+  section: HistorySection;
+  expandedTurns: ReadonlySet<string>;
+  onToggleTurn: (event: MouseEvent, key: string) => void;
+  renderGroups: (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => JSX.Element;
+}) {
+  const timeline = useTaskTimeline();
+  const body = createHistoryDisclosure(
+    () =>
+      `${timeline.manifest()?.bootstrap.generation}:${props.section.id}:${props.section.body ? historyPositionKey(props.section.body.first) + ":" + historyPositionKey(props.section.body.last) : "empty"}`,
+    (signal) => timeline.readSection(props.section, signal),
+  );
+  const positions = createMemo(() => new Map(body.events().map((event) => [event.message, historyPositionKey(event)])));
+  const routingRevision = createMemo(() => timeline.manifest()?.metadata.routingRevision);
+  const turns = createMemo(() => {
+    routingRevision();
+    return groupTurns(
+      aggregateToolGroups(
+        groupMessages(
+          body
+            .events()
+            .map((event) => event.message)
+            .filter(
+              (event) =>
+                historyRoot(
+                  event,
+                  untrack(() => timeline.manifest()?.metadata.routing ?? []),
+                ) && !isSessionBoundary(event),
+            ),
+        ),
+      ),
+    );
+  });
+  return (
+    <>
+      <Show when={body.loading()}>
+        <span class={styles.historyLoading} role="status" aria-label="Loading session history">
+          <LoadingIcon aria-hidden="true" />
+        </span>
+      </Show>
+      <Show when={body.error()}>
+        {(error) => (
+          <p role="alert">
+            {error()} <Button onClick={body.retry}>Retry</Button>
+          </p>
+        )}
+      </Show>
+      <For each={turns()}>
+        {(turn, index) => {
+          const key = () => `session:${props.section.id}:turn:${index()}:${turn.groups[0]?.events[0]?.ts ?? ""}`;
+          const expanded = () => props.expandedTurns.has(key());
+          const fact = () => {
+            const event = turn.groups
+              .flatMap((group) => group.events)
+              .find((message) => message.result === turn.result);
+            const position = event ? positions().get(event) : null;
+            return position
+              ? timeline.manifest()?.metadata.turns.find((item) => historyPositionKey(item) === position)
+              : null;
+          };
+          return (
+            <>
+              <div
+                class={`${styles.elidedTurn}${expanded() ? ` ${styles.elidedTurnExpanded}` : ""}`}
+                data-anchor-key={`turn:${key()}`}
+              >
+                <button
+                  type="button"
+                  class={styles.turnToggle}
+                  aria-expanded={expanded()}
+                  onClick={(event) => props.onToggleTurn(event, key())}
+                >
+                  <span class={styles.turnSummaryText}>{turnSummary(turn)}</span>
+                  <span class={styles.turnDuration}>
+                    {turn.durationMs > 0 ? formatTimingDuration(turn.durationMs) : "0s"}
+                  </span>
+                </button>
+                <Show when={fact()}>
+                  {(value) => <TurnInvocationIcon turn={value()} model={props.section.reportedModel ?? null} />}
+                </Show>
+              </div>
+              <Show when={expanded()}>
+                <div class={styles.indentTurn}>
+                  {props.renderGroups(
+                    () => turn.groups,
+                    (event) => positions().get(event) ?? null,
+                  )}
+                </div>
+              </Show>
+            </>
+          );
+        }}
+      </For>
+    </>
+  );
+}
+
+function SetupHistory(props: { startedAt?: string }) {
+  const timeline = useTaskTimeline();
+  const metadata = () => timeline.manifest()?.metadata;
+  const [open, setOpen] = createSignal(!metadata()?.initialInit);
+  const started = createMemo(() => metadata()?.initialInit !== undefined);
+  createEffect(() => {
+    if (started()) setOpen(false);
+  });
+  const range = () => {
+    const start = props.startedAt ? Date.parse(props.startedAt) : 0;
+    const at = metadata()?.setupEndedAt;
+    const end = at ? Date.parse(at) : 0;
+    return start > 0 && end >= start && end - start <= maxCredibleSetupDurationMs ? { start, end } : null;
+  };
+  return (
+    <details
+      class={styles.taskSetup}
+      open={open()}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      data-testid="task-setup"
+    >
+      <summary class={styles.taskSetupTitle}>
+        <span>Setup logs</span>
+        <TimingIcon
+          events={
+            metadata()?.initialInit?.message
+              ? [metadata()?.initialInit?.message].filter((event): event is EventMessage => event !== undefined)
+              : []
+          }
+          range={range()}
+          showZero
+        />
+      </summary>
+      <Show when={open()}>
+        <SetupHistoryBody />
+      </Show>
+    </details>
+  );
+}
+function SetupHistoryBody() {
+  const timeline = useTaskTimeline();
+  const body = createHistoryDisclosure(
+    () => {
+      const metadata = timeline.manifest()?.metadata;
+      return `${metadata?.setup ? historyPositionKey(metadata.setup.last) : ""}:${metadata?.initialInit ? historyPositionKey(metadata.initialInit) : ""}`;
+    },
+    (signal) => timeline.readSetup(signal),
+  );
+  return (
+    <>
+      <Show when={body.loading()}>
+        <span class={styles.historyLoading} role="status" aria-label="Loading setup logs">
+          <LoadingIcon aria-hidden="true" />
+        </span>
+      </Show>
+      <Show when={body.error()}>
+        {(error) => (
+          <p role="alert">
+            {error()} <Button onClick={body.retry}>Retry</Button>
+          </p>
+        )}
+      </Show>
+      <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
+        {body
+          .events()
+          .flatMap((event) => (event.message.log ? [event.message.log.line] : []))
+          .join("\n")}
+      </pre>
+    </>
+  );
+}
+
 function GroupContent(props: {
   group: () => MessageGroup;
   taskId: string;
@@ -1682,10 +1893,10 @@ function GroupContent(props: {
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
   model: string | null;
-  turnTiming: (event: EventMessage) => TurnTiming | undefined;
-  nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
+  turnTiming: (event: EventMessage) => HistoryTurn | undefined;
+  nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, BackgroundCommandActivity[]>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   backgroundSettled: () => boolean;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
@@ -1843,20 +2054,31 @@ function compactTokenSummary(before: number | undefined, after: number | undefin
 }
 
 function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: string }) {
+  const byKey = createMemo(
+    () => new Map(props.skills.map((skill) => [JSON.stringify([skill.path ?? null, skill.skill]), skill])),
+  );
+  const keys = createMemo(() => [...byKey().keys()]);
   return (
-    <Show when={props.skills.length > 0}>
+    <Show when={keys().length > 0}>
       <nav class={styles.skills} aria-label={props.label}>
         <SkillIcon class={styles.skillsIcon} width="14" height="14" aria-hidden="true" />
-        <For each={props.skills}>
-          {(skill) => (
-            <Show when={skill.path} keyed fallback={<span>{skill.skill}</span>}>
-              {(path) => (
-                <A class={styles.skillLink} href={taskViewURL(props.taskId, path)} title={path}>
-                  {skill.skill}
-                </A>
-              )}
-            </Show>
-          )}
+        <For each={keys()}>
+          {(key) => {
+            const skill = () => {
+              const value = byKey().get(key);
+              if (!value) throw new Error("Missing skill");
+              return value;
+            };
+            return (
+              <Show when={skill().path} keyed fallback={<span>{skill().skill}</span>}>
+                {(path) => (
+                  <A class={styles.skillLink} href={taskViewURL(props.taskId, path)} title={path}>
+                    {skill().skill}
+                  </A>
+                )}
+              </Show>
+            );
+          }}
         </For>
       </nav>
     </Show>
@@ -1865,12 +2087,7 @@ function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: st
 
 // Renders the header for a session boundary (init, compaction, or clear).
 // These events are extracted from the message stream and shown as section separators.
-function SessionBoundaryItem(props: {
-  event: EventMessage;
-  grouped: boolean;
-  taskId: string;
-  skills: EventSkillLoad[];
-}) {
+function SessionBoundaryItem(props: { event: EventMessage; grouped: boolean }) {
   const ev = () => props.event;
   const compactSummary = () => compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
@@ -1901,7 +2118,6 @@ function SessionBoundaryItem(props: {
           <div class={styles.contextCleared}>Context cleared</div>
         </Match>
       </Switch>
-      <SkillStrip taskId={props.taskId} skills={props.skills} label="Previous context skills" />
     </>
   );
 }
@@ -1979,7 +2195,7 @@ function MessageItem(props: {
   taskId: string;
   ev: EventMessage;
   model: string | null;
-  turnTiming?: TurnTiming;
+  turnTiming?: HistoryTurn;
   hideResultText?: boolean;
 }) {
   return (
@@ -2070,7 +2286,12 @@ function MessageItem(props: {
   );
 }
 
-function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming; hideText?: boolean }) {
+function ResultCard(props: {
+  result: EventResult;
+  model: string | null;
+  turnTiming?: HistoryTurn;
+  hideText?: boolean;
+}) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
@@ -2082,15 +2303,15 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
   });
   return (
     <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
-      <Show when={props.turnTiming} keyed>
+      <Show when={props.turnTiming}>
         {(turn) => (
           <div class={styles.resultHeader}>
             <strong>{result().isError ? "Error" : "Done"}</strong>
             <div class={styles.resultTiming}>
               <span class={styles.resultDuration} data-testid="turn-duration">
-                {turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}
+                {turn().durationMs > 0 ? formatTimingDuration(turn().durationMs) : "0s"}
               </span>
-              <TurnInvocationIcon turn={turn} model={props.model} />
+              <TurnInvocationIcon turn={turn()} model={props.model} />
             </div>
           </div>
         )}
@@ -2117,9 +2338,9 @@ function ToolMessageGroup(props: {
   currentPlan: TaskPlan | null;
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
-  nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
+  nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, BackgroundCommandActivity[]>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
@@ -2430,9 +2651,9 @@ function ToolCallCard(props: {
   onToggle: (open: boolean) => void;
   thinkingEvents?: EventMessage[];
   outputDeltaEvents?: EventMessage[];
-  nativeActivity?: NativeActivity[];
+  nativeActivity?: HistoryActivity[];
   nativeSettled?: () => boolean;
-  backgroundCommands?: BackgroundCommandActivity[];
+  backgroundCommands?: HistoryActivity[];
   backgroundSettled?: () => boolean;
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
@@ -2454,14 +2675,15 @@ function ToolCallCard(props: {
   const timedCommand = () => props.backgroundCommands?.[0];
   const durationMs = createLiveDuration(
     () => {
-      const start = timedCommand()?.startedAt ?? props.call.startedAt;
+      const command = timedCommand();
+      const start = command?.startedAt ? Date.parse(command.startedAt) : props.call.startedAt;
       return start !== undefined && start > 0 ? start : null;
     },
     () => {
       const command = timedCommand();
       if (!command) return props.durationMs;
-      return command.startedAt !== null && command.endedAt !== null
-        ? Math.max(0, command.endedAt - command.startedAt)
+      return command.startedAt && command.endedAt
+        ? Math.max(0, Date.parse(command.endedAt) - Date.parse(command.startedAt))
         : null;
     },
     () => {

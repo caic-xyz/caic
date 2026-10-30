@@ -333,10 +333,13 @@ function activity(id: string, anchorTs: number): NativeActivity {
 
 function sessionHeader(key: string): MsgItem {
   return {
-    kind: "sessionHeader",
-    session: { turns: [], toolCount: 0, textCount: 0, durationMs: 0 },
-    sessionKey: key,
+    kind: "sessionBoundary",
     key,
+    event: {
+      kind: "init",
+      ts: 0,
+      init: { sessionID: "s", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+    },
   };
 }
 

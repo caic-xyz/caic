@@ -89,62 +89,180 @@ func writeHistoryJSON(w http.ResponseWriter, r *http.Request, value any) {
 	}
 }
 
-func (h *historyHandlers) handleHistoryBootstrap(w http.ResponseWriter, r *http.Request) {
+func (h *historyHandlers) handleHistoryManifest(w http.ResponseWriter, r *http.Request) {
 	e, s, release, err := h.historySource(w, r, false)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
 	defer release()
-	snap, err := h.historySnapshot(r.Context(), e, s, 0, true)
-	if err != nil {
+	if _, err = h.historySnapshot(r.Context(), e, s, 0, true); err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
 	t := e.Task()
-	scope := historyScope(r.Context())
-	base := fmt.Sprintf("/api/caic/v1/tasks/%s/history/%s/%s/%s", t.ID, scope, historyProjectionVersion, t.TimelineID())
-	b := v1.HistoryBootstrap{ProjectionVersion: historyProjectionVersion, Generation: t.TimelineID(), Scope: scope, RecordsPerChunk: history.RecordsPerChunk, Through: snap.Through, Cursor: historyCursor{generation: t.TimelineID(), record: snap.Through, end: true}.String(), ResourceBase: base}
-	writeHistoryJSON(w, r, b)
+	snap, sections, metadata, err := s.Sections(r.Context(), t.InitialPrompt.Text)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	b := historyDiscovery(r.Context(), e, snap)
+	writeHistoryJSON(w, r, v1.HistoryManifest{Bootstrap: b, Sections: sections, Metadata: metadata})
 }
 
-func (h *historyHandlers) handleHistoryChunk(w http.ResponseWriter, r *http.Request) {
+func (h *historyHandlers) handleHistorySlice(w http.ResponseWriter, r *http.Request) {
 	e, s, release, err := h.historySource(w, r, true)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
 	defer release()
-	first, last, err := historyRange(r.PathValue("first"), r.PathValue("last"))
-	if err == nil && (first-1)%history.RecordsPerChunk != 0 {
-		err = historyBadRange()
-	}
+	body, err := historySlice(r)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
-	snap, err := h.historySnapshot(r.Context(), e, s, last, false)
+	snap, err := h.historySnapshot(r.Context(), e, s, body.Last.RecordID, false)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
-	// Identity-derived validators require no body decoding or unrelated raw tail
-	// projection. Vary also prevents cached bodies crossing cookie/token changes.
-	sum := sha256.Sum256([]byte(r.URL.Path))
+	if err = s.CheckSlice(r.Context(), snap, body); err != nil {
+		writeError(r.Context(), w, historyBadRange())
+		return
+	}
+	if immutableHistory(w, r) {
+		return
+	}
+	if err = s.WriteSlice(r.Context(), snap, body, w); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func (h *historyHandlers) handleHistoryActivity(w http.ResponseWriter, r *http.Request) {
+	e, s, release, err := h.historySource(w, r, true)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	defer release()
+	kind := v1.EventKind(r.PathValue("kind"))
+	through, err := historyUint(r.PathValue("through"))
+	if err != nil || kind != v1.EventKindNativeSubagent && kind != v1.EventKindBackgroundCommand {
+		writeError(r.Context(), w, historyBadRange())
+		return
+	}
+	var after history.Position
+	query := r.URL.Query()
+	if query.Has("afterRecordID") != query.Has("afterIndex") {
+		writeError(r.Context(), w, historyBadRange())
+		return
+	}
+	if query.Has("afterRecordID") {
+		after.RecordID, err = historyUint(query.Get("afterRecordID"))
+		index, parseErr := strconv.ParseUint(query.Get("afterIndex"), 10, 32)
+		if err != nil || parseErr != nil || strconv.FormatUint(index, 10) != query.Get("afterIndex") || after.RecordID > through {
+			writeError(r.Context(), w, historyBadRange())
+			return
+		}
+		after.Index = uint32(index)
+	}
+	snap, err := h.historySnapshot(r.Context(), e, s, through, false)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	first, err := s.ActivityStart(r.Context(), kind, r.PathValue("activity"))
+	if err != nil || first.RecordID > through {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "history activity not found"})
+		return
+	}
+	if immutableHistory(w, r) {
+		return
+	}
+	if err = s.WriteActivity(r.Context(), snap, kind, r.PathValue("activity"), through, after, w); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func (h *historyHandlers) handleHistorySetup(w http.ResponseWriter, r *http.Request) {
+	e, s, release, err := h.historySource(w, r, true)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	defer release()
+	through, err := historyUint(r.PathValue("through"))
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	snap, err := h.historySnapshot(r.Context(), e, s, through, false)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	if immutableHistory(w, r) {
+		return
+	}
+	if err = s.WriteSetup(r.Context(), snap, through, w); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func historySlice(r *http.Request) (v1.HistorySlice, error) {
+	first, err := historyUint(r.PathValue("first"))
+	if err != nil {
+		return v1.HistorySlice{}, err
+	}
+	last, err := historyUint(r.PathValue("last"))
+	if err != nil {
+		return v1.HistorySlice{}, err
+	}
+	fi, err := historyIndex(r.PathValue("firstIndex"))
+	if err != nil {
+		return v1.HistorySlice{}, err
+	}
+	li := history.RecordEndIndex
+	if r.PathValue("lastIndex") != "end" {
+		li, err = historyIndex(r.PathValue("lastIndex"))
+		if err != nil {
+			return v1.HistorySlice{}, err
+		}
+	}
+	if last < first || last == first && li < fi {
+		return v1.HistorySlice{}, historyBadRange()
+	}
+	return v1.HistorySlice{First: v1.HistoryPosition{RecordID: first, Index: fi}, Last: v1.HistoryPosition{RecordID: last, Index: li}}, nil
+}
+
+func historyIndex(value string) (uint32, error) {
+	n, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || n == uint64(history.RecordEndIndex) || strconv.FormatUint(n, 10) != value {
+		return 0, historyBadRange()
+	}
+	return uint32(n), nil
+}
+
+// immutableHistory returns true when the validator completed the response.
+func immutableHistory(w http.ResponseWriter, r *http.Request) bool {
+	sum := sha256.Sum256([]byte(r.URL.RequestURI()))
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("ETag", etag)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
-		return
+		return true
 	}
-	err = s.WriteRange(r.Context(), snap, first, last, w)
-	// A streaming failure must terminate the response, never publish a truncated
-	// JSON body as a successful immutable resource in a browser cache.
-	if err != nil {
-		panic(http.ErrAbortHandler)
-	}
+	return false
+}
+
+func historyDiscovery(ctx context.Context, e *taskmgr.Entry, snap history.Snapshot) v1.HistoryBootstrap {
+	t := e.Task()
+	scope := historyScope(ctx)
+	base := fmt.Sprintf("/api/caic/v1/tasks/%s/history/%s/%s/%s", t.ID, scope, historyProjectionVersion, t.TimelineID())
+	return v1.HistoryBootstrap{ProjectionVersion: historyProjectionVersion, Generation: t.TimelineID(), Scope: scope, RecordsPerChunk: history.RecordsPerChunk, Through: snap.Through, Cursor: historyCursor{generation: t.TimelineID(), record: snap.Through, end: true}.String(), ResourceBase: base}
 }
 
 func historyEstimate(c history.TurnEstimate) v1.HistoryTurnEstimate {
@@ -207,7 +325,7 @@ func historyScope(ctx context.Context) string {
 }
 
 func historyConflict() error {
-	return &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "history reference expired; fetch history/bootstrap"}
+	return &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "history reference expired; fetch history/manifest"}
 }
 
 func historyBadRange() error {
@@ -221,23 +339,6 @@ func historyUint(value string) (uint64, error) {
 		return 0, historyBadRange()
 	}
 	return n, nil
-}
-
-func historyRange(first, last string) (firstID, lastID uint64, err error) {
-	f, err := historyUint(first)
-	if err != nil {
-		return 0, 0, err
-	}
-	l, err := historyUint(last)
-	if err != nil {
-		return 0, 0, err
-	}
-	// Context and overlays may start at a retained record inside a fixed chunk.
-	// Chunk bodies additionally enforce their aligned first record at the route.
-	if l < f || (f-1)/history.RecordsPerChunk != (l-1)/history.RecordsPerChunk {
-		return 0, 0, historyBadRange()
-	}
-	return f, l, nil
 }
 
 func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +356,7 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 	stream := sse.New(w)
 	w.Header().Set("Cache-Control", "private, no-store")
 	reset := func(ctx context.Context) {
-		if err := historyFrame(stream, "reset", "", v1.HistoryReset{BootstrapURL: fmt.Sprintf("/api/caic/v1/tasks/%s/history/bootstrap", e.Task().ID)}); err != nil {
+		if err := historyFrame(stream, "reset", "", v1.HistoryReset{ManifestURL: fmt.Sprintf("/api/caic/v1/tasks/%s/history/manifest", e.Task().ID)}); err != nil {
 			h.log.DebugContext(ctx, "write history reset", "err", err)
 		}
 	}
@@ -347,12 +448,19 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 }
 
 func (h *historyHandlers) writeHistorySuffix(ctx context.Context, stream *sse.Stream, e *taskmgr.Entry, s *history.Source, snapshot history.Snapshot, cursor *historyCursor) error {
+	var manifest *v1.HistoryManifest
+	if !cursor.hasMetadata || snapshot.MetadataRevision != cursor.metadataRevision {
+		current, sections, metadata, err := s.Sections(ctx, e.Task().InitialPrompt.Text)
+		if err != nil {
+			return err
+		}
+		snapshot = current
+		bootstrap := historyDiscovery(ctx, e, snapshot)
+		manifest = &v1.HistoryManifest{Bootstrap: bootstrap, Sections: sections, Metadata: metadata}
+	}
 	first := cursor.record
 	if cursor.end {
 		first++
-	}
-	if first > snapshot.Through {
-		return historyFrame(stream, "checkpoint", cursor.String(), v1.HistoryCheckpoint{Cursor: cursor.String()})
 	}
 	for event, err := range s.Events(ctx, snapshot, first, snapshot.Through) {
 		if err != nil {
@@ -367,8 +475,14 @@ func (h *historyHandlers) writeHistorySuffix(ctx context.Context, stream *sse.St
 		}
 		*cursor = next
 	}
-	*cursor = historyCursor{generation: cursor.generation, record: snapshot.Through, end: true}
-	return historyFrame(stream, "checkpoint", cursor.String(), v1.HistoryCheckpoint{Cursor: cursor.String()})
+	*cursor = historyCursor{generation: cursor.generation, record: snapshot.Through, end: true, metadataRevision: snapshot.MetadataRevision, hasMetadata: true}
+	if err := historyFrame(stream, "checkpoint", cursor.String(), v1.HistoryCheckpoint{Cursor: cursor.String(), Through: cursor.record}); err != nil {
+		return err
+	}
+	if manifest != nil {
+		return historyFrame(stream, "manifest", "", manifest)
+	}
+	return nil
 }
 
 func (h *historyHandlers) historyStreamError(r *http.Request, stream *sse.Stream, err error) {
@@ -382,10 +496,12 @@ func (h *historyHandlers) historyStreamError(r *http.Request, stream *sse.Stream
 }
 
 type historyCursor struct {
-	generation string
-	record     uint64
-	index      uint32
-	end        bool
+	generation       string
+	record           uint64
+	index            uint32
+	end              bool
+	metadataRevision uint64
+	hasMetadata      bool
 }
 
 func parseHistoryCursor(value string) (historyCursor, error) {

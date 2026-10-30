@@ -85,7 +85,6 @@ declare const classes: {
   readonly "sessionDuration": string;
   readonly "sessionElided": string;
   readonly "sessionElidedExpanded": string;
-  readonly "sessionSkills": string;
   readonly "sessionToggle": string;
   readonly "skillLink": string;
   readonly "skills": string;

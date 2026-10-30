@@ -1,5 +1,5 @@
-// Preserves the conversation viewport during automatic backlog loading, live output, and expansion changes.
-import { createEffect, onCleanup, type Accessor } from "solid-js";
+// Preserves visible conversation anchors through context loading, live output, disclosure, and pane visibility changes.
+import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 
 interface Anchor {
   key: string | null;
@@ -62,6 +62,7 @@ export function createHistoryScroll(
       )
         return;
       frame = null;
+      if (el.clientHeight === 0) return;
       const prior = expansion ?? (structural && !following ? saved : null);
       if (prior) {
         const row = prior.key ? el.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(prior.key)}"]`) : null;
@@ -100,6 +101,14 @@ export function createHistoryScroll(
     schedule();
   });
 
+  onMount(() => {
+    const el = area();
+    if (!el) return;
+    const observer = new ResizeObserver(schedule);
+    observer.observe(el);
+    onCleanup(() => observer.disconnect());
+  });
+
   onCleanup(() => {
     active = false;
     operation++;
@@ -117,7 +126,7 @@ export function createHistoryScroll(
     },
     scroll() {
       const el = area();
-      if (!el) return;
+      if (!el || el.clientHeight === 0) return;
       saved = anchor(el);
       if (writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
         writtenTop = null;

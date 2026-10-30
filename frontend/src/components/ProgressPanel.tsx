@@ -1,9 +1,8 @@
-// ProgressPanel incrementally folds root-owned todos above the prompt.
+// ProgressPanel renders the latest server-owned root todo snapshot above the prompt.
 
 import { For, Show, createEffect, createMemo } from "solid-js";
 
-import type { EventMessage, EventTodo } from "@sdk/types.gen";
-import { isChildEvent } from "../grouping";
+import type { EventTodo } from "@sdk/types.gen";
 
 import { detailsOpenState } from "./TaskDetail";
 import styles from "./ProgressPanel.module.css";
@@ -32,23 +31,8 @@ function todoStatusClass(status: string): string {
 
 const DETAILS_KEY = "progress";
 
-export default function ProgressPanel(props: { messages: readonly EventMessage[] }) {
-  let processed = 0;
-  let lastEvent: EventMessage | null = null;
-  const todos = createMemo<EventTodo["todos"]>((previous) => {
-    const messages = props.messages;
-    const reset = messages.length < processed || (processed > 0 && messages[processed - 1] !== lastEvent);
-    let current = reset ? [] : (previous ?? []);
-    if (reset) processed = 0;
-    for (let i = processed; i < messages.length; i++) {
-      const event = messages[i];
-      if (!event) throw new Error("Missing timeline event");
-      if (event.todo && !isChildEvent(event)) current = event.todo.todos;
-    }
-    processed = messages.length;
-    lastEvent = messages.at(-1) ?? null;
-    return current;
-  });
+export default function ProgressPanel(props: { todos: EventTodo["todos"] }) {
+  const todos = () => props.todos;
 
   const completedCount = createMemo(() => todos().filter((item) => item.status === "completed").length);
 

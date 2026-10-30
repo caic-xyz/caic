@@ -2,7 +2,7 @@
 
 import type { EventBackgroundCommand, EventMessage, EventMessageSource, EventNativeSubagent } from "@sdk/types.gen";
 
-import type { MessageGroup, MsgItem, Session, Turn } from "./grouping";
+import type { MessageGroup, MsgItem, Turn } from "./grouping";
 import { childAgentID } from "./grouping";
 
 export interface NativeActivity extends EventNativeSubagent {
@@ -17,13 +17,13 @@ export interface NativeActivity extends EventNativeSubagent {
   anchorTs: number;
 }
 
-export function nativeTerminal(status: EventNativeSubagent["status"]): boolean {
+export function nativeTerminal(status: string): boolean {
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
 // Missing terminal evidence is not success or interruption. A settled parent or
 // incomplete historical window makes a running observation stale, not terminal.
-export function nativeActivityStatus(activity: NativeActivity, settled: boolean): string {
+export function nativeActivityStatus(activity: { status: string }, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   if (activity.status === "unknown") return "Status unknown";
   return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
@@ -196,12 +196,6 @@ function turnEndTs(turn: Turn): number {
   return max;
 }
 
-function sessionEndTs(session: Session): number {
-  let max = 0;
-  for (const turn of session.turns) max = Math.max(max, turnEndTs(turn));
-  return max;
-}
-
 // itemAnchorTs is the timestamp through which an item already represents
 // transcript content. Headers only introduce the content that follows them, so
 // they never anchor a card.
@@ -211,9 +205,6 @@ function itemAnchorTs(item: MsgItem): number | null {
       return groupEndTs(item.group);
     case "elided":
       return turnEndTs(item.turn);
-    case "sessionElided":
-      return sessionEndTs(item.session);
-    case "sessionHeader":
     case "sessionBoundary":
     case "expandedHeader":
       return null;
@@ -276,7 +267,7 @@ export function backgroundTerminal(status: EventBackgroundCommand["status"]): bo
 
 // Missing terminal evidence is not success or interruption. A settled parent or
 // incomplete historical window makes a running observation stale, not terminal.
-export function backgroundCommandStatus(activity: BackgroundCommandActivity, settled: boolean): string {
+export function backgroundCommandStatus(activity: { status: string }, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
 }

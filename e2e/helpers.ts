@@ -255,7 +255,7 @@ export async function convertPngsToWebp(dir: string): Promise<void> {
   );
 }
 
-export function recentHistoryChunk(bootstrap: HistoryBootstrap) {
+export function recentHistoryPage(bootstrap: HistoryBootstrap) {
   const first = Math.floor((bootstrap.through - 1) / bootstrap.recordsPerChunk) * bootstrap.recordsPerChunk + 1;
-  return { first, last: bootstrap.through, url: `${bootstrap.resourceBase}/chunks/${first}/${bootstrap.through}` };
+  return { first, last: bootstrap.through, url: `${bootstrap.resourceBase}/slice/${first}/0/${bootstrap.through}/end` };
 }

@@ -1,22 +1,7 @@
-// Incremental root invocation timing and bounded visual-block spans for concurrent task streams.
+// Tracks preceding visual events and bounded block spans within a loaded context.
 
-import type { EventChangeStat, EventMessage, EventResult } from "@sdk/types.gen";
+import type { EventMessage } from "@sdk/types.gen";
 import { isChildEvent } from "./grouping";
-
-export interface TurnTiming {
-  event: EventMessage;
-  result: EventResult;
-  // Model reported when the session that produced this turn started.
-  reportedModel?: string;
-  changeStat: EventChangeStat | null;
-  waitMs: number | null;
-}
-
-export interface TaskTimings {
-  previousEventTs: ReadonlyMap<EventMessage, number>;
-  turns: TurnTiming[];
-  userWaitMs: ReadonlyMap<EventMessage, number>;
-}
 
 export interface EventTimingSummary {
   range: { start: number; end: number } | null;
@@ -72,91 +57,28 @@ export class IncrementalEventTimingTracker {
   }
 }
 
-// IncrementalTaskTimingTracker folds append-only event batches without
-// rescanning retained task history. Call reset before replacing the timeline.
-export class IncrementalTaskTimingTracker {
-  private previousEventTs = new Map<EventMessage, number>();
-  private turns: TurnTiming[] = [];
-  private userWaitMs = new Map<EventMessage, number>();
+// VisualTimingTracker processes only appended visual events in one loaded context.
+export class VisualTimingTracker {
+  private previous = new Map<EventMessage, number>();
   private previousTs = 0;
   private processed = 0;
-  private reportedModel: string | undefined;
-  private latestTurn: TurnTiming | null = null;
-  private waitingTurn: TurnTiming | null = null;
-
-  derive(messages: readonly EventMessage[], reset: boolean): TaskTimings {
-    if (reset || messages.length < this.processed) this.clear();
+  derive(messages: readonly EventMessage[], reset: boolean, previousTs: number): ReadonlyMap<EventMessage, number> {
+    if (reset || messages.length < this.processed) {
+      this.previous = new Map();
+      this.previousTs = previousTs;
+      this.processed = 0;
+    }
+    if (this.processed === 0) this.previousTs = previousTs;
     for (let i = this.processed; i < messages.length; i++) {
       const event = messages[i];
-      if (!event) throw new Error("Missing timeline event");
-      this.append(event);
-    }
-    this.processed = messages.length;
-    return {
-      previousEventTs: this.previousEventTs,
-      turns: this.turns,
-      userWaitMs: this.userWaitMs,
-    };
-  }
-
-  private append(event: EventMessage) {
-    if (isChildEvent(event)) return;
-    if (event.kind === "init") {
-      this.reportedModel = event.init?.reportedModel || undefined;
-    }
-    if (isVisualTimelineEvent(event) && event.ts > 0) {
-      if (this.previousTs > 0 && event.ts >= this.previousTs) {
-        this.previousEventTs.set(event, this.previousTs);
-      }
+      if (!event) throw new Error("Missing context event");
+      if (isChildEvent(event) || !isVisualTimelineEvent(event) || event.ts <= 0) continue;
+      if (this.previousTs > 0 && event.ts >= this.previousTs) this.previous.set(event, this.previousTs);
       this.previousTs = event.ts;
     }
-    if (event.kind === "result" && event.result) {
-      const turn = {
-        event,
-        result: event.result,
-        reportedModel: this.reportedModel,
-        changeStat: null,
-        waitMs: null,
-      } satisfies TurnTiming;
-      this.turns.push(turn);
-      this.latestTurn = turn;
-      this.waitingTurn = turn;
-      return;
-    }
-    if (
-      event.kind === "commitSnapshot" &&
-      event.commitSnapshot &&
-      !event.commitSnapshot.baseline &&
-      this.latestTurn !== null
-    ) {
-      this.latestTurn.changeStat = event.commitSnapshot.changeStat ?? null;
-      return;
-    }
-    if (event.kind !== "userInput" || this.waitingTurn === null) return;
-
-    const waitMs = event.ts - this.waitingTurn.event.ts;
-    if (this.waitingTurn.event.ts > 0 && waitMs > 0) {
-      this.waitingTurn.waitMs = waitMs;
-      this.userWaitMs.set(event, waitMs);
-    }
-    this.waitingTurn = null;
+    this.processed = messages.length;
+    return this.previous;
   }
-
-  private clear() {
-    this.previousEventTs = new Map<EventMessage, number>();
-    this.turns = [];
-    this.userWaitMs = new Map<EventMessage, number>();
-    this.previousTs = 0;
-    this.processed = 0;
-    this.reportedModel = undefined;
-    this.latestTurn = null;
-    this.waitingTurn = null;
-  }
-}
-
-// deriveTaskTimings derives one immutable-history timing snapshot.
-export function deriveTaskTimings(messages: readonly EventMessage[]): TaskTimings {
-  return new IncrementalTaskTimingTracker().derive(messages, false);
 }
 
 function isVisualTimelineEvent(event: EventMessage): boolean {

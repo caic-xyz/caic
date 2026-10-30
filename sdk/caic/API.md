@@ -77,10 +77,12 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
-| GET | `/api/caic/v1/tasks/{id}/history/bootstrap` | Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. |  | `HistoryBootstrap` |
-| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/chunks/{first}/{last}` | Returns immutable normalized outputs as a JSON array with one output per line and leading commas after the first. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. |  | `HistoryEvent[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/manifest` | Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. |  | `HistoryManifest` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}` | Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. |  | `HistoryEvent[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}` | Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. |  | `HistoryEvent[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}` | Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[]` |
 | GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[]` |
-| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
+| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `manifest` (`HistoryManifest`), `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
 ## Processes
 
@@ -1844,15 +1846,11 @@ WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 
 ### HistoryBootstrap
 
-HistoryBootstrap is small revalidated discovery for task history. ResourceBase
-ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
-for direct arithmetic access. Scope isolates the
-authenticated account, including legacy shared tasks. Browser HTTP caching
-owns storage/eviction; clients need no inactive decoded transcript cache.
-Generation changes on server restart/task replacement. A stale reference
-returns 409; bootstrap again and discard old cursor metadata.
-For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
-and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+HistoryBootstrap identifies the raw prefix captured with a HistoryManifest.
+ResourceBase scopes immutable resources to the account, projection version,
+and task generation. Generation changes on server restart/task replacement;
+a stale reference returns 409 and requires manifest rediscovery.
+RecordsPerChunk defines fixed raw-record page alignment for section slices.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -1863,6 +1861,27 @@ and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
 | `through` | `uint64` |  | yes |
 | `cursor` | `string` |  | yes |
 | `resourceBase` | `string` |  | yes |
+
+### HistoryPosition
+
+HistoryPosition identifies one normalized output in a one-based physical raw
+record. Index is zero-based across every output of that record. Metadata and
+zero-output controls occupy record IDs too; IDs are not semantic event counts.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `recordID` | `uint64` |  | yes |
+| `index` | `number` |  | yes |
+
+### HistorySlice
+
+HistorySlice selects inclusive normalized positions, independently of raw
+chunk alignment. An absent slice denotes an empty section.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `first` | `HistoryPosition` |  | yes |
+| `last` | `HistoryPosition` |  | yes |
 
 ### EventMessageSource
 
@@ -2328,16 +2347,130 @@ projection version and timeline generation supplied by HistoryBootstrap.
 | `index` | `number` |  | yes |
 | `message` | `EventMessage` |  | yes |
 
-### HistoryPosition
+### HistorySection
 
-HistoryPosition identifies one normalized output in a one-based physical raw
-record. Index is zero-based across every output of that record. Metadata and
-zero-output controls occupy record IDs too; IDs are not semantic event counts.
+HistorySection describes one root context. Only the final section is current.
+Boundary and EndBoundary contain init/system metadata, never transcript text.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `body` | `HistorySlice` |  |  |
+| `boundary` | `HistoryEvent` |  |  |
+| `endBoundary` | `HistoryEvent` |  |  |
+| `reportedModel` | `string` |  |  |
+| `turnCount` | `int` |  | yes |
+| `textCount` | `int` |  | yes |
+| `toolCount` | `int` |  | yes |
+| `durationMs` | `int64` |  | yes |
+| `skills` | `EventSkillLoad[]` |  | yes |
+
+### HistoryRoute
+
+HistoryRoute is one authoritative delegation relation or namespace observation.
+An absent AgentID records a namespace that participates in ambiguity checks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `namespace` | `string` |  | yes |
+| `agentID` | `string` |  |  |
+
+### HistoryTurn
+
+HistoryTurn retains numeric invocation facts independently of transcript
+lifetime. SectionID associates the turn with its context. Pricing is obtained
+separately through getHistoryCosts using the embedded exact position.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `recordID` | `uint64` |  | yes |
 | `index` | `number` |  | yes |
+| `sectionID` | `string` |  | yes |
+| `at` | `ISOTimestamp` |  | yes |
+| `model` | `string` |  | yes |
+| `usage` | `EventUsage` |  | yes |
+| `durationMs` | `int64` |  | yes |
+| `durationAPIMs` | `int64` |  | yes |
+| `waitInput` | `HistoryPosition` |  |  |
+| `waitMs` | `int64` |  |  |
+| `changeStat` | `EventChangeStat` |  |  |
+| `cost` | `EventCost` |  |  |
+
+### HistoryToolTiming
+
+HistoryToolTiming aggregates completed tools across root and child actors.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `calls` | `int` |  | yes |
+| `durationMs` | `int64` |  | yes |
+
+### HistoryActivity
+
+HistoryActivity is payload-free lifecycle and routing state. Kind is
+nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
+are fetched through the finite activity resource only on disclosure.
+BodyThrough is a stable finite prefix containing all actor payload and
+ownership observations known at the manifest snapshot. Unrelated task
+records do not change it, allowing disclosures to reuse the HTTP cache.
+OwnershipThrough advances only for related routing/namespace observations;
+clients use it to distinguish ownership revisions from new actor output.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `EventKind` |  | yes |
+| `id` | `string` |  | yes |
+| `sectionID` | `string` | SectionID identifies the body containing the earliest actual lifecycle or
+resolved transcript origin, including an unfinished turn carried forward. | yes |
+| `source` | `EventMessageSource` |  |  |
+| `toolUseID` | `string` |  |  |
+| `scope` | `EventNativeSubagentScope` |  |  |
+| `groupID` | `string` |  |  |
+| `label` | `string` |  |  |
+| `status` | `string` |  | yes |
+| `background` | `boolean` |  |  |
+| `startedAt` | `ISOTimestamp` |  |  |
+| `endedAt` | `ISOTimestamp` |  |  |
+| `anchorAt` | `ISOTimestamp` |  | yes |
+| `first` | `HistoryPosition` |  | yes |
+| `bodyThrough` | `uint64` |  | yes |
+| `ownershipThrough` | `uint64` |  | yes |
+| `exitCode` | `int` |  |  |
+| `outputRef` | `string` |  |  |
+
+### HistoryMetadata
+
+HistoryMetadata contains compact task-wide facts needed without archived
+bodies. Setup bounds the separately disclosed, filtered getHistorySetup
+resource; it must not be fetched as an unfiltered slice. InitialInput
+identifies the first root input, permitting prompt deduplication by position.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `routingRevision` | `uint64` | RoutingRevision changes when earlier delegated ownership may have changed. | yes |
+| `routing` | `HistoryRoute[]` |  | yes |
+| `hasInitialPrompt` | `boolean` |  | yes |
+| `setupEndedAt` | `ISOTimestamp` |  |  |
+| `turns` | `HistoryTurn[]` |  | yes |
+| `tools` | `HistoryToolTiming[]` |  | yes |
+| `activities` | `HistoryActivity[]` |  | yes |
+| `initialInit` | `HistoryEvent` |  |  |
+| `initialInput` | `HistoryPosition` |  |  |
+| `setup` | `HistorySlice` |  |  |
+| `todo` | `EventTodo` |  |  |
+
+### HistoryManifest
+
+HistoryManifest discovers context sections without downloading their bodies.
+Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `bootstrap` | `HistoryBootstrap` |  | yes |
+| `sections` | `HistorySection[]` |  | yes |
+| `metadata` | `HistoryMetadata` |  | yes |
 
 ### HistoryTurnEstimate
 
@@ -2365,6 +2498,7 @@ cursor query on reconnect. Named stats events never replace this raw cursor.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `cursor` | `string` |  | yes |
+| `through` | `uint64` |  | yes |
 
 ### EventStats
 
@@ -2403,7 +2537,7 @@ HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `bootstrapURL` | `string` |  | yes |
+| `manifestURL` | `string` |  | yes |
 
 ### TaskHistoryStreamError
 

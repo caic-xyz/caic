@@ -114,15 +114,15 @@ func TestHistoryProcessRestart(t *testing.T) {
 		return response.StatusCode, body
 	}
 	bootstrap := func() v1.HistoryBootstrap {
-		status, body := request("/tasks/" + ksid.ID(1).String() + "/history/bootstrap")
+		status, body := request("/tasks/" + ksid.ID(1).String() + "/history/manifest")
 		if status != http.StatusOK {
 			t.Fatalf("bootstrap %d: %s", status, body)
 		}
-		var b v1.HistoryBootstrap
-		if err := json.Unmarshal(body, &b); err != nil {
+		var manifest v1.HistoryManifest
+		if err := json.Unmarshal(body, &manifest); err != nil {
 			t.Fatal(err)
 		}
-		return b
+		return manifest.Bootstrap
 	}
 	before := bootstrap()
 	_, original := request(strings.TrimPrefix(recentHistoryURL(&before), "/api/caic/v1"))

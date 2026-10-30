@@ -1,4 +1,4 @@
-// StatsPage displays statistics derived from shared task history and lazy cost estimates.
+// StatsPage renders server-owned numeric task statistics and lazy cost estimates.
 
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";

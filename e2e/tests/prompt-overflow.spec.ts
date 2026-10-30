@@ -10,7 +10,7 @@ for (const width of [390, 1280]) {
     const prompt = uniquePrompt("Long prompt") + " Describe the change and its expected behavior.".repeat(250);
     const id = await createTaskAPI(api, prompt);
     await waitForTaskState(api, id, "waiting");
-    const chunksURL = `**/api/caic/v1/tasks/${id}/history/**/chunks/**`;
+    const chunksURL = `**/api/caic/v1/tasks/${id}/history/**/slice/**`;
     const release = Promise.withResolvers<void>();
     let requested = false;
     // Keep the recorded prompt visible before conversation history arrives.

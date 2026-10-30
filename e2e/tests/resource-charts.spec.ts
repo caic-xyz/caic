@@ -5,6 +5,7 @@ import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 
 test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }, testInfo) => {
   const id = await createTaskAPI(api, "Inspect fractional CPU constraints");
+  const { through } = (await api.getHistoryManifest(id)).bootstrap;
   const ts = Date.UTC(2026, 9, 4);
   const event = {
     kind: "stats",
@@ -29,7 +30,7 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
   await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
     route.fulfill({
       contentType: "text/event-stream",
-      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: [event.stats] })}\n\nevent: checkpoint\ndata: {"cursor":"fixture"}\n\n`,
+      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: [event.stats] })}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`,
     }),
   );
   await page.goto(`/task/@${id}/stats`);
@@ -63,6 +64,7 @@ for (const history of ["clustered", "live"] as const) {
     const id = await createTaskAPI(api, "Seed the resource charts");
 
     if (history === "clustered") {
+      const { through } = (await api.getHistoryManifest(id)).bootstrap;
       // Reproduce stream restarts: the first two samples are only 1 ms apart
       // in a 20-second window, making their dots less than one pixel apart.
       const start = Date.UTC(2026, 9, 4);
@@ -86,7 +88,7 @@ for (const history of ["clustered", "live"] as const) {
       await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
         route.fulfill({
           contentType: "text/event-stream",
-          body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: events.map((event) => event.stats) })}\n\nevent: checkpoint\ndata: {"cursor":"fixture"}\n\n`,
+          body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: events.map((event) => event.stats) })}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`,
         }),
       );
     }

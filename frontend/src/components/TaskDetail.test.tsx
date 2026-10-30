@@ -1,7 +1,7 @@
 // Tests coherent history publication, stable context disclosures, task-owned plans, scoped tools, and SSE lifecycle.
 
 import assert from "node:assert/strict";
-import { historyResponse } from "@tests/history";
+import { historyResponse, historyManifest, fixtureHistoryResponse } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
@@ -29,21 +29,53 @@ beforeEach(() => {
   taskEventStreamMock = vi
     .spyOn(api, "historyEvents")
     .mockImplementation(() => ({ close: vi.fn(), onerror: null }) as unknown as EventSource);
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-    Response.json({
-      projectionVersion: "1",
-      generation: "test",
-      scope: "owner",
-      recordsPerChunk: 256,
-      through: 0,
-      cursor: "1.test.0.end",
-      resourceBase: "/history/owner/test",
-    }),
+  fixtureEvents = [];
+  fixtureRecord = 0;
+  fixturePrompt = "";
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    fixtureHistoryResponse(String(input), fixtureEvents, fixturePrompt),
   );
 });
 let fixtureRecord = 0;
+let fixtureEvents: HistoryEvent[] = [];
+let fixturePrompt = "";
 function emit(handlers: HistoryEventsHandlers, message: EventMessage) {
-  handlers.onMessage({ recordID: ++fixtureRecord, index: 0, message });
+  if (message.result)
+    message = {
+      ...message,
+      result: {
+        ...message.result,
+        duration: message.result.duration ?? 0,
+        durationAPI: message.result.durationAPI ?? 0,
+        usage: message.result.usage ?? {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          reportedModel: "",
+        },
+      },
+    };
+  const event = { recordID: ++fixtureRecord, index: 0, message };
+  fixtureEvents.push(event);
+  handlers.onMessage(event);
+  handlers.onCheckpoint?.({ cursor: `3.test.${fixtureRecord}.end`, through: fixtureRecord });
+  if (
+    message.init ||
+    message.result ||
+    message.toolResult ||
+    message.nativeSubagent ||
+    message.backgroundCommand ||
+    message.userInput ||
+    message.skillLoad ||
+    message.todo ||
+    message.log ||
+    message.commitSnapshot ||
+    message.system ||
+    message.source?.agentID ||
+    message.source?.delegationToolUseID
+  )
+    handlers.onManifest?.(historyManifest(fixtureEvents, fixturePrompt));
 }
 
 clearContextMock.mockImplementation(() => Promise.resolve({ status: "cleared" }) as never);
@@ -97,6 +129,7 @@ const baseProps = {
 };
 
 async function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
+  fixturePrompt = props.initialPrompt ?? "";
   window.history.replaceState(null, "", "/task/@abc+test-task");
   const view = render(() => (
     <Router>
@@ -132,17 +165,11 @@ it("never mounts completed context content while canonical history is published"
     resultEvent(7),
   ];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-    String(input).endsWith("/bootstrap")
-      ? Response.json({
-          projectionVersion: "2",
-          generation: "test",
-          scope: "owner",
-          recordsPerChunk: 256,
-          through: events.length,
-          cursor: "2.test.7.end",
-          resourceBase: "/history/owner/test",
-        })
-      : historyResponse(events.map((message, index) => ({ recordID: index + 1, index: 0, message }))),
+    fixtureHistoryResponse(
+      String(input),
+      events.map((message, index) => ({ recordID: index + 1, index: 0, message })),
+      "",
+    ),
   );
   const rendered: string[] = [];
   const innerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
@@ -161,7 +188,7 @@ it("never mounts completed context content while canonical history is published"
     expect(screen.getByText("Current context response")).toBeInTheDocument();
     expect(rendered).toHaveLength(0);
     await userEvent.setup().click(screen.getByRole("button", { name: /Compacted session/ }));
-    await userEvent.setup().click(screen.getByRole("button", { name: /^1 message/ }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: /^1 message/ }));
     expect(screen.getByRole("img", { name: "Historical render probe" })).toBeInTheDocument();
     expect(rendered.length).toBeGreaterThan(0);
   } finally {
@@ -185,24 +212,13 @@ it("updates only the task-owned root plan while preserving canonical history and
   const stream = vi
     .spyOn(api, "historyEvents")
     .mockImplementation(() => ({ close: vi.fn() }) as unknown as EventSource);
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = String(input);
-    if (url.endsWith("/bootstrap"))
-      return Response.json({
-        projectionVersion: "v1",
-        generation: "test",
-        scope: "owner",
-        recordsPerChunk: 256,
-        through: events.length,
-        cursor: "v1.test.4.end",
-        resourceBase: "/history/owner",
-        inPlanMode: false,
-      });
-    if (url.endsWith("/stats")) return Response.json({ samples: [] });
-    if (url.includes("/chunks/"))
-      return historyResponse(events.map((message, index) => ({ recordID: index + 1, index: 0, message })));
-    throw new Error(`Unexpected history request: ${url}`);
-  });
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    fixtureHistoryResponse(
+      String(input),
+      events.map((message, index) => ({ recordID: index + 1, index: 0, message })),
+      "",
+    ),
+  );
   const [plan, setPlan] = createSignal<TaskPlan | null>({ toolUseID: "owned", content: "Original root plan" });
   let timeline: ReturnType<typeof useTaskTimeline> | undefined;
   function Probe() {
@@ -245,7 +261,7 @@ it("updates only the task-owned root plan while preserving canonical history and
     expect(screen.queryByTestId("plan-content")).not.toBeInTheDocument();
     assert.equal(timeline.messages(), messages);
     assert.equal(timeline.epoch(), epoch);
-    assert.equal(fetchMock.mock.calls.length, requests);
+    assert.equal(fetchMock.mock.calls.length, requests + 1);
     assert.equal(stream.mock.calls.length, streams);
   } finally {
     view.unmount();
@@ -283,50 +299,33 @@ it("retries live history and automatically loads the full tool output", async ()
   const historyStream = vi
     .spyOn(api, "historyEvents")
     .mockImplementation(() => ({ close: vi.fn() }) as unknown as EventSource);
+  const events: HistoryEvent[] = [
+    {
+      recordID: 2,
+      index: 0,
+      message: {
+        kind: "toolUse",
+        ts: startedAt,
+        toolUse: { toolUseID: "tool", name: "Bash", input: { command: "echo old" } },
+      },
+    },
+    {
+      recordID: 3,
+      index: 0,
+      message: { kind: "toolOutputDelta", ts: 3, toolOutputDelta: { toolUseID: "tool", delta: "old output" } },
+    },
+    {
+      recordID: 520,
+      index: 0,
+      message: { kind: "toolOutputDelta", ts: 520, toolOutputDelta: { toolUseID: "tool", delta: "tail output" } },
+    },
+  ];
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     requests.push(url);
-    if (url.endsWith("/bootstrap"))
-      return Response.json({
-        projectionVersion: "v1",
-        generation: "test",
-        scope: "owner",
-        recordsPerChunk: 256,
-        through: 520,
-        cursor: "v1.test.520.end",
-        resourceBase: "/history/owner",
-        inPlanMode: false,
-      });
-    if (url.endsWith("/stats")) return Response.json({ samples: [] });
-    if (url.includes("/chunks/")) {
-      if (++chunkRequests === 1) return new Response("temporarily unavailable", { status: 503 });
-      const earlier = url.endsWith("/1/256");
-      if (url.endsWith("/257/512")) return historyResponse([]);
-      const events: HistoryEvent[] = earlier
-        ? [
-            {
-              recordID: 2,
-              index: 0,
-              message: {
-                kind: "toolUse",
-                ts: startedAt,
-                toolUse: { toolUseID: "tool", name: "Bash", input: { command: "echo old" } },
-              },
-            },
-          ]
-        : [];
-      events.push({
-        recordID: earlier ? 3 : 520,
-        index: 0,
-        message: {
-          kind: "toolOutputDelta",
-          ts: 520,
-          toolOutputDelta: { toolUseID: "tool", delta: earlier ? "old output" : "tail output" },
-        },
-      });
-      return historyResponse(events);
-    }
-    throw new Error(`Unexpected history request: ${url}`);
+    if (url.includes("/slice/") && ++chunkRequests === 1)
+      return new Response("temporarily unavailable", { status: 503 });
+    return fixtureHistoryResponse(url, events, "");
   });
   const view = await renderTaskDetail({});
   try {
@@ -336,7 +335,7 @@ it("retries live history and automatically loads the full tool output", async ()
     await waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
     expect(screen.getAllByTestId("tool-call")).toHaveLength(1);
     expect(screen.getByTestId("tool-duration")).toBeInTheDocument();
-    expect(requests.some((url) => url.endsWith("/chunks/1/256"))).toBe(true);
+    expect(requests.some((url) => url.endsWith("/slice/2/0/256/end"))).toBe(true);
     expect(screen.getByTestId("tool-call")).toHaveTextContent("old outputtail output");
   } finally {
     view.unmount();
@@ -372,28 +371,11 @@ it("automatically restores completed activity timing while keeping live observat
     return { close: vi.fn() } as unknown as EventSource;
   });
   const requests: string[] = [];
+  const historyEvents = [...seeds, ...finishes.map((message, index) => ({ recordID: 257 + index, index: 0, message }))];
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     requests.push(url);
-    if (url.endsWith("/bootstrap"))
-      return Response.json({
-        projectionVersion: "v1",
-        generation: "test",
-        scope: "owner",
-        recordsPerChunk: 256,
-        through: 258,
-        cursor: "v1.test.258.end",
-        resourceBase: "/history/owner",
-        inPlanMode: false,
-      });
-    if (url.endsWith("/stats")) return Response.json({ samples: [] });
-    if (url.includes("/chunks/"))
-      return historyResponse(
-        url.endsWith("/1/256")
-          ? seeds
-          : finishes.map((message, index) => ({ recordID: 257 + index, index: 0, message })),
-      );
-    throw new Error(`Unexpected history request: ${url}`);
+    return fixtureHistoryResponse(url, historyEvents, "");
   });
   const view = await renderTaskDetail({});
   try {
@@ -422,6 +404,27 @@ it("automatically restores completed activity timing while keeping live observat
         backgroundCommand: { id: "ongoing-shell", status: "running" },
       },
     });
+    historyEvents.push(
+      {
+        recordID: 259,
+        index: 0,
+        message: {
+          kind: "nativeSubagent",
+          ts: Date.now() - 1000,
+          nativeSubagent: { id: "ongoing", status: "running" },
+        },
+      },
+      {
+        recordID: 260,
+        index: 0,
+        message: {
+          kind: "backgroundCommand",
+          ts: Date.now() - 1000,
+          backgroundCommand: { id: "ongoing-shell", status: "running" },
+        },
+      },
+    );
+    stream.onManifest?.(historyManifest(historyEvents, ""));
     await vi.advanceTimersByTimeAsync(100);
     const native = view.container.querySelector('[data-native-id="ongoing"]');
     const background = view.container.querySelector('[data-command-id="ongoing-shell"]');
@@ -590,13 +593,15 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
   expect(screen.getByTestId("native-subagent-card")).toBe(card);
   expect(card).toHaveAttribute("open");
   expect(within(card).getByTestId("stream-message")).toBe(childBlock);
-  expect(within(childBlock).getByRole("listitem").querySelector("strong")?.textContent).toBe("bowtie");
+  await waitFor(() =>
+    expect(within(childBlock).getByRole("listitem").querySelector("strong")?.textContent).toBe("bowtie"),
+  );
   expect(parentBlock?.querySelector("details")).toBe(thinking);
   expect(parentBlock?.textContent).toContain("Consider triangulation.");
   send?.({ kind: "text", ts: 1900, source: child, text: { text: "" } });
   send?.({ kind: "thinking", ts: 2000, source: parent, thinking: { text: "" } });
   await waitFor(() => expect(childBlock.textContent).toBe(""));
-  expect(parentBlock?.querySelector("details")).toBeNull();
+  await waitFor(() => expect(parentBlock?.querySelector("details")).toBeNull());
   expect(parentBlock?.textContent).toBe("");
 });
 
@@ -696,8 +701,8 @@ describe("TaskDetail", () => {
     await renderTaskDetail({ taskId: "closed-context-identity" });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /^Compacted session · 1 turn/ }));
-    await user.click(screen.getByRole("button", { name: /^1 message/ }));
-    const body = screen.getByText("old context", { exact: true });
+    await user.click(await screen.findByRole("button", { name: /^1 message/ }));
+    const body = await screen.findByText("old context", { exact: true });
     const toggle = screen.getByRole("button", { name: /^Compacted session · 1 turn/ });
     toggle.focus();
     const boundaries: EventMessage[] = [
@@ -1043,14 +1048,15 @@ describe("TaskDetail", () => {
         emit(handlers, { kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } });
         return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
       });
-      await renderTaskDetail();
+      await renderTaskDetail({ taskId: `prior-skills-${subtype}` });
       expect(screen.getByRole("navigation", { name: "Loaded skills" })).toBeInTheDocument();
       send?.({ kind: "system", ts: 3, system: { subtype } });
       await waitFor(() => expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument());
-      const prior = screen.getByRole("navigation", { name: "Previous context skills" });
+      await userEvent.setup().click(screen.getByRole("button", { name: /^(Compacted|Cleared) session/ }));
+      const prior = await screen.findByRole("navigation", { name: "Previous context skills" });
       expect(within(prior).getByRole("link", { name: "review" })).toHaveAttribute(
         "href",
-        "/task/@abc/view?path=%2Fa%2FSKILL.md",
+        `/task/@prior-skills-${subtype}/view?path=%2Fa%2FSKILL.md`,
       );
       send?.({ kind: "skillLoad", ts: 4, skillLoad: { skill: "quality", path: "/b/SKILL.md" } });
       await waitFor(() =>
@@ -1179,123 +1185,36 @@ describe("TaskDetail", () => {
     expect(screen.getAllByRole("button", { name: /^Compacted session/ })).toHaveLength(1);
   });
 
-  it("preserves completed boundaries and turn expansion across live boundaries and same-session init", async () => {
-    let send: ((event: EventMessage) => void) | undefined;
+  it("keeps same-session content stable and exposes it through an archive after compaction", async () => {
+    let send: ((message: EventMessage) => void) | undefined;
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       send = (message) => emit(handlers, message);
-      const events: EventMessage[] = [
-        {
-          kind: "init",
-          ts: 1,
-          init: { sessionID: "same", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
-        },
-        { kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } },
-        { kind: "text", ts: 3, text: { text: "Original response" } },
-        {
-          kind: "result",
-          ts: 4,
-          result: {
-            subtype: "success",
-            result: "",
-            isError: false,
-            numTurns: 1,
-            totalCostUSD: 0,
-            duration: 0,
-            durationAPI: 0,
-            usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheCreationInputTokens: 0,
-              cacheReadInputTokens: 0,
-              reportedModel: "m",
-            },
-          },
-        },
-        {
-          kind: "system",
-          ts: 5,
-          system: { subtype: "compact_boundary", contextTokensBefore: 128_000, contextTokensAfter: 20_000 },
-        },
-        { kind: "skillLoad", ts: 6, skillLoad: { skill: "quality", path: "/b/SKILL.md" } },
-        { kind: "text", ts: 7, text: { text: "First compacted response" } },
-        {
-          kind: "result",
-          ts: 8,
-          result: {
-            subtype: "success",
-            result: "",
-            isError: false,
-            numTurns: 1,
-            totalCostUSD: 0,
-            duration: 0,
-            durationAPI: 0,
-            usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheCreationInputTokens: 0,
-              cacheReadInputTokens: 0,
-              reportedModel: "m",
-            },
-          },
-        },
-        { kind: "text", ts: 9, text: { text: "Second compacted response" } },
-        {
-          kind: "result",
-          ts: 10,
-          result: {
-            subtype: "success",
-            result: "",
-            isError: false,
-            numTurns: 2,
-            totalCostUSD: 0,
-            duration: 0,
-            durationAPI: 0,
-            usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheCreationInputTokens: 0,
-              cacheReadInputTokens: 0,
-              reportedModel: "m",
-            },
-          },
-        },
-      ];
-      for (const event of events) emit(handlers, event);
-      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+      emit(handlers, {
+        kind: "init",
+        ts: 1,
+        init: { sessionID: "same", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+      });
+      emit(handlers, { kind: "text", ts: 2, text: { text: "First response" } });
+      emit(handlers, resultEvent(3));
+      return { close: vi.fn() } as unknown as EventSource;
     });
-    await renderTaskDetail();
-    const user = userEvent.setup();
-    expect(screen.queryByText(/Conversation compacted/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
-    expect(screen.getByTestId("session-invocation-dialog")).toHaveTextContent("128kt → 20kt tokens");
-    await user.click(screen.getByRole("button", { name: "Close session details" }));
-    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
-    expect(screen.queryByText(/Conversation compacted/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
-    await user.click(screen.getByRole("button", { name: /^1 message/ }));
-    expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
+    await renderTaskDetail({ taskId: "boundary-contract" });
+    const first = screen.getByText("First response", { exact: true });
     send?.({
       kind: "init",
-      ts: 11,
+      ts: 4,
       init: { sessionID: "same", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
     });
-    expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
-    send?.({ kind: "system", ts: 12, system: { subtype: "compact_boundary" } });
-    send?.({ kind: "text", ts: 13, text: { text: "Live response after second compaction" } });
-    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
-    const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
-    expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
-    const first = screen.getByText("First compacted response", { exact: true });
-    const second = screen.getByText("Second compacted response", { exact: true });
-    assert.ok(strips[0] !== undefined);
-    expect(strips[0].compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    assert.ok(strips[1] !== undefined);
-    expect(second.compareDocumentPosition(strips[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(
-      strips[1].compareDocumentPosition(
-        await screen.findByText("Live response after second compaction", { exact: true }),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(screen.getByText("First response", { exact: true })).toBe(first);
+    send?.({ kind: "system", ts: 5, system: { subtype: "compact_boundary" } });
+    send?.({ kind: "text", ts: 6, text: { text: "Current response" } });
+    send?.(resultEvent(7));
+    await screen.findByText("Current response", { exact: true });
+    expect(screen.queryByText("First response", { exact: true })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+    await user.click(await screen.findByRole("button", { name: /^1 message/ }));
+    expect(await screen.findByText("First response", { exact: true })).toBeVisible();
   });
 
   it("copies only the selected fenced code block", async () => {
@@ -2553,3 +2472,208 @@ describe("streamed conversation", () => {
     expect(getByText("Fix the login bug")).toBeInTheDocument();
   });
 });
+
+it("shows a carried input's server-calculated wait without loading the previous result", async () => {
+  const events: EventMessage[] = [
+    {
+      kind: "init",
+      ts: 1,
+      init: { sessionID: "wait", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+    },
+    resultEvent(1000),
+    { kind: "userInput", ts: 5000, userInput: { text: "Carried continuation" } },
+    { kind: "system", ts: 6000, system: { subtype: "compact_boundary" } },
+    { kind: "text", ts: 7000, text: { text: "Current reply" } },
+    resultEvent(8000),
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    fixtureHistoryResponse(
+      String(input),
+      events.map((message, index) => ({ recordID: index + 1, index: 0, message })),
+      "",
+    ),
+  );
+  await renderTaskDetail({ taskId: "carried-wait" });
+  expect(screen.getByText("wait 0:04")).toBeInTheDocument();
+  expect(screen.getByText("Current reply")).toBeInTheDocument();
+});
+
+it("cancels a gated archived body when collapsed and keeps the current DOM mounted", async () => {
+  const events: HistoryEvent[] = [
+    {
+      recordID: 1,
+      index: 0,
+      message: {
+        kind: "init",
+        ts: 1,
+        init: { sessionID: "first", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+      },
+    },
+    { recordID: 2, index: 0, message: { kind: "text", ts: 2, text: { text: "Never mounted archive" } } },
+    { recordID: 3, index: 0, message: resultEvent(3) },
+    { recordID: 4, index: 0, message: { kind: "system", ts: 4, system: { subtype: "compact_boundary" } } },
+    { recordID: 5, index: 0, message: { kind: "text", ts: 5, text: { text: "Stable current response" } } },
+    { recordID: 6, index: 0, message: resultEvent(6) },
+  ];
+  let release: (response: Response) => void = () => {};
+  let signal: AbortSignal | null = null;
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    if (String(input).endsWith("/slice/1/0/3/0")) {
+      signal = init?.signal ?? null;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return Promise.resolve(fixtureHistoryResponse(String(input), events, ""));
+  });
+  const view = await renderTaskDetail({ taskId: "archive-cancellation" });
+  const current = screen.getByText("Stable current response");
+  const header = screen.getByRole("button", { name: /^Compacted session/ });
+  const user = userEvent.setup();
+  await user.click(header);
+  await waitFor(() => assert.ok(signal));
+  await user.click(header);
+  assert.equal((signal as AbortSignal | null)?.aborted, true);
+  release(historyResponse(events.slice(0, 3)));
+  expect(screen.queryByText("Never mounted archive")).not.toBeInTheDocument();
+  expect(screen.getByText("Stable current response")).toBe(current);
+  expect(screen.getByRole("button", { name: /^Compacted session/ })).toBe(header);
+  view.unmount();
+});
+
+it("keeps an open cross-context child focused when it completes, archiving it on close", async () => {
+  let send: ((message: EventMessage) => void) | undefined;
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    send = (message) => emit(handlers, message);
+    for (const message of [
+      {
+        kind: "init",
+        ts: 1,
+        init: { sessionID: "spanning", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+      },
+      {
+        kind: "nativeSubagent",
+        ts: 1000,
+        nativeSubagent: { id: "spanning-child", label: "Spanning review", status: "running" },
+      },
+      { kind: "text", ts: 1500, source: { agentID: "spanning-child" }, text: { text: "Old child output" } },
+      resultEvent(2000),
+      { kind: "system", ts: 3000, system: { subtype: "compact_boundary" } },
+      { kind: "text", ts: 4000, text: { text: "Current conversation" } },
+    ] satisfies EventMessage[])
+      emit(handlers, message);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  await renderTaskDetail({ taskId: "spanning-child-focus" });
+  const card = screen.getByTestId("native-subagent-card");
+  const summary = card.querySelector("summary");
+  assert.ok(summary);
+  const user = userEvent.setup();
+  await user.click(summary);
+  await screen.findByText("Old child output");
+  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+  summary.focus();
+  send?.({
+    kind: "nativeSubagent",
+    ts: 5000,
+    nativeSubagent: { id: "spanning-child", status: "completed", result: "Review complete" },
+  });
+  await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+  expect(screen.getByTestId("native-subagent-card")).toBe(card);
+  expect(card).toHaveAttribute("open");
+  expect(summary).toHaveFocus();
+  await user.click(summary);
+  await waitFor(() => expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1));
+  expect(screen.getByTestId("native-subagent-card")).not.toBe(card);
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Compacted session/ })).toHaveFocus());
+  expect(screen.getByTestId("native-subagent-card")).toHaveTextContent("Completed");
+});
+
+it("keeps completed background work in its origin section across equal-time compaction", async () => {
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    for (const message of [
+      {
+        kind: "init",
+        ts: 1000,
+        init: { sessionID: "a", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+      },
+      {
+        kind: "backgroundCommand",
+        ts: 1000,
+        backgroundCommand: { id: "origin-shell", label: "Old shell", status: "running" },
+      },
+      resultEvent(1000),
+      { kind: "system", ts: 1000, system: { subtype: "compact_boundary" } },
+      { kind: "backgroundCommand", ts: 2000, backgroundCommand: { id: "origin-shell", status: "completed" } },
+      { kind: "text", ts: 2000, text: { text: "Current context" } },
+    ] satisfies EventMessage[])
+      emit(handlers, message);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  await renderTaskDetail({ taskId: "background-origin" });
+  expect(screen.queryByTestId("background-command-card")).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: /^Compacted session/ }));
+  expect(await screen.findByTestId("background-command-card")).toHaveTextContent("Old shell");
+});
+
+for (const boundary of ["compaction", "changed init"]) {
+  it(`keeps carried native and background work current after ${boundary}`, async () => {
+    let send: ((message: EventMessage) => void) | undefined;
+    const init = (sessionID: string): EventMessage => ({
+      kind: "init",
+      ts: 1000,
+      init: { sessionID, reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+    });
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      for (const message of [
+        init("one"),
+        { kind: "text", ts: 1000, text: { text: "First turn" } },
+        resultEvent(1000),
+        { kind: "userInput", ts: 1000, userInput: { text: "Unfinished turn" } },
+        {
+          kind: "nativeSubagent",
+          ts: 1000,
+          nativeSubagent: { id: "carried-child", label: "Carried child", status: "running" },
+        },
+        { kind: "text", ts: 1000, source: { agentID: "carried-child" }, text: { text: "Carried child transcript" } },
+        {
+          kind: "backgroundCommand",
+          ts: 1000,
+          backgroundCommand: { id: "carried-shell", label: "Carried shell", status: "running" },
+        },
+      ] satisfies EventMessage[])
+        emit(handlers, message);
+      return { close: vi.fn() } as unknown as EventSource;
+    });
+    await renderTaskDetail({ taskId: `carried-${boundary}` });
+    const card = screen.getByTestId("native-subagent-card");
+    const summary = card.querySelector("summary");
+    assert.ok(summary);
+    const user = userEvent.setup();
+    await user.click(summary);
+    await screen.findByText("Carried child transcript");
+    summary.focus();
+    send?.(
+      boundary === "compaction" ? { kind: "system", ts: 1000, system: { subtype: "compact_boundary" } } : init("two"),
+    );
+    send?.({ kind: "text", ts: 1000, text: { text: "Second turn" } });
+    send?.(resultEvent(1000));
+    send?.({ kind: "nativeSubagent", ts: 1000, nativeSubagent: { id: "carried-child", status: "completed" } });
+    send?.({ kind: "backgroundCommand", ts: 1000, backgroundCommand: { id: "carried-shell", status: "completed" } });
+    await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+    expect(screen.getByTestId("native-subagent-card")).toBe(card);
+    expect(summary).toHaveFocus();
+    const archive = screen.getByTestId("history-section");
+    const archived = within(archive).getByRole("button", { name: /^Compacted session/ });
+    await user.click(archived);
+    expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1);
+    expect(screen.getAllByTestId("background-command-card")).toHaveLength(1);
+    expect(within(archive).queryByTestId("native-subagent-card")).not.toBeInTheDocument();
+    expect(within(archive).queryByTestId("background-command-card")).not.toBeInTheDocument();
+    await user.click(summary);
+    expect(screen.getByTestId("native-subagent-card")).toBe(card);
+    expect(card).not.toHaveAttribute("open");
+    expect(summary).toHaveFocus();
+  });
+}

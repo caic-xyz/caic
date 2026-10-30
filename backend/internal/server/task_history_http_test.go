@@ -68,7 +68,7 @@ func TestTaskHistoryHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		release()
-		if got := historyRequest(t, s, b.ResourceBase+"/chunks/2/2", ""); got.Code != http.StatusBadRequest {
+		if got := historyRequest(t, s, b.ResourceBase+"/slice/2/99/2/99", ""); got.Code != http.StatusBadRequest {
 			t.Fatalf("unaligned chunk: %d %s", got.Code, got.Body)
 		}
 		owner.invalidate(entry, source)
@@ -76,23 +76,144 @@ func TestTaskHistoryHTTP(t *testing.T) {
 			t.Fatalf("malformed request retained its source lease: %v", err)
 		}
 	})
-	t.Run("bootstrap", func(t *testing.T) {
+	t.Run("section manifest and exact slices", func(t *testing.T) {
 		t.Parallel()
-		s, tk, _ := historyHTTPFixture(t)
-		w := httptest.NewRecorder()
-		s.taskHandlers.routes().ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/tasks/"+tk.ID.String()+"/history/bootstrap", http.NoBody))
+		s, tk, path := historyHTTPFixture(t)
+		appendHistory(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]}}}`)
+		w := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/manifest", "")
 		if w.Code != http.StatusOK {
-			t.Fatalf("bootstrap status %d: %s", w.Code, w.Body)
+			t.Fatalf("manifest %d: %s", w.Code, w.Body)
 		}
-		var b map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil {
+		var manifest v1.HistoryManifest
+		if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil {
 			t.Fatal(err)
 		}
-		if b["through"] != float64(2) || b["recordsPerChunk"] != float64(256) {
-			t.Fatalf("invalid discovery: %s", w.Body)
+		if manifest.Bootstrap.Through != 3 || manifest.Bootstrap.RecordsPerChunk != 256 || len(manifest.Sections) != 1 || manifest.Sections[0].TextCount != 3 || manifest.Sections[0].Body == nil {
+			t.Fatalf("manifest = %#v", manifest)
 		}
-		if _, ok := b["messages"]; ok {
-			t.Fatal("bootstrap retransmits history")
+		target := manifest.Bootstrap.ResourceBase + "/slice/3/1/3/1"
+		body := historyRequest(t, s, target, "")
+		if body.Code != http.StatusOK || body.Header().Get("Cache-Control") != "private, max-age=31536000, immutable" {
+			t.Fatalf("slice %d: %s", body.Code, body.Body)
+		}
+		var events []v1.HistoryEvent
+		if err := json.Unmarshal(body.Body.Bytes(), &events); err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 1 || events[0].Message.Text == nil || events[0].Message.Text.Text != "two" {
+			t.Fatalf("slice = %#v", events)
+		}
+		appendHistory(t, path, `{"t":"agent","ts":3.000,"msg":{"type":"unknown_history_record"}}`)
+		paged := historyRequest(t, s, manifest.Bootstrap.ResourceBase+"/slice/3/1/4/end", "")
+		if paged.Code != http.StatusOK {
+			t.Fatalf("record-end page %d: %s", paged.Code, paged.Body)
+		}
+		if err := json.Unmarshal(paged.Body.Bytes(), &events); err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 1 || events[0].Message.Text == nil || events[0].Message.Text.Text != "two" {
+			t.Fatalf("record-end page = %#v", events)
+		}
+		emptyPage := historyRequest(t, s, manifest.Bootstrap.ResourceBase+"/slice/4/0/4/end", "")
+		if emptyPage.Code != http.StatusOK {
+			t.Fatalf("outputless first record page %d: %s", emptyPage.Code, emptyPage.Body)
+		}
+		var emptyEvents []v1.HistoryEvent
+		if err := json.Unmarshal(emptyPage.Body.Bytes(), &emptyEvents); err != nil {
+			t.Fatal(err)
+		}
+		if len(emptyEvents) != 0 {
+			t.Fatalf("outputless page = %#v", emptyEvents)
+		}
+		appendHistory(t, path, `{"t":"agent","ts":4.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"later context"}]}}}`)
+		historyBootstrap(t, s, tk, "")
+		again := historyRequest(t, s, manifest.Bootstrap.ResourceBase+"/slice/3/1/4/end", "")
+		if again.Code != http.StatusOK || !bytes.Equal(paged.Body.Bytes(), again.Body.Bytes()) {
+			t.Fatal("finite record-end page changed after append")
+		}
+		for _, suffix := range []string{"/slice/3/2/3/2", "/slice/3/1/3/0", "/slice/03/0/3/1", "/slice/3/01/3/1", "/slice/3/0/3/4294967296", "/slice/3/0/3/4294967295", "/slice/3/end/3/end", "/slice/3/0/3/END", "/slice/3/0/3/endx"} {
+			bad := historyRequest(t, s, manifest.Bootstrap.ResourceBase+suffix, "")
+			if bad.Code != http.StatusBadRequest || bad.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("invalid slice %s = %d %s", suffix, bad.Code, bad.Body)
+			}
+		}
+		other := historyRequest(t, s, target, "other-account")
+		if other.Code != http.StatusForbidden {
+			t.Fatalf("cross-account slice = %d", other.Code)
+		}
+	})
+	t.Run("finite native activity body", func(t *testing.T) {
+		t.Parallel()
+		s, tk, path := historyHTTPFixture(t)
+		appendHistory(t, path, `{"t":"agent","ts":1.500,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Native child","prompt":"Private child prompt","subagent_type":"general-purpose"}}]}}}`)
+		appendHistory(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"system","subtype":"task_started","task_id":"child","tool_use_id":"spawn","task_type":"local_agent","description":"Native child"}}`)
+		appendHistory(t, path, `{"t":"agent","ts":3.000,"msg":{"type":"assistant","parent_tool_use_id":"spawn","message":{"content":[{"type":"text","text":"child body"},{"type":"text","text":"child tail"}]}}}`)
+		b := historyBootstrap(t, s, tk, "")
+		target := b.ResourceBase + "/activity/nativeSubagent/claude:task:child/5"
+		body := historyRequest(t, s, target, "")
+		if body.Code != http.StatusOK {
+			t.Fatalf("activity %d: %s", body.Code, body.Body)
+		}
+		var events []v1.HistoryEvent
+		if err := json.Unmarshal(body.Body.Bytes(), &events); err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 3 || events[0].Message.NativeSubagent == nil || events[1].Message.Text == nil || events[1].Message.Text.Text != "child body" {
+			t.Fatalf("activity events = %#v", events)
+		}
+		suffixTarget := target + "?afterRecordID=5&afterIndex=0"
+		suffix := historyRequest(t, s, suffixTarget, "")
+		var tail []v1.HistoryEvent
+		if err := json.Unmarshal(suffix.Body.Bytes(), &tail); err != nil {
+			t.Fatal(err)
+		}
+		if suffix.Code != http.StatusOK || len(tail) != 1 || tail[0].Index != 1 || tail[0].Message.Text.Text != "child tail" {
+			t.Fatalf("same-record suffix = %d %#v", suffix.Code, tail)
+		}
+		if suffix.Header().Get("ETag") == body.Header().Get("ETag") {
+			t.Fatal("full and suffix resources share ETag")
+		}
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, strings.TrimPrefix(suffixTarget, "/api/caic/v1"), nil)
+		r.Header.Set("If-None-Match", body.Header().Get("ETag"))
+		conditional := httptest.NewRecorder()
+		s.taskHandlers.routes().ServeHTTP(conditional, r)
+		if conditional.Code != http.StatusOK {
+			t.Fatalf("full ETag incorrectly validated suffix: %d", conditional.Code)
+		}
+		noop := historyRequest(t, s, target+"?afterRecordID=5&afterIndex=4294967295", "")
+		if noop.Code != http.StatusOK || json.Unmarshal(noop.Body.Bytes(), &tail) != nil || len(tail) != 0 {
+			t.Fatalf("record-end suffix = %d %s", noop.Code, noop.Body)
+		}
+		for _, query := range []string{"?afterRecordID=4", "?afterIndex=0", "?afterRecordID=6&afterIndex=0", "?afterRecordID=5&afterIndex=00", "?afterRecordID=5&afterIndex=%2B0", "?afterRecordID=5&afterIndex=4294967296"} {
+			bad := historyRequest(t, s, target+query, "")
+			if bad.Code != http.StatusBadRequest {
+				t.Fatalf("invalid suffix %s = %d", query, bad.Code)
+			}
+		}
+		assertBodyThrough := func(want uint64) {
+			response := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/manifest", "")
+			var manifest v1.HistoryManifest
+			if err := json.Unmarshal(response.Body.Bytes(), &manifest); err != nil {
+				t.Fatal(err)
+			}
+			for _, activity := range manifest.Metadata.Activities {
+				if activity.ID == "claude:task:child" {
+					if activity.BodyThrough != want {
+						t.Fatalf("actor cache bound = %d, want %d", activity.BodyThrough, want)
+					}
+					return
+				}
+			}
+			t.Fatal("child missing from manifest")
+		}
+		assertBodyThrough(5)
+		appendHistory(t, path, `{"t":"agent","ts":3.500,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"unrelated root activity"}]}}}`)
+		assertBodyThrough(5)
+		appendHistory(t, path, `{"t":"agent","ts":4.000,"msg":{"type":"system","subtype":"task_started","task_id":"other-child","tool_use_id":"spawn","task_type":"local_agent"}}`)
+		assertBodyThrough(7)
+		again := historyRequest(t, s, target, "")
+		if again.Code != http.StatusOK || !bytes.Equal(body.Body.Bytes(), again.Body.Bytes()) {
+			t.Fatalf("future correlation mutated finite resource: %d %s", again.Code, again.Body)
 		}
 	})
 }
@@ -107,15 +228,15 @@ func historyRequest(t testing.TB, s *testRouter, target, user string) *httptest.
 	return w
 }
 func historyBootstrap(t testing.TB, s *testRouter, tk *task.Task, user string) v1.HistoryBootstrap {
-	w := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/bootstrap", user)
+	w := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/manifest", user)
 	if w.Code != 200 {
 		t.Fatalf("bootstrap %d: %s", w.Code, w.Body)
 	}
-	var b v1.HistoryBootstrap
-	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil {
+	var manifest v1.HistoryManifest
+	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	return b
+	return manifest.Bootstrap
 }
 func appendHistory(t testing.TB, path, line string) {
 	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_WRONLY, 0)
@@ -166,7 +287,7 @@ func TestHistoryResources(t *testing.T) {
 		if w.Code != 304 || w.Body.Len() != 0 {
 			t.Fatalf("revalidation %d: %s", w.Code, w.Body)
 		}
-		failed := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/bootstrap", "")
+		failed := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/manifest", "")
 		if failed.Code != 500 || failed.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("projection failure cached: %d %v", failed.Code, failed.Header())
 		}
@@ -190,7 +311,7 @@ func TestHistoryResources(t *testing.T) {
 			t.Fatalf("cross-account resource %d %s", w.Code, w.Body)
 		}
 		tk.OwnerID = "alice"
-		for _, target := range []string{"/tasks/" + tk.ID.String() + "/history/bootstrap", recentHistoryURL(&b), "/tasks/" + tk.ID.String() + "/history/events?cursor=" + b.Cursor, "/tasks/" + tk.ID.String() + "/history/costs"} {
+		for _, target := range []string{"/tasks/" + tk.ID.String() + "/history/manifest", recentHistoryURL(&b), "/tasks/" + tk.ID.String() + "/history/events?cursor=" + b.Cursor, "/tasks/" + tk.ID.String() + "/history/costs"} {
 			w := historyRequest(t, s, target, "bob")
 			if w.Code != 403 || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("unauthorized %s: %d", target, w.Code)
@@ -201,13 +322,13 @@ func TestHistoryResources(t *testing.T) {
 		t.Parallel()
 		s, tk, _ := historyHTTPFixture(t)
 		b := historyBootstrap(t, s, tk, "")
-		for _, suffix := range []string{"/chunks/0/1", "/chunks/2/2", "/chunks/1/257", "/chunks/01/2"} {
+		for _, suffix := range []string{"/slice/0/0/1/end", "/slice/2/99/2/99", "/slice/01/0/2/end"} {
 			w := historyRequest(t, s, b.ResourceBase+suffix, "")
 			if w.Code != 400 || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("bad range %s: %d", suffix, w.Code)
 			}
 		}
-		for _, target := range []string{strings.Replace(recentHistoryURL(&b), "/"+b.Generation+"/", "/expired/", 1), strings.Replace(recentHistoryURL(&b), "/"+historyProjectionVersion+"/"+b.Generation+"/", "/99/"+b.Generation+"/", 1), b.ResourceBase + "/chunks/1/3", "/tasks/" + tk.ID.String() + "/history/costs?generation=expired&through=2"} {
+		for _, target := range []string{strings.Replace(recentHistoryURL(&b), "/"+b.Generation+"/", "/expired/", 1), strings.Replace(recentHistoryURL(&b), "/"+historyProjectionVersion+"/"+b.Generation+"/", "/99/"+b.Generation+"/", 1), b.ResourceBase + "/slice/1/0/3/end", "/tasks/" + tk.ID.String() + "/history/costs?generation=expired&through=2"} {
 			w := historyRequest(t, s, target, "")
 			if w.Code != 409 || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("stale %s: %d %s", target, w.Code, w.Body)
@@ -273,6 +394,15 @@ func TestHistoryResources(t *testing.T) {
 type historyTestFrame struct{ name, id, data string }
 
 func readHistoryFrame(t testing.TB, r *bufio.Reader) historyTestFrame {
+	for {
+		f := readHistoryFrameIncludingMetadata(t, r)
+		if f.name != "manifest" {
+			return f
+		}
+	}
+}
+
+func readHistoryFrameIncludingMetadata(t testing.TB, r *bufio.Reader) historyTestFrame {
 	var f historyTestFrame
 	for {
 		line, err := r.ReadString('\n')
@@ -401,6 +531,28 @@ func TestTaskResourceSnapshot(t *testing.T) {
 
 func TestHistoryStream(t *testing.T) {
 	t.Parallel()
+	t.Run("coherent compact metadata after checkpoint", func(t *testing.T) {
+		t.Parallel()
+		s, tk, path := historyHTTPFixture(t)
+		b := historyBootstrap(t, s, tk, "")
+		appendHistory(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"result","subtype":"success","duration_ms":1000,"usage":{"input_tokens":10}}}`)
+		r, cancel := historyStream(t, s, tk, b.Cursor, "")
+		assertStatsSnapshot(t, r)
+		output := readHistoryFrameIncludingMetadata(t, r)
+		checkpoint := readHistoryFrameIncludingMetadata(t, r)
+		metadata := readHistoryFrameIncludingMetadata(t, r)
+		if output.name != "" || checkpoint.name != "checkpoint" || metadata.name != "manifest" || metadata.id != "" {
+			t.Fatalf("handoff frames = %#v %#v %#v", output, checkpoint, metadata)
+		}
+		var manifest v1.HistoryManifest
+		if err := json.Unmarshal([]byte(metadata.data), &manifest); err != nil {
+			t.Fatal(err)
+		}
+		if manifest.Bootstrap.Cursor != checkpoint.id || manifest.Bootstrap.Through != 3 || len(manifest.Metadata.Turns) != 1 {
+			t.Fatalf("manifest = %#v", manifest)
+		}
+		cancel()
+	})
 	t.Run("appends after bootstrap, output resume, zero records and stats", func(t *testing.T) {
 		t.Parallel()
 		s, tk, p := historyHTTPFixture(t)
@@ -456,7 +608,7 @@ func TestHistoryStream(t *testing.T) {
 			s, tk, _ := historyHTTPFixture(t)
 			r, _ := historyStream(t, s, tk, cursor, "")
 			f := readHistoryFrame(t, r)
-			if f.name != "reset" || f.id != "" || !strings.Contains(f.data, "history/bootstrap") {
+			if f.name != "reset" || f.id != "" || !strings.Contains(f.data, "history/manifest") {
 				t.Fatalf("stale cursor: %+v", f)
 			}
 		}
@@ -527,7 +679,7 @@ func TestHistorySharedRecovery(t *testing.T) {
 	var wg sync.WaitGroup
 	responses := make(chan *httptest.ResponseRecorder, 8)
 	for range 8 {
-		wg.Go(func() { responses <- historyRequest(t, s, base+"/chunks/769/1024", "") })
+		wg.Go(func() { responses <- historyRequest(t, s, base+"/slice/769/0/1024/end", "") })
 	}
 	wg.Wait()
 	close(responses)
@@ -547,7 +699,7 @@ func TestHistorySharedRecovery(t *testing.T) {
 		t.Fatalf("concurrent requests repeated prefix parsing: %d calls", calls.Load())
 	}
 	appendHistory(t, p, historyTextRecord)
-	if w := historyRequest(t, s, base+"/chunks/1/256", ""); w.Code != 200 {
+	if w := historyRequest(t, s, base+"/slice/1/0/256/end", ""); w.Code != 200 {
 		t.Fatalf("old direct lookup: %d", w.Code)
 	}
 	if calls.Load() != 1024 {
@@ -572,7 +724,7 @@ func BenchmarkHistoryHTTP(b *testing.B) {
 				b.Fatal(err)
 			}
 			bootstrap := historyBootstrap(b, s, tk, "")
-			target := bootstrap.ResourceBase + "/chunks/1/256"
+			target := bootstrap.ResourceBase + "/slice/1/0/256/end"
 			handler := s.taskHandlers.routes()
 			b.Run("warm-old-chunk", func(b *testing.B) {
 				b.ReportAllocs()
@@ -607,7 +759,7 @@ func BenchmarkHistorySwitchViews(b *testing.B) {
 			}
 			_ = historyBootstrap(b, s, tk, "")
 			for _, target := range []struct{ name, url string }{
-				{"bootstrap", "/tasks/" + tk.ID.String() + "/history/bootstrap"},
+				{"bootstrap", "/tasks/" + tk.ID.String() + "/history/manifest"},
 			} {
 				b.Run(target.name, func(b *testing.B) {
 					before := price.calls.Load()
@@ -687,11 +839,12 @@ func TestHistoryBootstrapAppend(t *testing.T) {
 	t.Parallel()
 	s, tk, p := historyHTTPFixture(t)
 	w := &historyAppendWriter{ResponseRecorder: httptest.NewRecorder(), append: func() { appendHistory(t, p, historyTextRecord) }}
-	s.taskHandlers.routes().ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/tasks/"+tk.ID.String()+"/history/bootstrap", nil))
-	var b v1.HistoryBootstrap
-	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil {
+	s.taskHandlers.routes().ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/tasks/"+tk.ID.String()+"/history/manifest", nil))
+	var manifest v1.HistoryManifest
+	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil {
 		t.Fatal(err)
 	}
+	b := manifest.Bootstrap
 	if b.Through != 2 {
 		t.Fatal("bootstrap snapshot changed while writing response")
 	}
@@ -759,7 +912,7 @@ func TestHistoryRecoveryCancellation(t *testing.T) {
 	}}
 	// Block the sole native parse while another request cancels against its gate.
 	// The canceled follower must not invalidate shared completed/in-flight work.
-	bURL := "/tasks/" + tk.ID.String() + "/history/bootstrap"
+	bURL := "/tasks/" + tk.ID.String() + "/history/manifest"
 	result := make(chan *httptest.ResponseRecorder, 1)
 	var wg sync.WaitGroup
 	t.Cleanup(wg.Wait)
@@ -798,7 +951,7 @@ func TestHistoryRecoveryCancellation(t *testing.T) {
 
 func recentHistoryURL(b *v1.HistoryBootstrap) string {
 	first := ((b.Through-1)/b.RecordsPerChunk)*b.RecordsPerChunk + 1
-	return fmt.Sprintf("%s/chunks/%d/%d", b.ResourceBase, first, b.Through)
+	return fmt.Sprintf("%s/slice/%d/0/%d/end", b.ResourceBase, first, b.Through)
 }
 
 func TestHistoryCompressionAndRevival(t *testing.T) {
@@ -934,20 +1087,21 @@ func BenchmarkHistoryTaskOpen(b *testing.B) {
 			entry.LogPath.Set(path)
 			handler := s.taskHandlers.routes()
 			open := func(cold bool) int {
-				response := historyRequest(b, s, "/tasks/"+tk.ID.String()+"/history/bootstrap", "")
+				response := historyRequest(b, s, "/tasks/"+tk.ID.String()+"/history/manifest", "")
 				if response.Code != http.StatusOK {
 					b.Fatal(response.Code, response.Body.String())
 				}
-				var bootstrap v1.HistoryBootstrap
-				if err := json.Unmarshal(response.Body.Bytes(), &bootstrap); err != nil {
+				var manifest v1.HistoryManifest
+				if err := json.Unmarshal(response.Body.Bytes(), &manifest); err != nil {
 					b.Fatal(err)
 				}
+				bootstrap := manifest.Bootstrap
 				total := response.Body.Len()
 				if cold {
 					for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
 						last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
 						writer := &historyOpenWriter{header: make(http.Header)}
-						request := httptest.NewRequestWithContext(b.Context(), http.MethodGet, strings.TrimPrefix(fmt.Sprintf("%s/chunks/%d/%d", bootstrap.ResourceBase, first, last), "/api/caic/v1"), http.NoBody)
+						request := httptest.NewRequestWithContext(b.Context(), http.MethodGet, strings.TrimPrefix(fmt.Sprintf("%s/slice/%d/0/%d/end", bootstrap.ResourceBase, first, last), "/api/caic/v1"), http.NoBody)
 						handler.ServeHTTP(writer, request)
 						if writer.code != http.StatusOK {
 							b.Fatal(writer.code)

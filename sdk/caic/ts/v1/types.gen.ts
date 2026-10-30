@@ -2131,15 +2131,11 @@ export interface WebFetchResp {
 }
 
 /**
- * HistoryBootstrap is small revalidated discovery for task history. ResourceBase
- * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
- * for direct arithmetic access. Scope isolates the
- * authenticated account, including legacy shared tasks. Browser HTTP caching
- * owns storage/eviction; clients need no inactive decoded transcript cache.
- * Generation changes on server restart/task replacement. A stale reference
- * returns 409; bootstrap again and discard old cursor metadata.
- * For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
- * and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+ * HistoryBootstrap identifies the raw prefix captured with a HistoryManifest.
+ * ResourceBase scopes immutable resources to the account, projection version,
+ * and task generation. Generation changes on server restart/task replacement;
+ * a stale reference returns 409 and requires manifest rediscovery.
+ * RecordsPerChunk defines fixed raw-record page alignment for section slices.
  */
 export interface HistoryBootstrap {
   projectionVersion: string;
@@ -2149,6 +2145,25 @@ export interface HistoryBootstrap {
   through: number /* uint64 */;
   cursor: string;
   resourceBase: string;
+}
+
+/**
+ * HistoryPosition identifies one normalized output in a one-based physical raw
+ * record. Index is zero-based across every output of that record. Metadata and
+ * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ */
+export interface HistoryPosition {
+  recordID: number /* uint64 */;
+  index: number;
+}
+
+/**
+ * HistorySlice selects inclusive normalized positions, independently of raw
+ * chunk alignment. An absent slice denotes an empty section.
+ */
+export interface HistorySlice {
+  first: HistoryPosition;
+  last: HistoryPosition;
 }
 
 /**
@@ -2162,13 +2177,123 @@ export interface HistoryEvent {
 }
 
 /**
- * HistoryPosition identifies one normalized output in a one-based physical raw
- * record. Index is zero-based across every output of that record. Metadata and
- * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ * HistorySection describes one root context. Only the final section is current.
+ * Boundary and EndBoundary contain init/system metadata, never transcript text.
  */
-export interface HistoryPosition {
+export interface HistorySection {
+  id: string;
+  body?: HistorySlice;
+  boundary?: HistoryEvent;
+  endBoundary?: HistoryEvent;
+  reportedModel?: string;
+  turnCount: number /* int */;
+  textCount: number /* int */;
+  toolCount: number /* int */;
+  durationMs: number /* int64 */;
+  skills: EventSkillLoad[];
+}
+
+/**
+ * HistoryRoute is one authoritative delegation relation or namespace observation.
+ * An absent AgentID records a namespace that participates in ambiguity checks.
+ */
+export interface HistoryRoute {
+  toolUseID: string;
+  namespace: string;
+  agentID?: string;
+}
+
+/**
+ * HistoryTurn retains numeric invocation facts independently of transcript
+ * lifetime. SectionID associates the turn with its context. Pricing is obtained
+ * separately through getHistoryCosts using the embedded exact position.
+ */
+export interface HistoryTurn {
   recordID: number /* uint64 */;
   index: number;
+  sectionID: string;
+  at: ISOTimestamp;
+  model: string;
+  usage: EventUsage;
+  durationMs: number /* int64 */;
+  durationAPIMs: number /* int64 */;
+  waitInput?: HistoryPosition;
+  waitMs?: number /* int64 */;
+  changeStat?: EventChangeStat;
+  cost?: EventCost;
+}
+
+/** HistoryToolTiming aggregates completed tools across root and child actors. */
+export interface HistoryToolTiming {
+  name: string;
+  calls: number /* int */;
+  durationMs: number /* int64 */;
+}
+
+/**
+ * HistoryActivity is payload-free lifecycle and routing state. Kind is
+ * nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
+ * are fetched through the finite activity resource only on disclosure.
+ * BodyThrough is a stable finite prefix containing all actor payload and
+ * ownership observations known at the manifest snapshot. Unrelated task
+ * records do not change it, allowing disclosures to reuse the HTTP cache.
+ * OwnershipThrough advances only for related routing/namespace observations;
+ * clients use it to distinguish ownership revisions from new actor output.
+ */
+export interface HistoryActivity {
+  kind: EventKind;
+  id: string;
+  /**
+   * SectionID identifies the body containing the earliest actual lifecycle or
+   * resolved transcript origin, including an unfinished turn carried forward.
+   */
+  sectionID: string;
+  source?: EventMessageSource;
+  toolUseID?: string;
+  scope?: EventNativeSubagentScope;
+  groupID?: string;
+  label?: string;
+  status: string;
+  background?: boolean;
+  startedAt?: ISOTimestamp;
+  endedAt?: ISOTimestamp;
+  anchorAt: ISOTimestamp;
+  first: HistoryPosition;
+  bodyThrough: number /* uint64 */;
+  ownershipThrough: number /* uint64 */;
+  exitCode?: number /* int */;
+  outputRef?: string;
+}
+
+/**
+ * HistoryMetadata contains compact task-wide facts needed without archived
+ * bodies. Setup bounds the separately disclosed, filtered getHistorySetup
+ * resource; it must not be fetched as an unfiltered slice. InitialInput
+ * identifies the first root input, permitting prompt deduplication by position.
+ */
+export interface HistoryMetadata {
+  /** RoutingRevision changes when earlier delegated ownership may have changed. */
+  routingRevision: number /* uint64 */;
+  routing: HistoryRoute[];
+  hasInitialPrompt: boolean;
+  setupEndedAt?: ISOTimestamp;
+  turns: HistoryTurn[];
+  tools: HistoryToolTiming[];
+  activities: HistoryActivity[];
+  initialInit?: HistoryEvent;
+  initialInput?: HistoryPosition;
+  setup?: HistorySlice;
+  todo?: EventTodo;
+}
+
+/**
+ * HistoryManifest discovers context sections without downloading their bodies.
+ * Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
+ */
+export interface HistoryManifest {
+  bootstrap: HistoryBootstrap;
+  sections: HistorySection[];
+  metadata: HistoryMetadata;
 }
 
 /**
@@ -2194,6 +2319,7 @@ export interface HistoryTurnEstimate {
  */
 export interface HistoryCheckpoint {
   cursor: string;
+  through: number /* uint64 */;
 }
 
 /**
@@ -2207,7 +2333,7 @@ export interface HistoryStats {
 
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
 export interface HistoryReset {
-  bootstrapURL: string;
+  manifestURL: string;
 }
 
 export interface ErrorDetails {

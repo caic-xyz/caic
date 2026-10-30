@@ -691,6 +691,7 @@ def emit_native_subagents_turn(turns: int) -> None:
                     "prompt": "Review authentication boundaries and regression coverage"
                     if visual
                     else "Tell a README joke",
+                    "tool_use_id": f"fake-native-{identity}",
                     "status": "running",
                 },
             }

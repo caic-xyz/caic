@@ -957,14 +957,6 @@ a.ciStatus:hover {
   border-left: 2px solid var(--color-border-light);
 }
 
-.sessionSkills {
-  padding: 0.5rem;
-}
-
-.sessionSkills .skills {
-  margin: 0;
-}
-
 /* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
 .sessionElided {
   display: flex;

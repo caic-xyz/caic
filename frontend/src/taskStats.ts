@@ -1,18 +1,11 @@
-// Inclusive task analytics with source-scoped tool timing and resource-counter rates.
+// Derives resource-counter rates and merges bounded task resource observations.
 
-import type { EventMessage, EventStats } from "@sdk/types.gen";
-
-import { toolIdentity, toolResultDurationMs } from "./grouping";
+import type { EventStats } from "@sdk/types.gen";
 
 export interface ToolTimingSummary {
   name: string;
   calls: number;
   durationMs: number;
-}
-
-interface ToolStart {
-  name: string;
-  ts: number;
 }
 
 export interface NetworkRateSample {
@@ -37,45 +30,6 @@ export function deriveNetworkRates(stats: readonly EventStats[]): NetworkRateSam
           : null,
     };
   });
-}
-
-export class ToolTimingTracker {
-  private starts = new Map<string, ToolStart>();
-  private totals = new Map<string, ToolTimingSummary>();
-  private summaries: ToolTimingSummary[] = [];
-  private dirty = false;
-
-  snapshot(): ToolTimingSummary[] {
-    if (this.dirty) {
-      this.summaries = Array.from(this.totals.values(), (summary) => ({ ...summary })).sort(
-        (a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name),
-      );
-      this.dirty = false;
-    }
-    return this.summaries;
-  }
-
-  append(event: EventMessage): boolean {
-    if (event.kind === "toolUse" && event.toolUse) {
-      this.starts.set(toolIdentity(event.source, event.toolUse.toolUseID), { name: event.toolUse.name, ts: event.ts });
-      return false;
-    }
-    if (event.kind !== "toolResult" || !event.toolResult) return false;
-
-    const key = toolIdentity(event.source, event.toolResult.toolUseID);
-    const start = this.starts.get(key);
-    if (!start) return false;
-    this.starts.delete(key);
-    const durationMs = toolResultDurationMs(event.toolResult, start.ts, event.ts);
-    if (durationMs === null) return false;
-
-    const summary = this.totals.get(start.name) ?? { name: start.name, calls: 0, durationMs: 0 };
-    summary.calls += 1;
-    summary.durationMs += durationMs;
-    this.totals.set(start.name, summary);
-    this.dirty = true;
-    return true;
-  }
 }
 
 // mergeStats keeps the newest revision of each timestamp in the bounded ring.

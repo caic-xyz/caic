@@ -4,8 +4,7 @@ import { createSignal, Show } from "solid-js";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
 
-import type { EventChangeStat } from "@sdk/types.gen";
-import type { TurnTiming } from "../timing";
+import type { EventChangeStat, HistoryTurn } from "@sdk/types.gen";
 import { formatTimingDuration } from "../timing";
 import ModalDialog from "./ModalDialog";
 import styles from "./TurnInvocationIcon.module.css";
@@ -32,11 +31,11 @@ function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
   return `${files} · +${stat.linesAdded} −${stat.linesDeleted}${binary}`;
 }
 
-export default function TurnInvocationIcon(props: { turn: TurnTiming; model: string | null }) {
+export default function TurnInvocationIcon(props: { turn: HistoryTurn; model: string | null }) {
   const [open, setOpen] = createSignal(false);
-  const result = () => props.turn.result;
+  const result = () => props.turn;
   const usage = () => result().usage;
-  const model = () => usage().reportedModel || props.turn.reportedModel || props.model;
+  const model = () => usage().reportedModel || props.turn.model || props.model;
 
   return (
     <>
@@ -75,15 +74,15 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
             </Show>
             <div>
               <dt>Turn time</dt>
-              <dd>{formatTimingDuration(result().duration * 1_000)}</dd>
+              <dd>{formatTimingDuration(result().durationMs)}</dd>
             </div>
-            <Show when={result().durationAPI > 0}>
+            <Show when={result().durationAPIMs > 0}>
               <div>
                 <dt>API time</dt>
-                <dd>{formatTimingDuration(result().durationAPI * 1_000)}</dd>
+                <dd>{formatTimingDuration(result().durationAPIMs)}</dd>
               </div>
             </Show>
-            <Show when={props.turn.waitMs !== null && props.turn.waitMs > 0}>
+            <Show when={(props.turn.waitMs ?? 0) > 0}>
               <div>
                 <dt>User wait</dt>
                 <dd>{formatTimingDuration(props.turn.waitMs ?? 0)}</dd>
@@ -140,7 +139,7 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
 }
 
 export function SessionInvocationIcon(props: {
-  turns: readonly TurnTiming[];
+  turns: readonly HistoryTurn[];
   model: string | null;
   compactionSummary: string;
 }) {
@@ -148,22 +147,22 @@ export function SessionInvocationIcon(props: {
   const totals = () =>
     props.turns.reduce(
       (total, turn) => {
-        const usage = turn.result.usage;
-        total.apiMs += turn.result.durationAPI * 1_000;
-        if (turn.result.cost) {
-          total.costUSD += turn.result.cost.usd;
-          if (turn.result.cost.source === "estimated") total.estimatedCost = true;
+        const usage = turn.usage;
+        total.apiMs += turn.durationAPIMs;
+        if (turn.cost) {
+          total.costUSD += turn.cost.usd;
+          if (turn.cost.source === "estimated") total.estimatedCost = true;
         } else {
           total.costKnown = false;
         }
-        total.durationMs += turn.result.duration * 1_000;
+        total.durationMs += turn.durationMs;
         total.inputTokens += usage.inputTokens;
         total.cacheWriteInputTokens += usage.cacheCreationInputTokens;
         total.cacheReadInputTokens += usage.cacheReadInputTokens;
         total.outputTokens += usage.outputTokens;
         total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
         total.userWaitMs += turn.waitMs ?? 0;
-        if (turn.changeStat !== null) {
+        if (turn.changeStat !== undefined) {
           total.changeStat.files += turn.changeStat.files;
           total.changeStat.linesAdded += turn.changeStat.linesAdded;
           total.changeStat.linesDeleted += turn.changeStat.linesDeleted;
@@ -195,12 +194,13 @@ export function SessionInvocationIcon(props: {
     Array.from(
       new Set(
         props.turns.flatMap((turn) => {
-          const model = turn.result.usage.reportedModel || turn.reportedModel || props.model;
+          const model = turn.usage.reportedModel || turn.model || props.model;
           return model ? [model] : [];
         }),
       ),
     );
-  const hasCompleteChangeStats = () => props.turns.length > 0 && props.turns.every((turn) => turn.changeStat !== null);
+  const hasCompleteChangeStats = () =>
+    props.turns.length > 0 && props.turns.every((turn) => turn.changeStat !== undefined);
 
   return (
     <>

@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -200,7 +201,7 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 
 func readHistoryRange(s *history.Source, ctx context.Context, snapshot history.Snapshot, first, last uint64) (string, error) {
 	var result strings.Builder
-	if err := s.WriteRange(ctx, snapshot, first, last, &result); err != nil {
+	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: history.Position{RecordID: first}, Last: history.Position{RecordID: last, Index: history.RecordEndIndex}}, &result); err != nil {
 		return "", err
 	}
 	return result.String(), nil

@@ -1,17 +1,11 @@
 // Tests for task turn durations and user-response wait derivation.
 
-import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
 import type { EventMessage } from "@sdk/types.gen";
 
-import {
-  deriveTaskTimings,
-  formatTimingDuration,
-  IncrementalEventTimingTracker,
-  IncrementalTaskTimingTracker,
-} from "./timing";
+import { formatTimingDuration, IncrementalEventTimingTracker, VisualTimingTracker } from "./timing";
 
 function result(ts: number, duration: number): EventMessage {
   return {
@@ -39,129 +33,6 @@ function result(ts: number, duration: number): EventMessage {
 function input(ts: number, text: string): EventMessage {
   return { kind: "userInput", ts, userInput: { text } };
 }
-
-describe("deriveTaskTimings", () => {
-  it("keeps child results and user inputs out of root waits and preceding timestamps", () => {
-    const source = { agentID: "native:child" };
-    const rootResult = result(1000, 1);
-    const rootInput = input(5000, "continue");
-    const timings = deriveTaskTimings([
-      rootResult,
-      { ...result(2000, 1), source },
-      { ...input(3000, "child continuation"), source },
-      rootInput,
-    ]);
-    expect(timings.turns).toHaveLength(1);
-    expect(timings.turns[0]?.waitMs).toBe(4000);
-    expect(timings.previousEventTs.get(rootInput)).toBe(1000);
-  });
-  it("associates each completed turn with its first following user response", () => {
-    const firstResult = result(10_000, 2);
-    const firstInput = input(25_500, "continue");
-    const secondResult = result(30_000, 3);
-    const secondInput = input(31_250, "again");
-
-    const timings = deriveTaskTimings([
-      input(1_000, "initial prompt"),
-      firstResult,
-      { kind: "system", ts: 12_000, system: { subtype: "idle" } },
-      firstInput,
-      secondResult,
-      secondInput,
-    ]);
-
-    expect(timings.turns.map((turn) => turn.waitMs)).toEqual([15_500, 1_250]);
-    expect(timings.userWaitMs.get(firstInput)).toBe(15_500);
-    expect(timings.userWaitMs.get(secondInput)).toBe(1_250);
-  });
-
-  it("tracks the previous visual event for single-event block durations", () => {
-    const initialInput = input(1_000, "initial prompt");
-    const nativeActivity: EventMessage = {
-      kind: "nativeSubagent",
-      ts: 2_200,
-      nativeSubagent: { id: "sub-1", status: "running", scope: "agent" },
-    };
-    const assistantText: EventMessage = { kind: "text", ts: 2_500, text: { text: "done" } };
-
-    const timings = deriveTaskTimings([
-      initialInput,
-      { kind: "system", ts: 2_000, system: { subtype: "idle" } },
-      nativeActivity,
-      assistantText,
-    ]);
-
-    expect(timings.previousEventTs.get(assistantText)).toBe(1_000);
-    expect(timings.previousEventTs.has(nativeActivity)).toBe(false);
-  });
-
-  it("leaves unfinished waits and initial prompts without a duration", () => {
-    const initialInput = input(1_000, "initial prompt");
-    const completed = result(2_000, 1);
-    const timings = deriveTaskTimings([initialInput, completed]);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].waitMs).toBeNull();
-    expect(timings.userWaitMs.has(initialInput)).toBe(false);
-  });
-
-  it("keeps the session-reported model when a result omits it", () => {
-    const completed = result(2_000, 1);
-    if (!completed.result) throw new Error("result fixture is missing payload");
-    completed.result.usage.reportedModel = "";
-
-    const timings = deriveTaskTimings([
-      {
-        kind: "init",
-        ts: 1_000,
-        init: {
-          reportedModel: "session-model",
-          agentVersion: "test",
-          sessionID: "session",
-          tools: [],
-          cwd: "",
-          harness: "test",
-        },
-      },
-      completed,
-    ]);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].reportedModel).toBe("session-model");
-  });
-
-  it("associates a completed snapshot's committed change with its turn", () => {
-    const completed = result(2_000, 1);
-    const changeStat = { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 1 };
-
-    const timings = deriveTaskTimings([
-      {
-        kind: "commitSnapshot",
-        ts: 1_000,
-        commitSnapshot: { baseline: true, repositoryCommits: [] },
-      },
-      completed,
-      { kind: "commitSnapshot", ts: 2_100, commitSnapshot: { repositoryCommits: [], changeStat } },
-    ]);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].changeStat).toEqual(changeStat);
-  });
-
-  it("does not present same-timestamp inputs as a measured wait", () => {
-    const userInput = input(1_000, "continue");
-    const timings = deriveTaskTimings([result(1_000, 1), userInput]);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].waitMs).toBeNull();
-    expect(timings.userWaitMs.has(userInput)).toBe(false);
-  });
-
-  it("consumes a completed turn only once", () => {
-    const firstInput = input(2_000, "first");
-    const duplicateInput = input(3_000, "duplicate");
-    const timings = deriveTaskTimings([result(1_000, 1), firstInput, duplicateInput]);
-
-    expect(timings.userWaitMs.get(firstInput)).toBe(1_000);
-    expect(timings.userWaitMs.has(duplicateInput)).toBe(false);
-  });
-});
 
 describe("IncrementalEventTimingTracker", () => {
   it("processes only appended events in a large streaming block", () => {
@@ -201,62 +72,34 @@ describe("IncrementalEventTimingTracker", () => {
   });
 });
 
-describe("IncrementalTaskTimingTracker", () => {
-  it("derives waits across appended batches", () => {
-    const tracker = new IncrementalTaskTimingTracker();
-    const messages = [input(1_000, "prompt"), result(5_000, 4)];
-
-    const trackerItem = tracker.derive(messages, false).turns[0];
-    assert.ok(trackerItem !== undefined);
-    expect(trackerItem.waitMs).toBeNull();
-    const response = input(8_500, "continue");
-    messages.push(response);
-    const timings = tracker.derive(messages, false);
-
-    expect(timings.turns).toHaveLength(1);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].waitMs).toBe(3_500);
-    expect(timings.userWaitMs.get(response)).toBe(3_500);
+describe("VisualTimingTracker", () => {
+  it("uses the numeric preceding context timestamp without fabricating an event", () => {
+    const event = input(5000, "carry");
+    const previous = new VisualTimingTracker().derive([event], true, 1000);
+    expect(previous.get(event)).toBe(1000);
   });
-
-  it("discards retained state when the timeline epoch resets", () => {
-    const tracker = new IncrementalTaskTimingTracker();
-    tracker.derive([result(1_000, 1), input(2_000, "old")], false);
-
-    const newResult = result(10_000, 2);
-    const timings = tracker.derive([newResult], true);
-
-    expect(timings.turns).toHaveLength(1);
-    assert.ok(timings.turns[0] !== undefined);
-    expect(timings.turns[0].event).toBe(newResult);
-    expect(timings.turns[0].waitMs).toBeNull();
-    expect(timings.userWaitMs.size).toBe(0);
-  });
-
-  it("processes only appended messages in a large replay", () => {
-    const tracker = new IncrementalTaskTimingTracker();
-    const messages = Array.from({ length: 65_000 }, (_, index): EventMessage => ({
-      kind: "system",
-      ts: index + 1,
-      system: { subtype: "idle" },
-    }));
-    messages[0] = input(1, "prompt");
-    messages[32_000] = result(32_001, 1);
-    messages[64_999] = input(65_000, "continue");
-
-    const trackerItem = tracker.derive(messages, false).turns[0];
-    assert.ok(trackerItem !== undefined);
-    expect(trackerItem.waitMs).toBe(32_999);
-
-    Object.defineProperty(messages[0], "ts", {
-      configurable: true,
+  it("skips child observations and only scans appended events", () => {
+    const tracker = new VisualTimingTracker();
+    const first = input(1000, "root");
+    const events: EventMessage[] = [first, { ...result(2000, 1), source: { agentID: "child" } }];
+    tracker.derive(events, false, 0);
+    Object.defineProperty(first, "ts", {
       get: () => {
-        throw new Error("retained message was rescanned");
+        throw new Error("rescanned prior event");
       },
     });
-    messages.push(input(70_000, "again"));
-
-    expect(tracker.derive(messages, false).turns).toHaveLength(1);
+    const next = input(3000, "next");
+    events.push(next);
+    expect(tracker.derive(events, false, 0).get(next)).toBe(1000);
+  });
+  it("drops preceding references on context replacement", () => {
+    const tracker = new VisualTimingTracker();
+    const prior = input(1000, "old");
+    tracker.derive([prior, result(2000, 1)], false, 0);
+    const next = input(10000, "new");
+    const values = tracker.derive([next], true, 9000);
+    expect(values.has(prior)).toBe(false);
+    expect(values.get(next)).toBe(9000);
   });
 });
 

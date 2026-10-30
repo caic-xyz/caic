@@ -507,8 +507,10 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.taskSvc.getTask))
 	m.HandleFunc("GET /tasks/{id}/info", handleWithTask(h, h.taskSvc.getTaskInfo))
 	hh := &historyHandlers{taskHandlers: h}
-	m.HandleFunc("GET /tasks/{id}/history/bootstrap", hh.handleHistoryBootstrap)
-	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/chunks/{first}/{last}", hh.handleHistoryChunk)
+	m.HandleFunc("GET /tasks/{id}/history/manifest", hh.handleHistoryManifest)
+	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}", hh.handleHistorySlice)
+	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}", hh.handleHistoryActivity)
+	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}", hh.handleHistorySetup)
 	m.HandleFunc("GET /tasks/{id}/history/costs", hh.handleHistoryCosts)
 	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)
 	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.taskSvc.sendInput))

@@ -1,5 +1,5 @@
 // Browser coverage for immutable history HTTP-cache reuse and exact live SSE handoff.
-import { test, expect, createTaskAPI, waitForTaskState, recentHistoryChunk } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, recentHistoryPage } from "../helpers";
 import type { HistoryEvent } from "../../sdk/caic/ts/v1/types.gen";
 
 // Routing disables Chromium's HTTP cache. This suite must exercise the native
@@ -24,8 +24,8 @@ for (const state of ["waiting", "stopped", "purged"])
       await api.purgeTask(id);
       await waitForTaskState(api, id, "purged");
     }
-    const b = await api.getHistoryBootstrap(id);
-    const recent = recentHistoryChunk(b);
+    const b = (await api.getHistoryManifest(id)).bootstrap;
+    const recent = recentHistoryPage(b);
     await page.goto("/");
     const read = () =>
       page.evaluate(async (url) => {
@@ -52,7 +52,7 @@ for (const state of ["waiting", "stopped", "purged"])
 test("native raw SSE resumes after bootstrap without replaying its prefix", async ({ api, page }) => {
   const id = await createTaskAPI(api, "history SSE contract");
   await waitForTaskState(api, id, "waiting");
-  const b = await api.getHistoryBootstrap(id);
+  const b = (await api.getHistoryManifest(id)).bootstrap;
   await page.goto("/");
   await page.evaluate(
     ({ id, cursor }) => {
@@ -84,7 +84,7 @@ test("native raw SSE resumes after bootstrap without replaying its prefix", asyn
   expect((await state()).records).toEqual([]);
   await api.sendInput(id, { prompt: { text: "continue raw SSE" } });
   await waitForTaskState(api, id, "waiting");
-  const next = await api.getHistoryBootstrap(id);
+  const next = (await api.getHistoryManifest(id)).bootstrap;
   await expect.poll(async () => (await state()).checkpoint).toBe(next.cursor);
   const live = await state();
   expect(live.records.length).toBeGreaterThan(0);

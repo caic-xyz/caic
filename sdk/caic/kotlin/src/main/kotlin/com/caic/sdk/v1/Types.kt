@@ -2513,15 +2513,11 @@ data class WebFetchReq(val url: String)
 data class WebFetchResp(val title: String, val content: String)
 
 /**
- * HistoryBootstrap is small revalidated discovery for task history. ResourceBase
- * ends in /history/{scope}/{version}/{generation}; append /chunks/{first}/{last}
- * for direct arithmetic access. Scope isolates the
- * authenticated account, including legacy shared tasks. Browser HTTP caching
- * owns storage/eviction; clients need no inactive decoded transcript cache.
- * Generation changes on server restart/task replacement. A stale reference
- * returns 409; bootstrap again and discard old cursor metadata.
- * For a one-based record r, first=floor((r-1)/RecordsPerChunk)*RecordsPerChunk+1
- * and last=min(first+RecordsPerChunk-1,Through). Through=0 has no chunks.
+ * HistoryBootstrap identifies the raw prefix captured with a HistoryManifest.
+ * ResourceBase scopes immutable resources to the account, projection version,
+ * and task generation. Generation changes on server restart/task replacement;
+ * a stale reference returns 409 and requires manifest rediscovery.
+ * RecordsPerChunk defines fixed raw-record page alignment for section slices.
  */
 @Serializable
 data class HistoryBootstrap(
@@ -2533,6 +2529,24 @@ data class HistoryBootstrap(
     val cursor: String,
     val resourceBase: String,
 )
+
+/**
+ * HistoryPosition identifies one normalized output in a one-based physical raw
+ * record. Index is zero-based across every output of that record. Metadata and
+ * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ */
+@Serializable
+data class HistoryPosition(
+    @SerialName("recordID") val recordID: Long,
+    val index: Long,
+)
+
+/**
+ * HistorySlice selects inclusive normalized positions, independently of raw
+ * chunk alignment. An absent slice denotes an empty section.
+ */
+@Serializable
+data class HistorySlice(val first: HistoryPosition, val last: HistoryPosition)
 
 /**
  * EventMessageSource identifies the provider origin of any normalized event.
@@ -2954,14 +2968,130 @@ data class HistoryEvent(
 )
 
 /**
- * HistoryPosition identifies one normalized output in a one-based physical raw
- * record. Index is zero-based across every output of that record. Metadata and
- * zero-output controls occupy record IDs too; IDs are not semantic event counts.
+ * HistorySection describes one root context. Only the final section is current.
+ * Boundary and EndBoundary contain init/system metadata, never transcript text.
  */
 @Serializable
-data class HistoryPosition(
+data class HistorySection(
+    val id: String,
+    val body: HistorySlice? = null,
+    val boundary: HistoryEvent? = null,
+    val endBoundary: HistoryEvent? = null,
+    val reportedModel: String? = null,
+    val turnCount: Int,
+    val textCount: Int,
+    val toolCount: Int,
+    val durationMs: Long,
+    val skills: List<EventSkillLoad>,
+)
+
+/**
+ * HistoryRoute is one authoritative delegation relation or namespace observation.
+ * An absent AgentID records a namespace that participates in ambiguity checks.
+ */
+@Serializable
+data class HistoryRoute(
+    @SerialName("toolUseID") val toolUseID: String,
+    val namespace: String,
+    @SerialName("agentID") val agentID: String? = null,
+)
+
+/**
+ * HistoryTurn retains numeric invocation facts independently of transcript
+ * lifetime. SectionID associates the turn with its context. Pricing is obtained
+ * separately through getHistoryCosts using the embedded exact position.
+ */
+@Serializable
+data class HistoryTurn(
     @SerialName("recordID") val recordID: Long,
     val index: Long,
+    @SerialName("sectionID") val sectionID: String,
+    val at: Instant,
+    val model: String,
+    val usage: EventUsage,
+    val durationMs: Long,
+    @SerialName("durationAPIMs") val durationAPIMs: Long,
+    val waitInput: HistoryPosition? = null,
+    val waitMs: Long? = null,
+    val changeStat: EventChangeStat? = null,
+    val cost: EventCost? = null,
+)
+
+/** HistoryToolTiming aggregates completed tools across root and child actors. */
+@Serializable
+data class HistoryToolTiming(
+    val name: String,
+    val calls: Int,
+    val durationMs: Long,
+)
+
+/**
+ * HistoryActivity is payload-free lifecycle and routing state. Kind is
+ * nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
+ * are fetched through the finite activity resource only on disclosure.
+ * BodyThrough is a stable finite prefix containing all actor payload and
+ * ownership observations known at the manifest snapshot. Unrelated task
+ * records do not change it, allowing disclosures to reuse the HTTP cache.
+ * OwnershipThrough advances only for related routing/namespace observations;
+ * clients use it to distinguish ownership revisions from new actor output.
+ */
+@Serializable
+data class HistoryActivity(
+    val kind: EventKind,
+    val id: String,
+    /**
+     * SectionID identifies the body containing the earliest actual lifecycle or
+     * resolved transcript origin, including an unfinished turn carried forward.
+     */
+    @SerialName("sectionID") val sectionID: String,
+    val source: EventMessageSource? = null,
+    @SerialName("toolUseID") val toolUseID: String? = null,
+    val scope: EventNativeSubagentScope? = null,
+    @SerialName("groupID") val groupID: String? = null,
+    val label: String? = null,
+    val status: String,
+    val background: Boolean? = null,
+    val startedAt: Instant? = null,
+    val endedAt: Instant? = null,
+    val anchorAt: Instant,
+    val first: HistoryPosition,
+    val bodyThrough: Long,
+    val ownershipThrough: Long,
+    val exitCode: Int? = null,
+    val outputRef: String? = null,
+)
+
+/**
+ * HistoryMetadata contains compact task-wide facts needed without archived
+ * bodies. Setup bounds the separately disclosed, filtered getHistorySetup
+ * resource; it must not be fetched as an unfiltered slice. InitialInput
+ * identifies the first root input, permitting prompt deduplication by position.
+ */
+@Serializable
+data class HistoryMetadata(
+    /** RoutingRevision changes when earlier delegated ownership may have changed. */
+    val routingRevision: Long,
+    val routing: List<HistoryRoute>,
+    val hasInitialPrompt: Boolean,
+    val setupEndedAt: Instant? = null,
+    val turns: List<HistoryTurn>,
+    val tools: List<HistoryToolTiming>,
+    val activities: List<HistoryActivity>,
+    val initialInit: HistoryEvent? = null,
+    val initialInput: HistoryPosition? = null,
+    val setup: HistorySlice? = null,
+    val todo: EventTodo? = null,
+)
+
+/**
+ * HistoryManifest discovers context sections without downloading their bodies.
+ * Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
+ */
+@Serializable
+data class HistoryManifest(
+    val bootstrap: HistoryBootstrap,
+    val sections: List<HistorySection>,
+    val metadata: HistoryMetadata,
 )
 
 /**
@@ -2987,7 +3117,7 @@ data class HistoryTurnEstimate(
  * cursor query on reconnect. Named stats events never replace this raw cursor.
  */
 @Serializable
-data class HistoryCheckpoint(val cursor: String)
+data class HistoryCheckpoint(val cursor: String, val through: Long)
 
 /** EventStats is a runtime resource usage snapshot emitted periodically. */
 @Serializable
@@ -3024,7 +3154,7 @@ data class HistoryStats(val samples: List<EventStats>)
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
 @Serializable
 data class HistoryReset(
-    @SerialName("bootstrapURL") val bootstrapURL: String,
+    @SerialName("manifestURL") val manifestURL: String,
 )
 
 /** TaskHistoryStreamError reports that task history could not be replayed. */

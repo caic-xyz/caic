@@ -499,13 +499,21 @@ public final class ApiClient {
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
         try await request("POST", path: "/api/caic/v1/web/fetch", body: try encoder.encode(req))
     }
-    /// Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest.
-    public func getHistoryBootstrap(id: String) async throws -> HistoryBootstrap {
-        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/bootstrap")
+    /// Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts.
+    public func getHistoryManifest(id: String) async throws -> HistoryManifest {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/manifest")
     }
-    /// Returns immutable normalized outputs as a JSON array with one output per line and leading commas after the first. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery.
-    public func getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String) async throws -> [HistoryEvent] {
-        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/chunks/\(first)/\(last)")
+    /// Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads.
+    public func getHistorySetup(id: String, scope: String, version: String, generation: String, through: String) async throws -> [HistoryEvent] {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/setup/\(through)")
+    }
+    /// Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges.
+    public func getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String) async throws -> [HistoryEvent] {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/slice/\(first)/\(firstIndex)/\(last)/\(lastIndex)")
+    }
+    /// Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata.
+    public func getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String) async throws -> [HistoryEvent] {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/activity/\(kind)/\(activity)/\(through)?afterRecordID=\(afterRecordID.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")&afterIndex=\(afterIndex.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")")
     }
     /// Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently.
     public func getHistoryCosts(id: String, generation: String, through: String) async throws -> [HistoryTurnEstimate] {
@@ -522,10 +530,11 @@ public final class ApiClient {
         sseStream(path: "/api/caic/v1/usage/events")
     }
     /// Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error.
-    public func historyEvents(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
+    public func historyEvents(id: String, cursor: String, onManifest: ((HistoryManifest) -> Void)? = nil, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
         namedSSEStream(path: "/api/caic/v1/tasks/\(id)/history/events?cursor=\(cursor.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")", lastEventID: lastEventID, onEventID: onEventID) { type, data in
             switch type {
             case "message": return try self.decoder.decode(HistoryEvent.self, from: data)
+            case "manifest": let payload = try self.decoder.decode(HistoryManifest.self, from: data); onManifest?(payload); return nil
             case "checkpoint": let payload = try self.decoder.decode(HistoryCheckpoint.self, from: data); onCheckpoint?(payload); return nil
             case "statsSnapshot": let payload = try self.decoder.decode(HistoryStats.self, from: data); onStatsSnapshot?(payload); return nil
             case "stats": let payload = try self.decoder.decode(EventStats.self, from: data); onStats?(payload); return nil
@@ -543,8 +552,8 @@ public final class ApiClient {
     public func globalUsageEventsReconnecting() -> AsyncThrowingStream<UsageResp, Error> {
         reconnectingStream { self.globalUsageEvents() }
     }
-    public func historyEventsReconnecting(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
+    public func historyEventsReconnecting(id: String, cursor: String, onManifest: ((HistoryManifest) -> Void)? = nil, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
         let resumeID = SSECursor(lastEventID)
-        return namedReconnectingStream { self.historyEvents(id: id, cursor: cursor, onCheckpoint: onCheckpoint, onStatsSnapshot: onStatsSnapshot, onStats: onStats, onReset: onReset, onHistoryError: onHistoryError, lastEventID: resumeID.get(), onEventID: { resumeID.set($0); onEventID?($0) }) }
+        return namedReconnectingStream { self.historyEvents(id: id, cursor: cursor, onManifest: onManifest, onCheckpoint: onCheckpoint, onStatsSnapshot: onStatsSnapshot, onStats: onStats, onReset: onReset, onHistoryError: onHistoryError, lastEventID: resumeID.get(), onEventID: { resumeID.set($0); onEventID?($0) }) }
     }
 }

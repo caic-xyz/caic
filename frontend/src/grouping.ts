@@ -1,4 +1,4 @@
-// Source-scoped message grouping, incremental context sections, and compact display aggregates.
+// Groups source-scoped messages and turns for loaded transcript bodies.
 
 import type {
   EventMessage,
@@ -216,20 +216,6 @@ export interface Turn {
   result?: EventResult;
 }
 
-// A session is a segment of the event stream opened by an init, compaction, or clear event.
-// Session boundaries are init events (new Claude Code session) and compaction/clear system
-// events. The current (last) session is never elided.
-export interface Session {
-  // The event that opened this session (init, compaction, or clear system event).
-  // undefined for an implicit initial segment before the first session event.
-  boundaryEvent?: EventMessage;
-  turns: Turn[];
-  toolCount: number;
-  textCount: number;
-  // Sum of turn runtimes, excluding time between a result and the next user input.
-  durationMs: number;
-}
-
 // Returns true if ev starts a new session.
 export function isSessionBoundary(ev: EventMessage): boolean {
   if (isChildEvent(ev)) return false;
@@ -246,7 +232,7 @@ export function rateLimitPercentage(utilization: number): number {
   return Math.round(utilization * 100);
 }
 
-function updateWarningPercentages(percentages: Map<string, number>, ev: EventMessage): void {
+export function updateWarningPercentages(percentages: Map<string, number>, ev: EventMessage): void {
   const rl = ev.rateLimit;
   if (ev.kind !== "rateLimit" || !rl) return;
   if (rl.status === "allowed_warning") percentages.set(rl.rateLimitType, rateLimitPercentage(rl.utilization));
@@ -559,7 +545,7 @@ function groupMessagesAfter(
         break;
       }
       case "system": {
-        // Compaction and clear are consumed by SessionGrouper before reaching here.
+        // Root context boundaries are supplied separately by the server manifest.
         // Thread status changes (active, idle, etc.) duplicate information
         // already in the task state — skip them to avoid noisy "other" groups.
         // model_rerouted and other informational subtypes are rendered via MessageItem.
@@ -1181,112 +1167,16 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   return turns;
 }
 
-// SessionGrouper consumes root events once and reuses contexts closed by a
-// compaction, clear, or changed session identity. Structural changes regroup
-// only the active context so cross-turn tool and message identities still join.
-export class SessionGrouper {
-  private closed: Session[] = [];
-  private segment: EventMessage[] = [];
-  private boundary: EventMessage | null = null;
-  private sessionID: string | undefined;
-  private lastResult = -1;
-  private active: Session | null = null;
-  private activeLength = -1;
-  private result: Session[] = [];
-  private warnings = new Map<string, number>();
-
-  get pastSessions(): Session[] {
-    return this.closed;
-  }
-
-  get warningPercentages(): ReadonlyMap<string, number> {
-    return this.warnings;
-  }
-
-  append(events: readonly EventMessage[]): Session[] {
-    let changed = false;
-    for (const event of events) {
-      updateWarningPercentages(this.warnings, event);
-      if (event.kind === "init" && !isChildEvent(event)) {
-        const id = event.init?.sessionID;
-        if (id !== this.sessionID) {
-          const openContext = this.boundary?.kind === "system" && this.lastResult < 0;
-          if (!openContext) {
-            if (this.boundary !== null) this.close();
-            this.boundary = event;
-            changed = true;
-          }
-          this.sessionID = id;
-        }
-      } else if (event.kind === "system" && isSessionBoundary(event)) {
-        if (this.boundary !== null) this.close();
-        this.boundary = event;
-        this.sessionID = undefined;
-        changed = true;
-      } else {
-        this.segment.push(event);
-        if (event.kind === "result" && !isChildEvent(event)) this.lastResult = this.segment.length - 1;
-        changed = true;
-      }
-    }
-    if (changed) {
-      // A changed boundary or segment always leaves a current context.
-      this.result = [...this.closed, this.current()];
-    }
-    return this.result;
-  }
-
-  private close(): void {
-    const carry = this.lastResult >= 0 ? this.segment.splice(this.lastResult + 1) : [];
-    this.closed = [...this.closed, this.current()];
-    this.segment = carry;
-    this.boundary = null;
-    this.lastResult = -1;
-    this.active = null;
-    this.activeLength = -1;
-  }
-
-  private current(): Session {
-    if (
-      this.active !== null &&
-      this.activeLength === this.segment.length &&
-      this.active.boundaryEvent === (this.boundary ?? undefined)
-    )
-      return this.active;
-    const turns = groupTurns(aggregateToolGroups(groupMessages(this.segment)));
-    let toolCount = 0;
-    let textCount = 0;
-    let durationMs = 0;
-    for (const turn of turns) {
-      toolCount += turn.toolCount;
-      textCount += turn.textCount;
-      durationMs += turn.durationMs;
-    }
-    this.activeLength = this.segment.length;
-    this.active = { boundaryEvent: this.boundary ?? undefined, turns, toolCount, textCount, durationMs };
-    return this.active;
-  }
-}
-
 // Flat display item for the message list.
 export type MsgItem =
-  | { kind: "sessionElided"; session: Session; sessionKey: string; key: string }
-  | { kind: "sessionHeader"; session: Session; sessionKey: string; key: string }
   | { kind: "sessionBoundary"; event: EventMessage; key: string }
-  | { kind: "elided"; turn: Turn; key: string; indent?: "session" }
-  | { kind: "expandedHeader"; turn: Turn; turnKey: string; key: string; indent?: "session" }
+  | { kind: "elided"; turn: Turn; key: string }
+  | { kind: "expandedHeader"; turn: Turn; turnKey: string; key: string }
   | { kind: "group"; group: MessageGroup; isLive: boolean; key: string; indent?: "turn" };
 
 // Builds flat items for a list of turns within a session.
 // All turns in this list are collapsible (caller handles the live turn separately).
-// inPastSession: true when building turns for an expanded past session — items receive
-// indent markers so the renderer can draw a visual left-border hierarchy.
-export function buildTurnItems(
-  turns: Turn[],
-  expandedTurnKeys: ReadonlySet<string>,
-  sessionKey: string,
-  inPastSession = false,
-): MsgItem[] {
+export function buildTurnItems(turns: Turn[], expandedTurnKeys: ReadonlySet<string>, sessionKey: string): MsgItem[] {
   const items: MsgItem[] = [];
   for (const [i, turn] of turns.entries()) {
     const turnKey = `${sessionKey}:turn:${i}:${turn.groups[0]?.events[0]?.ts ?? ""}`;
@@ -1296,7 +1186,6 @@ export function buildTurnItems(
         turn,
         turnKey,
         key: `hdr:${turnKey}`,
-        ...(inPastSession ? { indent: "session" as const } : {}),
       });
       for (const [j, group] of turn.groups.entries()) {
         items.push({
@@ -1312,26 +1201,10 @@ export function buildTurnItems(
         kind: "elided",
         turn,
         key: turnKey,
-        ...(inPastSession ? { indent: "session" as const } : {}),
       });
     }
   }
   return items;
-}
-
-// Builds the rows of one closed context, collapsed unless explicitly expanded.
-export function buildSessionItems(
-  session: Session,
-  sessionKey: string,
-  expanded: boolean,
-  expandedTurnKeys: ReadonlySet<string>,
-): MsgItem[] {
-  return expanded
-    ? [
-        { kind: "sessionHeader", session, sessionKey, key: `hdr:${sessionKey}` },
-        ...buildTurnItems(session.turns, expandedTurnKeys, sessionKey, true),
-      ]
-    : [{ kind: "sessionElided", session, sessionKey, key: sessionKey }];
 }
 
 export function toolCountSummary(calls: ToolCall[]): string {
@@ -1386,21 +1259,4 @@ export function turnSummary(turn: Turn): string {
     parts.push(turn.toolCount === 1 ? "1 tool call" : `${turn.toolCount} tool calls`);
   }
   return parts.length > 0 ? parts.join(", ") : "empty turn";
-}
-
-export function sessionSummary(session: Session): string {
-  const parts: string[] = [];
-  if (session.boundaryEvent?.system?.subtype === "context_cleared") {
-    parts.push("Cleared session");
-  } else {
-    parts.push("Compacted session");
-  }
-  parts.push(session.turns.length === 1 ? "1 turn" : `${session.turns.length} turns`);
-  if (session.textCount > 0) {
-    parts.push(session.textCount === 1 ? "1 message" : `${session.textCount} messages`);
-  }
-  if (session.toolCount > 0) {
-    parts.push(session.toolCount === 1 ? "1 tool call" : `${session.toolCount} tool calls`);
-  }
-  return parts.join(" \u00b7 ");
 }

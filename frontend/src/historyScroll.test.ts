@@ -1,10 +1,9 @@
-// Tests live-tail following, automatic backfill anchors, expansion restoration, and stale viewport callbacks.
+// Tests live-tail following, disclosure anchors, hidden-pane restoration, and stale viewport callbacks.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, it } from "node:test";
 import { batch, createRoot, createSignal } from "solid-js";
 import { vi } from "@tests/expect";
 import { createHistoryScroll } from "./historyScroll";
-import type { PreviewText } from "./recentTextPreview";
 import type { EventMessage } from "@sdk/types.gen";
 
 let frames = new Map<number, FrameRequestCallback>();
@@ -35,14 +34,15 @@ function fixture() {
   row.dataset.anchorKey = "visible";
   el.append(row);
   document.body.append(el);
+  let visible = true;
   let height = 1_000,
     top = 0,
     rowTop = 160;
   Object.defineProperties(el, {
-    clientHeight: { get: () => 200 },
-    scrollHeight: { get: () => height },
+    clientHeight: { get: () => (visible ? 200 : 0) },
+    scrollHeight: { get: () => (visible ? height : 0) },
     scrollTop: {
-      get: () => top,
+      get: () => (visible ? top : 0),
       set: (value: number) => {
         top = Math.max(0, Math.min(value, Math.max(0, height - 200)));
       },
@@ -51,7 +51,7 @@ function fixture() {
   el.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
   row.getBoundingClientRect = () => new DOMRect(0, rowTop - top, 400, 30);
   const [messages, setMessages] = createSignal<EventMessage[]>([]),
-    [preview, setPreview] = createSignal<PreviewText | null>(null),
+    [preview, setPreview] = createSignal<string | null>(null),
     [plan, setPlan] = createSignal(""),
     [epoch, setEpoch] = createSignal(0),
     [task, setTask] = createSignal("a");
@@ -69,6 +69,12 @@ function fixture() {
     el,
     row,
     ...owner,
+    hide: () => {
+      visible = false;
+    },
+    show: () => {
+      visible = true;
+    },
     setTask,
     setEpoch,
     setMessages,
@@ -78,7 +84,7 @@ function fixture() {
     },
     appendPreview: () => {
       height += 20;
-      setPreview({ prompt: "", response: "preview output" });
+      setPreview("pending output");
     },
     userScroll: (position: number) => {
       el.scrollTop = position;
@@ -229,3 +235,21 @@ for (const change of ["task", "generation", "dispose", "element"] as const) {
     }
   });
 }
+
+it("ignores hidden-pane scroll and content observations instead of changing the saved user position", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(300);
+    f.hide();
+    f.el.dispatchEvent(new Event("scroll"));
+    f.append();
+    await paint();
+    f.show();
+    f.append();
+    await paint();
+    assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});

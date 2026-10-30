@@ -7,7 +7,7 @@ import type { EventStats } from "@sdk/types.gen";
 
 import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
-import type { AnalyticsTurn } from "../taskAnalytics";
+import type { HistoryTurn } from "@sdk/types.gen";
 import { formatTimingDuration } from "../timing";
 import ChartDataTable from "./ChartDataTable";
 import { ToggleChip } from "./FormControls";
@@ -83,7 +83,7 @@ function formatExactSampleTime(ts: number): string {
   return new Date(ts).toISOString();
 }
 
-function tokenData(turns: readonly AnalyticsTurn[], asShare: boolean): TokenDatum[] {
+function tokenData(turns: readonly HistoryTurn[], asShare: boolean): TokenDatum[] {
   return turns.flatMap((turn, i) => {
     const usage = turn.usage;
     const counts: readonly (readonly [string, number])[] = [
@@ -103,7 +103,7 @@ function tokenData(turns: readonly AnalyticsTurn[], asShare: boolean): TokenDatu
 // Cache reads usually outweigh the other categories by an order of magnitude, so
 // the absolute stack flattens them into the baseline; the share view keeps the
 // composition between them readable.
-function drawTokenChart(turns: readonly AnalyticsTurn[], width: number, asShare: boolean): Element {
+function drawTokenChart(turns: readonly HistoryTurn[], width: number, asShare: boolean): Element {
   const data = tokenData(turns, asShare);
   return Plot.plot({
     width,
@@ -480,7 +480,7 @@ function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Elem
 
 export default function StatsCharts(props: {
   stats: readonly EventStats[];
-  turns: readonly AnalyticsTurn[];
+  turns: readonly HistoryTurn[];
   tools: readonly ToolTimingSummary[];
 }) {
   const stats = createMemo<readonly EventStats[]>((previous) => {
@@ -489,10 +489,8 @@ export default function StatsCharts(props: {
       ? previous
       : next;
   }, []);
-  const turns = createMemo<readonly AnalyticsTurn[]>((previous) => {
-    const next = props.turns;
-    return next.length === previous.length && next.at(-1) === previous.at(-1) ? previous : next;
-  }, []);
+  const turns = createMemo(() => props.turns);
+  const tools = createMemo(() => props.tools);
   const [tokenShare, setTokenShare] = createSignal(false);
   const tokenLabel = () => (tokenShare() ? "Token share by turn" : "Token volume by turn");
   const tokenDescription = () =>
@@ -545,20 +543,20 @@ export default function StatsCharts(props: {
           />
         </div>
       </Show>
-      <Show when={props.tools.length > 0}>
+      <Show when={tools().length > 0}>
         <div class={styles.figure} data-testid="tool-time-chart">
           <div class={styles.title}>Tool time by kind</div>
           <PlotHost
             label="Cumulative tool time by tool kind"
             description="Completed calls; concurrent durations may overlap."
-            draw={(width) => drawToolChart(props.tools, width)}
+            draw={(width) => drawToolChart(tools(), width)}
           />
           <div class={styles.note}>Completed calls; concurrent durations may overlap.</div>
           <ChartDataTable
             caption="Tool timings"
             columns={["Tool", "Calls", "Time"]}
             regionLabel="Cumulative tool time by kind"
-            rows={props.tools.map((tool) => [tool.name, String(tool.calls), formatTimingDuration(tool.durationMs)])}
+            rows={tools().map((tool) => [tool.name, String(tool.calls), formatTimingDuration(tool.durationMs)])}
           />
         </div>
       </Show>

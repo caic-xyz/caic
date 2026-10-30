@@ -6,13 +6,13 @@ import TaskViewHeader from "./TaskViewHeader";
 import type { EventStats } from "@sdk/types.gen";
 
 import type { ToolTimingSummary } from "../taskStats";
-import type { AnalyticsTurn } from "../taskAnalytics";
+import type { HistoryTurn } from "@sdk/types.gen";
 import styles from "./StatsDetail.module.css";
 
 const StatsCharts = lazy(() => import("./StatsCharts"));
 const noStats: readonly EventStats[] = [];
 const noTools: readonly ToolTimingSummary[] = [];
-const noTurns: readonly AnalyticsTurn[] = [];
+const noTurns: readonly HistoryTurn[] = [];
 
 export interface TaskUsageSummary {
   inputTokens: number;
@@ -30,7 +30,7 @@ interface UsageDetails extends TaskUsageSummary {
 interface StatsContentProps {
   tools: readonly ToolTimingSummary[];
   stats: EventStats[];
-  turns: readonly AnalyticsTurn[];
+  turns: readonly HistoryTurn[];
   usage?: TaskUsageSummary;
 }
 
@@ -51,8 +51,8 @@ function formatUSD(usd: number): string {
   return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
-function sumTurnUsage(turns: readonly AnalyticsTurn[]): UsageDetails {
-  const completeCost = turns.every((turn) => turn.cost !== null);
+function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
+  const completeCost = turns.every((turn) => turn.cost !== undefined);
   return turns.reduce<UsageDetails>(
     (total, turn) => {
       const usage = turn.usage;

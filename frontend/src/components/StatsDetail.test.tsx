@@ -5,10 +5,10 @@ import { render, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect, vi } from "@tests/expect";
 
-import type { EventMessage, EventStats } from "@sdk/types.gen";
+import type { EventStats, ISOTimestamp } from "@sdk/types.gen";
 
-import type { AnalyticsTurn } from "../taskAnalytics";
-import { ToolTimingTracker } from "../taskStats";
+import type { HistoryTurn } from "@sdk/types.gen";
+
 import { StatsContent, type TaskUsageSummary } from "./StatsDetail";
 
 const usage: TaskUsageSummary = {
@@ -19,20 +19,17 @@ const usage: TaskUsageSummary = {
   outputTokens: 500,
 };
 
-function tools(events: readonly EventMessage[]) {
-  const tracker = new ToolTimingTracker();
-  for (const event of events) tracker.append(event);
-  return tracker.snapshot();
-}
-const turns: [AnalyticsTurn] = [
+const turns: [HistoryTurn] = [
   {
-    key: "1:0",
-    ts: 2000,
+    recordID: 1,
+    index: 0,
+    sectionID: "1",
+    at: "2026-01-01T00:00:00Z" as ISOTimestamp,
     model: "test-model",
     durationMs: 5000,
     durationAPIMs: 4000,
     waitMs: 3000,
-    changeStat: null,
+
     cost: { usd: 0.125, source: "reported" },
     usage: {
       inputTokens: 1000,
@@ -109,20 +106,8 @@ function readoutCenter(chart: Element): number {
 
 describe("StatsContent", () => {
   it("separates token categories and reports cache efficiency", async () => {
-    const events = [
-      {
-        kind: "toolUse",
-        ts: 1_000,
-        toolUse: { toolUseID: "tool-1", name: "Bash", input: {} },
-      },
-      {
-        kind: "toolResult",
-        ts: 2_000,
-        toolResult: { toolUseID: "tool-1", duration: 1 },
-      },
-    ] as const;
     const { findByTestId, getByTestId } = render(() => (
-      <StatsContent tools={tools(events)} stats={[]} turns={turns} usage={usage} />
+      <StatsContent tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]} stats={[]} turns={turns} usage={usage} />
     ));
 
     const summary = getByTestId("task-usage-summary");
@@ -385,11 +370,9 @@ describe("StatsContent", () => {
 
   it("lists cumulative tool time as the chart's text alternative", async () => {
     const user = userEvent.setup();
-    const events = [
-      { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "tool-1", name: "Bash", input: {} } },
-      { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "tool-1", duration: 1 } },
-    ] as const;
-    const { findByTestId } = render(() => <StatsContent tools={tools(events)} stats={[]} turns={[]} usage={usage} />);
+    const { findByTestId } = render(() => (
+      <StatsContent tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]} stats={[]} turns={[]} usage={usage} />
+    ));
     const figure = await findByTestId("tool-time-chart");
 
     await user.click(within(figure).getByText("Tool timings (1)"));

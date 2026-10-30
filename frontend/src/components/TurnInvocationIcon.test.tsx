@@ -5,31 +5,28 @@ import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { expect } from "@tests/expect";
 
-import type { TurnTiming } from "../timing";
+import type { HistoryTurn, ISOTimestamp } from "@sdk/types.gen";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
 
-const turn: TurnTiming = {
-  event: { kind: "result", ts: 5_000 },
-  result: {
-    subtype: "success",
-    isError: false,
-    result: "done",
-    totalCostUSD: 0.125,
-    cost: { usd: 0.125, source: "reported" },
-    duration: 5,
-    durationAPI: 4,
-    numTurns: 1,
-    usage: {
-      inputTokens: 1_000,
-      outputTokens: 500,
-      cacheCreationInputTokens: 2_000,
-      cacheReadInputTokens: 7_000,
-      reasoningOutputTokens: 200,
-      reportedModel: "test-model",
-    },
+const turn: HistoryTurn = {
+  recordID: 1,
+  index: 0,
+  sectionID: "1",
+  at: "2026-01-01T00:00:00Z" as ISOTimestamp,
+  model: "test-model",
+  cost: { usd: 0.125, source: "reported" },
+  durationMs: 5000,
+  durationAPIMs: 4000,
+  usage: {
+    inputTokens: 1000,
+    outputTokens: 500,
+    cacheCreationInputTokens: 2000,
+    cacheReadInputTokens: 7000,
+    reasoningOutputTokens: 200,
+    reportedModel: "test-model",
   },
   changeStat: { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 1 },
-  waitMs: 3_000,
+  waitMs: 3000,
 };
 
 describe("TurnInvocationIcon", () => {
@@ -60,16 +57,12 @@ describe("TurnInvocationIcon", () => {
     const user = userEvent.setup();
     const incomplete = {
       ...turn,
-      reportedModel: "session-model",
-      result: {
-        ...turn.result,
-        totalCostUSD: 0,
-        cost: undefined,
-        durationAPI: 0,
-        usage: { ...turn.result.usage, reportedModel: "" },
-      },
-      waitMs: null,
-    } satisfies TurnTiming;
+      model: "session-model",
+      cost: undefined,
+      durationAPIMs: 0,
+      usage: { ...turn.usage, reportedModel: "" },
+      waitMs: undefined,
+    } satisfies HistoryTurn;
     render(() => <TurnInvocationIcon turn={incomplete} model="configured-model" />);
 
     await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
@@ -88,8 +81,8 @@ describe("SessionInvocationIcon", () => {
     const user = userEvent.setup();
     const estimated = {
       ...turn,
-      result: { ...turn.result, cost: { usd: 0.25, source: "estimated" } },
-    } satisfies TurnTiming;
+      cost: { usd: 0.25, source: "estimated" },
+    } satisfies HistoryTurn;
     render(() => <SessionInvocationIcon turns={[turn, estimated]} model={null} compactionSummary="" />);
 
     await user.click(screen.getByRole("button", { name: "Session invocation details" }));
@@ -100,8 +93,8 @@ describe("SessionInvocationIcon", () => {
     const user = userEvent.setup();
     const unknown = {
       ...turn,
-      result: { ...turn.result, cost: undefined },
-    } satisfies TurnTiming;
+      cost: undefined,
+    } satisfies HistoryTurn;
     render(() => <SessionInvocationIcon turns={[turn, unknown]} model={null} compactionSummary="" />);
 
     await user.click(screen.getByRole("button", { name: "Session invocation details" }));

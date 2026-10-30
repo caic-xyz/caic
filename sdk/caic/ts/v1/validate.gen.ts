@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryCheckpoint, HistoryEvent, HistoryReset, HistoryStats, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -814,10 +814,142 @@ export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
   };
 }
 
+export function validateHistoryBootstrap(raw: ValidatorInput): HistoryBootstrap {
+  const obj = asObject(raw, "HistoryBootstrap");
+  return {
+    projectionVersion: asString(obj["projectionVersion"], "HistoryBootstrap.projectionVersion"),
+    generation: asString(obj["generation"], "HistoryBootstrap.generation"),
+    scope: asString(obj["scope"], "HistoryBootstrap.scope"),
+    recordsPerChunk: asNumber(obj["recordsPerChunk"], "HistoryBootstrap.recordsPerChunk"),
+    through: asNumber(obj["through"], "HistoryBootstrap.through"),
+    cursor: asString(obj["cursor"], "HistoryBootstrap.cursor"),
+    resourceBase: asString(obj["resourceBase"], "HistoryBootstrap.resourceBase"),
+  };
+}
+
+export function validateHistoryPosition(raw: ValidatorInput): HistoryPosition {
+  const obj = asObject(raw, "HistoryPosition");
+  return {
+    recordID: asNumber(obj["recordID"], "HistoryPosition.recordID"),
+    index: asNumber(obj["index"], "HistoryPosition.index"),
+  };
+}
+
+export function validateHistorySlice(raw: ValidatorInput): HistorySlice {
+  const obj = asObject(raw, "HistorySlice");
+  return {
+    first: validateHistoryPosition(obj["first"]),
+    last: validateHistoryPosition(obj["last"]),
+  };
+}
+
+export function validateHistorySection(raw: ValidatorInput): HistorySection {
+  const obj = asObject(raw, "HistorySection");
+  return {
+    id: asString(obj["id"], "HistorySection.id"),
+    body: (obj["body"] === undefined || obj["body"] === null ? undefined : validateHistorySlice(obj["body"])),
+    boundary: (obj["boundary"] === undefined || obj["boundary"] === null ? undefined : validateHistoryEvent(obj["boundary"])),
+    endBoundary: (obj["endBoundary"] === undefined || obj["endBoundary"] === null ? undefined : validateHistoryEvent(obj["endBoundary"])),
+    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "HistorySection.reportedModel")),
+    turnCount: asNumber(obj["turnCount"], "HistorySection.turnCount"),
+    textCount: asNumber(obj["textCount"], "HistorySection.textCount"),
+    toolCount: asNumber(obj["toolCount"], "HistorySection.toolCount"),
+    durationMs: asNumber(obj["durationMs"], "HistorySection.durationMs"),
+    skills: validateArray(obj["skills"], "HistorySection.skills", validateEventSkillLoad) as EventSkillLoad[],
+  };
+}
+
+export function validateHistoryRoute(raw: ValidatorInput): HistoryRoute {
+  const obj = asObject(raw, "HistoryRoute");
+  return {
+    toolUseID: asString(obj["toolUseID"], "HistoryRoute.toolUseID"),
+    namespace: asString(obj["namespace"], "HistoryRoute.namespace"),
+    agentID: (obj["agentID"] === undefined || obj["agentID"] === null ? undefined : asString(obj["agentID"], "HistoryRoute.agentID")),
+  };
+}
+
+export function validateHistoryTurn(raw: ValidatorInput): HistoryTurn {
+  const obj = asObject(raw, "HistoryTurn");
+  return {
+    recordID: asNumber(obj["recordID"], "HistoryTurn.recordID"),
+    index: asNumber(obj["index"], "HistoryTurn.index"),
+    sectionID: asString(obj["sectionID"], "HistoryTurn.sectionID"),
+    at: asString(obj["at"], "HistoryTurn.at") as ISOTimestamp,
+    model: asString(obj["model"], "HistoryTurn.model"),
+    usage: validateEventUsage(obj["usage"]),
+    durationMs: asNumber(obj["durationMs"], "HistoryTurn.durationMs"),
+    durationAPIMs: asNumber(obj["durationAPIMs"], "HistoryTurn.durationAPIMs"),
+    waitInput: (obj["waitInput"] === undefined || obj["waitInput"] === null ? undefined : validateHistoryPosition(obj["waitInput"])),
+    waitMs: (obj["waitMs"] === undefined || obj["waitMs"] === null ? undefined : asNumber(obj["waitMs"], "HistoryTurn.waitMs")),
+    changeStat: (obj["changeStat"] === undefined || obj["changeStat"] === null ? undefined : validateEventChangeStat(obj["changeStat"])),
+    cost: (obj["cost"] === undefined || obj["cost"] === null ? undefined : validateEventCost(obj["cost"])),
+  };
+}
+
+export function validateHistoryToolTiming(raw: ValidatorInput): HistoryToolTiming {
+  const obj = asObject(raw, "HistoryToolTiming");
+  return {
+    name: asString(obj["name"], "HistoryToolTiming.name"),
+    calls: asNumber(obj["calls"], "HistoryToolTiming.calls"),
+    durationMs: asNumber(obj["durationMs"], "HistoryToolTiming.durationMs"),
+  };
+}
+
+export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
+  const obj = asObject(raw, "HistoryActivity");
+  return {
+    kind: (asString(obj["kind"], "HistoryActivity.kind") as EventKind),
+    id: asString(obj["id"], "HistoryActivity.id"),
+    sectionID: asString(obj["sectionID"], "HistoryActivity.sectionID"),
+    source: (obj["source"] === undefined || obj["source"] === null ? undefined : validateEventMessageSource(obj["source"])),
+    toolUseID: (obj["toolUseID"] === undefined || obj["toolUseID"] === null ? undefined : asString(obj["toolUseID"], "HistoryActivity.toolUseID")),
+    scope: (obj["scope"] === undefined || obj["scope"] === null ? undefined : (asString(obj["scope"], "HistoryActivity.scope") as EventNativeSubagentScope)),
+    groupID: (obj["groupID"] === undefined || obj["groupID"] === null ? undefined : asString(obj["groupID"], "HistoryActivity.groupID")),
+    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "HistoryActivity.label")),
+    status: asString(obj["status"], "HistoryActivity.status"),
+    background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "HistoryActivity.background")),
+    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "HistoryActivity.startedAt") as ISOTimestamp),
+    endedAt: (obj["endedAt"] === undefined || obj["endedAt"] === null ? undefined : asString(obj["endedAt"], "HistoryActivity.endedAt") as ISOTimestamp),
+    anchorAt: asString(obj["anchorAt"], "HistoryActivity.anchorAt") as ISOTimestamp,
+    first: validateHistoryPosition(obj["first"]),
+    bodyThrough: asNumber(obj["bodyThrough"], "HistoryActivity.bodyThrough"),
+    ownershipThrough: asNumber(obj["ownershipThrough"], "HistoryActivity.ownershipThrough"),
+    exitCode: (obj["exitCode"] === undefined || obj["exitCode"] === null ? undefined : asNumber(obj["exitCode"], "HistoryActivity.exitCode")),
+    outputRef: (obj["outputRef"] === undefined || obj["outputRef"] === null ? undefined : asString(obj["outputRef"], "HistoryActivity.outputRef")),
+  };
+}
+
+export function validateHistoryMetadata(raw: ValidatorInput): HistoryMetadata {
+  const obj = asObject(raw, "HistoryMetadata");
+  return {
+    routingRevision: asNumber(obj["routingRevision"], "HistoryMetadata.routingRevision"),
+    routing: validateArray(obj["routing"], "HistoryMetadata.routing", validateHistoryRoute) as HistoryRoute[],
+    hasInitialPrompt: asBoolean(obj["hasInitialPrompt"], "HistoryMetadata.hasInitialPrompt"),
+    setupEndedAt: (obj["setupEndedAt"] === undefined || obj["setupEndedAt"] === null ? undefined : asString(obj["setupEndedAt"], "HistoryMetadata.setupEndedAt") as ISOTimestamp),
+    turns: validateArray(obj["turns"], "HistoryMetadata.turns", validateHistoryTurn) as HistoryTurn[],
+    tools: validateArray(obj["tools"], "HistoryMetadata.tools", validateHistoryToolTiming) as HistoryToolTiming[],
+    activities: validateArray(obj["activities"], "HistoryMetadata.activities", validateHistoryActivity) as HistoryActivity[],
+    initialInit: (obj["initialInit"] === undefined || obj["initialInit"] === null ? undefined : validateHistoryEvent(obj["initialInit"])),
+    initialInput: (obj["initialInput"] === undefined || obj["initialInput"] === null ? undefined : validateHistoryPosition(obj["initialInput"])),
+    setup: (obj["setup"] === undefined || obj["setup"] === null ? undefined : validateHistorySlice(obj["setup"])),
+    todo: (obj["todo"] === undefined || obj["todo"] === null ? undefined : validateEventTodo(obj["todo"])),
+  };
+}
+
+export function validateHistoryManifest(raw: ValidatorInput): HistoryManifest {
+  const obj = asObject(raw, "HistoryManifest");
+  return {
+    bootstrap: validateHistoryBootstrap(obj["bootstrap"]),
+    sections: validateArray(obj["sections"], "HistoryManifest.sections", validateHistorySection) as HistorySection[],
+    metadata: validateHistoryMetadata(obj["metadata"]),
+  };
+}
+
 export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoint {
   const obj = asObject(raw, "HistoryCheckpoint");
   return {
     cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
+    through: asNumber(obj["through"], "HistoryCheckpoint.through"),
   };
 }
 
@@ -851,7 +983,7 @@ export function validateHistoryStats(raw: ValidatorInput): HistoryStats {
 export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
   const obj = asObject(raw, "HistoryReset");
   return {
-    bootstrapURL: asString(obj["bootstrapURL"], "HistoryReset.bootstrapURL"),
+    manifestURL: asString(obj["manifestURL"], "HistoryReset.manifestURL"),
   };
 }
 

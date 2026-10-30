@@ -1,6 +1,6 @@
 // Exercises the generated SDK across concurrent task creation, sync, input, restart, and purge.
 import { ok } from "node:assert/strict";
-import { test, expect, createTaskAPI, waitForTaskState, recentHistoryChunk } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, recentHistoryPage } from "../helpers";
 
 test("SDK task lifecycle keeps concurrent tasks isolated", async ({ api, uniquePrompt }) => {
   const prompt = uniquePrompt("SDK lifecycle A");
@@ -38,15 +38,17 @@ test("SDK task lifecycle keeps concurrent tasks isolated", async ({ api, uniqueP
 
     await api.restartTask(id, { prompt: { text: "start over" } });
     const restarted = await waitForTaskState(api, id, "waiting");
-    const bootstrap = await api.getHistoryBootstrap(id);
-    const recent = recentHistoryChunk(bootstrap);
-    const events = await api.getHistoryChunk(
+    const bootstrap = (await api.getHistoryManifest(id)).bootstrap;
+    const recent = recentHistoryPage(bootstrap);
+    const events = await api.getHistorySlice(
       id,
       bootstrap.scope,
       bootstrap.projectionVersion,
       bootstrap.generation,
       String(recent.first),
+      "0",
       String(recent.last),
+      "end",
     );
     // Reaching waiting alone could pass without a restart. The first joke
     // proves that the agent's session-local turn counter started over.

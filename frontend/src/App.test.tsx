@@ -1,7 +1,7 @@
 // Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
 
 import assert from "node:assert/strict";
-import { historyResponse } from "@tests/history";
+import { historyResponse, historyManifest } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSignal, Show } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -273,16 +273,7 @@ beforeEach(() => {
   vi.mocked(api.historyEvents).mockImplementation(() => new FakeEventSource("", []) as unknown as EventSource);
   fetchRouter.reset();
   fetchRouter.apiGet(/\/history\/stats$/, () => ({ samples: [] }));
-  fetchRouter.apiGet(/\/history\/bootstrap$/, () => ({
-    projectionVersion: "v1",
-    generation: "test",
-    scope: "test",
-    recordsPerChunk: 256,
-    through: 0,
-    cursor: "v1.test.0.end",
-    resourceBase: "/history",
-    inPlanMode: false,
-  }));
+  fetchRouter.apiGet(/\/history\/manifest$/, () => historyManifest([], ""));
   fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
   fetchRouter.apiGet("/.well-known/gomode.json", () => ({
     apiVersion: 1,
@@ -639,34 +630,38 @@ it("aborts old-account history and opens the same task through the new account's
     const url = String(input);
     if (!url.includes("/history/")) return fallbackFetch(input, init);
     historyRequests.push(url);
-    if (url.endsWith("/bootstrap"))
-      return Promise.resolve(
-        Response.json({
-          projectionVersion: "v1",
-          generation: "shared-log",
-          scope: account,
-          recordsPerChunk: 256,
-          through: 520,
-          cursor: `v1.shared-log.520.end`,
-          resourceBase: `/history/${account}`,
-          inPlanMode: false,
-        }),
-      );
-    if (url.endsWith("/stats")) return Promise.resolve(Response.json({ samples: [] }));
-    if (url === "/history/a/chunks/257/512") {
+    const scope = url.startsWith("/history/a/") ? "a" : "b";
+    const event = {
+      recordID: 520,
+      index: 0,
+      message: { kind: "text" as const, ts: 520, text: { text: `Private account ${account} transcript` } },
+    };
+    if (url.endsWith("/manifest")) {
+      const manifest = historyManifest([event], "");
+      manifest.bootstrap.scope = account;
+      manifest.bootstrap.resourceBase = `/history/${account}`;
+      const section = manifest.sections[0];
+      assert.ok(section);
+      section.id = "2";
+      manifest.sections.unshift({
+        id: "1",
+        body: { first: { recordID: 300, index: 0 }, last: { recordID: 300, index: 0 } },
+        turnCount: 1,
+        textCount: 1,
+        toolCount: 0,
+        durationMs: 1,
+        skills: [],
+      });
+      return Promise.resolve(Response.json(manifest));
+    }
+    if (url === "/history/a/slice/300/0/300/0") {
       if (!init?.signal) throw new Error("History request has no owner signal");
       pendingSignals.push(init.signal);
       return delayed.promise;
     }
-    if (!url.endsWith("/chunks/513/520")) return Promise.resolve(historyResponse([]));
-    const scope = url.startsWith("/history/a/") ? "a" : "b";
     return Promise.resolve(
       historyResponse([
-        {
-          recordID: 520,
-          index: 0,
-          message: { kind: "text", ts: 520, text: { text: `Private account ${scope} transcript` } },
-        },
+        { ...event, message: { ...event.message, text: { text: `Private account ${scope} transcript` } } },
       ]),
     );
   });
@@ -677,6 +672,7 @@ it("aborts old-account history and opens the same task through the new account's
   await screen.findByText("Private account a transcript");
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
   await waitFor(() => expect(pendingSignals).toHaveLength(1));
   await user.click(screen.getByTitle("account-a"));
   await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
@@ -688,7 +684,7 @@ it("aborts old-account history and opens the same task through the new account's
   account = "b";
   checkedIdentity.resolve({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" });
   await screen.findByText("Private account b transcript");
-  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/b/chunks/"))).toBe(true);
+  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/b/slice/"))).toBe(true);
   expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/a/"))).toBe(false);
   delayed.resolve(
     historyResponse([

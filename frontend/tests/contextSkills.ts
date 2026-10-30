@@ -1,7 +1,7 @@
-// Incrementally folds root-owned skill loads by context section across compaction and clear.
+// Builds context skill metadata for server-shaped component fixtures.
 
 import type { EventMessage, EventSkillLoad } from "@sdk/types.gen";
-import { isChildEvent } from "./grouping";
+import { isChildEvent } from "../src/grouping";
 
 export interface ContextSkills {
   current: EventSkillLoad[];

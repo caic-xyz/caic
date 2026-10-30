@@ -190,10 +190,14 @@ class ApiClient(
     suspend fun getUsageDashboard(): UsageDashboardResp = request("GET", "/api/caic/v1/usage/dashboard")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
-    /** Returns small task raw history discovery; immutable bodies live at scoped URLs. Older chunks use direct fixed-record arithmetic without a manifest. */
-    suspend fun getHistoryBootstrap(id: String): HistoryBootstrap = request("GET", "/api/caic/v1/tasks/$id/history/bootstrap")
-    /** Returns immutable normalized outputs as a JSON array with one output per line and leading commas after the first. First is an aligned chunk start; last is inclusive and may be partial. Scope/version/generation come from bootstrap; 409 requires rediscovery. */
-    suspend fun getHistoryChunk(id: String, scope: String, version: String, generation: String, first: String, last: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/chunks/$first/$last")
+    /** Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. */
+    suspend fun getHistoryManifest(id: String): HistoryManifest = request("GET", "/api/caic/v1/tasks/$id/history/manifest")
+    /** Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. */
+    suspend fun getHistorySetup(id: String, scope: String, version: String, generation: String, through: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/setup/$through")
+    /** Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. */
+    suspend fun getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/slice/$first/$firstIndex/$last/$lastIndex")
+    /** Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. */
+    suspend fun getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/activity/$kind/$activity/$through?afterRecordID=${java.net.URLEncoder.encode(afterRecordID, "UTF-8")}&afterIndex=${java.net.URLEncoder.encode(afterIndex, "UTF-8")}")
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
     suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate> = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
 
@@ -203,9 +207,10 @@ class ApiClient(
     /** Streams usage quota updates via SSE. */
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/usage/events")
     /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
-    fun historyEvents(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = namedSSEFlow("/api/caic/v1/tasks/$id/history/events?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}", lastEventID, onEventID) { type, data ->
+    fun historyEvents(id: String, cursor: String, onManifest: ((HistoryManifest) -> Unit)? = null, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = namedSSEFlow("/api/caic/v1/tasks/$id/history/events?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}", lastEventID, onEventID) { type, data ->
         when (type) {
             "message" -> json.decodeFromString<HistoryEvent>(data)
+            "manifest" -> { val payload = json.decodeFromString<HistoryManifest>(data); onManifest?.invoke(payload); null }
             "checkpoint" -> { val payload = json.decodeFromString<HistoryCheckpoint>(data); onCheckpoint?.invoke(payload); null }
             "statsSnapshot" -> { val payload = json.decodeFromString<HistoryStats>(data); onStatsSnapshot?.invoke(payload); null }
             "stats" -> { val payload = json.decodeFromString<EventStats>(data); onStats?.invoke(payload); null }
@@ -342,9 +347,9 @@ class ApiClient(
     /** Streams usage quota updates via SSE. */
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
     /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
-    fun historyEventsReconnecting(id: String, cursor: String, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
+    fun historyEventsReconnecting(id: String, cursor: String, onManifest: ((HistoryManifest) -> Unit)? = null, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
         val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
-        reconnectingNamedFlow { historyEvents(id, cursor, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
+        reconnectingNamedFlow { historyEvents(id, cursor, onManifest = onManifest, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
     }
 
     private fun <T> reconnectingNamedFlow(connect: () -> Flow<T>): Flow<T> = flow {
