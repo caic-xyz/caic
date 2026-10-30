@@ -181,6 +181,17 @@ func (testWire) ParseMessage(line []byte) ([]Message, error) {
 	return testParseFn(line)
 }
 
+type promptOrderWriter struct {
+	log *testLogSink
+}
+
+func (w *promptOrderWriter) Write(p []byte) (int, error) {
+	if w.log.Len() == 0 {
+		return 0, errors.New("input was delivered before being logged")
+	}
+	return len(p), nil
+}
+
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type testLogSink struct {
@@ -427,6 +438,13 @@ func TestSession(t *testing.T) {
 	})
 	t.Run("PlainTextWritePrompt", func(t *testing.T) {
 		t.Parallel()
+		t.Run("input_precedes_immediate_response", func(t *testing.T) {
+			t.Parallel()
+			log := &testLogSink{Version: LogVersionV3}
+			if err := PlainTextWritePrompt(&promptOrderWriter{log: log}, Prompt{Text: "hello"}, log); err != nil {
+				t.Fatal(err)
+			}
+		})
 		var stdin bytes.Buffer
 		log := &testLogSink{Version: LogVersionV2}
 		before := time.Now().Truncate(time.Millisecond)

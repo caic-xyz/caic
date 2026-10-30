@@ -186,7 +186,7 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, cacheDir, baseBranc
 // AllocateBranch allocates a caic-N branch from baseBranch. An empty baseBranch
 // uses the checkout default. Used to allocate branches for extra repositories.
 // preferred, when non-empty, is a branch name shared across a multi-repo task's
-// repos (Manager.allocateBranches): it is tried first, and allocation falls back
+// repos by the task manager: it is tried first, and allocation falls back
 // to the next sequential name when it already exists in git.
 func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (string, error) {
 	w.branchMu.Lock()
@@ -448,7 +448,7 @@ func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, log *slog.L
 
 // NextBranchSeq returns the next unused caic-N sequence number without
 // consuming it. Callers must serialize branch allocation across tasks (see
-// Manager.allocateBranches) for the value to stay meaningful.
+// the task manager's branch allocation) for the value to stay meaningful.
 func (w *Checkout) NextBranchSeq() int {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()

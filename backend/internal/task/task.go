@@ -166,6 +166,8 @@ type Task struct {
 	VNCPort          int                  // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
 	GitHubToken      bool                 // Inject GitHub token into the instance's environment.
 
+	inputMu sync.Mutex // Serializes follow-up delivery and its state rollback.
+
 	// mu protects mutable task metadata above and all fields below.
 	mu                     sync.Mutex
 	runtimeInstanceID      runtime.ID
@@ -1510,6 +1512,8 @@ var ErrInitialPromptNotAccepted = errors.New("task startup did not accept its in
 // dead-session detection proactively, so SendInput no longer does lazy
 // cleanup.
 func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
+	t.inputMu.Lock()
+	defer t.inputMu.Unlock()
 	t.mu.Lock()
 	h := t.handle
 	sessionStatus := SessionNone
@@ -1522,20 +1526,24 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		}
 	}
 	state := t.state
+	started := h != nil && (state == taskslog.StateWaiting || state == taskslog.StateAsking || state == taskslog.StateHasPlan)
+	if started {
+		// An agent can finish before SendPrompt returns. Establish the running
+		// state before delivery so its completion remains authoritative.
+		t.setState(taskslog.StateRunning)
+	}
+	seq := t.stateSeq
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("%w (state=%s session=%s)", ErrNoActiveSession, state, sessionStatus)
 	}
 	if err := h.Session.SendPrompt(p); err != nil {
+		t.mu.Lock()
+		if started && t.stateSeq == seq {
+			t.setState(state)
+		}
+		t.mu.Unlock()
 		return err
-	}
-	if state == taskslog.StateWaiting || state == taskslog.StateAsking || state == taskslog.StateHasPlan {
-		t.SetStateIfAny(taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
-		// Plan content is preserved — the UI hides naturally while the
-		// task is Running (isWaiting is false). When the agent finishes,
-		// the plan reappears (original or updated via Write/Edit).
-		// ClearMessages (the "Clear and execute plan" path) is the only
-		// place that erases plan state.
 	}
 	t.addMessage(ctx, syntheticUserInput(p))
 	return nil

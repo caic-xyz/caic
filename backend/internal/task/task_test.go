@@ -60,6 +60,20 @@ func (*failingConn) SendStop(context.Context) {}
 
 func (*failingConn) Close() error { return nil }
 
+// completingInputWriter models an agent that finishes before its input write returns.
+type completingInputWriter struct {
+	ctx  context.Context
+	task *Task
+}
+
+func (w *completingInputWriter) Write(p []byte) (int, error) {
+	w.task.addMessage(w.ctx, &agent.TextMessage{Text: "done"})
+	w.task.addMessage(w.ctx, &agent.ResultMessage{MessageType: "result"})
+	return len(p), nil
+}
+
+func (*completingInputWriter) Close() error { return nil }
+
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type titleSequenceProvider struct {
@@ -1198,6 +1212,33 @@ func TestTask(t *testing.T) {
 
 	t.Run("SendInput", func(t *testing.T) {
 		t.Parallel()
+		t.Run("completion_during_delivery_preserves_waiting_state", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetState(taskslog.StateWaiting)
+			ctx, cancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(ctx, "sleep", "60")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			conn := agent.NewConn(ctx, testLogger(), &completingInputWriter{ctx: ctx, task: tk}, agent.DiscardLogSink{Version: agent.LogVersionV3}, &testWire{})
+			s := agent.NewSession(ctx, cmd, conn, stdout, make(chan agent.TimedMessage, 256), testLogger())
+			t.Cleanup(func() {
+				cancel()
+				_ = s.Wait()
+			})
+			tk.AttachSession(&SessionHandle{Session: s})
+			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := tk.GetState(); got != taskslog.StateWaiting {
+				t.Fatalf("state = %s, want %s after agent completion", got, taskslog.StateWaiting)
+			}
+		})
 		t.Run("error_delivery_failure_preserves_waiting_state", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

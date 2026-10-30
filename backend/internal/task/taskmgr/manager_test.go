@@ -190,6 +190,77 @@ func awaitTaskCleanup(t *testing.T, m *Manager, id ksid.ID) {
 	})
 }
 
+func checkPublishedTaskLog(t *testing.T, m *Manager, create func() (ksid.ID, error)) {
+	// Hold insertion after its registry notification, before the creator can
+	// start asynchronous runtime work. Inspect exactly what readers can see.
+	m.quotaWatchMu.Lock()
+	_, changed := m.ChangeSnapshot()
+	var workers sync.WaitGroup
+	var createErr error
+	done := make(chan struct{})
+	workers.Go(func() {
+		_, createErr = create()
+		close(done)
+	})
+	t.Cleanup(func() {
+		m.quotaWatchMu.Unlock()
+		workers.Wait()
+		if createErr != nil {
+			t.Errorf("create task: %v", createErr)
+		}
+	})
+	select {
+	case <-changed:
+	case <-done:
+		t.Fatalf("creation returned before publication: %v", createErr)
+	case <-time.After(time.Second):
+		t.Fatal("task was not published")
+	}
+	for _, e := range m.Entries() {
+		if e.Task().InitialPrompt.Text != "publication" {
+			continue
+		}
+		path := e.LogPath.Get()
+		if path == "" {
+			t.Fatal("published task has no history log path")
+		}
+		loaded, err := taskslog.LoadHistorySource(path)
+		if err != nil {
+			t.Fatalf("read published history: %v", err)
+		}
+		if loaded.TaskID != e.Task().ID.String() || loaded.Primary() == nil || loaded.Primary().Branch == "" {
+			t.Fatalf("published log has incomplete identity: %#v", loaded)
+		}
+		return
+	}
+	t.Fatal("published task missing")
+}
+
+func BenchmarkManagerCreate(b *testing.B) {
+	m := newTestManager(b, Config{ServerCtx: b.Context(), Backends: agent.Backends{"fake": &agenttest.FakeBackend{}}})
+	b.Cleanup(func() {
+		if err := m.Close(); err != nil {
+			b.Error(err)
+		}
+	})
+	registerCheckout(b, m.Checkouts, "my/repo", &repo.Checkout{Dir: b.TempDir()})
+	p := CreateParams{Prompt: agent.Prompt{Text: strings.Repeat("Implement the requested change. ", 8)}, Repos: []CreateRepo{{Name: "my/repo"}}, Harness: "fake"}
+	b.ReportAllocs()
+	for b.Loop() {
+		id, err := m.Create(b.Context(), p)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		e, _ := m.GetEntry(id)
+		e.Lifecycle.wg.Wait()
+		m.mu.Lock()
+		delete(m.tasks, id)
+		m.mu.Unlock()
+		b.StartTimer()
+	}
+}
+
 func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeInfo) *runtime.Router {
 	var sys runtime.System = &testRuntimeSystem{testRuntimeBackend: backend}
 	if info != nil {
@@ -2293,12 +2364,90 @@ func TestManager(t *testing.T) {
 			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: "/tmp/my-repo"})
 			return m
 		}
+		t.Run("log_initialized_before_publication", func(t *testing.T) {
+			t.Parallel()
+			m := newManagerWithRepo(t)
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			checkPublishedTaskLog(t, m, func() (ksid.ID, error) {
+				return m.Create(t.Context(), CreateParams{Prompt: agent.Prompt{Text: "publication"}, Repos: []CreateRepo{{Name: "my/repo"}}, Harness: "fake"})
+			})
+		})
+		t.Run("error_log_initialization_does_not_publish", func(t *testing.T) {
+			t.Parallel()
+			m := newManagerWithRepo(t)
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := os.Remove(m.logStore.LogDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(m.logStore.LogDir, []byte("blocked"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, changed := m.ChangeSnapshot()
+			_, err := m.Create(t.Context(), CreateParams{Prompt: agent.Prompt{Text: "fail"}, Repos: []CreateRepo{{Name: "my/repo"}}, Harness: "fake"})
+			if te, ok := errors.AsType[*Error](err); !ok || te.Kind != KindInternal {
+				t.Fatalf("Create = %v, want internal initialization error", err)
+			}
+			if m.Len() != 0 {
+				t.Fatal("failed creation published a task")
+			}
+			select {
+			case <-changed:
+				t.Fatal("failed creation notified task readers")
+			default:
+			}
+		})
+		t.Run("concurrent_local_branch_adoption", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			initTaskRepo(t, dir, []string{"branch", "local-work"}, []string{"branch", "--set-upstream-to", "origin/main", "local-work"})
+			m := newManagerWithRepo(t)
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			checkout, _ := m.Checkouts.Checkout("my/repo")
+			checkout.Dir = dir
+			checkout.GitTimeout = time.Second
+			start := make(chan struct{})
+			var workers sync.WaitGroup
+			ids := make([]ksid.ID, 2)
+			errs := make([]error, 2)
+			for i := range ids {
+				workers.Go(func() {
+					<-start
+					ids[i], errs[i] = m.Create(t.Context(), CreateParams{Prompt: agent.Prompt{Text: "adopt"}, Repos: []CreateRepo{{Name: "my/repo", BaseBranch: "local-work"}}, Harness: "fake"})
+				})
+			}
+			close(start)
+			workers.Wait()
+			branches := make([]string, 0, len(errs))
+			for i, err := range errs {
+				if err != nil {
+					t.Fatal(err)
+				}
+				e, _ := m.GetEntry(ids[i])
+				branches = append(branches, e.Task().Primary().Branch)
+			}
+			slices.Sort(branches)
+			if !reflect.DeepEqual(branches, []string{"caic-0", "local-work"}) {
+				t.Fatalf("concurrent branches = %v", branches)
+			}
+		})
 		t.Run("valid_sets_basename_mounted_path_and_max_cpus", func(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
 			id, err := m.Create(t.Context(), CreateParams{
 				Prompt:          agent.Prompt{Text: "hi"},
-				Repos:           []CreateRepo{{Name: "my/repo", BaseBranch: "main"}},
+				Repos:           []CreateRepo{{Name: "my/repo"}},
 				Harness:         "fake",
 				MaxCPUs:         7,
 				ResumeSessionID: "session:not-a-guid",
@@ -2332,7 +2481,7 @@ func TestManager(t *testing.T) {
 			registerCheckout(t, m.Checkouts, "other/repo", &repo.Checkout{Dir: "/tmp/other-repo"})
 			id, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
-				Repos:   []CreateRepo{{Name: "my/repo", BaseBranch: "main"}},
+				Repos:   []CreateRepo{{Name: "my/repo"}},
 				Harness: "fake",
 			})
 			if err != nil {
@@ -2466,6 +2615,24 @@ func TestManager(t *testing.T) {
 			e := m.NewEntry(src, nil)
 			m.Insert(src.ID, e)
 			return m, e
+		}
+		for _, delegated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("log_initialized_before_publication/delegated=%t", delegated), func(t *testing.T) {
+				t.Parallel()
+				m, src := newForkManager(t)
+				t.Cleanup(func() {
+					if err := m.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				checkPublishedTaskLog(t, m, func() (ksid.ID, error) {
+					p := &ForkParams{Prompt: agent.Prompt{Text: "publication"}}
+					if delegated {
+						return src.Lifecycle.ForkDelegated(t.Context(), p)
+					}
+					return src.Lifecycle.Fork(t.Context(), p)
+				})
+			})
 		}
 		t.Run("valid_resolved_overrides_and_max_cpus", func(t *testing.T) {
 			t.Parallel()
@@ -6524,6 +6691,12 @@ func runAllocateBranchesTests(t *testing.T) {
 	t.Run("adoptionDisablesSharing", runAllocateBranchesAdoptionDisablesSharing)
 }
 
+func allocateTestBranches(ctx context.Context, m *Manager, tk *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
+	m.branchAllocationMu.Lock()
+	defer m.branchAllocationMu.Unlock()
+	return m.allocateBranchesLocked(ctx, tk, mounts, reserveOnly, adoptLocal)
+}
+
 func runAllocateBranchesBasic(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -6543,7 +6716,7 @@ func runAllocateBranchesBasic(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	tk.Repos = slices.Clone(mounts)
-	if err := m.allocateBranches(t.Context(), tk, mounts, len(mounts), false); err != nil {
+	if err := allocateTestBranches(t.Context(), m, tk, mounts, len(mounts), false); err != nil {
 		t.Fatal(err)
 	}
 	for i, r := range tk.ReposSnapshot() {
@@ -6558,7 +6731,7 @@ func runAllocateBranchesBasic(t *testing.T) {
 	// A repo with no registered checkout is a hard error.
 	bad := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	bad.Repos = []taskslog.RepoMount{{Name: "ghost/repo", Branch: "caic-1"}}
-	if err := m.allocateBranches(t.Context(), bad, bad.ReposSnapshot(), 1, false); err == nil {
+	if err := allocateTestBranches(t.Context(), m, bad, bad.ReposSnapshot(), 1, false); err == nil {
 		t.Fatal("allocateForkBranches error = nil, want error for unregistered repo")
 	}
 }
@@ -6601,7 +6774,7 @@ func runAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 		tk.Repos = []taskslog.RepoMount{{Name: "repo", BaseBranch: base, GitRoot: dir}}
 		m.insertEntry(tk.ID, m.NewEntry(tk, nil))
-		if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, true); err != nil {
+		if err := allocateTestBranches(t.Context(), m, tk, tk.ReposSnapshot(), 1, true); err != nil {
 			t.Fatal(err)
 		}
 		return tk
@@ -6684,7 +6857,7 @@ func runAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	tk.Repos = slices.Clone(mounts)
-	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, false); err != nil {
+	if err := allocateTestBranches(t.Context(), m, tk, tk.ReposSnapshot(), 1, false); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []string{"caic-5", "caic-5"} {
@@ -6728,7 +6901,7 @@ func runAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	tk.Repos = slices.Clone(mounts)
-	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, false); err != nil {
+	if err := allocateTestBranches(t.Context(), m, tk, tk.ReposSnapshot(), 1, false); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"caic-0", "caic-1"}
@@ -6757,7 +6930,7 @@ func runAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	tk.Repos = slices.Clone(mounts)
-	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, true); err != nil {
+	if err := allocateTestBranches(t.Context(), m, tk, tk.ReposSnapshot(), 1, true); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"local-work", "caic-0"}

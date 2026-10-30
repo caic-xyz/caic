@@ -312,7 +312,8 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	return nil
 }
 
-// Fork creates a new task from this task's retained runtime instance.
+// Fork initializes and publishes a new task with readable history, then forks
+// this task's retained runtime instance asynchronously.
 //
 // p must be non-nil.
 func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
@@ -406,24 +407,14 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	}
 	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
-	if p.parentTaskID != 0 {
-		// TODO: Replace this temporary per-parent cap with configurable, time-based delegation quotas.
-		if err := r.manager.insertDelegatedEntry(forkEntry); err != nil {
-			return 0, err
-		}
-	} else {
-		r.manager.insertEntry(t.ID, forkEntry)
+	if err := r.manager.publishEntry(ctx, forkEntry, len(sourceRepos), false); err != nil {
+		return 0, err
 	}
 	forkEntry.Lifecycle.generateTitle()
 
 	forkEntry.Lifecycle.wg.Go(func() { //nolint:contextcheck // fork must finish during shutdown
 		ctx, tk := trace.NewTask(forkEntry.Lifecycle.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
-		if err := r.manager.allocateBranches(ctx, t, mounts, len(sourceRepos), false); err != nil {
-			forkEntry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate fork branch")})
-			r.manager.NotifyTaskChange()
-			return
-		}
 		metadata := maps.Clone(r.manager.runtimeMetadata)
 		if metadata == nil {
 			metadata = runtime.Metadata{}

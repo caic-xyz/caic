@@ -1,4 +1,4 @@
-// Package taskmgr owns the task registry: task state, creation, lifecycle, and runtime-instance import.
+// Package taskmgr owns task publication with initialized logs, the registry, lifecycle, and runtime-instance import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -149,7 +149,7 @@ type Manager struct {
 
 	background sync.WaitGroup
 
-	branchAllocationMu sync.Mutex // Serializes branch adoption checks and reservations across task startups.
+	branchAllocationMu sync.Mutex // Serializes branch allocation, log initialization, and task publication.
 
 	// Guarded by mu.
 	mu            sync.Mutex
@@ -413,7 +413,9 @@ func (m *Manager) RegisteredLogPaths() map[string]struct{} {
 	return paths
 }
 
-// Create handles the HTTP task creation path.
+// Create initializes branch identity and history before publishing a task,
+// then starts its runtime asynchronously. Preparation failures return without
+// registering a task.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
 	// Runtime restoration publishes entries only after their histories are
 	// trusted. Wait before allocating branches to avoid adopting one still
@@ -430,7 +432,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 	}
 
 	// Validate that every extra repo has a registered checkout (branches are
-	// allocated later, in one pass, by allocateBranches).
+	// allocated later, in one pass, by publishEntry).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		if _, ok := m.Checkouts.Checkout(rs.Name); !ok {
 			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
@@ -491,20 +493,13 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 		t.SetPR(p.ForgeOwner, p.ForgeRepo, 0)
 	}
 	entry := m.NewEntry(t, nil)
-
-	m.insertEntry(t.ID, entry)
+	if err := m.publishEntry(ctx, entry, 1, true); err != nil {
+		return 0, err
+	}
 	entry.Lifecycle.generateTitle()
 
 	// Run setup under the lifecycle context.
 	entry.Lifecycle.wg.Go(func() {
-		// The primary's branch is created by the agent runtime before instance launch,
-		// so it only needs a name reserved; extras are created here.
-		if err := m.allocateBranches(entry.Lifecycle.ctx, t, mounts, 1, true); err != nil {
-			entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate branch")})
-			m.NotifyTaskChange()
-			return
-		}
-
 		ghToken := p.ResolvedGitHubToken
 
 		if err := entry.Lifecycle.Start(entry.Lifecycle.ctx, ghToken); err != nil {
@@ -1125,30 +1120,56 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	return collides
 }
 
-// allocateBranches assigns every repo of a task its final branch. Fresh tasks
-// adopt an explicitly selected local branch when it is available; remote-only,
-// default, and already-associated branches receive a new caic-N branch. Forks
-// always receive new branches. mounts[:reserveOnly] are repos whose new branch is created elsewhere
-// (by md.Fork for a fork's source repos, or by the agent runtime before launch for
-// a fresh task's primary), so they only need a name reserved.
-// mounts[reserveOnly:] are new to the host, so their branch is created here from
-// their own checkout.
-//
-// Every non-adopted repo of the task shares one branch name — the highest next
-// sequence number across their checkouts — so checking out the task's branch in
-// another mapped repo takes the same command. Reserving the number in every
-// checkout before any branch is created keeps concurrent single-repo tasks from
-// reissuing it; a repo whose shared name already exists in its git (a stale
-// branch from an older task) falls back to its own next caic-N, so mixed names
-// within one task remain possible.
-//
-// Reservation happens before any task log opens: the log filename and metadata
-// header embed each repo's final branch name, and md.Fork creates the git
-// branches using these names verbatim (the caller owns their uniqueness).
-func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
+// publishEntry initializes branch identity and a readable history log before
+// registration. The allocation lock spans publication so concurrent creators
+// cannot adopt the same branch or exceed the delegated-child limit.
+// Extra-repo Git preparation holds this lock, so other creators wait for it.
+// Preparation failures can leave unused branch reservations or created branches.
+func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly int, adoptLocal bool) error {
 	m.branchAllocationMu.Lock()
 	defer m.branchAllocationMu.Unlock()
+	t := entry.Task()
+	if t.ParentTaskID != 0 {
+		// TODO: Replace this temporary cap with configurable, time-based delegation quotas.
+		m.mu.Lock()
+		children := 0
+		for _, candidate := range m.tasks {
+			child := candidate.Task()
+			if child.ParentTaskID == t.ParentTaskID && child.GetState() != taskslog.StatePurged {
+				children++
+			}
+		}
+		m.mu.Unlock()
+		if children >= maxDelegatedTasksPerParent {
+			return conflict(fmt.Sprintf("delegating task already has %d non-purged child tasks", maxDelegatedTasksPerParent))
+		}
+	}
+	if err := m.allocateBranchesLocked(ctx, t, t.ReposSnapshot(), reserveOnly, adoptLocal); err != nil {
+		return internalErr(err, "allocate branch")
+	}
+	log, path, err := m.logStore.Open(t.LogFilename(), t.LogHeader())
+	if err != nil {
+		return internalErr(err, "initialize task log")
+	}
+	if err := log.Close(); err != nil {
+		return internalErr(err, "close initialized task log")
+	}
+	entry.LogPath.Set(path)
+	m.insertEntry(t.ID, entry)
+	return nil
+}
 
+// allocateBranchesLocked assigns every repo its final branch. Fresh tasks
+// adopt an explicitly selected local branch when available; forks always get
+// new branches. mounts[:reserveOnly] need only a reservation: runtime setup
+// creates those branches. The remaining branches are created in their checkout.
+// Fresh branches share the highest next sequence number across the checkouts,
+// falling back to a new number when the shared name already exists in Git.
+//
+// Requires branchAllocationMu through log initialization and publication:
+// the immutable log header and filename embed these branch names, and a newly
+// adopted local branch must become associated before another creator checks it.
+func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
 	// Resolve adoption first; adopted repos keep their own branch name.
 	var shared []int
 	var checkouts []*repo.Checkout
@@ -1661,29 +1682,6 @@ func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(entry.Task())
-}
-
-// insertDelegatedEntry registers a direct child while enforcing the temporary
-// per-parent limit atomically with registration.
-func (m *Manager) insertDelegatedEntry(entry *Entry) error {
-	t := entry.Task()
-	m.mu.Lock()
-	children := 0
-	for _, candidate := range m.tasks {
-		child := candidate.Task()
-		if child.ParentTaskID == t.ParentTaskID && child.GetState() != taskslog.StatePurged {
-			children++
-		}
-	}
-	if children >= maxDelegatedTasksPerParent {
-		m.mu.Unlock()
-		return conflict(fmt.Sprintf("delegating task already has %d non-purged child tasks", maxDelegatedTasksPerParent))
-	}
-	m.tasks[t.ID] = entry
-	m.taskChangedLocked()
-	m.mu.Unlock()
-	m.watchRateLimitEvents(t)
-	return nil
 }
 
 // watchRateLimitEvents forwards task quota changes to the shared change

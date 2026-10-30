@@ -766,6 +766,15 @@ func TestMCPTools(t *testing.T) {
 					t.Parallel()
 
 					s := newMCPTaskCreateTestRouter(t)
+					if len(tc.want) > 1 {
+						// Secondary repositories allocate their branches before publication.
+						checkout, ok := s.taskMgr.Checkouts.Checkout("myrepo")
+						if !ok {
+							t.Fatal("myrepo checkout missing")
+						}
+						checkout.Dir = initCloneSourceRepo(t)
+						runServerGit(t, checkout.Dir, "remote", "add", "origin", checkout.Dir)
+					}
 					registerRouterCheckout(t, s.taskMgr.Checkouts, "otherrepo", newRouterTestCheckout(t.TempDir()))
 					registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
 					result, err := registry.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_create", Arguments: json.RawMessage(tc.args)})
