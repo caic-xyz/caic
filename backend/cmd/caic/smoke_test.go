@@ -268,13 +268,14 @@ func TestSmoke(t *testing.T) {
 
 		t.Run("TerminalHistoryRestart", func(t *testing.T) {
 			history := func() string {
-				var bootstrap v1.HistoryBootstrap
-				getJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/history/bootstrap", &bootstrap)
+				var manifest v1.HistoryManifest
+				getJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/history/manifest", &manifest)
+				bootstrap := manifest.Bootstrap
 				var body strings.Builder
 				for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
 					last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
 					var events []v1.HistoryEvent
-					getJSON(t, baseURL, fmt.Sprintf("%s/chunks/%d/%d", bootstrap.ResourceBase, first, last), &events)
+					getJSON(t, baseURL, fmt.Sprintf("%s/slice/%d/0/%d/end", bootstrap.ResourceBase, first, last), &events)
 					data, err := json.Marshal(events)
 					if err != nil {
 						t.Fatal(err)
@@ -815,10 +816,31 @@ func postJSON(t *testing.T, baseURL, path string, reqBody, dst any) {
 	}
 }
 
+// TestSmokeHistoryStreamURL verifies manifest discovery and full-prefix replay.
+func TestSmokeHistoryStreamURL(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/caic/v1/tasks/task/history/manifest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.WriteString(w, `{"bootstrap":{"projectionVersion":"2","generation":"timeline","cursor":"2.timeline.37.end","through":37}}`); err != nil {
+			t.Error(err)
+		}
+	})
+	s := httptest.NewServer(mux)
+	t.Cleanup(s.Close)
+	got, err := smokeHistoryStreamURL(t.Context(), s.URL, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := s.URL + "/api/caic/v1/tasks/task/history/events?cursor=2.timeline.0.end"; got != want {
+		t.Fatalf("history stream URL = %q, want %q", got, want)
+	}
+}
+
 // smokeHistoryStreamURL starts before the first physical record so smoke checks
 // inspect both the retained transcript and subsequent live output.
 func smokeHistoryStreamURL(ctx context.Context, baseURL, taskID string) (_ string, retErr error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/history/bootstrap", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/history/manifest", http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -828,11 +850,12 @@ func smokeHistoryStreamURL(ctx context.Context, baseURL, taskID string) (_ strin
 	}
 	defer func() { retErr = errors.Join(retErr, resp.Body.Close()) }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("history bootstrap status %d", resp.StatusCode)
+		return "", fmt.Errorf("history manifest status %d", resp.StatusCode)
 	}
-	var bootstrap v1.HistoryBootstrap
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&bootstrap); err != nil {
+	var manifest v1.HistoryManifest
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&manifest); err != nil {
 		return "", err
 	}
+	bootstrap := manifest.Bootstrap
 	return fmt.Sprintf("%s/api/caic/v1/tasks/%s/history/events?cursor=%s.%s.0.end", baseURL, taskID, bootstrap.ProjectionVersion, bootstrap.Generation), nil
 }
