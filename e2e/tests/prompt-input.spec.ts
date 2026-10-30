@@ -1,5 +1,5 @@
 // Screenshots of the prompt input with short and long text to verify button layout.
-import { test, expect, fillContentEditable, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual";
 
 test.describe.configure({ mode: "serial" });
@@ -15,7 +15,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   const prompt = page.getByTestId("prompt-input");
 
   // Screenshot 1: main prompt with two words.
-  await fillContentEditable(prompt, "hello world");
+  await prompt.fill("hello world");
   await expect(prompt).toContainText("hello world");
   await captureScreenshot(page, "desktop", "prompt-short.png");
 
@@ -28,12 +28,12 @@ test("prompt input layout screenshots", async ({ page, api }) => {
     "rotation with configurable refresh intervals, update the API documentation with the " +
     "new authentication flow diagrams, and ensure backwards compatibility with existing " +
     "client applications that still use the legacy session-based authentication mechanism";
-  await fillContentEditable(prompt, longText);
+  await prompt.fill(longText);
   await expect(prompt).toContainText(longText);
   await captureScreenshot(page, "desktop", "prompt-long.png");
 
   // Clear and create a task for detail view.
-  await fillContentEditable(prompt, "");
+  await prompt.fill("");
   const id = await createTaskAPI(api, "Fix token expiry bug in auth middleware");
   await waitForTaskState(api, id, "waiting", 30_000);
 
@@ -46,12 +46,12 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await expect(detailInput).toBeVisible();
 
   // Screenshot 3: task detail input with two words.
-  await fillContentEditable(detailInput, "looks good");
+  await detailInput.fill("looks good");
   await expect(detailInput).toContainText("looks good");
   await captureScreenshot(page, "desktop", "prompt-detail-short.png");
 
   // Screenshot 4: task detail input with long text.
-  await fillContentEditable(detailInput, longText);
+  await detailInput.fill(longText);
   await expect(detailInput).toContainText(longText);
   await captureScreenshot(page, "desktop", "prompt-detail-long.png");
 

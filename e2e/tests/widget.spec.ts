@@ -1,5 +1,5 @@
 // E2E tests for generative UI widget rendering.
-import { test, expect, fillContentEditable } from "../helpers";
+import { test, expect } from "../helpers";
 
 test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePrompt }) => {
   await page.goto("/");
@@ -10,7 +10,7 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   const prompt = uniquePrompt("FAKE_WIDGET");
 
   // Create task.
-  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await page.getByTestId("prompt-input").fill(prompt);
   await page.getByTestId("submit-task").click();
   await expect(page).toHaveURL(/\/task\//);
 

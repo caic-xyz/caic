@@ -890,29 +890,76 @@ func TestHandlePurge(t *testing.T) {
 
 func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
-	t.Run("ReturnsID", func(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
+		for _, name := range []harness.Name{harness.Antigravity, harness.Claude} {
+			t.Run(string(name), func(t *testing.T) {
+				t.Parallel()
+				s := newTestRouter(t, map[harness.Name]agent.Backend{name: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
+				registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
+				h := testTaskHandlers(s).routes()
+				const prompt = `<script>alert("xss")</script> & "quotes" & émojis 🎉`
+				body := mustJSON(t, v1.CreateTaskReq{
+					InitialPrompt: v1.Prompt{Text: prompt},
+					Repos:         []v1.RepoSpec{{Name: "myrepo"}},
+					Harness:       v1.Harness(name),
+					Model:         "m1",
+				})
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/tasks", strings.NewReader(body)))
+				if w.Code != http.StatusOK {
+					t.Fatalf("create status = %d: %s", w.Code, w.Body.String())
+				}
+				var created v1.Task
+				if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+					t.Fatal(err)
+				}
+				if created.ID == 0 {
+					t.Fatal("response has zero 'id' field")
+				}
+				// Creation, individual lookup, and list lookup must preserve the
+				// harness, model selection, and opaque prompt through JSON.
+				for _, path := range []string{"/tasks/" + created.ID.String(), "/tasks"} {
+					w = httptest.NewRecorder()
+					h.ServeHTTP(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, path, nil))
+					if w.Code != http.StatusOK {
+						t.Fatalf("%s status = %d: %s", path, w.Code, w.Body.String())
+					}
+					var got v1.Task
+					if path == "/tasks" {
+						var tasks []v1.Task
+						if err := json.NewDecoder(w.Body).Decode(&tasks); err != nil {
+							t.Fatal(err)
+						}
+						if len(tasks) != 1 {
+							t.Fatalf("task count = %d, want 1", len(tasks))
+						}
+						got = tasks[0]
+					} else if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+						t.Fatal(err)
+					}
+					for _, tk := range []v1.Task{created, got} {
+						if tk.ID != created.ID || tk.Harness != v1.Harness(name) || tk.InitialPrompt != prompt || tk.RequestedModel != "m1" || tk.ReportedModel != "" {
+							t.Fatalf("%s task = %+v, want original identity, prompt, and model selection", path, tk)
+						}
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("MissingPrompt", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
-
-		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude","model":"m1"}`)
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
-		handler(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/tasks", strings.NewReader(`{"repos":[{"name":"myrepo"}],"harness":"claude"}`))
+		testTaskHandlers(s).routes().ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 		}
-		var resp v1.Task
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatal(err)
-		}
-		if resp.ID == 0 {
-			t.Error("response has zero 'id' field")
-		}
-		if resp.RequestedModel != "m1" || resp.ReportedModel != "" {
-			t.Errorf("settings = (%q, %q), want (m1, empty)", resp.RequestedModel, resp.ReportedModel)
+		if e := decodeError(t, w); e.Code != api.CodeBadRequest {
+			t.Fatalf("error = %+v, want BAD_REQUEST", e)
 		}
 	})
 

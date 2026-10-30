@@ -1,48 +1,7 @@
-// Error handling and edge case tests.
-import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../helpers";
-import type { Harness, UserResp, Warning } from "../../sdk/caic/ts/v1/types.gen";
+// Browser coverage for mobile warning details, missing-task navigation, and connection recovery.
+import { test, expect } from "../helpers";
+import type { UserResp, Warning } from "../../sdk/caic/ts/v1/types.gen";
 import { validateTaskListEvent } from "../../sdk/caic/ts/v1/validate.gen";
-
-test("runtime restoration warning shows the exact count and can be dismissed", async ({ page }) => {
-  const warning: Warning = {
-    id: "restore-outage-1",
-    category: "runtime_restore_failed",
-    message: "2 tasks could not be restored.",
-    details: [],
-  };
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/auth/me", (route) =>
-    route.fulfill({
-      json: {
-        id: "restore-test",
-        sessionID: "fixture-session",
-        provider: "github",
-        username: "restore-test",
-      } satisfies UserResp,
-    }),
-  );
-  await page.route("**/api/caic/v1/tasks/events", (route) =>
-    route.fulfill({
-      contentType: "text/event-stream",
-      body: `data: ${JSON.stringify({ kind: "status", status: { loading: false, error: "" } })}\n\ndata: ${JSON.stringify({ kind: "snapshot", snapshot: [] })}\n\ndata: ${JSON.stringify({ kind: "warning", warning })}\n\n`,
-    }),
-  );
-  await page.goto("/");
-  await expect(page.getByText(warning.message)).toBeVisible();
-  await page.getByRole("button", { name: "Dismiss warning" }).click();
-  await expect(page.getByText(warning.message)).toHaveCount(0);
-  expect(errors).toEqual([]);
-});
-
-test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
-  const err = await api
-    .createTask({ harness: "claude" } as unknown as Parameters<typeof api.createTask>[0])
-    .catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(APIError);
-  expect((err as APIError).status).toBe(400);
-  expect((err as APIError).code).toBeTruthy();
-});
 
 test("categorized CI alerts stay quiet on replay and expose details on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -98,40 +57,6 @@ test("categorized CI alerts stay quiet on replay and expose details on mobile", 
   expect(errors).toEqual([]);
 });
 
-test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) => {
-  const err = await api
-    .createTask({
-      initialPrompt: { text: "hello" },
-      repos: [{ name: "nonexistent" }],
-      harness: "claude",
-    })
-    .catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(APIError);
-  expect((err as APIError).status).toBe(400);
-  expect((err as APIError).code).toBe("UNKNOWN_REPOSITORY");
-});
-
-test("POST /api/caic/v1/tasks with unknown harness returns 400", async ({ api }) => {
-  const err = await api
-    // Deliberately outside the Harness enum: the server must reject it.
-    .createTask({ initialPrompt: { text: "hello" }, harness: "does-not-exist" as Harness })
-    .catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(APIError);
-  expect((err as APIError).status).toBe(400);
-});
-
-test("purge nonexistent task returns 404", async ({ api }) => {
-  const err = await api.purgeTask("nonexistent-id").catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(APIError);
-  expect((err as APIError).status).toBe(404);
-});
-
-test("send input to nonexistent task returns 404", async ({ api }) => {
-  const err = await api.sendInput("nonexistent-id", { prompt: { text: "hello" } }).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(APIError);
-  expect((err as APIError).status).toBe(404);
-});
-
 test("navigating to a nonexistent task redirects home", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
@@ -170,14 +95,4 @@ test("network failure shows reconnect banner", async ({ page }) => {
   await page.reload();
   await expect(word).toHaveAttribute("data-status", "connected", { timeout: 15_000 });
   await expect(word).toHaveCSS("color", "rgb(0, 0, 0)");
-});
-
-test("creating a task with special characters in prompt", async ({ api }) => {
-  const prompt = '<script>alert("xss")</script> & "quotes" & émojis 🎉';
-  const id = await createTaskAPI(api, prompt);
-  await waitForTaskState(api, id, "waiting");
-
-  const task = await api.getTask(id);
-  expect(task).toBeTruthy();
-  expect(task!.initialPrompt).toBe(prompt);
 });

@@ -1,7 +1,7 @@
 // E2E tests for guided quota recovery on desktop and mobile task paths.
 
 import type { APIClient, Page } from "../helpers";
-import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 async function createQuotaBlockedTask(api: APIClient, prompt: string) {
   const id = await createTaskAPI(api, prompt);
@@ -19,7 +19,7 @@ async function finishRecovery(page: Page, api: APIClient, sourceID: string, prom
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Continue after quota limit" })).toBeVisible();
   await expect(page.getByTestId("fork-prompt-input")).toContainText("Continue this task after quota exhaustion");
-  await fillContentEditable(page.getByTestId("fork-prompt-input"), prompt);
+  await page.getByTestId("fork-prompt-input").fill(prompt);
   await page.getByTestId("fork-submit").click();
 
   let forkedID = "";

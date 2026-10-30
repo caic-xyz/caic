@@ -1,6 +1,6 @@
 // Browser regressions for long prompts staying within the task form and conversation viewport.
 
-import { test, expect, fillContentEditable, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
   test(`long recorded prompt stays in the conversation viewport at ${width}px`, async ({ page, api, uniquePrompt }) => {
@@ -71,7 +71,7 @@ test("long new-task prompt keeps the task list below the editor", async ({ page 
   }
 
   const prompt = page.getByTestId("prompt-input");
-  await fillContentEditable(prompt, "Describe the change and its expected behavior. ".repeat(35));
+  await prompt.fill("Describe the change and its expected behavior. ".repeat(35));
   await expect(prompt).toContainText("expected behavior");
 
   const form = page.getByTestId("new-task-form");

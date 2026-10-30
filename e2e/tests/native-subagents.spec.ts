@@ -1,12 +1,12 @@
 // Tests canonical native activity rendering, keyboard disclosure, mobile containment, and restored SSE history.
-import { test, expect, fillContentEditable } from "../helpers";
+import { test, expect } from "../helpers";
 
 for (const width of [390, 1280]) {
   test(`native activity survives reload at ${width}px`, async ({ page, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
-    await fillContentEditable(page.getByTestId("prompt-input"), uniquePrompt("FAKE_NATIVE_SUBAGENTS"));
+    await page.getByTestId("prompt-input").fill(uniquePrompt("FAKE_NATIVE_SUBAGENTS"));
     await page.getByTestId("submit-task").click();
     await expect(page).toHaveURL(/\/task\//);
     // Cards render inline in the transcript, where each lifecycle settled.
@@ -39,7 +39,7 @@ for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
-    await fillContentEditable(page.getByTestId("prompt-input"), uniquePrompt("FAKE_BACKGROUND_COMMANDS"));
+    await page.getByTestId("prompt-input").fill(uniquePrompt("FAKE_BACKGROUND_COMMANDS"));
     await page.getByTestId("submit-task").click();
     await expect(page).toHaveURL(/\/task\//);
     // The spawning tool row resolves its chip to the command's exit code.

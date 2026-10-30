@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -182,6 +183,36 @@ func TestTaskDiffHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("compact repository status omits patch reads", func(t *testing.T) {
+		t.Parallel()
+		s, backend, taskID := newTaskDiffTestRouter(t)
+		backend.RepositoryStatusValue.DiffStat = []runtime.GitFileStat{
+			{Path: "committed.go", LinesAdded: 4, LinesDeleted: 1},
+			{Path: "renamed.go", LinesAdded: 2},
+		}
+		backend.RepositoryStatusValue.Uncommitted[0].IndexStatus = "U"
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/repo-status", nil)
+		testTaskHandlers(s).routes().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		var got v1.TaskRepoStatusResp
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		want := v1.TaskRepoStatusResp{Repositories: []v1.GitRepositoryState{{
+			Name: "repo", Branch: "caic-1", Ahead: 1, Behind: 1,
+			ChangedFiles: 2, LinesAdded: 6, LinesDeleted: 1, UncommittedFiles: 1, Conflicts: 1,
+		}}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("status = %+v, want %+v", got, want)
+		}
+		if len(backend.fileDiffCalls) != 0 {
+			t.Fatalf("FileDiff calls = %+v, want none", backend.fileDiffCalls)
+		}
+	})
+
 	t.Run("rejects invalid selectors", func(t *testing.T) {
 		t.Parallel()
 
@@ -206,6 +237,29 @@ func TestTaskDiffHandlers(t *testing.T) {
 			t.Fatalf("FileDiff calls = %d, want none", len(backend.fileDiffCalls))
 		}
 	})
+}
+
+func TestTaskHandlersMissingTask(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"invalid-id", ksid.NewID().String()} {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, nil)
+			for _, endpoint := range []string{"input", "purge"} {
+				t.Run(endpoint, func(t *testing.T) {
+					w := httptest.NewRecorder()
+					r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/tasks/"+id+"/"+endpoint, strings.NewReader(`{"prompt":{"text":"hello"}}`))
+					testTaskHandlers(s).routes().ServeHTTP(w, r)
+					if w.Code != http.StatusNotFound {
+						t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+					}
+					if e := decodeError(t, w); e.Code != api.CodeNotFound {
+						t.Fatalf("error = %+v, want NOT_FOUND", e)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestTaskHandlersVNCWithoutDisplay(t *testing.T) {

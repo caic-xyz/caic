@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
+import { createApiClient, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { StepLoadTimingReport } from "../frontend/src/stepTimings";
 import type { HistoryBootstrap, PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
 
@@ -152,6 +152,9 @@ export const test = base.extend<{
       });
     }
     await use(page);
+    // A task-stream open can start a config refresh after the last assertion.
+    // Drain route handlers before context teardown disposes route.fetch bodies.
+    await page.unrouteAll({ behavior: "wait" });
   },
   api: async ({ request }, use) => {
     await use(createClient(request));
@@ -169,22 +172,8 @@ export const test = base.extend<{
   },
 });
 
-export { expect, APIError };
+export { expect };
 export type { Page } from "@playwright/test";
-
-// ---------------------------------------------------------------------------
-// Utility: fill a contenteditable element (Playwright's fill() doesn't
-// reliably fire input events on contenteditable divs).
-// ---------------------------------------------------------------------------
-
-export async function fillContentEditable(locator: import("@playwright/test").Locator, text: string): Promise<void> {
-  await locator.click();
-  await locator.evaluate((el) => {
-    el.textContent = "";
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  await locator.pressSequentially(text, { delay: 0 });
-}
 
 // ---------------------------------------------------------------------------
 // Utility: create a task via API and return its ID.
@@ -194,15 +183,11 @@ export async function createTaskAPI(api: APIClient, prompt: string): Promise<str
   const repos = await api.listRepos();
   const firstRepo = repos[0];
   ok(firstRepo);
-  expect(repos.length).toBeGreaterThan(0);
-  const harnesses = await api.listHarnesses();
-  expect(harnesses.length).toBeGreaterThan(0);
   const resp = await api.createTask({
     initialPrompt: { text: prompt },
     repos: [{ name: firstRepo.path }],
     harness: "claude",
   });
-  expect(resp.id).toBeTruthy();
   return resp.id;
 }
 
@@ -220,7 +205,7 @@ export async function waitForTaskState(
   await expect(async () => {
     task = await api.getTask(taskId);
     expect(task.state).toBe(state);
-  }).toPass({ timeout: timeoutMs, intervals: [500] });
+  }).toPass({ timeout: timeoutMs, intervals: [100, 250, 500] });
   return task;
 }
 

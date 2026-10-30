@@ -1,4 +1,4 @@
-// Browser/API coverage for immutable raw history resources, native HTTP-cache reuse, and exact live handoff.
+// Browser coverage for immutable history HTTP-cache reuse and exact live SSE handoff.
 import { test, expect, createTaskAPI, waitForTaskState, recentHistoryChunk } from "../helpers";
 import type { HistoryEvent } from "../../sdk/caic/ts/v1/types.gen";
 
@@ -8,32 +8,9 @@ test.use({ taskPreferences: null });
 
 declare global {
   interface Window {
-    historyHTTPState?: { records: number[]; checkpoint: string; errors: string[] };
+    historyHTTPState?: { records: number[]; kinds: string[]; checkpoint: string; errors: string[] };
   }
 }
-
-test("raw history API exposes deterministic ranges and independent mutable views", async ({ api }) => {
-  const id = await createTaskAPI(api, "history HTTP API contract");
-  await waitForTaskState(api, id, "waiting");
-  const b = await api.getHistoryBootstrap(id);
-  const recent = recentHistoryChunk(b);
-  expect(b.recordsPerChunk).toBe(256);
-  expect(b.cursor).toMatch(new RegExp(`^${b.projectionVersion}\\.${b.generation}\\.${b.through}\\.end$`));
-  const args = [id, b.scope, b.projectionVersion, b.generation, String(recent.first), String(recent.last)] as const;
-  const events = await api.getHistoryChunk(...args);
-  expect(events.length).toBeGreaterThan(0);
-  expect(events.some((e) => e.message.kind === "result")).toBe(true);
-  expect(events.every((e) => e.recordID >= recent.first && e.recordID <= recent.last)).toBe(true);
-  expect(new Set(events.map((e) => `${e.recordID}:${e.index}`)).size).toBe(events.length);
-  const costs = await api.getHistoryCosts(id, b.generation, String(b.through));
-  expect(costs.every((c) => events.some((e) => e.recordID === c.recordID && e.index === c.index))).toBe(true);
-  await api.sendInput(id, { prompt: { text: "continue history contract" } });
-  await waitForTaskState(api, id, "waiting");
-  const next = await api.getHistoryBootstrap(id);
-  expect(next.generation).toBe(b.generation);
-  expect(next.through).toBeGreaterThan(b.through);
-  expect(await api.getHistoryChunk(...args)).toEqual(events);
-});
 
 for (const state of ["waiting", "stopped", "purged"])
   test(`immutable ${state} chunk bodies survive reload in the browser HTTP cache`, async ({ api, page }) => {
@@ -79,11 +56,14 @@ test("native raw SSE resumes after bootstrap without replaying its prefix", asyn
   await page.goto("/");
   await page.evaluate(
     ({ id, cursor }) => {
-      const state = { records: [] as number[], checkpoint: "", errors: [] as string[] };
+      const state = { records: [] as number[], kinds: [] as string[], checkpoint: "", errors: [] as string[] };
       window.historyHTTPState = state;
       const source = new EventSource(`/api/caic/v1/tasks/${id}/history/events?cursor=${encodeURIComponent(cursor)}`);
-      source.onmessage = (event: MessageEvent<string>) =>
-        state.records.push((JSON.parse(event.data) as HistoryEvent).recordID);
+      source.onmessage = (event: MessageEvent<string>) => {
+        const message = JSON.parse(event.data) as HistoryEvent;
+        state.records.push(message.recordID);
+        state.kinds.push(message.message.kind);
+      };
       source.addEventListener("checkpoint", (event) => {
         state.checkpoint = (event as MessageEvent<string>).lastEventId;
       });
@@ -109,5 +89,6 @@ test("native raw SSE resumes after bootstrap without replaying its prefix", asyn
   const live = await state();
   expect(live.records.length).toBeGreaterThan(0);
   expect(live.records.every((r) => r > b.through && r <= next.through)).toBe(true);
+  expect(live.kinds).toEqual(expect.arrayContaining(["textDelta", "text", "result"]));
   expect(live.errors).toEqual([]);
 });

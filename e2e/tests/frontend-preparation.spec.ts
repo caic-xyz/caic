@@ -1,10 +1,14 @@
 // Verifies scoped task preparation and deferred browser voice loading in the production caic bundle.
 
 import { expect, test, installNativeVoiceBridge } from "../helpers";
+import type { Config, TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
 
 test("native preparation waits for the empty complete task snapshot", async ({ page }) => {
   const snapshot = Promise.withResolvers<void>();
   const requested = Promise.withResolvers<void>();
+  const refreshing = Promise.withResolvers<void>();
+  const releaseRefresh = Promise.withResolvers<void>();
+  let configs = 0;
   const scripts: string[] = [];
   page.on("request", (request) => {
     if (request.resourceType() === "script") scripts.push(request.url());
@@ -13,44 +17,56 @@ test("native preparation waits for the empty complete task snapshot", async ({ p
   page.on("pageerror", (error) => errors.push(error.message));
   await installNativeVoiceBridge(page, false);
   await page.route("**/api/caic/v1/server/config", async (route) => {
+    // SSE opening refreshes config independently of initial preparation. Hold
+    // that refresh until the test exits to exercise route teardown ownership.
+    if (++configs > 1) {
+      refreshing.resolve();
+      await releaseRefresh.promise;
+    }
     const response = await route.fetch();
-    const config = await response.json();
-    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } });
+    const config: Config = await response.json();
+    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } satisfies Config });
   });
   await page.route("**/api/caic/v1/tasks/events", async (route) => {
     requested.resolve();
     await snapshot.promise;
     await route.fulfill({
       contentType: "text/event-stream",
-      body: `data: ${JSON.stringify({ kind: "snapshot", snapshot: [], complete: true })}\n\n`,
+      body: `data: ${JSON.stringify({ kind: "snapshot", snapshot: [], complete: true } satisfies TaskListEvent)}\n\n`,
     });
   });
-  await page.goto("/");
-  await requested.promise;
-  await expect(page.getByTestId("app-shell")).toBeVisible();
-  await page.waitForFunction(
-    () => typeof (window as unknown as { dispatchGoModeVoiceTool?: unknown }).dispatchGoModeVoiceTool === "function",
-  );
-  const readiness = () =>
-    page.evaluate(
-      () =>
-        (window as unknown as { preparationMessages: Array<{ ready: boolean; tools: Array<{ name: string }> }> })
-          .preparationMessages,
+  try {
+    await page.goto("/");
+    await requested.promise;
+    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await page.waitForFunction(
+      () => typeof (window as unknown as { dispatchGoModeVoiceTool?: unknown }).dispatchGoModeVoiceTool === "function",
     );
-  await expect.poll(async () => (await readiness()).length).toBeGreaterThan(0);
-  expect((await readiness()).some((message) => message.ready)).toBe(false);
-  snapshot.resolve();
-  await expect
-    .poll(async () => (await readiness()).at(-1))
-    .toEqual({
-      document: "native-document",
-      token: "native-identity",
-      scope: expect.any(String),
-      ready: true,
-      tools: [expect.objectContaining({ name: "focus_task" })],
-    });
-  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
-  expect(errors).toEqual([]);
+    const readiness = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { preparationMessages: Array<{ ready: boolean; tools: Array<{ name: string }> }> })
+            .preparationMessages,
+      );
+    await expect.poll(async () => (await readiness()).length).toBeGreaterThan(0);
+    expect((await readiness()).some((message) => message.ready)).toBe(false);
+    snapshot.resolve();
+    await expect
+      .poll(async () => (await readiness()).at(-1))
+      .toEqual({
+        document: "native-document",
+        token: "native-identity",
+        scope: expect.any(String),
+        ready: true,
+        tools: [expect.objectContaining({ name: "focus_task" })],
+      });
+    expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
+    expect(errors).toEqual([]);
+    await refreshing.promise;
+  } finally {
+    snapshot.resolve();
+    releaseRefresh.resolve();
+  }
 });
 
 test("browser voice and its keyboard shortcut wait for initial task preparation", async ({ page }, testInfo) => {
@@ -64,8 +80,8 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
   });
   await page.route("**/api/caic/v1/server/config", async (route) => {
     const response = await route.fetch();
-    const config = await response.json();
-    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } });
+    const config: Config = await response.json();
+    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } satisfies Config });
   });
   await page.route("**/.well-known/gomode.json", async (route) => {
     const response = await route.fetch();
@@ -83,19 +99,23 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
     await snapshot.promise;
     await route.fulfill({
       contentType: "text/event-stream",
-      body: `data: ${JSON.stringify({ kind: "snapshot", snapshot: [], complete: true })}\n\n`,
+      body: `data: ${JSON.stringify({ kind: "snapshot", snapshot: [], complete: true } satisfies TaskListEvent)}\n\n`,
     });
   });
-  await page.goto("/");
-  await requested.promise;
-  await expect(page.getByTestId("app-shell")).toBeVisible();
-  await expect(page.getByTestId("voice-overlay")).toHaveCount(0);
-  await page.keyboard.press("F4");
-  expect(voiceRequests).toEqual([]);
-  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
-  await page.screenshot({ path: testInfo.outputPath("frontend-pending.png") });
-  snapshot.resolve();
-  await expect(page.getByTestId("voice-overlay")).toBeVisible();
-  expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("frontend-ready.png") });
+  try {
+    await page.goto("/");
+    await requested.promise;
+    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await expect(page.getByTestId("voice-overlay")).toHaveCount(0);
+    await page.keyboard.press("F4");
+    expect(voiceRequests).toEqual([]);
+    expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath("frontend-pending.png") });
+    snapshot.resolve();
+    await expect(page.getByTestId("voice-overlay")).toBeVisible();
+    expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("frontend-ready.png") });
+  } finally {
+    snapshot.resolve();
+  }
 });

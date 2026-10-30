@@ -1,5 +1,5 @@
 // E2E tests for mobile fork-task navigation and layout.
-import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 test("forking from mobile opens only the forked task detail", async ({ page, api, uniquePrompt }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -19,7 +19,9 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
   await page.getByTestId("generate-handoff").click();
   await expect(page.getByTestId("fork-prompt-input")).toContainText("Continue this task in a new agent");
   const forkPrompt = uniquePrompt("e2e fork mobile child");
-  await fillContentEditable(page.getByTestId("fork-prompt-input"), forkPrompt);
+  // Let focus restore the editor's caret before fill selects its contents.
+  await page.getByTestId("fork-prompt-input").click();
+  await page.getByTestId("fork-prompt-input").fill(forkPrompt);
   await page.getByTestId("fork-submit").click();
 
   let forkedId = "";

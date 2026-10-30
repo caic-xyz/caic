@@ -1,29 +1,11 @@
-// E2E tests for image drafts: API compatibility, captures, limits, retry, task switching, and preview cleanup.
+// E2E tests for image drafts: captures, limits, retry, task switching, and preview cleanup.
 import { ok } from "node:assert/strict";
 import { validateTask } from "../../sdk/caic/ts/v1/validate.gen";
-import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 // Minimal 1×1 transparent PNG encoded as base64, used as a lightweight test fixture
 // when we need valid image bytes to send via the API.
 const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
-
-test("API: images are accepted in task inputs when harness supports them", async ({ api, uniquePrompt }) => {
-  const id = await createTaskAPI(api, uniquePrompt("image-api"));
-  await waitForTaskState(api, id, "waiting");
-
-  // Send a follow-up input that includes an attached image; the fake backend's
-  // harness has supportsImages: true so this must be accepted (HTTP 200).
-  await api.sendInput(id, {
-    prompt: {
-      text: "with image",
-      images: [{ mediaType: "image/png", data: TINY_PNG_B64 }],
-    },
-  });
-  await waitForTaskState(api, id, "waiting");
-
-  await api.purgeTask(id);
-  await waitForTaskState(api, id, "purged");
-});
 
 test("UI: a sent image opens in the document pane and survives a reload", async ({ page, api, uniquePrompt }) => {
   const id = await createTaskAPI(api, uniquePrompt("attachment-pane"));
@@ -135,10 +117,7 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   await expect(thumbnail).toBeVisible({ timeout: 5_000 });
 
   // Send the screenshot together with a text message.
-  await fillContentEditable(
-    detailForm.getByRole("textbox", { name: "Send message to agent..." }),
-    "here is a screenshot",
-  );
+  await detailForm.getByRole("textbox", { name: "Send message to agent..." }).fill("here is a screenshot");
   await detailForm.getByTestId("send-input").click();
 
   // After a successful send the input images are cleared, so the preview-strip
@@ -251,13 +230,15 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   await chooser.setInputFiles(pngFile);
   const thumbnail = form.getByRole("img", { name: "attached" });
   await expect(thumbnail).toHaveAttribute("src", /^blob:/);
-  await fillContentEditable(prompt, "first image draft");
+  await prompt.fill("first image draft");
   await page.evaluate(() => {
     window.draftProbe.holdReads = true;
   });
   await form.getByTestId("submit-task").click();
   await page.waitForFunction(() => window.draftProbe.readStarted);
-  await fillContentEditable(prompt, "edited during conversion");
+  // Let focus restore the editor's caret before fill selects its contents.
+  await prompt.click();
+  await prompt.fill("edited during conversion");
   await chooser.setInputFiles({ ...pngFile, name: "second.png" });
   await expect(thumbnail).toHaveCount(2);
   const requests: import("../../sdk/caic/ts/v1/types.gen").CreateTaskReq[] = [];
@@ -366,7 +347,7 @@ test("UI: unavailable attachment policy keeps text-only task creation working", 
   const form = page.locator("form").filter({ has: page.getByTestId("prompt-input") });
   await expect(form.getByTestId("attach-images")).toBeDisabled();
   await expect(form.getByRole("status")).toHaveText("Image attachments are unavailable until server limits load.");
-  await fillContentEditable(page.getByTestId("prompt-input"), uniquePrompt("text-only-no-image-policy"));
+  await page.getByTestId("prompt-input").fill(uniquePrompt("text-only-no-image-policy"));
   const createdResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/caic/v1/tasks") &&

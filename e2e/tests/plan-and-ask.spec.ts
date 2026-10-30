@@ -1,9 +1,9 @@
 // E2E tests for ExitPlanMode "Clear and execute plan" button and AskUserQuestion card.
-import { test, expect, waitForTaskState, fillContentEditable, type APIClient } from "../helpers";
+import { test, expect, waitForTaskState, type APIClient } from "../helpers";
 
 // Submit a task via the UI and poll until the task ID is available via the API.
 async function submitAndGetId(page: import("@playwright/test").Page, api: APIClient, prompt: string): Promise<string> {
-  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await page.getByTestId("prompt-input").fill(prompt);
   await page.getByTestId("submit-task").click();
   let taskId = "";
   await expect(async () => {
@@ -42,10 +42,10 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   await expect(page.getByTestId("plan-content")).toBeVisible();
 
   // Fill in a non-empty prompt so restart doesn't try to read the container plan file.
-  await fillContentEditable(
-    page.getByTestId("task-detail-form").getByRole("textbox", { name: "Send message to agent..." }),
-    "execute now",
-  );
+  await page
+    .getByTestId("task-detail-form")
+    .getByRole("textbox", { name: "Send message to agent..." })
+    .fill("execute now");
 
   // Click the button; the task restarts and settles back to waiting.
   await clearBtn.click();

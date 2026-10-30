@@ -1,6 +1,6 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { ok } from "node:assert/strict";
-import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
+import { test, expect, waitForTaskState, createTaskAPI } from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
@@ -12,7 +12,7 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   const prompt = uniquePrompt("FAKE_LIFECYCLE e2e lifecycle");
 
   // Fill prompt and submit.
-  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await page.getByTestId("prompt-input").fill(prompt);
   await page.getByTestId("submit-task").click();
 
   // Task creation navigates directly to TaskDetail; the initial event stream
@@ -169,7 +169,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await page.getByRole("button", { name: "Hide features" }).click();
 
   const prompt = uniquePrompt("Continue the existing session");
-  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await page.getByTestId("prompt-input").fill(prompt);
   const request = page.waitForRequest((req) => req.method() === "POST" && req.url().endsWith("/api/caic/v1/tasks"));
   await page.getByTestId("submit-task").click();
   const body = (await request).postDataJSON();

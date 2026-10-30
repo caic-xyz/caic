@@ -1,6 +1,6 @@
 // End-to-end keyboard-only navigation through repository selection, task creation, and task focus.
 
-import { test, expect, createTaskAPI, fillContentEditable, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 test("completes the primary task flow using only the keyboard", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
@@ -96,7 +96,7 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
 test("Ctrl+Enter submits from a focused feature toggle without toggling it", async ({ page, uniquePrompt }) => {
   await page.goto("/");
   const prompt = uniquePrompt("shortcut from feature toggle");
-  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await page.getByTestId("prompt-input").fill(prompt);
   await expect(page.getByTestId("submit-task")).toBeEnabled();
   await page.getByRole("button", { name: "Show features" }).click();
   const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });

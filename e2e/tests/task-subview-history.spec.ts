@@ -37,6 +37,10 @@ for (const width of [390, 1280]) {
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
       const pane = page.getByTestId("task-view-pane");
       await expect(pane).toBeVisible();
+      if (subview === "stats") {
+        await expect(pane.getByText("Performance", { exact: true })).toBeVisible();
+        await expect(pane.getByRole("heading", { name: "Resources" })).toBeVisible();
+      }
       if (width <= 768) await expect(conversation).toBeHidden();
       else {
         await expect(conversation).toBeVisible();
