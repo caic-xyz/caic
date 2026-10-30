@@ -46,7 +46,7 @@ test("device approval, normal permissions, logout, and network protection", asyn
       await expect(approval).toHaveURL(`${origin}/device`);
       await expect(approval.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
       await expect(screen.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
-      await screen.screenshot({ path: test.info().outputPath("device-display.png"), fullPage: true });
+
       const input = approval.getByRole("textbox", { name: "Device code" });
       await expect(input).toBeFocused();
       await expect(input).toHaveAttribute("inputmode", "text");
@@ -61,13 +61,13 @@ test("device approval, normal permissions, logout, and network protection", asyn
       expect(lookups).toBe(0);
       await expect(approval.getByRole("status", { includeHidden: true })).toHaveText("");
       await expect(input).toHaveValue(code.slice(0, -1));
-      await approval.screenshot({ path: test.info().outputPath("device-entry.png"), fullPage: true });
+
       await input.pressSequentially(raw.slice(-1));
       await expect(approval.getByText("127.0.0.0/24", { exact: true })).toBeVisible();
       await expect(approval.getByText(/Never approve a code sent by someone else/)).toBeVisible();
       await expect(approval.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
       expect(lookups).toBe(1);
-      await approval.screenshot({ path: test.info().outputPath("device-review.png"), fullPage: true });
+
       // Lookup alone must leave the display waiting and unauthenticated.
       await expect(screen.getByRole("status")).toHaveText("Waiting for approval…");
       const before = await display.request.get("/auth/me");
@@ -235,12 +235,11 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
         .toBe(true);
       await expect(page.getByLabel("Device code", { exact: true })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`display-${width}.png`) });
     }
     await worker.evaluate("chrome.tabs.setZoom(2)");
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(640);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("display-200-percent.png") });
+
     await page.goto("/device");
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
     await expect(page.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
@@ -258,16 +257,9 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
         expect(box.x + box.width).toBeLessThanOrEqual(width / 2);
         expect(box.height).toBeGreaterThanOrEqual(44);
       }
-      await page.screenshot({ path: testInfo.outputPath(`approval-${width / 2}-200-percent.png`) });
+
       await page.getByRole("button", { name: "Approve sign-in" }).scrollIntoViewIfNeeded();
-      await page.screenshot({ path: testInfo.outputPath(`approval-${width / 2}-200-percent-actions.png`) });
     }
-    // Full-page captures at native zoom crop inconsistently in Chromium;
-    // use an ordinary 320px viewport for a complete visual reflow record.
-    await worker.evaluate("chrome.tabs.setZoom(1)");
-    await page.setViewportSize({ width: 320, height: 960 });
-    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(320);
-    await page.screenshot({ path: testInfo.outputPath("approval-320-full.png"), fullPage: true });
   } finally {
     await context.close();
   }

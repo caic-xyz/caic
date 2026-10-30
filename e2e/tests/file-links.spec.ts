@@ -55,7 +55,7 @@ for (const width of [390, 1280]) {
     const image = page.getByRole("img", { name: "/home/user/src/caic/test-results/screenshot.png", exact: true });
     await expect(image).toBeVisible();
     expect(await image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
-    await page.screenshot({ path: test.info().outputPath("image-viewer.png") });
+
     const opened = page.waitForEvent("popup");
     await page.getByRole("link", { name: "raw file" }).click();
     const rawPage = await opened;
@@ -100,7 +100,7 @@ for (const width of [390, 1280]) {
           );
         }),
       ).toBe(true);
-      await page.screenshot({ path: test.info().outputPath("pdf-viewer.png") });
+
       const dimensions = await preview.evaluate((el) => ({
         height: el.clientHeight,
         pageHeight: el.querySelector("canvas")?.clientHeight ?? 0,
@@ -235,14 +235,14 @@ for (const width of [390, 1280]) {
       await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/models/assembly.3mf")}`);
       await expect(page.getByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
       await expect(page.locator("canvas")).toBeVisible();
-      await page.screenshot({ path: test.info().outputPath("printing-plates.png") });
+
       const canvas = await page.locator("canvas").boundingBox();
       if (!canvas) throw new Error("Missing canvas bounds");
       await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
       await page.mouse.down();
       await page.mouse.move(canvas.x + canvas.width / 2 + 40, canvas.y + canvas.height / 2, { steps: 8 });
       await page.mouse.up();
-      await page.screenshot({ path: test.info().outputPath("printing-plates-orbit.png") });
+
       await page.getByRole("button", { name: "View controls", exact: true }).focus();
       await page.getByRole("button", { name: "Reset view", exact: true }).click();
       await page.getByRole("button", { name: /^Display mode:/ }).click();

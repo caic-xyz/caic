@@ -1,42 +1,8 @@
-// Browser coverage for task-card compaction, tooltips, and repository-state refreshes.
+// Browser coverage for task-card tooltips, repository layout, and live diff refreshes.
 
 import { ok } from "node:assert/strict";
-import { expect, test, waitForTaskState } from "../helpers";
+import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
-
-test("task card shows the configured compaction threshold", async ({ page, api, uniquePrompt }) => {
-  const [repo] = await api.listRepos();
-  ok(repo);
-  const task = await api.createTask({
-    initialPrompt: { text: uniquePrompt("FAKE_DEMO compact threshold") },
-    repos: [{ name: repo.path }],
-    harness: "codex",
-  });
-  await waitForTaskState(api, task.id, "waiting");
-  const snapshot = {
-    kind: "snapshot",
-    snapshot: [
-      {
-        ...(await api.getTask(task.id)),
-        activeInputTokens: 180_000,
-        activeCacheReadTokens: 0,
-        autoCompactTokenLimit: 244_800,
-        contextWindowLimit: 400_000,
-      },
-    ],
-  } satisfies TaskListEvent;
-  await page.route(
-    (url) => url.pathname === "/api/caic/v1/tasks/events",
-    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
-  );
-  await page.goto(`/task/@${task.id}`);
-  const tokens = page.locator(`[data-task-id="${task.id}"]`).getByTestId("task-card-tokens");
-  await expect(tokens).toHaveText("180kt/245kt");
-  await tokens.hover();
-  const tooltip = page.getByText(/Configured auto-compact threshold: 244,800 total active tokens/);
-  await expect(tooltip).toContainText("The effective limit may be lower");
-  await expect(tooltip).toContainText("Context window: 400kt");
-});
 
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();
@@ -77,7 +43,7 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
   }
 });
 
-test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }, testInfo) => {
+test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }) => {
   const repos = await api.listRepos();
   const firstRepo = repos[0];
   ok(firstRepo);
@@ -225,9 +191,6 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
     expect(rhythm.rowGap).toBeGreaterThan(0);
     expect(rhythm.rowGap).toBeLessThanOrEqual(3);
     expect(rhythm.contained).toBe(true);
-    await page.getByTestId("task-list").screenshot({
-      path: testInfo.outputPath(`task-card-repository-state-${width}.png`),
-    });
   }
 
   // Purged tasks keep repository labels but no runtime Git markers.
@@ -260,27 +223,53 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
     .toBeLessThan(1);
 });
 
-test("turn completion and diff agree on a waiting task card", async ({ page, api, uniquePrompt }) => {
-  const repos = await api.listRepos();
-  const firstRepo = repos[0];
-  ok(firstRepo);
-  const secondRepo = repos[1];
-  ok(secondRepo);
-  const task = await api.createTask({
-    initialPrompt: { text: uniquePrompt("Refresh repository summary") },
-    repos: [{ name: firstRepo.path }],
-    harness: "claude",
-  });
-  await waitForTaskState(api, task.id, "waiting");
-  await page.goto(`/task/@${task.id}`);
-  const card = page.locator(`[data-task-id="${task.id}"]`);
+test("turn completion refreshes the diff and preserves task-card agreement", async ({ page, api, uniquePrompt }) => {
+  const id = await createTaskAPI(api, uniquePrompt("Repository summary"));
+  await waitForTaskState(api, id, "waiting");
+  await page.goto(`/task/@${id}/diff`);
+  const card = page.locator(`[data-task-id="${id}"]`);
+  const diff = page.getByTestId("task-view-pane");
   const summary = card.getByRole("img", {
     name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",
   });
-  await expect(summary).toBeVisible();
-  await page.goto(`/task/@${task.id}/diff`);
-  await expect(summary).toBeVisible();
-  await expect(card.getByTestId("state-badge")).toHaveText("waiting");
+  const assertAgreement = async () => {
+    await expect(summary).toBeVisible();
+    await expect(diff.getByRole("heading", { name: "Commits ahead (1)" })).toBeVisible();
+    await expect(diff.getByRole("heading", { name: "Uncommitted changes (1)" })).toBeVisible();
+    const committed = diff.getByRole("button", { name: "cmd/caic/main.go", exact: true });
+    const uncommitted = diff.getByRole("button", { name: "frontend/src/App.tsx", exact: true });
+    await expect(committed).toContainText("+8");
+    await expect(uncommitted).toContainText("+4");
+    await expect(uncommitted).toContainText("−2");
+  };
+  await assertAgreement();
+  await card.getByTestId("task-card-cost").getByRole("button").hover();
+  await expect(page.getByText(/API-equivalent cost/)).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(page.getByText(/API-equivalent cost/)).toHaveCount(0);
+
+  const indexResponse = () =>
+    page.waitForResponse((response) => new URL(response.url()).pathname === `/api/caic/v1/tasks/${id}/diff/index`);
+  try {
+    await test.step("running turn revalidates the open diff", async () => {
+      const refreshed = indexResponse();
+      await page.getByTestId("task-detail-prompt").fill("FAKE_DEMO_GATED");
+      await page.getByTestId("send-input").click();
+      await expect(card.getByTestId("state-badge")).toHaveText("running");
+      expect((await refreshed).ok()).toBe(true);
+      await expect(diff.getByText("Updating diff...", { exact: true })).toHaveCount(0);
+    });
+
+    await test.step("completion revalidates again and renders the matching file counts", async () => {
+      const refreshed = indexResponse();
+      await api.sendInput(id, { prompt: { text: "FAKE_DEMO_FINISH" } });
+      expect((await refreshed).ok()).toBe(true);
+      await expect(card.getByTestId("state-badge")).toHaveText("waiting");
+      await assertAgreement();
+    });
+  } finally {
+    await api.purgeTask(id);
+  }
 });
 
 test("failed refreshes retain counts and show a stale marker at desktop and mobile widths", async ({

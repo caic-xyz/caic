@@ -5,7 +5,7 @@ import type { ServerHealth, TaskListEvent, ISOTimestamp } from "../../sdk/caic/t
 import { expect, test } from "../helpers";
 
 for (const width of [320, 390, 1280]) {
-  test(`live server usage levels at ${width}px`, async ({ page }, testInfo) => {
+  test(`live server usage levels at ${width}px`, async ({ page }) => {
     const errors: string[] = [];
     const requests: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -74,7 +74,7 @@ for (const width of [320, 390, 1280]) {
       if (!tipBox) throw new Error("Tooltip missing");
       expect(tipBox.x).toBeGreaterThanOrEqual(0);
       expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(width);
-      await page.screenshot({ path: testInfo.outputPath("both-high.png") });
+
       // Hover must dismiss even while keyboard focus belongs to another control.
       await page.keyboard.press("Escape");
       await expect(tooltip).toBeHidden();
@@ -92,20 +92,20 @@ for (const width of [320, 390, 1280]) {
       await expect(memory).toHaveCSS("fill", "rgb(220, 53, 69)");
       expect(await memory.boundingBox()).toEqual(memBox);
       expect(await avatar.boundingBox()).toEqual(before);
-      await page.screenshot({ path: testInfo.outputPath("memory-high.png") });
+
       update({ cpuPerc: 680, memUsed: 16 * 2 ** 30 });
       await expect(link).toHaveAccessibleName("CPU warning, memory normal — open System");
       await expect(cpu).toHaveCSS("fill", "rgb(184, 92, 0)");
       await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
       expect(await cpu.boundingBox()).toEqual(cpuBox);
-      await page.screenshot({ path: testInfo.outputPath("cpu-warning.png") });
+
       update({ cpuPerc: 0, memUsed: 0 });
       await expect(link).toHaveAccessibleName("CPU normal, memory normal — open System");
       await expect(cpu).toBeVisible();
       await expect(memory).toBeVisible();
       await expect(cpu).toHaveCSS("fill", "rgb(40, 167, 69)");
       await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
-      await page.screenshot({ path: testInfo.outputPath("both-normal.png") });
+
       update({ error: "sample failed" });
       await expect(link).toHaveAccessibleName("CPU unavailable, memory unavailable — open System");
       await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
@@ -133,7 +133,7 @@ for (const width of [320, 390, 1280]) {
       await expect(tooltip).toContainText("Updates unavailable");
       await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
       await expect(memory).toHaveCSS("fill", "rgb(108, 117, 125)");
-      await page.screenshot({ path: testInfo.outputPath("disconnected.png") });
+
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await link.focus();
       await link.press("Enter");

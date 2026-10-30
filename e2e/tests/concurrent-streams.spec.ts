@@ -274,12 +274,12 @@ for (const width of [390, 1280]) {
       await toolA.locator(":scope > summary").focus();
       await cardA.scrollIntoViewIfNeeded();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-      await page.screenshot({ path: testInfo.outputPath("concurrent-streams.png"), fullPage: true });
+
       await toolB.locator(":scope > summary").focus();
       await cardB.scrollIntoViewIfNeeded();
       await expect(toolB.locator(":scope > summary")).toBeFocused();
       expect(await cardB.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
-      await page.screenshot({ path: testInfo.outputPath("concurrent-streams-failure.png"), fullPage: true });
+
       expect(appErrors).toEqual([]);
     } finally {
       reconnectGate?.resolve();

@@ -84,7 +84,7 @@ for (const width of [390, 1280]) {
       await page.goBack();
       await expect(page).toHaveURL(subviewURL);
       expect(await paneNode?.evaluate((node) => node.isConnected)).toBe(true);
-      await page.screenshot({ path: test.info().outputPath(`${subview}-workspace.png`) });
+
       await page.getByRole("button", { name: "Close view", exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
       await expect(prompt).toHaveText("Keep this draft");

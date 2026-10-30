@@ -62,7 +62,7 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await waitForTaskState(api, task!.id, "purged");
 });
 
-test("new-task effort stays compact and features follow the selectors", async ({ page, api }, testInfo) => {
+test("new-task effort stays compact and features follow the selectors", async ({ page, api }) => {
   const harnesses = await api.listHarnesses();
   await page.route("**/server/harnesses", (route) =>
     route.fulfill({
@@ -85,20 +85,18 @@ test("new-task effort stays compact and features follow the selectors", async ({
   const desktopDisclosure = (await disclosure.boundingBox())!;
   expect.soft(Math.abs(desktopDisclosure.y - desktopEffort.y)).toBeLessThan(1);
   expect.soft(desktopDisclosure.x - desktopEffort.x - desktopEffort.width).toBeLessThan(10);
-  await page.screenshot({ path: testInfo.outputPath("compact-controls-desktop.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(effort).toBeVisible();
   expect.soft((await effort.boundingBox())!.width).toBeLessThanOrEqual(desktopEffort.width + 1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("compact-controls-mobile.png") });
 });
 
 test("collapsed task features preserve opaque session IDs on desktop and mobile", async ({
   page,
   api,
   uniquePrompt,
-}, testInfo) => {
+}) => {
   const config = await api.getConfig();
   const runtimes = config.runtimes;
   if (!runtimes?.length) throw new Error("Fake server must expose a runtime");
@@ -121,12 +119,12 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await expect
     .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
     .toBeLessThan(1);
-  await page.screenshot({ path: testInfo.outputPath("features-collapsed-desktop.png") });
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect
     .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
     .toBeLessThan(1);
-  await page.screenshot({ path: testInfo.outputPath("features-collapsed-mobile.png") });
+
   await page.setViewportSize({ width: 1280, height: 844 });
   await disclosure.focus();
   await page.keyboard.press("Tab");
@@ -146,14 +144,14 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   const sessionID = "harness session:';$(opaque) " + "opaque-value-".repeat(12);
   await input.fill(`  ${sessionID}  `);
   expect((await input.boundingBox())!.width).toBeLessThan(450);
-  await page.screenshot({ path: testInfo.outputPath("resume-session-desktop.png") });
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(input).toHaveValue(`  ${sessionID}  `);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const bounds = await input.boundingBox();
   expect(bounds!.width).toBeGreaterThan(250);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: testInfo.outputPath("resume-session-mobile.png") });
+
   const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
   await toggle.focus();
   await page.keyboard.press("Space");
@@ -183,7 +181,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await api.stopTask(task!.id);
 });
 
-test("mobile stopped task card exposes Revive without selection", async ({ page, api }, testInfo) => {
+test("mobile stopped task card exposes Revive without selection", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const id = await createTaskAPI(api, "Revive from the mobile task summary");
   await waitForTaskState(api, id, "waiting", 30_000);
@@ -203,7 +201,6 @@ test("mobile stopped task card exposes Revive without selection", async ({ page,
   await expect(revive).toBeHidden();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(revive).toBeVisible();
-  await card.screenshot({ path: testInfo.outputPath("mobile-revive-card.png") });
 
   await revive.click();
   await waitForTaskState(api, id, "waiting", 30_000);
@@ -211,7 +208,7 @@ test("mobile stopped task card exposes Revive without selection", async ({ page,
   await expect(page).toHaveURL(/\/$/);
 });
 
-test("setup logs remain visible after task-detail replay", async ({ page, api }, testInfo) => {
+test("setup logs remain visible after task-detail replay", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Verify setup log replay");
   await waitForTaskState(api, id, "waiting", 30_000);
 
@@ -234,7 +231,6 @@ test("setup logs remain visible after task-detail replay", async ({ page, api },
   await expect(setup).toBeVisible();
   await expect(messageArea.getByTestId("task-setup")).toBeVisible();
   await expect(setup).not.toHaveAttribute("open");
-  await page.screenshot({ path: testInfo.outputPath("task-setup-logs.png") });
 });
 
 test("task detail desktop layout wraps timed controls and avoids pane overflow", async ({ page, api }) => {

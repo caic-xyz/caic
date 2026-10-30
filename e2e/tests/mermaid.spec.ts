@@ -99,14 +99,14 @@ for (const width of [390, 1280]) {
     await expect(shape).toHaveCSS("filter", "none");
     await page.emulateMedia({ forcedColors: "none" });
     await expect(shape).toHaveCSS("filter", /drop-shadow/);
-    await page.screenshot({ path: test.info().outputPath("diagrams.png"), fullPage: true });
+
     const architecture = blocks.nth(3).locator("[data-mermaid-diagram] > svg");
     await architecture.scrollIntoViewIfNeeded();
     await expect(architecture.locator("svg")).toHaveCount(2);
-    await architecture.screenshot({ path: test.info().outputPath("architecture.png") });
+
     const state = blocks.nth(5).locator("[data-mermaid-diagram] > svg");
     await state.scrollIntoViewIfNeeded();
-    await state.screenshot({ path: test.info().outputPath("state.png") });
+
     expect(remoteRequests).toEqual([]);
     expect(errors).toEqual([]);
   });

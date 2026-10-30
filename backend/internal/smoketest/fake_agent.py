@@ -1,4 +1,4 @@
-# Fake agent emits deterministic e2e scenarios, including gated concurrent streams with message identity.
+# Fake agent emits immediate deterministic e2e scenarios with explicit input gates and ordered message identity.
 #
 # Each envelope's message is a flat object whose "type" field maps directly to
 # an agent.Message type (init, text, text_delta, tool_use, ask, widget,
@@ -13,12 +13,6 @@ import os
 import re
 import sys
 import time
-
-
-def pause(seconds: float) -> None:
-    """Keep behavior tests paced; documentation replay uses emitted timing data."""
-    time.sleep(seconds * (0.01 if os.environ.get("CAIC_E2E_VISUALS") == "1" else 1))
-
 
 JOKES = [
     "Why do programmers prefer dark mode? Because light attracts bugs.",
@@ -447,10 +441,17 @@ DEMO_SCENARIOS = [
 ]
 
 
+last_timestamp_ms = 0
+
+
 def emit(obj: dict) -> None:
     # Task logs are v2: native harness output is wrapped in the canonical
     # envelope before the Go reader validates and records it.
-    timestamp_ms = int(time.time() * 1000)
+    global last_timestamp_ms
+    # Distinct fixture timestamps preserve transcript anchors even when the
+    # entire scenario is written in one batch without real-time delays.
+    timestamp_ms = max(int(time.time() * 1000), last_timestamp_ms + 1)
+    last_timestamp_ms = timestamp_ms
     envelope = '{{"t":"agent","ts":{}.{:03d},"msg":{}}}'.format(
         timestamp_ms // 1000, timestamp_ms % 1000, json.dumps(obj, separators=(",", ":"))
     )
@@ -468,7 +469,6 @@ def emit_text(text: str) -> None:
     part1 = text[: sp + 1]
     part2 = text[sp + 1 :]
     emit({"type": "text_delta", "text": part1})
-    pause(0.05)
     emit({"type": "text_delta", "text": part2})
     emit({"type": "text", "text": text})
 
@@ -558,7 +558,6 @@ def emit_widget_turn(turns: int) -> None:
     # Stream partial HTML deltas.
     mid = len(WIDGET_HTML) // 2
     emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[:mid]})
-    pause(0.05)
     emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[mid:]})
     # Final complete widget.
     emit({"type": "widget", "id": "toolu_widget", "title": WIDGET_TITLE, "html": WIDGET_HTML})
@@ -573,30 +572,21 @@ def emit_ask_turn(turns: int) -> None:
     emit_result(turns, "Asking user")
 
 
-def emit_attention_update_turn(turns: int) -> None:
-    """Stay running long enough for monitoring to observe an update."""
-    emit_text("Monitoring update is running before attention is required.")
-    pause(2.0)
-    emit_result(turns, "Monitoring update requires attention now", duration=2500)
-
-
-def emit_demo_turn(turns: int) -> None:
+def emit_demo_turn(turns: int, gated: bool) -> None:
     """Emit a realistic multi-tool scenario."""
     scenario = DEMO_SCENARIOS[(turns - 1) % len(DEMO_SCENARIOS)]
     for step in scenario["steps"]:
         if "thinking" in step:
             emit({"type": "thinking", "text": step["thinking"]})
-            pause(0.1)
         if "text" in step:
             emit_text(step["text"])
-            pause(0.1)
         if "tool" in step:
             tool_id, name, input_obj = step["tool"]
             emit_tool_use(tool_id, name, input_obj)
             duration_ms = TOOL_DURATIONS_MS.get(name, 200)
-            pause(duration_ms / 1000)
             emit_tool_result(tool_id, duration_ms)
-    emit_result(turns, scenario["result"], scenario.get("cost", 0.01), scenario.get("duration", 500))
+    if not gated or gate("FAKE_DEMO_FINISH"):
+        emit_result(turns, scenario["result"], scenario.get("cost", 0.01), scenario.get("duration", 500))
 
 
 def emit_lifecycle_turn(turns: int) -> None:
@@ -666,7 +656,6 @@ def emit_background_commands_turn(turns: int) -> None:
     )
     # The second command stays running past the result, so a settled replay must
     # report it as last-observed-running instead of inventing an outcome.
-    pause(0.05)
     emit_result(turns, "Background commands finished")
 
 
@@ -696,7 +685,6 @@ def emit_native_subagents_turn(turns: int) -> None:
                 },
             }
         )
-    pause(0.2)
     for identity, status, result in (
         (
             "joker",
@@ -752,10 +740,16 @@ def emit_native_subagents_turn(turns: int) -> None:
             },
         }
     )
-    # Keep the result strictly after the last native observation so the UI
-    # anchors the batch cards above the summary instead of on its timestamp.
-    pause(0.05)
     emit_result(turns, "Native activity finished")
+
+
+def gate(command: str) -> bool:
+    line = sys.stdin.readline()
+    if not line or "\x00" in line:
+        return False
+    if line.rstrip("\n") != command:
+        raise ValueError(f"Expected fake-agent command {command!r}, got {line!r}")
+    return True
 
 
 def emit_concurrent_streams_turn(turns: int) -> None:
@@ -773,14 +767,6 @@ def emit_concurrent_streams_turn(turns: int) -> None:
 
     def message(kind: str, thread: str, item: str, text: str) -> None:
         record({"type": kind, "text": text}, thread, item)
-
-    def gate(command: str) -> bool:
-        line = sys.stdin.readline()
-        if not line or "\x00" in line:
-            return False
-        if line.rstrip("\n") != command:
-            raise ValueError(f"Expected concurrent-stream command {command!r}, got {line!r}")
-        return True
 
     for thread, label in (("child-a", "Polygon research"), ("child-b", "Assembly research")):
         emit(
@@ -908,8 +894,6 @@ def main() -> None:
     if os.environ.get("CAIC_E2E_VISUALS") == "1":
         # Other harnesses do not report a Claude Code release number.
         version = "2.1.185" if os.environ.get("CAIC_FAKE_HARNESS") == "claude" else ""
-    # Model the agent handshake so setup timing is visible and non-zero in e2e.
-    pause(0.12)
     emit(
         {
             "type": "init",
@@ -973,11 +957,8 @@ def main() -> None:
         if "FAKE_ASK" in line:
             emit_ask_turn(turns)
             continue
-        if "FAKE_ATTENTION_UPDATE" in line:
-            emit_attention_update_turn(turns)
-            continue
         if "FAKE_DEMO" in line:
-            emit_demo_turn(turns)
+            emit_demo_turn(turns, "FAKE_DEMO_GATED" in line)
             continue
 
         # Natural prompt detection (for screenshots with clean prompts).
@@ -998,7 +979,7 @@ def main() -> None:
             emit_ask_turn(turns)
             continue
         if NATURAL_DEMO_RE.search(lower):
-            emit_demo_turn(turns)
+            emit_demo_turn(turns, False)
             continue
 
         if "FAKE_WIDGET" in line or (os.environ.get("CAIC_E2E_VISUALS") == "1" and "refraction" in lower):

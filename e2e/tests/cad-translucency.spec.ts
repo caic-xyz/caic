@@ -1,4 +1,4 @@
-// Browser coverage for camera-depth translucency, icon controls, mode changes, and render timings.
+// Browser coverage for camera-depth translucency, icon controls, mode changes, and curved STEP rendering.
 import type { Locator, Page } from "@playwright/test";
 import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -135,7 +135,7 @@ for (const width of [390, 1280]) {
     await expect(mode).toHaveAccessibleName("Display mode: Wireframe. Switch to translucent");
     await expect(mode).toBeFocused();
     expect((await stableFrame(canvas)).equals(solid)).toBe(false);
-    await page.screenshot({ path: test.info().outputPath("wireframe.png") });
+
     await page.keyboard.press("Enter");
     await expect(mode).toHaveAccessibleName("Display mode: Translucent. Switch to solid");
     await expect(mode).toBeFocused();
@@ -148,7 +148,7 @@ for (const width of [390, 1280]) {
     expect(planes[0].opacity).toBeGreaterThan(planes[1].opacity + 0.2);
     expect(planes[1].opacity).toBeGreaterThan(0.1);
     expect(planes[0].opacity).toBeLessThan(0.85);
-    await page.screenshot({ path: test.info().outputPath("translucent.png") });
+
     await mode.click();
     await expect(mode).toHaveAccessibleName("Display mode: Solid. Switch to wireframe");
     const restored = await stableFrame(canvas);
@@ -205,31 +205,16 @@ test("curved STEP translucency renders without shader errors", async ({ page, co
   await expect(page.getByText("1,318 triangles", { exact: true })).toBeVisible();
   const canvas = page.getByLabel(/^3D model/);
   const solid = await stableFrame(canvas);
-  async function frameTimes() {
-    return page.evaluate(async () => {
-      const samples: number[] = [];
-      let previous = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
-      for (let i = 0; i < 60; i++) {
-        const now = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
-        samples.push(now - previous);
-        previous = now;
-      }
-      samples.sort((a, b) => a - b);
-      return { medianMs: samples[30], p95Ms: samples[57] };
-    });
-  }
-  const opaqueTiming = await frameTimes();
   const mode = page.getByRole("button", { name: /^Display mode:/ });
   await mode.click();
   await mode.click();
   expect((await stableFrame(canvas)).equals(solid)).toBe(false);
-  console.log(JSON.stringify({ opaqueTiming, translucentTiming: await frameTimes() }));
   const bounds = await canvas.boundingBox();
   if (!bounds) throw new Error("Missing CAD canvas");
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
   await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width / 2 + 70, bounds.y + bounds.height / 2 + 30, { steps: 8 });
   await page.mouse.up();
-  await page.screenshot({ path: test.info().outputPath("curved-translucent.png") });
+
   expect(errors).toEqual([]);
 });

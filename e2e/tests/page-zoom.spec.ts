@@ -119,17 +119,17 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
           expect(box.x).toBeGreaterThanOrEqual(0);
           expect(box.x + box.width).toBeLessThanOrEqual(960 / zoom);
         }
-        await page.screenshot({ path: testInfo.outputPath(`page-zoom-${zoom}.png`) });
+
         const card = page.locator(`[data-task-id="${id}"]`);
         await card.scrollIntoViewIfNeeded();
         await expect(card).toBeInViewport();
-        if (zoom === 4) await page.screenshot({ path: testInfo.outputPath("page-zoom-4-task.png") });
+
         await avatar.focus();
         await avatar.press("ArrowDown");
         const settings = page.getByRole("menuitem", { name: "Settings" });
         await expect(settings).toBeFocused();
         await expect(settings).toBeInViewport({ ratio: 1 });
-        await page.screenshot({ path: testInfo.outputPath(`page-zoom-${zoom}-menu.png`) });
+
         await settings.press("Escape");
         await expect(avatar).toBeFocused();
       });

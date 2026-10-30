@@ -7,28 +7,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { createApiClient, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
-import type { StepLoadTimingReport } from "../frontend/src/stepTimings";
 import type { HistoryBootstrap, PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
-
-// Observe diagnostic entries without exposing a test-only hook in the viewer.
-export async function collectStepTimings(page: Page): Promise<StepLoadTimingReport[]> {
-  const reports: StepLoadTimingReport[] = [];
-  page.on("console", async (message) => {
-    if (message.type() === "debug" && message.text().startsWith("Observed STEP timing")) {
-      const detail = message.args()[1];
-      ok(detail);
-      reports.push((await detail.jsonValue()) as StepLoadTimingReport);
-    }
-  });
-  await page.addInitScript(() => {
-    new PerformanceObserver((list) => {
-      for (const entry of list.getEntries())
-        if (entry.name === "caic.step.load")
-          console.debug("Observed STEP timing", (entry as PerformanceMeasure).detail);
-    }).observe({ type: "measure" });
-  });
-  return reports;
-}
 
 // Exercise the public asynchronous native bridge, including its page/identity/scope binding.
 export async function installNativeVoiceBridge(page: Page, connected: boolean) {

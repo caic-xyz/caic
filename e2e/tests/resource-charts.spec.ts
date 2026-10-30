@@ -3,7 +3,7 @@
 import { createTaskAPI, expect, test } from "../helpers";
 import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 
-test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }, testInfo) => {
+test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Inspect fractional CPU constraints");
   const { through } = (await api.getHistoryManifest(id)).bootstrap;
   const ts = Date.UTC(2026, 9, 4);
@@ -43,7 +43,6 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
     await expect(resources).toContainText("Inherited CPU limits and process affinity are unreported.");
     await expect(resources).not.toContainText("of capacity");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await resources.screenshot({ path: testInfo.outputPath(`cpu-capacity-${width}.png`) });
   }
   await resources.getByText("Exact samples").click();
   await expect(resources.getByRole("table")).toContainText("Configured CPU ceiling");

@@ -66,7 +66,6 @@ for (const width of [390, 1280]) {
           expect(fitted.height).toBe(imageHeight);
         }
         if (name === "portrait") {
-          await page.screenshot({ path: test.info().outputPath("portrait-fit.png") });
           await page.setViewportSize({ width, height: 700 });
           await expect.poll(() => image.evaluate((el) => el.clientHeight)).toBeLessThan(fitted.height - 100);
           await pane.getByRole("button", { name: "Full screen", exact: true }).click();
@@ -91,7 +90,7 @@ for (const width of [390, 1280]) {
         });
         if (name === "portrait") expect(await viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
         if (name === "landscape") expect(await viewport.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
-        if (name === "portrait") await page.screenshot({ path: test.info().outputPath("portrait-zoom-scrolled.png") });
+
         await pane.getByRole("button", { name: "Fit image to pane", exact: true }).focus();
         await page.keyboard.press("Enter");
         await expect(image).toHaveJSProperty("clientHeight", Math.round(fitted.height));

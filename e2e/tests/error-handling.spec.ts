@@ -47,7 +47,7 @@ test("categorized CI alerts stay quiet on replay and expose details on mobile", 
   if (!bounds) throw new Error("Warning message is not rendered");
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: test.info().outputPath("ci-warning-mobile.png") });
+
   await page.getByRole("button", { name: "Dismiss warning" }).click();
   const priorRequests = requests;
   await expect.poll(() => requests).toBeGreaterThan(priorRequests);

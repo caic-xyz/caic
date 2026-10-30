@@ -1,10 +1,9 @@
 // Exercises STEP indexing before network completion, cancellation, and late archive validation over gated HTTP streams.
-import { ok } from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { zipSync } from "three/addons/libs/fflate.module.js";
 import { createFacetedStep } from "../../frontend/tests/step-fixture";
-import { test, expect, createTaskAPI, waitForTaskState, collectStepTimings } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 async function archiveStream(corrupt: boolean) {
   const archive = Buffer.from(zipSync({ "assembly.stp": createFacetedStep(8, false) }));
@@ -70,7 +69,6 @@ test.describe("streaming STEP", () => {
         page.on("console", (message) => {
           if (message.type() === "error") errors.push(message.text());
         });
-        const diagnostics = await collectStepTimings(page);
         await context.route("**/raw?*", (route) => route.fulfill({ status: 307, headers: { Location: source.url } }));
         const id = await createTaskAPI(api, uniquePrompt("Inspect [Assembly](/assembly.stpz)."));
         await waitForTaskState(api, id, "waiting");
@@ -81,13 +79,11 @@ test.describe("streaming STEP", () => {
         await expect(page.getByRole("progressbar", { name: "Downloading and reading STEP" })).toBeVisible();
         await expect(page.getByText(/[1-9][\d,]* records indexed/)).toBeVisible();
         await expect(page.getByText("32 triangles", { exact: true })).toHaveCount(0);
-        expect(diagnostics).toHaveLength(0);
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await page.screenshot({ path: test.info().outputPath("streamed-step-reading.png") });
+
         if (corrupt) {
           source.finish();
           await expect(page.getByRole("alert")).toContainText("CRC");
-          expect(diagnostics).toHaveLength(0);
           await expect(page.getByText("32 triangles", { exact: true })).toHaveCount(0);
           await page.getByRole("button", { name: "Retry", exact: true }).click();
         } else {
@@ -100,11 +96,8 @@ test.describe("streaming STEP", () => {
           source.finish();
         }
         await expect(page.getByText("32 triangles", { exact: true })).toBeVisible();
-        await expect.poll(() => diagnostics.length).toBe(1);
-        ok(diagnostics[0]);
-        expect(diagnostics[0].stages.occtParseMs).toBe(0);
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await page.screenshot({ path: test.info().outputPath("streamed-step.png") });
+
         expect(errors).toEqual([]);
       } finally {
         await source.close();

@@ -106,6 +106,7 @@ export default defineConfig({
     locale: "en-US",
     timezoneId: "UTC",
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium" }],
 });

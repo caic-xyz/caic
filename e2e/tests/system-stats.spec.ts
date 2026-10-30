@@ -4,7 +4,7 @@ import { expect, test } from "../helpers";
 import type { ISOTimestamp, SystemStatsResp } from "../../sdk/caic/ts/v1/types.gen";
 
 for (const width of [390, 1280]) {
-  test(`system utilization at ${width}px`, async ({ page, api }, testInfo) => {
+  test(`system utilization at ${width}px`, async ({ page, api }) => {
     await page.setViewportSize({ width, height: 850 });
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -62,14 +62,14 @@ for (const width of [390, 1280]) {
       if (!cpu || !memory) throw new Error("Resource charts are not visible");
       expect(memory.y).toBeGreaterThanOrEqual(cpu.y + cpu.height);
     }
-    await page.screenshot({ path: testInfo.outputPath("system.png") });
+
     await page.getByText("Logical CPUs (4)", { exact: true }).click();
     await expect(page.getByRole("meter", { name: "cpu0 utilization", exact: true })).toHaveAttribute("value", "100");
     await expect(page.getByRole("meter", { name: "cpu3 utilization", exact: true })).toHaveAttribute("value", "27");
     const lastCPU = page.getByRole("meter", { name: "cpu7 utilization", exact: true });
     await lastCPU.scrollIntoViewIfNeeded();
     await expect(lastCPU).toBeInViewport();
-    await page.screenshot({ path: testInfo.outputPath("system-cpus.png") });
+
     const cpuGraphic = await page.getByLabel("CPU utilization over time").elementHandle();
     await expect(page.getByRole("alert")).toHaveCount(0, { timeout: 10000 });
     expect(await cpuGraphic?.evaluate((el) => el.isConnected)).toBe(true);

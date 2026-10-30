@@ -61,7 +61,7 @@ for (const width of [390, 1280]) {
     expect(await oldHeader?.evaluate((element) => element.isConnected)).toBe(true);
     expect(await oldSkill?.evaluate((element) => element.isConnected && element === document.activeElement)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: test.info().outputPath("skill-context.png") });
+
     expect(errors).toEqual([]);
   });
 }

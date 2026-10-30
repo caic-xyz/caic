@@ -3,7 +3,7 @@ import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
 
 for (const width of [390, 1280]) {
-  test(`missing upstream commits can be inspected at ${width}px`, async ({ page, api }, testInfo) => {
+  test(`missing upstream commits can be inspected at ${width}px`, async ({ page, api }) => {
     await page.setViewportSize({ width, height: 844 });
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -62,7 +62,7 @@ for (const width of [390, 1280]) {
     await expect(page.getByText("+missing upstream line")).toBeVisible();
     expect(patchRequests).toBe(1);
     await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("behind-commits.png") });
+
     expect(errors).toEqual([]);
   });
 }

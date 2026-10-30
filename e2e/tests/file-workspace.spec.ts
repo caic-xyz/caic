@@ -124,7 +124,7 @@ for (const width of [390, 1000, 1440]) {
     } else {
       await expect(page.getByTestId("conversation-pane")).toBeHidden();
     }
-    await page.screenshot({ path: test.info().outputPath("docked-document.png") });
+
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
     if (width > 768) {
       await page.getByRole("button", { name: "Context actions", exact: true }).click();
@@ -148,7 +148,7 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeFocused();
-    await page.screenshot({ path: test.info().outputPath("fullscreen-document.png") });
+
     await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     await expect(page.getByTestId("new-task-button")).toBeVisible();
     await page.goBack();
@@ -204,12 +204,12 @@ for (const width of [390, 1000, 1440]) {
     await page.keyboard.press("Space");
     await expect(viewControls).toBeFocused();
     await expect(page.getByLabel("3D model", { exact: true })).toBeVisible();
-    await page.screenshot({ path: test.info().outputPath("cad-actions.png") });
+
     await page.keyboard.press("Enter");
     await page.getByRole("button", { name: "Reset view", exact: true }).click();
     await page.getByRole("link", { name: "raw file", exact: true }).hover();
     await expect(mode).toHaveAccessibleName("Display mode: Wireframe. Switch to translucent");
-    await page.screenshot({ path: test.info().outputPath("cad-actions-resting.png") });
+
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
     await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     expect(await canvas?.evaluate((node) => node.isConnected)).toBe(true);

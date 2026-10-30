@@ -35,7 +35,7 @@ for (const width of [390, 1280]) {
         expect(await messages.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
           await messages.evaluate((el) => el.clientHeight),
         );
-        await page.screenshot({ path: test.info().outputPath(`long-prompt-${phase}.png`) });
+
         if (phase === "recorded") {
           release.resolve();
           await expect(messages).toHaveAttribute("aria-busy", "false");

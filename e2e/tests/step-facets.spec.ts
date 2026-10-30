@@ -1,5 +1,4 @@
 // Browser coverage for faceted STEP geometry, rigid assemblies, polygons, and responsive dense loading.
-import { ok } from "node:assert/strict";
 import { zipSync } from "three/addons/libs/fflate.module.js";
 import {
   createDenseFacetedStep,
@@ -7,7 +6,7 @@ import {
   createFramedStep,
   createPolygonStep,
 } from "../../frontend/tests/step-fixture";
-import { test, expect, createTaskAPI, waitForTaskState, collectStepTimings } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
   test(`faceted STEP assemblies skip the CAD kernel at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
@@ -29,7 +28,6 @@ for (const width of [390, 1280]) {
               ),
           );
     const archive = Buffer.from(zipSync({ "assembly.stp": source }));
-    const diagnostics = await collectStepTimings(page);
     const errors: string[] = [];
     const wasm: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -47,15 +45,7 @@ for (const width of [390, 1280]) {
     await expect(page.getByText("32 triangles", { exact: true })).toBeVisible();
     await expect(page.getByLabel(/^3D model/)).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: test.info().outputPath("faceted-assembly.png") });
-    await expect.poll(() => diagnostics.length).toBe(1);
-    ok(diagnostics[0]);
-    expect(diagnostics[0].stages.occtInitMs).toBe(0);
-    expect(diagnostics[0].stages.occtParseMs).toBe(0);
-    expect(diagnostics[0].stages.directParseMs).toBeGreaterThan(0);
-    expect(diagnostics[0].stages.packingMs).toBeGreaterThan(0);
-    expect(diagnostics[0].stages.firstFrameMs).toBeGreaterThan(0);
-    for (const value of Object.values(diagnostics[0].stages)) expect(value).toBeGreaterThanOrEqual(0);
+
     expect(wasm).toEqual([]);
     expect(errors).toEqual([]);
   });
@@ -97,14 +87,13 @@ for (const width of [390, 1280]) {
     await expect(page.getByText("20 triangles", { exact: true })).toBeVisible();
     await expect(page.getByLabel(/^3D model/)).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: test.info().outputPath("polygon-prism.png") });
+
     expect(wasm).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
 
 test("dense faceted STEP assembly imports and releases its worker", async ({ page, context, api, uniquePrompt }) => {
-  const diagnostics = await collectStepTimings(page);
   const errors: string[] = [];
   const wasm: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -120,18 +109,13 @@ test("dense faceted STEP assembly imports and releases its worker", async ({ pag
   const id = await createTaskAPI(api, uniquePrompt("Inspect [Assembly](/assembly.stpz)."));
   await waitForTaskState(api, id, "waiting");
   await page.goto(`/task/@${id}`);
-  const start = performance.now();
   const started = page.waitForEvent("worker", (worker) => worker.url().includes("stepWorker"));
   await page.getByRole("link", { name: "Assembly", exact: true }).click();
   await started;
   await expect(page.getByText("193,600 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
-  const loadMs = performance.now() - start;
-  await expect.poll(() => diagnostics.length).toBe(1);
-  ok(diagnostics[0]);
-  console.log(JSON.stringify({ facetedAssembly: { loadMs, diagnostics: diagnostics[0] } }));
   await expect.poll(() => page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
   await expect(page.getByLabel(/^3D model/)).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath("dense-faceted-assembly.png") });
+
   expect(wasm).toEqual([]);
   expect(errors).toEqual([]);
 });

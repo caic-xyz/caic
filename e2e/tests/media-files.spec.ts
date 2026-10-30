@@ -68,7 +68,7 @@ for (const width of [390, 1280]) {
         const bounds = await media.boundingBox();
         expect(bounds).not.toBeNull();
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
-        await page.screenshot({ path: test.info().outputPath(`${kind}-viewer.png`) });
+
         const playing = await media.elementHandle();
         await page.getByRole("button", { name: "Close view", exact: true }).click();
         await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));

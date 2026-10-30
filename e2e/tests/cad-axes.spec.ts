@@ -26,20 +26,6 @@ async function axesFrame(page: Page): Promise<Buffer> {
   return frame;
 }
 
-async function frameTimes(page: Page) {
-  return page.evaluate(async () => {
-    const times: number[] = [];
-    let previous = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
-    for (let i = 0; i < 90; i++) {
-      const now = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
-      times.push(now - previous);
-      previous = now;
-    }
-    times.sort((a, b) => a - b);
-    return { medianMs: times[45], p95Ms: times[85] };
-  });
-}
-
 for (const width of [390, 1280]) {
   test.describe(`corner controls at ${width}px`, () => {
     test.use({ hasTouch: width === 390 });
@@ -73,10 +59,10 @@ for (const width of [390, 1280]) {
         await expect(panel).toBeVisible();
       }
       const initial = await axesFrame(page);
-      await page.screenshot({ path: test.info().outputPath("axes-enabled.png") });
+
       await expect(panel).toBeHidden();
       await reveal();
-      await page.screenshot({ path: test.info().outputPath("axes-controls.png") });
+
       if (width === 390) await page.touchscreen.tap(center.x, center.y);
       else {
         // Moving through the gap into the action panel must not dismiss it.
@@ -101,7 +87,7 @@ for (const width of [390, 1280]) {
       await expect(trigger).toBeFocused();
       await expect(trigger.locator("svg")).toBeVisible();
       expect((await axesFrame(page)).equals(initial)).toBe(false);
-      await page.screenshot({ path: test.info().outputPath("axes-disabled.png") });
+
       if (width === 390) await trigger.tap();
       else await trigger.hover();
       await page.getByRole("button", { name: "Reset view", exact: true }).click();
@@ -113,7 +99,6 @@ for (const width of [390, 1280]) {
         await page.mouse.move(center.x, center.y);
         await expect(panel).toBeHidden();
       }
-      const hiddenTiming = width === 1280 ? await frameTimes(page) : null;
       await trigger.press("Enter");
       await page.keyboard.press("Tab");
       await page.keyboard.press("Tab");
@@ -123,9 +108,6 @@ for (const width of [390, 1280]) {
       await page.getByRole("button", { name: /^Display mode:/ }).focus();
       await page.mouse.move(center.x, center.y);
       expect((await axesFrame(page)).equals(initial)).toBe(true);
-      if (width === 1280) {
-        console.log(JSON.stringify({ width, axesHidden: hiddenTiming, axesVisible: await frameTimes(page) }));
-      }
 
       // A drag that starts on the axes reaches OrbitControls and never opens actions.
       await page.mouse.move(axis.x, axis.y);
@@ -135,7 +117,6 @@ for (const width of [390, 1280]) {
       await expect(panel).toBeHidden();
       const rotated = await axesFrame(page);
       expect(rotated.equals(initial)).toBe(false);
-      await page.screenshot({ path: test.info().outputPath("axes-orbit.png") });
 
       await page.mouse.move(center.x, center.y);
       await page.mouse.down({ button: "right" });

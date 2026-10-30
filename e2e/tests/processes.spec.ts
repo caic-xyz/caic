@@ -89,7 +89,7 @@ test("process tree keeps actions aligned and commands readable at desktop and mo
   await expect(rows.nth(1).getByRole("cell").nth(14)).toHaveText(
     new Date(startedAt).toLocaleTimeString("en-US", { timeZone: "UTC" }),
   );
-  await page.screenshot({ path: "test-results/processes-desktop.png" });
+
   await page.getByRole("button", { name: "Collapse init children (PID 1)" }).focus();
   await page.keyboard.press("Enter");
   await expect(rows).toHaveCount(2);
@@ -100,7 +100,7 @@ test("process tree keeps actions aligned and commands readable at desktop and mo
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await expect(rows.nth(3).getByRole("cell").first()).toBeVisible();
-  await page.screenshot({ path: "test-results/processes-mobile.png" });
+
   await page.setViewportSize({ width: 390, height: 300 });
   await page.getByText("worker", { exact: true }).scrollIntoViewIfNeeded();
   const processHeader = page.getByRole("columnheader", { name: "PROCESS", exact: true });

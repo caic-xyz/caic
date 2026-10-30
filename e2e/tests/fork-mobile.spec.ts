@@ -1,7 +1,7 @@
 // E2E tests for mobile fork-task navigation and layout.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
-test("forking from mobile opens only the forked task detail", async ({ page, api, uniquePrompt }, testInfo) => {
+test("forking from mobile opens only the forked task detail", async ({ page, api, uniquePrompt }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
   const sourcePrompt = uniquePrompt("e2e fork mobile source");
@@ -31,13 +31,6 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
     expect(forked).toBeTruthy();
     forkedId = forked!.id;
   }).toPass({ timeout: 10_000, intervals: [500] });
-
-  const screenshotPath = testInfo.outputPath("fork-mobile-layout.png");
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-  await testInfo.attach("fork-mobile-layout", {
-    path: screenshotPath,
-    contentType: "image/png",
-  });
 
   await expect(page).toHaveURL(new RegExp(`/task/@${forkedId}`));
   await expect(page.getByTestId("detail-pane")).toBeVisible();

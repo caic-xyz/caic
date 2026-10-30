@@ -5,7 +5,7 @@ import type { SystemStatsResp } from "../../sdk/caic/ts/v1/types.gen";
 import { expect, test } from "../helpers";
 
 for (const width of [390, 1280]) {
-  test(`Monitoring sections at ${width}px`, async ({ page }, testInfo) => {
+  test(`Monitoring sections at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.clock.install();
     const errors: string[] = [];
@@ -45,7 +45,7 @@ for (const width of [390, 1280]) {
     const metrics = nav.getByRole("link", { name: "Metrics", exact: true });
     await expect(usage).toHaveAttribute("aria-current", "page");
     const frame = await nav.boundingBox();
-    await page.screenshot({ path: testInfo.outputPath("usage.png") });
+
     await usage.focus();
     await usage.press("Tab");
     await expect(system).toBeFocused();
@@ -56,7 +56,6 @@ for (const width of [390, 1280]) {
     await expect.poll(() => requests.system).toBe(1);
     await expect(page.getByRole("heading", { name: "Usage", exact: true })).toHaveCount(0);
     expect(await nav.boundingBox()).toEqual(frame);
-    await page.screenshot({ path: testInfo.outputPath("system.png") });
 
     // Hold the next poll across a section switch: its late completion must not
     // schedule another request after System has been disposed.
@@ -71,7 +70,7 @@ for (const width of [390, 1280]) {
     expect(requests.system).toBe(2);
     expect(requests.usage).toBe(1);
     expect(await nav.boundingBox()).toEqual(frame);
-    await page.screenshot({ path: testInfo.outputPath("metrics.png") });
+
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
     await page.goBack();

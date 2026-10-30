@@ -69,7 +69,7 @@ test("native preparation waits for the empty complete task snapshot", async ({ p
   }
 });
 
-test("browser voice and its keyboard shortcut wait for initial task preparation", async ({ page }, testInfo) => {
+test("browser voice and its keyboard shortcut wait for initial task preparation", async ({ page }) => {
   const snapshot = Promise.withResolvers<void>();
   const requested = Promise.withResolvers<void>();
   const voiceRequests: string[] = [];
@@ -110,11 +110,10 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
     await page.keyboard.press("F4");
     expect(voiceRequests).toEqual([]);
     expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(false);
-    await page.screenshot({ path: testInfo.outputPath("frontend-pending.png") });
+
     snapshot.resolve();
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
     expect(scripts.some((url) => /BrowserVoiceRuntime-[^/]+\.js$/.test(url))).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("frontend-ready.png") });
   } finally {
     snapshot.resolve();
   }

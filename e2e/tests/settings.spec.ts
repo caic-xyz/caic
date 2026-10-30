@@ -2,12 +2,26 @@
 
 import { ok } from "node:assert/strict";
 import { expect, test } from "../helpers";
-import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
+import type { ErrorResponse, VersionResp } from "../../sdk/caic/ts/v1/types.gen";
 
 // Settings journeys exercise the server's saved preferences through browser reloads.
 test.use({ taskPreferences: null });
 
-test("server model reload shows progress, success, and recoverable failure", async ({ page, api }, testInfo) => {
+// Settings exercise version presentation and requests without a live GitHub check.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/server/version", (route) =>
+    route.fulfill({
+      json: {
+        current: "1.0.0",
+        latest: "1.0.0",
+        updateAvailable: false,
+        autoUpdateEnabled: false,
+      } satisfies VersionResp,
+    }),
+  );
+});
+
+test("server model reload shows progress, success, and recoverable failure", async ({ page, api }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/settings?section=server");
   const models = page.getByRole("region", { name: "Reload models", exact: true });
@@ -17,7 +31,7 @@ test("server model reload shows progress, success, and recoverable failure", asy
   await expect(pi).toBeVisible();
   await expect(models.getByRole("button", { name: "antigravity", exact: true })).toBeVisible();
   await expect(models.getByRole("button")).toHaveCount(3);
-  await page.screenshot({ path: testInfo.outputPath("server-ready-desktop.png") });
+
   const gate = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   await page.route("**/server/harnesses/codex/refresh", async (route) => {
@@ -30,7 +44,6 @@ test("server model reload shows progress, success, and recoverable failure", asy
     await started.promise;
     await expect(codex).toBeDisabled();
     await expect(pi).toBeDisabled();
-    await page.screenshot({ path: testInfo.outputPath("server-reloading-desktop.png") });
   } finally {
     gate.resolve();
   }
@@ -41,7 +54,7 @@ test("server model reload shows progress, success, and recoverable failure", asy
   await expect
     .poll(async () => (await api.listHarnesses()).find((h) => h.name === "codex")?.models.map((m) => m.id))
     .toContain("fake-model-fast");
-  await page.screenshot({ path: testInfo.outputPath("server-success-desktop.png") });
+
   const successColor = await status.evaluate((element) => getComputedStyle(element).color);
   const failure = { error: { code: "INTERNAL_ERROR", message: "Model provider unavailable." } } satisfies ErrorResponse;
   await page.route("**/server/harnesses/pi/refresh", (route) => route.fulfill({ status: 503, json: failure }), {
@@ -54,16 +67,16 @@ test("server model reload shows progress, success, and recoverable failure", asy
   expect(await error.evaluate((element) => getComputedStyle(element).color)).not.toBe(successColor);
   await expect(codex).toBeEnabled();
   await expect(pi).toBeEnabled();
-  await page.screenshot({ path: testInfo.outputPath("server-failure-desktop.png") });
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: testInfo.outputPath("server-failure-mobile.png") });
+
   await pi.click();
   await expect(status).toHaveText("pi models refreshed.");
   await expect(error).toHaveCount(0);
   await expect(pi).toBeEnabled();
 });
 
-test("desktop settings tabs keep a consistent frame", async ({ page }, testInfo) => {
+test("desktop settings tabs keep a consistent frame", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/settings");
   const frames = [];
@@ -78,7 +91,6 @@ test("desktop settings tabs keep a consistent frame", async ({ page }, testInfo)
     const panel = await page.getByRole("region").first().boundingBox();
     if (!heading || !navigation || !panel) throw new Error("Settings frame missing");
     frames.push({ heading, navigation, panel });
-    await page.screenshot({ path: testInfo.outputPath(`settings-tab-${section.toLowerCase()}-desktop.png`) });
   }
   const first = frames[0];
   ok(first);
@@ -114,7 +126,7 @@ test("settings layout on desktop and mobile", async ({ page }) => {
     if (!bounds) throw new Error("Settings control missing");
     expect(bounds.width).toBeLessThanOrEqual(maximum);
   }
-  await page.screenshot({ path: "test-results/settings-general-desktop.png", fullPage: true });
+
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     for (const [control, maximum] of [
@@ -130,9 +142,6 @@ test("settings layout on desktop and mobile", async ({ page }) => {
       expect(bounds.width).toBeLessThanOrEqual(maximum);
     }
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    if (width === 390) {
-      await page.screenshot({ path: "test-results/settings-general-mobile.png", fullPage: true });
-    }
   }
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.getByRole("link", { name: "Storage", exact: true }).click();
@@ -146,10 +155,7 @@ test("settings layout on desktop and mobile", async ({ page }) => {
   await host.focus();
   await host.press("Tab");
   await expect(page.getByRole("status", { name: "Settings save status" }).locator("svg")).toHaveCount(0);
-  await page.screenshot({ path: "test-results/settings-desktop.png", fullPage: true });
-  await page
-    .getByRole("region", { name: "Custom mounts", exact: true })
-    .screenshot({ path: "test-results/settings-mounts-desktop.png" });
+
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     for (const testID of ["cache-mapping-row", "custom-mount-row"]) {
@@ -167,21 +173,12 @@ test("settings layout on desktop and mobile", async ({ page }) => {
         }
       }
     }
-    if (width === 390) {
-      await page
-        .getByRole("region", { name: "Custom mounts", exact: true })
-        .screenshot({ path: "test-results/settings-mounts-mobile.png" });
-      await page.getByRole("heading", { name: "Settings", exact: true }).scrollIntoViewIfNeeded();
-      await page.screenshot({ path: "test-results/settings-mobile.png", fullPage: true });
-    }
   }
   await page.reload();
   await expect(page.getByRole("link", { name: "Storage", exact: true })).toHaveAttribute("aria-current", "page");
   await page.getByRole("link", { name: "Server", exact: true }).click();
   await expect(page.getByRole("region", { name: "Version", exact: true })).toBeVisible();
-  await page.screenshot({ path: "test-results/settings-server-mobile.png", fullPage: true });
-  await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.screenshot({ path: "test-results/settings-server-desktop.png", fullPage: true });
+
   await page.goBack();
   await expect(page.getByRole("link", { name: "Storage", exact: true })).toHaveAttribute("aria-current", "page");
   await page.goto("/settings?section=unknown");
@@ -302,13 +299,12 @@ test("runtime CPU settings survive browser edits and reload", async ({ page, api
       expect(box.x).toBeGreaterThanOrEqual(bounds.x);
       expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     }
-    await page.screenshot({ path: "test-results/runtime-settings-mobile.png", fullPage: true });
   } finally {
     await api.updatePreferences({ settings: original.settings });
   }
 });
 
-test("server version check button sits in a button row and rechecks on demand", async ({ page }, testInfo) => {
+test("server version check button sits in a button row and rechecks on demand", async ({ page }) => {
   for (const viewport of [
     { name: "desktop", width: 1600, height: 1000 },
     { name: "mobile", width: 390, height: 800 },
@@ -324,7 +320,6 @@ test("server version check button sits in a button row and rechecks on demand", 
     await expect(check).toBeEnabled();
     const box = await check.boundingBox();
     expect(box?.width ?? Infinity).toBeLessThan(viewport.width / 2);
-    await page.screenshot({ path: testInfo.outputPath(`server-version-${viewport.name}.png`) });
   }
 });
 

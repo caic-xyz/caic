@@ -166,7 +166,13 @@ for (const { width, state } of [
       ).toBe(true);
       warmChunks.push(chunks);
     };
+    const coldResponse = page.waitForResponse(
+      (response) => response.url().includes(`/tasks/${id}/history/`) && response.url().includes("/slice/"),
+    );
     await open(id);
+    const cacheControl = (await coldResponse).headers()["cache-control"];
+    expect(cacheControl).toContain("private");
+    expect(cacheControl).toContain("immutable");
     expect(chunkRequests.length).toBeGreaterThan(0);
     const chunkURL = chunkRequests.at(-1)!;
     const transferred = () =>
@@ -177,7 +183,6 @@ for (const { width, state } of [
     expect(await transferred()).toBeGreaterThan(0);
     const activeHeap = await retainedChildOutputs(page, cdp);
     expect(activeHeap.count).toBeGreaterThan(100);
-    await page.screenshot({ path: testInfo.outputPath(`history-backlog-${width}.png`) });
     const inactiveHeap: { count: number; bytes: number }[] = [];
     // Chromium's native FocusEvent/KeyboardEvent template caches can retain the
     // last delegated dispatch path and a few detached DOM handlers. Verify a
@@ -268,7 +273,6 @@ for (const width of [390, 1280]) {
     await expect(page.getByTestId("native-subagent-card")).toHaveCount(0);
     const baseline = await retainedChildOutputs(page, cdp);
     expect(baseline.count).toBe(0);
-    await page.screenshot({ path: testInfo.outputPath(`archive-current-${width}.png`) });
     const section = page.locator(`[data-testid="history-section"][data-section-id="${archived.id}"]`);
     const toggle = section.getByRole("button", { name: /Compacted session/ });
     const bodyTransfers = () =>
@@ -328,7 +332,6 @@ for (const width of [390, 1280]) {
     await expect(page.locator('[data-native-id="joker"]')).toBeVisible();
     await expect(childSummary).toBeFocused();
     expect(actorPrefixRequests()).toHaveLength(1);
-    await page.screenshot({ path: testInfo.outputPath(`archive-expanded-${width}.png`) });
     await toggle.click();
     await expect(section.locator('[data-anchor-key^="turn:"]')).toHaveCount(0);
     const collapsed = await retainedChildOutputs(page, cdp);
