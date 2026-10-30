@@ -66,6 +66,7 @@ func (p *titleProviderSpy) GenSync(context.Context, genai.Messages, ...genai.Gen
 // instantExitBackend embeds testBackend but spawns a process that exits
 // immediately (no stdin read), so tests exercising EnsureSession's
 // already-done branch don't have to wait out its 10-second liveness timer.
+// Start waits for the exit so scheduling cannot race the readiness timeout.
 type instantExitBackend struct {
 	testBackend
 }
@@ -79,7 +80,9 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
+	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger)
+	<-s.Done()
+	return s, nil
 }
 
 type reviveCaptureBackend struct {
