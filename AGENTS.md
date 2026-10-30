@@ -67,8 +67,8 @@ sharing, targeted runs, screenshot gating).
 
 Smoke tests such as `make test-smoke` are optional. They may be skipped,
 especially when the running environment lacks the privileges required by the
-container runtime. Report skipped smoke tests and the reason in the handoff;
-they are not a completion gate.
+containers runtime (docker or podman). Report skipped smoke tests and the reason
+in the handoff; they are not a completion gate.
 
 ## Python tools
 

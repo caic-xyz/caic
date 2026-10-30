@@ -1,4 +1,4 @@
-// Native-subagent smoke: delivers each retained recording through a caic-managed md container.
+// Native-subagent smoke helpers replay retained recordings through caic-managed md containers.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,46 +84,6 @@ type smokeReplayCase struct {
 type recordedObservation struct {
 	subagent   agent.NativeSubagent
 	producerAt time.Time
-}
-
-// TestSmokeNativeSubagents proves the canonical native-subagent lifecycle inside
-// a caic-managed md container for every supported harness and recording. Each task
-// replays the retained recording through the production relay and that harness's
-// wire, and caic restarts while the replay agent is paused between the recorded
-// running card and the records that settle it, so the restored card must settle
-// from records the container produced after caic stopped, without a duplicate.
-//
-// It never runs a live harness: the recordings are the evidence, so the test stays
-// deterministic and needs no model credentials.
-func TestSmokeNativeSubagents(t *testing.T) {
-	// nativeSubagent is hand written, so a field added to either side is dropped
-	// without a compile error and quietly weakens the contract below.
-	if got, want := reflect.TypeFor[v1.EventNativeSubagent]().NumField(), reflect.TypeFor[agent.NativeSubagent]().NumField(); got != want {
-		t.Fatalf("v1.EventNativeSubagent has %d fields, agent.NativeSubagent has %d; update nativeSubagent to map the new field", got, want)
-	}
-	cases := make(map[string]smokeReplayCase, len(smokeReplayRecordings))
-	byHarness := map[harness.Name][]smoketest.ReplayRecording{}
-	for _, rec := range smokeReplayRecordings {
-		c := newSmokeReplayCase(t, rec.harness, rec.file)
-		cases[rec.name()] = c
-		byHarness[rec.harness] = append(byHarness[rec.harness], c.recording)
-	}
-	// One fixture for every recording: the container image and the server start
-	// are shared, and each task's prompt selects its harness recording.
-	backendSet := map[harness.Name]agent.Backend{}
-	for h, recordings := range byHarness {
-		backend, err := smoketest.NewReplayBackend(func() agent.WireFormat { return smokeReplayWire(h) }, recordings...)
-		if err != nil {
-			t.Fatalf("%s replay backend: %v", h, err)
-		}
-		backendSet[h] = backend
-	}
-	fixture := startServerFixture(t, serverFixture{backends: backendSet})
-	for _, rec := range smokeReplayRecordings {
-		t.Run(rec.name(), func(t *testing.T) {
-			runSmokeReplay(t, fixture, rec.harness, cases[rec.name()])
-		})
-	}
 }
 
 // newSmokeReplayCase loads one retained recording into a replay recording.

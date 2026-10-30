@@ -1,4 +1,4 @@
-// Runtime smoke test for the caic server's real md lifecycle and terminal raw-log history.
+// Smoke tests group real md lifecycle, native replay, pushes, and container-free helper checks.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -10,7 +10,6 @@ package main
 
 import (
 	"context"
-
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -29,11 +29,13 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/git"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -41,286 +43,518 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
 
-// TestSmoke verifies the real runtime path: start the server, launch an md
-// container, run a deterministic agent through the relay over SSH, and
-// exercise the task lifecycle. Unlike the e2e suite it must not use the fake
-// server or the smoketest runtime backend: it intentionally exercises the
-// md/container runtime path, which makes it host-dependent and isolated
-// behind the smoke build tag and its own make target (make test-smoke).
+// TestSmoke groups the runtime scenarios and their container-free helper checks.
 func TestSmoke(t *testing.T) {
-	smoke := startSmokeServer(t)
-	baseURL := smoke.baseURL
-
-	// --- API endpoints ---
-
-	t.Run("Config", func(t *testing.T) {
-		var cfg v1.Config
-		getJSON(t, baseURL, "/api/caic/v1/server/config", &cfg)
-		// Version is empty in dev builds (no ldflags), so only check that the
-		// endpoint returns successfully.
-		if cfg.DisplayName == "" {
-			t.Error("config.DisplayName is empty")
+	// The FailureDiagnostics scenario verifies bounded log tails and immediate launch
+	// failure reporting, including the terminal-state classification used by task
+	// waits. It needs no container runtime.
+	t.Run("FailureDiagnostics", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "server.log")
+		if err := os.WriteFile(path, []byte("first\nsecond\nthird\n"), 0o600); err != nil {
+			t.Fatal(err)
 		}
-	})
-
-	t.Run("Repos", func(t *testing.T) {
-		var repos []v1.Repo
-		getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
-		if len(repos) == 0 {
-			t.Fatal("expected at least one repo")
-		}
-		// Smoke setup creates two repos (clone and clone2).
-		if len(repos) < 2 {
-			t.Errorf("expected at least 2 repos, got %d", len(repos))
-		}
-		for _, r := range repos {
-			if r.Path == "" {
-				t.Error("repo path is empty")
-			}
-			if r.BaseBranch.Name == "" {
-				t.Errorf("repo %q has empty base branch", r.Path)
-			}
-		}
-	})
-
-	t.Run("Harnesses", func(t *testing.T) {
-		var harnesses []v1.HarnessInfo
-		getJSON(t, baseURL, "/api/caic/v1/server/harnesses", &harnesses)
-		if len(harnesses) == 0 {
-			t.Fatal("expected at least one harness")
-		}
-		found := false
-		for _, h := range harnesses {
-			if h.Name == v1.HarnessCodex {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("expected %q harness in list", harness.Codex)
-		}
-	})
-
-	// --- Task lifecycle ---
-
-	t.Run("TaskLifecycle", func(t *testing.T) {
-		var repos []v1.Repo
-		getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
-
-		var prefs v1.PreferencesResp
-		getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
-		prefs.Settings.WellKnownCaches = nil
-		prefs.Settings.CacheMappings = nil
-		postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
-
-		// Create a task on codex so the fork below switches harness (codex -> pi).
-		initialPrompt := "smoke test " + fmt.Sprint(time.Now().UnixNano())
-		createReq := v1.CreateTaskReq{
-			InitialPrompt: v1.Prompt{Text: initialPrompt},
-			Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
-			Harness:       v1.HarnessCodex,
-			RuntimeName:   smoketest.SmokeRuntime(),
-		}
-		var createResp v1.Task
-		postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
-		taskID := createResp.ID.String()
-		if taskID == "" {
-			t.Fatal("create response has empty task ID")
-		}
-		t.Logf("created task %s", taskID)
-
-		// Poll until the task reaches "waiting" after the in-container smoke
-		// agent responds through the relay.
-		task := waitForTaskState(t, smoke, taskID, "waiting")
-		if task.NumTurns != 1 {
-			t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
-		}
-		t.Logf("task %s reached 'waiting'", taskID)
-
-		logDir := filepath.Join(smoke.cfg.Dirs.CacheDir, "tasks")
-		entries, err := os.ReadDir(logDir)
-		if err != nil {
-			t.Fatalf("read task logs: %v", err)
-		}
-		var logPath string
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), taskID+"-") && strings.HasSuffix(entry.Name(), ".jsonl") {
-				logPath = filepath.Join(logDir, entry.Name())
-				break
-			}
-		}
-		if logPath == "" {
-			t.Fatalf("task %s has no raw log in %s", taskID, logDir)
-		}
-		logData, err := os.ReadFile(logPath)
-		if err != nil {
-			t.Fatalf("read task log: %v", err)
-		}
-		for i, line := range strings.FieldsFunc(string(logData), func(r rune) bool { return r == '\n' }) {
-			var record map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(line), &record); err != nil {
-				t.Fatalf("decode task log line %d: %v", i+1, err)
-			}
-			if string(record["t"]) == "" {
-				t.Fatalf("task log line %d has no task-log discriminator: %s", i+1, line)
-			}
-			if i == 0 && (string(record["t"]) != `"caic_meta"` || string(record["version"]) != "3") {
-				t.Fatalf("task log header = %s, want v3 caic_meta", line)
-			}
-		}
-
-		const resumePrompt = "resume after server restart"
-		t.Run("ServerRestart", func(t *testing.T) {
-			runtimeID := task.Runtime.ID
-			baseURL = smoke.restart()
-
-			restored := waitForTaskState(t, smoke, taskID, "waiting")
-			if restored.Runtime.ID != runtimeID {
-				t.Errorf("task %s: runtime ID = %q after restart, want %q", taskID, restored.Runtime.ID, runtimeID)
-			}
-
-			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/input", v1.InputReq{
-				Prompt: v1.Prompt{Text: resumePrompt},
-			}, nil)
-			task = waitForTaskState(t, smoke, taskID, "waiting")
-			if task.NumTurns != 2 {
-				t.Errorf("task %s: NumTurns = %d after restart, want 2; error=%q", taskID, task.NumTurns, task.Error)
-			}
-		})
-
-		disableSudo := false
-		forkReq := v1.ForkTaskReq{
-			// Switch harness on the fork so the test verifies the target
-			// harness's env is injected, not the source harness's.
-			Prompt:  v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
-			Harness: v1.HarnessPi,
-			Sudo:    &disableSudo,
-		}
-		var forkResp v1.Task
-		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/fork", forkReq, &forkResp)
-		forkID := forkResp.ID.String()
-		if forkID == "" {
-			t.Fatal("fork response has empty task ID")
-		}
-		forkTask := waitForTaskState(t, smoke, forkID, "waiting")
-		if forkTask.NumTurns != 1 {
-			t.Fatalf("fork task %s: NumTurns = %d, want 1; error=%q", forkID, forkTask.NumTurns, forkTask.Error)
-		}
-		t.Logf("fork task %s reached 'waiting'", forkID)
-
-		forkRuntimeID := runtime.ID(forkTask.Runtime.ID)
-		if forkRuntimeID == "" {
-			t.Fatalf("fork task %s has no runtime ID before purge", forkID)
-		}
-
-		// The fork's ~/.env is rewritten from scratch by md, so the target
-		// harness's env vars from config must be re-injected into the fork,
-		// and the source harness's vars must not survive the rewrite. The two
-		// harnesses use distinct marker values, so a fork that kept (or only
-		// re-injected) the source harness's env fails one of the checks below.
 		for _, c := range []struct {
-			name, id, want, absent string
+			name     string
+			maxBytes int64
+			want     string
 		}{
-			{"source", string(runtime.ID(task.Runtime.ID).InstanceID()), smoke.runToken + "-codex", smoke.runToken + "-pi"},
-			{"fork", string(forkRuntimeID.InstanceID()), smoke.runToken + "-pi", smoke.runToken + "-codex"},
+			{"whole file", 1 << 20, "first\nsecond\nthird\n"},
+			{"bounded tail", 7, "\nthird\n"},
 		} {
-			env, err := smoketest.ContainerFile(t.Context(), smoketest.SmokeRuntime(), c.id, "/home/user/.env")
-			if err != nil {
-				t.Fatalf("read %s container .env: %v", c.name, err)
-			}
-			if !strings.Contains(env, c.want) {
-				t.Fatalf("%s container /home/user/.env missing harness env %s:\n%s", c.name, c.want, env)
-			}
-			if strings.Contains(env, c.absent) {
-				t.Fatalf("%s container /home/user/.env has other harness's env %s:\n%s", c.name, c.absent, env)
-			}
-		}
-		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
-		waitForTaskState(t, smoke, forkID, "stopped")
-		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
-		waitForTaskState(t, smoke, forkID, "purged")
-		forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-		if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkRuntimeID); err != nil {
-			forkPurgeCancel()
-			t.Fatal(err)
-		}
-		forkPurgeCancel()
-		t.Logf("fork task %s reached 'purged'", forkID)
-
-		// Stop the task.
-		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
-		task = waitForTaskState(t, smoke, taskID, "stopped")
-		t.Logf("task %s reached 'stopped'", taskID)
-
-		// Purge the task.
-		runtimeID := runtime.ID(task.Runtime.ID)
-		if runtimeID == "" {
-			t.Fatalf("task %s has no runtime ID before purge", taskID)
-		}
-		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
-		waitForTaskState(t, smoke, taskID, "purged")
-		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), runtimeID); err != nil {
-			purgeCancel()
-			t.Fatal(err)
-		}
-		purgeCancel()
-		t.Logf("task %s reached 'purged'", taskID)
-
-		t.Run("TerminalHistoryRestart", func(t *testing.T) {
-			history := func() string {
-				var manifest v1.HistoryManifest
-				getJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/history/manifest", &manifest)
-				bootstrap := manifest.Bootstrap
-				var body strings.Builder
-				for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
-					last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
-					var events []v1.HistoryEvent
-					getJSON(t, baseURL, fmt.Sprintf("%s/slice/%d/0/%d/end", bootstrap.ResourceBase, first, last), &events)
-					data, err := json.Marshal(events)
-					if err != nil {
-						t.Fatal(err)
-					}
-					body.Write(data)
+			t.Run(c.name, func(t *testing.T) {
+				got, err := readFileTail(path, c.maxBytes)
+				if err != nil {
+					t.Fatalf("readFileTail(%d): %v", c.maxBytes, err)
 				}
-				return body.String()
+				if got != c.want {
+					t.Fatalf("readFileTail(%d) = %q, want %q", c.maxBytes, got, c.want)
+				}
+			})
+		}
+		for _, c := range []struct {
+			state v1.TaskState
+			want  bool
+		}{
+			{v1.TaskStateRunning, false},
+			{v1.TaskStateWaiting, false},
+			{v1.TaskStateStopped, false},
+			{v1.TaskStateCrashed, true},
+			{v1.TaskStateFailed, true},
+			{v1.TaskStatePurged, true},
+		} {
+			if got := isTerminalTaskState(c.state); got != c.want {
+				t.Errorf("isTerminalTaskState(%q) = %v, want %v", c.state, got, c.want)
 			}
-			first := history()
-			baseURL = smoke.restart()
-			waitForTaskState(t, smoke, taskID, "purged")
-			second := history()
-			for name, history := range map[string]string{"before restart": first, "after restart": second} {
-				for _, want := range []string{initialPrompt, "smoke agent received: " + initialPrompt, resumePrompt, "smoke agent received: " + resumePrompt} {
-					if !strings.Contains(history, want) {
-						t.Fatalf("terminal raw history %s missing %q:\n%s", name, want, history)
+		}
+		// A subprocess lets the test observe the helper's fatal outcome without
+		// failing the parent test.
+		t.Run("RuntimeWait", func(t *testing.T) {
+			if os.Getenv("CAIC_TEST_RUNTIME_FAILURE") == "1" {
+				id := ksid.NewID()
+				s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if err := json.NewEncoder(w).Encode([]v1.Task{{ID: id, State: v1.TaskStateFailed, Error: "building image: installer unavailable"}}); err != nil {
+						t.Error(err)
 					}
+				}))
+				t.Cleanup(s.Close)
+				waitForTaskRuntime(t, &smokeServer{baseURL: s.URL}, id.String())
+				return
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			t.Cleanup(cancel)
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSmoke$/^FailureDiagnostics$/^RuntimeWait$") //nolint:gosec // rerun this test binary.
+			cmd.Env = append(os.Environ(), "CAIC_TEST_RUNTIME_FAILURE=1")
+			out, err := cmd.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("failed launch did not end the wait: %v", ctx.Err())
+			}
+			if err == nil || !strings.Contains(string(out), `reached "failed" while waiting for a runtime instance; error "building image: installer unavailable"`) {
+				t.Fatalf("failed launch diagnostic: err=%v output=%s", err, out)
+			}
+		})
+	})
+
+	// The HistoryStreamURL scenario verifies manifest discovery and full-prefix replay.
+	t.Run("HistoryStreamURL", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /api/caic/v1/tasks/task/history/manifest", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if _, err := io.WriteString(w, `{"bootstrap":{"projectionVersion":"2","generation":"timeline","cursor":"2.timeline.37.end","through":37}}`); err != nil {
+				t.Error(err)
+			}
+		})
+		s := httptest.NewServer(mux)
+		t.Cleanup(s.Close)
+		got, err := smokeHistoryStreamURL(t.Context(), s.URL, "task")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := s.URL + "/api/caic/v1/tasks/task/history/events?cursor=2.timeline.0.end"; got != want {
+			t.Fatalf("history stream URL = %q, want %q", got, want)
+		}
+	})
+
+	// The Lifecycle scenario verifies the real runtime path: start the server, launch an md
+	// container, run a deterministic agent through the relay over SSH, and
+	// exercise the task lifecycle. Unlike the e2e suite it must not use the fake
+	// server or the smoketest runtime backend: it intentionally exercises the
+	// md/container runtime path, which makes it host-dependent and isolated
+	// behind the smoke build tag and its own make target (make test-smoke).
+	t.Run("Lifecycle", func(t *testing.T) {
+		smoke := startSmokeServer(t)
+		baseURL := smoke.baseURL
+
+		// --- API endpoints ---
+
+		t.Run("Config", func(t *testing.T) {
+			var cfg v1.Config
+			getJSON(t, baseURL, "/api/caic/v1/server/config", &cfg)
+			// Version is empty in dev builds (no ldflags), so only check that the
+			// endpoint returns successfully.
+			if cfg.DisplayName == "" {
+				t.Error("config.DisplayName is empty")
+			}
+		})
+
+		t.Run("Repos", func(t *testing.T) {
+			var repos []v1.Repo
+			getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
+			if len(repos) == 0 {
+				t.Fatal("expected at least one repo")
+			}
+			// Smoke setup creates two repos (clone and clone2).
+			if len(repos) < 2 {
+				t.Errorf("expected at least 2 repos, got %d", len(repos))
+			}
+			for _, r := range repos {
+				if r.Path == "" {
+					t.Error("repo path is empty")
+				}
+				if r.BaseBranch.Name == "" {
+					t.Errorf("repo %q has empty base branch", r.Path)
 				}
 			}
 		})
 
+		t.Run("Harnesses", func(t *testing.T) {
+			var harnesses []v1.HarnessInfo
+			getJSON(t, baseURL, "/api/caic/v1/server/harnesses", &harnesses)
+			if len(harnesses) == 0 {
+				t.Fatal("expected at least one harness")
+			}
+			found := false
+			for _, h := range harnesses {
+				if h.Name == v1.HarnessCodex {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected %q harness in list", harness.Codex)
+			}
+		})
+
+		// --- Task lifecycle ---
+
+		t.Run("TaskLifecycle", func(t *testing.T) {
+			var repos []v1.Repo
+			getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
+
+			var prefs v1.PreferencesResp
+			getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
+			prefs.Settings.WellKnownCaches = nil
+			prefs.Settings.CacheMappings = nil
+			postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
+
+			// Create a task on codex so the fork below switches harness (codex -> pi).
+			initialPrompt := "smoke test " + fmt.Sprint(time.Now().UnixNano())
+			createReq := v1.CreateTaskReq{
+				InitialPrompt: v1.Prompt{Text: initialPrompt},
+				Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
+				Harness:       v1.HarnessCodex,
+				RuntimeName:   smoketest.SmokeRuntime(),
+			}
+			var createResp v1.Task
+			postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
+			taskID := createResp.ID.String()
+			if taskID == "" {
+				t.Fatal("create response has empty task ID")
+			}
+			t.Logf("created task %s", taskID)
+
+			// Poll until the task reaches "waiting" after the in-container smoke
+			// agent responds through the relay.
+			task := waitForTaskState(t, smoke, taskID, "waiting")
+			if task.NumTurns != 1 {
+				t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
+			}
+			t.Logf("task %s reached 'waiting'", taskID)
+
+			logDir := filepath.Join(smoke.cfg.Dirs.CacheDir, "tasks")
+			entries, err := os.ReadDir(logDir)
+			if err != nil {
+				t.Fatalf("read task logs: %v", err)
+			}
+			var logPath string
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), taskID+"-") && strings.HasSuffix(entry.Name(), ".jsonl") {
+					logPath = filepath.Join(logDir, entry.Name())
+					break
+				}
+			}
+			if logPath == "" {
+				t.Fatalf("task %s has no raw log in %s", taskID, logDir)
+			}
+			logData, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("read task log: %v", err)
+			}
+			for i, line := range strings.FieldsFunc(string(logData), func(r rune) bool { return r == '\n' }) {
+				var record map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(line), &record); err != nil {
+					t.Fatalf("decode task log line %d: %v", i+1, err)
+				}
+				if string(record["t"]) == "" {
+					t.Fatalf("task log line %d has no task-log discriminator: %s", i+1, line)
+				}
+				if i == 0 && (string(record["t"]) != `"caic_meta"` || string(record["version"]) != "3") {
+					t.Fatalf("task log header = %s, want v3 caic_meta", line)
+				}
+			}
+
+			const resumePrompt = "resume after server restart"
+			t.Run("ServerRestart", func(t *testing.T) {
+				runtimeID := task.Runtime.ID
+				baseURL = smoke.restart()
+
+				restored := waitForTaskState(t, smoke, taskID, "waiting")
+				if restored.Runtime.ID != runtimeID {
+					t.Errorf("task %s: runtime ID = %q after restart, want %q", taskID, restored.Runtime.ID, runtimeID)
+				}
+
+				postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/input", v1.InputReq{
+					Prompt: v1.Prompt{Text: resumePrompt},
+				}, nil)
+				task = waitForTaskState(t, smoke, taskID, "waiting")
+				if task.NumTurns != 2 {
+					t.Errorf("task %s: NumTurns = %d after restart, want 2; error=%q", taskID, task.NumTurns, task.Error)
+				}
+			})
+
+			disableSudo := false
+			forkReq := v1.ForkTaskReq{
+				// Switch harness on the fork so the test verifies the target
+				// harness's env is injected, not the source harness's.
+				Prompt:  v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
+				Harness: v1.HarnessPi,
+				Sudo:    &disableSudo,
+			}
+			var forkResp v1.Task
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/fork", forkReq, &forkResp)
+			forkID := forkResp.ID.String()
+			if forkID == "" {
+				t.Fatal("fork response has empty task ID")
+			}
+			forkTask := waitForTaskState(t, smoke, forkID, "waiting")
+			if forkTask.NumTurns != 1 {
+				t.Fatalf("fork task %s: NumTurns = %d, want 1; error=%q", forkID, forkTask.NumTurns, forkTask.Error)
+			}
+			t.Logf("fork task %s reached 'waiting'", forkID)
+
+			forkRuntimeID := runtime.ID(forkTask.Runtime.ID)
+			if forkRuntimeID == "" {
+				t.Fatalf("fork task %s has no runtime ID before purge", forkID)
+			}
+
+			// The fork's ~/.env is rewritten from scratch by md, so the target
+			// harness's env vars from config must be re-injected into the fork,
+			// and the source harness's vars must not survive the rewrite. The two
+			// harnesses use distinct marker values, so a fork that kept (or only
+			// re-injected) the source harness's env fails one of the checks below.
+			for _, c := range []struct {
+				name, id, want, absent string
+			}{
+				{"source", string(runtime.ID(task.Runtime.ID).InstanceID()), smoke.runToken + "-codex", smoke.runToken + "-pi"},
+				{"fork", string(forkRuntimeID.InstanceID()), smoke.runToken + "-pi", smoke.runToken + "-codex"},
+			} {
+				env, err := smoketest.ContainerFile(t.Context(), smoketest.SmokeRuntime(), c.id, "/home/user/.env")
+				if err != nil {
+					t.Fatalf("read %s container .env: %v", c.name, err)
+				}
+				if !strings.Contains(env, c.want) {
+					t.Fatalf("%s container /home/user/.env missing harness env %s:\n%s", c.name, c.want, env)
+				}
+				if strings.Contains(env, c.absent) {
+					t.Fatalf("%s container /home/user/.env has other harness's env %s:\n%s", c.name, c.absent, env)
+				}
+			}
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
+			waitForTaskState(t, smoke, forkID, "stopped")
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
+			waitForTaskState(t, smoke, forkID, "purged")
+			forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkRuntimeID); err != nil {
+				forkPurgeCancel()
+				t.Fatal(err)
+			}
+			forkPurgeCancel()
+			t.Logf("fork task %s reached 'purged'", forkID)
+
+			// Stop the task.
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
+			task = waitForTaskState(t, smoke, taskID, "stopped")
+			t.Logf("task %s reached 'stopped'", taskID)
+
+			// Purge the task.
+			runtimeID := runtime.ID(task.Runtime.ID)
+			if runtimeID == "" {
+				t.Fatalf("task %s has no runtime ID before purge", taskID)
+			}
+			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
+			waitForTaskState(t, smoke, taskID, "purged")
+			purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), runtimeID); err != nil {
+				purgeCancel()
+				t.Fatal(err)
+			}
+			purgeCancel()
+			t.Logf("task %s reached 'purged'", taskID)
+
+			t.Run("TerminalHistoryRestart", func(t *testing.T) {
+				history := func() string {
+					var manifest v1.HistoryManifest
+					getJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/history/manifest", &manifest)
+					bootstrap := manifest.Bootstrap
+					var body strings.Builder
+					for first := uint64(1); first <= bootstrap.Through; first += bootstrap.RecordsPerChunk {
+						last := min(first+bootstrap.RecordsPerChunk-1, bootstrap.Through)
+						var events []v1.HistoryEvent
+						getJSON(t, baseURL, fmt.Sprintf("%s/slice/%d/0/%d/end", bootstrap.ResourceBase, first, last), &events)
+						data, err := json.Marshal(events)
+						if err != nil {
+							t.Fatal(err)
+						}
+						body.Write(data)
+					}
+					return body.String()
+				}
+				first := history()
+				baseURL = smoke.restart()
+				waitForTaskState(t, smoke, taskID, "purged")
+				second := history()
+				for name, history := range map[string]string{"before restart": first, "after restart": second} {
+					for _, want := range []string{initialPrompt, "smoke agent received: " + initialPrompt, resumePrompt, "smoke agent received: " + resumePrompt} {
+						if !strings.Contains(history, want) {
+							t.Fatalf("terminal raw history %s missing %q:\n%s", name, want, history)
+						}
+					}
+				}
+			})
+
+		})
+
+		// --- Frontend serving ---
+
+		t.Run("Frontend", func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/", http.NoBody)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("GET /: %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				_ = resp.Body.Close()
+				t.Errorf("GET /: status %d, want %d", resp.StatusCode, http.StatusOK)
+				return
+			}
+			ct := resp.Header.Get("Content-Type")
+			if err := resp.Body.Close(); err != nil {
+				t.Fatalf("close / response: %v", err)
+			}
+			if !strings.Contains(ct, "text/html") {
+				t.Errorf("GET /: Content-Type %q, want text/html", ct)
+			}
+		})
 	})
 
-	// --- Frontend serving ---
+	// The NativeSubagents scenario proves the canonical native-subagent lifecycle inside
+	// a caic-managed md container for every supported harness and recording. Each task
+	// replays the retained recording through the production relay and that harness's
+	// wire, and caic restarts while the replay agent is paused between the recorded
+	// running card and the records that settle it, so the restored card must settle
+	// from records the container produced after caic stopped, without a duplicate.
+	//
+	// It never runs a live harness: the recordings are the evidence, so the test stays
+	// deterministic and needs no model credentials.
+	t.Run("NativeSubagents", func(t *testing.T) {
+		// nativeSubagent is hand written, so a field added to either side is dropped
+		// without a compile error and quietly weakens the contract below.
+		if got, want := reflect.TypeFor[v1.EventNativeSubagent]().NumField(), reflect.TypeFor[agent.NativeSubagent]().NumField(); got != want {
+			t.Fatalf("v1.EventNativeSubagent has %d fields, agent.NativeSubagent has %d; update nativeSubagent to map the new field", got, want)
+		}
+		cases := make(map[string]smokeReplayCase, len(smokeReplayRecordings))
+		byHarness := map[harness.Name][]smoketest.ReplayRecording{}
+		for _, rec := range smokeReplayRecordings {
+			c := newSmokeReplayCase(t, rec.harness, rec.file)
+			cases[rec.name()] = c
+			byHarness[rec.harness] = append(byHarness[rec.harness], c.recording)
+		}
+		// One fixture for every recording: the container image and the server start
+		// are shared, and each task's prompt selects its harness recording.
+		backendSet := map[harness.Name]agent.Backend{}
+		for h, recordings := range byHarness {
+			backend, err := smoketest.NewReplayBackend(func() agent.WireFormat { return smokeReplayWire(h) }, recordings...)
+			if err != nil {
+				t.Fatalf("%s replay backend: %v", h, err)
+			}
+			backendSet[h] = backend
+		}
+		fixture := startServerFixture(t, serverFixture{backends: backendSet})
+		for _, rec := range smokeReplayRecordings {
+			t.Run(rec.name(), func(t *testing.T) {
+				runSmokeReplay(t, fixture, rec.harness, cases[rec.name()])
+			})
+		}
+	})
 
-	t.Run("Frontend", func(t *testing.T) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/", http.NoBody)
+	t.Run("Push", func(t *testing.T) {
+		smoke := startSmokeServer(t)
+		var repos []v1.Repo
+		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
+		root := filepath.Join(smoke.rootDir, repos[0].Path)
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		audit := filepath.Join(t.TempDir(), "verified")
+		hook, err := os.ReadFile("../../../scripts/hooks/pre-push")
 		if err != nil {
-			t.Fatalf("new request: %v", err)
+			t.Fatal(err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		if err := os.WriteFile(filepath.Join(root, "Makefile"), []byte("verify:\n\t@test \"$$(cat smoke-push.txt)\" = runtime-task\n\t@git rev-parse HEAD > '"+audit+"'\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"add", "."}, {"-c", "user.name=Smoke", "-c", "user.email=smoke@example.com", "commit", "-m", "Install push verification"}, {"push", "origin", "main"}} {
+			if _, err := g.RunGit(t.Context(), args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-push"), hook, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		before, err := g.RevParse(t.Context(), "HEAD")
 		if err != nil {
-			t.Fatalf("GET /: %v", err)
+			t.Fatal(err)
 		}
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			t.Errorf("GET /: status %d, want %d", resp.StatusCode, http.StatusOK)
-			return
+		var task v1.Task
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks", v1.CreateTaskReq{
+			InitialPrompt: v1.Prompt{Text: "runtime push smoke"}, Repos: []v1.RepoSpec{{Name: repos[0].Path}}, Harness: v1.HarnessCodex, RuntimeName: smoketest.SmokeRuntime(),
+		}, &task)
+		id := task.ID.String()
+		task = waitForTaskState(t, smoke, id, "waiting")
+		container := string(runtime.ID(task.Runtime.ID).InstanceID())
+		containerRoot := "/home/user/src/" + filepath.Base(repos[0].Path)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		t.Cleanup(cancel)
+		cmd := exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("container commit: %v: %s", err, out)
 		}
-		ct := resp.Header.Get("Content-Type")
-		if err := resp.Body.Close(); err != nil {
-			t.Fatalf("close / response: %v", err)
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		tip := lines[len(lines)-1]
+		if err := os.WriteFile(filepath.Join(root, "host-dirty"), []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(ct, "text/html") {
-			t.Errorf("GET /: Content-Type %q, want text/html", ct)
+		var resp v1.SyncResp
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{}, &resp)
+		if resp.Status != "synced" {
+			t.Fatalf("sync: %+v", resp)
+		}
+		cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/"+task.Repos[0].Branch) //nolint:gosec // fixture-owned runtime, container, and repository.
+		if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
+			t.Fatalf("container task-branch tracking ref: %q, %v; want %s", out, err, tip)
+		}
+		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{Target: "default"}, &resp)
+		if resp.Status != "synced" {
+			t.Fatalf("default sync: %+v", resp)
+		}
+		cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/main") //nolint:gosec // fixture-owned runtime, container, and repository.
+		if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
+			t.Fatalf("container upstream tracking ref: %q, %v; want %s", out, err, tip)
+		}
+		getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id, &task)
+		if len(task.DiffStat) != 0 || len(task.RepoStates) != 1 || task.RepoStates[0].Ahead != 0 {
+			t.Fatalf("post-push task statistics: diff=%+v repos=%+v", task.DiffStat, task.RepoStates)
+		}
+		verified, err := os.ReadFile(audit)
+		if err != nil || strings.TrimSpace(string(verified)) != tip {
+			t.Fatalf("hook verified %q, want %s: %v", verified, tip, err)
+		}
+		remote, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/"+task.Repos[0].Branch)
+		if err != nil || !strings.HasPrefix(remote, tip+"\t") {
+			t.Fatalf("remote: %q: %v", remote, err)
+		}
+		head, err := g.RevParse(t.Context(), "HEAD")
+		if err != nil || head != before {
+			t.Fatalf("host HEAD changed: %q, %v", head, err)
+		}
+		if dirty, err := os.ReadFile(filepath.Join(root, "host-dirty")); err != nil || string(dirty) != "keep" {
+			t.Fatalf("host untracked file changed: %q, %v", dirty, err)
+		}
+		entries, err := os.ReadDir(filepath.Join(smoke.cfg.Dirs.CacheDir, "push"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "operation-") {
+				if _, err := os.Stat(filepath.Join(smoke.cfg.Dirs.CacheDir, "push", e.Name(), "idle-v1")); err != nil {
+					t.Fatal("completed push checkout not reusable", err)
+				}
+				idle++
+			}
+		}
+		if idle != 1 {
+			t.Fatalf("expected one idle push checkout, got %d", idle)
 		}
 	})
 }
@@ -630,75 +864,6 @@ func isTerminalTaskState(state v1.TaskState) bool {
 	}
 }
 
-// TestSmokeFailureDiagnostics verifies bounded log tails and immediate launch
-// failure reporting, including the terminal-state classification used by task
-// waits. It needs no container runtime.
-func TestSmokeFailureDiagnostics(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "server.log")
-	if err := os.WriteFile(path, []byte("first\nsecond\nthird\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct {
-		name     string
-		maxBytes int64
-		want     string
-	}{
-		{"whole file", 1 << 20, "first\nsecond\nthird\n"},
-		{"bounded tail", 7, "\nthird\n"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := readFileTail(path, c.maxBytes)
-			if err != nil {
-				t.Fatalf("readFileTail(%d): %v", c.maxBytes, err)
-			}
-			if got != c.want {
-				t.Fatalf("readFileTail(%d) = %q, want %q", c.maxBytes, got, c.want)
-			}
-		})
-	}
-	for _, c := range []struct {
-		state v1.TaskState
-		want  bool
-	}{
-		{v1.TaskStateRunning, false},
-		{v1.TaskStateWaiting, false},
-		{v1.TaskStateStopped, false},
-		{v1.TaskStateCrashed, true},
-		{v1.TaskStateFailed, true},
-		{v1.TaskStatePurged, true},
-	} {
-		if got := isTerminalTaskState(c.state); got != c.want {
-			t.Errorf("isTerminalTaskState(%q) = %v, want %v", c.state, got, c.want)
-		}
-	}
-	// A subprocess lets the test observe the helper's fatal outcome without
-	// failing the parent test.
-	t.Run("RuntimeWait", func(t *testing.T) {
-		if os.Getenv("CAIC_TEST_RUNTIME_FAILURE") == "1" {
-			id := ksid.NewID()
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if err := json.NewEncoder(w).Encode([]v1.Task{{ID: id, State: v1.TaskStateFailed, Error: "building image: installer unavailable"}}); err != nil {
-					t.Error(err)
-				}
-			}))
-			t.Cleanup(s.Close)
-			waitForTaskRuntime(t, &smokeServer{baseURL: s.URL}, id.String())
-			return
-		}
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		t.Cleanup(cancel)
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSmokeFailureDiagnostics$/^RuntimeWait$") //nolint:gosec // rerun this test binary.
-		cmd.Env = append(os.Environ(), "CAIC_TEST_RUNTIME_FAILURE=1")
-		out, err := cmd.CombinedOutput()
-		if ctx.Err() != nil {
-			t.Fatalf("failed launch did not end the wait: %v", ctx.Err())
-		}
-		if err == nil || !strings.Contains(string(out), `reached "failed" while waiting for a runtime instance; error "building image: installer unavailable"`) {
-			t.Fatalf("failed launch diagnostic: err=%v output=%s", err, out)
-		}
-	})
-}
-
 // waitForTaskRuntime polls until the task's container is assigned or launch fails.
 func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID {
 	t.Helper()
@@ -813,27 +978,6 @@ func postJSON(t *testing.T, baseURL, path string, reqBody, dst any) {
 	}
 	if err := resp.Body.Close(); err != nil {
 		t.Fatalf("close POST %s: %v", path, err)
-	}
-}
-
-// TestSmokeHistoryStreamURL verifies manifest discovery and full-prefix replay.
-func TestSmokeHistoryStreamURL(t *testing.T) {
-	t.Parallel()
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/caic/v1/tasks/task/history/manifest", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if _, err := io.WriteString(w, `{"bootstrap":{"projectionVersion":"2","generation":"timeline","cursor":"2.timeline.37.end","through":37}}`); err != nil {
-			t.Error(err)
-		}
-	})
-	s := httptest.NewServer(mux)
-	t.Cleanup(s.Close)
-	got, err := smokeHistoryStreamURL(t.Context(), s.URL, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := s.URL + "/api/caic/v1/tasks/task/history/events?cursor=2.timeline.0.end"; got != want {
-		t.Fatalf("history stream URL = %q, want %q", got, want)
 	}
 }
 
