@@ -1,10 +1,12 @@
 // End-to-end coverage for reading resource samples from the task statistics charts.
 
-import { createTaskAPI, expect, test } from "../helpers";
+import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 
 test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Inspect fractional CPU constraints");
+  // Task creation returns before startup opens the history log.
+  await waitForTaskState(api, id, "waiting");
   const { through } = (await api.getHistoryManifest(id)).bootstrap;
   const ts = Date.UTC(2026, 9, 4);
   const event = {
@@ -61,6 +63,7 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
 for (const history of ["clustered", "live"] as const) {
   test(`resource charts read ${history} samples through the crosshair`, async ({ page, api }) => {
     const id = await createTaskAPI(api, "Seed the resource charts");
+    await waitForTaskState(api, id, "waiting");
 
     if (history === "clustered") {
       const { through } = (await api.getHistoryManifest(id)).bootstrap;
