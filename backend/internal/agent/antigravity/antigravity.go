@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -252,15 +253,21 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 		return err
 	}
 	data = append(data, '\n')
+	if log.LogVersion() == agent.LogVersionV3 {
+		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+			return err
+		}
+	} else if log.LogVersion() == agent.LogVersionV2 {
+		if err := log.AppendMessage(&agent.UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
+			return err
+		}
+	}
 	if n, err := w.Write(data); err != nil {
 		return err
 	} else if n != len(data) {
 		return io.ErrShortWrite
 	}
-	if log.LogVersion() != agent.LogVersionV3 {
-		return nil
-	}
-	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
+	return nil
 }
 
 // ParseMessage converts agy stdout and recorded stdin into neutral messages.

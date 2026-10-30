@@ -1,4 +1,4 @@
-// Strict canonical v2/v3 task-log decoding, including persisted user-input observation times.
+// Strict canonical v2/v3 task-log decoding, including input delivery outcomes and observation times.
 
 package agent
 
@@ -96,6 +96,10 @@ func (t logRecordType) controlKind() (logControlKind, bool) {
 		return logControlProvisioningLog, true
 	case logRecordContextCleared:
 		return logControlContextCleared, true
+	case logRecordInputDeliveryFailed:
+		return logControlInputDeliveryFailed, true
+	case logRecordInputDelivery:
+		return logControlInputDelivery, true
 	case logRecordText:
 		return logControlText, true
 	case logRecordUserInput:
@@ -121,20 +125,22 @@ const (
 	logRecordDiffStat logRecordType = "diff_stat"
 	logRecordExit     logRecordType = "exit"
 	// Host summaries must never contribute bytes to generation-local relay offsets.
-	logRecordGitSummary         logRecordType = "git_summary"
-	logRecordStrippedEnv        logRecordType = "stripped_env"
-	logRecordSession            logRecordType = "session"
-	logRecordModelInfo          logRecordType = "model_info"
-	logRecordPR                 logRecordType = "pr"
-	logRecordResult             logRecordType = "result"
-	logRecordTurnCommitSnapshot logRecordType = "turn_commit_snapshot"
-	logRecordPendingUserAction  logRecordType = "pending_user_action"
-	logRecordProvisioningLog    logRecordType = "log"
-	logRecordContextCleared     logRecordType = "context_cleared"
-	logRecordText               logRecordType = "text"
-	logRecordUserInput          logRecordType = "user_input"
-	logRecordMCPRequest         logRecordType = "mcp_request"
-	logRecordRelayGeneration    logRecordType = "relay_generation"
+	logRecordGitSummary          logRecordType = "git_summary"
+	logRecordStrippedEnv         logRecordType = "stripped_env"
+	logRecordSession             logRecordType = "session"
+	logRecordModelInfo           logRecordType = "model_info"
+	logRecordPR                  logRecordType = "pr"
+	logRecordResult              logRecordType = "result"
+	logRecordTurnCommitSnapshot  logRecordType = "turn_commit_snapshot"
+	logRecordPendingUserAction   logRecordType = "pending_user_action"
+	logRecordProvisioningLog     logRecordType = "log"
+	logRecordContextCleared      logRecordType = "context_cleared"
+	logRecordInputDeliveryFailed logRecordType = "input_delivery_failed"
+	logRecordInputDelivery       logRecordType = "input_delivery"
+	logRecordText                logRecordType = "text"
+	logRecordUserInput           logRecordType = "user_input"
+	logRecordMCPRequest          logRecordType = "mcp_request"
+	logRecordRelayGeneration     logRecordType = "relay_generation"
 )
 
 const (
@@ -273,7 +279,7 @@ func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string
 		return field == "action"
 	case logControlProvisioningLog:
 		return field == "line"
-	case logControlContextCleared:
+	case logControlContextCleared, logControlInputDeliveryFailed, logControlInputDelivery:
 		// Released writers emitted the complete SystemMessage projection. Accept
 		// those established fields alongside the compact marker, so RestartSession
 		// history remains replayable; unrelated fields are still rejected.

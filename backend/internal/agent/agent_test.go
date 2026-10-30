@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -87,10 +88,13 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
+	if err := AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+		return err
+	}
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return appendRelayNativeRecord(log, LogVersionV1, data)
+	return nil
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -155,6 +159,16 @@ func testParseFn(line []byte) ([]Message, error) {
 			return nil, err
 		}
 		return []Message{&m}, nil
+	case "user":
+		var m struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []Message{&UserInputMessage{Text: m.Message.Content}}, nil
 	case "stream_event":
 		var w struct {
 			Event struct {
@@ -223,51 +237,217 @@ func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error
 	return appendNativeRecord(log, version, logRecordAgent, data)
 }
 
-type mcpTestStdin struct{ bytes.Buffer }
+// canceledRegistry models an MCP operation that waits on another transport.
+type canceledRegistry struct {
+	mcptest.FakeRegistry
 
-func (*mcpTestStdin) Close() error { return nil }
+	started chan struct{}
+}
+
+func (r *canceledRegistry) CallTool(ctx context.Context, _ *mcp.ToolsCallParams) (mcp.RawToolResult, error) {
+	close(r.started)
+	<-ctx.Done()
+	return mcp.RawToolResult{}, ctx.Err()
+}
+
+type closeErrorWriter struct {
+	bytes.Buffer
+
+	err error
+}
+
+func (w *closeErrorWriter) Close() error { return w.err }
+
+func TestNewConn(t *testing.T) {
+	t.Parallel()
+	t.Run("SendRaw", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			stdinR, stdinW := io.Pipe()
+			logBuf := &testLogSink{Version: LogVersionV2}
+			c := NewConn(t.Context(), testLogger(), stdinW, logBuf, testWire{})
+
+			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
+			got := make([]byte, len(payload))
+			var workers sync.WaitGroup
+			t.Cleanup(func() { _ = stdinR.Close(); workers.Wait() })
+			workers.Go(func() {
+				if _, err := io.ReadFull(stdinR, got); err != nil {
+					t.Errorf("read input: %v", err)
+				}
+			})
+
+			if err := c.SendRaw(payload); err != nil {
+				t.Fatal(err)
+			}
+			workers.Wait()
+			if !bytes.Equal(got, payload) {
+				t.Errorf("stdin = %q, want %q", got, payload)
+			}
+			var record struct {
+				Type string          `json:"t"`
+				Msg  json.RawMessage `json:"msg"`
+			}
+			if err := json.Unmarshal(logBuf.Bytes(), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Type != "agent" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
+				t.Errorf("log record = %#v, want canonical agent envelope for %s", record, payload)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			stdinR, stdinW := io.Pipe()
+			_ = stdinR.Close()
+			c := NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{})
+			if err := c.SendRaw([]byte("data\n")); err == nil {
+				t.Error("expected error writing to closed pipe")
+			}
+		})
+	})
+}
 
 func TestNewMCPConn(t *testing.T) {
 	t.Parallel()
 	request := `{"t":"mcp_request","id":"same-id","method":"tools/call","name":"echo","arguments":{}}` + "\n"
+	t.Run("ReadMessages/error_closing_stdin", func(t *testing.T) {
+		t.Parallel()
+		closeErr := errors.New("close stdin")
+		c := NewMCPConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, DiscardLogSink{Version: LogVersionV3}, testWire{}, nil)
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), make(chan TimedMessage), nil); !errors.Is(err, closeErr) {
+			t.Fatalf("ReadMessages = %v, want close error", err)
+		}
+	})
+	t.Run("error_MCP_request_queue_overload", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		stdin, input := io.Pipe()
+		stdout, output := io.Pipe()
+		registry := &canceledRegistry{started: make(chan struct{})}
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, registry)
+		read := make(chan error, 1)
+		var workers sync.WaitGroup
+		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
+		workers.Go(func() { _, _ = io.WriteString(output, strings.Repeat(request, 100)) })
+		t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
+		select {
+		case err := <-read:
+			if !errors.Is(err, ErrResponseQueueFull) || !errors.Is(err, ErrResponsesAborted) {
+				t.Fatalf("MCP overload=%v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("MCP overload blocked stdout or shutdown")
+		}
+	})
+	t.Run("blocked_registry_preserves_stdout_and_cancels", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		stdin, input := io.Pipe()
+		stdout, output := io.Pipe()
+		registry := &canceledRegistry{started: make(chan struct{})}
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, registry)
+		messages := make(chan TimedMessage, 1)
+		read := make(chan error, 1)
+		var workers sync.WaitGroup
+		workers.Go(func() { read <- c.ReadMessages(stdout, messages, nil) })
+		t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
+		workers.Go(func() {
+			if _, err := io.WriteString(output, request+`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}}`+"\n"); err != nil {
+				t.Errorf("feed stdout: %v", err)
+			}
+		})
+		<-registry.started
+		select {
+		case parsed := <-messages:
+			if m, ok := parsed.Message.(*TextMessage); !ok || m.Text != "working" {
+				t.Fatalf("output=%#v", parsed.Message)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("MCP execution blocked stdout")
+		}
+		cancel()
+		select {
+		case err := <-read:
+			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrResponsesAborted) {
+				t.Fatalf("cancel=%v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("MCP worker was not canceled and joined")
+		}
+	})
+
 	t.Run("task routing and retry", func(t *testing.T) {
 		t.Parallel()
 		for _, task := range []string{"first", "second"} {
 			registry := &mcptest.FakeRegistry{CallErr: errors.New("retry this task")}
-			var stdin mcpTestStdin
+			stdin, input := io.Pipe()
+			stdout, output := io.Pipe()
 			sink := &testLogSink{Version: LogVersionV3}
-			c := NewMCPConn(t.Context(), testLogger(), &stdin, sink, testWire{}, registry)
+			c := NewMCPConn(t.Context(), testLogger(), input, sink, testWire{}, registry)
 			messages := make(chan TimedMessage, 1)
-			if err := c.ReadMessages(strings.NewReader(request), messages); err != nil {
+			read := make(chan error, 1)
+			var workers sync.WaitGroup
+			workers.Go(func() { read <- c.ReadMessages(stdout, messages, nil) })
+			t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
+			decoder := json.NewDecoder(stdin)
+			if _, err := io.WriteString(output, request); err != nil {
 				t.Fatal(err)
 			}
 			var response MCPResponseEnvelope
-			if err := json.Unmarshal(stdin.Bytes(), &response); err != nil || response.ID != "same-id" || response.Error != "retry this task" {
-				t.Fatalf("failed call = %+v, %v", response, err)
-			}
-			stdin.Reset()
-			registry.CallErr = nil
-			registry.CallResult = &mcp.RawToolResult{Structured: mcp.TextOutput{Result: task}}
-			if err := c.ReadMessages(strings.NewReader(request), messages); err != nil {
+			if err := decoder.Decode(&response); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(stdin.String(), `"result":"`+task+`"`) || strings.Contains(stdin.String(), `"error"`) {
-				t.Fatalf("retried task call = %s", stdin.String())
+			if response.ID != "same-id" || response.Error != "retry this task" {
+				t.Fatalf("failed call = %+v", response)
+			}
+			registry.CallErr = nil
+			registry.CallResult = &mcp.RawToolResult{Structured: mcp.TextOutput{Result: task}}
+			if _, err := io.WriteString(output, request); err != nil {
+				t.Fatal(err)
+			}
+			response = MCPResponseEnvelope{}
+			if err := decoder.Decode(&response); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(response.Result), `"result":"`+task+`"`) || response.Error != "" {
+				t.Fatalf("retried call = %+v", response)
+			}
+			if err := output.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-read; err != nil {
+				t.Fatal(err)
 			}
 			if len(messages) != 0 || strings.Contains(sink.String(), `"t":"input"`) {
-				t.Fatal("MCP controls were forwarded as agent messages or logged as user inputs")
+				t.Fatal("MCP controls forwarded or logged as inputs")
 			}
 		}
 	})
 	t.Run("unavailable registry", func(t *testing.T) {
 		t.Parallel()
-		var stdin mcpTestStdin
-		c := NewMCPConn(t.Context(), testLogger(), &stdin, &testLogSink{Version: LogVersionV3}, testWire{}, nil)
-		if err := c.ReadMessages(strings.NewReader(request), make(chan TimedMessage, 1)); err != nil {
+		stdin, input := io.Pipe()
+		stdout, output := io.Pipe()
+		c := NewMCPConn(t.Context(), testLogger(), input, &testLogSink{Version: LogVersionV3}, testWire{}, nil)
+		read := make(chan error, 1)
+		var workers sync.WaitGroup
+		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
+		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
+		if _, err := io.WriteString(output, request); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(stdin.String(), "task-scoped MCP is unavailable") {
-			t.Fatalf("unavailable result = %s", stdin.String())
+		var response MCPResponseEnvelope
+		if err := json.NewDecoder(stdin).Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Error != "task-scoped MCP is unavailable" {
+			t.Fatalf("unavailable response = %+v", response)
+		}
+		if err := output.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-read; err != nil {
+			t.Fatal(err)
 		}
 	})
 }
@@ -316,15 +496,50 @@ func TestExitMessage(t *testing.T) {
 }
 
 func TestSession(t *testing.T) {
+	t.Run("error_automatic_response_ends_process", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		cmd := exec.CommandContext(ctx, "sleep", "60")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		stdin, input := io.Pipe()
+		stdout, output := io.Pipe()
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, nil)
+		s := NewSession(ctx, cmd, c, stdout, make(chan TimedMessage, 1), testLogger())
+		var workers sync.WaitGroup
+		t.Cleanup(func() { cancel(); s.Cancel(); _ = output.Close(); _ = s.Wait(); workers.Wait() })
+		if err := stdin.CloseWithError(io.ErrUnexpectedEOF); err != nil {
+			t.Fatal(err)
+		}
+		workers.Go(func() {
+			if _, err := io.WriteString(output, `{"t":"mcp_request","id":"request","method":"tools/list"}`+"\n"); err != nil {
+				t.Errorf("feed MCP: %v", err)
+			}
+		})
+		select {
+		case <-s.Done():
+			if err := s.Wait(); !errors.Is(err, ErrResponsesAborted) || !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("session failure = %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("failed reply left the agent process or reader running")
+		}
+	})
+
 	t.Parallel()
 	t.Run("Stop", func(t *testing.T) {
 		t.Parallel()
 		t.Run("sentinel before EOF", func(t *testing.T) {
 			t.Parallel()
 			r, w := io.Pipe()
-			done := make(chan struct{})
-			close(done)
-			s := &Session{Conn: NewConn(t.Context(), testLogger(), w, DiscardLogSink{Version: LogVersionV1}, testWire{}), log: testLogger(), done: done}
+			stdout, output := io.Pipe()
+			cmd := exec.CommandContext(t.Context(), "true")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			t.Cleanup(func() { s.Cancel(); _ = output.Close(); _ = s.Wait() })
 			got := make(chan []byte, 1)
 			var reader sync.WaitGroup
 			reader.Go(func() { data, _ := io.ReadAll(r); got <- data })
@@ -342,8 +557,14 @@ func TestSession(t *testing.T) {
 			t.Cleanup(func() { _ = r.Close() })
 			started := make(chan struct{})
 			writer := &stopTestWriter{PipeWriter: w, started: started}
-			s := &Session{Conn: NewConn(t.Context(), testLogger(), writer, DiscardLogSink{Version: LogVersionV1}, testWire{}), log: testLogger(), done: make(chan struct{})}
 			ctx, cancel := context.WithCancel(t.Context())
+			stdout, output := io.Pipe()
+			cmd := exec.CommandContext(ctx, "sleep", "60")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			t.Cleanup(func() { cancel(); _ = output.Close(); _ = s.Wait() })
 			result := make(chan error, 1)
 			var stopper sync.WaitGroup
 			stopper.Go(func() { result <- s.Stop(ctx) })
@@ -359,22 +580,16 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 		stdinR, stdinW := io.Pipe()
 		stdoutR, stdoutW := io.Pipe()
+		msgCh := make(chan TimedMessage, 16)
 
-		s := &Session{
-			Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
-			done: make(chan struct{}),
+		cmd := exec.CommandContext(t.Context(), "true")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
 		}
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdoutR, msgCh, testLogger())
 
-		msgCh := make(chan Message, 16)
 		var workers sync.WaitGroup
-		t.Cleanup(func() { _ = stdinW.Close(); _ = stdoutW.Close(); workers.Wait() })
-
-		workers.Go(func() {
-			defer close(s.done)
-			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m TimedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); parseErr != nil {
-				s.err = parseErr
-			}
-		})
+		t.Cleanup(func() { s.Cancel(); _ = s.Wait(); workers.Wait() })
 
 		stdinBuf := make(chan string, 1)
 		workers.Go(func() {
@@ -382,9 +597,11 @@ func TestSession(t *testing.T) {
 			stdinBuf <- string(data)
 		})
 
-		if err := s.SendPrompt(Prompt{Text: "test prompt"}); err != nil {
+		prompt := Prompt{Text: "test prompt", Images: []v3.ImageData{{Data: "image", MediaType: "image/png"}}}
+		if err := s.SendPrompt(prompt); err != nil {
 			t.Fatal(err)
 		}
+		prompt.Images[0].Data = "changed"
 
 		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}` + "\n"
 		if _, err := stdoutW.Write([]byte(resultLine)); err != nil {
@@ -394,14 +611,19 @@ func TestSession(t *testing.T) {
 		select {
 		case <-s.done:
 			t.Fatal("session closed prematurely after result")
-		case <-time.After(50 * time.Millisecond):
+		default:
 		}
 
 		if err := s.SendPrompt(Prompt{Text: "follow-up"}); err != nil {
 			t.Fatal(err)
 		}
 
-		_ = s.Close()
+		if err := stdoutW.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Wait(); err != nil {
+			t.Fatal(err)
+		}
 
 		got := <-stdinBuf
 		if !strings.Contains(got, `"content":"test prompt"`) {
@@ -411,23 +633,26 @@ func TestSession(t *testing.T) {
 			t.Errorf("missing follow-up in stdin: %s", got)
 		}
 
-		_ = stdoutW.Close()
-
-		if err := s.Wait(); err != nil {
-			t.Fatal(err)
-		}
-
 		close(msgCh)
 		var count int
 		var gotResult *ResultMessage
 		for m := range msgCh {
+			if IsInputDeliveryControl(m.Message) {
+				continue
+			}
 			count++
-			if rm, ok := m.(*ResultMessage); ok {
+			if rm, ok := m.Message.(*ResultMessage); ok {
 				gotResult = rm
 			}
+			if count == 1 {
+				input, ok := m.Message.(*UserInputMessage)
+				if !ok || input.Text != "test prompt" || len(input.Images) != 1 || input.Images[0].Data != "image" {
+					t.Fatalf("first message = %#v, want independent prompt copy", m.Message)
+				}
+			}
 		}
-		if count != 1 {
-			t.Errorf("message count = %d, want 1", count)
+		if count != 3 {
+			t.Errorf("message count = %d, want 3", count)
 		}
 		if gotResult == nil {
 			t.Fatal("expected ResultMessage in msgCh, got none")
@@ -435,6 +660,76 @@ func TestSession(t *testing.T) {
 		if gotResult.Result != "ok" {
 			t.Errorf("result = %q, want %q", gotResult.Result, "ok")
 		}
+	})
+	t.Run("SendPrompt", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_interrupted_delivery_does_not_block_shutdown", func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(ctx, "sleep", "60")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			reader, pipe := io.Pipe()
+			started := make(chan struct{})
+			writer := &stopTestWriter{PipeWriter: pipe, started: started}
+			log := &testLogSink{Version: LogVersionV3}
+			msgCh := make(chan TimedMessage, 2)
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, log, testWire{}), stdout, msgCh, testLogger())
+			result := make(chan error, 1)
+			var sends sync.WaitGroup
+			sends.Go(func() { result <- s.SendPrompt(Prompt{Text: "follow up"}) })
+			t.Cleanup(func() {
+				cancel()
+				_ = reader.Close()
+				sends.Wait()
+				_ = s.Wait()
+			})
+			<-started
+			cancel()
+			s.Cancel()
+			// The full FIFO has no reader. Cancellation must still let the send
+			// and Wait finish, with the failure preserved in the durable log.
+			if err := <-result; !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("send = %v, want closed pipe", err)
+			}
+			_ = s.Wait()
+			marker := <-msgCh
+			if !IsInputDeliveryControl(marker.Message) {
+				t.Fatalf("first = %T, want attempt boundary", marker.Message)
+			}
+			first := <-msgCh
+			if _, ok := first.Message.(*UserInputMessage); !ok {
+				t.Fatalf("first = %T, want attempted input", first.Message)
+			}
+			close(msgCh)
+			// Calling SendPrompt after Wait must not touch the caller's closed
+			// FIFO, even though both context and done are also ready.
+			if err := s.SendPrompt(Prompt{Text: "too late"}); err == nil {
+				t.Fatal("send after Wait succeeded")
+			}
+			parser, err := NewLogRecordParser(LogVersionV3, testParseFn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var order []string
+			for line := range bytes.SplitSeq(bytes.TrimSpace(log.Bytes()), []byte{'\n'}) {
+				record, err := parser.ParseRecord(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, message := range record.Messages {
+					order = append(order, message.Message.Type())
+				}
+			}
+			if !slices.Equal(order, []string{"system", "user_input", "system"}) {
+				t.Fatalf("durable order = %v, want one attempted input and failure", order)
+			}
+		})
 	})
 	t.Run("PlainTextWritePrompt", func(t *testing.T) {
 		t.Parallel()
@@ -474,71 +769,6 @@ func TestSession(t *testing.T) {
 		}
 	})
 
-	t.Run("SendRaw", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			stdinR, stdinW := io.Pipe()
-			logBuf := &testLogSink{Version: LogVersionV2}
-			s := &Session{
-				Conn: NewConn(t.Context(), testLogger(), stdinW, logBuf, testWire{}),
-				done: make(chan struct{}),
-			}
-
-			stdinBuf := make(chan string, 1)
-			var workers sync.WaitGroup
-			t.Cleanup(func() { _ = stdinW.Close(); workers.Wait() })
-			workers.Go(func() {
-				data, _ := io.ReadAll(stdinR)
-				stdinBuf <- string(data)
-			})
-
-			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
-			if err := s.SendRaw(payload); err != nil {
-				t.Fatal(err)
-			}
-			_ = s.Close()
-
-			got := <-stdinBuf
-			if !strings.Contains(got, `"FOO":"bar"`) {
-				t.Errorf("stdin missing payload: %s", got)
-			}
-			var record struct {
-				Type string          `json:"t"`
-				Msg  json.RawMessage `json:"msg"`
-			}
-			if err := json.Unmarshal(logBuf.Bytes(), &record); err != nil {
-				t.Fatal(err)
-			}
-			if record.Type != "agent" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
-				t.Errorf("log record = %#v, want canonical agent envelope for %s", record, payload)
-			}
-		})
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			stdinR, stdinW := io.Pipe()
-			_ = stdinR.Close()
-			s := &Session{
-				Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
-				done: make(chan struct{}),
-			}
-			if err := s.SendRaw([]byte("data\n")); err == nil {
-				t.Error("expected error writing to closed pipe")
-			}
-		})
-	})
-	t.Run("CloseIdempotent", func(t *testing.T) {
-		t.Parallel()
-		stdinR, stdinW := io.Pipe()
-		var workers sync.WaitGroup
-		t.Cleanup(func() { _ = stdinW.Close(); workers.Wait() })
-		workers.Go(func() { _, _ = io.Copy(io.Discard, stdinR) })
-		s := &Session{
-			Conn: NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}),
-			done: make(chan struct{}),
-		}
-		_ = s.Close()
-	})
 	t.Run("SignalKillNotError", func(t *testing.T) {
 		t.Parallel()
 		cmd := exec.CommandContext(t.Context(), "sleep", "60")
@@ -732,7 +962,7 @@ func TestMarshalLogMessage(t *testing.T) {
 	t.Run("CommonSourceVersions", func(t *testing.T) {
 		t.Parallel()
 		messages := []Message{
-			&TextMessage{}, &UserInputMessage{}, ContextCleared(), &LogMessage{},
+			&TextMessage{}, &UserInputMessage{}, ContextCleared(), InputDeliveryStarted(), InputDeliveryCompleted(), InputDeliveryFailed(errors.New("closed")), &LogMessage{},
 			&StrippedEnvMessage{}, &DiffStatMessage{}, &ExitMessage{}, &MetaMessage{},
 			&MetaSessionMessage{}, &RelayGenerationMessage{}, &ModelInfoMessage{},
 			&MetaResultMessage{}, &MetaPRMessage{}, &TurnCommitSnapshotMessage{}, &PendingUserActionMessage{},
@@ -796,7 +1026,7 @@ func TestMarshalLogMessage(t *testing.T) {
 	})
 	t.Run("ParsedControlProvenance", func(t *testing.T) {
 		t.Parallel()
-		for _, message := range []Message{&MetaSessionMessage{SessionID: "session"}, ContextCleared()} {
+		for _, message := range []Message{&MetaSessionMessage{SessionID: "session"}, ContextCleared(), InputDeliveryStarted(), InputDeliveryCompleted(), InputDeliveryFailed(errors.New("closed"))} {
 			message.Provenance().AgentID = "native:child"
 			encoded, err := MarshalLogMessage(LogVersionV3, message)
 			if err != nil {
@@ -1009,8 +1239,9 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 				}
 			}
 			var messages []Message
-			err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) {
+			err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) error {
 				messages = append(messages, parsed.Message)
+				return nil
 			}, DiscardLogSink{Version: version}, version, func([]byte) ([]Message, error) {
 				return nil, nil
 			}, nil)
@@ -1072,7 +1303,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error { ch <- m.Message; return nil }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1098,7 +1329,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error { ch <- m.Message; return nil }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1135,7 +1366,7 @@ func TestReadMessages(t *testing.T) {
 				var log bytes.Buffer
 				got := make(chan TimedMessage, 1)
 				conn := NewConn(t.Context(), testLogger(), stdinW, &testLogSink{Version: tc.version}, testWire{})
-				err := conn.ReadMessages(strings.NewReader(tc.input), got)
+				err := conn.ReadMessages(io.NopCloser(strings.NewReader(tc.input)), got, nil)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
 				}
@@ -1149,8 +1380,9 @@ func TestReadMessages(t *testing.T) {
 		t.Parallel()
 		var log bytes.Buffer
 		var got []TimedMessage
-		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) {
+		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) error {
 			got = append(got, msg)
+			return nil
 		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
 		}, nil)
@@ -2076,7 +2308,7 @@ func TestAttachRelaySession(t *testing.T) {
 		session, err := AttachRelaySession(t.Context(), opts, &testWire{}, nil)
 		if err == nil {
 			if session != nil {
-				_ = session.Close()
+				session.Cancel()
 			}
 			t.Fatal("attach succeeded despite an unwarmed relay history")
 		}

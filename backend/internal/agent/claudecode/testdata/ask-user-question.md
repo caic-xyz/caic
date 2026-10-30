@@ -28,6 +28,10 @@ Let me start by calling AskUserQuestion with the exact specifications.
 
 </details>
 
+## User
+
+Hi
+
 <details><summary>💭 Thinking</summary>
 
 Good! The user answered "Hi". Now I need to:

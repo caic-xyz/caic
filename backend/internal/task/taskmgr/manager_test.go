@@ -310,6 +310,18 @@ func relayParsed(msgs ...agent.Message) []agent.TimedMessage {
 	return parsed
 }
 
+// waitingLaunchBackend holds startup until the test releases it.
+type waitingLaunchBackend struct {
+	*runtimetest.FakeBackend
+
+	release <-chan struct{}
+}
+
+func (b *waitingLaunchBackend) Launch(context.Context, []runtime.Repo, *runtime.StartOptions) (runtime.ID, error) {
+	<-b.release
+	return "", errors.New("startup released")
+}
+
 // blockingStopBackend blocks in Stop until release is closed (or the context is
 // cancelled), widening the Stop/Purge race window. started and returned signal
 // the call's entry and exit.
@@ -450,7 +462,7 @@ type reconnectInputConn struct {
 	cancel  context.CancelFunc
 }
 
-func (c *reconnectInputConn) SendPrompt(p agent.Prompt) error {
+func (c *reconnectInputConn) SendPrompt(p agent.Prompt, _ []byte) error {
 	c.backend.mu.Lock()
 	c.backend.prompts = append(c.backend.prompts, p)
 	c.backend.mu.Unlock()
@@ -459,9 +471,11 @@ func (c *reconnectInputConn) SendPrompt(p agent.Prompt) error {
 
 func (*reconnectInputConn) SendRaw([]byte) error { return nil }
 
+func (*reconnectInputConn) RecordInputFailure(_ agent.Prompt, err error) error { return err }
+
 func (*reconnectInputConn) SendCompact(string) error { return errors.New("compact not supported") }
 
-func (*reconnectInputConn) ReadMessages(r io.Reader, _ chan<- agent.TimedMessage) error {
+func (*reconnectInputConn) ReadMessages(r io.ReadCloser, _ chan<- agent.TimedMessage, _ agent.MessageInterceptor) error {
 	_, err := io.Copy(io.Discard, r)
 	return err
 }
@@ -470,10 +484,7 @@ func (c *reconnectInputConn) SendStop(context.Context) {
 	c.cancel()
 }
 
-func (c *reconnectInputConn) Close() error {
-	c.cancel()
-	return nil
-}
+func (c *reconnectInputConn) Cancel() { c.cancel() }
 
 func mergeLogAndRelayMessages(h harness.Name, logMessages, relayMessages []agent.Message) []agent.Message {
 	logEntries := make([]agent.TimedMessage, len(logMessages))
@@ -1567,8 +1578,9 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.CaicMCP = true
 			entry := m.NewEntry(tk, nil)
-			if _, ok := entry.Lifecycle.agentRuntime.MCPRegistry.(mcptest.FakeRegistry); !ok {
-				t.Errorf("entry MCP registry = %T, want mcptest.FakeRegistry", entry.Lifecycle.agentRuntime.MCPRegistry)
+			tools, err := entry.Lifecycle.agentRuntime.MCPRegistry.Tools(t.Context())
+			if err != nil || len(tools) != 1 || tools[0].Name != "echo" {
+				t.Fatalf("owned entry MCP registry tools=%#v err=%v", tools, err)
 			}
 			if scoper.taskID != tk.ID {
 				t.Errorf("scoper task ID = %s, want %s", scoper.taskID, tk.ID)
@@ -2408,15 +2420,19 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			initTaskRepo(t, dir, []string{"branch", "local-work"}, []string{"branch", "--set-upstream-to", "origin/main", "local-work"})
-			m := newManagerWithRepo(t)
+			release := make(chan struct{})
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &waitingLaunchBackend{FakeBackend: &runtimetest.FakeBackend{}, release: release}, nil),
+				Backends:  agent.Backends{"fake": &agenttest.FakeBackend{}},
+			})
+			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: dir, GitTimeout: time.Second})
 			t.Cleanup(func() {
+				close(release)
 				if err := m.Close(); err != nil {
 					t.Error(err)
 				}
 			})
-			checkout, _ := m.Checkouts.Checkout("my/repo")
-			checkout.Dir = dir
-			checkout.GitTimeout = time.Second
 			start := make(chan struct{})
 			var workers sync.WaitGroup
 			ids := make([]ksid.ID, 2)
@@ -6606,6 +6622,7 @@ func TestManager(t *testing.T) {
 	})
 
 	t.Run("LoadUnsettledTasks", runLoadUnsettledTasksTests)
+	t.Run("Preparation", runPreparationTests)
 	t.Run("allocateBranches", runAllocateBranchesTests)
 	t.Run("RegisteredLogPaths", runRegisteredLogPathsTests)
 }
@@ -6692,9 +6709,18 @@ func runAllocateBranchesTests(t *testing.T) {
 }
 
 func allocateTestBranches(ctx context.Context, m *Manager, tk *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
-	m.branchAllocationMu.Lock()
-	defer m.branchAllocationMu.Unlock()
-	return m.allocateBranchesLocked(ctx, tk, mounts, reserveOnly, adoptLocal)
+	unlock, err := m.lockPreparation(mounts)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	created, err := m.allocateBranchesLocked(ctx, tk, mounts, reserveOnly, adoptLocal)
+	if err != nil {
+		for _, branch := range created {
+			err = errors.Join(err, branch.Rollback(ctx, m.log))
+		}
+	}
+	return err
 }
 
 func runAllocateBranchesBasic(t *testing.T) {

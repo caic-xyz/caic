@@ -91,7 +91,7 @@ func TestFakeBackend(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Stop/EOF below closes the pipe; cleanup also covers failed assertions.
-				t.Cleanup(func() { _ = s.Close() })
+				t.Cleanup(func() { s.Cancel() })
 				var pending string
 				check := func(msg agent.Message) {
 					switch m := msg.(type) {
@@ -131,9 +131,7 @@ func TestFakeBackend(t *testing.T) {
 						t.Fatal(err)
 					}
 				} else {
-					if err := s.Close(); err != nil {
-						t.Fatal(err)
-					}
+					s.Cancel()
 					if err := s.Wait(); err != nil {
 						t.Fatal(err)
 					}

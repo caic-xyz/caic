@@ -153,6 +153,74 @@ func newFixtureSource(t testing.TB, path string) (*Source, *resolverSpy) {
 
 func TestSource(t *testing.T) {
 	t.Parallel()
+	t.Run("ExitAfterInputAttempt", func(t *testing.T) {
+		t.Parallel()
+		for _, outcome := range []string{"unresolved", "failed", "completed", "partial_output", "result_before_outcome", "historical"} {
+			t.Run(outcome, func(t *testing.T) {
+				t.Parallel()
+				path := writeFixture(t, claudeHeader, `{"t":"agent","ts":1.000,"msg":{"type":"result","is_error":false,"result":"done"}}`)
+				source, _ := newFixtureSource(t, path)
+				if _, err := source.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				var messages []agent.Message
+				if outcome != "historical" {
+					messages = append(messages, agent.InputDeliveryStarted())
+				}
+				messages = append(messages, &agent.UserInputMessage{Text: "attempt"})
+				switch outcome {
+				case "failed":
+					messages = append(messages, agent.InputDeliveryFailed(io.ErrClosedPipe))
+				case "completed":
+					messages = append(messages, agent.InputDeliveryCompleted())
+				case "partial_output":
+					messages = append(messages, &agent.TextDeltaMessage{Text: "working"}, agent.InputDeliveryFailed(io.ErrClosedPipe))
+				case "result_before_outcome":
+					messages = append(messages, &agent.ResultMessage{Result: "done again"}, agent.InputDeliveryCompleted())
+				}
+				want := ""
+				if outcome == "completed" || outcome == "partial_output" || outcome == "historical" {
+					want = "termination artifact"
+				}
+				messages = append(messages, &agent.ExitMessage{ExitCode: 1, Error: "termination artifact"})
+				for _, m := range messages {
+					switch m.(type) {
+					case *agent.TextDeltaMessage:
+						appendFixture(t, path, delta+"\n")
+					case *agent.ResultMessage:
+						appendFixture(t, path, `{"t":"agent","ts":4.000,"msg":{"type":"result","is_error":false,"result":"done again"}}`+"\n")
+					default:
+						encoded, err := agent.MarshalLogMessage(agent.LogVersionV3, m)
+						if err != nil {
+							t.Fatal(err)
+						}
+						appendFixture(t, path, string(encoded)+"\n")
+					}
+					// Each record can be the current end of a growing log. Recovery
+					// cannot read ahead to decide the attempt's eventual outcome.
+					if _, err := source.Refresh(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				snapshot, err := source.Refresh(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := ""
+				for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if event.Message.Error != nil {
+						got = event.Message.Error.Err
+					}
+				}
+				if got != want {
+					t.Fatalf("stored exit = %q, want %q", got, want)
+				}
+			})
+		}
+	})
 	t.Run("TurnCosts", testSourceTurnCosts)
 	t.Run("physical identities and immutable partial ranges", func(t *testing.T) {
 		t.Parallel()

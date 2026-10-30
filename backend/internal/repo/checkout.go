@@ -1,4 +1,4 @@
-// Checkout owns pooled task pushes, upstream ref refreshes, and ordered Git query snapshots.
+// Checkout owns prepared task branches, pooled pushes, upstream ref refreshes, and Git snapshots.
 
 package repo
 
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/trace"
 	"slices"
@@ -188,7 +189,7 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, cacheDir, baseBranc
 // preferred, when non-empty, is a branch name shared across a multi-repo task's
 // repos by the task manager: it is tried first, and allocation falls back
 // to the next sequential name when it already exists in git.
-func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (string, error) {
+func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (*AllocatedBranch, error) {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
 	return w.allocateBranchLocked(ctx, log, baseBranch, preferred)
@@ -722,14 +723,14 @@ func (w *Checkout) queryRuntime(target GitTarget) (runtime.ID, []runtime.Repo, e
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
 // the task branch. Must be called under branchMu.
-func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (string, error) {
+func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (*AllocatedBranch, error) {
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, w.GitTimeout)
 	defer gitCancel()
 	checkout := &git.Checkout{Root: w.Dir, Logger: log}
 	// Fetch so that origin/<base> is up to date.
 	if err := checkout.Fetch(gitCtx); err != nil {
-		return "", fmt.Errorf("fetch: %w", err)
+		return nil, fmt.Errorf("fetch: %w", err)
 	}
 	effectiveBase := baseBranch
 	if effectiveBase == "" {
@@ -746,14 +747,19 @@ func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, b
 	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}
+	// Pin before creation: resolving the branch after creation could mistake an
+	// external commit for our starting commit and later delete user work.
+	tip, err := checkout.RevParse(gitCtx, startPoint+"^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("resolve branch start: %w", err)
+	}
 	// Assign a sequential branch name, skipping existing ones. preferred, when
 	// set, is tried once first so multi-repo tasks can share one branch name.
 	var branch string
-	var err error
 	triedPreferred := false
 	for range 100 {
 		if gitCtx.Err() != nil {
-			return "", gitCtx.Err()
+			return nil, gitCtx.Err()
 		}
 		if preferred != "" && !triedPreferred {
 			triedPreferred = true
@@ -768,15 +774,20 @@ func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, b
 			w.nextID++
 		}
 		log.Info("creating branch", "br", branch, "base", effectiveBase)
-		err = checkout.CreateBranch(gitCtx, branch, startPoint, true)
+		err = checkout.CreateBranch(gitCtx, branch, tip, false)
 		if err == nil {
 			break
 		}
 	}
 	if err != nil {
-		return "", fmt.Errorf("create branch: %w", err)
+		return nil, fmt.Errorf("create branch: %w", err)
 	}
-	return branch, nil
+	owned := &AllocatedBranch{Name: branch, checkout: w, tip: tip}
+	if _, err := checkout.RunGit(gitCtx, "branch", "--set-upstream-to="+startPoint, "--", branch); err != nil {
+		cleanupErr := owned.rollbackLocked(ctx, log)
+		return nil, errors.Join(fmt.Errorf("set branch upstream: %w", err), cleanupErr)
+	}
+	return owned, nil
 }
 
 func (w *Checkout) effectiveBaseBranch(t TaskView) string {
@@ -904,6 +915,63 @@ func (w *Checkout) reportRetainedPushWorktrees(ctx context.Context, log *slog.Lo
 				continue
 			}
 			_ = retainPushWorktree(ctx, log, root, dir)
+		}
+	}
+	return nil
+}
+
+// AllocatedBranch owns a newly created branch at its pinned starting commit.
+// Adopted and reserved branches never have an AllocatedBranch.
+type AllocatedBranch struct {
+	Name string
+
+	checkout *Checkout
+	tip      string
+}
+
+// Rollback removes the branch only if its tip is unchanged and no worktree
+// checks it out. Missing or moved branches are preserved. Deletion compares the
+// original commit atomically, so concurrent commits cannot be deleted.
+func (b *AllocatedBranch) Rollback(ctx context.Context, log *slog.Logger) error {
+	w := b.checkout
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	return b.rollbackLocked(ctx, log)
+}
+
+func (b *AllocatedBranch) rollbackLocked(ctx context.Context, log *slog.Logger) error {
+	w := b.checkout
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	g := &git.Checkout{Root: w.Dir, Logger: log}
+	out, err := g.RunGit(ctx, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return fmt.Errorf("inspect worktrees for %s: %w", b.Name, err)
+	}
+	ref := "refs/heads/" + b.Name
+	for field := range strings.SplitSeq(out, "\x00") {
+		if field == "branch "+ref {
+			return nil
+		}
+	}
+	if _, err := g.RunGit(ctx, "update-ref", "-d", ref, b.tip); err != nil {
+		// A failed compare means another writer owns this branch now. Inspect
+		// only to distinguish that harmless race from a genuine Git failure.
+		if _, missing := g.RunGit(ctx, "show-ref", "--verify", "--quiet", ref); missing != nil {
+			if exit, ok := errors.AsType[*exec.ExitError](missing); ok && exit.ExitCode() == 1 {
+				return nil
+			}
+			return errors.Join(err, missing)
+		}
+		tip, readErr := g.RevParse(ctx, ref)
+		if readErr == nil && tip != b.tip {
+			return nil
+		}
+		return errors.Join(fmt.Errorf("remove prepared branch %s: %w", b.Name, err), readErr)
+	}
+	if _, err := g.RunGit(ctx, "config", "--local", "--remove-section", "branch."+b.Name); err != nil {
+		if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 5 {
+			return fmt.Errorf("remove prepared branch config %s: %w", b.Name, err)
 		}
 	}
 	return nil

@@ -1,4 +1,4 @@
-// Configurable agent.Backend test double.
+// Shared agent backend, wire, and gated input test doubles.
 
 package agenttest
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -97,3 +98,47 @@ func (f *FakeBackend) NewWire() agent.WireFormat {
 
 // Ensure the fake satisfies the interface at compile time.
 var _ agent.Backend = (*FakeBackend)(nil)
+
+// GatedWriter blocks one input write until Release closes. Started must be an
+// open channel and Release must be non-nil. It owns no external resource.
+type GatedWriter struct {
+	Started chan struct{}
+	Release <-chan struct{}
+}
+
+// Write signals that stdin delivery is blocked, then waits for Release.
+func (w *GatedWriter) Write(p []byte) (int, error) {
+	close(w.Started)
+	<-w.Release
+	return len(p), nil
+}
+
+// Close releases no resources.
+func (*GatedWriter) Close() error { return nil }
+
+// StdinPipe provides observable, interruptible stdin for transport tests.
+// Reading Reader releases writes; Close interrupts blocked writes.
+type StdinPipe struct {
+	Reader  *io.PipeReader
+	Started <-chan struct{}
+
+	writer  *io.PipeWriter
+	started chan struct{}
+	once    sync.Once
+}
+
+// NewStdinPipe creates an unbuffered stdin pipe.
+func NewStdinPipe() *StdinPipe {
+	r, w := io.Pipe()
+	started := make(chan struct{})
+	return &StdinPipe{Reader: r, Started: started, writer: w, started: started}
+}
+
+// Write signals the first write and waits until Reader consumes the bytes.
+func (p *StdinPipe) Write(data []byte) (int, error) {
+	p.once.Do(func() { close(p.started) })
+	return p.writer.Write(data)
+}
+
+// Close interrupts current and future writes.
+func (p *StdinPipe) Close() error { return p.writer.Close() }

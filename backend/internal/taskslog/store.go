@@ -1,4 +1,4 @@
-// Store owns the task-log directory it is given via NewStore: log segments,
+// Store owns task-log initialization, preparation rollback, log segments,
 // sidecar header caches, metadata trailers, terminal compression, and the
 // trimmed startup scans (plain unsettled load, capped settled load, task-ID
 // lookup).
@@ -188,10 +188,61 @@ func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, str
 	if created {
 		w.version = agent.LogVersionV3
 		if err := writeMetadataHeader(w, header); err != nil {
-			return nil, "", errors.Join(err, w.Close())
+			return nil, "", errors.Join(err, discardNewLog(w, path))
 		}
 	}
 	return w, path, nil
+}
+
+// Initialize exclusively creates and closes a new log with its metadata header.
+// Errors remove the newly created file. Existing files are never reopened or
+// modified. The caller owns Rollback until publication succeeds.
+func (s *Store) Initialize(name string, header *agent.MetaMessage) (*PreparedLog, error) {
+	path, err := s.resolveName(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
+	w, err := newTaskLogWriter(path, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
+	if err != nil {
+		return nil, fmt.Errorf("create task log: %w", err)
+	}
+	info, err := w.file.Stat()
+	if err != nil {
+		return nil, errors.Join(err, discardNewLog(w, path))
+	}
+	if err := writeMetadataHeader(w, header); err != nil {
+		return nil, errors.Join(err, discardNewLog(w, path))
+	}
+	if err := w.Close(); err != nil {
+		return nil, errors.Join(err, removeOwnedLog(path, info))
+	}
+	return &PreparedLog{Path: path, info: info}, nil
+}
+
+func discardNewLog(w *taskLogWriter, path string) error {
+	info, err := w.file.Stat()
+	closeErr := w.Close()
+	if err != nil {
+		return errors.Join(err, closeErr)
+	}
+	return errors.Join(closeErr, removeOwnedLog(path, info))
+}
+
+func removeOwnedLog(path string, info os.FileInfo) error {
+	current, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, current) {
+		return nil
+	}
+	return os.Remove(path)
 }
 
 // Reopen validates and opens an existing task log for appending without a
@@ -531,6 +582,18 @@ func (s *Store) compressPath(path string) (string, error) {
 		)
 	}
 	return dst, nil
+}
+
+// PreparedLog is an initialized, closed task log ready for publication.
+type PreparedLog struct {
+	Path string
+
+	info os.FileInfo
+}
+
+// Rollback removes this unpublished log, preserving a replacement file.
+func (p *PreparedLog) Rollback() error {
+	return removeOwnedLog(p.Path, p.info)
 }
 
 func writeMetadataHeader(log agent.LogSink, header *agent.MetaMessage) error {

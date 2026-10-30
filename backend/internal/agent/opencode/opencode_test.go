@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,11 +294,79 @@ func TestWritePromptInputPersistence(t *testing.T) {
 			if version == agent.LogVersionV3 && !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
 				t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
 			}
-			if version != agent.LogVersionV3 && log.Len() != 0 {
-				t.Fatalf("v%d log = %s, want no legacy stdin persistence", version, log.Bytes())
+			if version == agent.LogVersionV1 && log.Len() != 0 {
+				t.Fatalf("v1 log = %s, want no read-only stdin persistence", log.Bytes())
+			}
+			if version == agent.LogVersionV2 {
+				parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
+				if err != nil || record.RelayRecord || len(record.Messages) != 1 {
+					t.Fatalf("v2 input record = %#v, %v", record, err)
+				}
+				if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello" {
+					t.Fatalf("persisted v2 input = %#v", record.Messages[0].Message)
+				}
 			}
 		})
 	}
+}
+
+func TestWireFormat(t *testing.T) {
+	t.Parallel()
+	t.Run("WritePrompt/OutputWhileInputBlocked", func(t *testing.T) {
+		t.Parallel()
+		w, ok := New("", nil).NewWire().(*wireFormat)
+		if !ok {
+			t.Fatal("backend returned an unexpected wire format")
+		}
+		w.sessionID = "session"
+		release := make(chan struct{})
+		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
+		var workers sync.WaitGroup
+		var writeErr error
+		t.Cleanup(func() {
+			close(release)
+			workers.Wait()
+			if writeErr != nil {
+				t.Errorf("input failed after release: %v", writeErr)
+			}
+		})
+		written := make(chan error, 1)
+		workers.Go(func() {
+			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			written <- writeErr
+		})
+		<-writer.Started
+		parsed := make(chan error, 1)
+		var messages []agent.Message
+		workers.Go(func() {
+			var err error
+			messages, err = w.ParseMessage([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}`))
+			parsed <- err
+		})
+		select {
+		case err := <-parsed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("stdout parser blocked behind stdin delivery")
+		}
+		if len(messages) != 1 {
+			t.Fatalf("messages = %v, want streaming output", messages)
+		}
+		if m, ok := messages[0].(*agent.TextDeltaMessage); !ok || m.Text != "working" {
+			t.Fatalf("output = %#v", messages[0])
+		}
+		select {
+		case err := <-written:
+			t.Fatalf("input unexpectedly finished: %v", err)
+		default:
+		}
+	})
 }
 
 func TestHandshakeContinuation(t *testing.T) {

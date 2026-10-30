@@ -2206,7 +2206,7 @@ function MessageItem(props: {
       <Match when={props.ev.system?.subtype === "api_error"}>
         <div class={styles.parseError}>API error</div>
       </Match>
-      <Match when={props.ev.system?.subtype === "error"}>
+      <Match when={props.ev.system?.subtype === "error" || props.ev.system?.subtype === "input_delivery_failed"}>
         <div class={styles.parseError}>{props.ev.system?.detail || "Agent error"}</div>
       </Match>
       <Match when={props.ev.toolResult || props.ev.toolOutputDelta}>

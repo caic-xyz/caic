@@ -1,4 +1,4 @@
-// Package taskmgr owns task publication with initialized logs, the registry, lifecycle, and runtime-instance import.
+// Package taskmgr owns independent task preparation, initialized-log publication, lifecycle, and runtime-instance import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -134,6 +134,7 @@ type Manager struct {
 	pricer               quotausage.ModelPricer
 	rollup               task.RollupSink
 	taskMCPScoper        TaskMCPScoper
+	mcpExecutor          *agent.MCPExecutor
 	relay                relayReader
 
 	// Guarded by eventMu.
@@ -149,7 +150,12 @@ type Manager struct {
 
 	background sync.WaitGroup
 
-	branchAllocationMu sync.Mutex // Serializes branch allocation, log initialization, and task publication.
+	// Preparation locks are bounded by registered repository names. A creator
+	// holds its sorted repository set through publication; disjoint sets never
+	// wait for each other's Git fetches. These locks also protect adoption and
+	// shared sequence-number allocation across the participating checkouts.
+	preparationMu    sync.Mutex
+	preparationLocks map[string]*sync.Mutex
 
 	// Guarded by mu.
 	mu            sync.Mutex
@@ -200,6 +206,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		QuotaTracker:         quotausage.NewTracker(),
 		log:                  cfg.Log.With("cmp", "taskmgr"),
 		serverCtx:            serverCtx,
+		mcpExecutor:          agent.NewMCPExecutor(serverCtx),
 		cancelServerCtx:      cancelServerCtx,
 		Backends:             maps.Clone(cfg.Backends),
 		logStore:             cfg.LogStore,
@@ -213,6 +220,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		Checkouts:            cfg.Checkouts,
 		relay:                agentRelayReader{},
 		tasks:                make(map[ksid.ID]*Entry),
+		preparationLocks:     make(map[string]*sync.Mutex),
 		changed:              make(chan struct{}),
 	}
 	return m, nil
@@ -232,6 +240,7 @@ func (m *Manager) Close() error {
 	})
 	m.quotaWatchers.Wait()
 	m.background.Wait()
+	m.mcpExecutor.Close()
 	// After all task activity has settled, flush the usage rollup's pending
 	// deltas so a graceful shutdown never loses them.
 	return m.rollup.Close()
@@ -263,7 +272,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 	var taskMCP mcp.Registry
 	if t.CaicMCP {
-		taskMCP = m.taskMCPScoper.ForTask(t.ID)
+		taskMCP = m.mcpExecutor.Wrap(m.taskMCPScoper.ForTask(t.ID))
 	}
 	e := &Entry{
 		task:            t,
@@ -1120,18 +1129,81 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	return collides
 }
 
-// publishEntry initializes branch identity and a readable history log before
-// registration. The allocation lock spans publication so concurrent creators
-// cannot adopt the same branch or exceed the delegated-child limit.
-// Extra-repo Git preparation holds this lock, so other creators wait for it.
-// Preparation failures can leave unused branch reservations or created branches.
-func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly int, adoptLocal bool) error {
-	m.branchAllocationMu.Lock()
-	defer m.branchAllocationMu.Unlock()
+// lockPreparation locks a sorted, deduplicated repository set. The small map
+// mutex is released before acquiring any preparation lock or running Git.
+func (m *Manager) lockPreparation(mounts []taskslog.RepoMount) (func(), error) {
+	names := make([]string, 0, len(mounts))
+	for _, mount := range mounts {
+		if _, ok := m.Checkouts.Checkout(mount.Name); !ok {
+			return nil, fmt.Errorf("repo %q is not registered", mount.Name)
+		}
+		names = append(names, mount.Name)
+	}
+	slices.Sort(names)
+	names = slices.Compact(names)
+	locks := make([]*sync.Mutex, 0, len(names))
+	m.preparationMu.Lock()
+	for _, name := range names {
+		lock := m.preparationLocks[name]
+		if lock == nil {
+			lock = &sync.Mutex{}
+			m.preparationLocks[name] = lock
+		}
+		locks = append(locks, lock)
+	}
+	m.preparationMu.Unlock()
+	for _, lock := range locks {
+		lock.Lock()
+	}
+	return func() {
+		for _, lock := range slices.Backward(locks) {
+			lock.Unlock()
+		}
+	}, nil
+}
+
+// publishEntry prepares final branch identities and a closed readable history
+// before registration. Preparation owns only branches it actually creates and
+// its exclusive new log; any failure rolls those resources back. Reserved or
+// adopted branches are never deleted. Repository locks span publication so a
+// branch cannot be adopted twice, while the delegated cap is checked atomically
+// with insertion across disjoint repository sets.
+func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly int, adoptLocal bool) (err error) {
 	t := entry.Task()
+	mounts := t.ReposSnapshot()
+	unlock, err := m.lockPreparation(mounts)
+	if err != nil {
+		return internalErr(err, "lock task repositories")
+	}
+	defer unlock()
+	branches, allocationErr := m.allocateBranchesLocked(ctx, t, mounts, reserveOnly, adoptLocal)
+	var log *taskslog.PreparedLog
+	defer func() {
+		if err == nil {
+			return
+		}
+		var cleanupErr error
+		if log != nil {
+			cleanupErr = log.Rollback()
+		}
+		for _, branch := range slices.Backward(branches) {
+			cleanupErr = errors.Join(cleanupErr, branch.Rollback(ctx, m.log))
+		}
+		if cleanupErr != nil {
+			err = errors.Join(err, internalErr(cleanupErr, "rollback task preparation"))
+		}
+	}()
+	if allocationErr != nil {
+		return internalErr(allocationErr, "allocate branch")
+	}
+	log, err = m.logStore.Initialize(t.LogFilename(), t.LogHeader())
+	if err != nil {
+		return internalErr(err, "initialize task log")
+	}
+	entry.LogPath.Set(log.Path)
+	m.mu.Lock()
 	if t.ParentTaskID != 0 {
 		// TODO: Replace this temporary cap with configurable, time-based delegation quotas.
-		m.mu.Lock()
 		children := 0
 		for _, candidate := range m.tasks {
 			child := candidate.Task()
@@ -1139,23 +1211,15 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 				children++
 			}
 		}
-		m.mu.Unlock()
 		if children >= maxDelegatedTasksPerParent {
+			m.mu.Unlock()
 			return conflict(fmt.Sprintf("delegating task already has %d non-purged child tasks", maxDelegatedTasksPerParent))
 		}
 	}
-	if err := m.allocateBranchesLocked(ctx, t, t.ReposSnapshot(), reserveOnly, adoptLocal); err != nil {
-		return internalErr(err, "allocate branch")
-	}
-	log, path, err := m.logStore.Open(t.LogFilename(), t.LogHeader())
-	if err != nil {
-		return internalErr(err, "initialize task log")
-	}
-	if err := log.Close(); err != nil {
-		return internalErr(err, "close initialized task log")
-	}
-	entry.LogPath.Set(path)
-	m.insertEntry(t.ID, entry)
+	m.tasks[t.ID] = entry
+	m.taskChangedLocked()
+	m.mu.Unlock()
+	m.watchRateLimitEvents(t)
 	return nil
 }
 
@@ -1166,22 +1230,23 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 // Fresh branches share the highest next sequence number across the checkouts,
 // falling back to a new number when the shared name already exists in Git.
 //
-// Requires branchAllocationMu through log initialization and publication:
+// Requires all participating repository preparation locks through publication:
 // the immutable log header and filename embed these branch names, and a newly
 // adopted local branch must become associated before another creator checks it.
-func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
+func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) ([]*repo.AllocatedBranch, error) {
+	var created []*repo.AllocatedBranch
 	// Resolve adoption first; adopted repos keep their own branch name.
 	var shared []int
 	var checkouts []*repo.Checkout
 	for i := range mounts {
 		ws, ok := m.Checkouts.Checkout(mounts[i].Name)
 		if !ok {
-			return fmt.Errorf("repo %q is not registered", mounts[i].Name)
+			return created, fmt.Errorf("repo %q is not registered", mounts[i].Name)
 		}
 		if adoptLocal && mounts[i].BaseBranch != "" && !m.BranchAssociated(mounts[i].Name, mounts[i].BaseBranch) {
 			branches, err := ws.AdoptableBranches(ctx, m.log)
 			if err != nil {
-				return fmt.Errorf("inspect branch for %s: %w", mounts[i].Name, err)
+				return created, fmt.Errorf("inspect branch for %s: %w", mounts[i].Name, err)
 			}
 			if slices.Contains(branches, mounts[i].BaseBranch) {
 				t.SetRepoBranch(i, mounts[i].BaseBranch)
@@ -1192,12 +1257,12 @@ func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, moun
 		checkouts = append(checkouts, ws)
 	}
 	if len(shared) == 0 {
-		return nil
+		return created, nil
 	}
 
 	// One branch name for every repo that receives a fresh caic-N branch: the
 	// highest next sequence number across their checkouts, so it is free in
-	// each. branchAllocationMu makes the peek-and-reserve below atomic with
+	// each. The repository locks make the peek-and-reserve below atomic with
 	// respect to other tasks' allocations.
 	n := -1
 	for _, ws := range checkouts {
@@ -1219,11 +1284,12 @@ func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, moun
 		}
 		branch, err := checkouts[k].AllocateBranch(ctx, m.log, mounts[i].BaseBranch, preferred)
 		if err != nil {
-			return fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
+			return created, fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
 		}
-		t.SetRepoBranch(i, branch)
+		created = append(created, branch)
+		t.SetRepoBranch(i, branch.Name)
 	}
-	return nil
+	return created, nil
 }
 
 // watchStats streams runtime resource stats for the current active task set.

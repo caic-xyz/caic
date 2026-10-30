@@ -148,8 +148,8 @@ func (b *ReplayBackend) Start(ctx context.Context, opts *agent.Options) (*agent.
 	init := &agent.InitMessage{SessionID: replaySessionID(), ReportedModel: "replay-model"}
 	opts.MsgCh <- agent.TimedMessage{Message: init}
 	if err := agent.WriteMetaSession(opts.Log, init); err != nil {
-		_ = session.Close()
-		return nil, fmt.Errorf("write replay session metadata: %w", err)
+		session.Cancel()
+		return nil, fmt.Errorf("write replay session metadata: %w", errors.Join(err, session.Wait()))
 	}
 	return session, nil
 }

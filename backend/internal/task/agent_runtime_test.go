@@ -130,6 +130,36 @@ func (b *startupFailingBackend) Start(context.Context, *agent.Options) (*agent.S
 	return nil, b.err
 }
 
+// synchronousPromptBackend finishes a turn before Start returns, reproducing
+// harnesses that can respond while their initial prompt is still being sent.
+type synchronousPromptBackend struct {
+	testBackend
+
+	completed <-chan struct{}
+}
+
+func (b *synchronousPromptBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "sleep", "60")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	w := &completingInputWriter{msgCh: opts.MsgCh}
+	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, w, opts.Log, &testWire{}), stdout, opts.MsgCh, opts.Logger)
+	if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+		return nil, err
+	}
+	select {
+	case <-b.completed:
+		return s, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 type testRuntimeSystem struct {
 	testRuntimeBackend
 	runtimetest.FakeInfo
@@ -344,6 +374,62 @@ func (b *resultFetchBackend) TurnSnapshot(ctx context.Context, id runtime.ID, pr
 func TestRunner(t *testing.T) {
 	t.Parallel()
 	t.Run("Sessions", testRunnerSessions)
+	t.Run("PromptPrecedesSynchronousStartupResult", func(t *testing.T) {
+		t.Parallel()
+		for _, operation := range []string{"start", "start_session", "restart"} {
+			t.Run(operation, func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
+				completed := make(chan struct{})
+				backend := &synchronousPromptBackend{completed: completed}
+				r := newTestAgentRuntimeWithRuntime(t, testContainer(), agent.Backends{"test": backend}, t.TempDir())
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
+				tk.SetState(taskslog.StateWaiting)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
+				var completion sync.Once
+				r.NotifyTaskChange = func() {
+					if tk.GetState() == taskslog.StateWaiting && tk.LastAgentResult() != "" {
+						completion.Do(func() { close(completed) })
+					}
+				}
+				var h *SessionHandle
+				var err error
+				switch operation {
+				case "start":
+					h, err = r.Start(ctx, tk, "")
+				case "start_session":
+					h, err = r.StartSession(ctx, tk, agent.Prompt{Text: "test"})
+				case "restart":
+					h, err = r.RestartSession(ctx, tk, agent.Prompt{Text: "test"})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					cancel()
+					_ = h.Drain()
+					_ = h.Log.Close()
+				})
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Fatalf("state = %s, want completed turn to remain waiting", got)
+				}
+				var order []string
+				for _, m := range tk.Messages() {
+					switch m.(type) {
+					case *agent.UserInputMessage, *agent.TextMessage, *agent.ResultMessage:
+						order = append(order, m.Type())
+					}
+				}
+				if !slices.Equal(order, []string{"user_input", "text", "result"}) {
+					t.Fatalf("turn order = %v", order)
+				}
+				if got := tk.titleInput(); got != "Current title: test\nRecent activity:\nPrompt: test\nResult: done\n" {
+					t.Fatalf("title input = %q", got)
+				}
+			})
+		}
+	})
 
 	t.Run("MakeMetadata", func(t *testing.T) {
 		t.Parallel()
@@ -398,7 +484,7 @@ func TestRunner(t *testing.T) {
 		if got := runtimeBackend.metadata[runtime.MetadataTaskID]; got != tk.ID.String() {
 			t.Errorf("metadata[%s] = %q, want task ID", runtime.MetadataTaskID, got)
 		}
-		_ = h.Session.Close()
+		h.Session.Cancel()
 	})
 
 	t.Run("ProvisioningWriter", func(t *testing.T) {
@@ -1516,7 +1602,7 @@ func TestRunner(t *testing.T) {
 			if got := runtimeBackend.metadata[runtime.MetadataTaskID]; got != fork.ID.String() {
 				t.Errorf("metadata[%s] = %q, want fork ID", runtime.MetadataTaskID, got)
 			}
-			_ = h.Session.Close()
+			h.Session.Cancel()
 		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
@@ -1615,7 +1701,7 @@ func testRunnerSessions(t *testing.T) {
 					}
 					t.Cleanup(func() {
 						// The test context cancels the subprocess before cleanup.
-						_ = h.Session.Close()
+						h.Session.Cancel()
 						_ = h.Drain()
 						if err := h.Log.Close(); err != nil {
 							t.Error(err)
@@ -1969,9 +2055,10 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatalf("subscriber observed time = %v, want %v", got.ObservedAt, want)
 			}
 			var v1 agent.TimedMessage
-			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.TimedMessage) {
+			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.TimedMessage) error {
 				v1 = parsed
 				opts.MsgCh <- parsed
+				return nil
 			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
 				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
 			}, nil)

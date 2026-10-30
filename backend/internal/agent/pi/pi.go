@@ -34,7 +34,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/maruel/gomode/mcp"
 )
 
 // Backend implements agent.Backend for the Pi coding agent.
@@ -324,70 +323,45 @@ type caicModelInfo struct {
 
 // piConn wraps a default Conn to intercept extension_ui_request messages
 // during ReadMessages and auto-respond on stdin.
-type piConn struct {
-	agent.Conn
+type piConn struct{ agent.Conn }
 
-	ctx     context.Context
-	logger  *slog.Logger
-	log     agent.LogSink
-	version agent.LogVersion
-	wire    *piWireFormat
-	mcp     mcp.Registry
-}
-
-// newPiConn creates a piConn wrapping a standard Conn.
+// newPiConn installs the provider interceptor around the shared response owner.
 func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat, opts *agent.Options) *piConn {
-	return &piConn{
-		Conn:    agent.NewMCPConn(ctx, logger, stdin, log, wire, opts.MCP),
-		ctx:     ctx,
-		logger:  logger,
-		log:     log,
-		version: log.LogVersion(),
-		wire:    wire,
-		mcp:     opts.MCP,
+	return &piConn{Conn: agent.NewMCPConn(ctx, logger, stdin, log, wire, opts.MCP)}
+}
+
+// HandleMessage intercepts extension UI controls without writing stdin.
+func (c *piConn) HandleMessage(m agent.Message) (response []byte, handled bool, err error) {
+	raw, ok := m.(*agent.RawMessage)
+	if !ok {
+		return nil, false, nil
 	}
+	if strings.HasPrefix(raw.MessageType, "response:") {
+		return nil, true, nil
+	}
+	if raw.MessageType == string(pi.EventExtensionUI) {
+		data, err := extensionUIResponse(raw.Raw)
+		return data, true, err
+	}
+	return nil, false, nil
 }
 
-// ReadMessages overrides the default read loop to intercept extension_ui_request
-// messages and auto-respond before forwarding them to the message channel.
-func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
-	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.TimedMessage) {
-		m := parsed.Message
-		// Intercept extension UI requests.
-		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {
-			return
-		} else if ok && raw.MessageType == string(pi.EventExtensionUI) {
-			if err := handleExtensionUI(c.Conn, raw.Raw); err != nil {
-				c.logger.WarnContext(c.ctx, "pi: extension_ui_request auto-response failed", "err", err)
-			}
-			// Don't forward to msgCh — these are internal.
-			return
-		}
-		msgCh <- parsed
-	}, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
-}
-
-func (c *piConn) handleMCP(req agent.MCPRequest) error {
-	result, err := agent.MCPRequestResult(c.ctx, c.mcp, req)
-	return agent.RespondMCP(c.Conn, req.ID, result, err)
-}
-
-// handleExtensionUI auto-responds to an extension UI request. For confirm
+// extensionUIResponse encodes an automatic extension UI reply. For confirm
 // requests it sends confirmed=true. For select requests it picks the first
 // option. For all others it sends an empty value.
-func handleExtensionUI(conn agent.Conn, raw []byte) error {
+func extensionUIResponse(raw []byte) ([]byte, error) {
 	var req pi.ExtensionUIRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return fmt.Errorf("unmarshal extension_ui_request: %w", err)
+		return nil, fmt.Errorf("unmarshal extension_ui_request: %w", err)
 	}
 	switch req.Method {
 	case pi.UIMethodConfirm:
 		resp := pi.ExtensionUIResponseConfirm{Type: pi.ExtensionUIResponseType, ID: req.ID, Confirmed: true}
 		data, err := json.Marshal(resp)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return conn.SendRaw(append(data, '\n'))
+		return append(data, '\n'), nil
 	case pi.UIMethodSelect:
 		val := ""
 		if len(req.Options) > 0 {
@@ -396,20 +370,20 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 		resp := pi.ExtensionUIResponseValue{Type: pi.ExtensionUIResponseType, ID: req.ID, Value: val}
 		data, err := json.Marshal(resp)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return conn.SendRaw(append(data, '\n'))
+		return append(data, '\n'), nil
 	case pi.UIMethodNotify, pi.UIMethodSetStatus, pi.UIMethodSetWidget, pi.UIMethodSetTitle:
 		// Fire-and-forget; no response needed.
-		return nil
+		return nil, nil
 	default:
 		// input, editor, or unknown: send empty value.
 		resp := pi.ExtensionUIResponseValue{Type: pi.ExtensionUIResponseType, ID: req.ID, Value: ""}
 		data, err := json.Marshal(resp)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return conn.SendRaw(append(data, '\n'))
+		return append(data, '\n'), nil
 	}
 }
 
@@ -1113,10 +1087,10 @@ func writeJSONLine(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
-	if _, err := w.Write(data); err != nil {
+	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
 		return err
 	}
-	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+	if _, err := w.Write(data); err != nil {
 		return err
 	}
 	return nil

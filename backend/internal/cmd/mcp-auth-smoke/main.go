@@ -182,7 +182,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	}
 	checkoutRegistry := repo.NewRegistry()
 	stateLog := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	taskMgr, err := taskmgr.New(taskmgr.Config{
+	taskMgr, err := taskmgr.New(taskmgr.Config{ //nolint:contextcheck // Config.ServerCtx passes this caller context to the Manager-owned MCP executor.
 		ServerCtx:           ctx,
 		Log:                 stateLog,
 		LogStore:            taskslog.NewStore(stateLog, filepath.Join(stateDir, "tasks")),

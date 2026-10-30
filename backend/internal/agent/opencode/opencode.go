@@ -117,11 +117,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 
 	log := opts.Logger.With("target", opts.Target.SSHHost)
 	c := agent.NewMCPConn(ctx, log, rp.Stdin, opts.Log, hs.wire, opts.MCP)
-	s := agent.NewSession(ctx, rp.Cmd, c, continuation, opts.MsgCh, log)
+	s := agent.NewSession(ctx, rp.Cmd, c, agent.ContinuedReader{Reader: continuation, Closer: rp.Stdout}, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
-			_ = s.Close()
-			return nil, fmt.Errorf("write prompt: %w", err)
+			s.Cancel()
+			return nil, fmt.Errorf("write prompt: %w", errors.Join(err, s.Wait()))
 		}
 	}
 	return s, nil
@@ -198,16 +198,18 @@ type wireFormat struct {
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if w.sessionID == "" {
+		w.mu.Unlock()
 		return errors.New("opencode: no session ID (handshake not completed)")
 	}
 	id := w.allocIDLocked()
 	w.promptReqID = id
 	w.resetAccumulatedOutputLocked()
+	sessionID, supportsImage := w.sessionID, w.supportsImage
+	w.mu.Unlock()
 	content := make([]opencode.PromptContent, 0, 1+len(p.Images))
 	content = append(content, opencode.PromptContent{Type: opencode.ContentText, Text: p.Text})
-	if w.supportsImage {
+	if supportsImage {
 		for _, img := range p.Images {
 			content = append(content, opencode.PromptContent{
 				Type:     opencode.ContentImage,
@@ -216,7 +218,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 			})
 		}
 	}
-	params, err := marshalParams(opencode.SessionPromptParams{SessionID: w.sessionID, Prompt: content})
+	params, err := marshalParams(opencode.SessionPromptParams{SessionID: sessionID, Prompt: content})
 	if err != nil {
 		return fmt.Errorf("marshal session/prompt params: %w", err)
 	}
@@ -225,6 +227,11 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		ID:      id,
 		Method:  opencode.MethodSessionPrompt,
 		Params:  params,
+	}
+	if log.LogVersion() == agent.LogVersionV2 {
+		if err := log.AppendMessage(&agent.UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
+			return err
+		}
 	}
 	return writeJSONInput(wr, req, log)
 }
@@ -714,13 +721,15 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
+	if log.LogVersion() == agent.LogVersionV3 {
+		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+			return err
+		}
+	}
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if log.LogVersion() != agent.LogVersionV3 {
-		return nil
-	}
-	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
+	return nil
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response

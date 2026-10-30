@@ -1,4 +1,4 @@
-// Shared test helpers and fixtures for the task package.
+// Tests task timelines, delivery evidence, state, accounting, and pending-action recovery.
 
 package task
 
@@ -48,31 +48,58 @@ type failingConn struct {
 	err error
 }
 
-func (c *failingConn) SendPrompt(agent.Prompt) error { return c.err }
+func (c *failingConn) SendPrompt(agent.Prompt, []byte) error { return c.err }
+
+func (*failingConn) RecordInputFailure(_ agent.Prompt, err error) error { return err }
 
 func (*failingConn) SendRaw([]byte) error { return nil }
 
 func (*failingConn) SendCompact(string) error { return nil }
 
-func (*failingConn) ReadMessages(io.Reader, chan<- agent.TimedMessage) error { return nil }
+func (*failingConn) ReadMessages(io.ReadCloser, chan<- agent.TimedMessage, agent.MessageInterceptor) error {
+	return nil
+}
 
 func (*failingConn) SendStop(context.Context) {}
 
-func (*failingConn) Close() error { return nil }
+func (*failingConn) Cancel() {}
 
 // completingInputWriter models an agent that finishes before its input write returns.
 type completingInputWriter struct {
-	ctx  context.Context
-	task *Task
+	msgCh chan<- agent.TimedMessage
 }
 
 func (w *completingInputWriter) Write(p []byte) (int, error) {
-	w.task.addMessage(w.ctx, &agent.TextMessage{Text: "done"})
-	w.task.addMessage(w.ctx, &agent.ResultMessage{MessageType: "result"})
+	w.msgCh <- agent.TimedMessage{Message: &agent.TextMessage{Text: "done"}}
+	w.msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
 	return len(p), nil
 }
 
 func (*completingInputWriter) Close() error { return nil }
+
+type partialInputWriter struct {
+	msgCh    chan<- agent.TimedMessage
+	observed <-chan struct{}
+}
+
+func (w *partialInputWriter) Write([]byte) (int, error) {
+	w.msgCh <- agent.TimedMessage{Message: &agent.TextMessage{Text: "working"}}
+	<-w.observed
+	return 1, io.ErrUnexpectedEOF
+}
+
+func (*partialInputWriter) Close() error { return nil }
+
+type queuedDeltaInputWriter struct {
+	msgCh chan<- agent.TimedMessage
+}
+
+func (w *queuedDeltaInputWriter) Write([]byte) (int, error) {
+	w.msgCh <- agent.TimedMessage{Message: &agent.TextDeltaMessage{Text: "working"}}
+	return 1, io.ErrUnexpectedEOF
+}
+
+func (*queuedDeltaInputWriter) Close() error { return nil }
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
@@ -162,6 +189,115 @@ func recvType(ch <-chan TimelineMessage) string {
 }
 
 func TestTask(t *testing.T) {
+	t.Run("ExitAfterInputAttempt", func(t *testing.T) {
+		t.Parallel()
+		for _, outcome := range []string{"unresolved", "failed", "completed", "partial_output", "result_before_outcome", "historical"} {
+			t.Run(outcome, func(t *testing.T) {
+				t.Parallel()
+				history := []agent.Message{
+					&agent.UserInputMessage{Text: "accepted"},
+					&agent.ResultMessage{Result: "done"},
+				}
+				if outcome != "historical" {
+					history = append(history, agent.InputDeliveryStarted())
+				}
+				history = append(history, &agent.UserInputMessage{Text: "attempt"})
+				switch outcome {
+				case "failed":
+					history = append(history, agent.InputDeliveryFailed(io.ErrClosedPipe))
+				case "completed":
+					history = append(history, agent.InputDeliveryCompleted())
+				case "partial_output":
+					history = append(history, &agent.TextDeltaMessage{Text: "working"}, agent.InputDeliveryFailed(io.ErrClosedPipe))
+				case "result_before_outcome":
+					history = append(history, &agent.ResultMessage{Result: "done again"}, agent.InputDeliveryCompleted())
+				}
+				want := ""
+				if outcome == "completed" || outcome == "partial_output" || outcome == "historical" {
+					want = "termination artifact"
+				}
+				history = append(history, &agent.ExitMessage{ExitCode: 1, Error: "termination artifact"})
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(taskslog.StateRunning)
+				for _, m := range history {
+					live.addMessage(t.Context(), m)
+				}
+				seeded := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				seeded.SetState(taskslog.StateRunning)
+				seeded.SeedTimeline(history)
+				if got := live.LastExitError(); got != want {
+					t.Fatalf("live exit = %q, want %q", got, want)
+				}
+				if got := seeded.LastExitError(); got != live.LastExitError() {
+					t.Fatalf("seeded exit = %q, live = %q", got, live.LastExitError())
+				}
+			})
+		}
+	})
+	t.Run("HasAcceptedInputEvidence", func(t *testing.T) {
+		t.Parallel()
+		input := &agent.UserInputMessage{Text: "attempt"}
+		for _, tc := range []struct {
+			name     string
+			messages []agent.Message
+			accepted bool
+		}{
+			{name: "historical", messages: []agent.Message{input}, accepted: true},
+			{name: "started_only", messages: []agent.Message{agent.InputDeliveryStarted()}},
+			{name: "pending_without_outcome", messages: []agent.Message{agent.InputDeliveryStarted(), input}},
+			{name: "completed", messages: []agent.Message{agent.InputDeliveryStarted(), input, agent.InputDeliveryCompleted()}, accepted: true},
+			{name: "failed", messages: []agent.Message{agent.InputDeliveryStarted(), input, agent.InputDeliveryFailed(io.ErrClosedPipe)}},
+			{name: "root_output", messages: []agent.Message{agent.InputDeliveryStarted(), input, &agent.TextMessage{Text: "working"}}, accepted: true},
+			{name: "child_output", messages: []agent.Message{agent.InputDeliveryStarted(), input, &agent.TextMessage{Source: agent.MessageSource{AgentID: "child"}, Text: "working"}}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					parser, err := agent.NewLogRecordParser(version, func([]byte) ([]agent.Message, error) { return nil, nil })
+					if err != nil {
+						t.Fatal(err)
+					}
+					var restored []agent.Message
+					for _, m := range tc.messages {
+						data, err := agent.MarshalLogMessage(version, m)
+						if err != nil {
+							t.Fatal(err)
+						}
+						record, err := parser.ParseRecord(data)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, message := range record.Messages {
+							restored = append(restored, message.Message)
+						}
+					}
+					tk.SeedTimeline(restored)
+					// V2 has no child provenance; its historical output is global.
+					accepted := tc.accepted || version == agent.LogVersionV2 && tc.name == "child_output"
+					if got := tk.HasAcceptedInputEvidence(); got != accepted {
+						t.Fatalf("v%d evidence = %t, want %t", version, got, accepted)
+					}
+				}
+			})
+		}
+	})
+	t.Run("PendingInputPreservesCompletedTurnSemantics", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.SeedTimeline([]agent.Message{
+			&agent.UserInputMessage{Text: "accepted"},
+			&agent.ResultMessage{Result: "done"},
+			agent.InputDeliveryStarted(),
+			&agent.UserInputMessage{Text: "unresolved"},
+		})
+		if got := tk.GetState(); got != taskslog.StateWaiting {
+			t.Fatalf("state = %s, want previous completed turn to remain waiting", got)
+		}
+		if got := tk.titleInput(); got != "Current title: test\nRecent activity:\nPrompt: accepted\nResult: done\n" {
+			t.Fatalf("title input = %q", got)
+		}
+	})
 	t.Run("PlanSummaryChanges", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -1212,10 +1348,54 @@ func TestTask(t *testing.T) {
 
 	t.Run("SendInput", func(t *testing.T) {
 		t.Parallel()
-		t.Run("completion_during_delivery_preserves_waiting_state", func(t *testing.T) {
+		t.Run("error_queued_delta_after_rollback_establishes_running", func(t *testing.T) {
+			t.Parallel()
+			for _, state := range []taskslog.State{taskslog.StateWaiting, taskslog.StateAsking} {
+				t.Run(string(state), func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					tk.SetState(state)
+					if state == taskslog.StateAsking {
+						tk.addMessage(t.Context(), &agent.AskMessage{ToolUseID: "question"})
+					}
+					ctx, cancel := context.WithCancel(t.Context())
+					cmd := exec.CommandContext(ctx, "sleep", "60")
+					stdout, err := cmd.StdoutPipe()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := cmd.Start(); err != nil {
+						t.Fatal(err)
+					}
+					msgCh := make(chan agent.TimedMessage, 8)
+					log := agent.DiscardLogSink{Version: agent.LogVersionV3}
+					c := agent.NewConn(ctx, testLogger(), &queuedDeltaInputWriter{msgCh: msgCh}, log, &testWire{})
+					s := agent.NewSession(ctx, cmd, c, stdout, msgCh, testLogger())
+					t.Cleanup(func() { cancel(); _ = s.Wait(); close(msgCh) })
+					tk.AttachSession(&SessionHandle{Session: s})
+					if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Fatalf("send = %v, want delivery error", err)
+					}
+					if got := tk.GetState(); got != state {
+						t.Fatalf("state = %s before queued output dispatch, want %s", got, state)
+					}
+					// No dispatcher ran during the send. Fold its FIFO only after the
+					// transport error and rollback, reproducing either scheduler order.
+					for range 4 {
+						tk.addParsedMessage(<-msgCh)
+					}
+					if got := tk.GetState(); got != taskslog.StateRunning {
+						t.Fatalf("state = %s after queued root delta, want running", got)
+					}
+				})
+			}
+		})
+		t.Run("error_partial_delivery_preserves_active_root_output", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateWaiting)
+			_, live, unsubscribe := tk.Subscribe(t.Context())
+			t.Cleanup(unsubscribe)
 			ctx, cancel := context.WithCancel(t.Context())
 			cmd := exec.CommandContext(ctx, "sleep", "60")
 			stdout, err := cmd.StdoutPipe()
@@ -1225,18 +1405,82 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			conn := agent.NewConn(ctx, testLogger(), &completingInputWriter{ctx: ctx, task: tk}, agent.DiscardLogSink{Version: agent.LogVersionV3}, &testWire{})
-			s := agent.NewSession(ctx, cmd, conn, stdout, make(chan agent.TimedMessage, 256), testLogger())
+			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
+			log := agent.DiscardLogSink{Version: agent.LogVersionV3}
+			msgCh, _, work := r.startMessageDispatch(ctx, tk, log)
+			observed := make(chan struct{})
+			conn := agent.NewConn(ctx, testLogger(), &partialInputWriter{msgCh: msgCh, observed: observed}, log, &testWire{})
+			s := agent.NewSession(ctx, cmd, conn, stdout, msgCh, testLogger())
+			var readers sync.WaitGroup
+			readers.Go(func() {
+				<-live // User input.
+				<-live // Root text is folded before the transport error returns.
+				close(observed)
+			})
 			t.Cleanup(func() {
 				cancel()
 				_ = s.Wait()
+				close(msgCh)
+				work.Wait()
+				readers.Wait()
+			})
+			tk.AttachSession(&SessionHandle{Session: s})
+			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("send = %v, want partial-delivery error", err)
+			}
+			if got := tk.GetState(); got != taskslog.StateRunning {
+				t.Fatalf("state = %s, want active root output to remain running", got)
+			}
+			if !tk.HasAcceptedInputEvidence() {
+				t.Fatal("real root output did not prove input acceptance")
+			}
+		})
+		t.Run("completion_during_delivery_preserves_waiting_state", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetState(taskslog.StateWaiting)
+			_, live, unsubscribe := tk.Subscribe(t.Context())
+			t.Cleanup(unsubscribe)
+			ctx, cancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(ctx, "sleep", "60")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
+			msgCh, _, work := r.startMessageDispatch(ctx, tk, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			conn := agent.NewConn(ctx, testLogger(), &completingInputWriter{msgCh: msgCh}, agent.DiscardLogSink{Version: agent.LogVersionV3}, &testWire{})
+			s := agent.NewSession(ctx, cmd, conn, stdout, msgCh, testLogger())
+			t.Cleanup(func() {
+				cancel()
+				_ = s.Wait()
+				close(msgCh)
+				work.Wait()
 			})
 			tk.AttachSession(&SessionHandle{Session: s})
 			if err := tk.SendInput(ctx, agent.Prompt{Text: "follow up"}); err != nil {
 				t.Fatal(err)
 			}
+			var order []string
+			for range 3 {
+				select {
+				case message := <-live:
+					order = append(order, message.Message.Type())
+				case <-time.After(time.Second):
+					t.Fatal("missing live message")
+				}
+			}
+			if !slices.Equal(order, []string{"user_input", "text", "result"}) {
+				t.Fatalf("live order = %v, want prompt before answer and result", order)
+			}
 			if got := tk.GetState(); got != taskslog.StateWaiting {
 				t.Fatalf("state = %s, want %s after agent completion", got, taskslog.StateWaiting)
+			}
+			if got := tk.titleInput(); got != "Current title: test\nRecent activity:\nPrompt: follow up\nResult: done\n" {
+				t.Fatalf("title input = %q", got)
 			}
 		})
 		t.Run("error_delivery_failure_preserves_waiting_state", func(t *testing.T) {
@@ -1254,10 +1498,16 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			sendErr := errors.New("delivery failed")
-			s := agent.NewSession(t.Context(), cmd, &failingConn{err: sendErr}, stdout, make(chan agent.TimedMessage, 256), testLogger())
+			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
+			msgCh, _, work := r.startMessageDispatch(t.Context(), tk, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			_, live, unsubscribe := tk.Subscribe(t.Context())
+			t.Cleanup(unsubscribe)
+			s := agent.NewSession(t.Context(), cmd, &failingConn{err: sendErr}, stdout, msgCh, testLogger())
 			t.Cleanup(func() {
 				cmdCancel()
 				_ = s.Wait()
+				close(msgCh)
+				work.Wait()
 			})
 			tk.AttachSession(&SessionHandle{Session: s})
 
@@ -1268,8 +1518,31 @@ func TestTask(t *testing.T) {
 			if got := tk.GetState(); got != taskslog.StateWaiting {
 				t.Errorf("state = %s, want %s", got, taskslog.StateWaiting)
 			}
-			if msgs := tk.Messages(); len(msgs) != 0 {
-				t.Fatalf("messages = %d, want 0", len(msgs))
+			for range 2 {
+				select {
+				case <-live:
+				case <-time.After(time.Second):
+					t.Fatal("missing attempted input or failure")
+				}
+			}
+			var msgs []agent.Message
+			for _, m := range tk.Messages() {
+				if !agent.IsInputDeliveryControl(m) {
+					msgs = append(msgs, m)
+				}
+			}
+			if len(msgs) != 2 {
+				t.Fatalf("messages = %d, want attempted input and visible failure", len(msgs))
+			}
+			failure, ok := msgs[1].(*agent.SystemMessage)
+			if !ok || failure.Subtype != agent.SystemSubtypeInputDeliveryFailed || failure.Detail != "Input delivery failed: delivery failed" {
+				t.Fatalf("failure = %#v", msgs[1])
+			}
+			if tk.HasAcceptedInputEvidence() {
+				t.Fatal("failed attempt was accepted as evidence of delivery")
+			}
+			if strings.Contains(tk.titleInput(), "follow up") {
+				t.Fatal("failed input leaked into title context")
 			}
 		})
 		t.Run("PreservesPlanContent", func(t *testing.T) {
@@ -3508,6 +3781,37 @@ func TestTask(t *testing.T) {
 
 	t.Run("PendingUserActions", func(t *testing.T) {
 		t.Parallel()
+		t.Run("AcceptedAnswerClosesBeforeToolResult", func(t *testing.T) {
+			t.Parallel()
+			for _, outcome := range []string{"completed", "failed", "unresolved", "output"} {
+				t.Run(outcome, func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					history := []agent.Message{
+						&agent.AskMessage{ToolUseID: "ask", Questions: []v3.AskQuestion{{Question: "Which?"}}},
+						&agent.PendingUserActionMessage{Action: v3.PendingUserAction{Kind: agent.PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "ask", Ask: v3.PendingAskAction{Questions: []v3.AskQuestion{{Question: "Which?"}}}}},
+						agent.InputDeliveryStarted(), &agent.UserInputMessage{Text: "answer"},
+					}
+					switch outcome {
+					case "completed":
+						history = append(history, agent.InputDeliveryCompleted())
+					case "failed":
+						history = append(history, agent.InputDeliveryFailed(io.ErrClosedPipe))
+					case "output":
+						history = append(history, &agent.TextDeltaMessage{Text: "working"})
+					}
+					tk.SeedTimeline(history)
+					want := 1
+					if outcome == "completed" || outcome == "output" {
+						want = 0
+					}
+					if got := tk.PendingUserActions(); len(got) != want {
+						t.Fatalf("pending actions = %#v, want %d", got, want)
+					}
+				})
+			}
+		})
+
 		t.Run("AmbiguousClaudeControlDoesNotRestoreRootAsk", func(t *testing.T) {
 			t.Parallel()
 			for _, initialized := range []bool{false, true} {
@@ -3997,26 +4301,6 @@ func TestTask(t *testing.T) {
 				t.Errorf("error = %q, want session=%s", err.Error(), SessionExited)
 			}
 		})
-	})
-
-	t.Run("SyntheticUserInput", func(t *testing.T) {
-		t.Parallel()
-		img := v3.ImageData{Data: "base64data", MediaType: "image/png"}
-		prompt := agent.Prompt{Text: "look at this", Images: []v3.ImageData{img}}
-		msg := syntheticUserInput(prompt)
-		if msg.Text != "look at this" {
-			t.Errorf("Text = %q, want %q", msg.Text, "look at this")
-		}
-		if len(msg.Images) != 1 {
-			t.Fatalf("Images len = %d, want 1", len(msg.Images))
-		}
-		if msg.Images[0].Data != "base64data" {
-			t.Errorf("Images[0].Data = %q, want %q", msg.Images[0].Data, "base64data")
-		}
-		prompt.Images[0].Data = "modified"
-		if msg.Images[0].Data != "base64data" {
-			t.Error("message images not independent copy")
-		}
 	})
 
 	t.Run("LastAgentMessage", func(t *testing.T) {

@@ -338,8 +338,21 @@ func TestWritePromptInputPersistence(t *testing.T) {
 			if version == agent.LogVersionV3 && !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
 				t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
 			}
-			if version != agent.LogVersionV3 && log.Len() != 0 {
-				t.Fatalf("v%d log = %s, want no legacy stdin persistence", version, log.Bytes())
+			if version == agent.LogVersionV1 && log.Len() != 0 {
+				t.Fatalf("v1 log = %s, want no read-only stdin persistence", log.Bytes())
+			}
+			if version == agent.LogVersionV2 {
+				parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
+				if err != nil || record.RelayRecord || len(record.Messages) != 1 {
+					t.Fatalf("v2 input record = %#v, %v", record, err)
+				}
+				if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello" {
+					t.Fatalf("persisted v2 input = %#v", record.Messages[0].Message)
+				}
 			}
 		})
 	}

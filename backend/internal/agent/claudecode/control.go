@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"sync"
 
@@ -74,120 +73,89 @@ type controlConn struct {
 	pendingAsk *pendingControlAsk
 }
 
-func (c *controlConn) SendPrompt(p agent.Prompt) error {
+func (c *controlConn) SendPrompt(p agent.Prompt, data []byte) error {
 	c.mu.Lock()
 	pending := c.pendingAsk
+	c.mu.Unlock()
 	if pending == nil {
-		c.mu.Unlock()
-		return c.Conn.SendPrompt(p)
+		return c.Conn.SendPrompt(p, data)
 	}
 	if len(p.Images) > 0 {
-		c.mu.Unlock()
 		return errors.New("AskUserQuestion answers do not support images")
 	}
 	data, err := pending.answerResponse(p.Text)
 	if err != nil {
-		c.mu.Unlock()
 		return err
 	}
-	if err := c.SendRaw(data); err != nil {
-		c.mu.Unlock()
+	if err := c.Conn.SendPrompt(p, data); err != nil {
 		return err
 	}
-	c.pendingAsk = nil
+	c.mu.Lock()
+	if c.pendingAsk == pending {
+		c.pendingAsk = nil
+	}
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
-	proxy := make(chan agent.TimedMessage, 1)
-	errc := make(chan error, 1)
-	var workers sync.WaitGroup
-	workers.Go(func() {
-		defer close(errc)
-		var controlErr error
-		for parsed := range proxy {
-			handled, err := c.handleControlMessage(parsed.Message)
-			if err != nil && controlErr == nil {
-				controlErr = err
-			}
-			if controlErr != nil || handled {
-				continue
-			}
-			msgCh <- parsed
-		}
-		if controlErr != nil {
-			errc <- controlErr
-		}
-	})
-	err := c.Conn.ReadMessages(r, proxy)
-	close(proxy)
-	controlErr := <-errc
-	workers.Wait()
-	if controlErr != nil {
-		return errors.Join(err, controlErr)
-	}
-	return err
-}
-
-func (c *controlConn) handleControlMessage(m agent.Message) (bool, error) {
+// HandleMessage intercepts controls without writing stdin.
+func (c *controlConn) HandleMessage(m agent.Message) (response []byte, handled bool, err error) {
 	if m.Provenance().IsChild() {
-		return false, nil
+		return nil, false, nil
 	}
 	if pending, ok := m.(*agent.PendingUserActionMessage); ok {
 		switch pending.Action.Kind {
 		case agent.PendingUserActionAskUserQuestion:
-			return false, c.setPendingAsk(pendingAskFromUserAction(pending.Action))
+			return nil, false, c.setPendingAsk(pendingAskFromUserAction(pending.Action))
 		default:
-			return false, fmt.Errorf("unsupported pending user action kind %q", pending.Action.Kind)
+			return nil, false, fmt.Errorf("unsupported pending user action kind %q", pending.Action.Kind)
 		}
 	}
 	raw, ok := m.(*agent.RawMessage)
 	if !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	switch raw.MessageType {
 	case string(claudecode.OutputControlRequest):
-		drop, err := c.handleControlRequest(raw.Raw)
-		return drop, err
+		return c.handleControlRequest(raw.Raw)
 	case string(claudecode.OutputControlCancelRequest):
-		return true, c.handleControlCancelRequest(raw.Raw)
+		return nil, true, c.handleControlCancelRequest(raw.Raw)
 	default:
-		return false, nil
+		return nil, false, nil
 	}
 }
 
-func (c *controlConn) handleControlRequest(raw []byte) (bool, error) {
+func (c *controlConn) handleControlRequest(raw []byte) (response []byte, handled bool, err error) {
 	var msg claudecode.OutputControlRequestMsg
 	if err := json.Unmarshal(raw, &msg); err != nil {
-		return true, fmt.Errorf("unmarshal control_request: %w", err)
+		return nil, true, fmt.Errorf("unmarshal control_request: %w", err)
 	}
 	can, err := msg.DecodeCanUseTool()
 	if err != nil {
-		return true, c.sendControlError(msg.RequestID, "invalid can_use_tool request")
+		return controlError(msg.RequestID, "invalid can_use_tool request")
 	}
 	if can.Subtype != claudecode.ControlCanUseTool {
-		return true, c.sendControlError(msg.RequestID, "unsupported control request subtype: "+string(can.Subtype))
+		return controlError(msg.RequestID, "unsupported control request subtype: "+string(can.Subtype))
 	}
 	if can.ToolName != "AskUserQuestion" {
 		updatedInput, err := rawObjectOrEmpty(can.Input)
 		if err != nil {
-			return true, fmt.Errorf("marshal %s input: %w", can.ToolName, err)
+			return nil, true, fmt.Errorf("marshal %s input: %w", can.ToolName, err)
 		}
-		return true, c.sendAllowControlResponse(msg.RequestID, updatedInput)
+		return allowControlResponse(msg.RequestID, updatedInput)
 	}
 	inputRaw, err := rawObject(can.Input)
 	if err != nil {
-		return true, fmt.Errorf("marshal AskUserQuestion input: %w", err)
+		return nil, true, fmt.Errorf("marshal AskUserQuestion input: %w", err)
 	}
 	var input claudecode.AskUserQuestionInput
 	if err := json.Unmarshal(inputRaw, &input); err != nil || len(input.Questions) == 0 {
-		return true, c.sendControlError(msg.RequestID, "invalid AskUserQuestion input")
+		return controlError(msg.RequestID, "invalid AskUserQuestion input")
 	}
 	// Valid actionable Asks arrive as normalized PendingUserActionMessage.
 	// A valid Ask retained as raw has unresolved ownership; preserve it for
 	// inspection without registering a response on the root prompt channel.
-	return false, nil
+	return nil, false, nil
 }
 
 // restorePendingActions restores user-facing actions captured before reconnect.
@@ -244,34 +212,17 @@ func (c *controlConn) setPendingAsk(p pendingControlAsk) error {
 	return nil
 }
 
-func (c *controlConn) sendAllowControlResponse(requestID string, updatedInput json.RawMessage) error {
+func allowControlResponse(requestID string, updatedInput json.RawMessage) (response []byte, handled bool, err error) {
 	if len(updatedInput) == 0 {
 		updatedInput = json.RawMessage(`{}`)
 	}
-	return c.sendControlResponse(&claudecode.ControlResponse{
-		Subtype:   claudecode.ControlResponseSuccess,
-		RequestID: requestID,
-		Response: claudecode.ControlResponsePayload{
-			Behavior:     claudecode.ControlCanUseToolBehaviorAllow,
-			UpdatedInput: updatedInput,
-		},
-	})
+	data, err := marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseSuccess, RequestID: requestID, Response: claudecode.ControlResponsePayload{Behavior: claudecode.ControlCanUseToolBehaviorAllow, UpdatedInput: updatedInput}})
+	return data, true, err
 }
 
-func (c *controlConn) sendControlError(requestID, msg string) error {
-	return c.sendControlResponse(&claudecode.ControlResponse{
-		Subtype:   claudecode.ControlResponseError,
-		RequestID: requestID,
-		Error:     msg,
-	})
-}
-
-func (c *controlConn) sendControlResponse(response *claudecode.ControlResponse) error {
-	payload, err := marshalControlResponse(response)
-	if err != nil {
-		return err
-	}
-	return c.SendRaw(payload)
+func controlError(requestID, msg string) (response []byte, handled bool, err error) {
+	data, err := marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseError, RequestID: requestID, Error: msg})
+	return data, true, err
 }
 
 func rawObjectOrEmpty(m map[string]json.RawMessage) (json.RawMessage, error) {

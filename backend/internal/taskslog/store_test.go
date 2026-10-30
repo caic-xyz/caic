@@ -1,4 +1,4 @@
-// Tests for Store: log segment open/reopen authority, result trailers, terminal log compression, and unsettled/settled/task-ID scans.
+// Tests Store initialization, preparation rollback, append authority, terminal compression, and startup scans.
 
 package taskslog
 
@@ -106,6 +106,89 @@ func logLines(t *testing.T, path string) []string {
 
 func TestStore(t *testing.T) {
 	t.Parallel()
+	t.Run("Initialize", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			s := NewStore(testLogger(), t.TempDir())
+			id := ksid.NewID().String()
+			h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude), StartedAt: time.Now().UTC()}
+			p, err := s.Initialize(id+"-repo-caic-0.jsonl", h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lt, err := LoadHistorySource(p.Path)
+			if err != nil || lt.TaskID != id {
+				t.Fatalf("initialized log=%+v %v", lt, err)
+			}
+			if err := p.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(p.Path); !os.IsNotExist(err) {
+				t.Fatalf("rollback left log: %v", err)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			s := NewStore(testLogger(), t.TempDir())
+			h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude)}
+			for _, name := range []string{"../outside.jsonl", ""} {
+				if _, err := s.Initialize(name, h); err == nil {
+					t.Fatalf("Initialize(%q) accepted", name)
+				}
+			}
+			path := filepath.Join(s.LogDir, "existing.jsonl")
+			if err := os.WriteFile(path, []byte("existing"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Initialize("existing.jsonl", h); !errors.Is(err, os.ErrExist) {
+				t.Fatalf("Initialize existing=%v", err)
+			}
+			if b, err := os.ReadFile(path); err != nil || string(b) != "existing" { //nolint:gosec // Test-owned pre-existing log.
+				t.Fatalf("existing file changed: %q %v", b, err)
+			}
+			h.StartedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+			if _, err := s.Initialize("bad.jsonl", h); err == nil {
+				t.Fatal("invalid metadata accepted")
+			}
+			if _, err := os.Stat(filepath.Join(s.LogDir, "bad.jsonl")); !os.IsNotExist(err) {
+				t.Fatalf("bad log retained: %v", err)
+			}
+		})
+		t.Run("replacement_survives_rollback", func(t *testing.T) {
+			t.Parallel()
+			s := NewStore(testLogger(), t.TempDir())
+			p, err := s.Initialize("prepared.jsonl", &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(p.Path, p.Path+".original"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p.Path, []byte("replacement"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if b, err := os.ReadFile(p.Path); err != nil || string(b) != "replacement" {
+				t.Fatalf("replacement=%q %v", b, err)
+			}
+		})
+	})
+
+	t.Run("OpenRemovesFailedNewHeader", func(t *testing.T) {
+		t.Parallel()
+		s := NewStore(testLogger(), t.TempDir())
+		h := &agent.MetaMessage{Prompt: "prepared", Harness: string(harness.Claude), StartedAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
+		if _, _, err := s.Open("failed.jsonl", h); err == nil {
+			t.Fatal("Open accepted unserializable metadata")
+		}
+		files, err := os.ReadDir(s.LogDir)
+		if err != nil || len(files) != 0 {
+			t.Fatalf("failed header left files: %v, %v", files, err)
+		}
+	})
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
 		b := &agenttest.LogSink{Version: agent.LogVersionV2}

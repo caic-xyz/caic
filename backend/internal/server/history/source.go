@@ -57,18 +57,18 @@ type Snapshot struct {
 // The task service owns its lifetime and calls Close on lifecycle replacement
 // or shutdown. A projection error is sticky: discard the source to recover.
 type Source struct {
-	gate     chan struct{}
-	cursor   *taskslog.RecordCursor
-	tracker  *apiconv.ToolTimingTracker
-	spool    *os.File
-	writer   *bufio.Writer
-	starts   []int64
-	through  uint64
-	end      int64
-	journal  *costJournal
-	sections sectionIndex
-	err      error
-	clean    bool
+	gate       chan struct{}
+	cursor     *taskslog.RecordCursor
+	tracker    *apiconv.ToolTimingTracker
+	spool      *os.File
+	writer     *bufio.Writer
+	starts     []int64
+	through    uint64
+	end        int64
+	journal    *costJournal
+	sections   sectionIndex
+	err        error
+	exitStatus task.ExitStatus
 }
 
 // NewSource creates a lazy projection source. No task-history replay occurs
@@ -136,16 +136,8 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 					return Snapshot{}, err
 				}
 			}
-			// Successful turn results supersede a trailing relay exit failure,
-			// matching the canonical task history's exit reconciliation.
-			if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && s.clean {
+			if !s.exitStatus.Observe(m) {
 				continue
-			}
-			if task.ClearsExitError(m) {
-				s.clean = false
-			}
-			if result, ok := m.(*agent.ResultMessage); ok && !result.Source.IsChild() {
-				s.clean = !result.IsError
 			}
 			projected := s.tracker.ConvertMessage(m, parsed.ProducerTime)
 			for i := range projected {

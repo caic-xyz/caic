@@ -313,7 +313,6 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 
-	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt))
 	// Use SetStateIf so that a fast agent subprocess that already
 	// produced a result (and was processed by the dispatch goroutine
 	// via addMessage) isn't overwritten back to Running.
@@ -1073,6 +1072,9 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 		dispatchWork.Wait()
 		return nil, err
 	}
+	if prompt.Text != "" || len(prompt.Images) > 0 {
+		t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
+	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
 		close(msgCh)
@@ -1084,8 +1086,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.addMessage(ctx, syntheticUserInput(prompt))
-		t.SetState(taskslog.StateRunning)
+		t.SetStateIf(taskslog.StateStarting, taskslog.StateRunning)
 	}
 	return h, nil
 }
@@ -1185,8 +1186,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
 	t.AttachSession(h)
 	if mode == replaceSessionRestart {
-		t.addMessage(ctx, syntheticUserInput(prompt))
-		t.SetState(taskslog.StateRunning)
+		t.SetStateIf(taskslog.StateStarting, taskslog.StateRunning)
 		tlog.Info("session restarted")
 	} else {
 		t.SetState(taskslog.StateWaiting)

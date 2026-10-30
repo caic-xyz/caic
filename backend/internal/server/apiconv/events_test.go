@@ -33,6 +33,15 @@ func TestToolTimingTracker(t *testing.T) {
 	t.Parallel()
 	t.Run("ConvertMessage", func(t *testing.T) {
 		t.Parallel()
+		t.Run("PrivateDeliveryControlsAreNotEvents", func(t *testing.T) {
+			t.Parallel()
+			gt := NewToolTimingTracker(harness.Claude, "", nil)
+			for _, message := range []agent.Message{agent.InputDeliveryStarted(), agent.InputDeliveryCompleted()} {
+				if events := gt.ConvertMessage(message, time.Now()); len(events) != 0 {
+					t.Fatalf("private delivery control became events: %#v", events)
+				}
+			}
+		})
 		t.Run("GenericConvertInitHasHarness", func(t *testing.T) {
 			t.Parallel()
 			gt := NewToolTimingTracker(harness.Claude, "", nil)

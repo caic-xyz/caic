@@ -1,4 +1,4 @@
-// Package task orchestrates coding-agent state and durably applies Git summaries in read order.
+// Package task orchestrates coding-agent state and ordered conversation and Git history.
 //
 // It owns branch creation, instance lifecycle, agent execution, resource
 // history, and git integration.
@@ -221,16 +221,16 @@ type Task struct {
 	lastGitRead    repo.GitRead // Rejects deferred snapshots older than the applied Git state.
 	liveRepoStates []v3.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
-	diffCreated   bool   // True after any non-empty diff was reported for the task.
-	lastExitError string // Most recent non-zero relay exit diagnostic.
-	forgeOwner    string
-	forgeRepo     string
-	forgePR       int
-	forgePRState  forge.PRState // "open", "closed", "merged"; empty when no PR.
-	ciStatus      forge.CIStatus
-	ciChecks      []forge.Check
-	rateLimit     RateLimit                    // Active task quota block resolved across provider windows.
-	rateLimits    map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
+	diffCreated  bool // True after any non-empty diff was reported for the task.
+	exitStatus   ExitStatus
+	forgeOwner   string
+	forgeRepo    string
+	forgePR      int
+	forgePRState forge.PRState // "open", "closed", "merged"; empty when no PR.
+	ciStatus     forge.CIStatus
+	ciChecks     []forge.Check
+	rateLimit    RateLimit                    // Active task quota block resolved across provider windows.
+	rateLimits   map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
 // NewTask creates a task with a valid ID, a pending state, and prompt.
@@ -611,7 +611,7 @@ func (t *Task) LastAgentResult() string {
 func (t *Task) LastExitError() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.lastExitError
+	return t.exitStatus.Error
 }
 
 // LiveDiffStat returns the latest diff stat from the relay's periodic polling.
@@ -859,24 +859,23 @@ func (t *Task) ForwardMessages() iter.Seq[agent.Message] {
 }
 
 // HasAcceptedInputEvidence reports whether durable conversation history proves
-// that a user prompt reached the harness. Native user-input records are the
-// direct signal; turn output is accepted as evidence for older log formats
-// that did not persist their input side of the protocol.
+// that a user prompt reached the harness. Marked input attempts require a
+// completed delivery outcome or real root output. Unmarked historical inputs
+// retain their established meaning.
 func (t *Task) HasAcceptedInputEvidence() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	view := t.timelineViewLocked()
-	for _, entry := range view.Forward() {
-		switch message := entry.Message.(type) {
-		case *agent.UserInputMessage,
-			*agent.TextMessage, *agent.TextDeltaMessage,
-			*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
-			*agent.ToolUseMessage, *agent.ToolResultMessage, *agent.ToolOutputDeltaMessage,
-			*agent.SkillReadMessage, *agent.AskMessage, *agent.PendingUserActionMessage,
-			*agent.TodoMessage, *agent.ResultMessage,
-			*agent.NativeSubagentMessage, *agent.BackgroundCommandMessage,
-			*agent.WidgetMessage, *agent.WidgetDeltaMessage:
+	rejected := unacceptedInputs(view, 0)
+	for _, entry := range view.Backward() {
+		if acceptedInputOutput(entry.Message) {
 			return true
+		}
+		switch message := entry.Message.(type) {
+		case *agent.UserInputMessage:
+			if _, rejected := rejected[message]; !message.Source.IsChild() && !rejected {
+				return true
+			}
 		case *agent.LogMessage:
 			if message.Line == LegacyRelayRecoveryNotice {
 				return true
@@ -884,6 +883,79 @@ func (t *Task) HasAcceptedInputEvidence() bool {
 		}
 	}
 	return false
+}
+
+// unacceptedInputs finds marked attempts without successful delivery. Unmarked
+// historical inputs retain their established accepted-input meaning.
+func unacceptedInputs(entries timelineEntries, start int) map[*agent.UserInputMessage]struct{} {
+	var rejected map[*agent.UserInputMessage]struct{}
+	var attempt []*agent.UserInputMessage
+	var last *agent.UserInputMessage
+	pending, proven := false, false
+	complete := func() {
+		for _, input := range attempt {
+			delete(rejected, input)
+		}
+		attempt = attempt[:0]
+		pending, proven = false, true
+	}
+	for i := start; i < entries.Len(); i++ {
+		m := entries.At(i).Message
+		if m.Provenance().IsChild() {
+			continue
+		}
+		if acceptedInputOutput(m) {
+			complete()
+			continue
+		}
+		switch m := m.(type) {
+		case *agent.SystemMessage:
+			switch m.Subtype {
+			case agent.SystemSubtypeInputDeliveryStarted:
+				pending, proven = true, false
+				attempt = attempt[:0]
+			case agent.SystemSubtypeInputDeliveryCompleted:
+				complete()
+			case agent.SystemSubtypeInputDeliveryFailed:
+				if !proven && last != nil {
+					if rejected == nil {
+						rejected = make(map[*agent.UserInputMessage]struct{})
+					}
+					rejected[last] = struct{}{}
+				}
+				pending = false
+				attempt = attempt[:0]
+			}
+		case *agent.UserInputMessage:
+			last, proven = m, false
+			if pending {
+				if rejected == nil {
+					rejected = make(map[*agent.UserInputMessage]struct{})
+				}
+				rejected[m] = struct{}{}
+				attempt = append(attempt, m)
+			}
+		}
+	}
+	return rejected
+}
+
+func acceptedInputOutput(m agent.Message) bool {
+	if m.Provenance().IsChild() {
+		return false
+	}
+	switch m.(type) {
+	case *agent.TextMessage, *agent.TextDeltaMessage,
+		*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
+		*agent.ToolUseMessage, *agent.ToolResultMessage, *agent.ToolOutputDeltaMessage,
+		*agent.SkillReadMessage, *agent.AskMessage, *agent.PendingUserActionMessage,
+		*agent.TodoMessage, *agent.ResultMessage,
+		*agent.NativeSubagentMessage, *agent.BackgroundCommandMessage,
+		*agent.WidgetMessage, *agent.WidgetDeltaMessage:
+		return true
+	default:
+		return false
+	}
 }
 
 // BackwardMessages returns the task's messages newest first as a snapshot taken
@@ -976,9 +1048,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// Live stats: Claude's TotalCostUSD is cumulative until context_cleared.
 	// DurationMs and NumTurns are per-invocation, so they always accumulate.
 	// Token usage is always summed.
-	cleanTurnComplete := false
 	for _, entry := range view.Forward() {
 		msg := entry.Message
+		t.exitStatus.Observe(msg)
 		if msg.Provenance().IsChild() {
 			switch m := msg.(type) {
 			case *agent.NativeSubagentMessage:
@@ -996,20 +1068,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		}
 
 		t.observeUsageLocked(msg)
-		if exit, ok := msg.(*agent.ExitMessage); ok {
-			if exit.ExitCode != 0 && !cleanTurnComplete {
-				t.lastExitError = exit.ExitError()
-			} else {
-				t.lastExitError = ""
-			}
+		if _, ok := msg.(*agent.ExitMessage); ok {
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
-		}
-		if ClearsExitError(msg) {
-			t.lastExitError = ""
-			if _, ok := msg.(*agent.ResultMessage); !ok {
-				cleanTurnComplete = false
-			}
 		}
 		switch m := msg.(type) {
 		case *agent.MetaSessionMessage:
@@ -1091,7 +1152,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		case *agent.ResultMessage:
 			t.completedRootTurns++
 			t.planDismissed = false
-			cleanTurnComplete = !m.IsError
 			if m.ContextWindow > 0 {
 				t.reportedContextWindow = m.ContextWindow
 			}
@@ -1533,6 +1593,7 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		t.setState(taskslog.StateRunning)
 	}
 	seq := t.stateSeq
+	inputStart := t.timelineLenLocked()
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("%w (state=%s session=%s)", ErrNoActiveSession, state, sessionStatus)
@@ -1540,12 +1601,21 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	if err := h.Session.SendPrompt(p); err != nil {
 		t.mu.Lock()
 		if started && t.stateSeq == seq {
-			t.setState(state)
+			active := false
+			view := t.timelineViewLocked()
+			for i := inputStart; i < view.Len(); i++ {
+				if acceptedInputOutput(view.At(i).Message) {
+					active = true
+					break
+				}
+			}
+			if !active {
+				t.setState(state)
+			}
 		}
 		t.mu.Unlock()
 		return err
 	}
-	t.addMessage(ctx, syntheticUserInput(p))
 	return nil
 }
 
@@ -1943,6 +2013,10 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	}
 	parsed.ProducerTime = at
 	t.timeline = append(t.timeline, parsed)
+	visible := t.exitStatus.Observe(m)
+	if agent.IsInputDeliveryControl(m) {
+		return stateChanged, persistErr
+	}
 	if isDeltaFinal(m) {
 		if t.timelineReaders == 0 {
 			view := t.timelineViewLocked()
@@ -2011,7 +2085,10 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 			if t.state == taskslog.StateStarting || t.state == taskslog.StateRunning || t.state == taskslog.StateWaiting || t.state == taskslog.StateHasPlan {
 				t.setState(taskslog.StateAsking)
 			}
-		case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
+		case *agent.TextMessage, *agent.TextDeltaMessage,
+			*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
+			*agent.ToolUseMessage, *agent.ToolOutputDeltaMessage, *agent.TodoMessage,
+			*agent.WidgetMessage, *agent.WidgetDeltaMessage:
 			if t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking || t.state == taskslog.StateHasPlan {
 				if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.timelineViewLocked()) {
 					break
@@ -2053,15 +2130,6 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		// Diff data refreshes without a state change, but the task-list stream
 		// must still push the new card summary.
 		summaryChanged = true
-	}
-	if exit, ok := m.(*agent.ExitMessage); ok {
-		if rm := lastAgentMessage(t.timelineViewLocked()); exit.ExitCode != 0 && (rm == nil || rm.IsError) {
-			t.lastExitError = exit.ExitError()
-		} else {
-			t.lastExitError = ""
-		}
-	} else if ClearsExitError(m) {
-		t.lastExitError = ""
 	}
 	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
 		if sm.Subtype == "context_cleared" {
@@ -2124,7 +2192,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
-	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
+	if !visible {
 		return stateChanged, persistErr
 	}
 	t.broadcastTimelineMessageLocked(m, at)
@@ -2446,6 +2514,7 @@ func (t *Task) titleInput() string {
 		}
 	}
 	turns := make([]titleTurn, 0, 10)
+	failedInputs := unacceptedInputs(view, start)
 	var current titleTurn
 	finalText := false
 	for i := start; i < view.Len(); i++ {
@@ -2455,6 +2524,9 @@ func (t *Task) titleInput() string {
 		}
 		switch m := m.(type) {
 		case *agent.UserInputMessage:
+			if _, rejected := failedInputs[m]; rejected {
+				continue
+			}
 			current.prompt = truncateUTF8(m.Text, maxTextBytes)
 		case *agent.TextMessage:
 			current.answer = truncateUTF8(m.Text, maxTextBytes)
@@ -2601,26 +2673,14 @@ type timelineSnapshotLease struct {
 	release func()
 }
 
-// syntheticUserInput builds the UserInputMessage recorded in the task log for
-// a prompt that wasn't itself parsed from agent output.
-func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
-	var images []v3.ImageData
-	if len(p.Images) > 0 {
-		images = make([]v3.ImageData, len(p.Images))
-		copy(images, p.Images)
-	}
-	return &agent.UserInputMessage{
-		Text:   p.Text,
-		Images: images,
-	}
-}
-
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
 // messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
 // TextDeltaMessage, NativeSubagentMessage, BackgroundCommandMessage, RawMessage), and returns the trailing
 // ResultMessage if the last semantically meaningful message is a result. Returns
 // nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
 func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
+	var rejected map[*agent.UserInputMessage]struct{}
+	checkedInputs := false
 	for _, entry := range entries.Backward() {
 		if entry.Message.Provenance().IsChild() {
 			continue
@@ -2645,12 +2705,24 @@ func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 		case *agent.UsageMessage:
 			continue // Token usage metadata; skip.
 		case *agent.SystemMessage:
+			if m.Subtype == agent.SystemSubtypeInputDeliveryFailed || agent.IsInputDeliveryControl(m) {
+				continue
+			}
 			if m.Subtype == agent.SystemSubtypeExternalActivity {
 				continue // Informational activity cannot replace the root result.
 			}
 			return nil
 		case *agent.ResultMessage:
 			return m
+		case *agent.UserInputMessage:
+			if !checkedInputs {
+				rejected = unacceptedInputs(entries, 0)
+				checkedInputs = true
+			}
+			if _, rejected := rejected[m]; rejected {
+				continue
+			}
+			return nil
 		default:
 			return nil
 		}
@@ -2735,21 +2807,88 @@ func fallbackBoundary(msg agent.Message) bool {
 	}
 }
 
-// ClearsExitError reports whether a message clears the last exit error from a
+// ExitStatus reconciles relay termination with root turn and input delivery
+// evidence. The zero value is ready for an ordered stream of messages.
+type ExitStatus struct {
+	// Error is the latest exit diagnostic after reconciliation. Callers must
+	// treat it as read-only and update the status through Observe.
+	Error string
+
+	clean        bool
+	inputPending bool
+}
+
+// Observe folds one message and reports whether it should be published.
+// A marked input attempt preserves the prior completion until delivery succeeds
+// or actual root output arrives. Failed and truncated attempts cannot invalidate
+// a completed turn. Unmarked inputs begin a turn immediately.
+func (s *ExitStatus) Observe(msg agent.Message) bool {
+	if msg.Provenance().IsChild() {
+		return true
+	}
+	switch m := msg.(type) {
+	case *agent.ExitMessage:
+		if m.ExitCode == 0 || s.clean {
+			s.Error = ""
+			return m.ExitCode == 0
+		}
+		s.Error = m.ExitError()
+		return true
+	case *agent.SystemMessage:
+		switch m.Subtype {
+		case agent.SystemSubtypeInputDeliveryStarted:
+			s.inputPending = true
+			return true
+		case agent.SystemSubtypeInputDeliveryFailed:
+			s.inputPending = false
+			return true
+		case agent.SystemSubtypeInputDeliveryCompleted:
+			if s.inputPending {
+				s.inputPending = false
+				s.clean = false
+				s.Error = ""
+			}
+			return true
+		}
+	case *agent.UserInputMessage:
+		if s.inputPending {
+			return true
+		}
+	}
+	if s.inputPending {
+		if !acceptedInputOutput(msg) {
+			return true
+		}
+		s.inputPending = false
+		s.clean = false
+		s.Error = ""
+	}
+	if ClearsExitError(msg) {
+		s.Error = ""
+		s.clean = false
+		s.inputPending = false
+	}
+	if result, ok := msg.(*agent.ResultMessage); ok {
+		s.clean = !result.IsError
+		s.inputPending = false
+	}
+	return true
+}
+
+// ClearsExitError reports whether accepted activity clears the last exit error from a
 // prior turn. Messages that accompany a turn without starting a new one (exit,
 // diff stat, native subagent updates, background command updates, raw relay
 // lines, pending user actions, parse errors, log output, stripped env) never
 // clear it; a ResultMessage clears it only when the turn succeeded; every
-// other message starts a new turn. The live fold (addParsedMessage), the seed
-// fold (SeedTimeline), and the server SSE replay filter must all agree on this
-// rule, so it lives in one place.
+// other message starts a new turn. Ordered folds use ExitStatus to defer this
+// interpretation for input attempts whose delivery is not yet established.
 func ClearsExitError(msg agent.Message) bool {
 	if msg.Provenance().IsChild() {
 		return false
 	}
 	switch m := msg.(type) {
 	case *agent.SystemMessage:
-		return m.Subtype != agent.SystemSubtypeExternalActivity
+		return m.Subtype != agent.SystemSubtypeExternalActivity && !agent.IsInputDeliveryControl(m)
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
 		*agent.BackgroundCommandMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
@@ -2763,18 +2902,29 @@ func ClearsExitError(msg agent.Message) bool {
 }
 
 // lastTurnHasUnansweredAsk reports whether the current turn contains an
-// AskMessage that has not been followed by a successful ToolResultMessage.
+// AskMessage that has not been followed by a successful ToolResultMessage or
+// accepted user answer.
 // It scans backwards from the end until it hits the previous turn's
 // ResultMessage boundary. If the current turn's ResultMessage is present, it is
 // skipped as a boundary first.
 func lastTurnHasUnansweredAsk(entries timelineEntries) bool {
 	skipTrailingResult := lastAgentMessage(entries) != nil
 	answered := map[agent.ToolKey]struct{}{}
+	var rejected map[*agent.UserInputMessage]struct{}
+	checkedInputs := false
 	for _, entry := range entries.Backward() {
 		if entry.Message.Provenance().IsChild() {
 			continue
 		}
 		switch m := entry.Message.(type) {
+		case *agent.UserInputMessage:
+			if !checkedInputs {
+				rejected = unacceptedInputs(entries, 0)
+				checkedInputs = true
+			}
+			if _, failed := rejected[m]; !failed {
+				return false
+			}
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				return true
@@ -2807,11 +2957,24 @@ func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAct
 	restored := map[agent.ToolKey]struct{}{}
 	pending := map[agent.ToolKey]v3.PendingUserAction{}
 	var actions []v3.PendingUserAction
+	var rejected map[*agent.UserInputMessage]struct{}
+	checkedInputs := false
 	for _, entry := range entries.Backward() {
 		if entry.Message.Provenance().IsChild() {
 			continue
 		}
 		switch m := entry.Message.(type) {
+		case *agent.UserInputMessage:
+			if !checkedInputs {
+				rejected = unacceptedInputs(entries, 0)
+				checkedInputs = true
+			}
+			if _, failed := rejected[m]; !failed {
+				// Accepted answers close earlier Asks even before their tool
+				// results arrive. Keep only newer, still-pending questions.
+				slices.Reverse(actions)
+				return actions
+			}
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				continue

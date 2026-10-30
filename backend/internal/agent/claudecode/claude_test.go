@@ -1,24 +1,34 @@
-// Tests for the Claude Code backend, verifying prompt writing and message parsing.
+// Tests Claude prompts, parsing, bounded automatic replies, and question recovery.
 
 package claudecode
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/task"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/genai/providers/claudecode"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 func TestWritePrompt(t *testing.T) {
@@ -129,9 +139,12 @@ type fakeConn struct {
 	sent     [][]byte
 }
 
-func (f *fakeConn) SendPrompt(p agent.Prompt) error {
-	f.prompts = append(f.prompts, p)
-	return nil
+func (f *fakeConn) SendPrompt(p agent.Prompt, data []byte) error {
+	if data == nil {
+		f.prompts = append(f.prompts, p)
+		return nil
+	}
+	return f.SendRaw(data)
 }
 
 func (f *fakeConn) SendRaw(data []byte) error {
@@ -139,8 +152,22 @@ func (f *fakeConn) SendRaw(data []byte) error {
 	return nil
 }
 
-func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.TimedMessage) error {
+func (f *fakeConn) ReadMessages(_ io.ReadCloser, msgCh chan<- agent.TimedMessage, intercept agent.MessageInterceptor) error {
 	for _, m := range f.messages {
+		if intercept != nil {
+			data, handled, err := intercept.HandleMessage(m)
+			if err != nil {
+				return err
+			}
+			if len(data) > 0 {
+				if err := f.SendRaw(data); err != nil {
+					return err
+				}
+			}
+			if handled {
+				continue
+			}
+		}
 		msgCh <- agent.TimedMessage{Message: m}
 	}
 	return nil
@@ -517,6 +544,281 @@ func containsArgPair(args []string, key, value string) bool {
 
 func TestControlConn(t *testing.T) {
 	t.Parallel()
+	t.Run("ReadMessages/AutomaticResponseWhileInputBlocked", func(t *testing.T) {
+		t.Parallel()
+		stdin := agenttest.NewStdinPipe()
+		stdout, output := io.Pipe()
+		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+		var workers sync.WaitGroup
+		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
+		sent := make(chan error, 1)
+		workers.Go(func() { sent <- c.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
+		<-stdin.Started
+		messages := make(chan agent.TimedMessage, 8)
+		read := make(chan error, 1)
+		workers.Go(func() { read <- c.ReadMessages(stdout, messages, c) })
+		workers.Go(func() {
+			request := `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}` + "\n"
+			var requestSb563 strings.Builder
+			for _, text := range []string{"first", "second", "third"} {
+				requestSb563.WriteString(fmt.Sprintf(`{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":%q}]}}}`, text) + "\n")
+			}
+			request += requestSb563.String()
+			if _, err := io.WriteString(output, request); err != nil {
+				t.Errorf("feed output: %v", err)
+			}
+		})
+		for range 3 {
+			select {
+			case <-messages:
+			case err := <-read:
+				t.Fatalf("reader ended before output: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("stdout stalled behind automatic permission response")
+			}
+		}
+		input := bufio.NewReader(stdin.Reader)
+		if _, err := input.ReadBytes('\n'); err != nil {
+			t.Fatal(err)
+		}
+		response, err := input.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := decodeControlResponse(t, response); got.Response.RequestID != "allow" {
+			t.Fatalf("response = %#v", got)
+		}
+		if err := <-sent; err != nil {
+			t.Fatal(err)
+		}
+		if err := output.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-read; err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("ReadMessages/PermissionReplyWhileMCPAcceptedElsewhere", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		release := make(chan struct{})
+		registry := &agenttest.BlockingRegistry{Started: make(chan struct{}, 1), Release: release}
+		executor := agent.NewMCPExecutor(t.Context())
+		stdin := agenttest.NewStdinPipe()
+		stdout, output := io.Pipe()
+		c := &controlConn{Conn: agent.NewMCPConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat(), executor.Wrap(registry))}
+		var workers sync.WaitGroup
+		t.Cleanup(func() {
+			cancel()
+			c.Cancel()
+			_ = output.Close()
+			_ = stdin.Reader.Close()
+			close(release)
+			executor.Close()
+			workers.Wait()
+		})
+		read := make(chan error, 1)
+		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan agent.TimedMessage, 1), c) })
+		if _, err := io.WriteString(output, `{"t":"mcp_request","id":"slow","method":"tools/call","name":"echo","arguments":{}}`+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		<-registry.Started
+		if _, err := io.WriteString(output, `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}`+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		reply := make(chan []byte, 1)
+		workers.Go(func() {
+			line, err := bufio.NewReader(stdin.Reader).ReadBytes('\n')
+			if err != nil {
+				t.Errorf("read permission reply: %v", err)
+			}
+			reply <- line
+		})
+		select {
+		case data := <-reply:
+			if got := decodeControlResponse(t, data); got.Response.RequestID != "permission" {
+				t.Fatalf("reply=%#v", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("MCP work blocked automatic permission reply")
+		}
+		cancel()
+		select {
+		case err := <-read:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("stream cancellation=%v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("source shutdown waited for accepted work elsewhere")
+		}
+	})
+
+	t.Run("ReadMessages/error_response_lifecycle", func(t *testing.T) {
+		t.Parallel()
+		for _, end := range []string{"cancel", "interrupt", "eof", "overload_count", "overload_bytes", "write_failure", "blocked_dispatch"} {
+			t.Run(end, func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithCancel(t.Context())
+				stdin := agenttest.NewStdinPipe()
+				stdout, output := io.Pipe()
+				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+				var workers sync.WaitGroup
+				t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
+				sent := make(chan error, 1)
+				blockedPrompt := end != "write_failure" && end != "blocked_dispatch"
+				if blockedPrompt {
+					workers.Go(func() { sent <- c.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
+					<-stdin.Started
+				}
+				messages := make(chan agent.TimedMessage, 1)
+				if end == "blocked_dispatch" {
+					messages = make(chan agent.TimedMessage)
+				}
+				read := make(chan error, 1)
+				workers.Go(func() { read <- c.ReadMessages(stdout, messages, c) })
+				input := `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}` + "\n"
+				if end == "overload_count" {
+					input = strings.Repeat(input, 100)
+				}
+				if end == "overload_bytes" {
+					input = `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"large":"` + strings.Repeat("x", 5<<20) + `"}}}}` + "\n"
+				}
+				input += `{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"queued"}]}}}` + "\n"
+				workers.Go(func() {
+					if _, err := io.WriteString(output, input); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+						t.Errorf("feed output: %v", err)
+					}
+				})
+				switch end {
+				case "write_failure", "blocked_dispatch":
+					<-stdin.Started
+					if end == "write_failure" {
+						_ = stdin.Reader.CloseWithError(io.ErrUnexpectedEOF)
+					} else {
+						cancel()
+					}
+				case "cancel", "interrupt", "eof":
+					select {
+					case <-messages:
+					case err := <-read:
+						t.Fatalf("reader ended before queued reply: %v", err)
+					case <-time.After(time.Second):
+						t.Fatal("reader blocked behind pending reply")
+					}
+					switch end {
+					case "cancel":
+						cancel()
+					case "interrupt":
+						c.Cancel()
+					case "eof":
+						if err := output.Close(); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				err := <-read
+				if err == nil {
+					t.Fatal("response failure was not surfaced")
+				}
+				if strings.HasPrefix(end, "overload") && !errors.Is(err, agent.ErrResponseQueueFull) {
+					t.Fatalf("queue error = %v", err)
+				}
+				if end == "write_failure" && !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("write error = %v", err)
+				}
+				if (end == "cancel" || end == "blocked_dispatch") && !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancel error = %v", err)
+				}
+				if !strings.HasPrefix(end, "overload") && !errors.Is(err, agent.ErrResponsesAborted) {
+					t.Fatalf("aborted reply error = %v", err)
+				}
+				if blockedPrompt {
+					select {
+					case err := <-sent:
+						if err == nil {
+							t.Fatal("blocked prompt succeeded after transport closed")
+						}
+					case <-time.After(time.Second):
+						t.Fatal("stdin was not interrupted before joining")
+					}
+				}
+			})
+		}
+	})
+	t.Run("ReconnectAfterAcceptedAnswer", func(t *testing.T) {
+		t.Parallel()
+		tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.SeedTimeline([]agent.Message{
+			&agent.AskMessage{ToolUseID: "ask", Questions: []v3.AskQuestion{{Question: "Which?"}}},
+			&agent.PendingUserActionMessage{Action: v3.PendingUserAction{Kind: agent.PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "ask", Ask: v3.PendingAskAction{Questions: []v3.AskQuestion{{Question: "Which?"}}}}},
+			agent.InputDeliveryStarted(), &agent.UserInputMessage{Text: "answer"}, agent.InputDeliveryCompleted(),
+		})
+		inner := &fakeConn{}
+		c := &controlConn{Conn: inner}
+		if err := c.restorePendingActions(tk.PendingUserActions()); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.SendPrompt(agent.Prompt{Text: "next turn"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(inner.sent) != 0 || len(inner.prompts) != 1 || inner.prompts[0].Text != "next turn" {
+			t.Fatalf("reconnected routing: controls=%q prompts=%#v", inner.sent, inner.prompts)
+		}
+	})
+
+	t.Run("SendPrompt/CancellationWhileInputBlocked", func(t *testing.T) {
+		t.Parallel()
+		release := make(chan struct{})
+		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
+		log := slog.New(slog.DiscardHandler)
+		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+		if err := c.setPendingAsk(pendingControlAsk{requestID: "first", questions: []v3.AskQuestion{{Question: "Choice?"}}}); err != nil {
+			t.Fatal(err)
+		}
+		var workers sync.WaitGroup
+		var writeErr error
+		t.Cleanup(func() {
+			close(release)
+			workers.Wait()
+			if writeErr != nil {
+				t.Errorf("input failed after release: %v", writeErr)
+			}
+			if c.pendingAsk == nil || c.pendingAsk.requestID != "replacement" {
+				t.Errorf("completed answer discarded the replacement Ask: %#v", c.pendingAsk)
+			}
+		})
+		written := make(chan error, 1)
+		workers.Go(func() {
+			writeErr = c.SendPrompt(agent.Prompt{Text: "answer"}, nil)
+			written <- writeErr
+		})
+		<-writer.Started
+		parsed := make(chan error, 1)
+		workers.Go(func() {
+			_, _, err := c.HandleMessage(&agent.RawMessage{MessageType: "control_cancel_request", Raw: []byte(`{"type":"control_cancel_request","request_id":"first"}`)})
+			if err == nil {
+				err = c.setPendingAsk(pendingControlAsk{requestID: "replacement", questions: []v3.AskQuestion{{Question: "Next?"}}})
+			}
+			parsed <- err
+		})
+		select {
+		case err := <-parsed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("stdout cancellation blocked behind answer delivery")
+		}
+		select {
+		case err := <-written:
+			t.Fatalf("input unexpectedly finished: %v", err)
+		default:
+		}
+	})
 	t.Run("AnswersPendingAskUserQuestion", func(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{
@@ -545,7 +847,7 @@ func TestControlConn(t *testing.T) {
 		c := &controlConn{Conn: inner}
 
 		msgCh := make(chan agent.TimedMessage, 10)
-		if err := c.ReadMessages(nil, msgCh); err != nil {
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), msgCh, c); err != nil {
 			t.Fatal(err)
 		}
 		close(msgCh)
@@ -563,7 +865,7 @@ func TestControlConn(t *testing.T) {
 			t.Fatalf("forwarded[1] = %T, want *agent.PendingUserActionMessage", forwarded[1])
 		}
 
-		if err := c.SendPrompt(agent.Prompt{Text: "Identity only"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "Identity only"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.prompts) != 0 {
@@ -619,6 +921,17 @@ func TestControlConn(t *testing.T) {
 		if record.RelayRecord || !bytes.Equal(payload, bytes.TrimSpace(inner.sent[0])) {
 			t.Fatalf("AskUserQuestion input provenance = %#v, payload = %s", record, payload)
 		}
+		replayed, err := newWireFormat().ParseMessage(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(replayed) != 1 {
+			t.Fatalf("replayed messages = %d, want one user input", len(replayed))
+		}
+		input, ok := replayed[0].(*agent.UserInputMessage)
+		if !ok || input.Text != "Identity only" {
+			t.Fatalf("replayed answer = %#v", replayed[0])
+		}
 	})
 
 	t.Run("AutoAllowsOtherCanUseTool", func(t *testing.T) {
@@ -634,7 +947,7 @@ func TestControlConn(t *testing.T) {
 		c := &controlConn{Conn: inner}
 
 		msgCh := make(chan agent.TimedMessage, 10)
-		if err := c.ReadMessages(nil, msgCh); err != nil {
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), msgCh, c); err != nil {
 			t.Fatal(err)
 		}
 		close(msgCh)
@@ -657,6 +970,15 @@ func TestControlConn(t *testing.T) {
 		}
 		if updated.FilePath != "README.md" {
 			t.Errorf("updatedInput file_path = %q, want README.md", updated.FilePath)
+		}
+		replayed, err := newWireFormat().ParseMessage(inner.sent[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range replayed {
+			if _, ok := message.(*agent.UserInputMessage); ok {
+				t.Fatal("automatic permission response became a user prompt")
+			}
 		}
 	})
 
@@ -683,7 +1005,7 @@ func TestControlConn(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := c.SendPrompt(agent.Prompt{Text: "Forge-coupled"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "Forge-coupled"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.prompts) != 0 {
@@ -724,7 +1046,7 @@ func TestControlConn(t *testing.T) {
 		if err := c.restorePendingActions([]v3.PendingUserAction{pending.Action}); err != nil {
 			t.Fatal(err)
 		}
-		handled, err := c.handleControlMessage(pending)
+		_, handled, err := c.HandleMessage(pending)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -732,7 +1054,7 @@ func TestControlConn(t *testing.T) {
 			t.Fatal("duplicate pending ask was handled, want forwarded")
 		}
 
-		if err := c.SendPrompt(agent.Prompt{Text: "answer"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "answer"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.sent) != 1 {
@@ -756,7 +1078,7 @@ func TestControlConn(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := c.SendPrompt(agent.Prompt{Text: "answer"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "answer"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.prompts) != 0 {
@@ -813,12 +1135,12 @@ func TestControlConn(t *testing.T) {
 			t.Fatalf("err = %v, want unsupported pending user action kind", err)
 		}
 
-		handled, err := c.handleControlMessage(&agent.PendingUserActionMessage{
+		_, handled, err := c.HandleMessage(&agent.PendingUserActionMessage{
 			MessageType: agent.PendingUserActionMessageType,
 			Action:      action,
 		})
 		if err == nil {
-			t.Fatal("handleControlMessage returned nil error")
+			t.Fatal("HandleMessage returned nil error")
 		}
 		if !strings.Contains(err.Error(), "unsupported pending user action kind") {
 			t.Fatalf("err = %v, want unsupported pending user action kind", err)
@@ -836,7 +1158,7 @@ func TestControlConn(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := c.SendPrompt(agent.Prompt{Text: "next turn"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "next turn"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.prompts) != 1 {
@@ -851,7 +1173,7 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
-		if err := c.SendPrompt(agent.Prompt{Text: "hello"}); err != nil {
+		if err := c.SendPrompt(agent.Prompt{Text: "hello"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(inner.prompts) != 1 {

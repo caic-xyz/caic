@@ -256,6 +256,28 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Messa
 		}
 	}()
 	switch claudecode.OutputType(typ) {
+	case claudecode.OutputType(claudecode.InputControlResponse):
+		var response claudecode.InputControlResponseMsg
+		if err := json.Unmarshal(line, &response); err != nil {
+			return nil, record, err
+		}
+		if response.Response.Subtype == claudecode.ControlResponseSuccess && response.Response.Response.Behavior == claudecode.ControlCanUseToolBehaviorAllow {
+			var input claudecode.AskUserQuestionUpdatedInput
+			if err := json.Unmarshal(response.Response.Response.UpdatedInput, &input); err == nil && len(input.Questions) > 0 && len(input.Answers) == len(input.Questions) {
+				answer, answered := input.Answers[input.Questions[0].Question]
+				for _, question := range input.Questions {
+					text, ok := input.Answers[question.Question]
+					if question.Question == "" || !ok || text != answer {
+						answered = false
+						break
+					}
+				}
+				if answered {
+					return []agent.Message{&agent.UserInputMessage{Text: answer}}, record, nil
+				}
+			}
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, record, nil
 	case claudecode.OutputSystem:
 		subtype, err := agent.JSONString(line, "subtype")
 		if err != nil {

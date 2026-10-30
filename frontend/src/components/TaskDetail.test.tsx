@@ -149,6 +149,30 @@ async function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]>
   return view;
 }
 
+it("shows a failed input attempt with its delivery error", async () => {
+  let stream: HistoryEventsHandlers | undefined;
+  taskEventStreamMock.mockImplementation((_id, _cursor, handlers) => {
+    stream = handlers;
+    return { close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  const view = await renderTaskDetail();
+  try {
+    assert.ok(stream);
+    emit(stream, { kind: "userInput", ts: 1, userInput: { text: "Retry the build" } });
+    emit(stream, {
+      kind: "system",
+      ts: 2,
+      system: { subtype: "input_delivery_failed", detail: "Input delivery failed: transport closed" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Retry the build")).toBeInTheDocument();
+      expect(screen.getByText("Input delivery failed: transport closed")).toBeInTheDocument();
+    });
+  } finally {
+    view.unmount();
+  }
+});
+
 it("never mounts completed context content while canonical history is published", async () => {
   const init = (sessionID: string): EventMessage => ({
     kind: "init",

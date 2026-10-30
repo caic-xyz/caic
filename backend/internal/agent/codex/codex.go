@@ -119,11 +119,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := opts.Logger.With("target", opts.Target.SSHHost)
-	s := agent.NewSession(ctx, rp.Cmd, agent.NewMCPConn(ctx, log, rp.Stdin, opts.Log, wire, opts.MCP), continuation, opts.MsgCh, log)
+	s := agent.NewSession(ctx, rp.Cmd, agent.NewMCPConn(ctx, log, rp.Stdin, opts.Log, wire, opts.MCP), agent.ContinuedReader{Reader: continuation, Closer: rp.Stdout}, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
-			_ = s.Close()
-			return nil, fmt.Errorf("write prompt: %w", err)
+			s.Cancel()
+			return nil, fmt.Errorf("write prompt: %w", errors.Join(err, s.Wait()))
 		}
 	}
 	return s, nil
@@ -401,8 +401,9 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 // the given user message. Images are sent as data URL items after the text item.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.threadID == "" {
+	threadID, effort := w.threadID, w.requestedEffort
+	w.mu.Unlock()
+	if threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
 	id := w.nextID.Add(1)
@@ -415,10 +416,10 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		})
 	}
 	params, err := marshalParams(codex.TurnStartParams{
-		ThreadID: w.threadID,
+		ThreadID: threadID,
 		Input:    input,
 		Summary:  codex.ReasoningSummaryAuto,
-		Effort:   codex.ReasoningEffort(w.requestedEffort),
+		Effort:   codex.ReasoningEffort(effort),
 	})
 	if err != nil {
 		return fmt.Errorf("marshal turn/start params: %w", err)
@@ -429,6 +430,11 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		Method:  "turn/start",
 		Params:  params,
 	}
+	if log.LogVersion() == agent.LogVersionV2 {
+		if err := log.AppendMessage(&agent.UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
+			return err
+		}
+	}
 	return writeJSONInput(wr, req, log)
 }
 
@@ -436,11 +442,12 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 // JSON-RPC request. Codex compacts the context window for the current thread.
 func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.threadID == "" {
+	threadID := w.threadID
+	w.mu.Unlock()
+	if threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
-	params, err := marshalParams(codex.ThreadCompactStartParams{ThreadID: w.threadID})
+	params, err := marshalParams(codex.ThreadCompactStartParams{ThreadID: threadID})
 	if err != nil {
 		return fmt.Errorf("marshal thread/compact/start params: %w", err)
 	}
@@ -838,13 +845,15 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
+	if log.LogVersion() == agent.LogVersionV3 {
+		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+			return err
+		}
+	}
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if log.LogVersion() != agent.LogVersionV3 {
-		return nil
-	}
-	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
+	return nil
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response

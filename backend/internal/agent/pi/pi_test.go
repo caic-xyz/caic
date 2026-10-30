@@ -1,4 +1,4 @@
-// Tests Pi CLI model discovery, startup, update recovery, and wire configuration.
+// Tests Pi discovery, startup recovery, wire configuration, and automatic reply delivery.
 
 package pi
 
@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -30,10 +31,6 @@ import (
 )
 
 const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"
-
-type memoryWriteCloser struct{ bytes.Buffer }
-
-func (*memoryWriteCloser) Close() error { return nil }
 
 func init() {
 	if os.Getenv(piSSHHelperEnv) != "1" {
@@ -218,44 +215,91 @@ func TestWaitForResponse(t *testing.T) {
 	})
 }
 
-func TestPiConnTaskMCP(t *testing.T) {
+func TestPiConn(t *testing.T) {
 	t.Parallel()
-
-	stdin := &memoryWriteCloser{}
-	conn := newPiConn(
-		t.Context(),
-		slog.New(slog.DiscardHandler),
-		stdin,
-		agent.DiscardLogSink{Version: agent.LogVersionV2},
-		&piWireFormat{},
-		&agent.Options{MCP: mcptest.FakeRegistry{}},
-	)
-	input := `{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n"
-	if err := conn.ReadMessages(strings.NewReader(input), make(chan agent.TimedMessage)); err != nil {
-		t.Fatal(err)
-	}
-
-	var response struct {
-		Type   string `json:"t"`
-		ID     string `json:"id"`
-		Result struct {
-			Tools []struct {
-				Name string `json:"name"`
-			} `json:"tools"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(stdin.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Type != "mcp_response" || response.ID != "tools-1" {
-		t.Fatalf("response = %+v, want mcp_response for tools-1", response)
-	}
-	if len(response.Result.Tools) != 1 {
-		t.Fatalf("tools = %+v, want one tool", response.Result.Tools)
-	}
-	if got, want := response.Result.Tools[0].Name, "echo"; got != want {
-		t.Errorf("tool = %q, want %q", got, want)
-	}
+	t.Run("ReadMessages", func(t *testing.T) {
+		t.Parallel()
+		for _, kind := range []string{"ExtensionUI", "TaskMCP"} {
+			t.Run(kind, func(t *testing.T) {
+				t.Parallel()
+				stdin := agenttest.NewStdinPipe()
+				stdout, output := io.Pipe()
+				wire, ok := New("", nil).NewWire().(*piWireFormat)
+				if !ok {
+					t.Fatal("unexpected Pi wire")
+				}
+				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, wire, &agent.Options{MCP: mcptest.FakeRegistry{}})
+				var workers sync.WaitGroup
+				t.Cleanup(func() { conn.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
+				sent := make(chan error, 1)
+				workers.Go(func() { sent <- conn.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
+				<-stdin.Started
+				messages := make(chan agent.TimedMessage, 8)
+				read := make(chan error, 1)
+				workers.Go(func() { read <- conn.ReadMessages(stdout, messages, conn) })
+				request := `{"t":"agent","ts":1.000,"msg":{"type":"extension_ui_request","id":"confirm","method":"confirm","title":"Allow?"}}`
+				if kind == "TaskMCP" {
+					request = `{"t":"mcp_request","id":"tools","method":"tools/list"}`
+				}
+				workers.Go(func() {
+					if _, err := io.WriteString(output, request+"\n"+`{"t":"agent","ts":2.000,"msg":{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"working"}}}`+"\n"); err != nil {
+						t.Errorf("feed output: %v", err)
+					}
+				})
+				select {
+				case parsed := <-messages:
+					if m, ok := parsed.Message.(*agent.TextDeltaMessage); !ok || m.Text != "working" {
+						t.Fatalf("output = %#v", parsed.Message)
+					}
+				case err := <-read:
+					t.Fatalf("reader ended: %v", err)
+				case <-time.After(time.Second):
+					t.Fatal("stdout blocked behind automatic reply")
+				}
+				input := bufio.NewReader(stdin.Reader)
+				if _, err := input.ReadBytes('\n'); err != nil {
+					t.Fatal(err)
+				}
+				data, err := input.ReadBytes('\n')
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == "TaskMCP" {
+					var response agent.MCPResponseEnvelope
+					if err := json.Unmarshal(data, &response); err != nil {
+						t.Fatal(err)
+					}
+					if response.ID != "tools" || response.Error != "" {
+						t.Fatalf("MCP response = %#v", response)
+					}
+					var list agent.MCPToolsListResponse
+					if err := json.Unmarshal(response.Result, &list); err != nil {
+						t.Fatal(err)
+					}
+					if len(list.Tools) != 1 || list.Tools[0].Name != "echo" {
+						t.Fatalf("tools = %#v", list.Tools)
+					}
+				} else {
+					var response genaipi.ExtensionUIResponseConfirm
+					if err := json.Unmarshal(data, &response); err != nil {
+						t.Fatal(err)
+					}
+					if response.ID != "confirm" || !response.Confirmed {
+						t.Fatalf("extension response = %#v", response)
+					}
+				}
+				if err := <-sent; err != nil {
+					t.Fatal(err)
+				}
+				if err := output.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := <-read; err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	})
 }
 
 func TestReapPiProcessExit(t *testing.T) {

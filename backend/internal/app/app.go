@@ -280,7 +280,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}
 	checkoutRegistry := repo.NewRegistry()
-	taskMgr, err := taskmgr.New(taskmgr.Config{
+	taskMgr, err := taskmgr.New(taskmgr.Config{ //nolint:contextcheck // Config.ServerCtx passes this caller context to the Manager-owned MCP executor.
 		ServerCtx:           ctx,
 		Log:                 log,
 		LogStore:            logStore,

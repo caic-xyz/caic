@@ -5,6 +5,8 @@ package claudecode
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -434,7 +436,7 @@ func TestControlConnOwnership(t *testing.T) {
 					inner.messages = append(inner.messages, control...)
 					conn := &controlConn{Conn: inner}
 					messages := make(chan agent.TimedMessage, len(inner.messages))
-					if err := conn.ReadMessages(nil, messages); err != nil {
+					if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), messages, conn); err != nil {
 						t.Fatal(err)
 					}
 					close(messages)
@@ -445,7 +447,7 @@ func TestControlConnOwnership(t *testing.T) {
 					if len(control) != 1 || forwarded != control[0] {
 						t.Fatalf("connection lost normalized control: %#v", forwarded)
 					}
-					if err := conn.SendPrompt(agent.Prompt{Text: "Yes"}); err != nil {
+					if err := conn.SendPrompt(agent.Prompt{Text: "Yes"}, nil); err != nil {
 						t.Fatal(err)
 					}
 					if kind == "root" {

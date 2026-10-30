@@ -87,12 +87,16 @@ func TestWireFormat(t *testing.T) {
 				if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
 					t.Fatalf("input = %+v", msgs[0])
 				}
-				if version == agent.LogVersionV3 {
-					if !strings.Contains(log.String(), `"t":"input"`) || !strings.Contains(log.String(), `"event":"user"`) {
-						t.Fatalf("missing input provenance: %s", log.String())
-					}
-				} else if log.Len() != 0 {
-					t.Fatal("v2 prompt logging belongs to relay")
+				parser, err := agent.NewLogRecordParser(version, New("", nil).NewWire().ParseMessage)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
+				if err != nil || record.RelayRecord || len(record.Messages) != 1 {
+					t.Fatalf("input record = %#v, %v", record, err)
+				}
+				if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
+					t.Fatalf("persisted input = %#v", record.Messages[0].Message)
 				}
 			})
 		}
@@ -152,8 +156,8 @@ func TestWireFormat(t *testing.T) {
 			if err := w.WritePrompt(shortWriter{}, agent.Prompt{Text: "hello"}, log); !errors.Is(err, io.ErrShortWrite) {
 				t.Fatalf("short write = %v", err)
 			}
-			if log.Len() != 0 {
-				t.Fatal("failed write must not be logged")
+			if log.Len() == 0 {
+				t.Fatal("attempted input must precede delivery, including a short write")
 			}
 		})
 	})

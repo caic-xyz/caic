@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,9 +14,11 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/ksid"
@@ -141,8 +142,9 @@ func TestTaskService(t *testing.T) {
 				tk.SetState(taskslog.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				e, _ := s.taskMgr.GetEntry(tk.ID)
-				session, conn := newGatedInputSession(t)
-				tk.AttachSession(&task.SessionHandle{Session: session})
+				_, live, unsubscribe := tk.Subscribe(t.Context())
+				t.Cleanup(unsubscribe)
+				session, conn := newGatedInputSession(t, tk)
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
 				if when == "before_send" {
@@ -186,7 +188,17 @@ func TestTaskService(t *testing.T) {
 				if tk.GetState() != taskslog.StateRunning || e.Result() != nil {
 					t.Fatalf("accepted input state=%s result=%+v", tk.GetState(), e.Result())
 				}
-				messages := tk.Messages()
+				select {
+				case <-live:
+				case <-time.After(5 * time.Second):
+					t.Fatal("accepted input was not dispatched")
+				}
+				var messages []agent.Message
+				for _, m := range tk.Messages() {
+					if !agent.IsInputDeliveryControl(m) {
+						messages = append(messages, m)
+					}
+				}
 				if len(messages) != 1 {
 					t.Fatalf("recorded %d messages", len(messages))
 				}
@@ -212,37 +224,56 @@ type gatedInputConn struct {
 	release chan struct{}
 }
 
-func (c *gatedInputConn) SendPrompt(p agent.Prompt) error {
+func (c *gatedInputConn) SendPrompt(p agent.Prompt, data []byte) error {
 	close(c.started)
 	<-c.release
-	return c.Conn.SendPrompt(p)
+	return c.Conn.SendPrompt(p, data)
 }
 
-func (*gatedInputConn) ReadMessages(r io.Reader, _ chan<- agent.TimedMessage) error {
-	_, err := io.Copy(io.Discard, r)
-	return err
-}
-
-func newGatedInputSession(t *testing.T) (*agent.Session, *gatedInputConn) {
+func newGatedInputSession(t *testing.T, tk *task.Task) (*agent.Session, *gatedInputConn) {
 	ctx, cancel := context.WithCancel(t.Context())
-	cmd := exec.CommandContext(ctx, "cat")
+	t.Cleanup(cancel)
+	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{}}
+	r := &task.AgentRuntime{
+		Backends:         agent.Backends{harness.Claude: backend},
+		LogStore:         taskslog.NewStore(testLogger(), t.TempDir()),
+		LogPath:          &taskslog.Path{},
+		Log:              testLogger(),
+		NotifyTaskChange: func() {},
+	}
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fixture"), runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)
+	h, err := r.StartSession(ctx, tk, agent.Prompt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = h.Drain()
+		_ = h.Log.Close()
+	})
+	return h.Session, backend.conn
+}
+
+// gatedInputBackend uses the task runtime's real dispatch and log ownership.
+type gatedInputBackend struct {
+	*agenttest.FakeBackend
+
+	conn *gatedInputConn
+}
+
+func (b *gatedInputBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", "while IFS= read -r input; do :; done")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		cancel()
-		t.Fatal(err)
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		cancel()
-		t.Fatal(err)
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		cancel()
-		t.Fatal(err)
+		return nil, err
 	}
-	log := testLogger()
-	conn := &gatedInputConn{Conn: agent.NewConn(ctx, log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV2}, claudecode.New().NewWire()), started: make(chan struct{}), release: make(chan struct{})}
-	session := agent.NewSession(ctx, cmd, conn, stdout, make(chan agent.TimedMessage, 8), log)
-	t.Cleanup(func() { cancel(); _ = session.Wait() })
-	return session, conn
+	b.conn = &gatedInputConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Log, claudecode.New().NewWire()), started: make(chan struct{}), release: make(chan struct{})}
+	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.MsgCh, opts.Logger), nil
 }

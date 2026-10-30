@@ -103,10 +103,13 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) err
 		return err
 	}
 	data = append(data, '\n')
+	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+		return err
+	}
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return log.AppendNative(data)
+	return nil
 }
 
 func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {

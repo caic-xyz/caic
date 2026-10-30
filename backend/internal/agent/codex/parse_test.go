@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1062,6 +1063,57 @@ func TestParseMessage(t *testing.T) {
 }
 
 func TestWireFormat(t *testing.T) {
+	t.Run("WritePrompt/OutputWhileInputBlocked", func(t *testing.T) {
+		t.Parallel()
+		w, ok := New("", nil).NewWire().(*wireFormat)
+		if !ok {
+			t.Fatal("backend returned an unexpected wire format")
+		}
+		w.threadID = "thread"
+		release := make(chan struct{})
+		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
+		var workers sync.WaitGroup
+		var writeErr error
+		t.Cleanup(func() {
+			close(release)
+			workers.Wait()
+			if writeErr != nil {
+				t.Errorf("input failed after release: %v", writeErr)
+			}
+		})
+		written := make(chan error, 1)
+		workers.Go(func() {
+			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			written <- writeErr
+		})
+		<-writer.Started
+		parsed := make(chan error, 1)
+		var messages []agent.Message
+		workers.Go(func() {
+			var err error
+			messages, err = w.ParseMessage([]byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"working"}}`))
+			parsed <- err
+		})
+		select {
+		case err := <-parsed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("stdout parser blocked behind stdin delivery")
+		}
+		if len(messages) != 1 {
+			t.Fatalf("messages = %v, want streaming output", messages)
+		}
+		if m, ok := messages[0].(*agent.TextDeltaMessage); !ok || m.Text != "working" {
+			t.Fatalf("output = %#v", messages[0])
+		}
+		select {
+		case err := <-written:
+			t.Fatalf("input unexpectedly finished: %v", err)
+		default:
+		}
+	})
 	t.Run("ParseMessage/explicit child evidence without lifecycle cards", func(t *testing.T) {
 		t.Parallel()
 		for _, metadata := range []string{`"parentThreadId":"parent"`, `"threadSource":"subagent"`} {

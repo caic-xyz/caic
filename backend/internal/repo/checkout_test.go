@@ -1,4 +1,4 @@
-// Tests Checkout branch allocation, pooled pushes, restart safety, diffs, and ordered summaries.
+// Tests Checkout branch preparation and rollback, pooled pushes, restart safety, diffs, and summaries.
 
 package repo
 
@@ -121,6 +121,7 @@ func newInitializedTestCheckoutWithLiveBranches(t *testing.T, dir string, liveBr
 
 //nolint:tparallel // Environment-changing push fixtures run before parallel cases.
 func TestCheckout(t *testing.T) {
+	t.Run("AllocateBranch", runAllocateBranchTests)
 	// These process-wide fixtures must run before parallel checkout cases.
 	t.Run("pushWorktree", func(t *testing.T) {
 		t.Run("OverallDeadlineIncludesCleanup", func(t *testing.T) {
@@ -2160,4 +2161,173 @@ func assertPushIdle(t *testing.T, w *Checkout, root string) string {
 		t.Fatal("idle worktree registration missing", out)
 	}
 	return dirs[0]
+}
+
+func runAllocateBranchTests(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		for _, mode := range []string{"default", "local_override", "local_fallback", "preferred_collision"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				root := initTestRepo(t, "main")
+				w := newInitializedTestCheckout(t, root)
+				g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+				base, preferred, start, upstream := "", "caic-0", "origin/main", "refs/remotes/origin/main"
+				if mode == "local_override" || mode == "local_fallback" {
+					runGit(t, root, "checkout", "-b", "feature")
+					runGit(t, root, "commit", "--allow-empty", "-m", "local feature")
+					runGit(t, root, "checkout", "main")
+					start = "feature"
+					upstream = "refs/heads/feature"
+					if mode == "local_override" {
+						base = "feature"
+						runGit(t, root, "push", "origin", "main:feature")
+					} else {
+						w.BaseBranch = "feature"
+					}
+				}
+				if mode == "preferred_collision" {
+					runGit(t, root, "branch", "caic-0")
+				}
+				want, err := g.RevParse(t.Context(), start)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), base, preferred)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "preferred_collision" && b.Name != "caic-1" {
+					t.Fatalf("fallback=%q", b.Name)
+				}
+				if got, err := g.RevParse(t.Context(), b.Name); err != nil || got != want {
+					t.Fatalf("branch tip=%q %v want=%q", got, err, want)
+				}
+				if got, err := g.RunGit(t.Context(), "for-each-ref", "--format=%(upstream)", "refs/heads/"+b.Name); err != nil || got != upstream {
+					t.Fatalf("upstream=%q %v want=%q", got, err, upstream)
+				}
+				if err := b.Rollback(t.Context(), logtest.Logger(t)); err != nil {
+					t.Fatal(err)
+				}
+				if got, err := g.RunGit(t.Context(), "for-each-ref", "--format=%(refname)", "refs/heads/"+b.Name); err != nil || got != "" {
+					t.Fatalf("rollback refs=%q %v", got, err)
+				}
+				if got, err := g.RunGit(t.Context(), "config", "--get-regexp", "^branch\\.caic-"); err == nil || got != "" {
+					t.Fatalf("rollback config=%q %v", got, err)
+				}
+			})
+		}
+	})
+	t.Run("error_upstream_setup_rolls_back_created_branch", func(t *testing.T) {
+		if goruntime.GOOS == "windows" {
+			t.Skip("Git hook fixture requires POSIX shell")
+		}
+		root := initTestRepo(t, "main")
+		w := newInitializedTestCheckout(t, root)
+		runGit(t, root, "branch", "feature")
+		writePushFile(t, root, ".git/hooks/reference-transaction", `#!/bin/sh
+set -eu
+while read -r old new ref; do
+  if [ "$1" = committed ] && [ "$ref" = refs/heads/caic-0 ]; then
+    git -c core.hooksPath=/dev/null update-ref -d refs/heads/feature
+  fi
+done
+`, 0o700)
+		if _, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "feature", "caic-0"); err == nil {
+			t.Fatal("missing upstream accepted")
+		}
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		if got, err := g.RunGit(t.Context(), "for-each-ref", "--format=%(refname)", "refs/heads/caic-*"); err != nil || got != "" {
+			t.Fatalf("failed allocation left branch=%q %v", got, err)
+		}
+	})
+	t.Run("pins_commit_before_creation", func(t *testing.T) {
+		if goruntime.GOOS == "windows" {
+			t.Skip("Git hook fixture requires POSIX shell")
+		}
+		root := initTestRepo(t, "main")
+		w := newInitializedTestCheckout(t, root)
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		want, err := g.RevParse(t.Context(), "origin/main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "commit", "--allow-empty", "-m", "new main")
+		writePushFile(t, root, ".git/hooks/reference-transaction", `#!/bin/sh
+set -eu
+while read -r old new ref; do
+  if [ "$1" = prepared ] && [ "$ref" = refs/heads/caic-0 ]; then
+    git -c core.hooksPath=/dev/null update-ref refs/remotes/origin/main HEAD
+  fi
+done
+`, 0o700)
+		b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := g.RevParse(t.Context(), b.Name); err != nil || got != want {
+			t.Fatalf("created tip=%q %v want pinned=%q", got, err, want)
+		}
+		if err := b.Rollback(t.Context(), logtest.Logger(t)); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestAllocatedBranch(t *testing.T) {
+	t.Parallel()
+	t.Run("Rollback", func(t *testing.T) {
+		t.Parallel()
+		t.Run("preserves_commit_moved_during_creation", func(t *testing.T) {
+			t.Parallel()
+			if goruntime.GOOS == "windows" {
+				t.Skip("Git hook fixture requires POSIX shell")
+			}
+			root := initTestRepo(t, "main")
+			w := newInitializedTestCheckout(t, root)
+			runGit(t, root, "commit", "--allow-empty", "-m", "external work")
+			writePushFile(t, root, ".git/hooks/reference-transaction", `#!/bin/sh
+set -eu
+while read -r old new ref; do
+  if [ "$1" = committed ] && [ "$ref" = refs/heads/caic-0 ]; then
+    git -c core.hooksPath=/dev/null update-ref refs/heads/caic-0 HEAD
+  fi
+done
+`, 0o700)
+			b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := b.Rollback(t.Context(), logtest.Logger(t)); err != nil {
+				t.Fatal(err)
+			}
+			g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+			want, err := g.RevParse(t.Context(), "HEAD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := g.RevParse(t.Context(), b.Name); err != nil || got != want {
+				t.Fatalf("external commit removed: %q %v", got, err)
+			}
+		})
+		t.Run("error_ref_lock_preserves_branch", func(t *testing.T) {
+			t.Parallel()
+			root := initTestRepo(t, "main")
+			w := newInitializedTestCheckout(t, root)
+			b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".git", "refs", "heads", b.Name+".lock"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.Rollback(t.Context(), logtest.Logger(t)); err == nil {
+				t.Fatal("rollback hid ref-lock failure")
+			}
+			g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+			if _, err := g.RevParse(t.Context(), b.Name); err != nil {
+				t.Fatalf("locked branch removed: %v", err)
+			}
+		})
+	})
 }

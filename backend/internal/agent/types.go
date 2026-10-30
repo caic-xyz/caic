@@ -61,6 +61,22 @@ const SystemSubtypeCompactError = "compact_error"
 // start a root turn, replace its answer, or clear its result/error state.
 const SystemSubtypeExternalActivity = "external_activity"
 
+// SystemSubtypeInputDeliveryFailed marks the preceding root input as an
+// attempted prompt whose transport failed. It is not accepted-input evidence.
+const SystemSubtypeInputDeliveryFailed = "input_delivery_failed"
+
+// SystemSubtypeInputDeliveryStarted marks a prompt whose delivery is unresolved.
+const SystemSubtypeInputDeliveryStarted = "input_delivery_started"
+
+// SystemSubtypeInputDeliveryCompleted confirms a prompt's stdin write completed.
+const SystemSubtypeInputDeliveryCompleted = "input_delivery_completed"
+
+// IsInputDeliveryControl identifies private delivery bookkeeping, not UI events.
+func IsInputDeliveryControl(m Message) bool {
+	s, ok := m.(*SystemMessage)
+	return ok && (s.Subtype == SystemSubtypeInputDeliveryStarted || s.Subtype == SystemSubtypeInputDeliveryCompleted)
+}
+
 // MCPRequestMessage carries one task-local MCP request from the relay.
 type MCPRequestMessage v3.MCPRequestMessage
 
@@ -146,6 +162,21 @@ type SystemMessage v3.SystemMessage
 // ContextCleared creates the persisted context-clear system marker.
 func ContextCleared() *SystemMessage {
 	return &SystemMessage{MessageType: messageTypeSystem, Subtype: messageSubtypeContextCleared}
+}
+
+// InputDeliveryFailed makes a visible failure marker for the preceding input.
+func InputDeliveryFailed(err error) *SystemMessage {
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryFailed, Detail: "Input delivery failed: " + err.Error()}
+}
+
+// InputDeliveryStarted creates the private beginning of an input attempt.
+func InputDeliveryStarted() *SystemMessage {
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryStarted}
+}
+
+// InputDeliveryCompleted creates the private successful delivery outcome.
+func InputDeliveryCompleted() *SystemMessage {
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryCompleted}
 }
 
 // Type implements Message.
@@ -1200,8 +1231,8 @@ func (DiscardLogSink) Close() error { return nil }
 
 var _ LogSink = DiscardLogSink{}
 
-// AppendInputNativeRecord appends bytes caic sent to a harness's stdin in the
-// exact physical task-log format. V3 persists them separately from relay
+// AppendInputNativeRecord records bytes caic attempts to send before writing
+// the harness's stdin. V3 persists them separately from relay
 // output so protocol commands remain durable without becoming relay offsets.
 func AppendInputNativeRecord(log LogSink, version LogVersion, data []byte) error {
 	token := logRecordAgent
@@ -1371,8 +1402,15 @@ func v2ControlToken(m Message) (logRecordType, error) {
 	case messageTypeRelayGeneration:
 		return logRecordRelayGeneration, nil
 	case messageTypeSystem:
-		if m, ok := m.(*SystemMessage); ok && m.Subtype == messageSubtypeContextCleared {
-			return logRecordContextCleared, nil
+		if m, ok := m.(*SystemMessage); ok {
+			switch m.Subtype {
+			case messageSubtypeContextCleared:
+				return logRecordContextCleared, nil
+			case SystemSubtypeInputDeliveryFailed:
+				return logRecordInputDeliveryFailed, nil
+			case SystemSubtypeInputDeliveryStarted, SystemSubtypeInputDeliveryCompleted:
+				return logRecordInputDelivery, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("message type %q is not a task-log control", m.Type())

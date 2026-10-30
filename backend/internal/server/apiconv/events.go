@@ -1,4 +1,4 @@
-// Agent event conversions from backend messages to API v1 SSE DTOs.
+// Agent event conversions to API v1 SSE DTOs, excluding private input-delivery controls.
 
 package apiconv
 
@@ -91,6 +91,9 @@ func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			},
 		}}
 	case *agent.SystemMessage:
+		if agent.IsInputDeliveryControl(m) {
+			return nil
+		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindSystem,
 			Ts:   ts,
