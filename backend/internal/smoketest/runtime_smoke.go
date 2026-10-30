@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -20,20 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
-
-// SmokeRuntime returns the container runtime selected for smoke tests.
-func SmokeRuntime() string {
-	if rt := os.Getenv("CAIC_SMOKE_RUNTIME"); rt != "" {
-		return rt
-	}
-	if _, err := exec.LookPath("docker"); err == nil {
-		return "docker"
-	}
-	if _, err := exec.LookPath("podman"); err == nil {
-		return "podman"
-	}
-	return "docker"
-}
 
 // NewSmokeRunToken returns a cryptographically random label value unique to
 // one smoke-test fixture.

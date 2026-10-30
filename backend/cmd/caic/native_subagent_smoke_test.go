@@ -123,7 +123,7 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc smoke
 		InitialPrompt: v1.Prompt{Text: tc.recording.Prompt},
 		Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
 		Harness:       v1.Harness(h),
-		RuntimeName:   smoketest.SmokeRuntime(),
+		RuntimeName:   fixture.runtimeName,
 	}, &created)
 	taskID := created.ID.String()
 	if taskID == "" {

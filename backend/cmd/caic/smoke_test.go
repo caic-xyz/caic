@@ -211,7 +211,7 @@ func TestSmoke(t *testing.T) {
 				InitialPrompt: v1.Prompt{Text: initialPrompt},
 				Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
 				Harness:       v1.HarnessCodex,
-				RuntimeName:   smoketest.SmokeRuntime(),
+				RuntimeName:   smoke.runtimeName,
 			}
 			var createResp v1.Task
 			postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
@@ -316,7 +316,7 @@ func TestSmoke(t *testing.T) {
 				{"source", string(runtime.ID(task.Runtime.ID).InstanceID()), smoke.runToken + "-codex", smoke.runToken + "-pi"},
 				{"fork", string(forkRuntimeID.InstanceID()), smoke.runToken + "-pi", smoke.runToken + "-codex"},
 			} {
-				env, err := smoketest.ContainerFile(t.Context(), smoketest.SmokeRuntime(), c.id, "/home/user/.env")
+				env, err := smoketest.ContainerFile(t.Context(), smoke.runtimeName, c.id, "/home/user/.env")
 				if err != nil {
 					t.Fatalf("read %s container .env: %v", c.name, err)
 				}
@@ -332,7 +332,7 @@ func TestSmoke(t *testing.T) {
 			postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
 			waitForTaskState(t, smoke, forkID, "purged")
 			forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-			if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkRuntimeID); err != nil {
+			if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoke.runtimeName, forkRuntimeID); err != nil {
 				forkPurgeCancel()
 				t.Fatal(err)
 			}
@@ -352,7 +352,7 @@ func TestSmoke(t *testing.T) {
 			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
 			waitForTaskState(t, smoke, taskID, "purged")
 			purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
-			if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), runtimeID); err != nil {
+			if err := smoketest.WaitForRuntimeGone(purgeCtx, smoke.runtimeName, runtimeID); err != nil {
 				purgeCancel()
 				t.Fatal(err)
 			}
@@ -486,7 +486,7 @@ func TestSmoke(t *testing.T) {
 		}
 		var task v1.Task
 		postJSON(t, smoke.baseURL, "/api/caic/v1/tasks", v1.CreateTaskReq{
-			InitialPrompt: v1.Prompt{Text: "runtime push smoke"}, Repos: []v1.RepoSpec{{Name: repos[0].Path}}, Harness: v1.HarnessCodex, RuntimeName: smoketest.SmokeRuntime(),
+			InitialPrompt: v1.Prompt{Text: "runtime push smoke"}, Repos: []v1.RepoSpec{{Name: repos[0].Path}}, Harness: v1.HarnessCodex, RuntimeName: smoke.runtimeName,
 		}, &task)
 		id := task.ID.String()
 		task = waitForTaskState(t, smoke, id, "waiting")
@@ -494,7 +494,7 @@ func TestSmoke(t *testing.T) {
 		containerRoot := "/home/user/src/" + filepath.Base(repos[0].Path)
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		t.Cleanup(cancel)
-		cmd := exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
+		cmd := exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("container commit: %v: %s", err, out)
@@ -509,7 +509,7 @@ func TestSmoke(t *testing.T) {
 		if resp.Status != "synced" {
 			t.Fatalf("sync: %+v", resp)
 		}
-		cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/"+task.Repos[0].Branch) //nolint:gosec // fixture-owned runtime, container, and repository.
+		cmd = exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/"+task.Repos[0].Branch) //nolint:gosec // fixture-owned runtime, container, and repository.
 		if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
 			t.Fatalf("container task-branch tracking ref: %q, %v; want %s", out, err, tip)
 		}
@@ -517,7 +517,7 @@ func TestSmoke(t *testing.T) {
 		if resp.Status != "synced" {
 			t.Fatalf("default sync: %+v", resp)
 		}
-		cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/main") //nolint:gosec // fixture-owned runtime, container, and repository.
+		cmd = exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/main") //nolint:gosec // fixture-owned runtime, container, and repository.
 		if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
 			t.Fatalf("container upstream tracking ref: %q, %v; want %s", out, err, tip)
 		}
@@ -560,10 +560,11 @@ func TestSmoke(t *testing.T) {
 }
 
 type smokeServer struct {
-	t        *testing.T
-	rootDir  string
-	cfg      *server.Config
-	runToken string
+	t           *testing.T
+	rootDir     string
+	cfg         *server.Config
+	runToken    string
+	runtimeName string
 
 	addr    string
 	baseURL string
@@ -761,22 +762,23 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 		t.Logf("server log %s (last %d of at most %d bytes):\n%s", s.serverLogPath, len(tail), smokeServerLogTailBytes, tail)
 	})
 	t.Cleanup(s.close)
+	log := slog.New(slog.NewTextHandler(serverLog, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	client, err := mdruntime.New(ctx, log, "", "", "")
+	if err != nil {
+		t.Fatalf("init smoke image client: %v", err)
+	}
+	s.runtimeName = client.Runtime.Name()
 	t.Cleanup(func() {
 		s.stop()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 2*time.Minute)
 		defer cancel()
-		if err := smoketest.CleanupSmokeRunContainers(ctx, smoketest.SmokeRuntime(), runToken); err != nil {
+		if err := smoketest.CleanupSmokeRunContainers(ctx, s.runtimeName, runToken); err != nil {
 			t.Errorf("cleanup smoke containers: %v", err)
 		}
 	})
 	// Image setup downloads current harness releases even though the test runs
 	// deterministic agents. Retry that preparation before any lifecycle assertions
 	// so a transient installer outage does not fail an otherwise healthy runtime.
-	log := slog.New(slog.NewTextHandler(serverLog, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	client, err := mdruntime.New(ctx, log, "", "", smoketest.SmokeRuntime())
-	if err != nil {
-		t.Fatalf("init smoke image client: %v", err)
-	}
 	warmCtx, cancel := context.WithTimeout(ctx, smokeImagePrepTimeout)
 	defer cancel()
 	w := &mdruntime.SlogWriter{Context: warmCtx, Logger: log, Phase: "warmup"}
