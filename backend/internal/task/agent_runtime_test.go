@@ -631,7 +631,7 @@ func TestRunner(t *testing.T) {
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "model-1", "high")
-			tk.SetSessionMetadata("session:not-a-guid", "", "", "")
+			tk.SetSessionMetadata("session:not-a-guid", "", "", "", 0)
 			tk.StartedAt = time.Now().UTC()
 			h, err := r.Start(t.Context(), tk, "")
 			if err != nil {
@@ -1097,7 +1097,7 @@ func TestRunner(t *testing.T) {
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "historical"}, "test", "", "")
 					id := runtime.NewID("test-runtime", "historical")
 					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "historical"}, "", "", 0)
-					tk.SetSessionMetadata("historical-session", "", "", "")
+					tk.SetSessionMetadata("historical-session", "", "", "", 0)
 					tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "historical"}})
 					tk.SetState(taskslog.StateStopped)
 					path := filepath.Join(dir, tk.LogFilename())
@@ -1156,7 +1156,7 @@ func TestRunner(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetSessionMetadata("session-1", "", "", "")
+			tk.SetSessionMetadata("session-1", "", "", "", 0)
 			tk.SeedTimeline([]agent.Message{
 				&agent.UserInputMessage{Text: "accepted"},
 				&agent.ResultMessage{},
@@ -1229,7 +1229,7 @@ func TestRunner(t *testing.T) {
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "already accepted"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetSessionMetadata("session-1", "", "", "")
+			tk.SetSessionMetadata("session-1", "", "", "", 0)
 			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}})
 			tk.SetState(taskslog.StateStopped)
 
@@ -1379,7 +1379,7 @@ func TestRunner(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
-			tk.SetSessionMetadata("saved-session", "", "", "")
+			tk.SetSessionMetadata("saved-session", "", "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			log, err := r.openLog(tk)
 			if err != nil {

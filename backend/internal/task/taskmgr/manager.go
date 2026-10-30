@@ -482,7 +482,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 	if err != nil {
 		return 0, badRequestf("%v", err)
 	}
-	t.SetSessionMetadata(p.ResumeSessionID, "", "", "")
+	t.SetSessionMetadata(p.ResumeSessionID, "", "", "", 0)
 	t.Repos = mounts
 	t.RuntimeName = runtimeName
 	t.MaxCPUs = p.MaxCPUs
@@ -1024,8 +1024,8 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.Sudo = lt.Sudo
 		t.GitHubToken = lt.GitHubToken
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
-		if lt.SessionID != "" || lt.ReportedModel != "" || lt.ReportedEffort != "" || lt.AgentVersion != "" {
-			t.SetSessionMetadata(lt.SessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion)
+		if lt.SessionID != "" || lt.ReportedModel != "" || lt.ReportedEffort != "" || lt.AgentVersion != "" || lt.AutoCompactTokenLimit > 0 {
+			t.SetSessionMetadata(lt.SessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion, lt.AutoCompactTokenLimit)
 		}
 		if lt.State == taskslog.StateRunning {
 			// Nothing adopted the instance that was running this log, so the task can
@@ -1821,7 +1821,7 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 	if t.GetSessionID() != "" {
 		sessionID = ""
 	}
-	t.SetSessionMetadata(sessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion)
+	t.SetSessionMetadata(sessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion, lt.AutoCompactTokenLimit)
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.

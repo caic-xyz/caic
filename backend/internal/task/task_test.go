@@ -929,7 +929,7 @@ func TestTask(t *testing.T) {
 		tk.ContainerPlatform = "linux/amd64"
 		tk.SetTitle("title")
 		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-1", GitRoot: "/host/checkout"}}
-		tk.SetSessionMetadata("session-1", "reported", "", "1.2.3")
+		tk.SetSessionMetadata("session-1", "reported", "", "1.2.3", 0)
 		tk.SetState(taskslog.StatePurged)
 		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
 		parentID := ksid.NewID()
@@ -3766,11 +3766,14 @@ func TestTask(t *testing.T) {
 	t.Run("SetSessionMetadata", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested", "")
-		tk.SetSessionMetadata("session-1", "reported", "", "2.0.0")
+		tk.SetSessionMetadata("session-1", "reported", "", "2.0.0", 244800)
 		if got := tk.GetSessionID(); got != "session-1" {
 			t.Errorf("SessionID = %q, want session-1", got)
 		}
 		snap := tk.Snapshot()
+		if snap.AutoCompactTokenLimit != 244800 {
+			t.Fatalf("AutoCompactTokenLimit = %d, want 244800", snap.AutoCompactTokenLimit)
+		}
 		if snap.RequestedModel != "requested" || snap.ReportedModel != "reported" {
 			t.Errorf("settings = (%q, %q), want (requested, reported)", snap.RequestedModel, snap.ReportedModel)
 		}

@@ -828,46 +828,47 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 //
 // Header-cache persistence uses an explicit versioned snapshot projection.
 type LoadedTask struct {
-	TaskID            string // Task ID parsed from log filename; empty if unparseable.
-	Prompt            string
-	Title             string
-	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
-	LogVersion        agent.LogVersion
-	Harness           harness.Name
-	StartedAt         time.Time
-	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State             State
-	ForgeIssue        int // Originating issue number for bot comment callbacks.
-	OwnerID           string
-	ForkedFromTaskID  string
-	ParentTaskID      string
-	CaicMCP           bool
-	ForgeOwner        string
-	ForgeRepo         string
-	ForgePR           int // PR number created during the task; 0 if none.
-	Tailscale         bool
-	USB               bool
-	Display           bool
-	Sudo              bool
-	GitHubToken       bool
-	RuntimeName       runtime.Name
-	BaseImage         string
-	ContainerPlatform string
-	MaxCPUs           int
-	CacheMounts       []runtime.CacheMount
-	Mounts            []runtime.Mount
-	RequestedModel    string // User-requested model.
-	RequestedEffort   string // User-requested reasoning effort.
-	ReportedModel     string // Model resolved by the harness.
-	ReportedEffort    string // Reasoning effort resolved by the harness.
-	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
-	AgentVersion      string
-	LogSize           int64   // Byte size of the log file on disk; populated by Store.Load.
-	DiffCreated       bool    // True if any non-empty diff was recorded in the log; sticky across the run.
-	LastTrailer       *Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
-	Timeline          []agent.TimedMessage
-	RelayRecords      []agent.RelayRecordBoundary
-	RelayGeneration   string
+	TaskID                string // Task ID parsed from log filename; empty if unparseable.
+	Prompt                string
+	Title                 string
+	Repos                 []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
+	LogVersion            agent.LogVersion
+	Harness               harness.Name
+	StartedAt             time.Time
+	LastStateUpdateAt     time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	State                 State
+	ForgeIssue            int // Originating issue number for bot comment callbacks.
+	OwnerID               string
+	ForkedFromTaskID      string
+	ParentTaskID          string
+	CaicMCP               bool
+	ForgeOwner            string
+	ForgeRepo             string
+	ForgePR               int // PR number created during the task; 0 if none.
+	Tailscale             bool
+	USB                   bool
+	Display               bool
+	Sudo                  bool
+	GitHubToken           bool
+	RuntimeName           runtime.Name
+	BaseImage             string
+	ContainerPlatform     string
+	MaxCPUs               int
+	CacheMounts           []runtime.CacheMount
+	Mounts                []runtime.Mount
+	RequestedModel        string // User-requested model.
+	RequestedEffort       string // User-requested reasoning effort.
+	ReportedModel         string // Model resolved by the harness.
+	ReportedEffort        string // Reasoning effort resolved by the harness.
+	SessionID             string // Backend-native session/thread ID required to resume stateful harnesses.
+	AgentVersion          string
+	AutoCompactTokenLimit int     // Configured session auto-compaction threshold.
+	LogSize               int64   // Byte size of the log file on disk; populated by Store.Load.
+	DiffCreated           bool    // True if any non-empty diff was recorded in the log; sticky across the run.
+	LastTrailer           *Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
+	Timeline              []agent.TimedMessage
+	RelayRecords          []agent.RelayRecordBoundary
+	RelayGeneration       string
 
 	path           string       // Absolute path for lazy message loading via LoadMessages.
 	resolver       WireResolver // Fresh wire factory supplied by the task owner.
@@ -1289,6 +1290,9 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	}
 	if lt.AgentVersion == "" {
 		lt.AgentVersion = src.AgentVersion
+	}
+	if lt.AutoCompactTokenLimit == 0 {
+		lt.AutoCompactTokenLimit = src.AutoCompactTokenLimit
 	}
 }
 
@@ -1758,6 +1762,9 @@ func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
 		if init.ReportedEffort != "" {
 			lt.ReportedEffort = init.ReportedEffort
 		}
+		if init.AutoCompactTokenLimit > 0 {
+			lt.AutoCompactTokenLimit = init.AutoCompactTokenLimit
+		}
 		if init.Version != "" {
 			lt.AgentVersion = init.Version
 		}
@@ -1779,6 +1786,9 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 		}
 		if init.ReportedEffort != "" {
 			lt.ReportedEffort = init.ReportedEffort
+		}
+		if init.AutoCompactTokenLimit > 0 {
+			lt.AutoCompactTokenLimit = init.AutoCompactTokenLimit
 		}
 		if init.Version != "" {
 			lt.AgentVersion = init.Version

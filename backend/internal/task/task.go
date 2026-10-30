@@ -545,9 +545,12 @@ func (t *Task) GetSessionID() string {
 }
 
 // SetSessionMetadata records persisted agent session metadata.
-func (t *Task) SetSessionMetadata(sessionID, model, effort, agentVersion string) {
+func (t *Task) SetSessionMetadata(sessionID, model, effort, agentVersion string, autoCompactTokenLimit int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if autoCompactTokenLimit > 0 {
+		t.autoCompactTokenLimit = autoCompactTokenLimit
+	}
 	if sessionID != "" {
 		t.sessionID = sessionID
 	}

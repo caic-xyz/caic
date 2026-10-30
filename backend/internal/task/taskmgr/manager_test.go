@@ -3016,7 +3016,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{HarnessName: harness.Codex}}})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetSessionMetadata("saved-session", "", "", "")
+			tk.SetSessionMetadata("saved-session", "", "", "", 0)
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			recordTestTaskLog(t, m, e)
@@ -7532,7 +7532,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tk.SetSessionMetadata(tc.session, "", "", "")
+			tk.SetSessionMetadata(tc.session, "", "", "", 0)
 			var messages []agent.Message
 			if tc.accepted {
 				messages = append(messages, &agent.UserInputMessage{Text: "prompt"})
@@ -7574,7 +7574,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	}
 	tk.SetState(taskslog.StateFailed)
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
-	tk.SetSessionMetadata("saved-session", "", "", "")
+	tk.SetSessionMetadata("saved-session", "", "", "", 0)
 	tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
 	tk.SetState(taskslog.StateFailed)
 	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
@@ -7680,4 +7680,16 @@ func (i *observedRuntimeInfo) Inspect(_ context.Context, id runtime.ID) (*runtim
 		state = "running"
 	}
 	return &runtime.InstanceInspect{ID: id, State: state}, nil
+}
+
+func TestApplyLoadedSessionMetadata(t *testing.T) {
+	t.Parallel()
+	tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyLoadedSessionMetadata(tk, &taskslog.LoadedTask{SessionID: "session", AutoCompactTokenLimit: 244800})
+	if got := tk.Snapshot().AutoCompactTokenLimit; got != 244800 {
+		t.Fatalf("restored auto-compact threshold = %d, want 244800", got)
+	}
 }

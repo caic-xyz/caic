@@ -568,6 +568,36 @@ func TestLoadLogHeader(t *testing.T) {
 		return path
 	}
 
+	t.Run("AutoCompactThreshold", func(t *testing.T) {
+		t.Parallel()
+		for _, version := range []int{2, 3} {
+			t.Run(fmt.Sprintf("V%d", version), func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{Version: version, Harness: "codex", Prompt: "test"}),
+					`{"t":"session","session_id":"session","agent_version":"1.0","auto_compact_token_limit":244800}`,
+					`{"t":"result","state":"purged"}`)
+				semantic, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+				}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if semantic.AutoCompactTokenLimit != 244800 {
+					t.Fatalf("semantic auto-compact threshold = %d, want 244800", semantic.AutoCompactTokenLimit)
+				}
+				for range 2 {
+					loaded, err := loadLogHeader(testLogger(), path, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if loaded.AutoCompactTokenLimit != 244800 {
+						t.Fatalf("restored auto-compact threshold = %d, want 244800", loaded.AutoCompactTokenLimit)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("RoundTripServesCache", func(t *testing.T) {
 		t.Parallel()
 		path := writeMetaLog(t, t.TempDir(), "task1")
