@@ -103,7 +103,7 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) err
 		return err
 	}
 	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+	if err := agent.AppendInputNativeRecord(log, data); err != nil {
 		return err
 	}
 	if _, err := w.Write(data); err != nil {

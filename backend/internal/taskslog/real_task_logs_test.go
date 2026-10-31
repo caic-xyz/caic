@@ -76,9 +76,6 @@ func TestRealTaskLogCorpus(t *testing.T) {
 		if loaded.LogPath() == "" {
 			t.Fatal("loaded task has no log path")
 		}
-		if err := loaded.LogVersion.Validate(); err != nil {
-			t.Fatalf("loaded task %s has invalid log version: %v", loaded.TaskID, err)
-		}
 	}
 	t.Logf("loaded logs=%d candidates=%d physical-bytes=%d source=%s", len(tasks), len(paths), bytes, source)
 }

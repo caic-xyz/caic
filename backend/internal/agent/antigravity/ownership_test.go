@@ -3,7 +3,7 @@
 package antigravity
 
 import (
-	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -13,19 +13,16 @@ func TestConversationProvenance(t *testing.T) {
 	t.Parallel()
 	// Synthetic DTO cases pin metadata semantics; they are not recorded native
 	// lifecycle evidence and cannot enable subagent cards.
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
-			if version != 0 {
-				parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
-			}
+			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 			if err != nil {
 				t.Fatal(err)
 			}
 			feed := func(line string) []agent.Message {
-				if version == 0 {
+				if !physical {
 					messages, err := wire.ParseMessage([]byte(line))
 					if err != nil {
 						t.Fatal(err)

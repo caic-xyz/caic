@@ -235,9 +235,6 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	// filename and persist output from its first line.
 	log, err := r.openLog(t)
 	if err != nil {
-		if errors.Is(err, agent.ErrReadOnlyLog) {
-			return nil, err
-		}
 		startupErr := &StartupError{Harness: t.Harness, Phase: "task log setup", Err: err}
 		t.recordStartupFailure(ctx, startupErr)
 		return nil, startupErr
@@ -842,7 +839,7 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 }
 
 func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *taskslog.Result) error {
-	path, err := r.LogStore.CompressTerminal(r.LogPath.Get(), log, t.terminalLogSummary(log.LogVersion(), res))
+	path, err := r.LogStore.CompressTerminal(r.LogPath.Get(), log, t.terminalLogSummary(res))
 	if err != nil {
 		return err
 	}
@@ -1107,9 +1104,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	// Validate the retained log before closing the session or clearing history.
 	log, err := r.openLog(t)
 	if err != nil {
-		if !errors.Is(err, agent.ErrReadOnlyLog) {
-			t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
-		}
+		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 

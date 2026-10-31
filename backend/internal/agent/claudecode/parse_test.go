@@ -14,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 )
 
 // parseMessage decodes a single Claude Code NDJSON line without widget
@@ -22,39 +23,6 @@ import (
 func parseMessage(line []byte) ([]agent.Message, error) {
 	msgs, _, err := parseMessageWithTracker(line, nil)
 	return msgs, err
-}
-
-func TestToAgentUsage(t *testing.T) {
-	t.Parallel()
-	t.Run("inconsistent breakdown", func(t *testing.T) {
-		t.Parallel()
-		u := toAgentUsage(&genclaudecode.MsgUsage{CacheCreationInputTokens: 20, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}})
-		if u.CacheWriteBuckets().Total() != 20 {
-			t.Fatalf("write buckets exceed total: %+v", u)
-		}
-	})
-
-	for _, tt := range []struct {
-		name string
-		in   genclaudecode.MsgUsage
-		want int
-	}{
-		{name: "unknown", in: genclaudecode.MsgUsage{CacheReadInputTokens: 100}},
-		{name: "five minute", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 100, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 100}}, want: 300},
-		{name: "one hour", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 100, CacheCreation: genclaudecode.CacheCreation{Ephemeral1hInputTokens: 100}}, want: 3600},
-		{name: "mixed uses first expiry", in: genclaudecode.MsgUsage{CacheCreationInputTokens: 110, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}}, want: 300},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			usage := toAgentUsage(&tt.in)
-			if usage.CacheWriteBuckets().Count(time.Hour) != int64(tt.in.CacheCreation.Ephemeral1hInputTokens) {
-				t.Fatalf("one-hour tokens lost: %+v", usage)
-			}
-			if got := usage.CacheTTLSeconds; got != tt.want {
-				t.Errorf("CacheTTLSeconds = %d, want %d", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestWidgetTrackerBounds(t *testing.T) {
@@ -120,6 +88,59 @@ func TestWidgetTrackerBounds(t *testing.T) {
 
 func TestParseMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("InventoryReasoningParity", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":300}`,
+			`{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":5,"output_tokens_details":{"thinking_tokens":3}}}}`,
+			`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens_details":{"thinking_tokens":7}}}}`,
+			`{"type":"system","subtype":"thinking_tokens","parent_tool_use_id":"child","estimated_tokens_delta":500}`,
+			`{"type":"assistant","parent_tool_use_id":"child","message":{"usage":{"input_tokens":1,"output_tokens":900,"output_tokens_details":{"thinking_tokens":900}}}}`,
+			`{"type":"stream_event","parent_tool_use_id":"child","event":{"type":"message_delta","usage":{"output_tokens_details":{"thinking_tokens":1000}}}}`,
+			`{"type":"result","parent_tool_use_id":"child","usage":{"output_tokens_details":{"thinking_tokens":5000}}}`,
+			`{"type":"result","usage":{"output_tokens":50}}`,
+			`{"type":"result","usage":{"output_tokens":1}}`,
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":40}`,
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":-5}`,
+			`{"type":"result","parent_tool_use_id":"child","usage":{}}`,
+			`{"type":"result","usage":{}}`,
+			`{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":70}`,
+			`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens_details":{"thinking_tokens":100}}}}`,
+			`{"type":"result","usage":{"output_tokens_details":{"thinking_tokens":6}}}`,
+			`{"type":"result","usage":{}}`,
+		}
+		wire := newWireFormat()
+		var inventory metadata.Parser
+		for _, parser := range []struct {
+			name  string
+			parse func([]byte) ([]agent.Message, error)
+		}{
+			{"live", wire.ParseMessage},
+			{"inventory", inventory.Parse},
+		} {
+			t.Run(parser.name, func(t *testing.T) {
+				t.Parallel()
+				var got []int
+				for _, line := range lines {
+					messages, err := parser.parse([]byte(line))
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, message := range messages {
+						if result, ok := message.(*agent.ResultMessage); ok && !result.Source.IsChild() {
+							got = append(got, result.Usage.ReasoningOutputTokens)
+						}
+					}
+				}
+				// Actual usage beats estimates; child events neither add to nor
+				// reset root accounting; explicit results beat pending usage;
+				// every root result clears both accumulators.
+				if want := []int{10, 0, 40, 6, 0}; !slices.Equal(got, want) {
+					t.Errorf("root reasoning by turn = %v, want %v", got, want)
+				}
+			})
+		}
+	})
 	t.Run("SystemInit", func(t *testing.T) {
 		t.Parallel()
 		line := `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"abc-123","tools":["Bash","Read"],"model":"claude-opus-4-6","claude_code_version":"2.1.34","uuid":"uuid-1","effort":"high"}`
@@ -467,27 +488,7 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("text = %q, want %q", m.Text, "Hello")
 		}
 	})
-	t.Run("DiffStat", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":3}],"ts":1719500000.123}`
-		msgs, err := parseMessage([]byte(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("got %d messages, want 1", len(msgs))
-		}
-		m, ok := msgs[0].(*agent.DiffStatMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.DiffStatMessage", msgs[0])
-		}
-		if len(m.DiffStat) != 1 {
-			t.Fatalf("diff_stat len = %d, want 1", len(m.DiffStat))
-		}
-		if m.Ts != 1719500000.123 {
-			t.Fatalf("ts = %f, want 1719500000.123", m.Ts)
-		}
-	})
+
 	t.Run("PendingAskUserAction", func(t *testing.T) {
 		t.Parallel()
 		line := `{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which login boundary should Google use in caic?","header":"Login","options":[{"label":"Identity only","description":"Use identity-only login boundary"},{"label":"Forge-coupled","description":"Use forge-coupled login boundary"}],"multiSelect":false}]},"tool_use_id":"toolu-1"}}`

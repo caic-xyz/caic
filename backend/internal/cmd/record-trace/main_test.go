@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
@@ -198,26 +197,26 @@ func TestValidateGoldenRecording(t *testing.T) {
 
 	t.Run("DelegatingScenario", func(t *testing.T) {
 		t.Parallel()
-		if err := validateGoldenRecording("recording.jsonl", record(header, delegation, footer), agent.LogVersionV3, claude, true); err != nil {
+		if err := validateGoldenRecording("recording.jsonl", record(header, delegation, footer), claude, true); err != nil {
 			t.Fatalf("validateGoldenRecording = %v, want the delegation accepted", err)
 		}
 	})
 	t.Run("MissingDelegation", func(t *testing.T) {
 		t.Parallel()
-		err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), agent.LogVersionV3, claude, true)
+		err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), claude, true)
 		if err == nil || !strings.Contains(err.Error(), "no native subagent activity") {
 			t.Fatalf("validateGoldenRecording = %v, want a missing-delegation failure", err)
 		}
 	})
 	t.Run("ScenarioWithoutNativeEvidence", func(t *testing.T) {
 		t.Parallel()
-		if err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), agent.LogVersionV3, claude, false); err != nil {
+		if err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), claude, false); err != nil {
 			t.Fatalf("validateGoldenRecording = %v, want a non-delegating scenario accepted", err)
 		}
 	})
 	t.Run("UnparseableRecording", func(t *testing.T) {
 		t.Parallel()
-		if err := validateGoldenRecording("recording.jsonl", record(header, `{"t":"agent","ts":1.000,"msg":{"broken"}}`), agent.LogVersionV3, claude, false); err == nil {
+		if err := validateGoldenRecording("recording.jsonl", record(header, `{"t":"agent","ts":1.000,"msg":{"broken"}}`), claude, false); err == nil {
 			t.Fatal("validateGoldenRecording accepted an unparseable recording")
 		}
 	})

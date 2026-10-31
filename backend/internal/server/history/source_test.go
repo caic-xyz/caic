@@ -190,7 +190,7 @@ func TestSource(t *testing.T) {
 					case *agent.ResultMessage:
 						appendFixture(t, path, `{"t":"agent","ts":4.000,"msg":{"type":"result","is_error":false,"result":"done again"}}`+"\n")
 					default:
-						encoded, err := agent.MarshalLogMessage(agent.LogVersionV3, m)
+						encoded, err := agent.MarshalLogMessage(m)
 						if err != nil {
 							t.Fatal(err)
 						}

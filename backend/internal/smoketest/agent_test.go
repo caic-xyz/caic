@@ -40,7 +40,7 @@ func TestFakeBackend(t *testing.T) {
 					ch := make(chan agent.TimedMessage, 8)
 					s, err := b.Start(t.Context(), &agent.Options{
 						Logger: slog.New(slog.DiscardHandler),
-						Log:    agent.DiscardLogSink{Version: agent.LogVersionV2},
+						Log:    agent.DiscardLogSink{},
 						MsgCh:  ch,
 						Model:  model,
 						Effort: tc.effort,
@@ -83,7 +83,7 @@ func TestFakeBackend(t *testing.T) {
 				ch := make(chan agent.TimedMessage, 32)
 				s, err := b.Start(ctx, &agent.Options{
 					Logger:        slog.New(slog.DiscardHandler),
-					Log:           agent.DiscardLogSink{Version: agent.LogVersionV2},
+					Log:           agent.DiscardLogSink{},
 					MsgCh:         ch,
 					InitialPrompt: agent.Prompt{Text: "Implement rate limiting for API endpoints"},
 				})

@@ -40,7 +40,7 @@ tool's `run_in_background` and a task record's `is_backgrounded`
 card is the only native activity that can keep a task running after the parent
 result.
 
-A sanitized historical v2 task record proves the observable lifecycle:
+A sanitized v3 task record proves the observable lifecycle:
 `system/task_started` carries `task_id`, `tool_use_id`, `description`,
 `is_backgrounded`, and `task_type`; the matching `system/task_notification`
 carries the IDs, terminal `status`, `summary`, and `output_file`. That source

@@ -48,9 +48,9 @@ func New(cacheDir string, envVars []string) *Backend {
 // optional set_model) over stdin/stdout for record-trace golden-file
 // generation. It returns a populated wireFormat and a buffered reader that
 // replaces the original stdout for subsequent reads.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	log := agent.DiscardLogSink{Version: version}
+	log := agent.DiscardLogSink{}
 	hs, continuation, err := handshake(ctx, stdin, br, stdout, &agent.Options{Dir: dir, Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
@@ -162,16 +162,6 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-// CaicInit is the legacy pre-caic_session metadata record.
-//
-// TODO: Trim CaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
-type CaicInit struct {
-	Type          string `json:"type"` // always "caic_init"
-	SessionID     string `json:"session_id"`
-	ReportedModel string `json:"model,omitzero"`
-	Version       string `json:"version,omitzero"`
-}
-
 // maxAccumulatedOutputBytes bounds synthetic final-message state. Streaming
 // deltas are already persisted independently, so an overflow disables the
 // synthetic final rather than retaining an incomplete duplicate.
@@ -227,11 +217,6 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		ID:      id,
 		Method:  opencode.MethodSessionPrompt,
 		Params:  params,
-	}
-	if log.LogVersion() == agent.LogVersionV2 {
-		if err := log.AppendMessage(&agent.UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
-			return err
-		}
 	}
 	return writeJSONInput(wr, req, log)
 }
@@ -465,14 +450,8 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	defer stopRead()
 
 	w := &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
-	relayLog := agent.LogSink(agent.DiscardLogSink{Version: opts.Log.LogVersion()})
-	if opts.Log.LogVersion() == agent.LogVersionV3 {
-		relayLog = opts.Log
-	}
-	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), relayLog)
-	if err != nil {
-		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
-	}
+	records := agent.NewRelayRecordReader(stdout, opts.Log)
+
 	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.
@@ -721,10 +700,8 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
-	if log.LogVersion() == agent.LogVersionV3 {
-		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
-			return err
-		}
+	if err := agent.AppendInputNativeRecord(log, data); err != nil {
+		return err
 	}
 	if _, err := w.Write(data); err != nil {
 		return err

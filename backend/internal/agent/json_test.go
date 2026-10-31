@@ -26,17 +26,17 @@ func TestParseJSONRPCEnvelope(t *testing.T) {
 	})
 	t.Run("repeated fields", func(t *testing.T) {
 		t.Parallel()
-		env, err := ParseJSONRPCEnvelope([]byte(`{"method":"first","method":null,"type":"old","type":"new","params":{},"params":null}`))
+		env, err := ParseJSONRPCEnvelope([]byte(`{"method":"first","method":null,"params":{},"params":null}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if env.Method != "first" || env.Type != "new" || string(env.Params) != "null" {
+		if env.Method != "first" || string(env.Params) != "null" {
 			t.Fatalf("envelope = %#v", env)
 		}
 	})
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		for _, line := range []string{`[]`, `{"method":1}`, `{"type":false}`} {
+		for _, line := range []string{`[]`, `{"method":1}`} {
 			t.Run(line, func(t *testing.T) {
 				t.Parallel()
 				if _, err := ParseJSONRPCEnvelope([]byte(line)); err == nil {

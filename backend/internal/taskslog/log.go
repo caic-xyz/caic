@@ -36,10 +36,9 @@ func IsLogName(name string) bool {
 // provide either complete native records or semantic caic controls; raw file
 // writes never escape this type.
 type taskLogWriter struct {
-	mu      sync.Mutex
-	file    *os.File
-	version agent.LogVersion
-	closed  bool
+	mu     sync.Mutex
+	file   *os.File
+	closed bool
 }
 
 // newTaskLogWriter opens a serialized append writer for an active task log.
@@ -48,11 +47,8 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &taskLogWriter{file: f, version: agent.LogVersionV3}, nil
+	return &taskLogWriter{file: f}, nil
 }
-
-// LogVersion returns the physical record version owned by the task log.
-func (w *taskLogWriter) LogVersion() agent.LogVersion { return w.version }
 
 // AppendNative appends one complete encoded native physical record.
 func (w *taskLogWriter) AppendNative(data []byte) error {
@@ -60,9 +56,6 @@ func (w *taskLogWriter) AppendNative(data []byte) error {
 	defer w.mu.Unlock()
 	if w.closed {
 		return os.ErrClosed
-	}
-	if err := w.version.ValidateWritable(); err != nil {
-		return err
 	}
 	if len(data) == 0 || data[len(data)-1] != '\n' {
 		return errors.New("task log native record is not LF-terminated")
@@ -79,7 +72,7 @@ func (w *taskLogWriter) AppendNative(data []byte) error {
 
 // AppendMessage encodes and appends one backend-owned control record.
 func (w *taskLogWriter) AppendMessage(m agent.Message) error {
-	data, err := agent.MarshalLogMessage(w.version, m)
+	data, err := agent.MarshalLogMessage(m)
 	if err != nil {
 		return err
 	}

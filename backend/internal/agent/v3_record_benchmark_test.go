@@ -1,4 +1,4 @@
-// Microbenchmarks for strict canonical v2 task-log record decoding through the parser API.
+// Microbenchmarks for strict canonical v3 task-log record decoding through the parser API.
 
 package agent
 
@@ -9,19 +9,19 @@ import (
 	"testing"
 )
 
-type benchmarkV2NativeMessage struct {
+type benchmarkNativeMessage struct {
 	Type string `json:"type"`
 }
 
-func benchmarkV2NativeParser(line []byte) ([]Message, error) {
-	var msg benchmarkV2NativeMessage
+func benchmarkNativeParser(line []byte) ([]Message, error) {
+	var msg benchmarkNativeMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return nil, err
 	}
 	return nil, nil
 }
 
-func BenchmarkV2AgentRecord(b *testing.B) {
+func BenchmarkV3AgentRecord(b *testing.B) {
 	cases := []struct {
 		name    string
 		payload []byte
@@ -35,7 +35,7 @@ func BenchmarkV2AgentRecord(b *testing.B) {
 	}
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
-			p, err := NewLogRecordParser(LogVersionV2, benchmarkV2NativeParser)
+			p, err := NewLogRecordParser(benchmarkNativeParser)
 			if err != nil {
 				b.Fatal(err)
 			}

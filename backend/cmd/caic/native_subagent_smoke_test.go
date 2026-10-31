@@ -91,7 +91,7 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 	t.Helper()
 	newWire := func() agent.WireFormat { return smokeReplayWire(h) }
 	path := filepath.Join("..", "..", "internal", "agent", smokeReplayEvidenceDir[h], "testdata", "evidence", file)
-	evidence := agenttest.LoadNativeSubagentEvidence(t, path, agent.LogVersionV3, newWire)
+	evidence := agenttest.LoadNativeSubagentEvidence(t, path, newWire)
 	split := evidence.RunningSplit(t)
 	if split >= len(evidence.Payloads) {
 		t.Fatalf("%s leaves no payload after its running card, so a restart cannot be modeled", path)
@@ -99,7 +99,7 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 	return smokeReplayCase{
 		name: file,
 		recording: smoketest.ReplayRecording{
-			Prompt:    agenttest.NativeSubagentEvidencePrompt(t, path, agent.LogVersionV3),
+			Prompt:    agenttest.NativeSubagentEvidencePrompt(t, path),
 			Harness:   h,
 			Payloads:  evidence.Payloads,
 			HoldAfter: split,
@@ -346,7 +346,7 @@ func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat)
 			t.Errorf("close %s: %v", path, err)
 		}
 	}()
-	parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		t.Fatal(err)
 	}

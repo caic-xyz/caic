@@ -5,8 +5,8 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -20,7 +20,7 @@ import (
 // one agent that runs and completes.
 func TestNativeSubagentJokeEvidence(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat {
 		return New("", nil).NewWire()
 	})
 
@@ -35,8 +35,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 		observations []agent.NativeSubagent
 	}{
 		{"live", evidence.Live},
-		{"v2 replay", evidence.V2},
-		{"v3 replay", evidence.V3},
+		{"v3 replay", evidence.Replay},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -78,20 +77,17 @@ func TestConcurrentChildToolsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
-			if version != 0 {
-				parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
-			}
+			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var messages []agent.Message
 			for line := range bytes.SplitSeq(bytes.TrimSpace(data), []byte{'\n'}) {
-				if version == 0 {
+				if !physical {
 					var raw struct {
 						Message json.RawMessage `json:"msg"`
 					}

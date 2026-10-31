@@ -123,7 +123,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			}
 			// Results sum every request, including child threads. Subtract calls
 			// already priced, then estimate only the remaining aggregate at base
-			// rates: legacy logs and missing events do not establish request sizes.
+			// rates: missing per-call events do not establish request sizes.
 			writes := m.Usage.CacheWriteBuckets().Subtract(c.pricedUsage.CacheWriteBuckets())
 			remaining := agent.Usage{
 				InputTokens:              max(0, m.Usage.InputTokens-c.pricedUsage.InputTokens),

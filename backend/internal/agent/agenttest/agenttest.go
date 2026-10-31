@@ -14,7 +14,7 @@ import (
 // Parser parses one harness log line into normalized agent messages.
 type Parser func([]byte) ([]agent.Message, error)
 
-// ParseJSONL parses every non-empty line in a JSONL fixture with parser.
+// ParseJSONL parses every non-empty physical v3 fixture record with parser.
 func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -26,6 +26,10 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 		}
 	})
 
+	physical, err := agent.NewLogRecordParser(parser)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out []agent.Message
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
@@ -34,11 +38,13 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 		if strings.TrimSpace(string(data)) == "" {
 			continue
 		}
-		msgs, err := parser(data)
+		record, err := physical.ParseRecord(data)
 		if err != nil {
 			t.Fatalf("parse %s:%d: %v", path, line, err)
 		}
-		out = append(out, msgs...)
+		for _, msg := range record.Messages {
+			out = append(out, msg.Message)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan %s: %v", path, err)

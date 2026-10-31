@@ -4,11 +4,9 @@ package taskslog
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -19,84 +17,48 @@ import (
 
 func TestRecordCursorControls(t *testing.T) {
 	t.Parallel()
-	t.Run("legacy init", func(t *testing.T) {
-		t.Parallel()
-		path := writePhysicalTestLog(t, false, `{"type":"caic_meta","version":1,"harness":"claude","prompt":"original"}`, `{"type":"caic_init","session_id":"legacy","model":"legacy-model","version":"0.9"}`)
-		cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+	path := writePhysicalTestLog(t, false,
+		`{"t":"caic_meta","version":3,"harness":"claude","prompt":"original"}`,
+		`{"t":"session","session_id":"session-1","model":"claude-sonnet-4-6","reported_effort":"high","agent_version":"1.2"}`,
+		`{"t":"user_input","text":"follow up","images":[{"media_type":"image/png","data":"aGk="}]}`,
+		`{"t":"text","text":"plain response"}`)
+	resolver := backends.Default("", nil)
+	cursor, err := OpenRecordCursor(path, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cursor.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var conversation []agent.TimedMessage
+	var init *agent.InitMessage
+	for record, err := range cursor.Read(t.Context()) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if err := cursor.Close(); err != nil {
-				t.Error(err)
-			}
-		})
-		found := false
-		for record, err := range cursor.Read(t.Context()) {
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, message := range record.Messages {
-				if init, ok := message.Message.(*agent.InitMessage); ok && record.ID == 2 && init.SessionID == "legacy" && init.ReportedModel == "legacy-model" && init.Version == "0.9" {
-					found = true
-				}
+		for _, message := range record.Messages {
+			if m, ok := message.Message.(*agent.InitMessage); ok {
+				init = m
+			} else {
+				conversation = append(conversation, message)
 			}
 		}
-		if !found {
-			t.Fatal("legacy init missing")
-		}
-	})
-	for _, version := range []int{1, 2, 3} {
-		t.Run(strconv.Itoa(version), func(t *testing.T) {
-			t.Parallel()
-			key, session := "t", "session"
-			if version == 1 {
-				key, session = "type", "caic_session"
-			}
-			path := writePhysicalTestLog(t, false,
-				fmt.Sprintf(`{%q:"caic_meta","version":%d,"harness":"claude","prompt":"original"}`, key, version),
-				fmt.Sprintf(`{%q:%q,"session_id":"session-1","model":"claude-sonnet-4-6","reported_effort":"high","agent_version":"1.2"}`, key, session),
-				fmt.Sprintf(`{%q:"user_input","text":"follow up","images":[{"media_type":"image/png","data":"aGk="}]}`, key),
-				fmt.Sprintf(`{%q:"text","text":"plain response"}`, key))
-			resolver := backends.Default("", nil)
-			cursor, err := OpenRecordCursor(path, resolver)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := cursor.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			var conversation []agent.TimedMessage
-			var init *agent.InitMessage
-			for record, err := range cursor.Read(t.Context()) {
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, message := range record.Messages {
-					if m, ok := message.Message.(*agent.InitMessage); ok {
-						init = m
-					} else {
-						conversation = append(conversation, message)
-					}
-				}
-			}
-			loaded, err := loadSemanticTask(path, resolver)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if init == nil || init.SessionID != loaded.SessionID || init.ReportedModel != loaded.ReportedModel || init.ReportedEffort != loaded.ReportedEffort {
-				t.Fatalf("session context missing or differs from semantic loading: %+v", init)
-			}
-			if len(conversation) != 2 || !reflect.DeepEqual(conversation, loaded.Timeline) {
-				t.Fatalf("conversation controls differ from semantic loading: %#v", conversation)
-			}
-			input, ok := conversation[0].Message.(*agent.UserInputMessage)
-			if version != 1 && (!ok || input.Text != "follow up" || len(input.Images) != 1 || input.Images[0].Data != "aGk=") {
-				t.Fatalf("input/images not preserved: %#v", conversation[0].Message)
-			}
-		})
+	}
+	loaded, err := loadSemanticTask(path, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if init == nil || init.SessionID != loaded.SessionID || init.ReportedModel != loaded.ReportedModel || init.ReportedEffort != loaded.ReportedEffort {
+		t.Fatalf("session context missing or differs from semantic loading: %+v", init)
+	}
+	if len(conversation) != 2 || !reflect.DeepEqual(conversation, loaded.Timeline) {
+		t.Fatalf("conversation controls differ from semantic loading: %#v", conversation)
+	}
+	input, ok := conversation[0].Message.(*agent.UserInputMessage)
+	if !ok || input.Text != "follow up" || len(input.Images) != 1 || input.Images[0].Data != "aGk=" {
+		t.Fatalf("input/images not preserved: %#v", conversation[0].Message)
 	}
 }
 
@@ -179,7 +141,7 @@ func TestRecordCursorAuthority(t *testing.T) {
 		}
 		t.Fatal("accepted changed leading authority")
 	})
-	for _, segment := range []string{header, `{"t":"caic_meta","version":3,"harness":"codex"}`, `{"t":"caic_meta","version":2,"harness":"claude"}`} {
+	for _, segment := range []string{header, `{"t":"caic_meta","version":3,"harness":"codex"}`, `{"t":"caic_meta","version":3,"harness":"claude"}`} {
 		t.Run(segment, func(t *testing.T) {
 			t.Parallel()
 			cursor, err := OpenRecordCursor(writePhysicalTestLog(t, false, header, text, segment), backends.Default("", nil))

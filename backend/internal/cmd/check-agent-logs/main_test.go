@@ -4,10 +4,15 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	opencodedto "github.com/maruel/genai/providers/opencode"
@@ -15,10 +20,391 @@ import (
 
 func TestRun(t *testing.T) {
 	t.Parallel()
+	t.Run("deletes old obsolete logs", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		old := time.Now().Add(-7 * 24 * time.Hour)
+		paths := []string{
+			writeLog(t, filepath.Join(dir, "v1.jsonl"), []string{`{"type":"caic_meta","version":1}`, `not a valid body`}, false),
+			writeLog(t, filepath.Join(dir, "v2.jsonl.zst"), []string{`{"t":"caic_meta","version":2}`, `not a valid body`}, true),
+		}
+		for _, path := range paths {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var out bytes.Buffer
+		if err := run([]string{"-dir", dir}, &out); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("obsolete log still exists: %s (stat error: %v)", path, err)
+			}
+		}
+		want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 0 v3 task logs; found 0 schema issues\n", paths[0], paths[1])
+		if out.String() != want {
+			t.Errorf("output = %q, want %q", out.String(), want)
+		}
+	})
+	t.Run("deletes selected obsolete logs", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name      string
+			args      []string
+			selection string
+			checked   int
+		}{
+			{name: "default cutoff", checked: 1},
+			{name: "custom cutoff", args: []string{"-since=1h"}, checked: 1},
+			{name: "all", args: []string{"-all"}, checked: 1},
+			{name: "explicit file", args: []string{"-since=0"}, selection: "files"},
+			{name: "explicit directory", args: []string{"-since=0"}, selection: "directory", checked: 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				paths := make([]string, 0, 4)
+				var want strings.Builder
+				for i, header := range []string{`{"type":"caic_meta","version":1,"prompt":"p"}`, `{"t":"caic_meta","version":2,"repos":[]}`} {
+					for _, compressed := range []bool{false, true} {
+						name := fmt.Sprintf("v%d.jsonl", i+1)
+						if compressed {
+							name += ".zst"
+						}
+						path := writeLog(t, filepath.Join(dir, name), []string{header, "invalid body"}, compressed)
+						paths = append(paths, path)
+						fmt.Fprintf(&want, "deleted obsolete v%d task log %s\n", i+1, path)
+					}
+				}
+				ignored := writeLog(t, filepath.Join(dir, "unrelated.txt"), []string{`{"type":"caic_meta","version":1}`}, false)
+				current := writeLog(t, filepath.Join(dir, "v3.jsonl"), []string{taskMeta("pi")}, false)
+				args := append([]string(nil), tc.args...)
+				switch tc.selection {
+				case "files":
+					args = append(args, paths...)
+				case "directory":
+					args = append(args, dir)
+				default:
+					args = append(args, "-dir", dir)
+				}
+				fmt.Fprintf(&want, "checked %d v3 task logs; found 0 schema issues\n", tc.checked)
+				var out bytes.Buffer
+				if err := run(args, &out); err != nil {
+					t.Fatal(err)
+				}
+				if out.String() != want.String() {
+					t.Errorf("output = %q, want %q", out.String(), want.String())
+				}
+				for _, path := range paths {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("obsolete log still exists: %s (stat error: %v)", path, err)
+					}
+				}
+				for _, path := range []string{ignored, current} {
+					if _, err := os.Stat(path); err != nil {
+						t.Errorf("preserved file %s: %v", path, err)
+					}
+				}
+			})
+		}
+	})
+	t.Run("v3 age cutoff", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name string
+				args []string
+				age  time.Duration
+			}{
+				{name: "default", age: 96 * time.Hour},
+				{name: "custom", args: []string{"-since=1h"}, age: 2 * time.Hour},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					dir := t.TempDir()
+					path := writeLog(t, filepath.Join(dir, "old.jsonl.zst"), []string{taskMeta("pi"), "invalid body"}, true)
+					old := time.Now().Add(-tc.age)
+					if err := os.Chtimes(path, old, old); err != nil {
+						t.Fatal(err)
+					}
+					var out bytes.Buffer
+					if err := run(append(tc.args, "-dir", dir), &out); err != nil {
+						t.Fatal(err)
+					}
+					if out.String() != "checked 0 v3 task logs; found 0 schema issues\n" {
+						t.Errorf("output = %q", out.String())
+					}
+					if _, err := os.Stat(path); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, mode := range []string{"all", "explicit file", "explicit directory", "custom cutoff"} {
+				t.Run(mode, func(t *testing.T) {
+					t.Parallel()
+					dir := t.TempDir()
+					path := writeLog(t, filepath.Join(dir, "v3.jsonl"), []string{taskMeta("pi"), "invalid body"}, false)
+					old := time.Now().Add(-96 * time.Hour)
+					if err := os.Chtimes(path, old, old); err != nil {
+						t.Fatal(err)
+					}
+					var args []string
+					switch mode {
+					case "all":
+						args = []string{"-all", "-dir", dir}
+					case "explicit file":
+						args = []string{"-since=0", path}
+					case "explicit directory":
+						args = []string{"-since=0", dir}
+					case "custom cutoff":
+						args = []string{"-since=120h", "-dir", dir}
+					}
+					if err := run(args, io.Discard); err == nil || !strings.Contains(err.Error(), path+":2:") {
+						t.Errorf("run error = %v, want body validation error", err)
+					}
+					if _, err := os.Stat(path); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+	})
+	t.Run("overlapping explicit paths", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := writeLog(t, filepath.Join(dir, "obsolete.jsonl"), []string{`{"t":"caic_meta","version":2}`}, false)
+		current := writeLog(t, filepath.Join(dir, "v3.jsonl"), []string{taskMeta("pi")}, false)
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(cwd, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := run([]string{path, dir, path, rel, current}, &out); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("deleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 schema issues\n", path)
+		if out.String() != want {
+			t.Errorf("output = %q, want %q", out.String(), want)
+		}
+	})
+	t.Run("preserves unconfirmed headers", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, header string }{
+			{"empty", ""},
+			{"malformed", `{"type":"caic_meta","version":1`},
+			{"trailing", `{"type":"caic_meta","version":1} {}`},
+			{"array", `[{"type":"caic_meta","version":1}]`},
+			{"null", `null`},
+			{"missing version", `{"t":"caic_meta"}`},
+			{"missing discriminator", `{"version":1}`},
+			{"future", `{"t":"caic_meta","version":4}`},
+			{"native", `{"type":"agent_start","version":1}`},
+			{"other compact record", `{"t":"agent","version":2}`},
+			{"wrong v1 discriminator", `{"t":"caic_meta","version":1}`},
+			{"wrong v2 discriminator", `{"type":"caic_meta","version":2}`},
+			{"both discriminators", `{"type":"caic_meta","t":"caic_meta","version":1}`},
+			{"null discriminator", `{"t":"caic_meta","type":null,"version":2}`},
+			{"duplicate version", `{"t":"caic_meta","version":3,"version":2}`},
+			{"same duplicate version", `{"type":"caic_meta","version":1,"version":1}`},
+			{"escaped duplicate version", `{"t":"caic_meta","version":2,"ver\u0073ion":2}`},
+			{"case variant version", `{"type":"caic_meta","version":1,"Version":3}`},
+			{"case variant discriminator", `{"type":"caic_meta","TYPE":"agent","version":1}`},
+			{"unicode case variant version", `{"t":"caic_meta","version":2,"verſion":3}`},
+			{"duplicate discriminator", `{"t":"agent","t":"caic_meta","version":2}`},
+			{"string version", `{"t":"caic_meta","version":"2"}`},
+			{"fractional version", `{"t":"caic_meta","version":2.0}`},
+			{"malformed version", `{"type":"caic_meta","version":null}`},
+			{"invalid discriminator", `{"type":[],"version":1}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for _, compressed := range []bool{false, true} {
+					dir := t.TempDir()
+					name := "a-unconfirmed.jsonl"
+					if compressed {
+						name += ".zst"
+					}
+					path := writeLog(t, filepath.Join(dir, name), []string{tc.header}, compressed)
+					before, err := os.ReadFile(filepath.Clean(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					old := time.Now().Add(-96 * time.Hour)
+					if err := os.Chtimes(path, old, old); err != nil {
+						t.Fatal(err)
+					}
+					obsolete := writeLog(t, filepath.Join(dir, "z-obsolete.jsonl"), []string{`{"t":"caic_meta","version":2}`}, false)
+					if err := run([]string{"-dir", dir}, io.Discard); err == nil || !strings.Contains(err.Error(), path+":1:") {
+						t.Errorf("run error = %v, want header validation error", err)
+					}
+					after, err := os.ReadFile(filepath.Clean(path))
+					if err != nil || !bytes.Equal(before, after) {
+						t.Errorf("unconfirmed log changed; read error = %v", err)
+					}
+					if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
+						t.Errorf("obsolete log not deleted after unrelated header failure: %v", err)
+					}
+				}
+			})
+		}
+	})
+	t.Run("reports output failure", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		obsolete := []string{
+			writeLog(t, filepath.Join(dir, "a-v1.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false),
+			writeLog(t, filepath.Join(dir, "b-v2.jsonl.zst"), []string{`{"t":"caic_meta","version":2}`}, true),
+		}
+		current := writeLog(t, filepath.Join(dir, "c-v3.jsonl"), []string{taskMeta("pi"), `{"t":"agent","ts":1.000,"msg":{"type":"agent_start"}}`}, false)
+		drift := writeLog(t, filepath.Join(dir, "d-v3.jsonl"), []string{taskMeta("pi"), `{"t":"agent","ts":1.000,"msg":{"type":"agent_start","future":true}}`}, false)
+		r, out := io.Pipe()
+		if err := r.Close(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := out.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		err := run([]string{dir}, out)
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Errorf("run error = %v, want closed pipe", err)
+		}
+		if err == nil || !strings.Contains(err.Error(), "agent log schema validation failed") {
+			t.Errorf("run error = %v, want later v3 schema failure", err)
+		}
+		for _, path := range obsolete {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("obsolete log not deleted after reporting failure: %s: %v", path, err)
+			}
+		}
+		for _, path := range []string{current, drift} {
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("v3 log not preserved: %s: %v", path, err)
+			}
+		}
+	})
+	t.Run("continues after selection failure", func(t *testing.T) {
+		t.Parallel()
+		for _, mode := range []string{"missing root", "unreadable root", "unreadable file", "removal failure"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				if mode != "missing root" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+					t.Skip("file permissions do not force failure on this platform or as root")
+				}
+				dir := t.TempDir()
+				failed := filepath.Join(dir, "a-failure.jsonl")
+				wantErr := os.ErrNotExist
+				if mode != "missing root" {
+					wantErr = os.ErrPermission
+					if mode == "unreadable file" {
+						writeLog(t, failed, []string{`{"t":"caic_meta","version":2}`}, false)
+					} else {
+						if err := os.Mkdir(failed, 0o700); err != nil {
+							t.Fatal(err)
+						}
+						writeLog(t, filepath.Join(failed, "v1.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false)
+					}
+					f, err := os.Open(filepath.Clean(failed))
+					if err != nil {
+						t.Fatal(err)
+					}
+					restorePerm := os.FileMode(0o700)
+					if mode == "unreadable file" {
+						restorePerm = 0o600
+					}
+					t.Cleanup(func() {
+						if err := f.Chmod(restorePerm); err != nil {
+							t.Error(err)
+						}
+						if err := f.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					var perm os.FileMode
+					if mode == "removal failure" {
+						perm = 0o500
+					}
+					if err := f.Chmod(perm); err != nil {
+						t.Fatal(err)
+					}
+				}
+				healthy := filepath.Join(dir, "b-healthy")
+				if err := os.Mkdir(healthy, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				obsolete := []string{
+					writeLog(t, filepath.Join(healthy, "v1.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false),
+					writeLog(t, filepath.Join(healthy, "v2.jsonl.zst"), []string{`{"t":"caic_meta","version":2}`}, true),
+				}
+				current := writeLog(t, filepath.Join(healthy, "v3.jsonl"), []string{taskMeta("pi"), `{"t":"agent","ts":1.000,"msg":{"type":"agent_start"}}`}, false)
+				var out bytes.Buffer
+				args := []string{failed, healthy}
+				if mode == "missing root" {
+					args = append(args, filepath.Join(dir, "z-missing.jsonl"))
+				}
+				err := run(args, &out)
+				if !errors.Is(err, wantErr) {
+					t.Errorf("run error = %v, want %v", err, wantErr)
+				}
+				if mode == "missing root" {
+					for _, path := range []string{args[0], args[2]} {
+						if err == nil || !strings.Contains(err.Error(), path) {
+							t.Errorf("run error = %v, want discovery error for %s", err, path)
+						}
+					}
+				}
+				want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 schema issues\n", obsolete[0], obsolete[1])
+				if out.String() != want {
+					t.Errorf("output = %q, want %q", out.String(), want)
+				}
+				for _, path := range obsolete {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("obsolete log not deleted after selection failure: %s: %v", path, err)
+					}
+				}
+				if _, err := os.Stat(current); err != nil {
+					t.Errorf("v3 log not preserved: %v", err)
+				}
+				if mode != "missing root" {
+					if _, err := os.Stat(failed); err != nil {
+						t.Errorf("failed selection not preserved: %v", err)
+					}
+				}
+				if mode == "removal failure" {
+					if _, err := os.Stat(filepath.Join(failed, "v1.jsonl")); err != nil {
+						t.Errorf("obsolete log not preserved after removal failure: %v", err)
+					}
+				}
+			})
+		}
+	})
+	t.Run("reports compressed read failure", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "broken.jsonl.zst")
+		if err := os.WriteFile(path, []byte("not a zstd stream"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := run([]string{path}, io.Discard); err == nil || !strings.Contains(err.Error(), "read "+path) {
+			t.Errorf("run error = %v, want compressed read error", err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("clean JSONL and zstd", func(t *testing.T) {
 		t.Parallel()
 		lines := []string{
-			v2Meta("pi"),
+			taskMeta("pi"),
 			`{"t":"agent","ts":1.000,"msg":{"type":"agent_start"}}`,
 			`{"t":"turn_commit_snapshot","baseline":true,"repository_commits":[{"repository_path":"/home/user/src/repo","branch_name":"caic-1","commit_hash":"1111111111111111111111111111111111111111"}],"change_stat":{"files":1,"added":2,"deleted":1,"binary_files":0}}`,
 		}
@@ -32,7 +418,7 @@ func TestRun(t *testing.T) {
 			if err := run([]string{path}, &out); err != nil {
 				t.Fatal(err)
 			}
-			if got := out.String(); got != "checked 1 v2/v3 task logs; found 0 schema issues\n" {
+			if got := out.String(); got != "checked 1 v3 task logs; found 0 schema issues\n" {
 				t.Errorf("output = %q", got)
 			}
 		}
@@ -41,7 +427,7 @@ func TestRun(t *testing.T) {
 	t.Run("v3 input and relay records", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v3Meta("pi"),
+			taskMeta("pi"),
 			`{"t":"input","ts":1.000,"msg":{"type":"prompt","message":"hello"}}`,
 			`{"t":"agent","ts":1.001,"msg":{"type":"agent_start"}}`,
 		}, false)
@@ -83,7 +469,7 @@ func TestRun(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-					v3Meta(tc.harness),
+					taskMeta(tc.harness),
 					`{"t":"input","ts":1.000,"msg":` + tc.input + `}`,
 				}, false)
 				var out bytes.Buffer
@@ -109,7 +495,7 @@ func TestRun(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{v3Meta("antigravity"), tc.record}, false)
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{taskMeta("antigravity"), tc.record}, false)
 				var out bytes.Buffer
 				err := run([]string{path}, &out)
 				if tc.want == "" {
@@ -126,7 +512,7 @@ func TestRun(t *testing.T) {
 	t.Run("Claude Code init", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("claude"),
+			taskMeta("claude"),
 			`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","cwd":"/tmp","session_id":"session","tools":["Bash"],"model":"sonnet","claude_code_version":"2","uuid":"uuid"}}`,
 		}, false)
 		var out bytes.Buffer
@@ -138,7 +524,7 @@ func TestRun(t *testing.T) {
 	t.Run("unknown Pi field", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("pi"),
+			taskMeta("pi"),
 			`{"t":"agent","ts":1.000,"msg":{"type":"agent_start","newField":true}}`,
 		}, false)
 		var out bytes.Buffer
@@ -157,7 +543,7 @@ func TestRun(t *testing.T) {
 	t.Run("Codex emittedAtMs", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("codex"),
+			taskMeta("codex"),
 			`{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"thread"}},"emittedAtMs":1}}`,
 		}, false)
 		var out bytes.Buffer
@@ -322,37 +708,6 @@ func TestCheckOpenCode(t *testing.T) {
 		}
 	})
 
-	t.Run("caic injections", func(t *testing.T) {
-		t.Parallel()
-		for _, tc := range []struct {
-			name string
-			data string
-		}{
-			{name: "session", data: `{"type":"caic_session","session_id":"session","model":"model","agent_version":"1"}`},
-			{name: "init", data: `{"type":"caic_init","session_id":"session","model":"model","version":"1"}`},
-			{name: "diff stat", data: `{"type":"caic_diff_stat","diff_stat":[],"ts":1.000}`},
-			{name: "exit", data: `{"type":"caic_exit","exit_code":0,"cmd":["opencode"],"ts":1.000}`},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				if _, err := checkOpenCode([]byte(tc.data), nil); err != nil {
-					t.Fatal(err)
-				}
-				invalid := strings.TrimSuffix(tc.data, "}") + `,"unexpected":true}`
-				if _, err := checkOpenCode([]byte(invalid), nil); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
-					t.Fatalf("checkOpenCode(%s) error = %v, want strict unknown-field error", invalid, err)
-				}
-			})
-		}
-	})
-
-	t.Run("unknown caic injection", func(t *testing.T) {
-		t.Parallel()
-		if _, err := checkOpenCode([]byte(`{"type":"caic_future","value":true}`), nil); err == nil || !strings.Contains(err.Error(), `unrecognized OpenCode caic injection type "caic_future"`) {
-			t.Fatalf("checkOpenCode error = %v, want unknown caic injection error", err)
-		}
-	})
-
 	t.Run("missing notification params", func(t *testing.T) {
 		t.Parallel()
 		data := []byte(`{"method":"session/update"}`)
@@ -420,7 +775,7 @@ func TestCheckOpenCode(t *testing.T) {
 	t.Run("unknown update field", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("opencode"),
+			taskMeta("opencode"),
 			`{"t":"agent","ts":1.000,"msg":{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"},"newField":true}}}}`,
 		}, false)
 		var out bytes.Buffer
@@ -437,13 +792,13 @@ func TestCheckOpenCode(t *testing.T) {
 
 func TestCheckFile(t *testing.T) {
 	t.Parallel()
-	t.Run("rejects noncanonical v2 record", func(t *testing.T) {
+	t.Run("rejects noncanonical v3 record", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("pi"),
+			taskMeta("pi"),
 			`{"t":"agent","ts":1,"msg":{"type":"agent_start"}}`,
 		}, false)
-		if _, _, err := checkFile(path); err == nil || !strings.Contains(err.Error(), "timestamp must have exactly three fractional digits") {
+		if _, err := checkFile(path, time.Time{}); err == nil || !strings.Contains(err.Error(), "timestamp must have exactly three fractional digits") {
 			t.Errorf("checkFile error = %v, want noncanonical timestamp", err)
 		}
 	})
@@ -451,7 +806,7 @@ func TestCheckFile(t *testing.T) {
 	t.Run("reports relay diagnostic", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
-			v2Meta("pi"),
+			taskMeta("pi"),
 			`{"t":"agent","ts":1.000,"msg":"native record exceeds relay limit"}`,
 		}, false)
 		var out bytes.Buffer
@@ -463,17 +818,74 @@ func TestCheckFile(t *testing.T) {
 }
 
 func TestParseFlags(t *testing.T) {
-	t.Parallel()
+	t.Run("requires a selected directory without home", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		dir := t.TempDir()
+		t.Chdir(dir)
+		path := writeLog(t, filepath.Join(dir, "preserved.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false)
+		var out bytes.Buffer
+		if err := run(nil, &out); err == nil || !strings.Contains(err.Error(), "resolve default task-log directory") {
+			t.Errorf("default selection error = %v, want home-resolution error", err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unselected current-directory log changed: %v", err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("default selection produced output: %s", &out)
+		}
+	})
+	t.Run("selects default home directory", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		dir := filepath.Join(home, ".cache", "caic", "tasks")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		obsolete := writeLog(t, filepath.Join(dir, "obsolete.jsonl"), []string{`{"t":"caic_meta","version":2}`}, false)
+		cwd := t.TempDir()
+		t.Chdir(cwd)
+		preserved := writeLog(t, filepath.Join(cwd, "preserved.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false)
+		var out bytes.Buffer
+		if err := run(nil, &out); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
+			t.Errorf("default-home obsolete log still exists: %v", err)
+		}
+		if _, err := os.Stat(preserved); err != nil {
+			t.Errorf("unselected current-directory log changed: %v", err)
+		}
+	})
+	t.Run("explicit selection without home", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		for _, fileSelection := range []bool{false, true} {
+			dir := t.TempDir()
+			path := writeLog(t, filepath.Join(dir, "obsolete.jsonl"), []string{`{"type":"caic_meta","version":1}`}, false)
+			args := []string{"-dir", dir}
+			if fileSelection {
+				args = []string{path}
+			}
+			var out bytes.Buffer
+			if err := run(args, &out); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("explicitly selected log still exists: %v", err)
+			}
+		}
+	})
+	if _, err := parseFlags([]string{"-dir="}); err == nil || !strings.Contains(err.Error(), "-dir must not be empty") {
+		t.Fatalf("empty directory error = %v", err)
+	}
 	if _, err := parseFlags([]string{"-since=-1s"}); err == nil {
 		t.Fatal("parseFlags accepted a negative duration")
 	}
 }
 
-func v2Meta(harness string) string {
-	return `{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"` + harness + `"}`
-}
-
-func v3Meta(harness string) string {
+func taskMeta(harness string) string {
 	return `{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"` + harness + `"}`
 }
 

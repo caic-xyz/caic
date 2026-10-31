@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -59,27 +60,7 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("model/effort = %q/%q, want empty", init.ReportedModel, init.ReportedEffort)
 		}
 	})
-	t.Run("CaicSession", func(t *testing.T) {
-		t.Parallel()
-		const input = `{"type":"caic_session","session_id":"thread-1","model":"gpt-5.4","agent_version":"1.2.3"}`
-		msgs, err := parseTestMessage([]byte(input))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("msgs = %d, want 1", len(msgs))
-		}
-		init, ok := msgs[0].(*agent.InitMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
-		}
-		if init.SessionID != "thread-1" {
-			t.Errorf("SessionID = %q, want thread-1", init.SessionID)
-		}
-		if init.ReportedModel != "gpt-5.4" || init.ReportedEffort != "" || init.Version != "1.2.3" {
-			t.Errorf("model/effort/version = %q/%q/%q, want gpt-5.4/empty/1.2.3", init.ReportedModel, init.ReportedEffort, init.Version)
-		}
-	})
+
 	t.Run("TurnStarted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`
@@ -788,27 +769,7 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("Type() = %q", raw.Type())
 		}
 	})
-	t.Run("DiffStat", func(t *testing.T) {
-		t.Parallel()
-		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"foo.go","added":10,"deleted":2}],"ts":1719500000.5}`
-		msgs, err := parseTestMessage([]byte(input))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("msgs = %d, want 1", len(msgs))
-		}
-		ds, ok := msgs[0].(*agent.DiffStatMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.DiffStatMessage", msgs[0])
-		}
-		if len(ds.DiffStat) != 1 {
-			t.Fatalf("DiffStat = %d, want 1", len(ds.DiffStat))
-		}
-		if ds.DiffStat[0].Path != "foo.go" {
-			t.Errorf("Path = %q", ds.DiffStat[0].Path)
-		}
-	})
+
 	t.Run("ErrorNotificationWillRetry", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"rate limit"},"willRetry":true,"threadId":"t1","turnId":"turn_1"}}`
@@ -1083,7 +1044,7 @@ func TestWireFormat(t *testing.T) {
 		})
 		written := make(chan error, 1)
 		workers.Go(func() {
-			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{})
 			written <- writeErr
 		})
 		<-writer.Started
@@ -1265,20 +1226,17 @@ func TestWireFormat(t *testing.T) {
 			`{"method":"item/completed","params":{"threadId":"child","turnId":"child-turn","item":{"id":"answer","type":"agentMessage","text":"A bowtie"}}}`,
 			`{"method":"item/completed","params":{"threadId":"parent","turnId":"parent-turn","item":{"id":"reason","type":"reasoning","summary":["Evaluating"]}}}`,
 		}
-		for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-			t.Run(fmt.Sprint(version), func(t *testing.T) {
+		for _, physical := range []bool{false, true} {
+			t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 				t.Parallel()
 				w := &wireFormat{}
-				parser, err := agent.NewLogRecordParser(agent.LogVersionV3, w.ParseMessage)
-				if version != 0 {
-					parser, err = agent.NewLogRecordParser(version, w.ParseMessage)
-				}
+				parser, err := agent.NewLogRecordParser(w.ParseMessage)
 				if err != nil {
 					t.Fatal(err)
 				}
 				for i, line := range lines {
 					var msgs []agent.Message
-					if version == 0 {
+					if !physical {
 						msgs, err = w.ParseMessage([]byte(line))
 					} else {
 						record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + line + `}`))
@@ -1364,7 +1322,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
+		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{}); err != nil {
 			t.Fatal(err)
 		}
 		var req map[string]any
@@ -1403,7 +1361,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1", requestedEffort: "high"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
+		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{}); err != nil {
 			t.Fatal(err)
 		}
 		var req map[string]any
@@ -1425,7 +1383,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		var buf bytes.Buffer
-		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, agent.DiscardLogSink{Version: agent.LogVersionV1})
+		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, agent.DiscardLogSink{})
 		if err == nil {
 			t.Fatal("expected error for missing thread ID")
 		}

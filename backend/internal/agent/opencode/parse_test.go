@@ -402,55 +402,6 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("caicInit", func(t *testing.T) {
-		t.Parallel()
-		input := mustJSON(t, map[string]any{
-			"type":       "caic_init",
-			"session_id": "ses_abc",
-			"model":      "anthropic/claude-sonnet-4",
-			"version":    "0.5.0",
-		})
-		assertInitMessage(t, input, "ses_abc", "anthropic/claude-sonnet-4", "0.5.0")
-	})
-	t.Run("CaicSession", func(t *testing.T) {
-		t.Parallel()
-		input := mustJSON(t, map[string]any{
-			"type":          "caic_session",
-			"session_id":    "ses_abc",
-			"model":         "anthropic/claude-sonnet-4",
-			"agent_version": "0.5.0",
-		})
-		assertInitMessage(t, input, "ses_abc", "anthropic/claude-sonnet-4", "0.5.0")
-	})
-
-	t.Run("CaicDiffStat", func(t *testing.T) {
-		t.Parallel()
-		input := mustJSON(t, map[string]any{
-			"type": "caic_diff_stat",
-			"ts":   1719500000.5,
-			"diff_stat": []any{
-				map[string]any{"path": "main.go", "added": 10, "deleted": 3},
-			},
-		})
-		msgs, err := parseTestMessage(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("msgs = %d, want 1", len(msgs))
-		}
-		ds, ok := msgs[0].(*agent.DiffStatMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.DiffStatMessage", msgs[0])
-		}
-		if len(ds.DiffStat) != 1 {
-			t.Fatalf("DiffStat = %d, want 1", len(ds.DiffStat))
-		}
-		if ds.DiffStat[0].Path != "main.go" {
-			t.Errorf("Path = %q", ds.DiffStat[0].Path)
-		}
-	})
-
 	t.Run("JSONRPCResponse", func(t *testing.T) {
 		t.Parallel()
 		input := mustJSON(t, map[string]any{
@@ -1141,29 +1092,6 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return data
-}
-
-func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wantVersion string) {
-	msgs, err := parseTestMessage(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("msgs = %d, want 1", len(msgs))
-	}
-	init, ok := msgs[0].(*agent.InitMessage)
-	if !ok {
-		t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
-	}
-	if init.SessionID != wantSessionID {
-		t.Errorf("SessionID = %q, want %q", init.SessionID, wantSessionID)
-	}
-	if init.ReportedModel != wantModel {
-		t.Errorf("Model = %q, want %q", init.ReportedModel, wantModel)
-	}
-	if init.Version != wantVersion {
-		t.Errorf("Version = %q, want %q", init.Version, wantVersion)
-	}
 }
 
 func TestAddEditInputView(t *testing.T) {

@@ -1,4 +1,4 @@
-// Focused tests for strict canonical v2 task-log record decoding.
+// Focused tests for strict canonical v3 task-log record decoding.
 
 package agent
 
@@ -14,23 +14,22 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-type v2AgentRecordFixture struct {
-	ReaderCases    []v2ReaderCase    `json:"reader_cases"`
-	EncoderVectors []v2EncoderVector `json:"encoder_vectors"`
+type v3AgentRecordFixture struct {
+	ReaderCases    []v3ReaderCase    `json:"reader_cases"`
+	EncoderVectors []v3EncoderVector `json:"encoder_vectors"`
 }
 
-type v2ReaderCase struct {
+type v3ReaderCase struct {
 	Name        string `json:"name"`
 	Timestamp   string `json:"timestamp"`
 	NativeBytes string `json:"native_bytes"`
 	RecordBytes string `json:"record_bytes"`
 }
 
-type v2EncoderVector struct {
+type v3EncoderVector struct {
 	Name              string `json:"name"`
 	ObservedUnixNS    string `json:"observed_unix_ns"`
 	ExpectedTimestamp string `json:"expected_timestamp"`
@@ -40,37 +39,33 @@ type v2EncoderVector struct {
 
 func TestHostGitSummaryDoesNotAdvanceRelayPosition(t *testing.T) {
 	t.Parallel()
-	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-		t.Run(strconv.Itoa(int(version)), func(t *testing.T) {
-			t.Parallel()
-			encoded, err := MarshalLogMessage(version, &DiffStatMessage{
-				MessageType: "caic_diff_stat",
-				DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 2}},
-				Repos:       []v3.RepoState{{RepoIndex: 0, Branch: "main"}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			parser, err := NewLogRecordParser(version, testParseFn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord(encoded)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if record.RelayRecord || !record.Control || len(record.Messages) != 1 {
-				t.Fatalf("host summary = %+v, want one control outside relay history", record)
-			}
-			summary, ok := record.Messages[0].Message.(*DiffStatMessage)
-			if !ok || len(summary.DiffStat) != 1 || summary.DiffStat[0].LinesAdded != 2 || len(summary.Repos) != 1 || summary.Repos[0].Branch != "main" {
-				t.Fatalf("restored summary = %+v", record.Messages[0].Message)
-			}
-		})
+
+	encoded, err := MarshalLogMessage(&DiffStatMessage{
+		MessageType: "caic_diff_stat",
+		DiffStat:    logdata.DiffStat{{Path: "main.go", LinesAdded: 2}},
+		Repos:       []logdata.RepoState{{RepoIndex: 0, Branch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parser, err := NewLogRecordParser(testParseFn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := parser.ParseRecord(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.RelayRecord || !record.Control || len(record.Messages) != 1 {
+		t.Fatalf("host summary = %+v, want one control outside relay history", record)
+	}
+	summary, ok := record.Messages[0].Message.(*DiffStatMessage)
+	if !ok || len(summary.DiffStat) != 1 || summary.DiffStat[0].LinesAdded != 2 || len(summary.Repos) != 1 || summary.Repos[0].Branch != "main" {
+		t.Fatalf("restored summary = %+v", record.Messages[0].Message)
 	}
 }
 
-func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordBytes string) {
+func assertV3FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordBytes string) {
 	if name == "" || timestamp == "" || nativeBytes == "" || recordBytes == "" {
 		t.Fatalf("fixture record has an empty required field: name=%q timestamp=%q native=%q record=%q", name, timestamp, nativeBytes, recordBytes)
 	}
@@ -81,25 +76,25 @@ func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	if recordBytes != wantRecord {
 		t.Fatalf("record bytes = %q, want %q", recordBytes, wantRecord)
 	}
-	wantTime, err := parseV2ProducerTime([]byte(timestamp))
+	wantTime, err := parseV3ProducerTime([]byte(timestamp))
 	if err != nil {
 		t.Fatalf("timestamp %q is not canonical: %v", timestamp, err)
 	}
 
 	// These same literal encoder vectors are exercised by the maintained
 	// Python relay, pinning both Go envelopes to the relay's physical bytes.
-	encoded, err := (&v2.NativeRecord{Type: "agent", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
+	encoded, err := (&logdata.NativeRecord{Type: "agent", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
 	if err != nil || string(encoded)+"\n" != recordBytes {
-		t.Fatalf("v2 encoded %q: %v", encoded, err)
+		t.Fatalf("v3 encoded %q: %v", encoded, err)
 	}
-	encoded, err = (&v3.NativeRecord{Type: "input", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
+	encoded, err = (&logdata.NativeRecord{Type: "input", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
 	wantInput := strings.Replace(recordBytes, `"t":"agent"`, `"t":"input"`, 1)
 	if err != nil || string(encoded)+"\n" != wantInput {
 		t.Fatalf("v3 input encoded %q: %v", encoded, err)
 	}
 
 	calls := 0
-	p, err := NewLogRecordParser(LogVersionV2, func(msg []byte) ([]Message, error) {
+	p, err := NewLogRecordParser(func(msg []byte) ([]Message, error) {
 		calls++
 		if string(msg) != nativeBytes {
 			return nil, fmt.Errorf("native payload = %q, want %q", msg, nativeBytes)
@@ -110,7 +105,7 @@ func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 		t.Fatal(err)
 	}
 	line := []byte(strings.TrimSuffix(recordBytes, "\n"))
-	msgs, err := parseV2Record(p, line)
+	msgs, err := parseV3Record(p, line)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +114,7 @@ func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	}
 }
 
-func TestV2AgentRecord(t *testing.T) {
+func TestV3AgentRecord(t *testing.T) {
 	t.Parallel()
 
 	t.Run("canonical_values", func(t *testing.T) {
@@ -143,7 +138,7 @@ func TestV2AgentRecord(t *testing.T) {
 				var aliased bool
 				record := []byte(`{"t":"agent","ts":1700000000.123,"msg":` + tc.payload + `}`)
 				payloadStart := len(record) - 1 - len(tc.payload)
-				p, err := NewLogRecordParser(LogVersionV2, func(msg []byte) ([]Message, error) {
+				p, err := NewLogRecordParser(func(msg []byte) ([]Message, error) {
 					calls++
 					aliased = len(msg) != 0 && &msg[0] == &record[payloadStart]
 					if string(msg) != tc.payload {
@@ -154,7 +149,7 @@ func TestV2AgentRecord(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				msgs, err := parseV2Record(p, record)
+				msgs, err := parseV3Record(p, record)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -174,11 +169,11 @@ func TestV2AgentRecord(t *testing.T) {
 
 	t.Run("fixture", func(t *testing.T) {
 		t.Parallel()
-		data, err := os.ReadFile("testdata/v2_agent_records.json")
+		data, err := os.ReadFile("testdata/v3_agent_records.json")
 		if err != nil {
 			t.Fatal(err)
 		}
-		var fixture v2AgentRecordFixture
+		var fixture v3AgentRecordFixture
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&fixture); err != nil {
@@ -202,7 +197,7 @@ func TestV2AgentRecord(t *testing.T) {
 			readerNames[tc.Name] = struct{}{}
 			t.Run("reader_"+tc.Name, func(t *testing.T) {
 				t.Parallel()
-				assertV2FixtureRecord(t, tc.Name, tc.Timestamp, tc.NativeBytes, tc.RecordBytes)
+				assertV3FixtureRecord(t, tc.Name, tc.Timestamp, tc.NativeBytes, tc.RecordBytes)
 			})
 		}
 
@@ -241,7 +236,7 @@ func TestV2AgentRecord(t *testing.T) {
 			}
 			t.Run("encoder_"+vector.Name, func(t *testing.T) {
 				t.Parallel()
-				assertV2FixtureRecord(
+				assertV3FixtureRecord(
 					t,
 					vector.Name,
 					vector.ExpectedTimestamp,
@@ -257,14 +252,14 @@ func TestV2AgentRecord(t *testing.T) {
 
 	t.Run("control_discriminators", func(t *testing.T) {
 		t.Parallel()
-		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return []Message{&UsageMessage{}}, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		meta := []byte(`{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)
-		msgs, err := parseV2Record(p, meta)
+		meta := []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)
+		msgs, err := parseV3Record(p, meta)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,35 +267,35 @@ func TestV2AgentRecord(t *testing.T) {
 			t.Fatalf("meta record = %#v", msgs)
 		}
 		parsedMeta, ok := msgs.Messages[0].Message.(*MetaMessage)
-		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 2 {
+		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 3 {
 			t.Fatalf("meta message = %#v", msgs.Messages[0].Message)
 		}
-		msgs, err = parseV2Record(p, []byte(`{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude","model":"gpt-5.6","effort":"high"}`))
+		msgs, err = parseV3Record(p, []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","model":"gpt-5.6","effort":"high"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		parsedMeta, ok = msgs.Messages[0].Message.(*MetaMessage)
 		if !ok || parsedMeta.RequestedModel != "gpt-5.6" || parsedMeta.RequestedEffort != "high" {
-			t.Fatalf("v2 meta settings = %#v", msgs.Messages[0].Message)
+			t.Fatalf("v3 meta settings = %#v", msgs.Messages[0].Message)
 		}
-		msgs, err = parseV2Record(p, []byte(`{"t":"session","session_id":"s","model":"gpt-5.6","agent_version":"1"}`))
+		msgs, err = parseV3Record(p, []byte(`{"t":"session","session_id":"s","model":"gpt-5.6","agent_version":"1"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		init, ok := msgs.Messages[0].Message.(*InitMessage)
 		if !ok || init.ReportedModel != "gpt-5.6" {
-			t.Fatalf("v2 session = %#v", msgs.Messages[0].Message)
+			t.Fatalf("v3 session = %#v", msgs.Messages[0].Message)
 		}
-		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
-			t.Fatal("v2 meta accepted the V1 type field")
+		if _, err := parseV3Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
+			t.Fatal("v3 meta accepted the top-level type field")
 		}
-		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude","unknown":true}`)); err == nil || !strings.Contains(err.Error(), `json: unknown field "unknown"`) {
-			t.Fatalf("v2 meta error = %v, want strict unknown-field error", err)
+		if _, err := parseV3Record(p, []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","unknown":true}`)); err == nil || !strings.Contains(err.Error(), `json: unknown field "unknown"`) {
+			t.Fatalf("v3 meta error = %v, want strict unknown-field error", err)
 		}
-		if _, err := parseV2Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
+		if _, err := parseV3Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
-		msgs, err = parseV2Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
+		msgs, err = parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -314,7 +309,7 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Parallel()
 		t.Run("one_to_many", func(t *testing.T) {
 			t.Parallel()
-			p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 				return []Message{
 					&TextMessage{Text: "one"},
 					&ToolUseMessage{ToolUseID: "tool"},
@@ -324,7 +319,7 @@ func TestV2AgentRecord(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := parseV2Record(p, []byte(`{"t":"agent","ts":1.001,"msg":{}}`))
+			msgs, err := parseV3Record(p, []byte(`{"t":"agent","ts":1.001,"msg":{}}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -341,14 +336,14 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			t.Parallel()
 			calls := 0
-			p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 				calls++
 				return nil, nil
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := parseV2Record(p, []byte(`{"t":"agent","ts":0.001,"msg":false}`))
+			msgs, err := parseV3Record(p, []byte(`{"t":"agent","ts":0.001,"msg":false}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -390,7 +385,7 @@ func TestV2AgentRecord(t *testing.T) {
 			{name: "unknown_t", line: []byte(`{"t":"future","ts":1.000,"msg":{}}`)},
 			{name: "old_type_agent", line: []byte(`{"type":"agent","ts":1.000,"msg":{}}`)},
 			{name: "old_type_control", line: []byte(`{"type":"diff_stat","diff_stat":[]}`)},
-			{name: "old_type_meta", line: []byte(`{"type":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)},
+			{name: "old_type_meta", line: []byte(`{"type":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)},
 			{name: "type_null", line: []byte(`{"t":"diff_stat","type":null,"diff_stat":[]}`)},
 			{name: "type_boolean", line: []byte(`{"t":"diff_stat","type":true,"diff_stat":[]}`)},
 			{name: "type_number", line: []byte(`{"t":"diff_stat","type":1,"diff_stat":[]}`)},
@@ -416,14 +411,14 @@ func TestV2AgentRecord(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				calls := 0
-				p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 					calls++
 					return nil, nil
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := parseV2Record(p, tc.line); err == nil {
+				if _, err := parseV3Record(p, tc.line); err == nil {
 					t.Fatal("expected corruption error")
 				}
 				if calls != tc.wantCalls {
@@ -436,14 +431,14 @@ func TestV2AgentRecord(t *testing.T) {
 	t.Run("permissive_callback_cannot_accept_malformed_msg", func(t *testing.T) {
 		t.Parallel()
 		calls := 0
-		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			calls++
 			return nil, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := parseV2Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)); err == nil {
+		if _, err := parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)); err == nil {
 			t.Fatal("malformed native payload was accepted")
 		}
 		if calls != 0 {
@@ -455,20 +450,20 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Parallel()
 		prefix := []byte(`{"t":"agent","ts":1.000,"msg":"`)
 		suffix := []byte(`"}`)
-		payloadLen := v2MaxEncodedRecordLen - 2 - len(prefix) - len(suffix)
-		line := make([]byte, 0, v2MaxEncodedRecordLen-2)
+		payloadLen := v3MaxEncodedRecordLen - 2 - len(prefix) - len(suffix)
+		line := make([]byte, 0, v3MaxEncodedRecordLen-2)
 		line = append(line, prefix...)
 		line = append(line, bytes.Repeat([]byte{'a'}, payloadLen)...)
 		line = append(line, suffix...)
 		calls := 0
-		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			calls++
 			return nil, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := parseV2Record(p, line); err != nil {
+		if _, err := parseV3Record(p, line); err != nil {
 			t.Fatalf("maximum accepted record: %v", err)
 		}
 		if calls != 1 {
@@ -476,7 +471,7 @@ func TestV2AgentRecord(t *testing.T) {
 		}
 		line = append(line[:len(line)-len(suffix)], 'a')
 		line = append(line, suffix...)
-		if _, err := parseV2Record(p, line); err == nil || !strings.Contains(err.Error(), "encoded size") {
+		if _, err := parseV3Record(p, line); err == nil || !strings.Contains(err.Error(), "encoded size") {
 			t.Fatalf("oversized record error = %v", err)
 		}
 		if calls != 1 {
@@ -488,23 +483,23 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Parallel()
 		action := &PendingUserActionMessage{
 			MessageType: PendingUserActionMessageType,
-			Action: v3.PendingUserAction{
+			Action: logdata.PendingUserAction{
 				Kind: PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "tool",
 			},
 		}
 		batch := []Message{action, nil}
-		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return batch, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		line := []byte(`{"t":"agent","ts":1.000,"msg":{}}`)
-		if _, err := parseV2Record(p, line); err == nil || !strings.Contains(err.Error(), "native message 1 is nil") {
+		if _, err := parseV3Record(p, line); err == nil || !strings.Contains(err.Error(), "native message 1 is nil") {
 			t.Fatalf("invalid batch error = %v", err)
 		}
 		batch = []Message{action}
-		msgs, err := parseV2Record(p, line)
+		msgs, err := parseV3Record(p, line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -517,14 +512,14 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Parallel()
 		wantErr := errors.New("native failure")
 		calls := 0
-		p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			calls++
 			return nil, wantErr
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = parseV2Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
+		_, err = parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
 		if !errors.Is(err, wantErr) || calls != 1 {
 			t.Fatalf("error = %v, calls = %d", err, calls)
 		}
@@ -535,36 +530,32 @@ func TestHistoricalContextClearedRecord(t *testing.T) {
 	t.Parallel()
 	// RestartSession wrote this exact SystemMessage projection in both formats.
 	const historical = `{"session_id":"","subtype":"context_cleared","t":"context_cleared","uuid":""}`
-	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
-			t.Parallel()
-			encoded, err := MarshalLogMessage(version, ContextCleared())
-			if err != nil || string(encoded) != historical {
-				t.Fatalf("historical writer = %s, %v", encoded, err)
-			}
-			p, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := p.ParseRecord([]byte(historical))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(record.Messages) != 1 {
-				t.Fatalf("restored marker = %#v", record)
-			}
-			marker, ok := record.Messages[0].Message.(*SystemMessage)
-			if !ok || marker.Subtype != "context_cleared" {
-				t.Fatalf("restored marker = %#v", record)
-			}
-			if _, err := p.ParseRecord([]byte(`{"t":"context_cleared","unrelated":true}`)); err == nil {
-				t.Fatal("unknown field accepted")
-			}
-			for _, bad := range []string{`{"t":"context_cleared","session_id":false}`, `{"t":"context_cleared","subtype":"unrelated"}`} {
-				if _, err := p.ParseRecord([]byte(bad)); err == nil {
-					t.Fatalf("malformed marker accepted: %s", bad)
-				}
-			}
-		})
+
+	encoded, err := MarshalLogMessage(ContextCleared())
+	if err != nil || string(encoded) != historical {
+		t.Fatalf("historical writer = %s, %v", encoded, err)
+	}
+	p, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := p.ParseRecord([]byte(historical))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Messages) != 1 {
+		t.Fatalf("restored marker = %#v", record)
+	}
+	marker, ok := record.Messages[0].Message.(*SystemMessage)
+	if !ok || marker.Subtype != "context_cleared" {
+		t.Fatalf("restored marker = %#v", record)
+	}
+	if _, err := p.ParseRecord([]byte(`{"t":"context_cleared","unrelated":true}`)); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	for _, bad := range []string{`{"t":"context_cleared","session_id":false}`, `{"t":"context_cleared","subtype":"unrelated"}`} {
+		if _, err := p.ParseRecord([]byte(bad)); err == nil {
+			t.Fatalf("malformed marker accepted: %s", bad)
+		}
 	}
 }

@@ -23,7 +23,7 @@ from pathlib import Path
 from types import ModuleType
 
 RELAY_PY = Path(__file__).with_name("relay_v2.py")
-FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "v2_agent_records.json"
+FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "v3_agent_records.json"
 _AGENT_RECORD = re.compile(rb'^\{"t":"agent","ts":(?:0|[1-9][0-9]*)\.[0-9]{3},"msg":.+\}\n$')
 
 
@@ -786,7 +786,7 @@ def test_unlogged_stdin_is_forwarded_without_persistence() -> None:
     assert incoming.sent == b""
 
 
-def test_concurrent_controls_keep_destination_order_and_v2_tokens() -> None:
+def test_concurrent_controls_keep_destination_order_and_v3_tokens() -> None:
     relay = _load_relay()
     daemon, _proc, output, client = _new_daemon(relay)
     start = threading.Barrier(17)
@@ -879,7 +879,7 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
         assert json.loads(lines[1])["msg"] == {"source": "stdin"}
         assert json.loads(lines[2])["msg"] == {"source": "stdout"}
 
-        # Plain EOF preserves the daemon and agent, matching v1 SSH-drop semantics.
+        # Plain EOF preserves the daemon and agent, preserving SSH-drop semantics.
         proc.stdin.close()
         proc.wait(timeout=10)
         _wait_for_socket(sock_path, timeout=3)
@@ -1196,7 +1196,7 @@ def main() -> int:
         test_stdout_chunk_carry_blank_and_eof_flush,
         test_logged_stdin_is_file_only_and_partial_eof_is_dropped,
         test_unlogged_stdin_is_forwarded_without_persistence,
-        test_concurrent_controls_keep_destination_order_and_v2_tokens,
+        test_concurrent_controls_keep_destination_order_and_v3_tokens,
         test_real_relay_output_superset_no_stdin_echo_and_attach_offset,
         test_exit_and_stripped_environment_controls,
         test_harness_caic_mcp_integrations,

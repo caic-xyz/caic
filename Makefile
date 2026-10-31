@@ -19,7 +19,7 @@ help:
 	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
 	@printf '  %-34s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
-	@printf '  %-34s - %s\n' 'make check-agent-logs' 'Validate recent v2 task logs against genai wire DTOs'
+	@printf '  %-34s - %s\n' 'make check-agent-logs' 'Delete v1/v2 task logs and validate recent v3 logs against genai DTOs'
 	@printf '  %-34s - %s\n' 'make build' 'Build Go server (includes frontend build)'
 	@printf '  %-34s - %s\n' 'make fake-dev' 'Run the server with fake backend (no containers)'
 	@printf '  %-34s - %s\n' 'make frontend-deps' 'Install dependencies from the frozen lockfile'

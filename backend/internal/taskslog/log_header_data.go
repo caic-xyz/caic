@@ -13,19 +13,18 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	v8 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v8"
+	v9 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v9"
 )
 
-func headerTaskToData(t *LoadedTask) *v8.Task {
+func headerTaskToData(t *LoadedTask) *v9.Task {
 	if t == nil {
 		return nil
 	}
-	return &v8.Task{
+	return &v9.Task{
 		TaskID:                t.TaskID,
 		Prompt:                t.Prompt,
 		Title:                 t.Title,
 		Repos:                 headerReposToData(t.Repos),
-		LogVersion:            int(t.LogVersion),
 		Harness:               string(t.Harness),
 		StartedAt:             t.StartedAt,
 		LastStateUpdateAt:     t.LastStateUpdateAt,
@@ -62,7 +61,7 @@ func headerTaskToData(t *LoadedTask) *v8.Task {
 	}
 }
 
-func headerTaskFromData(t *v8.Task) *LoadedTask {
+func headerTaskFromData(t *v9.Task) *LoadedTask {
 	if t == nil {
 		return nil
 	}
@@ -71,7 +70,6 @@ func headerTaskFromData(t *v8.Task) *LoadedTask {
 		Prompt:                t.Prompt,
 		Title:                 t.Title,
 		Repos:                 headerReposFromData(t.Repos),
-		LogVersion:            agent.LogVersion(t.LogVersion),
 		Harness:               harness.Name(t.Harness),
 		StartedAt:             t.StartedAt,
 		LastStateUpdateAt:     t.LastStateUpdateAt,
@@ -108,18 +106,18 @@ func headerTaskFromData(t *v8.Task) *LoadedTask {
 	}
 }
 
-func headerReposToData(in []RepoMount) []v8.Repo {
+func headerReposToData(in []RepoMount) []v9.Repo {
 	if in == nil {
 		return nil
 	}
-	out := make([]v8.Repo, len(in))
+	out := make([]v9.Repo, len(in))
 	for i := range in {
-		out[i] = v8.Repo(in[i])
+		out[i] = v9.Repo(in[i])
 	}
 	return out
 }
 
-func headerReposFromData(in []v8.Repo) []RepoMount {
+func headerReposFromData(in []v9.Repo) []RepoMount {
 	if in == nil {
 		return nil
 	}
@@ -130,18 +128,18 @@ func headerReposFromData(in []v8.Repo) []RepoMount {
 	return out
 }
 
-func headerCacheMountsToData(in []runtime.CacheMount) []v8.CacheMount {
+func headerCacheMountsToData(in []runtime.CacheMount) []v9.CacheMount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v8.CacheMount, len(in))
+	out := make([]v9.CacheMount, len(in))
 	for i := range in {
-		out[i] = v8.CacheMount(in[i])
+		out[i] = v9.CacheMount(in[i])
 	}
 	return out
 }
 
-func headerCacheMountsFromData(in []v8.CacheMount) []runtime.CacheMount {
+func headerCacheMountsFromData(in []v9.CacheMount) []runtime.CacheMount {
 	if in == nil {
 		return nil
 	}
@@ -152,18 +150,18 @@ func headerCacheMountsFromData(in []v8.CacheMount) []runtime.CacheMount {
 	return out
 }
 
-func headerMountsToData(in []runtime.Mount) []v8.Mount {
+func headerMountsToData(in []runtime.Mount) []v9.Mount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v8.Mount, len(in))
+	out := make([]v9.Mount, len(in))
 	for i := range in {
-		out[i] = v8.Mount(in[i])
+		out[i] = v9.Mount(in[i])
 	}
 	return out
 }
 
-func headerMountsFromData(in []v8.Mount) []runtime.Mount {
+func headerMountsFromData(in []v9.Mount) []runtime.Mount {
 	if in == nil {
 		return nil
 	}
@@ -174,18 +172,18 @@ func headerMountsFromData(in []v8.Mount) []runtime.Mount {
 	return out
 }
 
-func headerDiffStatToData(in []v3.DiffFileStat) []v8.DiffFileStat {
+func headerDiffStatToData(in []v3.DiffFileStat) []v9.DiffFileStat {
 	if in == nil {
 		return nil
 	}
-	out := make([]v8.DiffFileStat, len(in))
+	out := make([]v9.DiffFileStat, len(in))
 	for i := range in {
-		out[i] = v8.DiffFileStat(in[i])
+		out[i] = v9.DiffFileStat(in[i])
 	}
 	return out
 }
 
-func headerDiffStatFromData(in []v8.DiffFileStat) []v3.DiffFileStat {
+func headerDiffStatFromData(in []v9.DiffFileStat) []v3.DiffFileStat {
 	if in == nil {
 		return nil
 	}
@@ -196,7 +194,7 @@ func headerDiffStatFromData(in []v8.DiffFileStat) []v3.DiffFileStat {
 	return out
 }
 
-func headerResultToData(r *Result) *v8.Result {
+func headerResultToData(r *Result) *v9.Result {
 	if r == nil {
 		return nil
 	}
@@ -204,14 +202,14 @@ func headerResultToData(r *Result) *v8.Result {
 	if r.Err != nil {
 		text = r.Err.Error()
 	}
-	var failure *v8.StartupFailure
+	var failure *v9.StartupFailure
 	if r.StartupFailure != nil {
-		failure = new(v8.StartupFailure(*r.StartupFailure))
+		failure = new(v9.StartupFailure(*r.StartupFailure))
 	}
-	return &v8.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
+	return &v9.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
 }
 
-func headerResultFromData(r *v8.Result) *Result {
+func headerResultFromData(r *v9.Result) *Result {
 	if r == nil {
 		return nil
 	}
@@ -226,18 +224,18 @@ func headerResultFromData(r *v8.Result) *Result {
 	return &Result{State: State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }
 
-func headerUsageToData(u agent.Usage) v8.Usage {
-	buckets := make([]v8.CacheWrite, 0, len(u.CacheWrites))
+func headerUsageToData(u agent.Usage) v9.Usage {
+	buckets := make([]v9.CacheWrite, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil
 	}
 	for _, b := range u.CacheWrites {
-		buckets = append(buckets, v8.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
+		buckets = append(buckets, v9.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
 	}
-	return v8.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
+	return v9.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
 }
 
-func headerUsageFromData(u v8.Usage) agent.Usage {
+func headerUsageFromData(u v9.Usage) agent.Usage {
 	buckets := make(tokens.CacheWrites, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil

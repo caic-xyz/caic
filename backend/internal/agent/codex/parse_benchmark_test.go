@@ -113,7 +113,7 @@ func BenchmarkReplayConcurrentChildTools(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		wire := New("", nil).NewWire()
-		parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 		if err != nil {
 			b.Fatal(err)
 		}

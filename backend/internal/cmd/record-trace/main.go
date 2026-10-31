@@ -3,7 +3,7 @@
 // Usage:
 //
 //	record-trace --harness pi --scenario read-edit-bash
-//	record-trace --harness claude --scenario native-subagent-joke --local --log-version 3
+//	record-trace --harness claude --scenario native-subagent-joke --local
 //
 // Requires: podman, unless --local runs the harness on this machine. It mounts
 // logged-in harness credentials when available; --api-key-env is optional for
@@ -43,6 +43,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
@@ -114,15 +115,10 @@ func mainImpl() error {
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for optional API key")
 	localFlag := flag.Bool("local", false, "run the harness on this machine instead of a container; requires the harness CLIs on PATH")
-	logVersionFlag := flag.Int("log-version", int(agent.LogVersionV3), "task-log version to record (2 or 3)")
 	flag.Parse()
 
 	if *harnessFlag == "" {
 		return errors.New("--harness is required")
-	}
-	logVersion := agent.LogVersion(*logVersionFlag)
-	if err := logVersion.ValidateWritable(); err != nil {
-		return fmt.Errorf("--log-version: %w", err)
 	}
 	b, ok := backends[*harnessFlag]
 	if !ok {
@@ -143,13 +139,10 @@ func mainImpl() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *modelFlag, *localFlag, logVersion)
+	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *modelFlag, *localFlag)
 }
 
-func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool, version agent.LogVersion) error {
-	if err := version.ValidateWritable(); err != nil {
-		return err
-	}
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool) error {
 	workDir, err := setupCheckout()
 	if err != nil {
 		return err
@@ -161,7 +154,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	relayDir := filepath.Join(workDir, "relay")
 	ctr := ""
 	if local {
-		if err := deployLocalRelay(relayDir, version); err != nil {
+		if err := deployLocalRelay(relayDir); err != nil {
 			return err
 		}
 	} else {
@@ -172,7 +165,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 		defer func() {
 			_ = exec.CommandContext(context.WithoutCancel(ctx), "podman", "stop", ctr).Run()
 		}()
-		if err := deployRelay(ctx, ctr, version); err != nil {
+		if err := deployRelay(ctx, ctr); err != nil {
 			return err
 		}
 		// Create empty widget plugin dir so harnesses that reference
@@ -211,7 +204,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	var stdout io.Reader = stdoutPipe
 	var wire agent.WireFormat
 	if hs, ok := b.(agent.RecordHandshaker); ok {
-		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, harnessWorkDir(local, workDir), model, version)
+		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, harnessWorkDir(local, workDir), model)
 		if err != nil {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
@@ -223,10 +216,10 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 		_ = cmd.Wait()
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, stdoutPipe, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer, version); err != nil {
+	if err := waitAndShutdown(ctx, cmd, stdin, stdout, stdoutPipe, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc, outputPath, version)
+	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc, outputPath)
 }
 
 // localOutputPath returns the host path of the recording's output.jsonl.
@@ -237,13 +230,10 @@ func localOutputPath(relayDir string, local bool) string {
 	return ""
 }
 
-// deployLocalRelay writes the version's embedded relay script into a dedicated
+// deployLocalRelay writes the maintained relay script into a dedicated
 // relay directory for a local recording.
-func deployLocalRelay(relayDir string, version agent.LogVersion) error {
-	script, err := agent.RelayScript(version)
-	if err != nil {
-		return err
-	}
+func deployLocalRelay(relayDir string) error {
+	script := relay.ScriptV2
 	if err := os.MkdirAll(relayDir, 0o750); err != nil {
 		return fmt.Errorf("create local relay dir: %w", err)
 	}
@@ -332,13 +322,9 @@ func credentialMountArgs(h harness.Name) ([]string, error) {
 }
 
 // deployRelay pipes the embedded relay script into the container.
-// deployRelay uploads the relay script for the requested log version, so a v2 or v3
-// recording is written by the version that produces those physical records.
-func deployRelay(ctx context.Context, ctr string, version agent.LogVersion) error {
-	script, err := agent.RelayScript(version)
-	if err != nil {
-		return err
-	}
+// deployRelay uploads the maintained relay script used by live task sessions.
+func deployRelay(ctx context.Context, ctr string) error {
+	script := relay.ScriptV2
 	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ctr, //nolint:gosec // args from trusted source
 		"sh", "-c", "mkdir -p "+agent.RelayDir+" && cat > "+agent.RelayScriptPath)
 	cmd.Stdin = bytes.NewReader(script)
@@ -429,18 +415,18 @@ func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent
 func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string, wire agent.WireFormat) error {
 	if wire == nil {
 		if pp, ok := b.(agent.PrePromptWriter); ok {
-			if err := pp.WritePrePrompt(stdin, model, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
+			if err := pp.WritePrePrompt(stdin, model, agent.DiscardLogSink{}); err != nil {
 				return err
 			}
 		}
 		wire = b.NewWire()
 	}
 	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", promptText))
-	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, agent.DiscardLogSink{Version: agent.LogVersionV1})
+	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, agent.DiscardLogSink{})
 }
 
 // waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, stdoutPipe io.Closer, b agent.Backend, ctr, localOutput string, wire agent.WireFormat, askAnswer string, version agent.LogVersion) error {
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, stdoutPipe io.Closer, b agent.Backend, ctr, localOutput string, wire agent.WireFormat, askAnswer string) error {
 	if wire == nil {
 		wire = b.NewWire()
 	}
@@ -453,7 +439,7 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 		_ = stdoutPipe.Close()
 		_ = group.Wait()
 	}()
-	agentDone := watchAgent(group, stdout, stdin, wire.ParseMessage, askAnswer, version)
+	agentDone := watchAgent(group, stdout, stdin, wire.ParseMessage, askAnswer)
 
 	slog.InfoContext(ctx, "Waiting for agent to finish")
 	select {
@@ -497,15 +483,11 @@ func waitForLocalFile(ctx context.Context, path string, timeout time.Duration) e
 }
 
 // watchAgent reads physical relay records, answers Claude control requests, and
-// signals when a ResultMessage is parsed. version selects the record format the
-// relay writes, so the recorded trace is read exactly like a live task session.
-func watchAgent(group *errgroup.Group, stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string, version agent.LogVersion) <-chan error {
+// signals when a ResultMessage is parsed, reading the trace like a live task session.
+func watchAgent(group *errgroup.Group, stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string) <-chan error {
 	done := make(chan error, 1)
-	reader, err := agent.NewRelayRecordReader(stdout, version, agent.DiscardLogSink{Version: version})
-	if err != nil {
-		done <- err
-		return done
-	}
+	reader := agent.NewRelayRecordReader(stdout, agent.DiscardLogSink{})
+
 	group.Go(func() error {
 		defer close(done)
 		for {
@@ -620,7 +602,7 @@ func askUserQuestionUpdatedInput(raw map[string]json.RawMessage, answer string) 
 // writeGoldenFile copies output.jsonl from the container, sanitizes it,
 // writes the JSONL trace, validates the evidence it records, and generates the
 // .golden.md markdown file.
-func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local bool, b agent.Backend, sc scenario, outputPath string, version agent.LogVersion) error {
+func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local bool, b agent.Backend, sc scenario, outputPath string) error {
 	localOutput := filepath.Join(workDir, "output.jsonl")
 	if local {
 		localOutput = filepath.Join(relayDir, "output.jsonl")
@@ -636,14 +618,14 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 		return fmt.Errorf("read output: %w", err)
 	}
 
-	sanitized, err := buildGoldenContent(raw, b.Harness(), sc.prompt, version)
+	sanitized, err := buildGoldenContent(raw, b.Harness(), sc.prompt)
 	if err != nil {
 		return err
 	}
 
 	// Validate before publishing: a scenario that must delegate may not replace
 	// the retained golden files with evidence-free content.
-	if err := validateGoldenRecording(outputPath, sanitized, version, b, sc.wantNative); err != nil {
+	if err := validateGoldenRecording(outputPath, sanitized, b, sc.wantNative); err != nil {
 		return err
 	}
 
@@ -674,8 +656,8 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 // and reports the native-subagent lifecycle it contains. wantNative requires the
 // recording to hold at least one native observation, so a scenario that asks the
 // harness to delegate cannot publish evidence that proves nothing.
-func validateGoldenRecording(path, sanitized string, version agent.LogVersion, b agent.Backend, wantNative bool) error {
-	parser, err := agent.NewLogRecordParser(version, b.NewWire().ParseMessage)
+func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative bool) error {
+	parser, err := agent.NewLogRecordParser(b.NewWire().ParseMessage)
 	if err != nil {
 		return err
 	}
@@ -707,16 +689,16 @@ func validateGoldenRecording(path, sanitized string, version agent.LogVersion, b
 }
 
 // buildGoldenContent prepends a caic_meta header and appends a caic_result footer.
-func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string, version agent.LogVersion) (string, error) {
+func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string) (string, error) {
 	meta := agent.MetaMessage{
 		MessageType: "caic_meta",
-		Version:     int(version),
+		Version:     agent.LogVersionV3,
 		Prompt:      promptText,
 		Harness:     string(harnessName),
 		Repos:       []v3.MetaRepo{},
 		StartedAt:   time.Now().UTC(),
 	}
-	metaJSON, err := agent.MarshalLogMessage(version, &meta)
+	metaJSON, err := agent.MarshalLogMessage(&meta)
 	if err != nil {
 		return "", fmt.Errorf("marshal meta: %w", err)
 	}
@@ -725,7 +707,7 @@ func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string,
 		MessageType: "caic_result",
 		State:       "completed",
 	}
-	resultJSON, err := agent.MarshalLogMessage(version, &result)
+	resultJSON, err := agent.MarshalLogMessage(&result)
 	if err != nil {
 		return "", fmt.Errorf("marshal result: %w", err)
 	}

@@ -535,102 +535,6 @@ func TestHandleAgentEnd(t *testing.T) {
 	})
 }
 
-func TestCaicModelInfo(t *testing.T) {
-	t.Parallel()
-	// Verify caic_model_info sets modelCtxWindow on the wire format,
-	// which is then used by handleTurnEnd to emit the correct ContextWindow
-	// in UsageMessage.
-
-	t.Run("sets modelCtxWindow from caic_model_info line", func(t *testing.T) {
-		t.Parallel()
-		w := &piWireFormat{}
-
-		// Parse the synthetic caic_model_info line.
-		infoLine := []byte(`{"type":"caic_model_info","context_window":1000000}`)
-		msgs, err := w.ParseMessage(infoLine)
-		if err != nil {
-			t.Fatalf("ParseMessage(caic_model_info): %v", err)
-		}
-		if len(msgs) != 0 {
-			t.Errorf("expected 0 messages, got %d", len(msgs))
-		}
-		if w.modelCtxWindow != 1000000 {
-			t.Errorf("modelCtxWindow = %d, want 1000000", w.modelCtxWindow)
-		}
-	})
-
-	t.Run("turn_end after caic_model_info has correct ContextWindow", func(t *testing.T) {
-		t.Parallel()
-		w := &piWireFormat{}
-
-		// Simulate replay order: caic_model_info first, then turn_end.
-		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":1000000}`)); err != nil {
-			t.Fatal(err)
-		}
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180,"cost":{"total":0.125}}}}`)
-		msgs, err := w.ParseMessage(turnEndLine)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("expected 1 message, got %d", len(msgs))
-		}
-		um, ok := msgs[0].(*agent.UsageMessage)
-		if !ok {
-			t.Fatalf("expected *agent.UsageMessage, got %T", msgs[0])
-		}
-		if um.ReportedCostUSD == nil || *um.ReportedCostUSD != 0.125 {
-			t.Fatalf("ReportedCostUSD = %v, want 0.125", um.ReportedCostUSD)
-		}
-		if um.ContextWindow != 1000000 {
-			t.Errorf("ContextWindow = %d, want 1000000", um.ContextWindow)
-		}
-		if um.Usage.ReasoningOutputTokens != 20 {
-			t.Errorf("ReasoningOutputTokens = %d, want 20", um.Usage.ReasoningOutputTokens)
-		}
-		if um.Usage.CacheWriteBuckets().Count(time.Hour) != 20 {
-			t.Fatalf("one-hour tokens lost: %+v", um.Usage)
-		}
-		if um.Usage.CacheTTLSeconds != 300 {
-			t.Errorf("CacheTTLSeconds = %d, want 300 for mixed five-minute and one-hour writes", um.Usage.CacheTTLSeconds)
-		}
-		if um.ReportedModel != "openrouter/anthropic/claude-opus-4-6" {
-			t.Errorf("ReportedModel = %q, want openrouter/anthropic/claude-opus-4-6", um.ReportedModel)
-		}
-		if !um.PerCall {
-			t.Error("turn_end must preserve single-request pricing scope")
-		}
-	})
-
-	t.Run("turn_end without caic_model_info defaults to 0", func(t *testing.T) {
-		t.Parallel()
-		w := &piWireFormat{}
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
-		msgs, err := w.ParseMessage(turnEndLine)
-		if err != nil {
-			t.Fatal(err)
-		}
-		um, ok := msgs[0].(*agent.UsageMessage)
-		if !ok {
-			t.Fatalf("expected *agent.UsageMessage, got %T", msgs[0])
-		}
-		if um.ContextWindow != 0 {
-			t.Errorf("ContextWindow = %d, want 0 (no caic_model_info)", um.ContextWindow)
-		}
-	})
-
-	t.Run("caic_model_info with zero context_window is ignored", func(t *testing.T) {
-		t.Parallel()
-		w := &piWireFormat{}
-		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":0}`)); err != nil {
-			t.Fatal(err)
-		}
-		if w.modelCtxWindow != 0 {
-			t.Errorf("modelCtxWindow = %d, want 0 (zero should be ignored)", w.modelCtxWindow)
-		}
-	})
-}
-
 func TestWireFormatDurationTracking(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
@@ -853,7 +757,6 @@ func TestPiWireRejectsMalformedJSONBeforeEarlyReturns(t *testing.T) {
 		{name: "agent_start lifecycle", line: `{"type":"agent_start"} true`},
 		{name: "turn_start lifecycle", line: `{"type":"turn_start"} true`},
 		{name: "compact command", line: `{"type":"compact"} true`},
-		{name: "caic_model_info type error", line: `{"type":"caic_model_info","context_window":"invalid"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

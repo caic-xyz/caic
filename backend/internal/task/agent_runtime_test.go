@@ -493,7 +493,7 @@ func TestRunner(t *testing.T) {
 		_, ch, unsub := tk.Subscribe(t.Context())
 		t.Cleanup(unsub)
 
-		persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
+		persisted := &agenttest.LogSink{}
 		w := &provisioningWriter{ctx: t.Context(), t: tk, log: persisted}
 
 		n, err := w.Write([]byte("hel"))
@@ -1086,68 +1086,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("ReviveTask", func(t *testing.T) {
 		t.Parallel()
-		t.Run("rejects_read_only_history_before_state_or_runtime_changes", func(t *testing.T) {
-			t.Parallel()
-			for _, compressed := range []bool{false, true} {
-				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
-					t.Parallel()
-					backend := &runtimetest.FakeBackend{}
-					dir := t.TempDir()
-					r := newTestAgentRuntimeWithRuntime(t, backend, nil, dir)
-					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "historical"}, "test", "", "")
-					id := runtime.NewID("test-runtime", "historical")
-					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "historical"}, "", "", 0)
-					tk.SetSessionMetadata("historical-session", "", "", "", 0)
-					tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "historical"}})
-					tk.SetState(taskslog.StateStopped)
-					path := filepath.Join(dir, tk.LogFilename())
-					const history = `{"type":"caic_meta","version":1,"prompt":"historical","repos":[],"harness":"test"}` + "\n" + `{"type":"caic_result","state":"stopped"}` + "\n"
-					if err := os.WriteFile(path, []byte(history), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					if compressed {
-						var err error
-						path, err = r.LogStore.Compress(path, nil, taskslog.StateStopped)
-						if err != nil {
-							t.Fatal(err)
-						}
-					}
-					before, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
-					if err != nil {
-						t.Fatal(err)
-					}
-					r.LogPath.Set(path)
-					if _, err := r.ReviveTask(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
-						t.Fatalf("v1 revival: %v", err)
-					}
-					if _, err := r.Reconnect(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
-						t.Fatalf("v1 reconnect: %v", err)
-					}
-					if _, err := r.Start(t.Context(), tk, ""); !errors.Is(err, agent.ErrReadOnlyLog) {
-						t.Fatalf("v1 start: %v", err)
-					}
-					tk.SetState(taskslog.StateWaiting)
-					count := tk.MessageCount()
-					if _, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "continue"}); !errors.Is(err, agent.ErrReadOnlyLog) {
-						t.Fatalf("v1 restart: %v", err)
-					}
-					if _, err := r.ClearContextSession(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
-						t.Fatalf("v1 clear context: %v", err)
-					}
-					if tk.GetState() != taskslog.StateWaiting || tk.MessageCount() != count {
-						t.Fatal("rejected v1 replacement cleared history or changed state")
-					}
-					tk.SetState(taskslog.StateStopped)
-					if tk.GetState() != taskslog.StateStopped || tk.HasSession() || backend.Status(id) != runtimetest.StatusAbsent {
-						t.Fatal("rejected v1 continuation mutated task or runtime")
-					}
-					got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
-					if err != nil || !bytes.Equal(got, before) {
-						t.Fatalf("v1 history changed: %v", err)
-					}
-				})
-			}
-		})
+
 		t.Run("refreshes_repository_state_after_live_tool", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
@@ -2025,9 +1964,9 @@ func testRunnerSessions(t *testing.T) {
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 			msgCh, done, _ := r.startMessageDispatch(t.Context(), tk, nil)
-			log := &agenttest.LogSink{Version: agent.LogVersionV2}
+			log := &agenttest.LogSink{}
 			opts := agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: log}
-			var v2Message agent.Message
+			var timedMessage agent.Message
 			cmd := exec.CommandContext(t.Context(), "python3", "-c", "import sys; print(sys.argv[1])", `{"t":"agent","ts":1.234,"msg":{}}`)
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
@@ -2041,34 +1980,19 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 			session := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), logtest.Logger(t), stdin, log, &testWire{parse: func([]byte) ([]agent.Message, error) {
-				v2Message = &agent.TextMessage{Text: "v2"}
-				return []agent.Message{v2Message}, nil
+				timedMessage = &agent.TextMessage{Text: "timed"}
+				return []agent.Message{timedMessage}, nil
 			}}), stdout, opts.MsgCh, logtest.Logger(t))
 			if err := session.Wait(); err != nil {
 				t.Fatal(err)
 			}
 			got := <-sub
-			if got.Message != v2Message {
-				t.Fatalf("subscriber message = %T, want original %T", got.Message, v2Message)
+			if got.Message != timedMessage {
+				t.Fatalf("subscriber message = %T, want original %T", got.Message, timedMessage)
 			}
 			if want := time.Unix(1, 234_000_000); !got.ObservedAt.Equal(want) {
 				t.Fatalf("subscriber observed time = %v, want %v", got.ObservedAt, want)
 			}
-			var v1 agent.TimedMessage
-			err = agent.DefaultReadMessages(t.Context(), logtest.Logger(t), strings.NewReader(`{"event":"legacy"}`+"\n"), func(parsed agent.TimedMessage) error {
-				v1 = parsed
-				opts.MsgCh <- parsed
-				return nil
-			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
-				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
-			}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !v1.ProducerTime.IsZero() {
-				t.Fatalf("v1 producer time = %v, want zero", v1.ProducerTime)
-			}
-			<-sub
 			close(msgCh)
 			<-done
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"})
@@ -2238,7 +2162,7 @@ func testRunnerSessions(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/home/user/src/repo"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
+			persisted := &agenttest.LogSink{}
 			// Exercise delivery before AttachSession.
 			tk.addMessage(t.Context(), agent.NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",

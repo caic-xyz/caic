@@ -1962,7 +1962,7 @@ describe("TaskDetail", () => {
       emit(handlers, {
         kind: "error",
         ts: 2,
-        error: { err: "agent extension failed to load", line: "" },
+        error: { err: "agent extension failed to load" },
       });
       return {
         addEventListener: vi.fn(),

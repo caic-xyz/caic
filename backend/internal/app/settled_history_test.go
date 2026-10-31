@@ -22,17 +22,17 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/metrics"
 )
 
-// writeSettledHistoryLog writes a minimal v1 task log (metadata header plus an
+// writeSettledHistoryLog writes a minimal v3 task log (metadata header plus an
 // optional result trailer) with the given mtime and returns its path. An empty
 // state leaves the log non-terminal (running).
 func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Time) string {
-	meta, err := json.Marshal(v1.MetaMessage{
+	meta, err := json.Marshal(logdata.MetaMessage{
 		MessageType: "caic_meta",
-		Version:     int(agent.LogVersionV1),
+		Version:     int(agent.LogVersionV3),
 		Harness:     string(harness.Claude),
 		Prompt:      "history",
 	})
@@ -43,8 +43,8 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 	data = append(data, meta...)
 	data = append(data, '\n')
 	if state != "" {
-		trailer, err := json.Marshal(v1.MetaResultMessage{
-			MessageType: "caic_result",
+		trailer, err := json.Marshal(logdata.MetaResultMessage{
+			MessageType: "result",
 			State:       state,
 		})
 		if err != nil {

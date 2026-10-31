@@ -70,7 +70,7 @@ func TestLiveRelay(t *testing.T) {
 	ch := make(chan agent.TimedMessage, 256)
 	opts := agent.Options{
 		Target: target, Dir: dir, Model: model, MsgCh: ch,
-		Logger: slog.Default(), Log: agent.DiscardLogSink{Version: agent.LogVersionV3},
+		Logger: slog.Default(), Log: agent.DiscardLogSink{},
 	}
 	var session *agent.Session
 	t.Cleanup(func() {
@@ -234,7 +234,7 @@ func TestLiveTaskMCP(t *testing.T) {
 			ch := make(chan agent.TimedMessage, 256)
 			opts := agent.Options{
 				Target: runtime.ConnectionTarget{SSHHost: host}, Dir: dir, Model: model, MsgCh: ch,
-				Logger: slog.Default(), Log: agent.DiscardLogSink{Version: agent.LogVersionV3}, MCP: registry,
+				Logger: slog.Default(), Log: agent.DiscardLogSink{}, MCP: registry,
 			}
 			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once with empty arguments. Reply with its returned result only. Do not use shell or write files."
 			registry.setToken()

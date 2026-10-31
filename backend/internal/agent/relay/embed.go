@@ -6,13 +6,13 @@ import _ "embed"
 // ScriptV2 is the maintained Python relay with canonical agent framing.
 // V2 identifies the relay implementation, not the physical task-log format.
 // Relay and task-log versions are independent. This relay supports task-log
-// formats v2 and v3. Implementation size does not define a version boundary.
+// format v3. Implementation size does not define a version boundary.
 //
 // Compatibility has three independent boundaries:
 //   - Physical task logs: preserve supported record bytes, field meanings, and
 //     replay semantics. An incompatible format needs a new log version and
-//     independent data types. Keep historical readers; declare write and
-//     continuation support separately. This version belongs to agent.LogVersion,
+//     independent data types. Remove unsupported historical readers.
+//     This version belongs to the persisted metadata header,
 //     not to the Python implementation.
 //   - Live relay protocol: preserve framing, control messages, byte offsets,
 //     attach, MCP routing, and shutdown across backend restarts. A backend must

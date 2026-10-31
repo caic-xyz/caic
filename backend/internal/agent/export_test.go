@@ -1,532 +1,226 @@
-// Tests parsed task-discussion markdown rendering.
+// Tests task-discussion Markdown rendering against reviewed golden fixtures.
 
 package agent
 
 import (
 	"encoding/json"
-	"errors"
+	"flag"
+	"os"
+	"path/filepath"
+
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-type v1ExportTestLine struct {
-	Type string `json:"type"`
-}
-
-// v1ExportParseFn is a minimal parser for export tests. It recognises the
-// message types that ExportDiscussion renders and ignores the rest.
-func v1ExportParseFn(line []byte) ([]Message, error) {
-	var env v1ExportTestLine
-	if err := json.Unmarshal(line, &env); err != nil {
-		return nil, err
-	}
-	switch env.Type {
-	case "user_input":
-		var m UserInputMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return []Message{&m}, nil
-	case "text":
-		var w struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
-		}
-		return []Message{&TextMessage{Text: w.Text}}, nil
-	case "thinking":
-		var w struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
-		}
-		return []Message{&ThinkingMessage{Text: w.Text}}, nil
-	case "tool_use":
-		var w struct {
-			ID    string          `json:"id"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
-		}
-		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
-		}
-		return []Message{&ToolUseMessage{ToolUseID: w.ID, Name: w.Name, Input: w.Input}}, nil
-	case "tool_result":
-		var w struct {
-			ToolUseID string `json:"tool_use_id"`
-			Error     string `json:"error"`
-		}
-		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
-		}
-		m := &ToolResultMessage{ToolUseID: w.ToolUseID}
-		if w.Error != "" {
-			m.Error = w.Error
-		}
-		return []Message{m}, nil
-	case "system":
-		var m SystemMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return []Message{&m}, nil
-	case "native_subagent":
-		var m NativeSubagentMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return []Message{&m}, nil
-	default:
-		return nil, nil
-	}
-}
-
-// v1ExportFixture is an in-memory renderer fixture. Physical-log export is
-// covered through taskslog.ExportDiscussion; renderer tests keep only their
-// harness-neutral input messages here.
-func v1ExportFixture(lines []string) []string {
-	return lines
-}
-
-func renderDiscussionV1Fixture(lines []string) (string, error) {
-	var meta *MetaMessage
-	var result *MetaResultMessage
-	var pr *MetaPRMessage
-	var messages []Message
-	for _, line := range lines {
-		var env v1ExportTestLine
-		if json.Unmarshal([]byte(line), &env) != nil {
-			continue
-		}
-		switch env.Type {
-		case "caic_meta":
-			var decoded MetaMessage
-			if json.Unmarshal([]byte(line), &decoded) == nil {
-				meta = &decoded
-			}
-		case "caic_result":
-			var decoded MetaResultMessage
-			if json.Unmarshal([]byte(line), &decoded) == nil {
-				result = &decoded
-			}
-		case "caic_pr":
-			var decoded MetaPRMessage
-			if json.Unmarshal([]byte(line), &decoded) == nil {
-				pr = &decoded
-			}
-		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init", PendingUserActionMessageType:
-		default:
-			parsed, err := v1ExportParseFn([]byte(line))
-			if err == nil {
-				messages = append(messages, parsed...)
-			}
-		}
-	}
-	if meta == nil {
-		return "", errors.New("no caic_meta header")
-	}
-	return RenderDiscussion(meta, result, pr, messages), nil
-}
-
-// v1MetaLine returns a caic_meta JSON line with the given prompt and harness.
-func v1MetaLine(prompt, harnessName string) string {
-	return `{"type":"caic_meta","version":1,"prompt":` + jsonStr(prompt) + `,"harness":` + jsonStr(harnessName) + `,"repos":[],"started_at":"2025-01-15T10:00:00Z"}`
-}
-
-// jsonStr returns a JSON-quoted string.
-func jsonStr(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		panic(err)
-	}
-	return string(b)
-}
+var updateDiscussionGoldens = flag.Bool("update-discussion-goldens", false, "update reviewed discussion Markdown fixtures")
 
 func TestRenderDiscussion(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid", func(t *testing.T) {
+	t.Run("full_conversation", func(t *testing.T) {
 		t.Parallel()
-
-		t.Run("full_conversation", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("fix the bug", "pi"),
-				`{"type":"user_input","text":"fix the bug"}`,
-				`{"type":"thinking","text":"Let me analyze the issue carefully and find the root cause."}`,
-				`{"type":"text","text":"I'll look at the error logs first."}`,
-				`{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cat /var/log/app.log"}}`,
-				`{"type":"tool_result","tool_use_id":"t1"}`,
-				`{"type":"tool_use","id":"t2","name":"Edit","input":{"path":"main.go","old_text":"buggy","new_text":"fixed"}}`,
-				`{"type":"tool_result","tool_use_id":"t2"}`,
-				`{"type":"text","text":"The bug is fixed. The issue was a nil pointer dereference."}`,
-				`{"type":"caic_result","state":"completed","cost_usd":0.05,"duration":120,"num_turns":3}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Metadata
-			assertContains(t, md, "# Task Discussion")
-			assertContains(t, md, "**Prompt**: fix the bug")
-			assertContains(t, md, "**Harness**: pi")
-			assertContains(t, md, "**State**: completed")
-			assertContains(t, md, "**Cost**: $0.0500")
-			assertContains(t, md, "**Duration**: 2.0m")
-			assertContains(t, md, "**Turns**: 3")
-
-			// Conversation
-			assertContains(t, md, "## User\n\nfix the bug")
-			assertContains(t, md, "## Assistant\n\nI'll look at the error logs first.")
-			assertContains(t, md, "The bug is fixed")
-			assertContains(t, md, "### 🔧 Tool: `Bash`")
-			assertContains(t, md, "```bash\ncat /var/log/app.log\n```")
-			assertContains(t, md, "### 🔧 Tool: `Edit`")
-			assertContains(t, md, "**File**: `main.go`")
-			assertContains(t, md, "💭 Thinking")
+		md := RenderDiscussion(&MetaMessage{Prompt: "fix the bug", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, &MetaResultMessage{State: "completed", CostUSD: 0.05, Duration: 120, NumTurns: 3}, nil, []Message{
+			&UserInputMessage{Text: "fix the bug"},
+			&ThinkingMessage{Text: "Let me analyze the issue carefully and find the root cause."},
+			&TextMessage{Text: "I'll look at the error logs first."},
+			&ToolUseMessage{ToolUseID: "t1", Name: "Bash", Input: json.RawMessage(`{"command":"cat /var/log/app.log"}`)},
+			&ToolResultMessage{ToolUseID: "t1"},
+			&ToolUseMessage{ToolUseID: "t2", Name: "Edit", Input: json.RawMessage(`{"path":"main.go","old_text":"buggy","new_text":"fixed"}`)},
+			&ToolResultMessage{ToolUseID: "t2"},
+			&TextMessage{Text: "The bug is fixed. The issue was a nil pointer dereference."},
 		})
 
-		t.Run("metadata_only", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("hello", "claude"),
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Prompt**: hello")
-			assertContains(t, md, "**Harness**: claude")
-			assertContains(t, md, "# Task Discussion")
-			assertContains(t, md, "---")
-		})
-
-		t.Run("with_PR_info", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("add feature", "claude"),
-				`{"type":"text","text":"done"}`,
-				`{"type":"caic_pr","forge_owner":"octo","forge_repo":"app","forge_pr":42}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**PR**: octo/app#42")
-		})
-
-		t.Run("reported_settings", func(t *testing.T) {
-			t.Parallel()
-			meta := &MetaMessage{
-				Prompt:          "task",
-				Harness:         string(harness.Codex),
-				RequestedModel:  "requested-model",
-				RequestedEffort: "low",
-			}
-			md := RenderDiscussion(meta, nil, nil, []Message{
-				&InitMessage{ReportedModel: "reported-model", ReportedEffort: "high"},
-				&SystemMessage{Subtype: SystemSubtypeModelRerouted, ReportedModel: "rerouted-model"},
-			})
-			assertContains(t, md, "**Model**: rerouted-model")
-			assertContains(t, md, "**Effort**: high")
-			if strings.Contains(md, "requested-model") || strings.Contains(md, "**Effort**: low") {
-				t.Fatalf("exported requested settings:\n%s", md)
-			}
-		})
-
-		t.Run("with_flags", func(t *testing.T) {
-			t.Parallel()
-			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[],"started_at":"2025-01-15T10:00:00Z","tailscale":true,"display":true}`
-			lines := v1ExportFixture([]string{line})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Flags**: tailscale, display")
-		})
-
-		t.Run("with_repos", func(t *testing.T) {
-			t.Parallel()
-			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[{"name":"app","base_branch":"main","branch":"fix-bug"}],"started_at":"2025-01-15T10:00:00Z"}`
-			lines := v1ExportFixture([]string{line})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Repo**: app (`main..fix-bug`)")
-		})
-
-		t.Run("with_error_result", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"text","text":"something went wrong"}`,
-				`{"type":"caic_result","state":"failed","error":"container died","cost_usd":0.01,"duration":10}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**State**: failed")
-			assertContains(t, md, "**Error**: container died")
-		})
-
-		t.Run("tool_error", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"tool_result","tool_use_id":"t1","error":"command not found"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "⚠️ Tool error: command not found")
-		})
-
-		t.Run("native_subagent_activity", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"native_subagent","subagent":{"id":"child-1","label":"analyze logs","status":"running"}}`,
-				`{"type":"native_subagent","subagent":{"id":"child-1","scope":"batch","status":"paused","result":"awaiting input"}}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "### 🤖 Native agent: analyze logs — running")
-			assertContains(t, md, "### 🤖 Native batch: child-1 — paused")
-			assertContains(t, md, "awaiting input")
-		})
-
-		t.Run("compaction_boundary", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"system","subtype":"compact_boundary"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "Context compaction boundary")
-		})
-
-		t.Run("skips_caic_control_records", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"caic_diff_stat","diff_stat":[]}`,
-				`{"type":"caic_exit","exit_code":0}`,
-				`{"type":"caic_model_info","context_window":200000}`,
-				`{"type":"text","text":"visible"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "visible")
-			assertNotContains(t, md, "caic_diff_stat")
-			assertNotContains(t, md, "caic_exit")
-			assertNotContains(t, md, "caic_model_info")
-		})
-
-		t.Run("thinking_truncated", func(t *testing.T) {
-			t.Parallel()
-			long := strings.Repeat("a", 1000)
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"thinking","text":` + jsonStr(long) + `}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(md, strings.Repeat("a", 500)+"...") {
-				t.Error("thinking text was not truncated")
-			}
-		})
-
-		t.Run("duration_hours", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"caic_result","state":"completed","duration":7200}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Duration**: 2.0h")
-		})
-
-		t.Run("duration_seconds", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"caic_result","state":"completed","duration":45}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Duration**: 45s")
-		})
-
-		t.Run("skips_empty_tool_use", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"text","text":"Before"}`,
-				`{"type":"tool_use","id":"t1","name":"Read","input":{}}`,
-				`{"type":"tool_use","id":"t2","name":"Read","input":{"path":"main.go"}}`,
-				`{"type":"text","text":"After"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The empty ToolUseMessage should be skipped.
-			assertContains(t, md, "**File**: `main.go`")
-			// There should be exactly one Tool use line.
-			if strings.Count(md, "### 🔧 Tool:") != 1 {
-				t.Errorf("expected 1 tool use, got %d", strings.Count(md, "### 🔧 Tool:"))
-			}
-		})
-
-		t.Run("skips_null_tool_use_input", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"tool_use","id":"t1","name":"Read","input":null}`,
-				`{"type":"text","text":"done"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertNotContains(t, md, "### 🔧 Tool:")
-		})
-
-		t.Run("write_tool_preview", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"tool_use","id":"t1","name":"Write","input":{"path":"out.txt","content":"hello world"}}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**File**: `out.txt`")
-			assertContains(t, md, "hello world")
-		})
-
-		t.Run("read_tool_path", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"tool_use","id":"t1","name":"Read","input":{"path":"main.go"}}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**File**: `main.go`")
-		})
-
-		t.Run("grep_tool_pattern", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"TODO","path":"."}}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "**Pattern**: `TODO`")
-		})
-
-		t.Run("title", func(t *testing.T) {
-			t.Parallel()
-			meta := &MetaMessage{
-				Prompt:    "do something",
-				Title:     "My Task Title",
-				Harness:   string(harness.Pi),
-				StartedAt: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-			}
-			md := RenderDiscussion(meta, nil, nil, nil)
-			if !strings.Contains(md, "**Title**: My Task Title") {
-				t.Errorf("missing title in output:\n%s", md)
-			}
-		})
+		assertDiscussionGolden(t, "full-conversation.md", md)
 	})
 
-	t.Run("error", func(t *testing.T) {
+	t.Run("metadata_only", func(t *testing.T) {
 		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "hello", Harness: "claude", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, nil)
+		assertContains(t, md, "**Prompt**: hello")
+		assertContains(t, md, "**Harness**: claude")
+		assertContains(t, md, "# Task Discussion")
+		assertContains(t, md, "---")
+	})
 
-		t.Run("no_caic_meta_header", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				`{"type":"text","text":"orphan message"}`,
-			})
-			_, err := renderDiscussionV1Fixture(lines)
-			if err == nil {
-				t.Fatal("expected error for missing caic_meta")
-			}
-			if !strings.Contains(err.Error(), "no caic_meta header") {
-				t.Errorf("error = %q, want it to mention 'no caic_meta header'", err.Error())
-			}
+	t.Run("with_PR_info", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "add feature", Harness: "claude", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, &MetaPRMessage{ForgeOwner: "octo", ForgeRepo: "app", ForgePR: 42}, []Message{
+			&TextMessage{Text: "done"},
 		})
+		assertContains(t, md, "**PR**: octo/app#42")
+	})
 
-		t.Run("empty_fixture", func(t *testing.T) {
-			t.Parallel()
-			_, err := renderDiscussionV1Fixture(nil)
-			if err == nil {
-				t.Fatal("expected error for empty file")
-			}
+	t.Run("reported_settings", func(t *testing.T) {
+		t.Parallel()
+		meta := &MetaMessage{
+			Prompt:          "task",
+			Harness:         string(harness.Codex),
+			RequestedModel:  "requested-model",
+			RequestedEffort: "low",
+		}
+		md := RenderDiscussion(meta, nil, nil, []Message{
+			&InitMessage{ReportedModel: "reported-model", ReportedEffort: "high"},
+			&SystemMessage{Subtype: SystemSubtypeModelRerouted, ReportedModel: "rerouted-model"},
 		})
+		assertContains(t, md, "**Model**: rerouted-model")
+		assertContains(t, md, "**Effort**: high")
+		if strings.Contains(md, "requested-model") || strings.Contains(md, "**Effort**: low") {
+			t.Fatalf("exported requested settings:\n%s", md)
+		}
+	})
 
-		t.Run("unparseable_lines_skipped", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{not valid json`,
-				`{"type":"text","text":"visible"}`,
-			})
+	t.Run("with_flags", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "test", Harness: "pi", Tailscale: true, Display: true, StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, nil)
+		assertContains(t, md, "**Flags**: tailscale, display")
+	})
 
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "visible")
+	t.Run("with_repos", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "test", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC), Repos: []v3.MetaRepo{{Name: "app", BaseBranch: "main", Branch: "fix-bug"}}}, nil, nil, nil)
+		assertContains(t, md, "**Repo**: app (`main..fix-bug`)")
+	})
+
+	t.Run("with_error_result", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, &MetaResultMessage{State: "failed", CostUSD: 0.01, Duration: 10, Error: "container died"}, nil, []Message{
+			&TextMessage{Text: "something went wrong"},
 		})
+		assertContains(t, md, "**State**: failed")
+		assertContains(t, md, "**Error**: container died")
+	})
+
+	t.Run("tool_error", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ToolResultMessage{ToolUseID: "t1", Error: "command not found"},
+		})
+		assertContains(t, md, "⚠️ Tool error: command not found")
+	})
+
+	t.Run("native_subagent_activity", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&NativeSubagentMessage{Subagent: NativeSubagent{ID: "child-1", Label: "analyze logs", Status: NativeSubagentStatusRunning}},
+			&NativeSubagentMessage{Subagent: NativeSubagent{ID: "child-1", Scope: NativeSubagentScopeBatch, Status: NativeSubagentStatusPaused, Result: "awaiting input"}},
+		})
+		assertContains(t, md, "### 🤖 Native agent: analyze logs — running")
+		assertContains(t, md, "### 🤖 Native batch: child-1 — paused")
+		assertContains(t, md, "awaiting input")
+	})
+
+	t.Run("compaction_boundary", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&SystemMessage{Subtype: "compact_boundary"},
+		})
+		assertContains(t, md, "Context compaction boundary")
+	})
+
+	t.Run("skips_control_messages", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&DiffStatMessage{},
+			&ExitMessage{ExitCode: 0},
+			&ModelInfoMessage{ContextWindow: 200000},
+			&TextMessage{Text: "visible"},
+		})
+		assertDiscussionGolden(t, "skips-control-messages.md", md)
+	})
+
+	t.Run("thinking_truncated", func(t *testing.T) {
+		t.Parallel()
+		long := strings.Repeat("a", 1000)
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ThinkingMessage{Text: long},
+		})
+		if !strings.Contains(md, strings.Repeat("a", 500)+"...") {
+			t.Error("thinking text was not truncated")
+		}
+	})
+
+	t.Run("duration_hours", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, &MetaResultMessage{State: "completed", Duration: 7200}, nil, nil)
+		assertContains(t, md, "**Duration**: 2.0h")
+	})
+
+	t.Run("duration_seconds", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, &MetaResultMessage{State: "completed", Duration: 45}, nil, nil)
+		assertContains(t, md, "**Duration**: 45s")
+	})
+
+	t.Run("skips_empty_tool_use", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&TextMessage{Text: "Before"},
+			&ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{}`)},
+			&ToolUseMessage{ToolUseID: "t2", Name: "Read", Input: json.RawMessage(`{"path":"main.go"}`)},
+			&TextMessage{Text: "After"},
+		})
+		// The empty ToolUseMessage should be skipped.
+		assertContains(t, md, "**File**: `main.go`")
+		// There should be exactly one Tool use line.
+		if strings.Count(md, "### 🔧 Tool:") != 1 {
+			t.Errorf("expected 1 tool use, got %d", strings.Count(md, "### 🔧 Tool:"))
+		}
+	})
+
+	t.Run("skips_null_tool_use_input", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`null`)},
+			&TextMessage{Text: "done"},
+		})
+		if strings.Contains(md, "### 🔧 Tool:") {
+			t.Errorf("empty tool input rendered: %s", md)
+		}
+	})
+
+	t.Run("write_tool_preview", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ToolUseMessage{ToolUseID: "t1", Name: "Write", Input: json.RawMessage(`{"path":"out.txt","content":"hello world"}`)},
+		})
+		assertContains(t, md, "**File**: `out.txt`")
+		assertContains(t, md, "hello world")
+	})
+
+	t.Run("read_tool_path", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{"path":"main.go"}`)},
+		})
+		assertContains(t, md, "**File**: `main.go`")
+	})
+
+	t.Run("grep_tool_pattern", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&ToolUseMessage{ToolUseID: "t1", Name: "Grep", Input: json.RawMessage(`{"pattern":"TODO","path":"."}`)},
+		})
+		assertContains(t, md, "**Pattern**: `TODO`")
+	})
+
+	t.Run("title", func(t *testing.T) {
+		t.Parallel()
+		meta := &MetaMessage{
+			Prompt:    "do something",
+			Title:     "My Task Title",
+			Harness:   string(harness.Pi),
+			StartedAt: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		}
+		md := RenderDiscussion(meta, nil, nil, nil)
+		if !strings.Contains(md, "**Title**: My Task Title") {
+			t.Errorf("missing title in output:\n%s", md)
+		}
 	})
 }
 
@@ -589,19 +283,25 @@ func TestTrunc(t *testing.T) {
 
 func assertContains(t *testing.T, s, substr string) {
 	if !strings.Contains(s, substr) {
-		t.Errorf("expected output to contain %q, but it didn't.\nGot:\n%s", substr, truncForTest(s, 500))
+		t.Errorf("expected output to contain %q, but it didn't.\nGot:\n%s", substr, s)
 	}
 }
 
-func assertNotContains(t *testing.T, s, substr string) {
-	if strings.Contains(s, substr) {
-		t.Errorf("expected output NOT to contain %q, but it did", substr)
+// Update fixtures with:
+// go test ./backend/internal/agent -run '^TestRenderDiscussion$' -args -update-discussion-goldens
+// Review the resulting testdata/render-discussion diff before committing.
+func assertDiscussionGolden(t *testing.T, name, got string) {
+	path := filepath.Join("testdata", "render-discussion", name)
+	if *updateDiscussionGoldens {
+		if err := os.WriteFile(filepath.Clean(path), []byte(got), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-}
-
-func truncForTest(s string, n int) string {
-	if len(s) <= n {
-		return s
+	want, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return s[:n] + "... (truncated)"
+	if diff := cmp.Diff(string(want), got); diff != "" {
+		t.Errorf("discussion golden %s mismatch (-want +got):\n%s", path, diff)
+	}
 }

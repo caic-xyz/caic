@@ -159,7 +159,7 @@ func loadUsageStartedAt(path string) (startedAt time.Time, retErr error) {
 
 func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow, error] {
 	return func(yield func(data.UsageRow, error) bool) {
-		if lt.LogVersion != agent.LogVersionV2 && lt.LogVersion != agent.LogVersionV3 || lt.TaskID == "" {
+		if lt.TaskID == "" {
 			return
 		}
 		type key struct {

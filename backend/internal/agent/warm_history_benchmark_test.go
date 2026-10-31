@@ -31,7 +31,7 @@ func BenchmarkWarmHistoryReplay(b *testing.B) {
 					b.Fatal(err)
 				}
 				wire := &warmHistoryWire{}
-				parser, err := NewLogRecordParser(LogVersionV3, wire.ParseMessage)
+				parser, err := NewLogRecordParser(wire.ParseMessage)
 				if err != nil {
 					b.Fatal(err)
 				}

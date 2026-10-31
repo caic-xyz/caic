@@ -43,14 +43,6 @@ type CreateRequest struct {
 
 const statsRingSize = 60
 
-// LegacyRelayRecoveryNotice marks imported V2 histories whose live relay
-// proves that the original prompt ran even though its offline output could not
-// be reconciled safely with the durable task log.
-//
-// TODO(2026-11): Remove this notice, its accepted-input exception, the live V2
-// relay recovery fallback, and their tests. Retain historical V2 log parsing.
-const LegacyRelayRecoveryNotice = "Recovered legacy relay session; output produced while caic was unavailable could not be verified and was not retained."
-
 // stateTransitionHistory bounds each task's journal of recent state
 // transitions. It only needs to cover the states a task-list connection can
 // miss between two snapshots, so a short window is sufficient.
@@ -874,13 +866,8 @@ func (t *Task) HasAcceptedInputEvidence() bool {
 		if acceptedInputOutput(entry.Message) {
 			return true
 		}
-		switch message := entry.Message.(type) {
-		case *agent.UserInputMessage:
-			if _, rejected := rejected[message]; !message.Source.IsChild() && !rejected {
-				return true
-			}
-		case *agent.LogMessage:
-			if message.Line == LegacyRelayRecoveryNotice {
+		if message, ok := entry.Message.(*agent.UserInputMessage); ok && !message.Source.IsChild() {
+			if _, rejected := rejected[message]; !rejected {
 				return true
 			}
 		}
@@ -2333,7 +2320,7 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 // into the same LoadedTask shape used by startup. Completion already has these
 // values in memory, so persisting this projection avoids decoding the newly
 // compressed message body on the next process start.
-func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result) *taskslog.LoadedTask {
+func (t *Task) terminalLogSummary(res *taskslog.Result) *taskslog.LoadedTask {
 	snapshot := t.Snapshot()
 	// GitRoot is process-local checkout state and is absent from the durable
 	// log header. Do not let the fast completion path persist a stale host path
@@ -2350,7 +2337,6 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		Prompt:            t.InitialPrompt.Text,
 		Title:             snapshot.Title,
 		Repos:             snapshot.Repos,
-		LogVersion:        version,
 		Harness:           t.Harness,
 		StartedAt:         t.StartedAt,
 		LastStateUpdateAt: snapshot.StateUpdatedAt,
@@ -2894,7 +2880,7 @@ func ClearsExitError(msg agent.Message) bool {
 		return m.Subtype != agent.SystemSubtypeExternalActivity && !agent.IsInputDeliveryControl(m)
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
 		*agent.BackgroundCommandMessage,
-		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
+		*agent.PendingUserActionMessage,
 		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false
 	case *agent.ResultMessage:

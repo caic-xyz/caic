@@ -57,7 +57,7 @@ func TestMCPRegistry(t *testing.T) {
 			// These local tools deliberately outlive request cancellation. The
 			// task-scoped capability denies them, but executor ownership must
 			// also preserve accepted work for registries that expose them.
-			conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{Version: agent.LogVersionV3}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
+			conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
 			read := make(chan error, 1)
 			response := make(chan string, 1)
 			var workers sync.WaitGroup
@@ -132,12 +132,12 @@ func TestMCPRegistry(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout, output := io.Pipe()
-		conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{Version: agent.LogVersionV3}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
+		conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
 		messages := make(chan agent.TimedMessage, 4)
 		session := agent.NewSession(ctx, cmd, conn, stdout, messages, testLogger())
 		dispatchDone := make(chan struct{})
 		close(dispatchDone)
-		h := &task.SessionHandle{Session: session, MsgCh: messages, DispatchDone: dispatchDone, Log: agent.DiscardLogSink{Version: agent.LogVersionV3}}
+		h := &task.SessionHandle{Session: session, MsgCh: messages, DispatchDone: dispatchDone, Log: agent.DiscardLogSink{}}
 		tk.AttachSession(h)
 		t.Cleanup(func() {
 			cancel()

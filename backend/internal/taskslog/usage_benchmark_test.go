@@ -3,7 +3,6 @@
 package taskslog_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,13 +11,12 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
-
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
@@ -28,7 +26,7 @@ const (
 )
 
 // BenchmarkUsageBackfill measures the background path from a read-only scan
-// of retained v2/v3 logs through publication of their neutral daily rows.
+// of retained v3 logs through publication of their neutral daily rows.
 func BenchmarkUsageBackfill(b *testing.B) {
 	b.StopTimer()
 	dir := b.TempDir()
@@ -41,13 +39,10 @@ func BenchmarkUsageBackfill(b *testing.B) {
 		times[i] = time.Date(2026, time.February, 5, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Hour)
 	}
 	var bytes int
-	for i := range usageBenchmarkTasks {
-		version := agent.LogVersionV2
-		if i%2 != 0 {
-			version = agent.LogVersionV3
-		}
-		bytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), version, times)
+	for range usageBenchmarkTasks {
+		bytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
 	}
+
 	logStore := taskslog.NewStore(slog.New(slog.DiscardHandler), logDir)
 	resolver := usageResolver()
 	b.SetBytes(int64(bytes))
@@ -70,29 +65,20 @@ func BenchmarkUsageBackfill(b *testing.B) {
 	}
 }
 
-func writeUsageBenchmarkLog(b *testing.B, dir, id string, version agent.LogVersion, times []time.Time) int {
-	meta := v1.MetaMessage{
+func writeUsageBenchmarkLog(b *testing.B, dir, id string, times []time.Time) int {
+	meta := agent.MetaMessage{
 		MessageType:    "caic_meta",
-		Version:        int(version),
+		Version:        3,
 		Prompt:         "backfill benchmark",
-		Repos:          []v1.MetaRepo{{Name: "org/repo"}},
+		Repos:          []v3.MetaRepo{{Name: "org/repo"}},
 		Harness:        string(harness.Claude),
 		RequestedModel: "claude-test",
 	}
-	header, err := json.Marshal(meta)
+	header, err := agent.MarshalLogMessage(&meta)
 	if err != nil {
 		b.Fatal(err)
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(header, &obj); err != nil {
-		b.Fatal(err)
-	}
-	delete(obj, "type")
-	obj["t"] = json.RawMessage(`"caic_meta"`)
-	header, err = json.Marshal(obj)
-	if err != nil {
-		b.Fatal(err)
-	}
+
 	data := make([]byte, 0, len(header)+len(times)*128)
 	data = append(data, header...)
 	data = append(data, '\n')

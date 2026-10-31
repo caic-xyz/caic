@@ -2112,10 +2112,9 @@ public struct EventDiffStat: Codable {
     public let diffStat: DiffStat?
 }
 
-/// EventError is emitted when the backend fails to parse an agent output line.
+/// EventError reports an agent subprocess failure.
 public struct EventError: Codable {
     public let err: String
-    public let line: String
 }
 
 /// EventThinking is an assistant thinking block.

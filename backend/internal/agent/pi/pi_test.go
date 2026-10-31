@@ -179,11 +179,9 @@ func TestWaitForResponse(t *testing.T) {
 
 	t.Run("caic_exit surfaces relay stderr", func(t *testing.T) {
 		t.Parallel()
-		r, err := agent.NewRelayRecordReader(bytes.NewBufferString(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = waitForResponse(r, "set_model")
+		r := agent.NewRelayRecordReader(bytes.NewBufferString(`{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.DiscardLogSink{})
+
+		_, err := waitForResponse(r, "set_model")
 		if err == nil {
 			t.Fatal("waitForResponse returned nil error")
 		}
@@ -194,14 +192,12 @@ func TestWaitForResponse(t *testing.T) {
 			t.Fatalf("errors.AsType[*piProcessExitError](%v) = (_, false), want (_, true)", err)
 		}
 	})
-	t.Run("v2 response is persisted once", func(t *testing.T) {
+	t.Run("physical response is persisted once", func(t *testing.T) {
 		t.Parallel()
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`
-		log := agenttest.LogSink{Version: agent.LogVersionV2}
-		records, err := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), agent.LogVersionV2, &log)
-		if err != nil {
-			t.Fatal(err)
-		}
+		log := agenttest.LogSink{}
+		records := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), &log)
+
 		resp, err := waitForResponse(records, "set_model")
 		if err != nil {
 			t.Fatal(err)
@@ -228,7 +224,7 @@ func TestPiConn(t *testing.T) {
 				if !ok {
 					t.Fatal("unexpected Pi wire")
 				}
-				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, wire, &agent.Options{MCP: mcptest.FakeRegistry{}})
+				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, wire, &agent.Options{MCP: mcptest.FakeRegistry{}})
 				var workers sync.WaitGroup
 				t.Cleanup(func() { conn.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
@@ -321,10 +317,8 @@ func TestReapPiProcessExit(t *testing.T) {
 		_ = stdin.Close()
 	})
 
-	records, recordsErr := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
-	if recordsErr != nil {
-		t.Fatal(recordsErr)
-	}
+	records := agent.NewRelayRecordReader(stdout, agent.DiscardLogSink{})
+
 	_, err = waitForResponse(records, "set_model")
 	if err == nil {
 		t.Fatal("waitForResponse returned nil error")
@@ -359,7 +353,7 @@ func TestBackend(t *testing.T) {
 		t.Setenv("PI_SSH_HELPER_DIR", dir)
 
 		msgs := make(chan agent.TimedMessage, 1)
-		log := &agenttest.LogSink{Version: agent.LogVersionV2}
+		log := &agenttest.LogSink{}
 		sess, err := New("", nil).Start(t.Context(), &agent.Options{
 			ResumeSessionID: "ses-1",
 			Logger:          slog.New(slog.DiscardHandler),
@@ -440,7 +434,7 @@ func TestBackend(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{}})
 		if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
 			t.Fatalf("resume mismatch error=%v", err)
 		}
@@ -596,26 +590,6 @@ func TestBackend(t *testing.T) {
 			}
 			if got := len(wire.toolOutputLen); got != 0 {
 				t.Fatalf("tracked tool outputs after result = %d, want 0", got)
-			}
-		})
-
-		t.Run("caic_exit carries relay stderr", func(t *testing.T) {
-			t.Parallel()
-			parser := New("", nil).NewWire().ParseMessage
-			line := []byte(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`)
-			msgs, err := parser(line)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(msgs) != 1 {
-				t.Fatalf("got %d messages, want 1", len(msgs))
-			}
-			exit, ok := msgs[0].(*agent.ExitMessage)
-			if !ok {
-				t.Fatalf("got %T, want ExitMessage", msgs[0])
-			}
-			if exit.ExitCode != 2 || exit.Error != "Unknown option: --approve" {
-				t.Errorf("exit = %+v, want code 2 with stderr", exit)
 			}
 		})
 

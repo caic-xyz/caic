@@ -21,7 +21,7 @@ import (
 var fakeScript []byte
 
 // FakeBackend implements agent.Backend using a Python subprocess that cycles
-// through canned responses carried in canonical v2 task-log envelopes.
+// through canned responses carried in canonical v3 task-log envelopes.
 type FakeBackend struct {
 	agent.Base
 }

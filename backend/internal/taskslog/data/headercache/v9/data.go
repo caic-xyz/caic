@@ -1,5 +1,5 @@
-// Package v8 defines the independent version 8 task-header cache schema.
-package v8
+// Package v9 defines the independent version 9 task-header cache schema.
+package v9
 
 import "time"
 
@@ -17,7 +17,6 @@ type Task struct {
 	Prompt                string       `json:"prompt"`
 	Title                 string       `json:"title"`
 	Repos                 []Repo       `json:"repos"`
-	LogVersion            int          `json:"log_version"`
 	Harness               string       `json:"harness"`
 	StartedAt             time.Time    `json:"started_at"`
 	LastStateUpdateAt     time.Time    `json:"last_state_update_at"`

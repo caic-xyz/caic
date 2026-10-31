@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/caic-xyz/caic/backend/internal/tokens"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 
 	"github.com/buger/jsonparser"
 
@@ -20,39 +20,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
-
-// toAgentUsage converts the wire MsgUsage to the backend-neutral agent.Usage.
-func toAgentUsage(u *claudecode.MsgUsage) agent.Usage {
-	usage := agent.Usage{
-		InputTokens:              int(u.InputTokens),
-		OutputTokens:             int(u.OutputTokens),
-		CacheCreationInputTokens: max(0, int(u.CacheCreationInputTokens)),
-		CacheReadInputTokens:     int(u.CacheReadInputTokens),
-	}
-	usage.CacheWrites = tokens.NewCacheWrites(int64(usage.CacheCreationInputTokens), 0,
-		tokens.CacheWrite{TTL: time.Hour, Tokens: int64(u.CacheCreation.Ephemeral1hInputTokens)},
-		tokens.CacheWrite{TTL: 5 * time.Minute, Tokens: int64(u.CacheCreation.Ephemeral5mInputTokens)})
-
-	// Claude Code normally gives a subscription's main conversation a one-hour
-	// cache. Named subagents have separate five-minute caches. A fork can read
-	// the parent's prefix on its first request, but its writes use the auxiliary
-	// five-minute bucket. API-key and cloud main conversations also default to
-	// five minutes. Settings, environment variables, authentication, and
-	// subscription overage can change those choices, so use the response's
-	// duration buckets instead of inferring TTL from the agent role:
-	// https://code.claude.com/docs/en/prompt-caching#subagents-and-the-cache
-	// https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
-	// Anthropic defines the five-minute and one-hour response buckets here:
-	// https://platform.claude.com/docs/en/build-with-claude/prompt-caching#1-hour-cache-duration
-	// Wire schema: https://github.com/maruel/genai/blob/main/providers/claudecode/dto.go
-	// A mixed response has both durations, so its first expiry is five minutes.
-	if u.CacheCreation.Ephemeral5mInputTokens > 0 {
-		usage.CacheTTLSeconds = 300
-	} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
-		usage.CacheTTLSeconds = 3600
-	}
-	return usage
-}
 
 const (
 	maxTrackedWidgetBlocks     = 64
@@ -292,25 +259,11 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Messa
 		msgs, err := parseUser(line, &record)
 		return msgs, record, err
 	case claudecode.OutputResult:
-		var w claudecode.OutputResultMsg
-		if err := json.Unmarshal(line, &w); err != nil {
+		msg, err := metadata.ParseResult(line)
+		if err != nil {
 			return nil, record, err
 		}
-		usage := toAgentUsage(&w.Usage)
-		usage.ReasoningOutputTokens = resultThinkingTokens(line)
-		return []agent.Message{&agent.ResultMessage{
-			MessageType:   string(w.Type),
-			Subtype:       string(w.Subtype),
-			IsError:       w.IsError,
-			DurationMs:    w.Duration.AsDuration().Milliseconds(),
-			DurationAPIMs: w.DurationAPI.AsDuration().Milliseconds(),
-			NumTurns:      w.NumTurns,
-			Result:        w.Result,
-			SessionID:     w.SessionID,
-			TotalCostUSD:  w.TotalCostUSD,
-			Usage:         usage,
-			UUID:          w.UUID,
-		}}, record, nil
+		return []agent.Message{msg}, record, nil
 	case claudecode.OutputStreamEvent:
 		msgs, err := parseStreamEvent(line, wt)
 		return msgs, record, err
@@ -338,30 +291,6 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Messa
 	case claudecode.OutputControlRequest:
 		msgs, err := parseControlRequest(line, &record)
 		return msgs, record, err
-	case agent.PendingUserActionMessageType:
-		var m agent.PendingUserActionMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, record, err
-		}
-		return []agent.Message{&m}, record, nil
-	case "caic_diff_stat":
-		var m agent.DiffStatMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, record, err
-		}
-		return []agent.Message{&m}, record, nil
-	case "caic_stripped_env":
-		var m agent.StrippedEnvMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, record, err
-		}
-		return []agent.Message{&m}, record, nil
-	case "caic_exit":
-		var m agent.ExitMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, record, err
-		}
-		return []agent.Message{&m}, record, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, record, nil
 	}
@@ -459,27 +388,18 @@ func decodeAskUserQuestionInput(raw json.RawMessage) (claudecode.AskUserQuestion
 
 func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Message, error) {
 	if claudecode.SystemSubtype(subtype) == claudecode.SystemInit {
-		var w claudecode.OutputInitMsg
-		if err := json.Unmarshal(line, &w); err != nil {
+		msg, err := metadata.ParseInit(line)
+		if err != nil {
 			return nil, err
 		}
-		return []agent.Message{&agent.InitMessage{
-			SessionID:      w.SessionID,
-			Cwd:            w.Cwd,
-			Tools:          w.Tools,
-			ReportedModel:  w.Model,
-			ReportedEffort: w.Effort,
-			Version:        w.Version,
-		}}, nil
+		return []agent.Message{msg}, nil
 	}
 	if claudecode.SystemSubtype(subtype) == claudecode.SystemThinkingTokens {
-		var estimate struct {
-			Delta int64 `json:"estimated_tokens_delta"`
-		}
-		if err := json.Unmarshal(line, &estimate); err != nil {
+		estimate, err := metadata.ReasoningEstimate(line)
+		if err != nil {
 			return nil, err
 		}
-		record.reasoningEstimate = int(max(0, estimate.Delta))
+		record.reasoningEstimate = estimate
 		return nil, nil
 	}
 	var w claudecode.OutputSystemMsg
@@ -558,8 +478,7 @@ func parseAssistant(line []byte) ([]agent.Message, error) {
 	}
 	u := w.Message.Usage
 	if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
-		usage := toAgentUsage(&u)
-		usage.ReasoningOutputTokens = assistantThinkingTokens(line)
+		usage := metadata.Usage(&u)
 		msgs = append(msgs, &agent.UsageMessage{
 			Usage:         usage,
 			ReportedModel: w.Message.Model,
@@ -943,8 +862,7 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 	case "content_block_start", "content_block_stop",
 		"message_start", "message_stop", "message_delta", "ping":
 		if w.Event.Type == "message_delta" && !w.Event.Usage.IsZero() {
-			usage := toAgentUsage(&w.Event.Usage)
-			usage.ReasoningOutputTokens = int(w.Event.Usage.OutputTokensDetails.ThinkingTokens)
+			usage := metadata.Usage(&w.Event.Usage)
 			if hasUsage(usage) {
 				return []agent.Message{&agent.UsageMessage{Usage: usage}}, nil
 			}
@@ -958,40 +876,6 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
 	}
-}
-
-func assistantThinkingTokens(line []byte) int {
-	var p struct {
-		Message struct {
-			Usage json.RawMessage `json:"usage"`
-		} `json:"message"`
-	}
-	if json.Unmarshal(line, &p) != nil {
-		return 0
-	}
-	return usageThinkingTokens(p.Message.Usage)
-}
-
-func resultThinkingTokens(line []byte) int {
-	var p struct {
-		Usage json.RawMessage `json:"usage"`
-	}
-	if json.Unmarshal(line, &p) != nil {
-		return 0
-	}
-	return usageThinkingTokens(p.Usage)
-}
-
-func usageThinkingTokens(raw json.RawMessage) int {
-	var p struct {
-		OutputTokensDetails struct {
-			ThinkingTokens int `json:"thinking_tokens"`
-		} `json:"output_tokens_details"`
-	}
-	if json.Unmarshal(raw, &p) != nil {
-		return 0
-	}
-	return p.OutputTokensDetails.ThinkingTokens
 }
 
 func hasUsage(u agent.Usage) bool {

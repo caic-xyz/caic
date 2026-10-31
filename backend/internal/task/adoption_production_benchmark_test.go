@@ -1,4 +1,4 @@
-// Benchmarks V1 task-log adoption and header-validated reopen.
+// Benchmarks v3 task-log adoption, timeline restoration, and backward message lookup.
 
 package task_test
 
@@ -21,7 +21,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 )
 
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
@@ -142,18 +141,18 @@ func writeProductionAdoptionFixture(b *testing.B, path string) {
 		b.Fatal(err)
 	}
 	writer := bufio.NewWriterSize(file, 1<<20)
-	meta, err := json.Marshal(v1.MetaMessage{
+	meta, err := json.Marshal(v3.MetaMessage{
 		MessageType: "caic_meta",
-		Version:     int(agent.LogVersionV1),
+		Version:     int(agent.LogVersionV3),
 		Prompt:      "benchmark adoption",
-		Repos:       []v1.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Repos:       []v3.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
 		Harness:     string(harness.Claude),
 		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	session, err := json.Marshal(v1.MetaSessionMessage{MessageType: "caic_session", SessionID: "benchmark-session", AgentVersion: "2.1.0"})
+	session, err := json.Marshal(v3.MetaSessionMessage{MessageType: "session", SessionID: "benchmark-session", AgentVersion: "2.1.0"})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func writeProductionAdoptionFixture(b *testing.B, path string) {
 			b.Fatal(err)
 		}
 	}
-	const native = `{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}` + "\n"
+	const native = `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}}` + "\n"
 	for written := len(meta) + len(session) + 2; written < 128<<20; written += len(native) {
 		if _, err := writer.WriteString(native); err != nil {
 			b.Fatal(err)

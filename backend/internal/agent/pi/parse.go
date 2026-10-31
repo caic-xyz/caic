@@ -86,10 +86,9 @@ func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
 // already extracted by the caller via decodeEventType).
 //
 // The line is one of:
-//   - A caic-injected JSON object with a "type" field (caic_diff_stat, etc.)
 //   - A Pi event dispatched by the "type" field (message_update, tool_execution_end, etc.)
 //   - A Pi response envelope (type:"response")
-//   - A Pi command sent on stdin (prompt, compact, etc.) — logged by the relay
+//   - A Pi command sent on stdin (prompt, compact, etc.) — recorded by caic
 //
 // Emitted agent.Message types:
 //   - TextDeltaMessage     — message_update (text_delta)
@@ -97,19 +96,14 @@ func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
 //   - ToolUseMessage       — tool_execution_start
 //   - ToolResultMessage    — tool_execution_end
 //   - ToolOutputDeltaMessage — tool_execution_update
-//   - DiffStatMessage      — caic_diff_stat injection
-//   - UserInputMessage     — prompt command (stdin logged by relay)
+//   - UserInputMessage     — prompt command (recorded stdin)
 //   - SystemMessage        — compaction start/boundary/error
 //   - RawMessage           — unrecognised event types
 func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedRecord, error) {
-	// caic-injected lines and stdin commands.
+	// Persisted stdin commands.
 	switch typ {
-	case pi.EventType("caic_model_info"):
-		// Handled by wireFormat.ParseMessage; skip in stateless replay.
-		return nil, decodedRecord{}, nil
-
 	case pi.CmdPrompt:
-		// Stdin prompt command logged by relay; convert to UserInputMessage.
+		// Persisted stdin prompt command; convert to UserInputMessage.
 		var cmd pi.PromptCmd
 		if err := json.Unmarshal(line, &cmd); err != nil {
 			return nil, decodedRecord{}, fmt.Errorf("unmarshal prompt cmd: %w", err)
@@ -126,20 +120,6 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 	case pi.CmdCompact:
 		// Stdin compact command logged by relay; skip during replay.
 		return nil, decodedRecord{}, nil
-
-	case pi.EventType("caic_diff_stat"):
-		var m agent.DiffStatMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, decodedRecord{}, err
-		}
-		return []agent.Message{&m}, decodedRecord{}, nil
-
-	case pi.EventType("caic_exit"):
-		var m agent.ExitMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, decodedRecord{}, err
-		}
-		return []agent.Message{&m}, decodedRecord{}, nil
 
 	case pi.EventMessageUpdate:
 		msgs, err := parseMessageUpdate(line)

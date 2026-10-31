@@ -16,7 +16,6 @@ import (
 // beyond the current ParseMessage call. Native decoding validates consumed
 // fields; this probe does not run an additional whole-document validation pass.
 type JSONRPCEnvelope struct {
-	Type   string
 	Method string
 	ID     json.RawMessage
 	Params json.RawMessage
@@ -29,7 +28,7 @@ func ParseJSONRPCEnvelope(line []byte) (JSONRPCEnvelope, error) {
 	var env JSONRPCEnvelope
 	err := jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, end int) error {
 		switch string(key) {
-		case "type", "method":
+		case "method":
 			if kind == jsonparser.Null {
 				return nil
 			}
@@ -37,11 +36,7 @@ func ParseJSONRPCEnvelope(line []byte) (JSONRPCEnvelope, error) {
 			if err != nil {
 				return fmt.Errorf("%s: %w", key, err)
 			}
-			if string(key) == "type" {
-				env.Type = text
-			} else {
-				env.Method = text
-			}
+			env.Method = text
 		case "id":
 			env.ID = rawJSONValue(line, value, kind, end)
 		case "params":

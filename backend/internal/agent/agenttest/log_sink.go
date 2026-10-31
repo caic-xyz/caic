@@ -1,4 +1,4 @@
-// Test log sink for recording versioned physical task-log records.
+// Test log sink for recording physical v3 task-log records.
 
 package agenttest
 
@@ -8,16 +8,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// LogSink records task-log records in memory. Version must be set to the
-// physical record version represented by the test.
+// LogSink records v3 task-log records in memory.
 type LogSink struct {
 	bytes.Buffer
-
-	Version agent.LogVersion
 }
-
-// LogVersion returns the physical record version owned by the sink.
-func (s *LogSink) LogVersion() agent.LogVersion { return s.Version }
 
 // AppendNative records one complete native physical record.
 func (s *LogSink) AppendNative(data []byte) error {
@@ -27,7 +21,7 @@ func (s *LogSink) AppendNative(data []byte) error {
 
 // AppendMessage records one versioned caic control record.
 func (s *LogSink) AppendMessage(m agent.Message) error {
-	data, err := agent.MarshalLogMessage(s.LogVersion(), m)
+	data, err := agent.MarshalLogMessage(m)
 	if err != nil {
 		return err
 	}

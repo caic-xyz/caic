@@ -2775,9 +2775,9 @@ data class EventTodo(
 @Serializable
 data class EventDiffStat(val diffStat: DiffStat? = null)
 
-/** EventError is emitted when the backend fails to parse an agent output line. */
+/** EventError reports an agent subprocess failure. */
 @Serializable
-data class EventError(val err: String, val line: String)
+data class EventError(val err: String)
 
 /** EventThinking is an assistant thinking block. */
 @Serializable

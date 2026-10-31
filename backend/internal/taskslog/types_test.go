@@ -71,7 +71,7 @@ func TestState(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			for _, s := range []State{"", "bogus", "Pending", "terminated"} {
+			for _, s := range []State{"", "bogus", "Pending"} {
 				if err := s.Validate(); err == nil {
 					t.Errorf("Validate(%q) = nil, want error", string(s))
 				}

@@ -150,7 +150,7 @@ func TestCostTracker(t *testing.T) {
 				total: agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 200_000, CacheCreationInputTokens: 1_000, OutputTokens: 1_000}, want: 0.46,
 			},
 			{
-				name: "legacy turn totals retain base rate",
+				name: "turn totals without per-call usage retain base rate",
 				calls: []*agent.UsageMessage{
 					{ModelDerived: true, Usage: agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}},
 				},

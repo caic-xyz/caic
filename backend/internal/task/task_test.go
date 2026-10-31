@@ -252,15 +252,15 @@ func TestTask(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
+				{
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-					parser, err := agent.NewLogRecordParser(version, func([]byte) ([]agent.Message, error) { return nil, nil })
+					parser, err := agent.NewLogRecordParser(func([]byte) ([]agent.Message, error) { return nil, nil })
 					if err != nil {
 						t.Fatal(err)
 					}
 					var restored []agent.Message
 					for _, m := range tc.messages {
-						data, err := agent.MarshalLogMessage(version, m)
+						data, err := agent.MarshalLogMessage(m)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -273,10 +273,9 @@ func TestTask(t *testing.T) {
 						}
 					}
 					tk.SeedTimeline(restored)
-					// V2 has no child provenance; its historical output is global.
-					accepted := tc.accepted || version == agent.LogVersionV2 && tc.name == "child_output"
+					accepted := tc.accepted
 					if got := tk.HasAcceptedInputEvidence(); got != accepted {
-						t.Fatalf("v%d evidence = %t, want %t", version, got, accepted)
+						t.Fatalf("evidence = %t, want %t", got, accepted)
 					}
 				}
 			})
@@ -937,10 +936,12 @@ func TestTask(t *testing.T) {
 		tk.OwnerID = "user-1"
 		tk.CaicMCP = true
 
-		summary := tk.terminalLogSummary(agent.LogVersionV1, result)
-		if summary.LogVersion != agent.LogVersionV1 || summary.State != taskslog.StatePurged || summary.LastTrailer != result {
+		summary := tk.terminalLogSummary(result)
+
+		if summary.State != taskslog.StatePurged || summary.LastTrailer != result {
 			t.Fatalf("terminal summary = %#v", summary)
 		}
+
 		if summary.SessionID != "session-1" || summary.RequestedModel != "requested" || summary.ReportedModel != "reported" || summary.AgentVersion != "1.2.3" {
 			t.Errorf("session summary = (%q, %q, %q, %q)", summary.SessionID, summary.RequestedModel, summary.ReportedModel, summary.AgentVersion)
 		}
@@ -1368,7 +1369,7 @@ func TestTask(t *testing.T) {
 						t.Fatal(err)
 					}
 					msgCh := make(chan agent.TimedMessage, 8)
-					log := agent.DiscardLogSink{Version: agent.LogVersionV3}
+					log := agent.DiscardLogSink{}
 					c := agent.NewConn(ctx, testLogger(), &queuedDeltaInputWriter{msgCh: msgCh}, log, &testWire{})
 					s := agent.NewSession(ctx, cmd, c, stdout, msgCh, testLogger())
 					t.Cleanup(func() { cancel(); _ = s.Wait(); close(msgCh) })
@@ -1406,7 +1407,7 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
-			log := agent.DiscardLogSink{Version: agent.LogVersionV3}
+			log := agent.DiscardLogSink{}
 			msgCh, _, work := r.startMessageDispatch(ctx, tk, log)
 			observed := make(chan struct{})
 			conn := agent.NewConn(ctx, testLogger(), &partialInputWriter{msgCh: msgCh, observed: observed}, log, &testWire{})
@@ -1451,8 +1452,8 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
-			msgCh, _, work := r.startMessageDispatch(ctx, tk, agent.DiscardLogSink{Version: agent.LogVersionV3})
-			conn := agent.NewConn(ctx, testLogger(), &completingInputWriter{msgCh: msgCh}, agent.DiscardLogSink{Version: agent.LogVersionV3}, &testWire{})
+			msgCh, _, work := r.startMessageDispatch(ctx, tk, agent.DiscardLogSink{})
+			conn := agent.NewConn(ctx, testLogger(), &completingInputWriter{msgCh: msgCh}, agent.DiscardLogSink{}, &testWire{})
 			s := agent.NewSession(ctx, cmd, conn, stdout, msgCh, testLogger())
 			t.Cleanup(func() {
 				cancel()
@@ -1499,7 +1500,7 @@ func TestTask(t *testing.T) {
 			}
 			sendErr := errors.New("delivery failed")
 			r := &AgentRuntime{Log: testLogger(), NotifyTaskChange: func() {}}
-			msgCh, _, work := r.startMessageDispatch(t.Context(), tk, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			msgCh, _, work := r.startMessageDispatch(t.Context(), tk, agent.DiscardLogSink{})
 			_, live, unsubscribe := tk.Subscribe(t.Context())
 			t.Cleanup(unsubscribe)
 			s := agent.NewSession(t.Context(), cmd, &failingConn{err: sendErr}, stdout, msgCh, testLogger())
@@ -1586,7 +1587,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -1693,7 +1694,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
@@ -1752,7 +1753,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -1787,7 +1788,7 @@ func TestTask(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 		h := &SessionHandle{Session: s}
 		tk.AttachSession(h)
 
@@ -4046,7 +4047,7 @@ func TestTask(t *testing.T) {
 		t.Run("WithSession", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			buf := &agenttest.LogSink{Version: agent.LogVersionV2}
+			buf := &agenttest.LogSink{}
 			h := &SessionHandle{Log: buf}
 			tk.AttachSession(h)
 			if err := tk.WriteToLog(&agent.LogMessage{MessageType: "caic_log", Line: "hello"}); err != nil {
@@ -4100,76 +4101,6 @@ func TestTask(t *testing.T) {
 			want := append(append([]byte(nil), before...), append(encoded, '\n')...)
 			if !bytes.Equal(data, want) {
 				t.Fatalf("log = %q, want %q", data, want)
-			}
-		})
-		t.Run("RejectsInvalidPersistedAuthorityWithoutMutation", func(t *testing.T) {
-			t.Parallel()
-			validHeader := func(version agent.LogVersion, h harness.Name) []byte {
-				meta := agent.MetaMessage{
-					MessageType: "caic_meta",
-					Version:     int(version),
-					Prompt:      "test",
-					Harness:     string(h),
-				}
-				value := any(meta)
-				if version == agent.LogVersionV2 {
-					value = map[string]any{
-						"t":       "caic_meta",
-						"version": meta.Version,
-						"prompt":  meta.Prompt,
-						"harness": meta.Harness,
-					}
-				}
-				data, err := json.Marshal(value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return append(data, '\n')
-			}
-			cases := []struct {
-				name string
-				data []byte
-			}{
-				{name: "v2", data: validHeader(agent.LogVersionV2, "claude")},
-				{name: "corrupt", data: []byte("not json\n")},
-				{name: "unknown", data: validHeader(agent.LogVersion(4), "claude")},
-				{name: "harness mismatch", data: validHeader(agent.LogVersionV1, "codex")},
-				{name: "missing"},
-			}
-			for _, tc := range cases {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					path := filepath.Join(t.TempDir(), "task.jsonl")
-					if tc.data != nil {
-						if err := os.WriteFile(path, tc.data, 0o600); err != nil {
-							t.Fatal(err)
-						}
-					}
-					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "claude", "", "")
-					if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
-						t.Fatal("WriteToLog error = nil")
-					}
-					if tc.data == nil {
-						if _, err := os.Stat(path); !os.IsNotExist(err) {
-							t.Fatalf("stat error = %v, want os.ErrNotExist", err)
-						}
-						return
-					}
-					after, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
-					if err != nil {
-						t.Fatal(err)
-					}
-					if !bytes.Equal(after, tc.data) {
-						t.Fatalf("log mutated: got %q, want %q", after, tc.data)
-					}
-				})
-			}
-		})
-		t.Run("ReturnsAppendError", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
-				t.Fatal("WriteToLog err = nil, want append error")
 			}
 		})
 	})
@@ -4293,7 +4224,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err := tk.SendCompact(t.Context(), "compact now")
@@ -4430,7 +4361,7 @@ func TestSessionHandle(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
+		s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), testLogger(), stdin, agent.DiscardLogSink{}, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.TimedMessage, 256), testLogger())
 		ch := make(chan agent.TimedMessage)
 		done := make(chan struct{})
 		var workers sync.WaitGroup
@@ -4636,7 +4567,7 @@ func TestPricedCost(t *testing.T) {
 			if err != nil || len(loaded) != 1 || !loaded[0].LastTrailer.Usage.Equal(want) {
 				t.Fatalf("trailer restore = %+v, %v", loaded, err)
 			}
-			if _, err := store.CompressTerminal(path, log, tk.terminalLogSummary(agent.LogVersionV3, res)); err != nil {
+			if _, err := store.CompressTerminal(path, log, tk.terminalLogSummary(res)); err != nil {
 				t.Fatal(err)
 			}
 			loaded, err = store.LoadAllReadOnly()

@@ -26,8 +26,7 @@ not recorded lifecycle evidence.
 ## Integration boundary
 
 The backend is selectable through `backends.Default`.
-Use the existing relay and preserve v3 input provenance. Do not alter the frozen
-v1 relay.
+Use the maintained relay and preserve v3 input provenance.
 
 Result usage, duration, and turn count include the entire conversation,
 including resumed processes. Sum DONE-step usage for per-turn totals. Keep

@@ -157,10 +157,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	records, err := agent.NewRelayRecordReader(rp.Stdout, opts.Log.LogVersion(), opts.Log)
-	if err != nil {
-		return nil, fmt.Errorf("pi: construct relay reader: %w", err)
-	}
+	records := agent.NewRelayRecordReader(rp.Stdout, opts.Log)
 
 	// Pre-prompt commands: set_model and set_thinking_level. We must wait
 	// for each response before sending the next.
@@ -315,10 +312,6 @@ func writeStartupLogOutput(log agent.LogSink, command, output string) error {
 		}
 	}
 	return nil
-}
-
-type caicModelInfo struct {
-	ContextWindow int64 `json:"context_window"`
 }
 
 // piConn wraps a default Conn to intercept extension_ui_request messages
@@ -483,21 +476,6 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 func (w *piWireFormat) parseNativeMessage(typ pi.EventType, line []byte) ([]agent.Message, error) {
-	// Restore model context window from synthetic caic_model_info line
-	// written during Start. This ensures replay/import correctly
-	// reports the model's real context window instead of falling back
-	// to the harness hardcoded default of 200k.
-	if typ == "caic_model_info" {
-		var info caicModelInfo
-		if err := json.Unmarshal(line, &info); err != nil {
-			return nil, fmt.Errorf("unmarshal caic_model_info: %w", err)
-		}
-		if info.ContextWindow > 0 {
-			w.modelCtxWindow = info.ContextWindow
-		}
-		return nil, nil
-	}
-
 	// Intercept agent_end for final usage.
 	if typ == pi.EventAgentEnd {
 		return w.handleAgentEnd(line)
@@ -1087,7 +1065,7 @@ func writeJSONLine(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+	if err := agent.AppendInputNativeRecord(log, data); err != nil {
 		return err
 	}
 	if _, err := w.Write(data); err != nil {

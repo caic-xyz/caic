@@ -29,7 +29,7 @@ func TestBackend(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 {"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
 `
-			_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, io.NopCloser(strings.NewReader(responses)), "/workspace", "", agent.LogVersionV1)
+			_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, io.NopCloser(strings.NewReader(v3Records(responses))), "/workspace", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -46,7 +46,7 @@ func TestBackend(t *testing.T) {
 			t.Cleanup(func() { _ = w.Close() })
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "", agent.LogVersionV1)
+			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "")
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("handshake error = %v, want cancellation", err)
 			}
@@ -74,7 +74,7 @@ exit 0
 			Logger: slog.New(slog.DiscardHandler),
 			Target: runtime.ConnectionTarget{SSHHost: "task"},
 			Dir:    "/workspace",
-			Log:    &agenttest.LogSink{Version: agent.LogVersionV2},
+			Log:    &agenttest.LogSink{},
 			MsgCh:  make(chan agent.TimedMessage, 1),
 			MCP:    mcptest.FakeRegistry{},
 		})

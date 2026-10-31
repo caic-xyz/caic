@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
@@ -35,13 +36,7 @@ var errNotLogFile = errors.New("not a caic log file")
 // needed while scanning a large persisted task-log directory.
 const maxParallelLogHeaderLoads = 8
 
-// v1TypeEnvelope extracts the legacy v1 native-message type used by inventory parsing.
-type v1TypeEnvelope struct {
-	Type string `json:"type"`
-}
-
 type logAuthority struct {
-	Version agent.LogVersion
 	Harness harness.Name
 }
 
@@ -56,7 +51,6 @@ type physicalLogScanner struct {
 	src       string
 	authority logAuthority
 	line      []byte
-	typ       string
 	err       error
 	headerSet bool
 	headerRaw []byte
@@ -110,39 +104,26 @@ func (s *physicalLogScanner) Scan() bool {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		if s.authority.Version != agent.LogVersionV1 && bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
+		if bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
 			s.line = line
-			s.typ = "agent"
 			return true
 		}
-		typ, candidate, probeErr := decodeDiscriminatorProbe(line, s.authority.Version)
-		if probeErr != nil {
-			s.err = fmt.Errorf("%s: invalid log record: %w", s.src, probeErr)
-			return false
-		}
-		if !candidate {
-			s.line = line
-			s.typ = typ
-			return true
-		}
-		typ, meta, err := decodeSegmentMeta(line, s.authority.Version)
+		meta, err := decodeSegmentMeta(line)
 		if errors.Is(err, errNotMetaRecord) {
 			s.line = line
-			s.typ = typ
 			return true
 		}
 		if err != nil {
 			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
 			return false
 		}
-		if agent.LogVersion(meta.Version) != s.authority.Version || harness.Name(meta.Harness) != s.authority.Harness {
+		if harness.Name(meta.Harness) != s.authority.Harness {
 			s.err = fmt.Errorf(
-				"%s: log segment authority changed from version %d harness %q to version %d harness %q",
-				s.src, s.authority.Version, s.authority.Harness, meta.Version, meta.Harness)
+				"%s: log segment harness changed from %q to %q",
+				s.src, s.authority.Harness, meta.Harness)
 			return false
 		}
 		s.line = line
-		s.typ = typ
 		return true
 	}
 	if s.scanner.Err() == nil {
@@ -153,10 +134,6 @@ func (s *physicalLogScanner) Scan() bool {
 
 func (s *physicalLogScanner) Bytes() []byte {
 	return s.line
-}
-
-func (s *physicalLogScanner) Type() string {
-	return s.typ
 }
 
 func (s *physicalLogScanner) Err() error {
@@ -207,25 +184,16 @@ var (
 
 // decodeDiscriminatorProbe cheaply identifies caic_meta candidates before the
 // allocation-heavy raw-object decoder validates their authority fields.
-func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string, candidate bool, err error) {
+func decodeDiscriminatorProbe(line []byte) (candidate bool, err error) {
 	i := skipJSONWhitespace(line, 0)
 	if i >= len(line) || line[i] != '{' {
-		return "", false, nil
+		return false, nil
 	}
 	i++
-	var typeValue, tValue string
-	var typeMeta, tMeta bool
-	result := func(err error) (string, bool, error) {
-		typ := typeValue
-		if version != agent.LogVersionV1 {
-			typ = tValue
-		}
-		return typ, typeMeta || tMeta, err
-	}
 	for {
 		i = skipJSONWhitespace(line, i)
 		if i >= len(line) {
-			return result(nil)
+			return candidate, nil
 		}
 		if line[i] == '}' {
 			break
@@ -234,40 +202,34 @@ func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string
 		var ok bool
 		i, ok = skipJSONString(line, i)
 		if !ok {
-			return result(nil)
+			return candidate, nil
 		}
 		key := discriminatorKey(line[keyStart:i])
 		i = skipJSONWhitespace(line, i)
 		if i >= len(line) || line[i] != ':' {
-			return result(nil)
+			return candidate, nil
 		}
 		i = skipJSONWhitespace(line, i+1)
 		valueStart := i
 		valueEnd, ok, err := skipJSONValue(line, i)
 		if err != nil {
-			return result(err)
+			return candidate, err
 		}
 		if !ok {
-			return result(nil)
+			return candidate, nil
 		}
 		if key == "type" || key == "t" {
 			var value string
 			if err := json.Unmarshal(line[valueStart:valueEnd], &value); err == nil {
-				if key == "type" {
-					typeValue = value
-					typeMeta = typeMeta || value == "caic_meta"
-				} else {
-					tValue = value
-					tMeta = tMeta || value == "caic_meta"
-				}
+				candidate = candidate || value == "caic_meta"
 				if value != "caic_meta" && !bytes.Contains(line[valueEnd:], []byte(`"caic_meta"`)) {
-					return result(nil)
+					return candidate, nil
 				}
 			}
 		}
 		i = skipJSONWhitespace(line, valueEnd)
 		if i >= len(line) {
-			return result(nil)
+			return candidate, nil
 		}
 		switch line[i] {
 		case ',':
@@ -276,20 +238,16 @@ func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string
 			i++
 			i = skipJSONWhitespace(line, i)
 			if i != len(line) {
-				return result(nil)
+				return candidate, nil
 			}
 			goto done
 		default:
-			return result(nil)
+			return candidate, nil
 		}
 	}
 
 done:
-	typ = typeValue
-	if version != agent.LogVersionV1 {
-		typ = tValue
-	}
-	return typ, typeMeta || tMeta, nil
+	return candidate, nil
 }
 
 func discriminatorKey(raw []byte) string {
@@ -671,11 +629,11 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if err := json.Unmarshal(rawVersion, &version); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("version must be an integer: %w", err)
 	}
-	authority := logAuthority{Version: agent.LogVersion(version)}
-	if err := authority.Version.Validate(); err != nil {
-		return agent.MetaMessage{}, logAuthority{}, err
+	authority := logAuthority{}
+	if version != agent.LogVersionV3 {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("unsupported log version %d", version)
 	}
-	if authority.Version != agent.LogVersionV1 && len(obj.duplicates) != 0 {
+	if len(obj.duplicates) != 0 {
 		duplicates := make([]string, 0, len(obj.duplicates))
 		for key := range obj.duplicates {
 			duplicates = append(duplicates, key)
@@ -683,14 +641,8 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 		slices.Sort(duplicates)
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("%w %q", errDuplicateRawKey, duplicates[0])
 	}
-	key := "type"
-	if authority.Version != agent.LogVersionV1 {
-		key = "t"
-	}
-	otherKey := "t"
-	if key == "t" {
-		otherKey = "type"
-	}
+	const key = "t"
+	const otherKey = "type"
 	if _, exists := obj.fields[otherKey]; exists {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("both %q and %q discriminators are present", key, otherKey)
 	}
@@ -701,7 +653,7 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if discriminator != "caic_meta" {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("wrong %s discriminator %q", key, discriminator)
 	}
-	parser, err := agent.NewLogRecordParser(authority.Version, func([]byte) ([]agent.Message, error) {
+	parser, err := agent.NewLogRecordParser(func([]byte) ([]agent.Message, error) {
 		return nil, errors.New("unexpected native metadata header")
 	})
 	if err != nil {
@@ -722,82 +674,43 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	return *meta, authority, nil
 }
 
-func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.MetaMessage, error) {
-	typ, candidate, probeErr := decodeDiscriminatorProbe(line, version)
+func decodeSegmentMeta(line []byte) (agent.MetaMessage, error) {
+	candidate, probeErr := decodeDiscriminatorProbe(line)
 	if probeErr != nil {
-		return typ, agent.MetaMessage{}, probeErr
+		return agent.MetaMessage{}, probeErr
 	}
 	if !candidate {
-		return typ, agent.MetaMessage{}, errNotMetaRecord
+		return agent.MetaMessage{}, errNotMetaRecord
 	}
 	obj, isObject, err := decodeJSONObject(line)
 	if err != nil {
-		return typ, agent.MetaMessage{}, err
+		return agent.MetaMessage{}, err
 	}
 	if !isObject {
-		return typ, agent.MetaMessage{}, errNotMetaRecord
+		return agent.MetaMessage{}, errNotMetaRecord
 	}
-	key := "type"
-	if version != agent.LogVersionV1 {
-		key = "t"
-	}
-	otherKey := "t"
-	if key == "t" {
-		otherKey = "type"
-	}
+	const key = "t"
+	const otherKey = "type"
 	value, hasKey := obj.fields[key]
 	otherValue, hasOther := obj.fields[otherKey]
 	if hasKey {
 		var discriminator string
 		if err := json.Unmarshal(value, &discriminator); err == nil && discriminator == "caic_meta" {
-			meta, authority, err := decodeAuthorityMeta(line)
+			meta, _, err := decodeAuthorityMeta(line)
 			if err != nil {
-				return typ, agent.MetaMessage{}, err
+				return agent.MetaMessage{}, err
 			}
-			if authority.Version != version {
-				return typ, agent.MetaMessage{}, fmt.Errorf("authority version %d does not match log version %d", authority.Version, version)
-			}
-			return typ, meta, nil
+
+			return meta, nil
 		}
 	}
 	if hasOther {
 		var discriminator string
 		if err := json.Unmarshal(otherValue, &discriminator); err == nil && discriminator == "caic_meta" {
-			return typ, agent.MetaMessage{}, fmt.Errorf("wrong %s discriminator for log version %d", otherKey, version)
+			return agent.MetaMessage{}, fmt.Errorf("wrong %s discriminator for log version %d", otherKey, agent.LogVersionV3)
 		}
 	}
-	return typ, agent.MetaMessage{}, errNotMetaRecord
-}
-
-// tailInit is the subset of a system/init message parsed from the tail scan.
-type tailInit struct {
-	Subtype string `json:"subtype"`
-	Model   string `json:"model"`
-	Version string `json:"claude_code_version"`
-}
-
-// tailResult is the subset of a result message parsed from the tail scan.
-type tailResult struct {
-	TotalCostUSD float64     `json:"total_cost_usd"`
-	DurationMs   int64       `json:"duration_ms"`
-	NumTurns     int         `json:"num_turns"`
-	Usage        agent.Usage `json:"usage"`
-}
-
-type logTailScan struct {
-	lastResultCostUSD  float64
-	lastResultDuration time.Duration
-	lastResultNumTurns int
-	lastResultUsage    agent.Usage
-}
-
-func (s *logTailScan) finish(lt *LoadedTask) {
-	if lt.LastTrailer != nil && lt.LastTrailer.CostUSD == 0 && s.lastResultCostUSD > 0 {
-		lt.LastTrailer.CostUSD = s.lastResultCostUSD
-		lt.LastTrailer.Duration = s.lastResultDuration
-		lt.LastTrailer.NumTurns = s.lastResultNumTurns
-		lt.LastTrailer.Usage = s.lastResultUsage
-	}
+	return agent.MetaMessage{}, errNotMetaRecord
 }
 
 func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
@@ -832,7 +745,6 @@ type LoadedTask struct {
 	Prompt                string
 	Title                 string
 	Repos                 []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
-	LogVersion            agent.LogVersion
 	Harness               harness.Name
 	StartedAt             time.Time
 	LastStateUpdateAt     time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
@@ -877,9 +789,10 @@ type LoadedTask struct {
 
 func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
 	loaded := &LoadedTask{}
+	var projection taskMetadataProjection
 	var relayEnd int64
 	var generation string
-	version, err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, encoded []byte) {
+	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, encoded []byte) {
 		if record.RelayGeneration != "" {
 			generation = record.RelayGeneration
 			relayEnd = int64(len(encoded) + 1)
@@ -888,7 +801,13 @@ func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
 		} else if record.RelayRecord {
 			relayEnd += int64(len(encoded) + 1)
 		}
-		semanticLoadedMessages(loaded, record.Control, record.Messages)
+		projection.apply(loaded, record.Messages)
+		for _, parsed := range record.Messages {
+			if record.Control && isInventoryMetadataMessage(parsed.Message) {
+				continue
+			}
+			loaded.Timeline = append(loaded.Timeline, parsed)
+		}
 		if record.RelayRecord {
 			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
 				Generation:  generation,
@@ -901,7 +820,7 @@ func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
 	if err != nil {
 		return nil, err
 	}
-	loaded.LogVersion = version
+	projection.finish(loaded)
 	return loaded, nil
 }
 
@@ -914,19 +833,20 @@ func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *Lo
 		if err != nil {
 			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
-		loaded = &LoadedTask{LogVersion: scanner.authority.Version}
+		loaded = &LoadedTask{}
 		apply := func(record agent.ParsedRecord, err error) error {
 			if err != nil {
-				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
-					return fmt.Errorf("parse task log %s: %w", path, err)
-				}
-				return nil
+				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			applyParsedSessionMetadata(loaded, record.Messages)
+			for _, parsed := range record.Messages {
+				if init, ok := parsed.Message.(*agent.InitMessage); ok {
+					applySessionMetadata(loaded, init)
+				}
+			}
 			return nil
 		}
 		record, err := parser.ParseRecord(scanner.headerRaw)
@@ -958,7 +878,6 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Prompt:            meta.Prompt,
 		Title:             meta.Title,
 		Repos:             repos,
-		LogVersion:        agent.LogVersion(meta.Version),
 		Harness:           harness.Name(meta.Harness),
 		RequestedModel:    meta.RequestedModel,
 		RequestedEffort:   meta.RequestedEffort,
@@ -1138,7 +1057,7 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedM
 			if err != nil {
 				return err
 			}
-			parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 			if err != nil {
 				return err
 			}
@@ -1205,7 +1124,7 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 				yield(agent.TimedMessage{}, err)
 				return
 			}
-			parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 			if err != nil {
 				yield(agent.TimedMessage{}, err)
 				return
@@ -1269,7 +1188,7 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 // UsageRows streams this task's durable usage by producer day and model.
 //
 // Costs and quota snapshots require live task state, so reconstruction leaves
-// both absent. Legacy v1 and task-ID-less logs yield no rows. A non-nil error
+// both absent. Task-ID-less logs yield no rows. A non-nil error
 // is yielded at most once and terminates the sequence.
 func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[data.UsageRow, error] {
 	return taskUsageRows(lt, ctx)
@@ -1299,17 +1218,16 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 // scanSemanticLog parses a complete task log with a fresh header-authorized
 // parser and folds each physical record before reusing the scanner buffer.
 // It retains no intermediate message or physical-record arrays.
-func scanSemanticLog(path string, resolver WireResolver, visit func(agent.ParsedRecord, []byte)) (version agent.LogVersion, retErr error) {
+func scanSemanticLog(path string, resolver WireResolver, visit func(agent.ParsedRecord, []byte)) (retErr error) {
 	if resolver == nil {
-		return 0, errors.New("wire resolver is nil")
+		return errors.New("wire resolver is nil")
 	}
 	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		version = scanner.authority.Version
 		wire, err := resolver.ResolveWire(scanner.authority.Harness)
 		if err != nil {
 			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
@@ -1321,16 +1239,13 @@ func scanSemanticLog(path string, resolver WireResolver, visit func(agent.Parsed
 		for scanner.Scan() {
 			record, err := parser.ParseRecord(scanner.Bytes())
 			if err != nil {
-				if record.Control || version != agent.LogVersionV1 {
-					return fmt.Errorf("parse task log %s: %w", path, err)
-				}
-				continue
+				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
 			visit(record, scanner.Bytes())
 		}
 		return scanner.Err()
 	})
-	return version, retErr
+	return retErr
 }
 
 // ExportDiscussion loads one physical task log with its header-authorized native
@@ -1340,7 +1255,7 @@ func ExportDiscussion(path string, resolver WireResolver) (string, error) {
 	var result *agent.MetaResultMessage
 	var pr *agent.MetaPRMessage
 	var messages []agent.Message
-	_, err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, _ []byte) {
+	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, _ []byte) {
 		for _, parsed := range record.Messages {
 			switch message := parsed.Message.(type) {
 			case *agent.MetaMessage:
@@ -1363,59 +1278,26 @@ func ExportDiscussion(path string, resolver WireResolver) (string, error) {
 	return agent.RenderDiscussion(meta, result, pr, messages), nil
 }
 
-func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.TimedMessage) {
-	applyInventoryMetadata(loaded, nil, messages)
-	for _, parsed := range messages {
-		if control && isInventoryMetadataMessage(parsed.Message) {
-			continue
-		}
-		loaded.Timeline = append(loaded.Timeline, parsed)
-	}
+// taskMetadataProjection folds shared startup and lazy-load metadata. Native
+// Claude accounting survives a zero-cost revival trailer until EOF, when the
+// latest authoritative trailer and last completed root result are both known.
+type taskMetadataProjection struct {
+	lastResult *agent.ResultMessage
 }
 
-// inventoryResultMetadata is the V1-native result subset needed to backfill an
-// omitted caic_result trailer. It is only emitted by the inventory parser.
-type inventoryResultMetadata struct {
-	agent.MessageProvenance
-	tailResult
-}
-
-// Type implements agent.Message.
-func (*inventoryResultMetadata) Type() string { return "inventory_result" }
-
-// parseInventoryNativeMetadata strictly validates native JSON while preserving
-// the V1 inventory scan's generic init/result tail backfill without assigning
-// any harness-specific conversation semantics.
-func parseInventoryNativeMetadata(raw []byte) ([]agent.Message, error) {
-	if !json.Valid(raw) {
-		return nil, errors.New("invalid native JSON value")
-	}
-	var env v1TypeEnvelope
-	if json.Unmarshal(raw, &env) == nil {
-		switch env.Type {
-		case "system":
-			var init tailInit
-			if json.Unmarshal(raw, &init) == nil && init.Subtype == "init" {
-				return []agent.Message{&agent.InitMessage{ReportedModel: init.Model, Version: init.Version}}, nil
-			}
-		case "result":
-			var result tailResult
-			if json.Unmarshal(raw, &result) == nil {
-				return []agent.Message{&inventoryResultMetadata{tailResult: result}}, nil
-			}
-		}
-	}
-	return nil, nil
-}
-
-// applyInventoryMetadata updates only task projections available during an
-// inventory scan. It deliberately never appends conversation or control
-// messages, keeping Timeline nil until a later semantic load.
-func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []agent.TimedMessage) {
+func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.TimedMessage) {
 	for _, parsed := range messages {
 		switch msg := parsed.Message.(type) {
+		case *agent.MetaMessage:
+			loaded.Harness = harness.Name(msg.Harness)
 		case *agent.InitMessage:
-			applySessionMetadataMessages(loaded, []agent.Message{msg})
+			applySessionMetadata(loaded, msg)
+		case *agent.ResultMessage:
+			// Claude's native result is the inventory accounting source. Other
+			// harnesses publish their startup metadata through canonical controls.
+			if loaded.Harness == harness.Claude && !msg.Source.IsChild() {
+				p.lastResult = msg
+			}
 		case *agent.MetaPRMessage:
 			if msg.ForgePR > 0 {
 				loaded.ForgeOwner = msg.ForgeOwner
@@ -1433,20 +1315,22 @@ func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []ag
 					loaded.LastStateUpdateAt = t
 				}
 			}
-		case *inventoryResultMetadata:
-			if tail != nil {
-				tail.lastResultCostUSD = msg.TotalCostUSD
-				tail.lastResultDuration = time.Duration(msg.DurationMs) * time.Millisecond
-				tail.lastResultNumTurns = msg.NumTurns
-				tail.lastResultUsage = msg.Usage
-			}
 		}
+	}
+}
+
+func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
+	if loaded.LastTrailer != nil && loaded.LastTrailer.CostUSD == 0 && p.lastResult != nil && p.lastResult.TotalCostUSD > 0 {
+		loaded.LastTrailer.CostUSD = p.lastResult.TotalCostUSD
+		loaded.LastTrailer.Duration = time.Duration(p.lastResult.DurationMs) * time.Millisecond
+		loaded.LastTrailer.NumTurns = p.lastResult.NumTurns
+		loaded.LastTrailer.Usage = p.lastResult.Usage
 	}
 }
 
 func isInventoryMetadataMessage(msg agent.Message) bool {
 	switch msg.(type) {
-	case *agent.InitMessage, *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *inventoryResultMetadata:
+	case *agent.InitMessage, *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage:
 		return true
 	default:
 		return false
@@ -1747,53 +1631,24 @@ func taskIDFromLogBase(base string) string {
 
 var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
 
-func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
-	for _, parsed := range msgs {
-		init, ok := parsed.Message.(*agent.InitMessage)
-		if !ok || init.Source.IsChild() {
-			continue
-		}
-		if init.SessionID != "" {
-			lt.SessionID = init.SessionID
-		}
-		if init.ReportedModel != "" {
-			lt.ReportedModel = init.ReportedModel
-		}
-		if init.ReportedEffort != "" {
-			lt.ReportedEffort = init.ReportedEffort
-		}
-		if init.AutoCompactTokenLimit > 0 {
-			lt.AutoCompactTokenLimit = init.AutoCompactTokenLimit
-		}
-		if init.Version != "" {
-			lt.AgentVersion = init.Version
-		}
+func applySessionMetadata(lt *LoadedTask, init *agent.InitMessage) {
+	if init.Source.IsChild() {
 		return
 	}
-}
-
-func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
-	for _, msg := range msgs {
-		init, ok := msg.(*agent.InitMessage)
-		if !ok || init.Source.IsChild() {
-			continue
-		}
-		if init.SessionID != "" {
-			lt.SessionID = init.SessionID
-		}
-		if init.ReportedModel != "" {
-			lt.ReportedModel = init.ReportedModel
-		}
-		if init.ReportedEffort != "" {
-			lt.ReportedEffort = init.ReportedEffort
-		}
-		if init.AutoCompactTokenLimit > 0 {
-			lt.AutoCompactTokenLimit = init.AutoCompactTokenLimit
-		}
-		if init.Version != "" {
-			lt.AgentVersion = init.Version
-		}
-		return
+	if init.SessionID != "" {
+		lt.SessionID = init.SessionID
+	}
+	if init.ReportedModel != "" {
+		lt.ReportedModel = init.ReportedModel
+	}
+	if init.ReportedEffort != "" {
+		lt.ReportedEffort = init.ReportedEffort
+	}
+	if init.Version != "" {
+		lt.AgentVersion = init.Version
+	}
+	if init.AutoCompactTokenLimit > 0 {
+		lt.AutoCompactTokenLimit = init.AutoCompactTokenLimit
 	}
 }
 
@@ -1810,12 +1665,20 @@ func isHistoryStreamControlMessage(msg agent.Message) bool {
 	}
 }
 
-// scanInventoryRecords projects only inventory metadata through a parser local
-// to this physical scan. ParsedRecord.Control is the sole control classifier
-// for both V1 and V2 logs.
+// scanInventoryRecords projects canonical controls and provider-owned native
+// metadata without retaining conversation history. Claude reports session and
+// completed-run accounting in its native init/result records.
 func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTask) error {
-	tail := logTailScan{}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, parseInventoryNativeMetadata)
+	var native metadata.Parser
+	parser, err := agent.NewLogRecordParser(func(raw []byte) ([]agent.Message, error) {
+		if !json.Valid(raw) {
+			return nil, errors.New("invalid native JSON value")
+		}
+		if lt.Harness == harness.Claude {
+			return native.Parse(raw)
+		}
+		return nil, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -1823,37 +1686,20 @@ func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTa
 	if err != nil {
 		return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 	}
-	if bootstrap.Control {
-		applyInventoryMetadata(lt, &tail, bootstrap.Messages)
-	}
+	var projection taskMetadataProjection
+	projection.apply(lt, bootstrap.Messages)
 	for scanner.Scan() {
-		if scanner.authority.Version == agent.LogVersionV1 && !needsV1InventoryParse(scanner.Type()) {
-			continue
-		}
 		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
-			if record.Control || scanner.authority.Version != agent.LogVersionV1 {
-				return fmt.Errorf("parse task log %s: %w", path, err)
-			}
-			continue
+			return fmt.Errorf("parse task log %s: %w", path, err)
 		}
-		if record.Control {
-			applyInventoryMetadata(lt, &tail, record.Messages)
-			continue
-		}
-		applyInventoryMetadata(lt, &tail, record.Messages)
+		projection.apply(lt, record.Messages)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	tail.finish(lt)
+	projection.finish(lt)
 	return nil
-}
-
-// needsV1InventoryParse reports whether a legacy record can affect startup
-// task metadata. Ordinary native conversation records are intentionally lazy.
-func needsV1InventoryParse(typ string) bool {
-	return typ == "system" || typ == "result" || typ == agent.PendingUserActionMessageType || strings.HasPrefix(typ, "caic_")
 }
 
 // tsToTime converts a Unix epoch float64 (seconds with sub-second precision)
@@ -1868,9 +1714,6 @@ func tsToTime(ts float64) time.Time {
 // An unrecognized value (corrupt or from a newer version) is treated as
 // failed rather than rejected, so one bad historical log cannot block startup.
 func parseState(s string) State {
-	if s == "terminated" { // backward compat with pre-rename logs; remove once old logs age out
-		return StatePurged
-	}
 	state := State(s)
 	if state.Validate() != nil {
 		return StateFailed

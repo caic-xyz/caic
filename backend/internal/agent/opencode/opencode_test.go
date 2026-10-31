@@ -37,7 +37,7 @@ func TestBackend(t *testing.T) {
 			t.Cleanup(func() { _ = w.Close() })
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "", agent.LogVersionV1)
+			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "")
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("handshake error = %v, want cancellation", err)
 			}
@@ -98,7 +98,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func v2Records(native string) string {
+func v3Records(native string) string {
 	var records strings.Builder
 	for line := range strings.SplitSeq(strings.TrimSpace(native), "\n") {
 		records.WriteString(`{"t":"agent","ts":1.000,"msg":`)
@@ -116,10 +116,10 @@ func TestHandshake(t *testing.T) {
 			t.Run(fmt.Sprintf("task_mcp/resume=%s/enabled=%t", resume, enabled), func(t *testing.T) {
 				t.Parallel()
 				var stdin bytes.Buffer
-				stdout := bufio.NewReader(strings.NewReader(v2Records(
+				stdout := bufio.NewReader(strings.NewReader(v3Records(
 					`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n" +
 						`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}`)))
-				opts := &agent.Options{Dir: "/workspace", ResumeSessionID: resume, Log: &agenttest.LogSink{Version: agent.LogVersionV3}}
+				opts := &agent.Options{Dir: "/workspace", ResumeSessionID: resume, Log: &agenttest.LogSink{}}
 				if enabled {
 					opts.MCP = &mcptest.FakeRegistry{}
 				}
@@ -168,14 +168,14 @@ func TestHandshake(t *testing.T) {
 		const selectedModel = "openai/gpt-5"
 		const generation = `{"t":"relay_generation","generation":"generation-1"}` + "\n"
 		var stdin bytes.Buffer
-		stdout := bufio.NewReader(strings.NewReader(generation + v2Records(strings.Join([]string{
+		stdout := bufio.NewReader(strings.NewReader(generation + v3Records(strings.Join([]string{
 			`{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"promptCapabilities":{"image":true}}}}`,
 			`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model","type":"select","currentValue":"anthropic/claude-sonnet-4","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 		}, "\n")+"\n")))
 
-		log := &agenttest.LogSink{Version: agent.LogVersionV3}
+		log := &agenttest.LogSink{}
 		hs, _, err := handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
@@ -234,35 +234,16 @@ func TestHandshake(t *testing.T) {
 		}
 	})
 
-	t.Run("v2_agent_envelopes", func(t *testing.T) {
-		t.Parallel()
-		const responses = `{"jsonrpc":"2.0","id":1,"result":{}}
-{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"openai/gpt-5"}}}
-`
-		var stdin bytes.Buffer
-		log := &agenttest.LogSink{Version: agent.LogVersionV2}
-		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: log})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if hs.wire.sessionID != "session-1" || hs.currentModel != "openai/gpt-5" {
-			t.Fatalf("v2 handshake = session=%q model=%q", hs.wire.sessionID, hs.currentModel)
-		}
-		if log.Len() != 0 {
-			t.Fatalf("v2 handshake log = %s, want no legacy stdin persistence", log.Bytes())
-		}
-	})
-
 	t.Run("services task scoped MCP during session creation", func(t *testing.T) {
 		t.Parallel()
 
 		const initializeResponse = `{"jsonrpc":"2.0","id":1,"result":{}}`
 		const sessionResponse = `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}`
-		records := v2Records(initializeResponse) +
+		records := v3Records(initializeResponse) +
 			`{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n" +
-			v2Records(sessionResponse)
+			v3Records(sessionResponse)
 		var stdin bytes.Buffer
-		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -282,35 +263,15 @@ func TestHandshake(t *testing.T) {
 
 func TestWritePromptInputPersistence(t *testing.T) {
 	t.Parallel()
-	for _, version := range []agent.LogVersion{agent.LogVersionV1, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
-			t.Parallel()
-			var stdin bytes.Buffer
-			log := &agenttest.LogSink{Version: version}
-			wire := &wireFormat{sessionID: "session-1"}
-			if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
-				t.Fatal(err)
-			}
-			if version == agent.LogVersionV3 && !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
-				t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
-			}
-			if version == agent.LogVersionV1 && log.Len() != 0 {
-				t.Fatalf("v1 log = %s, want no read-only stdin persistence", log.Bytes())
-			}
-			if version == agent.LogVersionV2 {
-				parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
-				if err != nil {
-					t.Fatal(err)
-				}
-				record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
-				if err != nil || record.RelayRecord || len(record.Messages) != 1 {
-					t.Fatalf("v2 input record = %#v, %v", record, err)
-				}
-				if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello" {
-					t.Fatalf("persisted v2 input = %#v", record.Messages[0].Message)
-				}
-			}
-		})
+
+	var stdin bytes.Buffer
+	log := &agenttest.LogSink{}
+	wire := &wireFormat{sessionID: "session-1"}
+	if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
+		t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
 	}
 }
 
@@ -336,7 +297,7 @@ func TestWireFormat(t *testing.T) {
 		})
 		written := make(chan error, 1)
 		workers.Go(func() {
-			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{Version: agent.LogVersionV3})
+			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{})
 			written <- writeErr
 		})
 		<-writer.Started
@@ -376,18 +337,18 @@ func TestHandshakeContinuation(t *testing.T) {
 `
 	const notification = `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{}}}`
 	for _, tc := range []struct {
-		name    string
-		version agent.LogVersion
-		input   string
-		want    string
+		name string
+
+		input string
+		want  string
 	}{
-		{name: "v1", version: agent.LogVersionV1, input: native + notification + "\n", want: notification + "\n"},
-		{name: "v2", version: agent.LogVersionV2, input: v2Records(native + notification), want: `{"t":"agent","ts":1.000,"msg":` + notification + "}\n"},
+
+		{name: "v3", input: v3Records(native + notification), want: `{"t":"agent","ts":1.000,"msg":` + notification + "}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: tc.version}})
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -439,8 +400,7 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 
 type failingLogSink struct{}
 
-func (failingLogSink) LogVersion() agent.LogVersion { return agent.LogVersionV3 }
-func (failingLogSink) AppendNative([]byte) error    { return nil }
+func (failingLogSink) AppendNative([]byte) error { return nil }
 func (failingLogSink) AppendMessage(agent.Message) error {
 	return errors.New("persist session metadata")
 }

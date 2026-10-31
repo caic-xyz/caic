@@ -18,12 +18,10 @@ import (
 // more typed agent.Messages.
 //
 // The line is one of:
-//   - A caic-injected JSON object with a "type" field (e.g. caic_diff_stat).
 //   - A JSON-RPC 2.0 notification (has "method", no "id").
 //   - A JSON-RPC 2.0 response (has "id").
 //
 // Emitted agent.Message types:
-//   - InitMessage          — caic_session or caic_init injection
 //   - TextDeltaMessage     — agent_message_chunk
 //   - ThinkingDeltaMessage — agent_thought_chunk
 //   - ToolUseMessage       — tool_call
@@ -33,50 +31,8 @@ import (
 //   - UserInputMessage     — user_message_chunk
 //   - UsageMessage         — usage_update
 //   - SystemMessage        — current_mode_update
-//   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
-	// caic-injected lines have a "type" field.
-	if probe.Type != "" {
-		switch probe.Type {
-		case "caic_session":
-			m, err := agent.DecodeV1MetaSessionMessage(line)
-			if err != nil {
-				return nil, nil, err
-			}
-			return []agent.Message{&agent.InitMessage{
-				SessionID:      m.SessionID,
-				ReportedModel:  m.ReportedModel,
-				ReportedEffort: m.ReportedEffort,
-				Version:        m.AgentVersion,
-			}}, nil, nil
-		case "caic_init":
-			var ci CaicInit
-			if err := json.Unmarshal(line, &ci); err != nil {
-				return nil, nil, err
-			}
-			return []agent.Message{&agent.InitMessage{
-				SessionID:     ci.SessionID,
-				ReportedModel: ci.ReportedModel,
-				Version:       ci.Version,
-			}}, nil, nil
-		case "caic_diff_stat":
-			var m agent.DiffStatMessage
-			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, nil, err
-			}
-			return []agent.Message{&m}, nil, nil
-		case "caic_exit":
-			var m agent.ExitMessage
-			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, nil, err
-			}
-			return []agent.Message{&m}, nil, nil
-		default:
-			return []agent.Message{&agent.RawMessage{MessageType: probe.Type, Raw: append([]byte(nil), line...)}}, nil, nil
-		}
-	}
-
 	// JSON-RPC response (has "id").
 	if probe.ID != nil {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil, nil

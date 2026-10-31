@@ -56,7 +56,7 @@ func findBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHist
 	if err != nil {
 		return 0, false, err
 	}
-	parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		return 0, false, err
 	}
@@ -107,7 +107,7 @@ func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHis
 	if err != nil {
 		return nil, err
 	}
-	parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		return nil, err
 	}

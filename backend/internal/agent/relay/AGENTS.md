@@ -9,23 +9,16 @@ the Go binary.
 Apply the compatibility policy beside [`ScriptV2`](embed.go) before changing
 relay contracts. Version physical logs, live protocol, and launch CLI
 independently. Do not create a new frozen script because a refactor is large.
-Use [`LogVersion`](../types.go) for physical task-log version rules.
+The physical task-log format is v3; reject unsupported metadata header versions.
 
-`relay_v2.py` is the maintained relay. It implements canonical v2 framing and is
-deployed for writable v2 and v3 logs. Fix relay behavior here and cover it in
-`test_relay_v2.py`.
-
-`relay.py` is a frozen historical artifact: the original v1 relay. It stays in
-the tree as historical protocol evidence; v1 logs are read-only and its relay
-is no longer embedded or deployed. Do not edit
-it, do not port fixes into it, and do not test it: it no longer changes, and
-`test_relay_v2.py` covers the maintained relay.
+`relay_v2.py` is the maintained relay. It implements canonical output framing
+for v3 task logs. Its implementation name is independent of task-log versions.
+Fix relay behavior here and cover it in `test_relay_v2.py`.
 
 ## Deployment
 
-Deployment and management from Go is in the parent `agent.go` (`RelayScript`,
-`DeployRelay`, `StartRelay`, `AttachRelaySession`, `ReadRelayOutput`, etc.).
-`RelayScript` rejects read-only v1 and selects `ScriptV2` for writable versions.
+Deployment and management from Go is in the parent `agent.go` (`DeployRelay`, `StartRelay`, `AttachRelaySession`, `ReadRelayOutput`, etc.).
+`DeployRelay` uploads the maintained `ScriptV2` implementation.
 
 ## Operational Modes
 
@@ -56,14 +49,13 @@ Deployment and management from Go is in the parent `agent.go` (`RelayScript`,
    sends SIGINT, escalates to SIGTERM/SIGKILL
 5. **diff_watcher** — polls `git diff --numstat --stat` on activity, emits
    `caic_diff_stat` events (throttled 10s, debounced 2s, uses temporary git index
-   for untracked files). Only `relay_v2.py` reports binary pre-image and post-image
-   sizes.
+   for untracked files). It reports binary pre-image and post-image sizes.
 
 ## Container Layout
 
 ```
 /tmp/caic-relay/
-  relay.py          # Deployed script (v1 or v2 selected by log version)
+  relay.py          # Deployed maintained script
   relay.sock        # Unix socket
   output.jsonl      # Append-only conversation log (survives restarts)
   relay.log         # Daemon diagnostics

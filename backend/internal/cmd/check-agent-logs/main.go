@@ -1,4 +1,4 @@
-// Command check-agent-logs validates recent v2 and v3 task-log harness records against genai wire DTOs.
+// Command check-agent-logs deletes obsolete task logs and validates recent v3 harness records against genai wire DTOs.
 package main
 
 import (
@@ -11,13 +11,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	caicopencode "github.com/caic-xyz/caic/backend/internal/agent/opencode"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
@@ -50,10 +49,10 @@ type config struct {
 	paths []string
 }
 
-type record struct {
-	Type    string `json:"t"`
-	Harness string `json:"harness"`
-	Version int    `json:"version"`
+type fileCheck struct {
+	findings []finding
+	version  int
+	checked  bool
 }
 
 type finding struct {
@@ -143,49 +142,69 @@ func main() {
 	}
 }
 
+// run processes all discoverable logs even when discovery, file I/O, or reporting fails.
 func run(args []string, out io.Writer) error {
 	cfg, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	paths, err := logPaths(cfg)
-	if err != nil {
-		return err
-	}
+	paths, runErr := logPaths(cfg)
 	var findings []finding
 	var checked int
+	var cutoff time.Time
+	if len(cfg.paths) == 0 && !cfg.all {
+		cutoff = time.Now().Add(-cfg.since)
+	}
 	for _, path := range paths {
-		fs, isV2, err := checkFile(path)
+		result, err := checkFile(path, cutoff)
 		if err != nil {
-			return err
+			runErr = errors.Join(runErr, err)
+			continue
 		}
-		if isV2 {
-			checked++
+		switch result.version {
+		case 1, 2:
+			if err := os.Remove(path); err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("delete obsolete v%d task log %s: %w", result.version, path, err))
+				continue
+			}
+			if _, err := fmt.Fprintf(out, "deleted obsolete v%d task log %s\n", result.version, path); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		case agent.LogVersionV3:
+			if result.checked {
+				checked++
+			}
 		}
-		findings = append(findings, fs...)
+		findings = append(findings, result.findings...)
 	}
 	findings = dedupe(findings)
 	for _, f := range findings {
 		if _, err := fmt.Fprintln(out, f.String()); err != nil {
-			return err
+			runErr = errors.Join(runErr, err)
 		}
 	}
-	if _, err := fmt.Fprintf(out, "checked %d v2/v3 task logs; found %d schema issues\n", checked, len(findings)); err != nil {
-		return err
+	if _, err := fmt.Fprintf(out, "checked %d v3 task logs; found %d schema issues\n", checked, len(findings)); err != nil {
+		runErr = errors.Join(runErr, err)
 	}
 	if len(findings) != 0 {
-		return errors.New("agent log schema validation failed")
+		runErr = errors.Join(runErr, errors.New("agent log schema validation failed"))
 	}
-	return nil
+	return runErr
 }
 
 func parseFlags(args []string) (config, error) {
 	var cfg config
 	fs := flag.NewFlagSet("check-agent-logs", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.StringVar(&cfg.dir, "dir", defaultLogDir(), "task-log directory")
-	fs.DurationVar(&cfg.since, "since", 72*time.Hour, "only scan files modified within this duration")
-	fs.BoolVar(&cfg.all, "all", false, "scan all matching files regardless of modification time")
+	fs.Func("dir", "task-log directory; matching v1 and v2 logs are deleted regardless of age", func(dir string) error {
+		if dir == "" {
+			return errors.New("-dir must not be empty")
+		}
+		cfg.dir = dir
+		return nil
+	})
+	fs.DurationVar(&cfg.since, "since", 72*time.Hour, "validate v3 bodies modified within this duration; explicit paths ignore this cutoff")
+	fs.BoolVar(&cfg.all, "all", false, "validate all v3 bodies regardless of modification time")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -193,17 +212,17 @@ func parseFlags(args []string) (config, error) {
 		return config{}, errors.New("-since must not be negative")
 	}
 	cfg.paths = fs.Args()
+	if len(cfg.paths) == 0 && cfg.dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return config{}, fmt.Errorf("resolve default task-log directory: %w", err)
+		}
+		cfg.dir = filepath.Join(home, ".cache", "caic", "tasks")
+	}
 	return cfg, nil
 }
 
-func defaultLogDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, ".cache", "caic", "tasks")
-}
-
+// logPaths returns normalized, distinct paths alongside errors from other selections.
 func logPaths(cfg config) ([]string, error) {
 	var roots []string
 	if len(cfg.paths) == 0 {
@@ -212,10 +231,12 @@ func logPaths(cfg config) ([]string, error) {
 		roots = cfg.paths
 	}
 	var paths []string
+	var pathErr error
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil {
-			return nil, fmt.Errorf("stat %s: %w", root, err)
+			pathErr = errors.Join(pathErr, fmt.Errorf("stat %s: %w", root, err))
+			continue
 		}
 		if !info.IsDir() {
 			if isLogPath(root) {
@@ -225,90 +246,178 @@ func logPaths(cfg config) ([]string, error) {
 		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", root, err)
+			pathErr = errors.Join(pathErr, fmt.Errorf("read %s: %w", root, err))
 		}
 		for _, entry := range entries {
 			if entry.IsDir() || !isLogPath(entry.Name()) {
 				continue
 			}
 			path := filepath.Join(root, entry.Name())
-			if len(cfg.paths) == 0 && !cfg.all {
-				info, err := entry.Info()
-				if err != nil {
-					return nil, fmt.Errorf("stat %s: %w", path, err)
-				}
-				if time.Since(info.ModTime()) > cfg.since {
-					continue
-				}
-			}
 			paths = append(paths, path)
 		}
 	}
-	sort.Strings(paths)
-	return paths, nil
+	normalized := paths[:0]
+	for _, path := range paths {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			pathErr = errors.Join(pathErr, fmt.Errorf("resolve %s: %w", path, err))
+			continue
+		}
+		normalized = append(normalized, abs)
+	}
+	slices.Sort(normalized)
+	return slices.Compact(normalized), pathErr
 }
 
 func isLogPath(path string) bool {
 	return strings.HasSuffix(path, ".jsonl") || strings.HasSuffix(path, ".jsonl.zst")
 }
 
-func checkFile(path string) ([]finding, bool, error) {
+// checkFile closes the reader before returning a version eligible for deletion.
+func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 	r, err := openLog(path)
 	if err != nil {
-		return nil, false, err
+		return fileCheck{}, err
 	}
-	defer func() { _ = r.Close() }()
+	defer func() {
+		if closeErr := r.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %s: %w", path, closeErr))
+		}
+	}()
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), maxRecordSize)
 	if !sc.Scan() {
 		if err := sc.Err(); err != nil {
-			return nil, false, fmt.Errorf("read %s: %w", path, err)
+			return fileCheck{}, fmt.Errorf("read %s: %w", path, err)
 		}
-		return nil, false, nil
+		return fileCheck{}, fmt.Errorf("validate %s:1: missing metadata header", path)
 	}
 
-	var header record
-	if err := json.Unmarshal(sc.Bytes(), &header); err != nil {
-		return nil, false, fmt.Errorf("decode %s:1: %w", path, err)
+	version, harness, err := inspectHeader(sc.Bytes())
+	if err != nil {
+		return fileCheck{}, fmt.Errorf("validate %s:1: %w", path, err)
 	}
-	if header.Type != "caic_meta" || (header.Version != int(agent.LogVersionV2) && header.Version != int(agent.LogVersionV3)) {
-		return nil, false, nil
+	if version != agent.LogVersionV3 {
+		return fileCheck{version: version}, nil
 	}
-	if header.Harness == "" {
-		return nil, true, fmt.Errorf("validate %s:1: v%d metadata is missing harness", path, header.Version)
+	if !cutoff.IsZero() {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fileCheck{}, fmt.Errorf("stat %s: %w", path, err)
+		}
+		if info.ModTime().Before(cutoff) {
+			return fileCheck{version: version}, nil
+		}
 	}
 
 	var findings []finding
 	openCodeMethods := make(map[string]opencodedto.Method)
 	line := 1
 	input := false
-	parser, err := agent.NewLogRecordParser(agent.LogVersion(header.Version), func(message []byte) ([]agent.Message, error) {
-		if f := checkMessage(path, line, header.Harness, message, input, openCodeMethods); f != nil {
+	parser, err := agent.NewLogRecordParser(func(message []byte) ([]agent.Message, error) {
+		if f := checkMessage(path, line, harness, message, input, openCodeMethods); f != nil {
 			findings = append(findings, *f)
 		}
 		return nil, nil
 	})
 	if err != nil {
-		return nil, true, fmt.Errorf("create v%d parser: %w", header.Version, err)
+		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
 	}
 	if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
-		return nil, true, fmt.Errorf("validate %s:1: %w", path, err)
+		return fileCheck{}, fmt.Errorf("validate %s:1: %w", path, err)
 	}
 	for line++; sc.Scan(); line++ {
-		var envelope record
-		if err := json.Unmarshal(sc.Bytes(), &envelope); err != nil {
-			return nil, true, fmt.Errorf("validate %s:%d: %w", path, line, err)
+		token, err := agent.JSONString(sc.Bytes(), "t")
+		if err != nil {
+			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, line, err)
 		}
-		input = envelope.Type == "input"
+		input = token == "input"
 		if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
-			return nil, true, fmt.Errorf("validate %s:%d: %w", path, line, err)
+			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, line, err)
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, true, fmt.Errorf("read %s: %w", path, err)
+		return fileCheck{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	return findings, true, nil
+	return fileCheck{findings: findings, version: version, checked: true}, nil
+}
+
+// inspectHeader proves the format identity before a log can be deleted.
+func inspectHeader(data []byte) (version int, harness string, err error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	opening, err := dec.Token()
+	if err != nil {
+		return 0, "", err
+	}
+	if opening != json.Delim('{') {
+		return 0, "", errors.New("metadata header must be a JSON object")
+	}
+	seen := make(map[string]struct{})
+	var token, legacyToken string
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return 0, "", err
+		}
+		field, ok := key.(string)
+		if !ok {
+			return 0, "", errors.New("metadata field name must be a string")
+		}
+		for _, name := range []string{"t", "type", "version"} {
+			if field != name && strings.EqualFold(field, name) {
+				return 0, "", fmt.Errorf("metadata identity field %q must use exact casing", field)
+			}
+		}
+		if _, duplicate := seen[field]; duplicate {
+			return 0, "", fmt.Errorf("duplicate metadata field %q", field)
+		}
+		seen[field] = struct{}{}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return 0, "", err
+		}
+		switch field {
+		case "version":
+			err = json.Unmarshal(value, &version)
+		case "t":
+			err = json.Unmarshal(value, &token)
+		case "type":
+			err = json.Unmarshal(value, &legacyToken)
+		case "harness":
+			err = json.Unmarshal(value, &harness)
+		}
+		if err != nil {
+			return 0, "", fmt.Errorf("metadata field %q: %w", field, err)
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return 0, "", err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return 0, "", errors.New("metadata header has trailing data")
+	}
+	_, hasType := seen["type"]
+	_, hasToken := seen["t"]
+	if hasType && hasToken {
+		return 0, "", errors.New("metadata header has ambiguous type and t discriminators")
+	}
+	switch version {
+	case 1:
+		if legacyToken != "caic_meta" {
+			return 0, "", errors.New("missing v1 metadata header")
+		}
+	case 2, agent.LogVersionV3:
+		if token != "caic_meta" {
+			return 0, "", fmt.Errorf("missing v%d metadata header", version)
+		}
+	default:
+		return 0, "", fmt.Errorf("unsupported log version %d", version)
+	}
+	if version == agent.LogVersionV3 && harness == "" {
+		return 0, "", errors.New("v3 metadata is missing harness")
+	}
+	return version, harness, nil
 }
 
 func openLog(path string) (io.ReadCloser, error) {
@@ -322,8 +431,7 @@ func openLog(path string) (io.ReadCloser, error) {
 	}
 	zr, err := zstd.NewReader(f)
 	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("open zstd %s: %w", path, err)
+		return nil, errors.Join(fmt.Errorf("open zstd %s: %w", path, err), f.Close())
 	}
 	return &zstdLog{Decoder: zr, file: f}, nil
 }
@@ -644,7 +752,7 @@ func checkOpenCode(data []byte, methods map[string]opencodedto.Method) (string, 
 		return "MessageProbe", err
 	}
 	if probe.Type != "" {
-		return checkOpenCodeInjection(probe.Type, data)
+		return "JSONRPCMessage", fmt.Errorf("unexpected native type %q", probe.Type)
 	}
 
 	var msg opencodedto.JSONRPCMessage
@@ -710,29 +818,6 @@ func checkOpenCodeRequest(method opencodedto.Method, params json.RawMessage) (st
 		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode request method %q; add its DTO and checker dispatch", method)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(params, dst)
-}
-
-func checkOpenCodeInjection(typ string, data []byte) (string, error) {
-	var dst any
-	switch typ {
-	case "caic_session":
-		// caic_session is a v1 control record and retains its legacy field names.
-		dst = &struct {
-			Type         string `json:"type"`
-			SessionID    string `json:"session_id"`
-			Model        string `json:"model,omitempty"`
-			AgentVersion string `json:"agent_version,omitempty"`
-		}{}
-	case "caic_init":
-		dst = &caicopencode.CaicInit{}
-	case "caic_diff_stat":
-		dst = &v1.DiffStatMessage{}
-	case "caic_exit":
-		dst = &v1.ExitMessage{}
-	default:
-		return "caic injection", fmt.Errorf("unrecognized OpenCode caic injection type %q; add its DTO and checker dispatch", typ)
-	}
-	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
 
 func isEmptyJSON(raw json.RawMessage) bool {

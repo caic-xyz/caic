@@ -4,7 +4,6 @@ package taskslog_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,7 +22,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
@@ -49,8 +49,8 @@ func TestStore(t *testing.T) {
 				`{"type":"agent_start"}`,
 				`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":7}}]}`,
 			}
-			for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
-				header, err := agent.MarshalLogMessage(version, &agent.MetaMessage{MessageType: "caic_meta", Version: int(version), Harness: string(harness.Pi), Prompt: "usage", StartedAt: usageAt(5), RequestedModel: "anthropic/claude-opus-4-6"})
+			for range 2 {
+				header, err := agent.MarshalLogMessage(&agent.MetaMessage{MessageType: "caic_meta", Version: 3, Harness: string(harness.Pi), Prompt: "usage", StartedAt: usageAt(5), RequestedModel: "anthropic/claude-opus-4-6"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -75,8 +75,8 @@ func TestStore(t *testing.T) {
 		t.Run("reconstructs mixed cache duration counts", func(t *testing.T) {
 			t.Parallel()
 			_, logStore, rollup := newUsageStores(t)
-			for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
-				writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), version, usageAt(5), usageAt(5),
+			for range 2 {
+				writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), usageAt(5), usageAt(5),
 					`{"type":"result","num_turns":1,"usage":{"cache_creation_input_tokens":110,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":100}}}`)
 			}
 			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
@@ -88,12 +88,11 @@ func TestStore(t *testing.T) {
 			}
 		})
 
-		t.Run("reconstructs v2 and v3 by producer day and skips v1", func(t *testing.T) {
+		t.Run("reconstructs producer days", func(t *testing.T) {
 			t.Parallel()
 			usageDir, logStore, rollup := newUsageStores(t)
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV1, usageAt(4), usageAt(4))
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV2, usageAt(5), usageAt(5))
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(6), usageAt(6))
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), usageAt(5), usageAt(5))
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), usageAt(6), usageAt(6))
 			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +113,7 @@ func TestStore(t *testing.T) {
 		t.Run("counts reconstructed skill reads by name", func(t *testing.T) {
 			t.Parallel()
 			_, logStore, rollup := newUsageStores(t)
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), usageAt(5), usageAt(5),
 				usageSkillUse("sk_1", `{"skill":"go-code-quality"}`),
 				usageSkillUse("sk_2", `{"skill":"go-code-quality"}`),
 				usageSkillUse("sk_3", `{"skill":"review"}`),
@@ -141,7 +140,7 @@ func TestStore(t *testing.T) {
 		t.Run("reconstructed inferred reads require successful result", func(t *testing.T) {
 			t.Parallel()
 			_, logStore, rollup := newUsageStores(t)
-			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+			writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), usageAt(5), usageAt(5),
 				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"failed","name":"Read","input":{"file_path":"/home/user/.agents/skills/review/SKILL.md"}}],"usage":{}}}`,
 				`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"failed","is_error":true,"content":"missing file"}]}}`,
 				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"ok","name":"Read","input":{"file_path":"/home/user/.agents/skills/go-code-quality/SKILL.md"}}],"usage":{}}}`,
@@ -161,7 +160,7 @@ func TestStore(t *testing.T) {
 			_, logStore, rollup := newUsageStores(t)
 			id := ksid.NewID().String()
 			at := usageAt(5)
-			writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV3, at, at,
+			writeUsageLog(t, logStore.LogDir, id, at, at,
 				`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"/tmp/example"}}],"usage":{}}}`,
 				`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"ok"}]}}`,
 			)
@@ -190,7 +189,7 @@ func TestStore(t *testing.T) {
 			if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			writeUsageLog(t, logStore.LogDir, "valid", agent.LogVersionV2, usageAt(5), usageAt(5))
+			writeUsageLog(t, logStore.LogDir, "valid", usageAt(5), usageAt(5))
 			if err := os.WriteFile(filepath.Join(logStore.LogDir, "broken.jsonl"), []byte("not json\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -226,7 +225,7 @@ func TestStore(t *testing.T) {
 			const tasks = 9
 			for i := range tasks {
 				id := fmt.Sprintf("task%02d", i)
-				writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV2, usageAt(5), usageAt(tasks-i))
+				writeUsageLog(t, logStore.LogDir, id, usageAt(5), usageAt(tasks-i))
 			}
 			var got []string
 			for row, err := range logStore.UsageRows(t.Context(), usageResolver()) {
@@ -271,45 +270,31 @@ func usageSkillUse(id, input string) string {
 
 // writeUsageLog writes one retained task log. Each extra record is a native
 // harness message stamped at and emitted before the trailing result.
-func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, startedAt time.Time, extra ...string) {
+func writeUsageLog(t *testing.T, dir, id string, at, startedAt time.Time, extra ...string) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	meta := v1.MetaMessage{
+	meta := agent.MetaMessage{
 		MessageType:    "caic_meta",
-		Version:        int(version),
+		Version:        3,
 		Prompt:         "backfill",
-		Repos:          []v1.MetaRepo{{Name: "org/repo"}},
+		Repos:          []v3.MetaRepo{{Name: "org/repo"}},
 		Harness:        string(harness.Claude),
 		RequestedModel: "claude-test",
 		StartedAt:      startedAt,
 	}
-	header, err := json.Marshal(meta)
+	header, err := agent.MarshalLogMessage(&meta)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != agent.LogVersionV1 {
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(header, &obj); err != nil {
-			t.Fatal(err)
-		}
-		delete(obj, "type")
-		obj["t"] = json.RawMessage(`"caic_meta"`)
-		header, err = json.Marshal(obj)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+
 	encodedLog := make([]byte, 0, len(header)+128)
 	encodedLog = append(encodedLog, header...)
 	encodedLog = append(encodedLog, '\n')
 	records := append(slices.Clone(extra), `{"type":"result","duration_api_ms":3,"duration_ms":7,"num_turns":1,"usage":{"output_tokens":7}}`)
 	for _, native := range records {
-		if version == agent.LogVersionV1 {
-			encodedLog = append(encodedLog, native...)
-		} else {
-			encodedLog = append(encodedLog, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
-		}
+		encodedLog = append(encodedLog, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
+
 		encodedLog = append(encodedLog, '\n')
 	}
 	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), encodedLog, 0o600); err != nil {

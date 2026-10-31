@@ -15,6 +15,7 @@ import (
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -131,12 +132,11 @@ var _ agent.Backend = (*Backend)(nil)
 // instance is created for every session so this state can't leak between
 // concurrent Claude Code tasks sharing the registered Backend singleton.
 type wireFormat struct {
-	nativeSubagents              nativeSubagents
-	backgroundCommands           backgroundCommands
-	widgetTracker                *WidgetTracker
-	pendingReasoningOutputTokens int
-	pendingReasoningEstimate     int
-	reportedModel                string
+	nativeSubagents    nativeSubagents
+	backgroundCommands backgroundCommands
+	widgetTracker      *WidgetTracker
+	reasoning          metadata.Reasoning
+	reportedModel      string
 	// pendingSkillUses maps a Skill tool use ID to the skill its success
 	// loads into the main context, until the paired tool result arrives. The
 	// value is empty for a call naming no skill and for a subagent's call.
@@ -199,7 +199,6 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 	subagent := record.source.DelegationToolUseID != ""
-	w.pendingReasoningEstimate += record.reasoningEstimate
 	native, err := w.nativeSubagents.parse(&record, msgs)
 	if err != nil {
 		return nil, err
@@ -259,6 +258,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			delete(w.askSources, agent.ToolKeyForSource(source, m.ToolUseID))
 		}
 	}
+	w.reasoning.Apply(&record.source, record.reasoningEstimate, msgs)
 	if loaded != nil && agent.ToolKeyForSource(loaded.Provenance(), "") == agent.ToolKeyForSource(&record.source, "") {
 		loaded.Path = skillPath(record.user)
 	}
@@ -323,7 +323,6 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 				m.ReportedModel = w.reportedModel
 				m.ModelDerived = true
 			}
-			w.pendingReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 		case *agent.ResultMessage:
 			if m.Source.IsChild() {
 				break
@@ -331,17 +330,6 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			// Claude Code reports the active model's context window only in the
 			// turn result, so this is the earliest point caic can learn it.
 			m.ContextWindow = resultContextWindow(line, w.reportedModel)
-			// Claude result records can omit output_tokens_details even when
-			// preceding events reported thinking tokens. Prefer actual
-			// message_delta usage over system/thinking_tokens estimates.
-			if m.Usage.ReasoningOutputTokens == 0 {
-				m.Usage.ReasoningOutputTokens = w.pendingReasoningOutputTokens
-				if m.Usage.ReasoningOutputTokens == 0 {
-					m.Usage.ReasoningOutputTokens = w.pendingReasoningEstimate
-				}
-			}
-			w.pendingReasoningOutputTokens = 0
-			w.pendingReasoningEstimate = 0
 			// A turn boundary drops skill reads whose result never arrived.
 			clear(w.pendingSkillUses)
 			clear(w.askSources)
@@ -403,7 +391,7 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 		return err
 	}
 	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+	if err := agent.AppendInputNativeRecord(log, data); err != nil {
 		return err
 	}
 	if _, err := w.Write(data); err != nil {

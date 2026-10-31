@@ -321,10 +321,9 @@ type EventDiffStat struct {
 	DiffStat DiffStat `json:"diffStat,omitzero"`
 }
 
-// EventError is emitted when the backend fails to parse an agent output line.
+// EventError reports an agent subprocess failure.
 type EventError struct {
-	Err  string `json:"err"`
-	Line string `json:"line"`
+	Err string `json:"err"`
 }
 
 // EventThinking is an assistant thinking block.

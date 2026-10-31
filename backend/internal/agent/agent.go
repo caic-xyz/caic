@@ -62,7 +62,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
@@ -198,7 +197,6 @@ type conn struct {
 	logger      *slog.Logger
 	stdin       io.WriteCloser
 	log         LogSink
-	version     LogVersion
 	wire        WireFormat
 	mcp         mcp.Registry
 	interrupted <-chan struct{}
@@ -222,7 +220,7 @@ func (c *conn) SendPrompt(p Prompt, data []byte) error {
 	var err error
 	if data == nil {
 		err = c.wire.WritePrompt(c.stdin, p, log)
-	} else if err = AppendInputNativeRecord(log, c.version, data); err == nil {
+	} else if err = AppendInputNativeRecord(log, data); err == nil {
 		var n int
 		n, err = c.stdin.Write(data)
 		if err == nil && n != len(data) {
@@ -256,7 +254,7 @@ func (c *conn) SendRaw(data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !isMCPResponse(data) {
-		if err := AppendInputNativeRecord(c.log, c.version, data); err != nil {
+		if err := AppendInputNativeRecord(c.log, data); err != nil {
 			return err
 		}
 	}
@@ -314,7 +312,7 @@ func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercep
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-		}, c.log, c.version, c.wire.ParseMessage, func(req MCPRequest) error {
+		}, c.log, c.wire.ParseMessage, func(req MCPRequest) error {
 			return requests.enqueue(responseWork{request: &req})
 		})
 	})
@@ -436,7 +434,7 @@ func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sin
 		panic("logger is required")
 	}
 	interruption, cancel := context.WithCancel(ctx)
-	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire, mcp: registry, interrupted: interruption.Done(), cancelRead: cancel}
+	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, wire: wire, mcp: registry, interrupted: interruption.Done(), cancelRead: cancel}
 }
 
 // MCPToolResultResponse translates a registry result to the standard MCP tool
@@ -607,15 +605,12 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	if err := opts.Log.LogVersion().ValidateWritable(); err != nil {
-		return nil, fmt.Errorf("relay log version: %w", err)
-	}
 	if opts.WarmHistory {
 		// A session that attaches with an empty stateful wire cannot correlate
 		// the completions its restored history implies, which is the defect the
 		// warm-up exists to prevent, so a failure here aborts the attach instead
 		// of continuing in that state. The caller's recovery path retries.
-		if err := WarmRelayHistory(ctx, sshHost, opts.Log.LogVersion(), wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
+		if err := WarmRelayHistory(ctx, sshHost, wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
 			return nil, fmt.Errorf("warm relay history: %w", err)
 		}
 	}
@@ -746,39 +741,32 @@ func (s *Session) Wait() error {
 	return s.err
 }
 
-// LogRecordParser decodes versioned physical task-log records around one
+// LogRecordParser decodes v3 physical task-log records around one
 // harness-native parser. A parser holds ordered log state and is not safe for
 // concurrent use.
 type LogRecordParser struct {
-	version       LogVersion
 	parseNative   func([]byte) ([]Message, error)
 	contextWindow int
 }
 
-// NewLogRecordParser constructs a parser for an already-validated physical log
-// version. parseNative is called synchronously and must parse and validate the
+// NewLogRecordParser constructs a v3 task-log parser.
+// parseNative is called synchronously and must parse and validate the
 // supplied harness-native JSON before returning.
 //
 // The callback input may alias scanner-owned record memory. parseNative must not
 // retain or use the input after it returns.
-func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message, error)) (*LogRecordParser, error) {
-	if err := version.Validate(); err != nil {
-		return nil, err
-	}
+func NewLogRecordParser(parseNative func([]byte) ([]Message, error)) (*LogRecordParser, error) {
 	if parseNative == nil {
 		return nil, errors.New("native message parser is nil")
 	}
-	return &LogRecordParser{version: version, parseNative: parseNative}, nil
+	return &LogRecordParser{parseNative: parseNative}, nil
 }
 
-// ParseRecord decodes one physical task-log record according to the parser's
-// exact version. Classification belongs to this parser so task-log consumers
+// ParseRecord decodes one v3 physical task-log record.
+// Classification belongs to this parser so task-log consumers
 // never duplicate or guess control vocabulary.
 func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
-	if p.version != LogVersionV1 {
-		return parseV2Record(p, line)
-	}
-	return parseV1Record(p, line)
+	return parseV3Record(p, line)
 }
 
 type logControlKind int
@@ -789,7 +777,6 @@ const (
 	logControlExit
 	logControlStrippedEnv
 	logControlSession
-	logControlLegacyInit
 	logControlModelInfo
 	logControlPR
 	logControlResult
@@ -805,83 +792,47 @@ const (
 	logControlRelayGeneration
 )
 
-var v1LogControlKinds = map[string]logControlKind{
-	messageTypeMeta:                  logControlMeta,
-	messageTypeDiffStat:              logControlDiffStat,
-	messageTypeExit:                  logControlExit,
-	messageTypeStrippedEnv:           logControlStrippedEnv,
-	messageTypeSession:               logControlSession,
-	messageTypeLegacyInit:            logControlLegacyInit,
-	messageTypeModelInfo:             logControlModelInfo,
-	messageTypePR:                    logControlPR,
-	messageTypeResult:                logControlResult,
-	messageTypeTurnCommitSnapshot:    logControlTurnCommitSnapshot,
-	messageTypePendingUserAction:     logControlPendingUserAction,
-	messageTypeProvisioningLogRecord: logControlProvisioningLog,
-}
-
 func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
 	switch kind {
 	case logControlMeta:
 		var m MetaMessage
-		if p.version == LogVersionV1 {
-			var err error
-			m, err = DecodeV1MetaMessage(line)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s: %w", token, err)
-			}
-		} else if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if err := m.Validate(); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		if LogVersion(m.Version) != p.version {
-			return nil, fmt.Errorf("decode %s: header version %d does not match parser version %d", token, m.Version, p.version)
-		}
 		return []Message{&m}, nil
 	case logControlDiffStat:
 		var m DiffStatMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeDiffStat
 		return []Message{&m}, nil
 	case logControlExit:
 		var m ExitMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeExit
 		return []Message{&m}, nil
 	case logControlStrippedEnv:
 		var m StrippedEnvMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeStrippedEnv
 		return []Message{&m}, nil
 	case logControlSession:
 		var m MetaSessionMessage
-		if p.version == LogVersionV1 {
-			var err error
-			m, err = DecodeV1MetaSessionMessage(line)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s: %w", token, err)
-			}
-		} else if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&InitMessage{MessageProvenance: m.MessageProvenance, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion, AutoCompactTokenLimit: m.AutoCompactTokenLimit}}, nil
-	case logControlLegacyInit:
-		var m v1.LegacyInit
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.Model, Version: m.Version}}, nil
 	case logControlModelInfo:
 		var m ModelInfoMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.ContextWindow > 0 {
@@ -893,42 +844,42 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return nil, nil
 	case logControlPR:
 		var m MetaPRMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypePR
 		return []Message{&m}, nil
 	case logControlResult:
 		var m MetaResultMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeResult
 		return []Message{&m}, nil
 	case logControlTurnCommitSnapshot:
 		var m TurnCommitSnapshotMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeTurnCommitSnapshot
 		return []Message{&m}, nil
 	case logControlPendingUserAction:
 		var m PendingUserActionMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = PendingUserActionMessageType
 		return []Message{&m}, nil
 	case logControlProvisioningLog:
 		var m LogMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeProvisioningLogRecord
 		return []Message{&m}, nil
 	case logControlContextCleared:
 		var m SystemMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.Subtype != "" && m.Subtype != messageSubtypeContextCleared {
@@ -939,7 +890,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{cleared}, nil
 	case logControlInputDeliveryFailed:
 		var m SystemMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.Subtype != SystemSubtypeInputDeliveryFailed {
@@ -949,7 +900,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlInputDelivery:
 		var m SystemMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if !IsInputDeliveryControl(&m) {
@@ -959,19 +910,19 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlText:
 		var m TextMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&m}, nil
 	case logControlUserInput:
 		var m UserInputMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&m}, nil
 	case logControlMCPRequest:
 		var m MCPRequestMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.ID == "" || (mcp.Method(m.Method) != mcp.MethodToolsList && (mcp.Method(m.Method) != mcp.MethodToolsCall || m.Name == "")) {
@@ -980,7 +931,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlRelayGeneration:
 		var m RelayGenerationMessage
-		if err := decodeLogControl(p.version, line, &m); err != nil {
+		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.Generation == "" {
@@ -1032,7 +983,7 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 }
 
 // ParsedRecord is a parser-owned semantic task-log record. Control reports
-// whether the version-specific discriminator identifies a caic-owned control.
+// whether the physical discriminator identifies a caic-owned control.
 type ParsedRecord struct {
 	Messages        []TimedMessage
 	RelayRecord     bool
@@ -1051,24 +1002,19 @@ type RelayRecordReader struct {
 	native []byte
 }
 
-// NewRelayRecordReader creates a version-aware physical relay reader. version
-// must be the caller-validated task-log version. log must be non-nil; use
-// DiscardLogSink{Version: version} when persistence is unnecessary.
-func NewRelayRecordReader(r io.Reader, version LogVersion, log LogSink) (*RelayRecordReader, error) {
+// NewRelayRecordReader creates a canonical physical relay reader.
+// log must be non-nil; use DiscardLogSink{} when persistence is unnecessary.
+func NewRelayRecordReader(r io.Reader, log LogSink) *RelayRecordReader {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReaderSize(r, 1<<20)
 	}
 	reader := &RelayRecordReader{r: br, log: log}
-	parser, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
+	reader.parser = &LogRecordParser{parseNative: func(line []byte) ([]Message, error) {
 		reader.native = append(reader.native[:0], line...)
 		return nil, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	reader.parser = parser
-	return reader, nil
+	}}
+	return reader
 }
 
 // Reader returns the buffered source positioned after records consumed by ReadRecord.
@@ -1097,10 +1043,8 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage
 		if parseErr != nil {
 			return nil, nil, parseErr
 		}
-		if r.parser.version != LogVersionV1 {
-			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
-				return nil, nil, fmt.Errorf("write log: %w", writeErr)
-			}
+		if writeErr := r.log.AppendNative(encoded); writeErr != nil {
+			return nil, nil, fmt.Errorf("write log: %w", writeErr)
 		}
 		if len(r.native) > 0 {
 			return slices.Clone(r.native), nil, nil
@@ -1127,11 +1071,11 @@ func messageIsNil(msg Message) bool {
 // DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original TimedMessage wrappers.
 // Dispatch and MCP handling failures end the read loop.
-func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage) error, sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
+func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage) error, sink LogSink, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
 	if log == nil {
 		return errors.New("logger is required")
 	}
-	parser, err := NewLogRecordParser(version, parseNative)
+	parser, err := NewLogRecordParser(parseNative)
 	if err != nil {
 		return fmt.Errorf("construct relay record parser: %w", err)
 	}
@@ -1152,20 +1096,11 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 		}
 		n++
 		parsed, err := parser.ParseRecord(line)
-		if version != LogVersionV1 && err != nil {
-			return fmt.Errorf("parse v2 relay record: %w", err)
-		}
-		if version != LogVersionV1 {
-			if writeErr := sink.AppendNative(record); writeErr != nil {
-				return fmt.Errorf("write log: %w", writeErr)
-			}
-		}
 		if err != nil {
-			log.WarnContext(ctx, "unparseable message", "err", err, "line", string(line))
-			if err := dispatch(TimedMessage{Message: &ParseErrorMessage{Err: err.Error(), Line: string(line)}}); err != nil {
-				return err
-			}
-			continue
+			return fmt.Errorf("parse relay record: %w", err)
+		}
+		if writeErr := sink.AppendNative(record); writeErr != nil {
+			return fmt.Errorf("write log: %w", writeErr)
 		}
 		for _, msg := range parsed.Messages {
 			if request, ok := msg.Message.(*MCPRequestMessage); ok {
@@ -1199,19 +1134,8 @@ const (
 	PiCaicMCPExtensionPath      = RelayDir + "/caic-mcp.ts"
 )
 
-// RelayScript returns the maintained script for a writable log version.
-func RelayScript(version LogVersion) ([]byte, error) {
-	if err := version.ValidateWritable(); err != nil {
-		return nil, err
-	}
-	return relay.ScriptV2, nil
-}
-
-// DeployRelay uploads the selected relay script into the runtime target. Idempotent.
-func DeployRelay(ctx context.Context, target runtime.ConnectionTarget, version LogVersion) error {
-	if err := version.ValidateWritable(); err != nil {
-		return err
-	}
+// DeployRelay uploads the maintained relay script into the runtime target. Idempotent.
+func DeployRelay(ctx context.Context, target runtime.ConnectionTarget) error {
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
@@ -1219,11 +1143,7 @@ func DeployRelay(ctx context.Context, target runtime.ConnectionTarget, version L
 	// shell, so a single string works correctly as a shell command.
 	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
 		"mkdir -p "+RelayDir+" && cat > "+RelayScriptPath)
-	script, err := RelayScript(version)
-	if err != nil {
-		return err
-	}
-	cmd.Stdin = bytes.NewReader(script)
+	cmd.Stdin = bytes.NewReader(relay.ScriptV2)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("deploy relay: %w: %s", err, out)
 	}
@@ -1417,11 +1337,7 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 		return nil, errors.New("agent connection target missing SSH host")
 	}
 	tStart := time.Now()
-	version := opts.Log.LogVersion()
-	if err := version.ValidateWritable(); err != nil {
-		return nil, fmt.Errorf("relay log version: %w", err)
-	}
-	if err := DeployRelay(ctx, opts.Target, version); err != nil {
+	if err := DeployRelay(ctx, opts.Target); err != nil {
 		return nil, err
 	}
 	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
@@ -1487,7 +1403,7 @@ func RelayOutputSize(ctx context.Context, container string) (int64, error) {
 
 // ReadRelayTail reads only the tail of the relay output.jsonl from the
 // container and returns the parsed messages plus the total file size (for
-// RelayOffset). Memory and transfer are bounded by maxBytes; validated v2
+// RelayOffset). Memory and transfer are bounded by maxBytes; validated v3
 // records are retained so adoption can persist output produced while offline.
 func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (timeline ParsedTimeline, size int64, err error) {
 	generation, err := relayOutputGeneration(ctx, container)
@@ -1657,9 +1573,7 @@ func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
 // exact physical offset consumed, including a skipped partial tail record.
 func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string) (timeline ParsedTimeline, offset int64, err error) {
 	offset, err = scanRelayTailRecords(r, parser, start, skipFirst, src, generation, func(parsed ParsedRecord, line, encoded []byte, byteEnd int64, currentGeneration string) {
-		if parser.version != LogVersionV1 {
-			timeline.Encoded = append(timeline.Encoded, encoded...)
-		}
+		timeline.Encoded = append(timeline.Encoded, encoded...)
 		timeline.Messages = append(timeline.Messages, parsed.Messages...)
 		if parsed.RelayRecord {
 			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
@@ -1709,11 +1623,7 @@ func scanRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		}
 		parsed, parseErr := parser.ParseRecord(line)
 		if parseErr != nil {
-			if parser.version != LogVersionV1 || parsed.Control {
-				return offset, fmt.Errorf("parse relay record: %w", parseErr)
-			}
-			slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
-			continue
+			return offset, fmt.Errorf("parse relay record from %s: %w", src, parseErr)
 		}
 		if parsed.RelayGeneration != "" {
 			currentGeneration = parsed.RelayGeneration
@@ -1800,7 +1710,7 @@ const warmHistoryAttempts = 2
 // second copy would be idempotent and never reach the task timeline. A failure is
 // returned, after one retry to absorb a transient relay read, because attaching
 // with empty correlation state is the defect this exists to prevent.
-func WarmRelayHistory(ctx context.Context, container string, version LogVersion, wire WireFormat, endOffset, maxBytes int64) error {
+func WarmRelayHistory(ctx context.Context, container string, wire WireFormat, endOffset, maxBytes int64) error {
 	if endOffset <= 0 {
 		// A fresh session: the live attach already replays everything from the
 		// start, so there is no history to warm and nothing to double-process.
@@ -1815,7 +1725,7 @@ func WarmRelayHistory(ctx context.Context, container string, version LogVersion,
 	if err != nil {
 		return err
 	}
-	parser, err := NewLogRecordParser(version, wire.ParseMessage)
+	parser, err := NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		return err
 	}

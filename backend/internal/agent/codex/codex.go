@@ -62,9 +62,9 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
 // (initialize → initialized → thread/start) for golden-file trace recording.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	log := agent.DiscardLogSink{Version: version}
+	log := agent.DiscardLogSink{}
 	wire, _, continuation, err := handshake(ctx, stdin, br, stdout, &agent.Options{Dir: dir, Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
@@ -184,11 +184,9 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	defer stopRead()
 
 	nextID := atomic.Int64{}
-	records, err := agent.NewRelayRecordReader(stdout, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
-	if err != nil {
-		return nil, fmt.Errorf("construct model-list reader: %w", err)
-	}
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID, agent.DiscardLogSink{Version: agent.LogVersionV1})
+	records := &appServerReader{scanner: bufio.NewScanner(stdout)}
+	records.scanner.Buffer(make([]byte, 64<<10), 32<<20)
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID, agent.DiscardLogSink{})
 	if err != nil {
 		return nil, fmt.Errorf("codex model/list: %w", err)
 	}
@@ -324,14 +322,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	defer stopRead()
 
 	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
-	relayLog := agent.LogSink(agent.DiscardLogSink{Version: opts.Log.LogVersion()})
-	if opts.Log.LogVersion() == agent.LogVersionV3 {
-		relayLog = opts.Log
-	}
-	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), relayLog)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
-	}
+	records := agent.NewRelayRecordReader(stdout, opts.Log)
 
 	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID, opts.Log)
 	if err != nil {
@@ -429,11 +420,6 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		ID:      id,
 		Method:  "turn/start",
 		Params:  params,
-	}
-	if log.LogVersion() == agent.LogVersionV2 {
-		if err := log.AppendMessage(&agent.UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
-			return err
-		}
 	}
 	return writeJSONInput(wr, req, log)
 }
@@ -735,7 +721,7 @@ func (w *wireFormat) rootThreadID() string {
 	return w.threadID
 }
 
-func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, nextID *atomic.Int64, log agent.LogSink) ([]codex.ModelInfo, error) {
+func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records recordReader, nextID *atomic.Int64, log agent.LogSink) ([]codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -756,7 +742,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *age
 				// item/completed plan instead.
 				codex.MethodPlanDelta,
 				// Coarse git diff snapshot repeated on every file change; we use the
-				// caic-injected caic_diff_stat from the relay watcher instead.
+				// canonical diff_stat controls from the relay watcher instead.
 				codex.MethodTurnDiffUpdated,
 				// High-level plan snapshot updated on each tool call; redundant with
 				// item/plan which gives us the final plan text.
@@ -845,10 +831,8 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
-	if log.LogVersion() == agent.LogVersionV3 {
-		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
-			return err
-		}
+	if err := agent.AppendInputNativeRecord(log, data); err != nil {
+		return err
 	}
 	if _, err := w.Write(data); err != nil {
 		return err
@@ -856,10 +840,32 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 	return nil
 }
 
+// recordReader reads either direct app-server output or relay-framed output.
+type recordReader interface {
+	ReadRecord() ([]byte, []agent.TimedMessage, error)
+}
+
+// appServerReader reads native output for model discovery without a task relay.
+type appServerReader struct {
+	scanner *bufio.Scanner
+}
+
+func (r *appServerReader) ReadRecord() ([]byte, []agent.TimedMessage, error) {
+	for r.scanner.Scan() {
+		if len(r.scanner.Bytes()) != 0 {
+			return r.scanner.Bytes(), nil, nil
+		}
+	}
+	if err := r.scanner.Err(); err != nil {
+		return nil, nil, err
+	}
+	return nil, nil, io.EOF
+}
+
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
-func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*codex.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r recordReader) (*codex.JSONRPCMessage, error) {
 	for {
 		line, controls, err := r.ReadRecord()
 		if err != nil {

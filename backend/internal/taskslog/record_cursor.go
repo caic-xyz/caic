@@ -63,7 +63,7 @@ func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retE
 		if err != nil {
 			return nil, errors.Join(err, r.Close())
 		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 		if err != nil {
 			return nil, errors.Join(err, r.Close())
 		}
@@ -91,7 +91,7 @@ func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retE
 	if err != nil {
 		return nil, err
 	}
-	parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -222,17 +222,17 @@ func (c *RecordCursor) validateAuthority(line []byte) error {
 		}
 		return nil
 	}
-	if c.authority.Version != agent.LogVersionV1 && bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
+	if bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
 		return nil
 	}
-	_, meta, err := decodeSegmentMeta(line, c.authority.Version)
+	meta, err := decodeSegmentMeta(line)
 	if errors.Is(err, errNotMetaRecord) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("invalid physical history segment header: %w", err)
 	}
-	if agent.LogVersion(meta.Version) != c.authority.Version || harness.Name(meta.Harness) != c.authority.Harness {
+	if harness.Name(meta.Harness) != c.authority.Harness {
 		return errors.New("physical history segment authority changed")
 	}
 	return nil

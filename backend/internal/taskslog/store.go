@@ -198,7 +198,6 @@ func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, str
 		return nil, "", err
 	}
 	if created {
-		w.version = agent.LogVersionV3
 		if err := writeMetadataHeader(w, header); err != nil {
 			return nil, "", errors.Join(err, discardNewLog(w, path))
 		}
@@ -320,7 +319,7 @@ func restorePlainLog(path, plain string, header *agent.MetaMessage) (err error) 
 	if readErr != nil {
 		return errors.Join(readErr, out.Close())
 	}
-	_, validationErr := validateRawLogAppend(out, tmp, header)
+	validationErr := validateRawLogAppend(out, tmp, header)
 	if err := errors.Join(validationErr, out.Close()); err != nil {
 		return err
 	}
@@ -345,35 +344,32 @@ func openTaskLogForAppend(path string, header *agent.MetaMessage, create bool) (
 	if err != nil {
 		return nil, false, err
 	}
-	version, err := validateRawLogAppend(w.file, cleanPath, header)
+	err = validateRawLogAppend(w.file, cleanPath, header)
 	if err != nil {
 		return nil, false, errors.Join(err, w.Close())
 	}
-	w.version = version
 	return w, false, nil
 }
 
 // validateRawLogAppend validates the immutable header needed to safely select
 // the append encoding. caic owns task-log writes, so reopening does not rescan
 // historical records.
-func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) (agent.LogVersion, error) {
+func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) error {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return 0, err
+		return err
 	}
 	scanner := newPhysicalLogScanner(f, path)
 	if _, err := scanner.ReadHeader(); err != nil {
-		return 0, fmt.Errorf("validate task log for append: %w", err)
+		return fmt.Errorf("validate task log for append: %w", err)
 	}
 	if string(scanner.authority.Harness) != header.Harness {
-		return 0, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, header.Harness)
+		return fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, header.Harness)
 	}
-	if err := scanner.authority.Version.ValidateWritable(); err != nil {
-		return 0, fmt.Errorf("validate task log for append: %w", err)
-	}
+
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return 0, err
+		return err
 	}
-	return scanner.authority.Version, nil
+	return nil
 }
 
 // WriteResultTrailer appends a MetaResultMessage to an active task log.
@@ -699,7 +695,7 @@ func (p *PreparedLog) Rollback() error {
 
 func writeMetadataHeader(log agent.LogSink, header *agent.MetaMessage) error {
 	meta := *header
-	meta.Version = int(log.LogVersion())
+	meta.Version = agent.LogVersionV3
 	if err := log.AppendMessage(&meta); err != nil {
 		return fmt.Errorf("write log metadata: %w", err)
 	}

@@ -36,7 +36,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	logv1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
@@ -1883,20 +1883,20 @@ func TestMCPTools(t *testing.T) {
 			t.Parallel()
 			logDir := t.TempDir()
 			restoredID := ksid.NewID()
-			meta := mustJSON(t, logv1.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: "inspect history", Harness: string(harness.Claude),
+			meta := mustJSON(t, logdata.MetaMessage{
+				MessageType: "caic_meta", Version: 3, Prompt: "inspect history", Harness: string(harness.Claude),
 				StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			})
-			toolUse := mustJSON(t, map[string]any{
+			toolUse := nativeJSON(t, map[string]any{
 				"type": "assistant",
 				"message": map[string]any{"content": []any{map[string]any{
 					"type": "tool_use", "id": "tool-1", "name": "Bash", "input": map[string]any{"command": "make check"},
 				}}},
 			})
-			lastMessage := mustJSON(t, map[string]any{
+			lastMessage := nativeJSON(t, map[string]any{
 				"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "history result"}}},
 			})
-			trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			trailer := mustJSON(t, logdata.MetaResultMessage{MessageType: "result", State: "purged"})
 			writeLogFile(t, logDir, restoredID.String()+".jsonl", meta, toolUse, lastMessage, trailer)
 
 			s := newTestRouter(t, map[harness.Name]agent.Backend{

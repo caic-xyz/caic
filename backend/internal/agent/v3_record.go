@@ -1,4 +1,4 @@
-// Strict canonical v2/v3 task-log decoding, including input delivery outcomes and observation times.
+// Strict canonical v3 task-log decoding, including input delivery outcomes and observation times.
 
 package agent
 
@@ -15,10 +15,10 @@ import (
 	"unicode/utf8"
 )
 
-// logRecordType is the compact top-level "t" discriminator in v2 task-log records.
+// logRecordType is the compact top-level "t" discriminator in v3 task-log records.
 type logRecordType string
 
-func decodeV2ControlFields(line []byte) (token logRecordType, fields []string, err error) {
+func decodeV3ControlFields(line []byte) (token logRecordType, fields []string, err error) {
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	opening, err := decoder.Token()
 	if err != nil {
@@ -144,53 +144,53 @@ const (
 )
 
 const (
-	v2AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
+	v3AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
 	v3InputRecordPrefix   = `{"t":"` + string(logRecordInput) + `","ts":`
-	v2AgentMessagePrefix  = `,"msg":`
-	v2MaxEncodedRecordLen = 32 << 20
-	v2MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
+	v3AgentMessagePrefix  = `,"msg":`
+	v3MaxEncodedRecordLen = 32 << 20
+	v3MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
 )
 
-// parseV2Record validates and decodes one canonical v2 physical record.
+// parseV3Record validates and decodes one canonical v3 physical record.
 // Agent records use the zero-copy fast path; control records use the general
 // decoder and update parser state before the resulting messages are returned.
-func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
-	if err := validateV2RecordBytes(line); err != nil {
+func parseV3Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
+	if err := validateV3RecordBytes(line); err != nil {
 		return ParsedRecord{}, err
 	}
-	if bytes.HasPrefix(line, []byte(v2AgentRecordPrefix)) {
-		msgs, err := parseV2NativeRecord(p, line, v2AgentRecordPrefix)
+	if bytes.HasPrefix(line, []byte(v3AgentRecordPrefix)) {
+		msgs, err := parseV3NativeRecord(p, line, v3AgentRecordPrefix)
 		return ParsedRecord{Messages: msgs, RelayRecord: true}, err
 	}
-	if p.version == LogVersionV3 && bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
-		msgs, err := parseV2NativeRecord(p, line, v3InputRecordPrefix)
+	if bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
+		msgs, err := parseV3NativeRecord(p, line, v3InputRecordPrefix)
 		return ParsedRecord{Messages: msgs}, err
 	}
 
 	// Controls are small and retain ordinary decoding. Canonical agent records
 	// take the branch above, so no valid agent envelope reaches this decoder.
-	token, fields, err := decodeV2ControlFields(line)
+	token, fields, err := decodeV3ControlFields(line)
 	if err != nil {
-		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: decode control discriminator: %w", err)
+		return ParsedRecord{}, fmt.Errorf("corrupt v3 log record: decode control discriminator: %w", err)
 	}
 	if token == "" {
-		if containsV2ControlField(fields, "type") {
-			return ParsedRecord{}, errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
+		if containsV3ControlField(fields, "type") {
+			return ParsedRecord{}, errors.New("corrupt v3 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v3")
 		}
-		return ParsedRecord{}, errors.New("corrupt v2 log record: missing top-level t")
+		return ParsedRecord{}, errors.New("corrupt v3 log record: missing top-level t")
 	}
 	if token == logRecordAgent {
-		return ParsedRecord{}, errors.New("corrupt v2 agent record: noncanonical envelope")
+		return ParsedRecord{}, errors.New("corrupt v3 agent record: noncanonical envelope")
 	}
 	kind, ok := token.controlKind()
 	if !ok {
-		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
+		return ParsedRecord{}, fmt.Errorf("corrupt v3 log record: unknown top-level t %q", token)
 	}
 	record := ParsedRecord{RelayRecord: token.relayOwned(), Control: true}
-	if err := validateV2ControlFields(p.version, kind, token, fields); err != nil {
+	if err := validateV3ControlFields(kind, token, fields); err != nil {
 		return record, err
 	}
-	msgs, err := parseV2Control(p, kind, token, line)
+	msgs, err := p.parseControl(kind, string(token), line)
 	if err != nil {
 		return record, err
 	}
@@ -213,7 +213,7 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	if token == logRecordRelayGeneration && len(msgs) == 1 {
 		generation, ok := msgs[0].(*RelayGenerationMessage)
 		if !ok {
-			return record, errors.New("corrupt v2 relay generation: unexpected message type")
+			return record, errors.New("corrupt v3 relay generation: unexpected message type")
 		}
 		record.RelayGeneration = generation.Generation
 		record.Messages = nil
@@ -221,27 +221,27 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	return record, err
 }
 
-func containsV2ControlField(fields []string, want string) bool {
+func containsV3ControlField(fields []string, want string) bool {
 	return slices.Contains(fields, want)
 }
 
-func validateV2ControlFields(version LogVersion, kind logControlKind, token logRecordType, fields []string) error {
+func validateV3ControlFields(kind logControlKind, token logRecordType, fields []string) error {
 	for _, field := range fields {
 		if field == "type" {
-			return errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
+			return errors.New("corrupt v3 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v3")
 		}
-		// The strict decoder in parseV2Control validates caic_meta fields after
-		// this pass has enforced the v2 discriminator and duplicate-key rules.
-		if kind == logControlMeta || v2ControlFieldAllowed(version, kind, field) {
+		// The strict decoder in parseControl validates caic_meta fields after
+		// this pass has enforced the v3 discriminator and duplicate-key rules.
+		if kind == logControlMeta || v3ControlFieldAllowed(kind, field) {
 			continue
 		}
-		return fmt.Errorf("corrupt v2 %s record: unknown top-level field %q", token, field)
+		return fmt.Errorf("corrupt v3 %s record: unknown top-level field %q", token, field)
 	}
 	return nil
 }
 
-func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string) bool {
-	if field == "t" || version == LogVersionV3 && field == "source" {
+func v3ControlFieldAllowed(kind logControlKind, field string) bool {
+	if field == "t" || field == "source" {
 		return true
 	}
 	switch kind {
@@ -302,59 +302,53 @@ func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string
 		return field == "id" || field == "method" || field == "name" || field == "arguments"
 	case logControlRelayGeneration:
 		return field == "generation"
-	case logControlLegacyInit:
-		return false
 	}
 	return false
 }
 
-func parseV2Control(p *LogRecordParser, kind logControlKind, token logRecordType, line []byte) ([]Message, error) {
-	return p.parseControl(kind, string(token), line)
-}
-
-func validateV2RecordBytes(line []byte) error {
-	if len(line) >= v2MaxEncodedRecordLen-1 {
+func validateV3RecordBytes(line []byte) error {
+	if len(line) >= v3MaxEncodedRecordLen-1 {
 		return fmt.Errorf(
-			"corrupt v2 log record: encoded size with LF must be smaller than %d bytes",
-			v2MaxEncodedRecordLen,
+			"corrupt v3 log record: encoded size with LF must be smaller than %d bytes",
+			v3MaxEncodedRecordLen,
 		)
 	}
 	if !utf8.Valid(line) {
-		return errors.New("corrupt v2 log record: invalid UTF-8")
+		return errors.New("corrupt v3 log record: invalid UTF-8")
 	}
 	if bytes.IndexByte(line, '\n') >= 0 {
-		return errors.New("corrupt v2 log record: unexpected LF")
+		return errors.New("corrupt v3 log record: unexpected LF")
 	}
 	return nil
 }
 
-func parseV2NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]TimedMessage, error) {
+func parseV3NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]TimedMessage, error) {
 	rest := line[len(prefix):]
 	delimiter := bytes.IndexByte(rest, ',')
-	if delimiter < 0 || !bytes.HasPrefix(rest[delimiter:], []byte(v2AgentMessagePrefix)) {
-		return nil, errors.New("corrupt v2 agent record: invalid timestamp delimiter")
+	if delimiter < 0 || !bytes.HasPrefix(rest[delimiter:], []byte(v3AgentMessagePrefix)) {
+		return nil, errors.New("corrupt v3 agent record: invalid timestamp delimiter")
 	}
-	producerTime, err := parseV2ProducerTime(rest[:delimiter])
+	producerTime, err := parseV3ProducerTime(rest[:delimiter])
 	if err != nil {
-		return nil, fmt.Errorf("corrupt v2 agent record: invalid ts: %w", err)
+		return nil, fmt.Errorf("corrupt v3 agent record: invalid ts: %w", err)
 	}
 
-	msgStart := len(prefix) + delimiter + len(v2AgentMessagePrefix)
+	msgStart := len(prefix) + delimiter + len(v3AgentMessagePrefix)
 	if msgStart >= len(line) || line[len(line)-1] != '}' {
-		return nil, errors.New("corrupt v2 agent record: missing final msg or closing brace")
+		return nil, errors.New("corrupt v3 agent record: missing final msg or closing brace")
 	}
 	msg := line[msgStart : len(line)-1]
 	if len(msg) == 0 {
-		return nil, errors.New("corrupt v2 agent record: missing msg")
+		return nil, errors.New("corrupt v3 agent record: missing msg")
 	}
 	if isJSONWhitespace(msg[0]) || isJSONWhitespace(msg[len(msg)-1]) {
-		return nil, errors.New("corrupt v2 agent record: msg has surrounding JSON whitespace")
+		return nil, errors.New("corrupt v3 agent record: msg has surrounding JSON whitespace")
 	}
 	if bytes.Equal(msg, []byte("null")) {
-		return nil, errors.New("corrupt v2 agent record: null msg")
+		return nil, errors.New("corrupt v3 agent record: null msg")
 	}
 	if !json.Valid(msg) {
-		return nil, errors.New("corrupt v2 agent record: invalid or noncanonical msg envelope")
+		return nil, errors.New("corrupt v3 agent record: invalid or noncanonical msg envelope")
 	}
 	// msg aliases the scanner-owned record and is valid only for this
 	// synchronous callback. The native parser must not retain it.
@@ -365,7 +359,7 @@ func parseV2NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]Time
 	return wrapParsedMessages(msgs, producerTime), nil
 }
 
-func parseV2ProducerTime(raw []byte) (time.Time, error) {
+func parseV3ProducerTime(raw []byte) (time.Time, error) {
 	if len(raw) < len("0.000") || raw[len(raw)-4] != '.' {
 		return time.Time{}, errors.New("timestamp must have exactly three fractional digits")
 	}
@@ -389,7 +383,7 @@ func parseV2ProducerTime(raw []byte) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("timestamp integer is out of range: %w", err)
 	}
-	if seconds > v2MaxUnixSeconds {
+	if seconds > v3MaxUnixSeconds {
 		return time.Time{}, errors.New("timestamp is outside the supported Unix time range")
 	}
 	milliseconds := int64(0)

@@ -6,12 +6,12 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,44 +67,44 @@ func TestWireFormat(t *testing.T) {
 	t.Parallel()
 	t.Run("WritePrompt", func(t *testing.T) {
 		t.Parallel()
-		for _, version := range []agent.LogVersion{agent.LogVersionV2, agent.LogVersionV3} {
-			t.Run(fmt.Sprint(version), func(t *testing.T) {
-				t.Parallel()
-				w := New("", nil).NewWire()
-				var out bytes.Buffer
-				log := &agenttest.LogSink{Version: version}
-				if err := w.WritePrompt(&out, agent.Prompt{Text: "hello\nworld"}, log); err != nil {
-					t.Fatal(err)
-				}
-				want := `{"event":"user","message":{"content":[{"type":"text","text":"hello\nworld"}]}}` + "\n"
-				if out.String() != want {
-					t.Fatalf("input = %q", out.String())
-				}
-				msgs, err := w.ParseMessage(out.Bytes())
-				if err != nil || len(msgs) != 1 {
-					t.Fatalf("parse input = %v, %v", msgs, err)
-				}
-				if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
-					t.Fatalf("input = %+v", msgs[0])
-				}
-				parser, err := agent.NewLogRecordParser(version, New("", nil).NewWire().ParseMessage)
-				if err != nil {
-					t.Fatal(err)
-				}
-				record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
-				if err != nil || record.RelayRecord || len(record.Messages) != 1 {
-					t.Fatalf("input record = %#v, %v", record, err)
-				}
-				if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
-					t.Fatalf("persisted input = %#v", record.Messages[0].Message)
-				}
-			})
-		}
+
+		t.Run(strconv.Itoa(agent.LogVersionV3), func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			var out bytes.Buffer
+			log := &agenttest.LogSink{}
+			if err := w.WritePrompt(&out, agent.Prompt{Text: "hello\nworld"}, log); err != nil {
+				t.Fatal(err)
+			}
+			want := `{"event":"user","message":{"content":[{"type":"text","text":"hello\nworld"}]}}` + "\n"
+			if out.String() != want {
+				t.Fatalf("input = %q", out.String())
+			}
+			msgs, err := w.ParseMessage(out.Bytes())
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
+				t.Fatalf("input = %+v", msgs[0])
+			}
+			parser, err := agent.NewLogRecordParser(New("", nil).NewWire().ParseMessage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
+			if err != nil || record.RelayRecord || len(record.Messages) != 1 {
+				t.Fatalf("input record = %#v, %v", record, err)
+			}
+			if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
+				t.Fatalf("persisted input = %#v", record.Messages[0].Message)
+			}
+		})
+
 		t.Run("images and text", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			var out bytes.Buffer
-			log := &agenttest.LogSink{Version: agent.LogVersionV3}
+			log := &agenttest.LogSink{}
 			prompt := agent.Prompt{
 				Text:   "describe this",
 				Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}},
@@ -129,7 +129,7 @@ func TestWireFormat(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			var out bytes.Buffer
-			log := &agenttest.LogSink{Version: agent.LogVersionV3}
+			log := &agenttest.LogSink{}
 			prompt := agent.Prompt{
 				Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "anBn"}},
 			}
@@ -152,7 +152,7 @@ func TestWireFormat(t *testing.T) {
 		t.Run("errors", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
-			log := &agenttest.LogSink{Version: agent.LogVersionV3}
+			log := &agenttest.LogSink{}
 			if err := w.WritePrompt(shortWriter{}, agent.Prompt{Text: "hello"}, log); !errors.Is(err, io.ErrShortWrite) {
 				t.Fatalf("short write = %v", err)
 			}

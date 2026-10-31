@@ -2152,12 +2152,11 @@ EventDiffStat is emitted when the relay reports updated diff statistics.
 
 ### EventError
 
-EventError is emitted when the backend fails to parse an agent output line.
+EventError reports an agent subprocess failure.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `err` | `string` |  | yes |
-| `line` | `string` |  | yes |
 
 ### EventThinking
 

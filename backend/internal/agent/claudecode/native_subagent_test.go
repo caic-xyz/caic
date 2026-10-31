@@ -19,7 +19,7 @@ import (
 // task_updated, task_notification, and the parent tool result.
 func TestNativeSubagentJokeEvidence(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat {
 		return New().NewWire()
 	})
 
@@ -36,8 +36,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 		observations []agent.NativeSubagent
 	}{
 		{"live", evidence.Live},
-		{"v2 replay", evidence.V2},
-		{"v3 replay", evidence.V3},
+		{"v3 replay", evidence.Replay},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -80,7 +79,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 // second card and leaving the first one running.
 func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat {
 		return New().NewWire()
 	})
 	// History through task_started; the tail continues with the child stream
@@ -90,7 +89,7 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusRunning || restoredActive != 1 {
 		t.Fatalf("restored = %#v active = %d, want one running card", restored, restoredActive)
 	}
-	live := agenttest.RestartNativeSubagents(t, agent.LogVersionV3, history, tail, New().NewWire())
+	live := agenttest.RestartNativeSubagents(t, history, tail, New().NewWire())
 
 	observations := append(historyObservations(t, history), live...)
 	cards, active := agenttest.FoldNativeSubagents(observations)

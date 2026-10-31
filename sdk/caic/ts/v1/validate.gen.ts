@@ -591,7 +591,6 @@ export function validateEventError(raw: ValidatorInput): EventError {
   const obj = asObject(raw, "EventError");
   return {
     err: asString(obj["err"], "EventError.err"),
-    line: asString(obj["line"], "EventError.line"),
   };
 }
 

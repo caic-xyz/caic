@@ -14,7 +14,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
-	v2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
@@ -29,7 +28,6 @@ const (
 	messageTypeExit                  = "caic_exit"
 	messageTypeStrippedEnv           = "caic_stripped_env"
 	messageTypeSession               = "caic_session"
-	messageTypeLegacyInit            = "caic_init"
 	messageTypeModelInfo             = "caic_model_info"
 	messageTypePR                    = "caic_pr"
 	messageTypeResult                = "caic_result"
@@ -1062,18 +1060,6 @@ type RawMessage struct {
 // Type implements Message.
 func (m *RawMessage) Type() string { return m.MessageType }
 
-// ParseErrorMessage is emitted when a backend output line cannot be decoded.
-// It carries the error and the raw line for diagnostic display.
-type ParseErrorMessage struct {
-	MessageProvenance
-
-	Err  string
-	Line string
-}
-
-// Type implements Message.
-func (m *ParseErrorMessage) Type() string { return "parse_error" }
-
 // LogMessage is a provisioning/startup log line from the container backend.
 type LogMessage v3.LogMessage
 
@@ -1113,49 +1099,8 @@ func (m *ExitMessage) ExitError() string {
 	return fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
 }
 
-// LogVersion identifies a physical task-log format, not a relay implementation
-// or live protocol version. Each format owns independent data types under
-// taskslog/data/vN; historical records convert at the read boundary.
-//
-// Change the version when record bytes or meanings cannot fit the existing
-// contract without breaking supported readers or replay. Preserve historical
-// readers. Reading support does not imply writing or continuation support;
-// ValidateWritable defines that boundary separately. Internal type renames,
-// refactoring, and coordinated relay launch changes do not change this version.
-type LogVersion int
-
-// Validate rejects unsupported task-log versions.
-func (v LogVersion) Validate() error {
-	switch v {
-	case LogVersionV1, LogVersionV2, LogVersionV3:
-		return nil
-	default:
-		return fmt.Errorf("unsupported log version %d", v)
-	}
-}
-
-// ErrReadOnlyLog reports that a historical v1 log cannot be continued or written.
-var ErrReadOnlyLog = errors.New("task log version 1 is read-only; continuation is unsupported")
-
-// ValidateWritable rejects historical read-only and unsupported log formats.
-func (v LogVersion) ValidateWritable() error {
-	if err := v.Validate(); err != nil {
-		return err
-	}
-	if v == LogVersionV1 {
-		return ErrReadOnlyLog
-	}
-	return nil
-}
-
-const (
-	// LogVersionV1 is the legacy bare-harness task-log format.
-	LogVersionV1 LogVersion = 1
-	// LogVersionV2 is the caic-enveloped task-log format.
-	LogVersionV2 LogVersion = 2
-	// LogVersionV3 distinguishes relay output from caic-to-harness input.
-	LogVersionV3 LogVersion = 3
-)
+// LogVersionV3 is the supported physical task-log format.
+const LogVersionV3 = 3
 
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.
@@ -1172,8 +1117,8 @@ func (m *MetaMessage) Validate() error {
 	if m.MessageType != messageTypeMeta {
 		return fmt.Errorf("unexpected type %q", m.MessageType)
 	}
-	if err := LogVersion(m.Version).Validate(); err != nil {
-		return err
+	if m.Version != LogVersionV3 {
+		return fmt.Errorf("unsupported log version %d", m.Version)
 	}
 	if m.Prompt == "" {
 		return errors.New("missing prompt")
@@ -1203,22 +1148,15 @@ func (m *RelayGenerationMessage) Type() string { return messageTypeRelayGenerati
 
 // LogSink appends complete task-log records through the task-owned physical
 // log authority. Native records are already encoded physical records; semantic
-// messages are backend controls encoded according to the owned log version.
+// messages are backend controls encoded as v3 records.
 type LogSink interface {
-	LogVersion() LogVersion
 	AppendNative(data []byte) error
 	AppendMessage(message Message) error
 	Close() error
 }
 
 // DiscardLogSink ignores task-log records for non-persistent agent operations.
-// Version must be set to the physical record version represented by the caller.
-type DiscardLogSink struct {
-	Version LogVersion
-}
-
-// LogVersion returns the physical record version represented by the discarded records.
-func (s DiscardLogSink) LogVersion() LogVersion { return s.Version }
+type DiscardLogSink struct{}
 
 // AppendNative discards one native physical record.
 func (DiscardLogSink) AppendNative([]byte) error { return nil }
@@ -1234,37 +1172,18 @@ var _ LogSink = DiscardLogSink{}
 // AppendInputNativeRecord records bytes caic attempts to send before writing
 // the harness's stdin. V3 persists them separately from relay
 // output so protocol commands remain durable without becoming relay offsets.
-func AppendInputNativeRecord(log LogSink, version LogVersion, data []byte) error {
-	token := logRecordAgent
-	if version == LogVersionV3 {
-		token = logRecordInput
-	}
-	return appendNativeRecord(log, version, token, data)
+func AppendInputNativeRecord(log LogSink, data []byte) error {
+	return appendNativeRecord(log, logRecordInput, data)
 }
 
-func appendNativeRecord(log LogSink, version LogVersion, token logRecordType, data []byte) error {
-	if err := version.Validate(); err != nil {
-		return err
-	}
-	// Nonpersistent harness discovery still parses bare native v1 streams.
-	// Discard those inputs without constructing a historical physical record.
-	if _, ok := log.(DiscardLogSink); ok {
-		return nil
-	}
-	if err := version.ValidateWritable(); err != nil {
-		return err
-	}
+func appendNativeRecord(log LogSink, token logRecordType, data []byte) error {
 	data = bytes.TrimSuffix(data, []byte{'\n'})
 	if len(data) == 0 {
 		return nil
 	}
 	ts := time.Now().UTC()
 	var err error
-	if version == LogVersionV2 {
-		data, err = (&v2.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
-	} else {
-		data, err = (&v3.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
-	}
+	data, err = (&v3.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
 	if err != nil {
 		return err
 	}
@@ -1311,8 +1230,7 @@ type MetaResultMessage struct {
 	CacheReadInputTokens     int             `json:"cache_read_input_tokens,omitempty"`
 	ReasoningOutputTokens    int             `json:"reasoning_output_tokens,omitempty"`
 	DiffStat                 v3.DiffStat     `json:"diff_stat,omitzero"`
-	// TODO(2026-10-01): Make DiskUsedBytes an int64 value using -1 for
-	// unavailable measurements after legacy result records have aged out.
+	// DiskUsedBytes is nil when the runtime could not measure disk usage.
 	DiskUsedBytes  *int64             `json:"disk_used_bytes,omitempty"`
 	Error          string             `json:"error,omitempty"`
 	AgentResult    string             `json:"agent_result,omitempty"`
@@ -1355,23 +1273,7 @@ type MetaPRMessage v3.MetaPRMessage
 // Type implements Message.
 func (m *MetaPRMessage) Type() string { return messageTypePR }
 
-// MarshalLogMessage encodes one semantic backend control record for version.
-func MarshalLogMessage(version LogVersion, m Message) ([]byte, error) {
-	if err := version.ValidateWritable(); err != nil {
-		return nil, err
-	}
-	if _, ok := m.(*RawMessage); ok {
-		return nil, errors.New("raw messages must be appended as native records")
-	}
-	switch version {
-	case LogVersionV2:
-		return marshalV2Control(m)
-	default:
-		return marshalV3Control(m)
-	}
-}
-
-func v2ControlToken(m Message) (logRecordType, error) {
+func v3ControlToken(m Message) (logRecordType, error) {
 	switch m.Type() {
 	case messageTypeMeta:
 		return logRecordMeta, nil

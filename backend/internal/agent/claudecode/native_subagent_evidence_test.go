@@ -1,4 +1,4 @@
-// Verifies the sanitized v2 Claude task-lifecycle protocol evidence.
+// Verifies the sanitized v3 Claude task-lifecycle protocol evidence.
 
 package claudecode
 
@@ -22,7 +22,7 @@ func TestTaskLifecycleEvidence(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	p, err := agent.NewLogRecordParser(agent.LogVersionV2, New().NewWire().ParseMessage)
+	p, err := agent.NewLogRecordParser(New().NewWire().ParseMessage)
 	if err != nil {
 		t.Fatal(err)
 	}

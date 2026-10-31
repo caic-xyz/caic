@@ -36,13 +36,13 @@ func TestWritePrompt(t *testing.T) {
 	t.Run("TextOnly", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		logBuf := &agenttest.LogSink{Version: agent.LogVersionV2}
+		logBuf := &agenttest.LogSink{}
 		var b wireFormat
 		if err := b.WritePrompt(&buf, agent.Prompt{Text: "hello"}, logBuf); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(logBuf.String(), `"t":"agent"`) || !strings.Contains(logBuf.String(), `"msg":{"type":"user"`) {
-			t.Errorf("log = %q, want canonical v2 agent record", logBuf.String())
+		if !strings.Contains(logBuf.String(), `"t":"input"`) || !strings.Contains(logBuf.String(), `"msg":{"type":"user"`) {
+			t.Errorf("log = %q, want canonical v3 input record", logBuf.String())
 		}
 		if !strings.Contains(buf.String(), `"content":[{"type":"text","text":"hello"}]`) {
 			t.Errorf("unexpected output: %s", buf.String())
@@ -56,7 +56,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []v3.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, agent.DiscardLogSink{}); err != nil {
 			t.Fatal(err)
 		}
 		// Content must be an array of content blocks, not a string.
@@ -102,7 +102,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []v3.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, agent.DiscardLogSink{}); err != nil {
 			t.Fatal(err)
 		}
 		var msg struct {
@@ -548,7 +548,7 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		stdin := agenttest.NewStdinPipe()
 		stdout, output := io.Pipe()
-		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat())}
 		var workers sync.WaitGroup
 		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 		sent := make(chan error, 1)
@@ -607,7 +607,7 @@ func TestControlConn(t *testing.T) {
 		executor := agent.NewMCPExecutor(t.Context())
 		stdin := agenttest.NewStdinPipe()
 		stdout, output := io.Pipe()
-		c := &controlConn{Conn: agent.NewMCPConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat(), executor.Wrap(registry))}
+		c := &controlConn{Conn: agent.NewMCPConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat(), executor.Wrap(registry))}
 		var workers sync.WaitGroup
 		t.Cleanup(func() {
 			cancel()
@@ -662,7 +662,7 @@ func TestControlConn(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				stdin := agenttest.NewStdinPipe()
 				stdout, output := io.Pipe()
-				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat())}
 				var workers sync.WaitGroup
 				t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
@@ -775,7 +775,7 @@ func TestControlConn(t *testing.T) {
 		release := make(chan struct{})
 		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
 		log := slog.New(slog.DiscardHandler)
-		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, agent.DiscardLogSink{Version: agent.LogVersionV3}, newWireFormat())}
+		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, agent.DiscardLogSink{}, newWireFormat())}
 		if err := c.setPendingAsk(pendingControlAsk{requestID: "first", questions: []v3.AskQuestion{{Question: "Choice?"}}}); err != nil {
 			t.Fatal(err)
 		}
@@ -902,12 +902,12 @@ func TestControlConn(t *testing.T) {
 			t.Errorf("answer = %q, want Identity only", updated.Answers[question])
 		}
 
-		log := &agenttest.LogSink{Version: agent.LogVersionV3}
-		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), inner.sent[0]); err != nil {
+		log := &agenttest.LogSink{}
+		if err := agent.AppendInputNativeRecord(log, inner.sent[0]); err != nil {
 			t.Fatal(err)
 		}
 		var payload []byte
-		parser, err := agent.NewLogRecordParser(agent.LogVersionV3, func(data []byte) ([]agent.Message, error) {
+		parser, err := agent.NewLogRecordParser(func(data []byte) ([]agent.Message, error) {
 			payload = bytes.Clone(data)
 			return nil, nil
 		})

@@ -4,8 +4,8 @@ package claudecode
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,11 +16,11 @@ import (
 
 func TestClaudeOwnership(t *testing.T) {
 	t.Parallel()
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			var history []string
-			parse := ownershipParser(t, version, New().NewWire())
+			parse := ownershipParser(t, physical, New().NewWire())
 			feed := func(line string) []agent.Message {
 				history = append(history, line)
 				return parse(line)
@@ -62,7 +62,7 @@ func TestClaudeOwnership(t *testing.T) {
 
 			// Adoption warms the same wire from retained records before reading
 			// the live tail, without re-emitting that prefix to the task.
-			warm := ownershipParser(t, agent.LogVersionV3, New().NewWire())
+			warm := ownershipParser(t, true, New().NewWire())
 			for _, line := range history {
 				warm(line)
 			}
@@ -74,16 +74,13 @@ func TestClaudeOwnership(t *testing.T) {
 	}
 }
 
-func ownershipParser(t *testing.T, version agent.LogVersion, wire agent.WireFormat) func(string) []agent.Message {
-	parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
-	if version != 0 {
-		parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
-	}
+func ownershipParser(t *testing.T, physical bool, wire agent.WireFormat) func(string) []agent.Message {
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return func(line string) []agent.Message {
-		if version == 0 {
+		if !physical {
 			messages, err := wire.ParseMessage([]byte(line))
 			if err != nil {
 				t.Fatal(err)
@@ -104,11 +101,11 @@ func ownershipParser(t *testing.T, version agent.LogVersion, wire agent.WireForm
 
 func TestClaudeRecordedChildPromptOwnership(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat { return New().NewWire() })
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat { return New().NewWire() })
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
-			feed := ownershipParser(t, version, New().NewWire())
+			feed := ownershipParser(t, physical, New().NewWire())
 			var prompts int
 			for _, line := range evidence.Payloads {
 				for _, message := range feed(string(line)) {
@@ -129,7 +126,7 @@ func TestClaudeRecordedChildPromptOwnership(t *testing.T) {
 
 func TestClaudeWidgetOwnership(t *testing.T) {
 	t.Parallel()
-	feed := ownershipParser(t, 0, New().NewWire())
+	feed := ownershipParser(t, false, New().NewWire())
 	stream := func(owner string, event string) []agent.Message {
 		return feed(`{"type":"stream_event","session_id":"session","parent_tool_use_id":"` + owner + `","event":` + event + `}`)
 	}
@@ -162,10 +159,10 @@ func TestClaudeWidgetOwnership(t *testing.T) {
 
 func TestClaudeAskControlOwnership(t *testing.T) {
 	t.Parallel()
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
-			feed := ownershipParser(t, version, New().NewWire())
+			feed := ownershipParser(t, physical, New().NewWire())
 			feed(`{"type":"system","subtype":"init","session_id":"session"}`)
 			feed(`{"type":"system","subtype":"task_started","session_id":"session","task_type":"local_agent","task_id":"child","tool_use_id":"spawn"}`)
 			input := `{"questions":[{"question":"Proceed?","header":"Choice","options":[{"label":"Yes","description":"Go"},{"label":"No","description":"Stop"}]}]}`
@@ -187,7 +184,7 @@ func TestClaudeAskControlOwnership(t *testing.T) {
 func TestClaudeRootModelOwnership(t *testing.T) {
 	t.Parallel()
 	w := newWireFormat()
-	feed := ownershipParser(t, 0, w)
+	feed := ownershipParser(t, false, w)
 	feed(`{"type":"system","subtype":"init","session_id":"session","model":"root-model"}`)
 	feed(`{"type":"assistant","session_id":"session","parent_tool_use_id":"spawn","message":{"model":"child-model","content":[{"type":"text","text":"child answer"}],"usage":{"input_tokens":3}}}`)
 	if w.reportedModel != "root-model" {
@@ -224,7 +221,7 @@ func TestClaudeRootModelOwnership(t *testing.T) {
 
 func TestClaudeControlReportedAgent(t *testing.T) {
 	t.Parallel()
-	feed := ownershipParser(t, 0, New().NewWire())
+	feed := ownershipParser(t, false, New().NewWire())
 	feed(`{"type":"system","subtype":"init","session_id":"session"}`)
 	feed(`{"type":"system","subtype":"task_started","session_id":"session","task_type":"local_agent","task_id":"known-child"}`)
 	input := `{"questions":[{"question":"Proceed?","header":"Choice","options":[{"label":"Yes","description":"Go"},{"label":"No","description":"Stop"}]}]}`
@@ -287,12 +284,12 @@ func TestParseRecordHeader(t *testing.T) {
 
 func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 	t.Parallel()
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			t.Run("delegation namespaces", func(t *testing.T) {
 				t.Parallel()
-				feed := ownershipParser(t, version, New().NewWire())
+				feed := ownershipParser(t, physical, New().NewWire())
 				for _, session := range []string{"A", "B"} {
 					background := "false"
 					if session == "A" {
@@ -333,7 +330,7 @@ func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 			})
 			t.Run("control matches reported child thread", func(t *testing.T) {
 				t.Parallel()
-				feed := ownershipParser(t, version, New().NewWire())
+				feed := ownershipParser(t, physical, New().NewWire())
 				feed(`{"type":"system","subtype":"init","session_id":"root"}`)
 				feed(`{"type":"system","subtype":"task_started","session_id":"root","task_type":"local_agent","task_id":"child","tool_use_id":"spawn"}`)
 				input := `{"questions":[{"question":"Proceed?","header":"Choice","options":[{"label":"Yes","description":"Go"},{"label":"No","description":"Stop"}]}]}`
@@ -349,7 +346,7 @@ func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 			t.Run("ambiguous control remains informational", func(t *testing.T) {
 				t.Parallel()
 				for _, initialized := range []bool{false, true} {
-					feed := ownershipParser(t, version, New().NewWire())
+					feed := ownershipParser(t, physical, New().NewWire())
 					if initialized {
 						feed(`{"type":"system","subtype":"init","session_id":"root"}`)
 					}
@@ -369,7 +366,7 @@ func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 			})
 			t.Run("unknown session does not borrow delegation", func(t *testing.T) {
 				t.Parallel()
-				feed := ownershipParser(t, version, New().NewWire())
+				feed := ownershipParser(t, physical, New().NewWire())
 				for _, session := range []string{"A", "B"} {
 					feed(`{"type":"system","subtype":"task_started","session_id":"` + session + `","task_type":"local_agent","task_id":"child-` + session + `","tool_use_id":"spawn"}`)
 				}
@@ -387,7 +384,7 @@ func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 			})
 			t.Run("deferred loads retain successful source", func(t *testing.T) {
 				t.Parallel()
-				feed := ownershipParser(t, version, New().NewWire())
+				feed := ownershipParser(t, physical, New().NewWire())
 				feed(`{"type":"assistant","session_id":"A","message":{"content":[{"type":"tool_use","id":"skill-1","name":"Skill","input":{"skill":"review"}},{"type":"tool_use","id":"skill-2","name":"Skill","input":{"skill":"quality"}}]}}`)
 				messages := feed(`{"type":"user","session_id":"A","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"skill-1","content":"ok"},{"type":"tool_result","tool_use_id":"skill-2","content":"ok"}]}}`)
 				messages = append(messages, feed(`{"type":"assistant","session_id":"B","message":{"content":[{"type":"text","text":"other session"}]}}`)...)
@@ -410,13 +407,13 @@ func TestClaudeReviewOwnershipRegressions(t *testing.T) {
 
 func TestControlConnOwnership(t *testing.T) {
 	t.Parallel()
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			for _, kind := range []string{"ambiguous initialized", "ambiguous source-free", "child", "root"} {
 				t.Run(kind, func(t *testing.T) {
 					t.Parallel()
-					feed := ownershipParser(t, version, New().NewWire())
+					feed := ownershipParser(t, physical, New().NewWire())
 					inner := &fakeConn{}
 					if kind != "ambiguous source-free" {
 						inner.messages = append(inner.messages, feed(`{"type":"system","subtype":"init","session_id":"root"}`)...)

@@ -48,7 +48,7 @@ func TestPrepareRelay(t *testing.T) {
 		Logger: slog.New(slog.DiscardHandler),
 		Target: runtime.ConnectionTarget{SSHHost: "task"},
 		Dir:    "/workspace with spaces",
-		Log:    &testLogSink{Version: LogVersionV3},
+		Log:    &testLogSink{},
 	}
 	rp, err := PrepareRelay(t.Context(), opts, nil, []string{"claude", "--resume", id})
 	if err != nil {
@@ -88,7 +88,7 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
+	if err := AppendInputNativeRecord(log, data); err != nil {
 		return err
 	}
 	if _, err := w.Write(data); err != nil {
@@ -210,11 +210,7 @@ func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type testLogSink struct {
 	bytes.Buffer
-
-	Version LogVersion
 }
-
-func (s *testLogSink) LogVersion() LogVersion { return s.Version }
 
 func (s *testLogSink) AppendNative(data []byte) error {
 	_, err := s.Write(data)
@@ -222,7 +218,7 @@ func (s *testLogSink) AppendNative(data []byte) error {
 }
 
 func (s *testLogSink) AppendMessage(m Message) error {
-	data, err := MarshalLogMessage(s.LogVersion(), m)
+	data, err := MarshalLogMessage(m)
 	if err != nil {
 		return err
 	}
@@ -233,8 +229,8 @@ func (*testLogSink) Close() error { return nil }
 
 // appendRelayNativeRecord appends bytes received from a relay in the exact
 // physical task-log format, matching what a live relay writes.
-func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
-	return appendNativeRecord(log, version, logRecordAgent, data)
+func appendRelayNativeRecord(log LogSink, data []byte) error {
+	return appendNativeRecord(log, logRecordAgent, data)
 }
 
 // canceledRegistry models an MCP operation that waits on another transport.
@@ -265,7 +261,7 @@ func TestNewConn(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
-			logBuf := &testLogSink{Version: LogVersionV2}
+			logBuf := &testLogSink{}
 			c := NewConn(t.Context(), testLogger(), stdinW, logBuf, testWire{})
 
 			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
@@ -292,15 +288,15 @@ func TestNewConn(t *testing.T) {
 			if err := json.Unmarshal(logBuf.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if record.Type != "agent" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
-				t.Errorf("log record = %#v, want canonical agent envelope for %s", record, payload)
+			if record.Type != "input" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
+				t.Errorf("log record = %#v, want canonical input envelope for %s", record, payload)
 			}
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
-			c := NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{})
+			c := NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{}, testWire{})
 			if err := c.SendRaw([]byte("data\n")); err == nil {
 				t.Error("expected error writing to closed pipe")
 			}
@@ -314,7 +310,7 @@ func TestNewMCPConn(t *testing.T) {
 	t.Run("ReadMessages/error_closing_stdin", func(t *testing.T) {
 		t.Parallel()
 		closeErr := errors.New("close stdin")
-		c := NewMCPConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, DiscardLogSink{Version: LogVersionV3}, testWire{}, nil)
+		c := NewMCPConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, DiscardLogSink{}, testWire{}, nil)
 		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), make(chan TimedMessage), nil); !errors.Is(err, closeErr) {
 			t.Fatalf("ReadMessages = %v, want close error", err)
 		}
@@ -325,7 +321,7 @@ func TestNewMCPConn(t *testing.T) {
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, registry)
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, registry)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
@@ -346,7 +342,7 @@ func TestNewMCPConn(t *testing.T) {
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, registry)
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, registry)
 		messages := make(chan TimedMessage, 1)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
@@ -383,7 +379,7 @@ func TestNewMCPConn(t *testing.T) {
 			registry := &mcptest.FakeRegistry{CallErr: errors.New("retry this task")}
 			stdin, input := io.Pipe()
 			stdout, output := io.Pipe()
-			sink := &testLogSink{Version: LogVersionV3}
+			sink := &testLogSink{}
 			c := NewMCPConn(t.Context(), testLogger(), input, sink, testWire{}, registry)
 			messages := make(chan TimedMessage, 1)
 			read := make(chan error, 1)
@@ -428,7 +424,7 @@ func TestNewMCPConn(t *testing.T) {
 		t.Parallel()
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewMCPConn(t.Context(), testLogger(), input, &testLogSink{Version: LogVersionV3}, testWire{}, nil)
+		c := NewMCPConn(t.Context(), testLogger(), input, &testLogSink{}, testWire{}, nil)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
 		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
@@ -505,7 +501,7 @@ func TestSession(t *testing.T) {
 		}
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{Version: LogVersionV3}, testWire{}, nil)
+		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, nil)
 		s := NewSession(ctx, cmd, c, stdout, make(chan TimedMessage, 1), testLogger())
 		var workers sync.WaitGroup
 		t.Cleanup(func() { cancel(); s.Cancel(); _ = output.Close(); _ = s.Wait(); workers.Wait() })
@@ -538,7 +534,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, DiscardLogSink{}, testWire{}), stdout, make(chan TimedMessage), testLogger())
 			t.Cleanup(func() { s.Cancel(); _ = output.Close(); _ = s.Wait() })
 			got := make(chan []byte, 1)
 			var reader sync.WaitGroup
@@ -563,7 +559,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, DiscardLogSink{}, testWire{}), stdout, make(chan TimedMessage), testLogger())
 			t.Cleanup(func() { cancel(); _ = output.Close(); _ = s.Wait() })
 			result := make(chan error, 1)
 			var stopper sync.WaitGroup
@@ -586,7 +582,7 @@ func TestSession(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdoutR, msgCh, testLogger())
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{}, testWire{}), stdoutR, msgCh, testLogger())
 
 		var workers sync.WaitGroup
 		t.Cleanup(func() { s.Cancel(); _ = s.Wait(); workers.Wait() })
@@ -603,7 +599,7 @@ func TestSession(t *testing.T) {
 		}
 		prompt.Images[0].Data = "changed"
 
-		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}` + "\n"
+		resultLine := `{"t":"agent","ts":1.000,"msg":{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}}` + "\n"
 		if _, err := stdoutW.Write([]byte(resultLine)); err != nil {
 			t.Fatal(err)
 		}
@@ -677,7 +673,7 @@ func TestSession(t *testing.T) {
 			reader, pipe := io.Pipe()
 			started := make(chan struct{})
 			writer := &stopTestWriter{PipeWriter: pipe, started: started}
-			log := &testLogSink{Version: LogVersionV3}
+			log := &testLogSink{}
 			msgCh := make(chan TimedMessage, 2)
 			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, log, testWire{}), stdout, msgCh, testLogger())
 			result := make(chan error, 1)
@@ -712,7 +708,7 @@ func TestSession(t *testing.T) {
 			if err := s.SendPrompt(Prompt{Text: "too late"}); err == nil {
 				t.Fatal("send after Wait succeeded")
 			}
-			parser, err := NewLogRecordParser(LogVersionV3, testParseFn)
+			parser, err := NewLogRecordParser(testParseFn)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -735,13 +731,13 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 		t.Run("input_precedes_immediate_response", func(t *testing.T) {
 			t.Parallel()
-			log := &testLogSink{Version: LogVersionV3}
+			log := &testLogSink{}
 			if err := PlainTextWritePrompt(&promptOrderWriter{log: log}, Prompt{Text: "hello"}, log); err != nil {
 				t.Fatal(err)
 			}
 		})
 		var stdin bytes.Buffer
-		log := &testLogSink{Version: LogVersionV2}
+		log := &testLogSink{}
 		before := time.Now().Truncate(time.Millisecond)
 		if err := PlainTextWritePrompt(&stdin, Prompt{Text: "hello"}, log); err != nil {
 			t.Fatal(err)
@@ -749,7 +745,7 @@ func TestSession(t *testing.T) {
 		if got := stdin.String(); got != "hello\n" {
 			t.Errorf("stdin = %q, want hello\\n", got)
 		}
-		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -788,7 +784,7 @@ func TestSession(t *testing.T) {
 		log := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		msgCh := make(chan TimedMessage, 16)
-		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, DiscardLogSink{Version: LogVersionV1}, testWire{}), stdout, msgCh, log)
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, DiscardLogSink{}, testWire{}), stdout, msgCh, log)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -823,29 +819,29 @@ func (w *stopTestWriter) Write(p []byte) (int, error) {
 func TestRelayNativeRecordEncoding(t *testing.T) {
 	t.Parallel()
 
-	t.Run("V2TerminatesWithLF", func(t *testing.T) {
+	t.Run("V3TerminatesWithLF", func(t *testing.T) {
 		t.Parallel()
-		log := &testLogSink{Version: LogVersionV2}
-		if err := appendRelayNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
+		log := &testLogSink{}
+		if err := appendRelayNativeRecord(log, []byte(`{"type":"response"}`)); err != nil {
 			t.Fatal(err)
 		}
 		got := log.Bytes()
 		if got[len(got)-1] != '\n' || bytes.Contains(got, []byte(`\\n`)) {
-			t.Fatalf("v2 record = %q, want one real LF terminator", got)
+			t.Fatalf("v3 record = %q, want one real LF terminator", got)
 		}
 		if !bytes.HasPrefix(got, []byte(`{"t":"agent","ts":`)) || !bytes.HasSuffix(got, append([]byte(`"msg":{"type":"response"}}`), '\n')) {
-			t.Fatalf("v2 record = %q, want canonical agent envelope", got)
+			t.Fatalf("v3 record = %q, want canonical input envelope", got)
 		}
 	})
 }
 
 func TestDirectionalNativeRecords(t *testing.T) {
 	t.Parallel()
-	log := &testLogSink{Version: LogVersionV3}
-	if err := AppendInputNativeRecord(log, LogVersionV3, []byte(`{"method":"set_model"}`)); err != nil {
+	log := &testLogSink{}
+	if err := AppendInputNativeRecord(log, []byte(`{"method":"set_model"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendRelayNativeRecord(log, LogVersionV3, []byte(`{"type":"message"}`)); err != nil {
+	if err := appendRelayNativeRecord(log, []byte(`{"type":"message"}`)); err != nil {
 		t.Fatal(err)
 	}
 	lines := bytes.Split(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}), []byte{'\n'})
@@ -853,7 +849,7 @@ func TestDirectionalNativeRecords(t *testing.T) {
 		t.Fatalf("directional records = %q", log.Bytes())
 	}
 	var parsedInput []byte
-	parser, err := NewLogRecordParser(LogVersionV3, func(data []byte) ([]Message, error) {
+	parser, err := NewLogRecordParser(func(data []byte) ([]Message, error) {
 		parsedInput = bytes.Clone(data)
 		return nil, nil
 	})
@@ -876,36 +872,34 @@ func TestDirectionalNativeRecords(t *testing.T) {
 func TestWriteMetaSession(t *testing.T) {
 	t.Parallel()
 
-	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-		t.Run(fmt.Sprintf("V%dCompactThreshold", version), func(t *testing.T) {
-			t.Parallel()
-			buf := &testLogSink{Version: version}
-			if err := WriteMetaSession(buf, &InitMessage{SessionID: "session", AutoCompactTokenLimit: 244800}); err != nil {
-				t.Fatal(err)
-			}
-			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			init, ok := record.Messages[0].Message.(*InitMessage)
-			if !ok || init.AutoCompactTokenLimit != 244800 {
-				t.Fatalf("restored message = %#v", record.Messages[0].Message)
-			}
-		})
-	}
+	t.Run("CompactThreshold", func(t *testing.T) {
+		t.Parallel()
+		buf := &testLogSink{}
+		if err := WriteMetaSession(buf, &InitMessage{SessionID: "session", AutoCompactTokenLimit: 244800}); err != nil {
+			t.Fatal(err)
+		}
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		init, ok := record.Messages[0].Message.(*InitMessage)
+		if !ok || init.AutoCompactTokenLimit != 244800 {
+			t.Fatalf("restored message = %#v", record.Messages[0].Message)
+		}
+	})
 
 	t.Run("V3PreservesProvenance", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{Version: LogVersionV3}
+		buf := &testLogSink{}
 		source := MessageSource{AgentID: "native:child", DelegationToolUseID: "delegate"}
 		if err := WriteMetaSession(buf, &InitMessage{Source: source, SessionID: "session"}); err != nil {
 			t.Fatal(err)
 		}
-		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -917,9 +911,9 @@ func TestWriteMetaSession(t *testing.T) {
 			t.Errorf("session provenance lost: %s", buf.Bytes())
 		}
 	})
-	t.Run("V2PreservesDurableSettings", func(t *testing.T) {
+	t.Run("V3PreservesDurableSettings", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{Version: LogVersionV2}
+		buf := &testLogSink{}
 		if err := WriteMetaSession(buf, &InitMessage{ReportedModel: "m", ReportedEffort: "medium", Version: "1.2.3"}); err != nil {
 			t.Fatal(err)
 		}
@@ -928,26 +922,13 @@ func TestWriteMetaSession(t *testing.T) {
 			t.Fatal(err)
 		}
 		if raw["model"] != "m" || raw["reported_effort"] != "medium" || raw["reported_model"] != nil {
-			t.Fatalf("v2 session settings = %#v", raw)
-		}
-	})
-
-	t.Run("VersionWithoutSession", func(t *testing.T) {
-		t.Parallel()
-		// Released v1 metadata omitted requested effort.
-		data := []byte(`{"type":"caic_session","session_id":"","model":"m","agent_version":"1.2.3"}`)
-		got, err := DecodeV1MetaSessionMessage(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.MessageType != "caic_session" || got.SessionID != "" || got.ReportedModel != "m" || got.ReportedEffort != "" || got.AgentVersion != "1.2.3" {
-			t.Fatalf("MetaSessionMessage = %+v", got)
+			t.Fatalf("v3 session settings = %#v", raw)
 		}
 	})
 
 	t.Run("EmptyIgnored", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{Version: LogVersionV2}
+		buf := &testLogSink{}
 		if err := WriteMetaSession(buf, &InitMessage{}); err != nil {
 			t.Fatal(err)
 		}
@@ -959,7 +940,7 @@ func TestWriteMetaSession(t *testing.T) {
 
 func TestMarshalLogMessage(t *testing.T) {
 	t.Parallel()
-	t.Run("CommonSourceVersions", func(t *testing.T) {
+	t.Run("CommonSource", func(t *testing.T) {
 		t.Parallel()
 		messages := []Message{
 			&TextMessage{}, &UserInputMessage{}, ContextCleared(), InputDeliveryStarted(), InputDeliveryCompleted(), InputDeliveryFailed(errors.New("closed")), &LogMessage{},
@@ -971,55 +952,32 @@ func TestMarshalLogMessage(t *testing.T) {
 		for _, message := range messages {
 			t.Run(fmt.Sprintf("%T", message), func(t *testing.T) {
 				t.Parallel()
-				for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-					*message.Provenance() = MessageSource{}
-					absent, err := MarshalLogMessage(version, message)
-					if err != nil {
-						t.Fatal(err)
-					}
-					*message.Provenance() = source
-					encoded, err := MarshalLogMessage(version, message)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if version == LogVersionV2 {
-						if !bytes.Equal(absent, encoded) {
-							t.Errorf("v2 frozen shape changed: %s != %s", absent, encoded)
-						}
-						var fields map[string]json.RawMessage
-						if err := json.Unmarshal(encoded, &fields); err != nil {
-							t.Fatal(err)
-						}
-						fields["source"], _ = json.Marshal(source)
-						invalid, err := json.Marshal(fields)
-						if err != nil {
-							t.Fatal(err)
-						}
-						parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
-						if err != nil {
-							t.Fatal(err)
-						}
-						if _, err := parser.ParseRecord(invalid); err == nil {
-							t.Errorf("v2 accepted source: %s", invalid)
-						}
-						continue
-					}
-					out, ok := reflect.TypeAssert[Message](reflect.New(reflect.TypeOf(message).Elem()))
-					if !ok {
-						t.Fatal("control does not implement Message")
-					}
-					if err := decodeLogControl(version, encoded, out); err != nil {
-						t.Fatal(err)
-					}
-					if *out.Provenance() != source {
-						t.Errorf("v3 source lost: %+v", out.Provenance())
-					}
-					if err := decodeLogControl(version, absent, out); err != nil {
-						t.Fatal(err)
-					}
-					if !out.Provenance().IsZero() {
-						t.Errorf("old v3 source = %+v", out.Provenance())
-					}
+				*message.Provenance() = MessageSource{}
+				absent, err := MarshalLogMessage(message)
+				if err != nil {
+					t.Fatal(err)
+				}
+				*message.Provenance() = source
+				encoded, err := MarshalLogMessage(message)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				out, ok := reflect.TypeAssert[Message](reflect.New(reflect.TypeOf(message).Elem()))
+				if !ok {
+					t.Fatal("control does not implement Message")
+				}
+				if err := decodeLogControl(encoded, out); err != nil {
+					t.Fatal(err)
+				}
+				if *out.Provenance() != source {
+					t.Errorf("v3 source lost: %+v", out.Provenance())
+				}
+				if err := decodeLogControl(absent, out); err != nil {
+					t.Fatal(err)
+				}
+				if !out.Provenance().IsZero() {
+					t.Errorf("absent source = %+v", out.Provenance())
 				}
 			})
 		}
@@ -1028,11 +986,11 @@ func TestMarshalLogMessage(t *testing.T) {
 		t.Parallel()
 		for _, message := range []Message{&MetaSessionMessage{SessionID: "session"}, ContextCleared(), InputDeliveryStarted(), InputDeliveryCompleted(), InputDeliveryFailed(errors.New("closed"))} {
 			message.Provenance().AgentID = "native:child"
-			encoded, err := MarshalLogMessage(LogVersionV3, message)
+			encoded, err := MarshalLogMessage(message)
 			if err != nil {
 				t.Fatal(err)
 			}
-			parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+			parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1045,33 +1003,31 @@ func TestMarshalLogMessage(t *testing.T) {
 			}
 		}
 	})
-	t.Run("TextSourceVersions", func(t *testing.T) {
+	t.Run("TextSourceRoundTrip", func(t *testing.T) {
 		t.Parallel()
-		const oldShape = `{"phase":"commentary","t":"text","text":"visible"}`
-		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-			message := &TextMessage{Text: "visible", Phase: "commentary"}
-			encoded, err := MarshalLogMessage(version, message)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(encoded) != oldShape {
-				t.Errorf("v%d absent source changed old shape: %s", version, encoded)
-			}
-			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord(encoded)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(record.Messages) != 1 {
-				t.Fatalf("v%d old text record = %+v", version, record)
-			}
-			restored, ok := record.Messages[0].Message.(*TextMessage)
-			if !ok || restored.Text != "visible" || restored.Phase != "commentary" || !restored.Source.IsZero() {
-				t.Errorf("v%d old text message = %#v", version, record.Messages[0].Message)
-			}
+		const withoutSource = `{"phase":"commentary","t":"text","text":"visible"}`
+		message := &TextMessage{Text: "visible", Phase: "commentary"}
+		encoded, err := MarshalLogMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(encoded) != withoutSource {
+			t.Errorf("absent source encoding = %s", encoded)
+		}
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(record.Messages) != 1 {
+			t.Fatalf("text record = %+v", record)
+		}
+		restored, ok := record.Messages[0].Message.(*TextMessage)
+		if !ok || restored.Text != "visible" || restored.Phase != "commentary" || !restored.Source.IsZero() {
+			t.Errorf("text message = %#v", record.Messages[0].Message)
 		}
 		for _, source := range []MessageSource{
 			{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"},
@@ -1079,21 +1035,14 @@ func TestMarshalLogMessage(t *testing.T) {
 			{RootThreadID: "root"},
 		} {
 			message := &TextMessage{Text: "visible", Phase: "commentary", Source: source}
-			old, err := MarshalLogMessage(LogVersionV2, message)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(old) != oldShape {
-				t.Errorf("v2 sourced text changed frozen shape: %s", old)
-			}
-			encoded, err := MarshalLogMessage(LogVersionV3, message)
+			encoded, err := MarshalLogMessage(message)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Contains(encoded, []byte(`"source":`)) {
 				t.Errorf("v3 text lost source: %s", encoded)
 			}
-			parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+			parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1111,32 +1060,21 @@ func TestMarshalLogMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("TextSourceVersionValidation", func(t *testing.T) {
+	t.Run("TextSourceValidation", func(t *testing.T) {
 		t.Parallel()
 		const sourced = `{"t":"text","text":"visible","source":{"threadID":"thread","rootThreadID":"root"}}`
-		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord([]byte(sourced))
-			if version == LogVersionV2 {
-				if err == nil || !strings.Contains(err.Error(), `unknown top-level field "source"`) {
-					t.Errorf("v2 source accepted or wrong error: %v", err)
-				}
-			} else {
-				if err != nil || len(record.Messages) != 1 {
-					t.Fatalf("v3 source rejected: %+v, %v", record, err)
-				}
-				message, ok := record.Messages[0].Message.(*TextMessage)
-				if !ok || message.Source != (MessageSource{ThreadID: "thread", RootThreadID: "root"}) {
-					t.Errorf("v3 partial source = %#v", record.Messages[0].Message)
-				}
-			}
-		}
-		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord([]byte(sourced))
+
+		if err != nil || len(record.Messages) != 1 {
+			t.Fatalf("v3 source rejected: %+v, %v", record, err)
+		}
+		message, ok := record.Messages[0].Message.(*TextMessage)
+		if !ok || message.Source != (MessageSource{ThreadID: "thread", RootThreadID: "root"}) {
+			t.Errorf("v3 partial source = %#v", record.Messages[0].Message)
 		}
 		for _, line := range []string{
 			`{"t":"text","text":"visible","source":{"unknown":"value"}}`,
@@ -1149,29 +1087,16 @@ func TestMarshalLogMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("ReadOnlyV1RejectsPhysicalWrites", func(t *testing.T) {
+	t.Run("V3RelayGenerationRoundTrip", func(t *testing.T) {
 		t.Parallel()
-		log := &testLogSink{Version: LogVersionV1}
-		if _, err := MarshalLogMessage(LogVersionV1, &MetaResultMessage{State: "purged"}); !errors.Is(err, ErrReadOnlyLog) {
-			t.Fatalf("v1 control: %v", err)
-		}
-		if err := AppendInputNativeRecord(log, LogVersionV1, []byte(`{"type":"user","text":"hello"}`)); !errors.Is(err, ErrReadOnlyLog) {
-			t.Fatalf("v1 native: %v", err)
-		}
-		if log.Len() != 0 {
-			t.Fatalf("read-only log mutated: %s", log.Bytes())
-		}
-	})
-	t.Run("V2RelayGenerationRoundTrip", func(t *testing.T) {
-		t.Parallel()
-		data, err := MarshalLogMessage(LogVersionV2, &RelayGenerationMessage{
+		data, err := MarshalLogMessage(&RelayGenerationMessage{
 			MessageType: messageTypeRelayGeneration,
 			Generation:  "generation-1",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1183,11 +1108,11 @@ func TestMarshalLogMessage(t *testing.T) {
 			t.Fatalf("parsed relay generation = %#v", record)
 		}
 	})
-	t.Run("V2MetaPreservesDurableSettings", func(t *testing.T) {
+	t.Run("V3MetaPreservesDurableSettings", func(t *testing.T) {
 		t.Parallel()
-		data, err := MarshalLogMessage(LogVersionV2, &MetaMessage{
+		data, err := MarshalLogMessage(&MetaMessage{
 			MessageType:     messageTypeMeta,
-			Version:         int(LogVersionV2),
+			Version:         int(LogVersionV3),
 			Prompt:          "test",
 			Harness:         "codex",
 			RequestedModel:  "gpt-5.6",
@@ -1201,19 +1126,7 @@ func TestMarshalLogMessage(t *testing.T) {
 			t.Fatal(err)
 		}
 		if raw["model"] != "gpt-5.6" || raw["effort"] != "high" || raw["requested_model"] != nil || raw["requested_effort"] != nil {
-			t.Fatalf("v2 header settings = %#v", raw)
-		}
-	})
-
-	t.Run("V1MetaPreservesLegacySettings", func(t *testing.T) {
-		t.Parallel()
-		data := []byte(`{"type":"caic_meta","version":1,"prompt":"test","repos":[],"harness":"codex","model":"gpt-5.6","effort":"high"}`)
-		decoded, err := DecodeV1MetaMessage(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if decoded.RequestedModel != "gpt-5.6" || decoded.RequestedEffort != "high" {
-			t.Fatalf("decoded settings = %q/%q", decoded.RequestedModel, decoded.RequestedEffort)
+			t.Fatalf("v3 header settings = %#v", raw)
 		}
 	})
 }
@@ -1225,40 +1138,34 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 		BranchName:     "caic-1",
 		CommitHash:     "1111111111111111111111111111111111111111",
 	}
-	for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
-		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
-			t.Parallel()
-			var snapshot []byte
-			var err error
-			if version == LogVersionV1 {
-				snapshot = []byte(`{"type":"caic_turn_commit_snapshot","repository_commits":[{"repository_path":"/home/user/src/repo","branch_name":"caic-1","commit_hash":"1111111111111111111111111111111111111111"}]}`)
-			} else {
-				snapshot, err = MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{commit}, false, nil))
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			var messages []Message
-			err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) error {
-				messages = append(messages, parsed.Message)
-				return nil
-			}, DiscardLogSink{Version: version}, version, func([]byte) ([]Message, error) {
-				return nil, nil
-			}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(messages) != 1 {
-				t.Fatalf("messages = %d, want 1", len(messages))
-			}
-			got, ok := messages[0].(*TurnCommitSnapshotMessage)
-			if !ok {
-				t.Fatalf("message = %T, want *TurnCommitSnapshotMessage", messages[0])
-			}
-			if !reflect.DeepEqual(got.RepositoryCommits, []v3.RepositoryCommit{commit}) {
-				t.Fatalf("snapshot = %+v, want commits %+v", got, []v3.RepositoryCommit{commit})
-			}
-		})
+
+	var snapshot []byte
+	var err error
+
+	snapshot, err = MarshalLogMessage(NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{commit}, false, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []Message
+	err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) error {
+		messages = append(messages, parsed.Message)
+		return nil
+	}, DiscardLogSink{}, func([]byte) ([]Message, error) {
+		return nil, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(messages))
+	}
+	got, ok := messages[0].(*TurnCommitSnapshotMessage)
+	if !ok {
+		t.Fatalf("message = %T, want *TurnCommitSnapshotMessage", messages[0])
+	}
+	if !reflect.DeepEqual(got.RepositoryCommits, []v3.RepositoryCommit{commit}) {
+		t.Fatalf("snapshot = %+v, want commits %+v", got, []v3.RepositoryCommit{commit})
 	}
 }
 
@@ -1300,10 +1207,16 @@ func TestReadMessages(t *testing.T) {
 			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{}},"session_id":"s","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hi","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
 		}
+		for i, line := range lines {
+			lines[i] = `{"t":"agent","ts":1.000,"msg":` + line + `}`
+		}
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error { ch <- m.Message; return nil }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
+			ch <- m.Message
+			return nil
+		}, DiscardLogSink{}, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1326,10 +1239,16 @@ func TestReadMessages(t *testing.T) {
 			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{}},"session_id":"s","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hello","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
 		}
+		for i, line := range lines {
+			lines[i] = `{"t":"agent","ts":1.000,"msg":` + line + `}`
+		}
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error { ch <- m.Message; return nil }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
+			ch <- m.Message
+			return nil
+		}, DiscardLogSink{}, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1352,20 +1271,20 @@ func TestReadMessages(t *testing.T) {
 	t.Run("rejects unterminated physical records", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
-			name    string
-			version LogVersion
-			input   string
+			name string
+
+			input string
 		}{
-			{name: "v1", version: LogVersionV1, input: `{"type":"system","subtype":"init"}`},
-			{name: "v2", version: LogVersionV2, input: `{"t":"agent","ts":1.000,"msg":{}}`},
+			{name: "native fragment", input: `{"type":"system","subtype":"init"}`},
+			{name: "physical fragment", input: `{"t":"agent","ts":1.000,"msg":{}}`},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				stdinR, stdinW := io.Pipe()
 				t.Cleanup(func() { _ = stdinR.Close() })
-				var log bytes.Buffer
+				log := &testLogSink{}
 				got := make(chan TimedMessage, 1)
-				conn := NewConn(t.Context(), testLogger(), stdinW, &testLogSink{Version: tc.version}, testWire{})
+				conn := NewConn(t.Context(), testLogger(), stdinW, log, testWire{})
 				err := conn.ReadMessages(io.NopCloser(strings.NewReader(tc.input)), got, nil)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
@@ -1376,14 +1295,14 @@ func TestReadMessages(t *testing.T) {
 			})
 		}
 	})
-	t.Run("v2 structural corruption is not persisted", func(t *testing.T) {
+	t.Run("physical structural corruption is not persisted", func(t *testing.T) {
 		t.Parallel()
-		var log bytes.Buffer
+		log := &testLogSink{}
 		var got []TimedMessage
 		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) error {
 			got = append(got, msg)
 			return nil
-		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
+		}, log, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
 		}, nil)
 		if err == nil || log.Len() != 0 || len(got) != 0 {
@@ -1396,11 +1315,9 @@ func TestRelayRecordReader(t *testing.T) {
 	t.Parallel()
 	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
 		t.Parallel()
-		var log bytes.Buffer
-		reader, err := NewRelayRecordReader(strings.NewReader(`{"type":"system","subtype":"init"}`), LogVersionV1, &testLogSink{Version: LogVersionV1})
-		if err != nil {
-			t.Fatal(err)
-		}
+		log := &testLogSink{}
+		reader := NewRelayRecordReader(strings.NewReader(`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`), log)
+
 		if _, _, err := reader.ReadRecord(); !errors.Is(err, io.ErrUnexpectedEOF) {
 			t.Fatalf("ReadRecord error = %v, want unexpected EOF", err)
 		}
@@ -1412,11 +1329,11 @@ func TestRelayRecordReader(t *testing.T) {
 
 func TestReadRelayTailRecords(t *testing.T) {
 	t.Parallel()
-	const complete = `{"type":"system","subtype":"init"}`
+	const complete = `{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`
 	full := "old\npartial" + "\n" + complete + "\n"
 	tail := "rtial\n" + complete + "\n"
 	start := int64(len(full) - len(tail))
-	parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+	parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 		return []Message{&TextMessage{Text: "tail"}}, nil
 	})
 	if err != nil {
@@ -1426,7 +1343,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(timeline.Messages) != 1 || len(timeline.RelayRecords) != 0 {
+	if len(timeline.Messages) != 1 || len(timeline.RelayRecords) != 1 {
 		t.Fatalf("timeline = %#v", timeline)
 	}
 	msg, ok := timeline.Messages[0].Message.(*TextMessage)
@@ -1448,7 +1365,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 	}
 	t.Run("leading empty record is not a partial fragment", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{Text: "complete"}}, nil
 		})
 		if err != nil {
@@ -1461,7 +1378,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 	})
 	t.Run("start at prior record LF retains following complete record", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{Text: "complete"}}, nil
 		})
 		if err != nil {
@@ -1475,7 +1392,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 	})
 	t.Run("trailing fragment remains for attach", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(LogVersionV1, func([]byte) ([]Message, error) {
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{Text: "complete"}}, nil
 		})
 		if err != nil {
@@ -1487,9 +1404,9 @@ func TestReadRelayTailRecords(t *testing.T) {
 			t.Fatalf("trailing fragment = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
-	t.Run("v2 empty native record retains boundary", func(t *testing.T) {
+	t.Run("empty native record retains boundary", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return nil, nil
 		})
 		if err != nil {
@@ -1507,9 +1424,9 @@ func TestReadRelayTailRecords(t *testing.T) {
 			t.Fatalf("boundary = %#v, want relay end %d at message end 0", boundary, len(input))
 		}
 	})
-	t.Run("v2 generation propagates to following boundaries", func(t *testing.T) {
+	t.Run("generation propagates to following boundaries", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1528,22 +1445,20 @@ func TestReadRelayTailRecords(t *testing.T) {
 			}
 		}
 	})
-	t.Run("v2 corruption and oversized records do not persist", func(t *testing.T) {
+	t.Run("corruption and oversized records do not persist", func(t *testing.T) {
 		t.Parallel()
 		for _, input := range []string{
 			`{"t":"agent","time":1.000,"msg":{}}` + "\n",
 			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
 		} {
-			var log bytes.Buffer
-			reader, err := NewRelayRecordReader(strings.NewReader(input), LogVersionV2, &testLogSink{Version: LogVersionV2})
-			if err != nil {
-				t.Fatal(err)
-			}
+			log := &testLogSink{}
+			reader := NewRelayRecordReader(strings.NewReader(input), log)
+
 			if _, _, err := reader.ReadRecord(); err == nil {
 				t.Fatal("ReadRecord error = nil")
 			}
 			if log.Len() != 0 {
-				t.Fatalf("persisted invalid v2 = %d bytes", log.Len())
+				t.Fatalf("persisted invalid physical record = %d bytes", log.Len())
 			}
 		}
 	})
@@ -1555,7 +1470,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 		// newline: hashing the encoded record instead silently broke overlap
 		// detection while leaving every synthetic test consistent with itself.
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"text","text":"hi"}}`
-		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1586,44 +1501,42 @@ func TestRelayGenerationCommand(t *testing.T) {
 }
 
 func TestLogRecordParser(t *testing.T) {
-	t.Run("LegacyResultCacheWrites", func(t *testing.T) {
+	t.Run("ResultCacheLifetimePartition", func(t *testing.T) {
 		t.Parallel()
-		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
-			parser, err := NewLogRecordParser(version, testParseFn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_creation_1h_input_tokens":100}`))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(record.Messages) != 1 {
-				t.Fatalf("messages = %+v", record.Messages)
-			}
-			m, ok := record.Messages[0].Message.(*MetaResultMessage)
-			want := []v3.CacheWrite{{Tokens: 10}, {TTLSeconds: 3600, Tokens: 100}}
-			if !ok || !reflect.DeepEqual(m.CacheWrites, want) {
-				t.Fatalf("v%d canonical cache writes = %+v", version, m)
-			}
-			encoded, err := MarshalLogMessage(version, m)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got, expected any
-			if err := json.Unmarshal(encoded, &got); err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":0,"tokens":10},{"ttl_seconds":3600,"tokens":100}]}`), &expected); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, expected) {
-				t.Fatalf("v%d rewritten result = %s", version, encoded)
-			}
+		parser, err := NewLogRecordParser(testParseFn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_creation_1h_input_tokens":100}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(record.Messages) != 1 {
+			t.Fatalf("messages = %+v", record.Messages)
+		}
+		m, ok := record.Messages[0].Message.(*MetaResultMessage)
+		want := []v3.CacheWrite{{Tokens: 10}, {TTLSeconds: 3600, Tokens: 100}}
+		if !ok || !reflect.DeepEqual(m.CacheWrites, want) {
+			t.Fatalf("canonical cache writes = %+v", m)
+		}
+		encoded, err := MarshalLogMessage(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, expected any
+		if err := json.Unmarshal(encoded, &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":0,"tokens":10},{"ttl_seconds":3600,"tokens":100}]}`), &expected); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, expected) {
+			t.Fatalf("rewritten result = %s", encoded)
 		}
 	})
 	t.Run("ChildContextDoesNotInheritRootSnapshot", func(t *testing.T) {
 		t.Parallel()
-		p, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 			return []Message{&UsageMessage{Source: MessageSource{AgentID: "child"}}}, nil
 		})
 		if err != nil {
@@ -1644,115 +1557,25 @@ func TestLogRecordParser(t *testing.T) {
 
 	t.Run("Constructor", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewLogRecordParser(LogVersion(4), testParseFn); err == nil || !strings.Contains(err.Error(), "unsupported log version 4") {
-			t.Fatalf("unknown version error = %v", err)
-		}
-		if _, err := NewLogRecordParser(LogVersionV1, nil); err == nil || !strings.Contains(err.Error(), "native message parser is nil") {
+		if _, err := NewLogRecordParser(nil); err == nil || !strings.Contains(err.Error(), "native message parser is nil") {
 			t.Fatalf("nil parser error = %v", err)
-		}
-	})
-
-	t.Run("ControlVocabulary", func(t *testing.T) {
-		t.Parallel()
-		pairs := []struct {
-			name         string
-			v1           string
-			v2           string
-			relayOwnedV2 bool
-		}{
-			{
-				name:         "diff_stat",
-				v1:           `{"type":"caic_diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
-				v2:           `{"t":"diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
-				relayOwnedV2: true,
-			},
-			{
-				name:         "exit",
-				v1:           `{"type":"caic_exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
-				v2:           `{"t":"exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
-				relayOwnedV2: true,
-			},
-			{
-				name:         "stripped_env",
-				v1:           `{"type":"caic_stripped_env","variables":{"TOKEN":"secret"}}`,
-				v2:           `{"t":"stripped_env","variables":{"TOKEN":"secret"}}`,
-				relayOwnedV2: true,
-			},
-			{
-				name: "session",
-				v1:   `{"type":"caic_session","session_id":"s1","model":"m1","agent_version":"1.2.3"}`,
-				v2:   `{"t":"session","session_id":"s1","model":"m1","agent_version":"1.2.3"}`,
-			},
-			{
-				name: "pr",
-				v1:   `{"type":"caic_pr","forge_owner":"o","forge_repo":"r","forge_pr":7}`,
-				v2:   `{"t":"pr","forge_owner":"o","forge_repo":"r","forge_pr":7}`,
-			},
-			{
-				name: "result",
-				v1:   `{"type":"caic_result","state":"purged","title":"done","cost_usd":1.5,"num_turns":2}`,
-				v2:   `{"t":"result","state":"purged","title":"done","cost_usd":1.5,"num_turns":2}`,
-			},
-			{
-				name: "pending_user_action",
-				v1:   `{"type":"caic_pending_user_action","action":{"kind":"ask_user_question","request_id":"r1","tool_use_id":"t1"}}`,
-				v2:   `{"t":"pending_user_action","action":{"kind":"ask_user_question","request_id":"r1","tool_use_id":"t1"}}`,
-			},
-			{
-				name: "provisioning_log",
-				v1:   `{"type":"caic_log","line":"starting"}`,
-				v2:   `{"t":"log","line":"starting"}`,
-			},
-		}
-		for _, tc := range pairs {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				v1, err := NewLogRecordParser(LogVersionV1, testParseFn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				v2, err := NewLogRecordParser(LogVersionV2, testParseFn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				gotV1, err := v1.ParseRecord([]byte(tc.v1))
-				if err != nil {
-					t.Fatal(err)
-				}
-				gotV2, err := v2.ParseRecord([]byte(tc.v2))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !gotV1.Control || !gotV2.Control {
-					t.Fatalf("control classification = %t, %t; want true", gotV1.Control, gotV2.Control)
-				}
-				if gotV1.RelayRecord || gotV2.RelayRecord != tc.relayOwnedV2 {
-					t.Fatalf("relay ownership = %t, %t; want false, %t", gotV1.RelayRecord, gotV2.RelayRecord, tc.relayOwnedV2)
-				}
-				if !reflect.DeepEqual(gotV1.Messages, gotV2.Messages) {
-					t.Fatalf("v1 = %#v, v2 = %#v", gotV1.Messages, gotV2.Messages)
-				}
-				if len(gotV1.Messages) != 1 || !gotV1.Messages[0].ProducerTime.IsZero() || !gotV2.Messages[0].ProducerTime.IsZero() {
-					t.Fatalf("control producer times = %v, %v; want zero", gotV1.Messages, gotV2.Messages)
-				}
-			})
 		}
 	})
 
 	t.Run("ControlClassificationOnErrors", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct {
-			name    string
-			version LogVersion
-			line    string
+			name string
+
+			line string
 		}{
-			{name: "v1", version: LogVersionV1, line: `{"type":"caic_meta","version":"bad"}`},
-			{name: "v2", version: LogVersionV2, line: `{"t":"model_info","unexpected":true}`},
+			{name: "invalid metadata", line: `{"t":"caic_meta","version":"bad"}`},
+			{name: "invalid model info", line: `{"t":"model_info","unexpected":true}`},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				p, err := NewLogRecordParser(tc.version, testParseFn)
+				p, err := NewLogRecordParser(testParseFn)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1764,109 +1587,25 @@ func TestLogRecordParser(t *testing.T) {
 		}
 	})
 
-	t.Run("HeadersAndLegacySession", func(t *testing.T) {
-		t.Parallel()
-		for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
-			p, err := NewLogRecordParser(version, testParseFn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			discriminator := "type"
-			if version == LogVersionV2 {
-				discriminator = "t"
-			}
-			line := fmt.Sprintf(`{%q:"caic_meta","version":%d,"prompt":"p","repos":[],"harness":"claude"}`, discriminator, version)
-			record, err := p.ParseRecord([]byte(line))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !record.Control || len(record.Messages) != 1 {
-				t.Fatalf("version %d record = %#v", version, record)
-			}
-			meta, ok := record.Messages[0].Message.(*MetaMessage)
-			if !ok || meta.Version != int(version) || !record.Messages[0].ProducerTime.IsZero() {
-				t.Fatalf("version %d meta = %#v", version, record.Messages[0])
-			}
-		}
-
-		v2, err := NewLogRecordParser(LogVersionV2, testParseFn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		wrongVersion := []byte(`{"t":"caic_meta","version":1,"prompt":"p","repos":[],"harness":"claude"}`)
-		if _, err := v2.ParseRecord(wrongVersion); err == nil || !strings.Contains(err.Error(), "does not match parser version 2") {
-			t.Fatalf("mismatched header error = %v", err)
-		}
-
-		p, err := NewLogRecordParser(LogVersionV1, testParseFn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		record, err := p.ParseRecord([]byte(`{"type":"caic_init","session_id":"legacy","model":"m","version":"0.9"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []TimedMessage{{Message: &InitMessage{SessionID: "legacy", ReportedModel: "m", Version: "0.9"}}}
-		if !record.Control || !reflect.DeepEqual(record.Messages, want) {
-			t.Fatalf("legacy record = %#v, want messages %#v", record, want)
-		}
-	})
-
 	t.Run("ContextCleared", func(t *testing.T) {
 		t.Parallel()
-		v1, err := NewLogRecordParser(LogVersionV1, testParseFn)
+		parser, err := NewLogRecordParser(testParseFn)
 		if err != nil {
 			t.Fatal(err)
 		}
-		v2, err := NewLogRecordParser(LogVersionV2, testParseFn)
-		if err != nil {
-			t.Fatal(err)
+		record, err := parser.ParseRecord([]byte(`{"t":"context_cleared"}`))
+		if err != nil || !record.Control || record.RelayRecord || len(record.Messages) != 1 {
+			t.Fatalf("context-cleared = %#v, %v", record, err)
 		}
-		gotV1, err := v1.ParseRecord([]byte(`{"type":"system","subtype":"context_cleared"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		gotV2, err := v2.ParseRecord([]byte(`{"t":"context_cleared"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if gotV1.Control || !gotV2.Control || len(gotV1.Messages) != 1 || len(gotV2.Messages) != 1 ||
-			!reflect.DeepEqual(gotV1.Messages[0].Message, gotV2.Messages[0].Message) {
-			t.Fatalf("v1 = %#v, v2 = %#v", gotV1, gotV2)
-		}
-		if gotV1.RelayRecord || gotV2.RelayRecord {
-			t.Fatalf("context-cleared relay classification = %t, %t; want false", gotV1.RelayRecord, gotV2.RelayRecord)
+		if msg, ok := record.Messages[0].Message.(*SystemMessage); !ok || msg.Subtype != "context_cleared" {
+			t.Fatalf("message = %#v", record.Messages[0].Message)
 		}
 	})
 
-	t.Run("V1NativeFallback", func(t *testing.T) {
-		t.Parallel()
-		var got []byte
-		p, err := NewLogRecordParser(LogVersionV1, func(line []byte) ([]Message, error) {
-			got = append([]byte(nil), line...)
-			return []Message{&RawMessage{MessageType: "native", Raw: append([]byte(nil), line...)}}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, line := range [][]byte{
-			[]byte(`{"type":"caic_future","value":1}`),
-			[]byte(`not-json`),
-		} {
-			record, err := p.ParseRecord(line)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if record.Control || !bytes.Equal(got, line) || len(record.Messages) != 1 {
-				t.Fatalf("native input = %s, record = %#v", got, record)
-			}
-		}
-	})
-
-	t.Run("V2AgentPayloads", func(t *testing.T) {
+	t.Run("V3AgentPayloads", func(t *testing.T) {
 		t.Parallel()
 		var got [][]byte
-		p, err := NewLogRecordParser(LogVersionV2, func(line []byte) ([]Message, error) {
+		p, err := NewLogRecordParser(func(line []byte) ([]Message, error) {
 			got = append(got, append([]byte(nil), line...))
 			return []Message{&RawMessage{MessageType: "native", Raw: append([]byte(nil), line...)}}, nil
 		})
@@ -1894,7 +1633,7 @@ func TestLogRecordParser(t *testing.T) {
 		}
 	})
 
-	t.Run("V2Rejections", func(t *testing.T) {
+	t.Run("V3Rejections", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct {
 			name string
@@ -1902,7 +1641,7 @@ func TestLogRecordParser(t *testing.T) {
 			want string
 		}{
 			{name: "bare_native", line: `{"type":"assistant"}`, want: "top-level type discriminator"},
-			{name: "prefixed_v1", line: `{"type":"caic_diff_stat","diff_stat":[]}`, want: "top-level type discriminator"},
+			{name: "top-level type discriminator", line: `{"type":"caic_diff_stat","diff_stat":[]}`, want: "top-level type discriminator"},
 			{name: "unknown", line: `{"t":"future"}`, want: `unknown top-level t "future"`},
 			{name: "missing_t", line: `{"value":1}`, want: "missing top-level t"},
 			{name: "malformed_json", line: `{`, want: "decode control discriminator"},
@@ -1917,7 +1656,7 @@ func TestLogRecordParser(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				p, err := NewLogRecordParser(LogVersionV2, testParseFn)
+				p, err := NewLogRecordParser(testParseFn)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1928,7 +1667,7 @@ func TestLogRecordParser(t *testing.T) {
 		}
 	})
 
-	t.Run("V2RejectsInvalidUTF8", func(t *testing.T) {
+	t.Run("V3RejectsInvalidUTF8", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
 			name string
@@ -1946,7 +1685,7 @@ func TestLogRecordParser(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				called := false
-				p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 					called = true
 					return nil, nil
 				})
@@ -1961,92 +1700,64 @@ func TestLogRecordParser(t *testing.T) {
 				}
 			})
 		}
-
-		legacy := []byte{'n', 'a', 't', 'i', 'v', 'e', 0xff}
-		var got []byte
-		v1, err := NewLogRecordParser(LogVersionV1, func(line []byte) ([]Message, error) {
-			got = append([]byte(nil), line...)
-			return []Message{&RawMessage{MessageType: "native", Raw: got}}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := v1.ParseRecord(legacy); err != nil {
-			t.Fatalf("v1 invalid UTF-8 fallback: %v", err)
-		}
-		if !bytes.Equal(got, legacy) {
-			t.Fatalf("v1 native input = %v, want %v", got, legacy)
-		}
 	})
 
 	t.Run("ModelContextSnapshot", func(t *testing.T) {
 		t.Parallel()
-		for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
-			t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
-				t.Parallel()
-				p, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
-					var wire struct {
-						ContextWindow int `json:"context_window"`
-					}
-					if err := json.Unmarshal(line, &wire); err != nil {
-						return nil, err
-					}
-					return []Message{&UsageMessage{ContextWindow: wire.ContextWindow}}, nil
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				native := func(contextWindow int) string {
-					payload := fmt.Sprintf(`{"type":"usage","context_window":%d}`, contextWindow)
-					if version == LogVersionV1 {
-						return payload
-					}
-					return fmt.Sprintf(`{"t":"agent","ts":10.000,"msg":%s}`, payload)
-				}
-				infoDiscriminator := "type"
-				infoType := "caic_model_info"
-				if version == LogVersionV2 {
-					infoDiscriminator = "t"
-					infoType = "model_info"
-				}
 
-				before, err := p.ParseRecord([]byte(native(0)))
-				if err != nil {
-					t.Fatal(err)
-				}
-				beforeUsage, ok := before.Messages[0].Message.(*UsageMessage)
-				if !ok {
-					t.Fatalf("pre-snapshot message = %T, want *UsageMessage", before.Messages[0].Message)
-				}
-				if beforeUsage.ContextWindow != 0 {
-					t.Fatalf("pre-snapshot context = %d", beforeUsage.ContextWindow)
-				}
-				if record, err := p.ParseRecord(fmt.Appendf(nil, `{%q:%q,"context_window":1000000}`, infoDiscriminator, infoType)); err != nil || !record.Control || len(record.Messages) != 0 {
-					t.Fatalf("model info record = %#v, err = %v", record, err)
-				}
-				after, err := p.ParseRecord([]byte(native(0)))
-				if err != nil {
-					t.Fatal(err)
-				}
-				afterUsage, ok := after.Messages[0].Message.(*UsageMessage)
-				if !ok {
-					t.Fatalf("post-snapshot message = %T, want *UsageMessage", after.Messages[0].Message)
-				}
-				if afterUsage.ContextWindow != 1000000 {
-					t.Fatalf("snapshot context = %d", afterUsage.ContextWindow)
-				}
-				nativeValue, err := p.ParseRecord([]byte(native(200000)))
-				if err != nil {
-					t.Fatal(err)
-				}
-				nativeUsage, ok := nativeValue.Messages[0].Message.(*UsageMessage)
-				if !ok {
-					t.Fatalf("native-context message = %T, want *UsageMessage", nativeValue.Messages[0].Message)
-				}
-				if nativeUsage.ContextWindow != 200000 {
-					t.Fatalf("native context = %d", nativeUsage.ContextWindow)
-				}
-			})
+		p, err := NewLogRecordParser(func(line []byte) ([]Message, error) {
+			var wire struct {
+				ContextWindow int `json:"context_window"`
+			}
+			if err := json.Unmarshal(line, &wire); err != nil {
+				return nil, err
+			}
+			return []Message{&UsageMessage{ContextWindow: wire.ContextWindow}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		native := func(contextWindow int) string {
+			payload := fmt.Sprintf(`{"type":"usage","context_window":%d}`, contextWindow)
+
+			return fmt.Sprintf(`{"t":"agent","ts":10.000,"msg":%s}`, payload)
+		}
+
+		before, err := p.ParseRecord([]byte(native(0)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeUsage, ok := before.Messages[0].Message.(*UsageMessage)
+		if !ok {
+			t.Fatalf("pre-snapshot message = %T, want *UsageMessage", before.Messages[0].Message)
+		}
+		if beforeUsage.ContextWindow != 0 {
+			t.Fatalf("pre-snapshot context = %d", beforeUsage.ContextWindow)
+		}
+		if record, err := p.ParseRecord([]byte(`{"t":"model_info","context_window":1000000}`)); err != nil || !record.Control || len(record.Messages) != 0 {
+			t.Fatalf("model info record = %#v, err = %v", record, err)
+		}
+		after, err := p.ParseRecord([]byte(native(0)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		afterUsage, ok := after.Messages[0].Message.(*UsageMessage)
+		if !ok {
+			t.Fatalf("post-snapshot message = %T, want *UsageMessage", after.Messages[0].Message)
+		}
+		if afterUsage.ContextWindow != 1000000 {
+			t.Fatalf("snapshot context = %d", afterUsage.ContextWindow)
+		}
+		nativeValue, err := p.ParseRecord([]byte(native(200000)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeUsage, ok := nativeValue.Messages[0].Message.(*UsageMessage)
+		if !ok {
+			t.Fatalf("native-context message = %T, want *UsageMessage", nativeValue.Messages[0].Message)
+		}
+		if nativeUsage.ContextWindow != 200000 {
+			t.Fatalf("native context = %d", nativeUsage.ContextWindow)
 		}
 	})
 
@@ -2070,7 +1781,7 @@ func TestLogRecordParser(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				batch := []Message{action, tc.invalid}
-				p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 					return batch, nil
 				})
 				if err != nil {
@@ -2094,7 +1805,7 @@ func TestLogRecordParser(t *testing.T) {
 			t.Parallel()
 			usage := &UsageMessage{}
 			batch := []Message{usage, (*UsageMessage)(nil)}
-			p, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
 				return batch, nil
 			})
 			if err != nil {
@@ -2146,11 +1857,11 @@ func TestLogRecordParser(t *testing.T) {
 			}
 		}
 
-		v2, err := NewLogRecordParser(LogVersionV2, parseNative)
+		parser, err := NewLogRecordParser(parseNative)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mixed, err := v2.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
+		mixed, err := parser.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2165,25 +1876,25 @@ func TestLogRecordParser(t *testing.T) {
 			t.Fatalf("mixed record = %#v", mixed)
 		}
 		if !mixed.RelayRecord {
-			t.Fatal("native v2 record is not classified as relay-owned")
+			t.Fatal("native v3 record is not classified as relay-owned")
 		}
-		freshV2, err := NewLogRecordParser(LogVersionV2, parseNative)
+		fresh, err := NewLogRecordParser(parseNative)
 		if err != nil {
 			t.Fatal(err)
 		}
-		reparsed, err := freshV2.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
+		reparsed, err := fresh.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reparsed.RelayRecord {
-			t.Fatal("reparsed native v2 record is not relay-owned")
+			t.Fatal("reparsed native v3 record is not relay-owned")
 		}
-		nextRecord, err := freshV2.ParseRecord([]byte(`{"t":"agent","ts":123.251,"msg":{"kind":"mixed"}}`))
+		nextRecord, err := fresh.ParseRecord([]byte(`{"t":"agent","ts":123.251,"msg":{"kind":"mixed"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !nextRecord.RelayRecord {
-			t.Fatal("next native v2 record is not relay-owned")
+			t.Fatal("next native v3 record is not relay-owned")
 		}
 		wantTime := time.Unix(123, 250_000_000).UTC()
 		for i, want := range wantTypes {
@@ -2200,27 +1911,7 @@ func TestLogRecordParser(t *testing.T) {
 			t.Fatalf("unwrapped message = %T, want *ToolUseMessage", mixed.Messages[1].Message)
 		}
 
-		v1, err := NewLogRecordParser(LogVersionV1, parseNative)
-		if err != nil {
-			t.Fatal(err)
-		}
-		legacy, err := v1.ParseRecord([]byte(`{"kind":"mixed"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if legacy.Control || len(legacy.Messages) != len(wantTypes) {
-			t.Fatalf("v1 record = %#v", legacy)
-		}
-		if legacy.RelayRecord {
-			t.Fatal("v1 native record is classified as relay-owned")
-		}
-		for i, msg := range legacy.Messages {
-			if msg.Message == nil || !msg.ProducerTime.IsZero() {
-				t.Fatalf("v1 message %d = %#v, want non-nil message and zero producer time", i, msg)
-			}
-		}
-
-		empty, err := v2.ParseRecord([]byte(`{"t":"agent","ts":124.000,"msg":{"kind":"empty"}}`))
+		empty, err := parser.ParseRecord([]byte(`{"t":"agent","ts":124.000,"msg":{"kind":"empty"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2252,7 +1943,7 @@ func TestWarmRelayHistory(t *testing.T) {
 		t.Parallel()
 		// A zero offset must return before any relay read, so the container is
 		// never reached.
-		if err := WarmRelayHistory(t.Context(), unreachable, LogVersionV3, &testWire{}, 0, maxWarmHistoryBytes); err != nil {
+		if err := WarmRelayHistory(t.Context(), unreachable, &testWire{}, 0, maxWarmHistoryBytes); err != nil {
 			t.Fatalf("zero offset warm = %v, want no read", err)
 		}
 	})
@@ -2282,7 +1973,7 @@ func TestWarmRelayHistory(t *testing.T) {
 
 	t.Run("reports an unreadable relay", func(t *testing.T) {
 		t.Parallel()
-		if err := WarmRelayHistory(t.Context(), unreachable, LogVersionV3, &testWire{}, 1024, maxWarmHistoryBytes); err == nil {
+		if err := WarmRelayHistory(t.Context(), unreachable, &testWire{}, 1024, maxWarmHistoryBytes); err == nil {
 			t.Fatal("warm read of an unreachable container succeeded")
 		}
 	})
@@ -2303,7 +1994,7 @@ func TestAttachRelaySession(t *testing.T) {
 			Target:      runtime.ConnectionTarget{SSHHost: unreachable},
 			RelayOffset: 1024,
 			WarmHistory: true,
-			Log:         &testLogSink{Version: LogVersionV3},
+			Log:         &testLogSink{},
 		}
 		session, err := AttachRelaySession(t.Context(), opts, &testWire{}, nil)
 		if err == nil {
@@ -2359,7 +2050,7 @@ func TestReadWarmHistoryPayload(t *testing.T) {
 		// Parsing the returned payload must feed the wire once, with the successful
 		// records only.
 		wire := &countingWire{}
-		warmParser, err := NewLogRecordParser(LogVersionV3, wire.ParseMessage)
+		warmParser, err := NewLogRecordParser(wire.ParseMessage)
 		if err != nil {
 			t.Fatal(err)
 		}

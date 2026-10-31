@@ -5,7 +5,6 @@ package taskslog
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +23,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 )
 
 const (
@@ -55,15 +53,15 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		b.Fatal(err)
 	}
 	bw := bufio.NewWriterSize(f, 1<<20)
-	header := benchmarkJSONLine(b, v1.MetaMessage{
+	header := benchmarkJSONLine(b, agent.MetaMessage{
 		MessageType: "caic_meta",
-		Version:     int(agent.LogVersionV1),
+		Version:     int(agent.LogVersionV3),
 		Prompt:      "benchmark adoption",
-		Repos:       []v1.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Repos:       []v3.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
 		Harness:     string(harness.Claude),
 		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
-	session := benchmarkJSONLine(b, v1.MetaSessionMessage{
+	session := benchmarkJSONLine(b, agent.MetaSessionMessage{
 		MessageType:   "caic_session",
 		SessionID:     "benchmark-session",
 		ReportedModel: "claude-sonnet-4-6",
@@ -91,11 +89,11 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		// compressed, terminal task log — the set the header cache targets.
 		// Its size is reserved from the padding so the fixture stays exactly
 		// target bytes.
-		result := benchmarkJSONLine(b, v1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		result := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		resultBytes := int64(len(result) + 1)
 		remaining := target - written
-		const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
-		const suffix = `"}]}}`
+		const prefix = `{"t":"agent","ts":1767225600.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"`
+		const suffix = `"}]}}}`
 		payloadBytes := remaining - int64(len(prefix)+len(suffix)+1) - resultBytes
 		if payloadBytes < 0 {
 			err = fmt.Errorf("fixture remainder %d cannot hold padding and result", remaining)
@@ -136,11 +134,11 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 
 func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 	lt := &LoadedTask{
-		TaskID:     f.id.String(),
-		LogVersion: agent.LogVersionV1,
-		Harness:    harness.Claude,
-		LogSize:    f.size,
-		path:       f.path,
+		TaskID: f.id.String(),
+
+		Harness: harness.Claude,
+		LogSize: f.size,
+		path:    f.path,
 	}
 	lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 		return claudecode.New().NewWire().ParseMessage, nil
@@ -375,51 +373,20 @@ func runAdoptionSubbenchmark(b *testing.B, fixture *adoptionBenchmarkFixture, op
 // tool outputs. b/report bytes/sec tracks the line size so shape changes are
 // comparable.
 func BenchmarkDecodeDiscriminatorProbe(b *testing.B) {
-	largeOutput := strings.Repeat("tool output line\\n", 16<<10)
-	cases := []struct {
-		name    string
-		version agent.LogVersion
-		line    string
-	}{
-		{
-			name:    "V1LargeToolResult",
-			version: agent.LogVersionV1,
-			line:    `{"type":"user","parent_tool_use_id":"tool-1","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`,
-		},
-		{
-			name:    "V1Assistant",
-			version: agent.LogVersionV1,
-			line:    `{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}`,
-		},
-		{
-			name:    "V1Meta",
-			version: agent.LogVersionV1,
-			line:    `{"type":"caic_meta","version":1,"harness":"claude","prompt":"benchmark","repos":[{"name":"org/repo","branch":"caic-0"}]}`,
-		},
-		{
-			name:    "V1MarkerLater",
-			version: agent.LogVersionV1,
-			line:    `{"type":"system","subtype":"init","model":"claude","padding":"` + strings.Repeat("x", 1<<16) + `","t":"caic_meta"}`,
-		},
-		{
-			name:    "V2Agent",
-			version: agent.LogVersionV2,
-			line:    `{"t":"agent","ts":1767225600.5,"message":{"content":[{"type":"text","text":"working"}]}}`,
-		},
-		{
-			name:    "V2LargeToolResult",
-			version: agent.LogVersionV2,
-			line:    `{"t":"user","ts":1767225600.5,"message":{"content":[{"t":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`,
-		},
-	}
-	for _, tc := range cases {
+	large := strings.Repeat("tool output line\\n", 16<<10)
+	for _, tc := range []struct{ name, line string }{
+		{"assistant", nativeLogLine(`{"type":"assistant","message":{"content":[{"type":"text","text":"work"}]}}`)},
+		{"large tool result", nativeLogLine(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + large + `"}]}}`)},
+		{"header", `{"t":"caic_meta","version":3,"prompt":"benchmark","harness":"claude"}`},
+		{"input", `{"t":"input","ts":1767225600.500,"msg":{"type":"user","message":{"role":"user","content":"prompt"}}}`},
+	} {
 		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
 			line := []byte(tc.line)
+			b.ReportAllocs()
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
 			for range b.N {
-				_, _, _ = decodeDiscriminatorProbe(line, tc.version)
+				_, _ = decodeDiscriminatorProbe(line)
 			}
 		})
 	}
@@ -428,23 +395,21 @@ func BenchmarkDecodeDiscriminatorProbe(b *testing.B) {
 func benchmarkAdoptionRecords(header []byte) [][]byte {
 	largeOutput := strings.Repeat("tool output line\\n", 16<<10)
 	return [][]byte{
-		[]byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working"}}}`),
-		[]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}`),
-		[]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"/workspace/repo/main.go"}}]}}`),
-		[]byte(`{"type":"user","parent_tool_use_id":"tool-1","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`),
-		[]byte(`{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":4,"deleted":1}],"ts":1767225600.5}`),
-		[]byte(`{"type":"caic_log","line":"restoring task workspace"}`),
+		// Retained Claude traces report reasoning on message_delta usage before
+		// the final result. Include that accounting path in startup scan costs.
+		[]byte(nativeLogLine(`{"type":"stream_event","event":{"type":"message_delta","usage":{"input_tokens":8,"output_tokens":75,"output_tokens_details":{"thinking_tokens":43}}}}`)),
+		[]byte(nativeLogLine(`{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":53}`)),
+		[]byte(nativeLogLine(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working"}}}`)),
+		[]byte(nativeLogLine(`{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}`)),
+		[]byte(nativeLogLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"/workspace/repo/main.go"}}]}}`)),
+		[]byte(nativeLogLine(`{"type":"user","parent_tool_use_id":"tool-1","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + largeOutput + `"}]}}`)),
+		[]byte(`{"t":"git_summary","diff_stat":[{"path":"main.go","added":4,"deleted":1}],"ts":1767225600.5}`),
+		[]byte(`{"t":"log","line":"restoring task workspace"}`),
 		header,
 	}
 }
 
-func benchmarkJSONLine(b *testing.B, v any) []byte {
-	data, err := json.Marshal(v)
-	if err != nil {
-		b.Fatal(err)
-	}
-	return data
-}
+func benchmarkJSONLine(b *testing.B, v any) []byte { return []byte(mustJSON(b, v)) }
 
 func writeBenchmarkRecord(w *bufio.Writer, record []byte) (int64, error) {
 	n, err := w.Write(record)
@@ -550,14 +515,14 @@ func BenchmarkSettledScanAgeFilter(b *testing.B) {
 // writeSettledBenchLog writes a zstd-compressed terminal task log for repo of
 // roughly size uncompressed bytes (multi-block) so decompressing has a cost.
 func writeSettledBenchLog(b *testing.B, dir, name, repo string, size int) {
-	meta := benchmarkJSONLine(b, v1.MetaMessage{
-		MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "settled bench",
-		Repos: []v1.MetaRepo{{Name: repo, Branch: "caic-0"}}, Harness: string(harness.Claude),
+	meta := benchmarkJSONLine(b, agent.MetaMessage{
+		MessageType: "caic_meta", Version: int(agent.LogVersionV3), Prompt: "settled bench",
+		Repos: []v3.MetaRepo{{Name: repo, Branch: "caic-0"}}, Harness: string(harness.Claude),
 		StartedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
-	trailer := benchmarkJSONLine(b, v1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-	const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
-	const suffix = `"}]}}`
+	trailer := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+	const prefix = `{"t":"agent","ts":1767225600.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"`
+	const suffix = `"}]}}}`
 	textLen := max(size-len(meta)-len(trailer)-len(prefix)-len(suffix)-4, 0)
 	lines := [][]byte{meta, []byte(prefix + strings.Repeat("p", textLen) + suffix), trailer}
 

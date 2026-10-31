@@ -1,4 +1,4 @@
-// Replays native-subagent evidence fixtures through the live wire parser and both task-log versions, and projects the harness-neutral contract each fixture pins.
+// Replays native-subagent evidence fixtures through the live wire parser and v3 task logs, and projects the harness-neutral contract each fixture pins.
 
 package agenttest
 
@@ -17,10 +17,9 @@ import (
 
 // NativeSubagentEvidence is the canonical lifecycle observation stream for one
 // evidence fixture. Live is the wire parser reading native harness records in
-// order. PerPayload groups the same observations by the payload that produced
-// them, so a test can model a restart after an exact record. V2 and V3 replay the
-// identical native payloads as physical task-log records of each version, which
-// is what restart and settled-history replay do.
+// order. PerPayload groups observations by the native payload that produced
+// them. Replay reads the identical payloads as physical v3 records, as restart
+// and settled-history replay do.
 //
 // Adapters are stateful, so each field is produced by a fresh wire format.
 type NativeSubagentEvidence struct {
@@ -29,22 +28,20 @@ type NativeSubagentEvidence struct {
 	Payloads   [][]byte
 	PerPayload [][]agent.NativeSubagent
 	Live       []agent.NativeSubagent
-	V2         []agent.NativeSubagent
-	V3         []agent.NativeSubagent
+	Replay     []agent.NativeSubagent
 }
 
-// LoadNativeSubagentEvidence reads a minimized physical fixture at fixtureVersion,
+// LoadNativeSubagentEvidence reads a minimized physical v3 fixture,
 // extracts its native harness payloads, and parses them live and replayed.
 //
-// The fixture's control records (the caic_meta header and caic_result footer)
+// The fixture's control records (the metadata header and result trailer)
 // never reach the native parser, so one fixture serves live and replay.
-func LoadNativeSubagentEvidence(t testing.TB, path string, fixtureVersion agent.LogVersion, newWire func() agent.WireFormat) NativeSubagentEvidence {
+func LoadNativeSubagentEvidence(t testing.TB, path string, newWire func() agent.WireFormat) NativeSubagentEvidence {
 	t.Helper()
-	native := nativeSubagentPayloads(t, path, fixtureVersion)
+	native := nativeSubagentPayloads(t, path)
 	evidence := NativeSubagentEvidence{Payloads: native}
 	evidence.PerPayload, evidence.Live = liveSubagents(t, native, newWire())
-	evidence.V2 = replaySubagents(t, native, newWire(), agent.LogVersionV2)
-	evidence.V3 = replaySubagents(t, native, newWire(), agent.LogVersionV3)
+	evidence.Replay = replaySubagents(t, native, newWire())
 	return evidence
 }
 
@@ -66,21 +63,19 @@ func (e *NativeSubagentEvidence) RunningSplit(t testing.TB) int {
 }
 
 // Contract returns the contract this evidence fixture pins. Live parsing and
-// both task-log replays must agree before the contract is trusted.
+// task-log replay must agree before the contract is trusted.
 func (e *NativeSubagentEvidence) Contract(t testing.TB) NativeSubagentContract {
 	t.Helper()
 	live := Contract(e.Live)
-	for name, observations := range map[string][]agent.NativeSubagent{"v2 replay": e.V2, "v3 replay": e.V3} {
-		if got := Contract(observations); !got.Equal(live) {
-			t.Fatalf("%s contract = %s, want the live contract %s", name, got, live)
-		}
+	if got := Contract(e.Replay); !got.Equal(live) {
+		t.Fatalf("replay contract = %s, want the live contract %s", got, live)
 	}
 	return live
 }
 
 // nativeSubagentPayloads returns the native harness payloads of a fixture in
 // file order.
-func nativeSubagentPayloads(t testing.TB, path string, version agent.LogVersion) [][]byte {
+func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 	t.Helper()
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -92,7 +87,7 @@ func nativeSubagentPayloads(t testing.TB, path string, version agent.LogVersion)
 		}
 	})
 	var payloads [][]byte
-	parser, err := agent.NewLogRecordParser(version, func(line []byte) ([]agent.Message, error) {
+	parser, err := agent.NewLogRecordParser(func(line []byte) ([]agent.Message, error) {
 		payloads = append(payloads, append([]byte(nil), line...))
 		return nil, nil
 	})
@@ -142,18 +137,18 @@ func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perP
 }
 
 // replaySubagents replays the same native payloads as physical task-log records
-// of version, which is the restart and settled-history path.
-func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat, version agent.LogVersion) []agent.NativeSubagent {
+// which is the restart and settled-history path.
+func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
 	t.Helper()
-	parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := make([]agent.NativeSubagent, 0, len(payloads))
 	for index, payload := range payloads {
-		record, err := parser.ParseRecord(v2AgentRecord(payload))
+		record, err := parser.ParseRecord(v3AgentRecord(payload))
 		if err != nil {
-			t.Fatalf("v%d replay of native record %d: %v", version, index, err)
+			t.Fatalf("replay of native record %d: %v", index, err)
 		}
 		for _, message := range record.Messages {
 			if subagent, ok := message.Message.(*agent.NativeSubagentMessage); ok {
@@ -169,20 +164,20 @@ func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat, ver
 // agent.WarmRelayHistory, and the live tail then continues on that same wire.
 // The returned observations are the tail's, and they must settle the same
 // canonical identities the history produced.
-func RestartNativeSubagents(t testing.TB, version agent.LogVersion, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
+func RestartNativeSubagents(t testing.TB, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
 	t.Helper()
-	parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for index, payload := range history {
-		if _, err := parser.ParseRecord(v2AgentRecord(payload)); err != nil {
+		if _, err := parser.ParseRecord(v3AgentRecord(payload)); err != nil {
 			t.Fatalf("warm history record %d: %v", index, err)
 		}
 	}
 	out := make([]agent.NativeSubagent, 0, len(tail))
 	for index, payload := range tail {
-		record, err := parser.ParseRecord(v2AgentRecord(payload))
+		record, err := parser.ParseRecord(v3AgentRecord(payload))
 		if err != nil {
 			t.Fatalf("live tail record %d: %v", index, err)
 		}
@@ -195,9 +190,9 @@ func RestartNativeSubagents(t testing.TB, version agent.LogVersion, history, tai
 	return out
 }
 
-// v2AgentRecord wraps one native payload in a canonical agent record. Agent
-// record framing is identical in v2 and v3.
-func v2AgentRecord(payload []byte) []byte {
+// v3AgentRecord wraps one native payload in a canonical agent record. Agent
+// framing preserves the native JSON bytes.
+func v3AgentRecord(payload []byte) []byte {
 	var buf bytes.Buffer
 	buf.WriteString(`{"t":"agent","ts":1.000,"msg":`)
 	buf.Write(payload)
@@ -314,7 +309,7 @@ func (c NativeSubagentContract) String() string {
 
 // NativeSubagentEvidencePrompt returns the delegation prompt one evidence
 // fixture was recorded with, so a live acceptance drives the identical request.
-func NativeSubagentEvidencePrompt(t testing.TB, path string, version agent.LogVersion) string {
+func NativeSubagentEvidencePrompt(t testing.TB, path string) string {
 	t.Helper()
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -325,7 +320,7 @@ func NativeSubagentEvidencePrompt(t testing.TB, path string, version agent.LogVe
 			t.Error(err)
 		}
 	})
-	parser, err := agent.NewLogRecordParser(version, func([]byte) ([]agent.Message, error) { return nil, nil })
+	parser, err := agent.NewLogRecordParser(func([]byte) ([]agent.Message, error) { return nil, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

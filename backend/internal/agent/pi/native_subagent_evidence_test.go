@@ -3,7 +3,7 @@
 package pi
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,7 +17,7 @@ import (
 // spawn, and the subagent_wait completion that settles it.
 func TestNativeSubagentJokeEvidence(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat {
 		return New("", nil).NewWire()
 	})
 
@@ -32,8 +32,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 		observations []agent.NativeSubagent
 	}{
 		{"live", evidence.Live},
-		{"v2 replay", evidence.V2},
-		{"v3 replay", evidence.V3},
+		{"v3 replay", evidence.Replay},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -78,7 +77,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 // leaving it running and adding a run-keyed duplicate.
 func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat {
 		return New("", nil).NewWire()
 	})
 	// History through the async acknowledgement; the tail is the wait.
@@ -100,7 +99,7 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusRunning || restoredActive != 1 {
 		t.Fatalf("restored = %#v active = %d, want one running card", restored, restoredActive)
 	}
-	live := agenttest.RestartNativeSubagents(t, agent.LogVersionV3, history, tail, New("", nil).NewWire())
+	live := agenttest.RestartNativeSubagents(t, history, tail, New("", nil).NewWire())
 
 	cards, active := agenttest.FoldNativeSubagents(append(restoredObservations, live...))
 	if len(cards) != 1 || cards[0].Status != agent.NativeSubagentStatusCompleted || active != 0 {
@@ -118,7 +117,7 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 // no per-agent lifecycle for its steps.
 func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-workflow-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-workflow-v3.jsonl", func() agent.WireFormat {
 		return New("", nil).NewWire()
 	})
 
@@ -131,8 +130,7 @@ func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 		observations []agent.NativeSubagent
 	}{
 		{"live", evidence.Live},
-		{"v2 replay", evidence.V2},
-		{"v3 replay", evidence.V3},
+		{"v3 replay", evidence.Replay},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -173,22 +171,19 @@ func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 // child's internal tool stream or ownership inferred from result prose.
 func TestDelegationTransportOwnership(t *testing.T) {
 	t.Parallel()
-	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat { return New("", nil).NewWire() })
-	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
-		t.Run(fmt.Sprint(version), func(t *testing.T) {
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", func() agent.WireFormat { return New("", nil).NewWire() })
+	for _, physical := range []bool{false, true} {
+		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
-			if version != 0 {
-				parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
-			}
+			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var calls, results, outputs, cards int
 			for _, line := range evidence.Payloads {
 				var messages []agent.Message
-				if version == 0 {
+				if !physical {
 					messages, err = wire.ParseMessage(line)
 				} else {
 					record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + string(line) + `}`))
