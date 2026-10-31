@@ -59,6 +59,7 @@ declare const classes: {
   readonly "loadInputBtn": string;
   readonly "logLine": string;
   readonly "messageArea": string;
+  readonly "messageContent": string;
   readonly "messageTiming": string;
   readonly "parseError": string;
   readonly "pendingInput": string;

@@ -1,4 +1,4 @@
-// Browser coverage for context skills, stable disclosures through later turns, compaction, and recursive Markdown navigation.
+// Browser coverage for context skills, disclosures, compacted live-tail scrolling, and recursive Markdown navigation.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
@@ -62,6 +62,63 @@ for (const width of [390, 1280]) {
     expect(await oldSkill?.evaluate((element) => element.isConnected && element === document.activeElement)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const width of [390, 1280]) {
+  test(`switching to a running compacted task follows its live tail at ${width}px`, async ({
+    page,
+    api,
+    uniquePrompt,
+  }) => {
+    await page.setViewportSize({ width, height: 700 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const id = await createTaskAPI(api, uniquePrompt("FAKE_SKILLS load"));
+    await waitForTaskState(api, id, "waiting");
+    for (let i = 0; i < 12; i++) {
+      await api.sendInput(id, { prompt: { text: "FAKE_SKILLS compact" } });
+      await waitForTaskState(api, id, "waiting");
+    }
+    await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS" } });
+    await waitForTaskState(api, id, "running");
+    const other = await createTaskAPI(api, uniquePrompt("other scroll conversation"));
+    await waitForTaskState(api, other, "waiting");
+    await page.goto(`/task/@${other}`);
+    const area = page.getByTestId("task-message-area");
+    const atBottom = async () => {
+      await expect(area).toHaveAttribute("aria-busy", "false");
+      await expect.poll(() => area.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+    };
+    for (let cycle = 0; cycle < 3; cycle++) {
+      if (width === 390) await page.keyboard.press("Escape");
+      const card = page.locator(`[data-task-id='${id}']`);
+      await card.focus();
+      await card.press("Enter");
+      await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(12);
+      await expect.poll(() => area.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await atBottom();
+      if (cycle === 0) {
+        await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_CONTINUE" } });
+        await expect(page.getByText("Parent summary remains separate.", { exact: false })).toBeVisible();
+        await atBottom();
+        await area.hover();
+        await page.mouse.wheel(0, -10_000);
+        await expect.poll(() => area.evaluate((el) => el.scrollTop)).toBe(0);
+        await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_RECONNECT" } });
+        await expect(area).toContainText("parent missed output");
+        expect(await area.evaluate((el) => el.scrollTop)).toBe(0);
+        await area.focus();
+        await page.keyboard.press("Control+End");
+        await atBottom();
+      }
+      if (width === 390) await page.keyboard.press("Escape");
+      const otherCard = page.locator(`[data-task-id='${other}']`);
+      await otherCard.focus();
+      await otherCard.press("Enter");
+      await atBottom();
+    }
     expect(errors).toEqual([]);
   });
 }

@@ -6,10 +6,12 @@ interface Anchor {
   top: number | null;
   scroll: number;
   height: number;
+  viewport: number;
 }
 
 export function createHistoryScroll(
   area: Accessor<HTMLElement | undefined>,
+  body: Accessor<HTMLElement | undefined>,
   taskId: Accessor<string>,
   epochValue: Accessor<number>,
   content: Accessor<unknown>,
@@ -25,6 +27,7 @@ export function createHistoryScroll(
   let writtenTop: number | null = null;
   let frame: number | null = null;
   let structural = false;
+  let scrollInput = false;
 
   const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
@@ -39,6 +42,7 @@ export function createHistoryScroll(
       top: row?.getBoundingClientRect().top ?? null,
       scroll: el.scrollTop,
       height: el.scrollHeight,
+      viewport: el.clientHeight,
     };
   }
 
@@ -77,6 +81,7 @@ export function createHistoryScroll(
         writtenTop = el.scrollTop;
       }
       structural = false;
+      scrollInput = false;
       expansion = null;
       saved = anchor(el);
     });
@@ -88,6 +93,7 @@ export function createHistoryScroll(
     content();
     if (task !== id) {
       task = id;
+      scrollInput = false;
       following = true;
       saved = null;
       expansion = null;
@@ -106,7 +112,32 @@ export function createHistoryScroll(
     if (!el) return;
     const observer = new ResizeObserver(schedule);
     observer.observe(el);
-    onCleanup(() => observer.disconnect());
+    const container = body();
+    if (container) observer.observe(container);
+    // Scroll events also come from native anchoring and layout clamping. Only
+    // input may override a pending layout correction or initial tail placement.
+    const input = () => {
+      scrollInput = true;
+    };
+    const keyInput = (event: KeyboardEvent) => {
+      if (event.target === el && ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key))
+        input();
+    };
+    const pointerInput = (event: PointerEvent) => {
+      const left = el.getBoundingClientRect().left + el.clientLeft;
+      if (event.target === el && (event.clientX < left || event.clientX >= left + el.clientWidth)) input();
+    };
+    el.addEventListener("wheel", input, { passive: true });
+    el.addEventListener("touchmove", input, { passive: true });
+    el.addEventListener("pointerdown", pointerInput, { passive: true });
+    el.addEventListener("keydown", keyInput);
+    onCleanup(() => {
+      observer.disconnect();
+      el.removeEventListener("wheel", input);
+      el.removeEventListener("touchmove", input);
+      el.removeEventListener("pointerdown", pointerInput);
+      el.removeEventListener("keydown", keyInput);
+    });
   });
 
   onCleanup(() => {
@@ -121,14 +152,23 @@ export function createHistoryScroll(
     restoreAnchor(key: string, top: number | undefined) {
       const el = area();
       if (!el || top === undefined) return;
-      expansion = { key, top, scroll: el.scrollTop, height: el.scrollHeight };
+      expansion = { key, top, scroll: el.scrollTop, height: el.scrollHeight, viewport: el.clientHeight };
       schedule();
     },
     scroll() {
       const el = area();
       if (!el || el.clientHeight === 0) return;
+      if (
+        !scrollInput &&
+        (!saved || saved.height !== el.scrollHeight || saved.viewport !== el.clientHeight || structural)
+      ) {
+        schedule();
+        return;
+      }
+      const fromInput = scrollInput;
+      scrollInput = false;
       saved = anchor(el);
-      if (writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
+      if (!fromInput && writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
         writtenTop = null;
         return;
       }

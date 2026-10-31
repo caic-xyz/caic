@@ -8,8 +8,23 @@ import type { EventMessage } from "@sdk/types.gen";
 
 let frames = new Map<number, FrameRequestCallback>();
 let nextFrame = 0;
+let resize: ResizeObserverCallback;
+let observed: Element[];
 beforeEach(() => {
   frames = new Map();
+  observed = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      disconnect() {}
+    },
+  );
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     frames.set(++nextFrame, callback);
     return nextFrame;
@@ -59,6 +74,7 @@ function fixture() {
     dispose,
     scroll: createHistoryScroll(
       () => el,
+      () => row,
       task,
       epoch,
       () => [messages(), preview(), plan()],
@@ -87,7 +103,18 @@ function fixture() {
       setPreview("pending output");
     },
     userScroll: (position: number) => {
+      el.dispatchEvent(new Event("wheel"));
       el.scrollTop = position;
+      el.dispatchEvent(new Event("scroll"));
+    },
+    grow: () => {
+      height += 300;
+      if (observed.includes(row)) resize([], {} as ResizeObserver);
+    },
+    clamp: () => {
+      height = 600;
+      top = 300;
+      setEpoch((value) => value + 1);
       el.dispatchEvent(new Event("scroll"));
     },
     append: () => {
@@ -249,6 +276,68 @@ it("ignores hidden-pane scroll and content observations instead of changing the 
     f.append();
     await paint();
     assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("keeps following when context replacement clamps scrolling before the next paint", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.clamp();
+    f.append();
+    await paint();
+    assert.equal(f.el.scrollTop, 420);
+    f.append();
+    await paint();
+    assert.equal(f.el.scrollTop, 440);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("follows content resizing after rendering, but leaves earlier reading in place", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.grow();
+    await paint();
+    assert.equal(f.el.scrollTop, 1100);
+    f.userScroll(300);
+    f.grow();
+    await paint();
+    assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("starts following a newly selected task despite layout scrolls from the old task", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    f.setTask("b");
+    f.el.dispatchEvent(new Event("scroll"));
+    f.append();
+    await paint();
+    assert.equal(f.el.scrollTop, 820);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("honors keyboard scrolling while a context replacement is pending", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.backfill();
+    f.el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp" }));
+    f.el.scrollTop = 400;
+    f.el.dispatchEvent(new Event("scroll"));
+    await paint();
+    assert.equal(f.el.scrollTop, 400);
   } finally {
     f.dispose();
   }

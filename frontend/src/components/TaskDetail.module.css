@@ -233,6 +233,10 @@ a.headerPR:hover {
   border-radius: var(--radius-lg);
 }
 
+.messageContent {
+  display: flow-root;
+}
+
 .placeholder {
   color: var(--color-text-muted);
 }
