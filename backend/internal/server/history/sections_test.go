@@ -143,6 +143,7 @@ func TestSourceSections(t *testing.T) {
 		}{
 			{name: "clear and empty context", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, agent.ContextCleared(), &agent.InitMessage{SessionID: "two"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 4}}, {{RecordID: 2, Index: 5}}}, turns: []int{1, 0, 0}},
 			{name: "changed session restart", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, &agent.UserInputMessage{Text: "carry"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 6}}}, turns: []int{1, 1}},
+			{name: "unidentified init keeps the session", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.UserInputMessage{Text: "prompt"}, &agent.InitMessage{}, &agent.TextMessage{Text: "answer"}, &agent.ResultMessage{DurationMs: 1000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 4}}}, turns: []int{1}},
 			{name: "compaction restart and repeated init", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.ResultMessage{DurationMs: 1000}}, {&agent.UserInputMessage{Text: "carry"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, &agent.InitMessage{SessionID: "two"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 1}}, {{RecordID: 3, Index: 0}, {RecordID: 3, Index: 5}}}, turns: []int{1, 1}},
 		}
 		for _, c := range cases {
@@ -221,8 +222,16 @@ func TestSourceSections(t *testing.T) {
 				if !reflect.DeepEqual(joined, canonical) {
 					t.Fatalf("partition lost/duplicated outputs: %#v vs %#v", joined, canonical)
 				}
-				if len(metadata.Turns) != 2 && c.name != "clear and empty context" {
-					t.Fatalf("turn facts = %#v", metadata.Turns)
+				wantFacts := 0
+				for _, batch := range c.batches {
+					for _, message := range batch {
+						if _, ok := message.(*agent.ResultMessage); ok {
+							wantFacts++
+						}
+					}
+				}
+				if len(metadata.Turns) != wantFacts {
+					t.Fatalf("turn facts = %#v, want %d", metadata.Turns, wantFacts)
 				}
 			})
 		}

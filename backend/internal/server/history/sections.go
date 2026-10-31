@@ -84,7 +84,9 @@ func (s *sectionIndex) append(e *Event) {
 			s.metadata.SetupEndedAt = historyTime(m.Ts)
 		}
 		boundary := m.Kind == v1.EventKindSystem && m.System != nil && (m.System.Subtype == "compact_boundary" || m.System.Subtype == "context_cleared")
-		changedInit := m.Init != nil && m.Init.SessionID != s.sessionID
+		// An init without a session identity reports an unknown origin, such as a
+		// replayed message_start record. It must not split the running session.
+		changedInit := m.Init != nil && m.Init.SessionID != "" && m.Init.SessionID != s.sessionID
 		if boundary || changedInit && (s.current.Boundary == nil || s.current.Boundary.Message.System == nil || s.lastResult.RecordID != 0) {
 			if s.current.Boundary != nil {
 				s.close(e)
@@ -96,7 +98,9 @@ func (s *sectionIndex) append(e *Event) {
 			}
 		}
 		if m.Init != nil {
-			s.sessionID = m.Init.SessionID
+			if m.Init.SessionID != "" {
+				s.sessionID = m.Init.SessionID
+			}
 			s.model = m.Init.ReportedModel
 			s.current.ReportedModel = s.model
 			if s.metadata.InitialInit == nil {
