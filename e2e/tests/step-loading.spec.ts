@@ -2,7 +2,7 @@
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { zipSync } from "three/addons/libs/fflate.module.js";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 const cube = readFileSync("node_modules/occt-import-js/test/testfiles/simple-basic-cube/cube.stp", "utf8");
 const archive = Buffer.from(zipSync({ "cube.stp": new TextEncoder().encode(cube) }));
@@ -52,7 +52,7 @@ for (const width of [390, 1280]) {
       expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(1);
 
       gate.resolve();
-      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
       await closed;
       await expect(page.getByLabel(/^3D model/)).toBeVisible();
       expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
@@ -100,7 +100,7 @@ for (const width of [390, 1280]) {
       const retryStarted = nextStepWorker(page);
       await page.getByRole("button", { name: "Retry", exact: true }).click();
       const { closed: retryClosed } = await retryStarted;
-      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
+      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
       await retryClosed;
       expect(loads).toBe(2);
       await page.keyboard.press("Escape");
@@ -116,7 +116,7 @@ for (const width of [390, 1280]) {
       await page.getByRole("link", { name: "Cube", exact: true }).click();
       await switchedClosed;
       await expect(page.getByTitle("/cube.step", { exact: true })).toBeVisible();
-      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
+      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
       await expect(page.getByRole("alert")).toHaveCount(0);
       await page.keyboard.press("Escape");
       const closingStarted = nextStepWorker(page);
@@ -148,7 +148,7 @@ test("STEP worker startup errors are recoverable", async ({ page, context, api, 
   await page.getByRole("link", { name: "Cube", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Failed to start STEP import worker");
   await page.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
+  await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(attempts).toBe(2);
 });

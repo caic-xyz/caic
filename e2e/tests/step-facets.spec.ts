@@ -6,7 +6,7 @@ import {
   createFramedStep,
   createPolygonStep,
 } from "../../frontend/tests/step-fixture";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 for (const width of [390, 1280]) {
   test(`faceted STEP assemblies skip the CAD kernel at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
@@ -112,7 +112,7 @@ test("dense faceted STEP assembly imports and releases its worker", async ({ pag
   const started = page.waitForEvent("worker", (worker) => worker.url().includes("stepWorker"));
   await page.getByRole("link", { name: "Assembly", exact: true }).click();
   await started;
-  await expect(page.getByText("193,600 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("193,600 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
   await expect.poll(() => page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
   await expect(page.getByLabel(/^3D model/)).toBeVisible();
 

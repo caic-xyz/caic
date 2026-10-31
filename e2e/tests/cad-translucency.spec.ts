@@ -4,7 +4,7 @@ import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { strToU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { create3mfFixture } from "../../frontend/tests/cad-fixture";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 function depthFixture(): Buffer {
   const files = unzipSync(create3mfFixture());
@@ -202,7 +202,7 @@ test("curved STEP translucency renders without shader errors", async ({ page, co
   await waitForTaskState(api, id, "waiting");
   await page.goto(`/task/@${id}`);
   await page.getByRole("link", { name: "Cone", exact: true }).click();
-  await expect(page.getByText("1,318 triangles", { exact: true })).toBeVisible();
+  await expect(page.getByText("1,318 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
   const canvas = page.getByLabel(/^3D model/);
   const solid = await stableFrame(canvas);
   const mode = page.getByRole("button", { name: /^Display mode:/ });

@@ -163,6 +163,17 @@ export { expect };
 export type { Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
+// Every viewer open imports a STEP file in a fresh worker that instantiates the
+// 7.6 MB OCCT WebAssembly module. A shared 4-worker CI runner spends seconds on
+// that: a recorded import pulled the worker script in 393 ms and the compressed
+// wasm in 747 ms over loopback, then spent about 1.5 s compiling and parsing a
+// 12-triangle cube and finished just past Playwright's five-second default.
+// Budget cold STEP imports well above it.
+// ---------------------------------------------------------------------------
+
+export const STEP_IMPORT_TIMEOUT = 30_000;
+
+// ---------------------------------------------------------------------------
 // Utility: create a task via API and return its ID.
 // ---------------------------------------------------------------------------
 

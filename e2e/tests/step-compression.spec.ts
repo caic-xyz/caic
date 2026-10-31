@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { zipSync } from "three/addons/libs/fflate.module.js";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 for (const width of [390, 1280]) {
   test(`compressed STEP models open at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
@@ -41,7 +41,7 @@ for (const width of [390, 1280]) {
     await page.goto(`/task/@${id}`);
     for (const label of ["Plain", "STPZ", "ZIP", "Gzip"]) {
       await page.getByRole("link", { name: label, exact: true }).click();
-      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
+      await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
       await expect(page.getByRole("alert")).toHaveCount(0);
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/?]+)?$`));
