@@ -3,13 +3,11 @@
 package v1
 
 import (
-	"encoding/base64"
 	"fmt"
 	"maps"
 	"net/http"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
@@ -27,7 +25,7 @@ const (
 	maxPromptImageBytes = 20 << 20
 )
 
-// ImageUploadConstraints reports the validation-owned upload policy to clients.
+// ImageUploadConstraints reports image-picker limits and supported MIME types.
 func ImageUploadConstraints() ImageConstraints {
 	return ImageConstraints{AllowedMediaTypes: slices.Sorted(maps.Keys(allowedImageTypes)), MaxImageBytes: maxImageBytes, MaxPromptImageBytes: maxPromptImageBytes}
 }
@@ -67,39 +65,6 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: field + " contains duplicate name: " + rs.Name}
 		}
 		seen[rs.Name] = struct{}{}
-	}
-	return nil
-}
-
-// validateImages checks media types, nonempty payloads, and padding-aware decoded
-// size estimates. It does not decode or validate image contents or base64 syntax.
-func validateImages(images []ImageData) error {
-	var total int
-	for _, img := range images {
-		if img.MediaType == "" {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image mediaType is required"}
-		}
-		if _, ok := allowedImageTypes[img.MediaType]; !ok {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported image mediaType: " + img.MediaType}
-		}
-		if img.Data == "" {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data is required"}
-		}
-		size := base64.StdEncoding.DecodedLen(len(img.Data))
-		if len(img.Data) >= 4 && len(img.Data)%4 == 0 {
-			if strings.HasSuffix(img.Data, "==") {
-				size -= 2
-			} else if strings.HasSuffix(img.Data, "=") {
-				size--
-			}
-		}
-		if size > maxImageBytes {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data too large"}
-		}
-		total += size
-		if total > maxPromptImageBytes {
-			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data total too large"}
-		}
 	}
 	return nil
 }

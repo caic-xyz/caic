@@ -82,7 +82,7 @@ func testSourcePricingInputs(t *testing.T) {
 			`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"root","turnId":"turn","tokenUsage":{"total":{"inputTokens":300000,"outputTokens":1000},"last":{"inputTokens":300000,"outputTokens":1000}}}}}`,
 			`{"t":"agent","ts":3.000,"msg":{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}}`,
 		)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,7 +191,7 @@ func costFixture(t testing.TB, h harness.Name, groups ...[]agent.Message) (*Sour
 			return groups[index], nil
 		}}
 	}}}
-	source, err := NewSource(t.Context(), path, resolver)
+	source, err := NewSource(t.Context(), path, "", resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func testSourceCachePricing(t *testing.T) {
 			`{"t":"agent","ts":2.125,"msg":{"type":"assistant","message":{"model":"priced","id":"request","role":"assistant","content":[],"usage":{"cache_creation_input_tokens":350000,"cache_creation":{"ephemeral_5m_input_tokens":100000,"ephemeral_1h_input_tokens":200000}}}}}`,
 			`{"t":"agent","ts":3.000,"msg":{"type":"result","subtype":"success","total_cost_usd":99,"usage":{"cache_creation_input_tokens":350000}}}`,
 		)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}

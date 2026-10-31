@@ -767,7 +767,7 @@ func TestHandleTaskInput(t *testing.T) {
 			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/input", body)
 			req.SetPathValue("id", tk.ID.String())
 			w := httptest.NewRecorder()
-			handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.sendInput)(w, req)
+			handleTaskPrompt(testTaskHandlers(s), testTaskHandlers(s).taskSvc.sendInput)(w, req)
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
 			}
@@ -790,7 +790,7 @@ func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/restart", body)
 	req.SetPathValue("id", tk.ID.String())
 	w := httptest.NewRecorder()
-	handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.restartTask)(w, req)
+	handleTaskPrompt(testTaskHandlers(s), testTaskHandlers(s).taskSvc.restartTask)(w, req)
 	if w.Code != wantStatus {
 		t.Errorf("status = %d, want %d", w.Code, wantStatus)
 	}
@@ -973,7 +973,7 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"delegate the review"},"repos":[{"name":"myrepo"}],"harness":"claude","caicMCP":true}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1002,7 +1002,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1021,7 +1021,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1041,7 +1041,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1064,7 +1064,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"codex","model":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1087,7 +1087,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","runtimeName":"nonexistent"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1110,7 +1110,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		// Set docker image in user preferences.
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
@@ -1170,7 +1170,7 @@ func TestHandleCreateTask(t *testing.T) {
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
-		handle(testTaskHandlers(s).taskSvc.createTask)(w, req)
+		handlePrompt(testTaskHandlers(s).taskSvc.createTask)(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1239,7 +1239,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		createReq := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","gitHubToken":true}`))
 		createW := httptest.NewRecorder()
-		handle(testTaskHandlers(s).taskSvc.createTask)(createW, createReq)
+		handlePrompt(testTaskHandlers(s).taskSvc.createTask)(createW, createReq)
 		if createW.Code != http.StatusOK {
 			t.Fatalf("create status = %d, want %d: %s", createW.Code, http.StatusOK, createW.Body.String())
 		}
@@ -1281,7 +1281,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1318,7 +1318,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1342,7 +1342,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
 		s := newTestRouter(t, map[harness.Name]agent.Backend{})
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -1357,7 +1357,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownField", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+		handler := handlePrompt(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
@@ -3181,7 +3181,7 @@ func TestCreateTaskRuntimeCPUSettings(t *testing.T) {
 			}
 			body := fmt.Sprintf(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","runtimeName":%q}`, tc.requested)
 			w := httptest.NewRecorder()
-			handle(testTaskHandlers(s).taskSvc.createTask)(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(body)))
+			handlePrompt(testTaskHandlers(s).taskSvc.createTask)(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(body)))
 			if w.Code != http.StatusOK {
 				t.Fatalf("create: %d %s", w.Code, w.Body.String())
 			}

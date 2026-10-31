@@ -146,13 +146,13 @@ class ApiClient(
     suspend fun getTask(id: String): Task = request("GET", "/api/caic/v1/tasks/$id")
     /** Returns recorded and observed runtime metadata for a task. */
     suspend fun getTaskInfo(id: String): TaskInfo = request("GET", "/api/caic/v1/tasks/$id/info")
-    /** Creates and starts a new coding agent task. */
+    /** Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. */
     suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Cancels a queued prompt before delivery. */
     suspend fun cancelQueuedInput(id: String, req: CancelQueuedInputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input/cancel", json.encodeToString(req))
-    /** Sends user input immediately, or queues it for the next waiting turn. */
+    /** Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. */
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input", json.encodeToString(req))
-    /** Restarts a completed or errored task with a new prompt. */
+    /** Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/restart", json.encodeToString(req))
     /** Clears context and restarts the agent session without a prompt. */
     suspend fun clearContext(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/clear-context")

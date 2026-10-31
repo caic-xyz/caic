@@ -1,4 +1,4 @@
-// Serves prompt images stored in task logs as immutable, optionally downscaled resources.
+// Serves immutable prompt images and on-demand previews with a 30-day cache lifetime.
 
 package server
 
@@ -19,19 +19,8 @@ import (
 )
 
 const (
-	// attachmentVariant versions the derived bytes so a decoder or encoder
-	// change cannot be served from an immutable cache entry.
-	attachmentVariant = "1"
-
-	// attachmentConversationWidth renders a conversation thumbnail; the pane
-	// asks for attachmentPaneWidth. Only these widths are accepted: every other
-	// value would add an unbounded decode cost to the immutable cache key.
-	attachmentConversationWidth = 480
-	attachmentPaneWidth         = 1280
-
-	// attachmentCacheControl marks a served image immutable for a year: its bytes
-	// derive only from the digest, the width, and attachmentVariant.
-	attachmentCacheControl = "private, max-age=31536000, immutable"
+	// attachmentCacheControl caches immutable image resources for 30 days.
+	attachmentCacheControl = "private, max-age=2592000, immutable"
 
 	// attachmentMaxPixels bounds a resized decode. A larger image is served
 	// unchanged instead of allocating a full-frame decode per request.
@@ -70,11 +59,11 @@ func imageExtension(mediaType string) string {
 	}
 }
 
-// downscaleImage returns a width-sized encode of a PNG or JPEG image. It
+// downscaleImage fits a PNG or JPEG inside maxDimension on either axis. It
 // reports false when the image must be served unchanged: an animated format,
 // an orientation this decoder would lose, or a frame larger than the resize
 // budget.
-func downscaleImage(data []byte, mediaType string, width int) ([]byte, bool) {
+func downscaleImage(data []byte, mediaType string, maxDimension int) ([]byte, bool) {
 	if mediaType != "image/png" && mediaType != "image/jpeg" {
 		return nil, false
 	}
@@ -87,14 +76,16 @@ func downscaleImage(data []byte, mediaType string, width int) ([]byte, bool) {
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
 		return nil, false
 	}
-	if cfg.Width*cfg.Height > attachmentMaxPixels || cfg.Width <= width {
+	if cfg.Width*cfg.Height > attachmentMaxPixels || max(cfg.Width, cfg.Height) <= maxDimension {
 		return nil, false
 	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, false
 	}
-	height := max(1, cfg.Height*width/cfg.Width)
+	edge := max(cfg.Width, cfg.Height)
+	width := max(1, cfg.Width*maxDimension/edge)
+	height := max(1, cfg.Height*maxDimension/edge)
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
 	var buf bytes.Buffer

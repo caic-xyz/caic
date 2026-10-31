@@ -72,7 +72,7 @@ func (h *taskHistory) acquire(ctx context.Context, entry *taskmgr.Entry) (*histo
 		cached = nil
 	}
 	if cached == nil {
-		source, err := history.NewSource(ctx, path, h.manager.Backends)
+		source, err := history.NewSource(ctx, path, id.String(), h.manager.Backends)
 		if err != nil {
 			return nil, nil, err
 		}

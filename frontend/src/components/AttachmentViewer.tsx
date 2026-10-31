@@ -1,30 +1,25 @@
-// Renders one prompt image from the task log inside the document pane.
+// Renders immutable prompt image resources inside the document pane.
 
 import { Show, createSignal } from "solid-js";
 
 import ImagePreview from "./ImagePreview";
 import TaskViewHeader from "./TaskViewHeader";
 import styles from "./AttachmentViewer.module.css";
-import { attachmentPaneWidth, taskAttachmentURL } from "../runtimePath";
 
-export default function AttachmentViewer(props: { taskId: string; taskPath: string; hash: string }) {
+export default function AttachmentViewer(props: { taskPath: string; url: string; previewURL: string }) {
   const [failed, setFailed] = createSignal(false);
-  const full = () => taskAttachmentURL(props.taskId, props.hash, null);
-  const pane = () => taskAttachmentURL(props.taskId, props.hash, attachmentPaneWidth);
   return (
     <div class={styles.container}>
       <TaskViewHeader
         taskPath={props.taskPath}
         label="Attachment controls"
         actions={
-          <a class={styles.rawLink} href={full()} target="_blank" rel="noopener noreferrer">
+          <a class={styles.rawLink} href={props.url} target="_blank" rel="noopener noreferrer">
             full image
           </a>
         }
       >
-        <span class={styles.title} title={props.hash}>
-          Attached image
-        </span>
+        <span class={styles.title}>Attached image</span>
       </TaskViewHeader>
       <div class={styles.content}>
         <Show
@@ -35,7 +30,7 @@ export default function AttachmentViewer(props: { taskId: string; taskPath: stri
             </div>
           }
         >
-          <ImagePreview src={pane()} fullSrc={full()} alt="attachment" onError={() => setFailed(true)} />
+          <ImagePreview src={props.previewURL} fullSrc={props.url} alt="attachment" onError={() => setFailed(true)} />
         </Show>
       </div>
     </div>

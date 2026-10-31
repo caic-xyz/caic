@@ -388,7 +388,7 @@ a.headerPR:hover {
 }
 
 .quotaDismiss:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--color-focus-border);
   outline-offset: 2px;
 }
 
@@ -1405,6 +1405,15 @@ a.ciStatus:hover {
   flex-wrap: wrap;
   gap: 0.4rem;
   padding-top: 0.25rem;
+}
+
+.queuedImageLink {
+  display: block;
+}
+
+.queuedImageLink:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
 }
 
 .queuedImage {

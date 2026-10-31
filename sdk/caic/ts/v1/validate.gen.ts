@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, LocalUsage, LocalWindow, PendingInput, PendingInputImage, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -58,11 +58,20 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
   return result;
 }
 
-export function validatePendingInputImage(raw: ValidatorInput): PendingInputImage {
-  const obj = asObject(raw, "PendingInputImage");
+export function validateInputImage(raw: ValidatorInput): InputImage {
+  const obj = asObject(raw, "InputImage");
   return {
-    url: asString(obj["url"], "PendingInputImage.url"),
-    thumbnailURL: asString(obj["thumbnailURL"], "PendingInputImage.thumbnailURL"),
+    url: asString(obj["url"], "InputImage.url"),
+    thumbnailURL: (obj["thumbnailURL"] === undefined || obj["thumbnailURL"] === null ? undefined : asString(obj["thumbnailURL"], "InputImage.thumbnailURL")),
+    previewURL: (obj["previewURL"] === undefined || obj["previewURL"] === null ? undefined : asString(obj["previewURL"], "InputImage.previewURL")),
+  };
+}
+
+export function validatePrompt(raw: ValidatorInput): Prompt {
+  const obj = asObject(raw, "Prompt");
+  return {
+    text: asString(obj["text"], "Prompt.text"),
+    images: (obj["images"] === undefined || obj["images"] === null ? undefined : validateArray(obj["images"], "Prompt.images", validateInputImage) as InputImage[]),
   };
 }
 
@@ -72,8 +81,7 @@ export function validatePendingInput(raw: ValidatorInput): PendingInput {
     delivered: (obj["delivered"] === undefined || obj["delivered"] === null ? undefined : asBoolean(obj["delivered"], "PendingInput.delivered")),
     delivering: (obj["delivering"] === undefined || obj["delivering"] === null ? undefined : asBoolean(obj["delivering"], "PendingInput.delivering")),
     id: asString(obj["id"], "PendingInput.id"),
-    text: asString(obj["text"], "PendingInput.text"),
-    images: validateArray(obj["images"], "PendingInput.images", validatePendingInputImage) as PendingInputImage[],
+    prompt: validatePrompt(obj["prompt"]),
     error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "PendingInput.error")),
   };
 }
@@ -546,23 +554,6 @@ export function validateEventSystem(raw: ValidatorInput): EventSystem {
   };
 }
 
-export function validateEventImageData(raw: ValidatorInput): EventImageData {
-  const obj = asObject(raw, "EventImageData");
-  return {
-    mediaType: asString(obj["mediaType"], "EventImageData.mediaType"),
-    data: asString(obj["data"], "EventImageData.data"),
-    hash: (obj["hash"] === undefined || obj["hash"] === null ? undefined : asString(obj["hash"], "EventImageData.hash")),
-  };
-}
-
-export function validateEventUserInput(raw: ValidatorInput): EventUserInput {
-  const obj = asObject(raw, "EventUserInput");
-  return {
-    text: asString(obj["text"], "EventUserInput.text"),
-    images: (obj["images"] === undefined || obj["images"] === null ? undefined : validateArray(obj["images"], "EventUserInput.images", validateEventImageData) as EventImageData[]),
-  };
-}
-
 export function validateTodoItem(raw: ValidatorInput): TodoItem {
   const obj = asObject(raw, "TodoItem");
   return {
@@ -770,7 +761,7 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
       result.system = validateEventSystem(obj["system"]);
       break;
     case "userInput":
-      result.userInput = validateEventUserInput(obj["userInput"]);
+      result.userInput = validatePrompt(obj["userInput"]);
       break;
     case "todo":
       result.todo = validateEventTodo(obj["todo"]);

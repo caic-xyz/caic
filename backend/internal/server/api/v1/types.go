@@ -138,16 +138,20 @@ const (
 	PlatformLinuxAMD64 Platform = "linux/amd64"
 )
 
-// ImageData carries a single base64-encoded image.
-type ImageData struct {
-	MediaType string `json:"mediaType"` // e.g. "image/png", "image/jpeg"
-	Data      string `json:"data"`      // base64-encoded
-}
-
 // Prompt bundles user text with optional images.
 type Prompt struct {
-	Text   string      `json:"text"`
-	Images []ImageData `json:"images,omitempty"`
+	Text   string       `json:"text"`
+	Images []InputImage `json:"images,omitempty"`
+}
+
+// Validate checks image references. Requests decide whether an empty prompt is allowed.
+func (p *Prompt) Validate() error {
+	for _, image := range p.Images {
+		if err := image.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RuntimeInfo is the JSON representation of an available task runtime backend.
@@ -155,7 +159,7 @@ type RuntimeInfo struct {
 	Name string `json:"name"`
 }
 
-// ImageConstraints describes decoded-byte budgets and supported image MIME types.
+// ImageConstraints describes image-picker byte budgets and supported MIME types.
 type ImageConstraints struct {
 	AllowedMediaTypes   []string `json:"allowedMediaTypes"`
 	MaxImageBytes       int      `json:"maxImageBytes"`
@@ -344,20 +348,35 @@ type TaskPlan struct {
 	Content   string `json:"content"`
 }
 
-// PendingInputImage identifies original and thumbnail resources for a pending attachment.
-type PendingInputImage struct {
+// InputImage identifies a prompt attachment's original, thumbnail, and preview.
+// To submit images, use multipart/form-data with a first "request" part holding
+// the JSON request. Each Prompt.Images URL is "cid:image-N" referencing the
+// subsequent binary part named "image-N", in zero-based image order. Text-only
+// requests use JSON. Responses contain immutable task-owned download URLs.
+type InputImage struct {
 	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnailURL"`
+	ThumbnailURL string `json:"thumbnailURL,omitempty"` // Compact thumbnail, at most 96px on either axis.
+	PreviewURL   string `json:"previewURL,omitempty"`   // Inline preview, at most 480px on either axis.
+}
+
+// Validate requires an image URL. The HTTP boundary checks multipart references;
+// thumbnail and preview URLs are not submission inputs.
+func (i *InputImage) Validate() error {
+	if i.URL == "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image URL is required"}
+	}
+	return nil
 }
 
 // PendingInput is a task's single pending prompt without embedded image payloads.
 type PendingInput struct {
-	Delivered  bool                `json:"delivered,omitempty"`
-	Delivering bool                `json:"delivering,omitempty"`
-	ID         ksid.ID             `json:"id"`
-	Text       string              `json:"text"`
-	Images     []PendingInputImage `json:"images"`
-	Error      string              `json:"error,omitempty"`
+	// Delivered means the agent accepted the prompt but clearing the durable pending record failed.
+	// Clients must not offer to edit and resend it, which would duplicate delivery.
+	Delivered  bool    `json:"delivered,omitempty"`
+	Delivering bool    `json:"delivering,omitempty"`
+	ID         ksid.ID `json:"id"`
+	Prompt     Prompt  `json:"prompt"`
+	Error      string  `json:"error,omitempty"`
 }
 
 // Task is the JSON representation sent to the frontend.
@@ -707,7 +726,7 @@ func (r *CreateTaskReq) Validate() error {
 	if err := validateRepoSpecs(r.Repos, "repos"); err != nil {
 		return err
 	}
-	return validateImages(r.InitialPrompt.Images)
+	return r.InitialPrompt.Validate()
 }
 
 // ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
@@ -732,7 +751,7 @@ func (r *ForkTaskReq) Validate() error {
 	if err := validateRepoSpecs(r.ExtraRepos, "extraRepos"); err != nil {
 		return err
 	}
-	return validateImages(r.Prompt.Images)
+	return r.Prompt.Validate()
 }
 
 // TaskHandoffResp contains an editable prompt for continuing a source task in
@@ -780,7 +799,7 @@ func (r *InputReq) Validate() error {
 	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "prompt or images required"}
 	}
-	return validateImages(r.Prompt.Images)
+	return r.Prompt.Validate()
 }
 
 // CancelQueuedInputReq identifies a pending prompt to cancel.

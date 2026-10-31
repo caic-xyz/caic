@@ -31,6 +31,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 type parsingSpy struct {
@@ -92,7 +93,7 @@ func TestUserInputObservationRecovery(t *testing.T) {
 	t.Parallel()
 	path := writeFixture(t, claudeHeader, `{"t":"user_input","text":"unknown"}`, `{"t":"user_input","ts":1234.567,"text":"timed"}`)
 	for attempt := range 2 {
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +140,7 @@ func appendFixture(t testing.TB, path, data string) {
 
 func newFixtureSource(t testing.TB, path string) (*Source, *resolverSpy) {
 	resolver := &resolverSpy{backends: backends.Default("", nil)}
-	source, err := NewSource(t.Context(), path, resolver)
+	source, err := NewSource(t.Context(), path, "", resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +423,7 @@ func TestSource(t *testing.T) {
 	t.Run("spool cleanup", func(t *testing.T) {
 		t.Parallel()
 		path := writeFixture(t, claudeHeader, twoTexts)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -499,13 +500,13 @@ func TestSource(t *testing.T) {
 			t.Fatal(err)
 		}
 		loaded.SetWireResolver(backends.Default("", nil))
-		tracker := apiconv.NewToolTimingTracker(loaded.Harness, loaded.RequestedModel, nil)
+		tracker := apiconv.NewToolTimingTracker("", loaded.Harness, loaded.RequestedModel, nil)
 		var expected []v1.EventMessage
 		for parsed, err := range loaded.StreamMessages(t.Context()) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			expected = append(expected, tracker.ConvertMessage(parsed.Message, parsed.ProducerTime)...)
+			expected = append(expected, tracker.ConvertMessage(2, 0, parsed.Message, parsed.ProducerTime)...)
 		}
 		var actual []v1.EventMessage
 		for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
@@ -610,7 +611,7 @@ func TestSource(t *testing.T) {
 
 func TestSourceSpoolProcessExit(t *testing.T) {
 	if path := os.Getenv("CAIC_SPOOL_EXIT_FIXTURE"); path != "" {
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -733,6 +734,50 @@ func TestSourceStickyFailure(t *testing.T) {
 			assertSourcePoisoned(t, source, snapshot, err)
 		})
 	}
+	t.Run("attachment addresses use parsed message indexes", func(t *testing.T) {
+		t.Parallel()
+		path := writeFixture(t, claudeHeader, `{"t":"agent","ts":1.000,"msg":{"prompt":true}}`)
+		resolver := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
+				return []agent.Message{&agent.UserInputMessage{}, &agent.UserInputMessage{Text: "look", Images: []logv3.ImageData{{MediaType: "image/png", Data: "Zmlyc3Q="}, {MediaType: "image/png", Data: "c2Vjb25k"}}}}, nil
+			}}
+		}}}
+		source, err := NewSource(t.Context(), path, "task", resolver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := source.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		snapshot, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var urls []string
+		for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Message.UserInput != nil {
+				for _, image := range event.Message.UserInput.Images {
+					urls = append(urls, image.URL)
+				}
+			}
+		}
+		if !reflect.DeepEqual(urls, []string{"/api/caic/v1/tasks/task/attachments/2/1/0", "/api/caic/v1/tasks/task/attachments/2/1/1"}) {
+			t.Fatalf("URLs = %v", urls)
+		}
+		media, image, err := taskslog.FindAttachment(t.Context(), path, resolver, 2, 1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if media != "image/png" || string(image) != "second" {
+			t.Fatalf("image = (%q, %q)", media, image)
+		}
+	})
+
 	t.Run("failed boundary frame does not publish offset", func(t *testing.T) {
 		t.Parallel()
 		lines := append([]string{claudeHeader}, slices.Repeat([]string{noOutput}, 255)...)
@@ -745,7 +790,7 @@ func TestSourceStickyFailure(t *testing.T) {
 				return nil, nil
 			}}
 		}}}
-		source, err := NewSource(t.Context(), path, resolver)
+		source, err := NewSource(t.Context(), path, "", resolver)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -827,19 +872,19 @@ func benchmarkSource(b *testing.B, path string, appends []string) {
 		loaded.SetWireResolver(resolver)
 		b.ReportAllocs()
 		for b.Loop() {
-			tracker := apiconv.NewToolTimingTracker(harness.Claude, "", nil)
+			tracker := apiconv.NewToolTimingTracker("", harness.Claude, "", nil)
 			for message, err := range loaded.StreamMessages(b.Context()) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				tracker.ConvertMessage(message.Message, message.ProducerTime)
+				tracker.ConvertMessage(2, 0, message.Message, message.ProducerTime)
 			}
 		}
 	})
 	b.Run("ColdProjection", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			source, err := NewSource(b.Context(), path, resolver)
+			source, err := NewSource(b.Context(), path, "", resolver)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1022,7 +1067,7 @@ func TestSourceLocalChunkSizes(t *testing.T) {
 			t.Fatal(err)
 		}
 		started := time.Now()
-		source, err := NewSource(t.Context(), copyPath, backends.Default("", nil))
+		source, err := NewSource(t.Context(), copyPath, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1158,7 +1203,7 @@ func TestSourceCompressed(t *testing.T) {
 		if err := os.WriteFile(path, compressedBytes[:len(compressedBytes)-4], 0o600); err != nil { //nolint:gosec // Path is generated inside this test's private temporary directory.
 			t.Fatal(err)
 		}
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			return
 		}

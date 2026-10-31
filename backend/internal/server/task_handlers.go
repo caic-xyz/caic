@@ -1,13 +1,11 @@
-// HTTP handlers for task/global-health SSE, queued attachments, file streams, WebSocket proxying, and task lookup.
+// HTTP handlers for task/global-health SSE, immutable prompt attachments, file streams, WebSocket proxying, and task lookup.
 
 package server
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -504,7 +502,7 @@ func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager) (*taskmgr.E
 func (h *taskHandlers) routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /tasks", handle(h.taskSvc.listTasks))
-	m.HandleFunc("POST /tasks", handle(h.taskSvc.createTask))
+	m.HandleFunc("POST /tasks", handlePrompt(h.taskSvc.createTask))
 	m.HandleFunc("GET /tasks/events", h.handleTaskListEvents)
 	m.HandleFunc("GET /tasks/{id}", handleWithTask(h, h.taskSvc.getTask))
 	m.HandleFunc("GET /tasks/{id}/info", handleWithTask(h, h.taskSvc.getTaskInfo))
@@ -517,12 +515,12 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)
 	m.HandleFunc("GET /tasks/{id}/input/{inputID}/images/{index}", h.handleQueuedInputImage)
 	m.HandleFunc("POST /tasks/{id}/input/cancel", handleWithTask(h, h.taskSvc.cancelQueuedInput))
-	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.taskSvc.sendInput))
-	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(h, h.taskSvc.restartTask))
+	m.HandleFunc("POST /tasks/{id}/input", handleTaskPrompt(h, h.taskSvc.sendInput))
+	m.HandleFunc("POST /tasks/{id}/restart", handleTaskPrompt(h, h.taskSvc.restartTask))
 	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(h, h.taskSvc.clearContext))
 	m.HandleFunc("POST /tasks/{id}/compact", handleWithTask(h, h.taskSvc.compactContext))
 	m.HandleFunc("GET /tasks/{id}/handoff", handleWithTask(h, h.taskSvc.getTaskHandoff))
-	m.HandleFunc("POST /tasks/{id}/fork", handleWithTask(h, h.taskSvc.forkTask))
+	m.HandleFunc("POST /tasks/{id}/fork", handleTaskPrompt(h, h.taskSvc.forkTask))
 	m.HandleFunc("POST /tasks/{id}/stop", handleWithTask(h, h.taskSvc.stopTask))
 	m.HandleFunc("POST /tasks/{id}/purge", handleWithTask(h, h.taskSvc.purgeTask))
 	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(h, h.taskSvc.reviveTask))
@@ -530,7 +528,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
 	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
 	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)
-	m.HandleFunc("GET /tasks/{id}/attachments/{hash}", h.handleTaskAttachment)
+	m.HandleFunc("GET /tasks/{id}/attachments/{record}/{message}/{image}", h.handleTaskAttachment)
 	m.HandleFunc("GET /tasks/{id}/raw", h.handleTaskRaw)
 	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
@@ -565,18 +563,19 @@ func (h *taskHandlers) handleQueuedInputImage(w http.ResponseWriter, r *http.Req
 		return
 	}
 	reader := base64.NewDecoder(base64.StdEncoding, strings.NewReader(img.Data))
-	width := r.URL.Query().Get("w")
-	if width != "" && width != "96" {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported pending image width"})
+	dimension := r.URL.Query().Get("max")
+	size, sizeErr := strconv.Atoi(dimension)
+	if dimension != "" && (sizeErr != nil || (size != apiconv.QueuedImageMaxDimension && size != apiconv.ConversationImageMaxDimension)) {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported pending image max dimension"})
 		return
 	}
-	if width == "96" && len(img.Data) <= base64.StdEncoding.EncodedLen(v1.ImageUploadConstraints().MaxImageBytes) {
+	if dimension != "" && len(img.Data) <= base64.StdEncoding.EncodedLen(v1.ImageUploadConstraints().MaxImageBytes) {
 		data, decodeErr := base64.StdEncoding.DecodeString(img.Data)
 		if decodeErr != nil {
 			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "invalid queued image"})
 			return
 		}
-		if thumbnail, resized := downscaleImage(data, img.MediaType, 96); resized {
+		if thumbnail, resized := downscaleImage(data, img.MediaType, size); resized {
 			data = thumbnail
 		}
 		reader = bytes.NewReader(data)
@@ -588,8 +587,15 @@ func (h *taskHandlers) handleQueuedInputImage(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.Header().Set("Content-Type", img.MediaType)
+	etag := `"` + id.String() + "-" + strconv.Itoa(index) + "-" + dimension + `"`
+	w.Header().Set("Cache-Control", attachmentCacheControl)
+	w.Header().Set("ETag", etag)
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	if r.Method == http.MethodHead {
 		return
 	}
@@ -702,8 +708,8 @@ func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleTaskAttachment serves one prompt image from the task log by content
-// digest, optionally downscaled. It is a raw browser resource endpoint, like
+// handleTaskAttachment serves one prompt image by its task-log location,
+// optionally downscaled. It is a raw browser resource endpoint, like
 // the file stream, and intentionally outside the generated JSON SDK.
 func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -714,26 +720,29 @@ func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Reque
 	}
 	// A failed lookup must not stay cached: only a served image is immutable.
 	w.Header().Set("Cache-Control", "no-store")
-	raw := strings.ToLower(r.PathValue("hash"))
-	digestBytes, err := hex.DecodeString(raw)
-	if err != nil || len(digestBytes) != sha256.Size {
-		writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image hash must be 64 hexadecimal characters"})
-		return
-	}
-	var digest [sha256.Size]byte
-	copy(digest[:], digestBytes)
-
-	width := 0
-	if value := r.URL.Query().Get("w"); value != "" && value != "0" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil || (parsed != attachmentConversationWidth && parsed != attachmentPaneWidth) {
-			writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported image width"})
+	var location [3]uint64
+	for i, name := range []string{"record", "message", "image"} {
+		value := r.PathValue(name)
+		n, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || strconv.FormatUint(n, 10) != value || (i == 0 && n == 0) {
+			writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid image log location"})
 			return
 		}
-		width = parsed
+		location[i] = n
+	}
+	raw := fmt.Sprintf("%d/%d/%d", location[0], location[1], location[2])
+
+	maxDimension := 0
+	if value := r.URL.Query().Get("max"); value != "" && value != "0" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || (parsed != apiconv.QueuedImageMaxDimension && parsed != apiconv.ConversationImageMaxDimension && parsed != apiconv.PaneImageMaxDimension) {
+			writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported image max dimension"})
+			return
+		}
+		maxDimension = parsed
 	}
 
-	etag := `"` + raw + "-" + strconv.Itoa(width) + "-" + attachmentVariant + `"`
+	etag := `"` + raw + "-" + strconv.Itoa(maxDimension) + `"`
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {
 		w.Header().Set("Cache-Control", attachmentCacheControl)
 		w.Header().Set("ETag", etag)
@@ -746,13 +755,13 @@ func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Reque
 		writeError(ctx, w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "image not found"})
 		return
 	}
-	mediaType, data, err := taskslog.FindAttachment(ctx, logPath, digest)
+	mediaType, data, err := taskslog.FindAttachment(ctx, logPath, h.taskMgr.Backends, location[0], location[1], location[2])
 	if err != nil {
 		writeError(ctx, w, attachmentError(err))
 		return
 	}
-	if width > 0 {
-		if scaled, ok := downscaleImage(data, mediaType, width); ok {
+	if maxDimension > 0 {
+		if scaled, ok := downscaleImage(data, mediaType, maxDimension); ok {
 			data = scaled
 		}
 	}
@@ -760,7 +769,7 @@ func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Cache-Control", attachmentCacheControl)
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Content-Type", mediaType)
-	w.Header().Set("Content-Disposition", "inline; filename=\"attachment-"+raw[:12]+imageExtension(mediaType)+"\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\"attachment-"+strings.ReplaceAll(raw, "/", "-")+imageExtension(mediaType)+"\"")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))

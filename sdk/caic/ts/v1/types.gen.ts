@@ -291,24 +291,6 @@ export interface EventSystem {
   contextTokensAfter?: number /* int64 */;
 }
 
-/**
- * EventImageData describes one prompt image carried by a user-input event.
- *
- * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
- * task attachment route. Data stays until clients fetch images only by Hash.
- */
-export interface EventImageData {
-  mediaType: string;
-  data: string;
-  hash?: string;
-}
-
-/** EventUserInput is emitted when a user sends a text message to the agent. */
-export interface EventUserInput {
-  text: string;
-  images?: EventImageData[];
-}
-
 /** TodoItem is a single todo entry from a TodoWrite tool call. */
 export interface TodoItem {
   content: string;
@@ -506,7 +488,7 @@ export interface EventMessage {
   usage?: EventUsage;
   result?: EventResult;
   system?: EventSystem;
-  userInput?: EventUserInput;
+  userInput?: Prompt;
   todo?: EventTodo;
   diffStat?: EventDiffStat;
   error?: EventError;
@@ -860,7 +842,7 @@ export const WarningCategoryRuntimeRestoreFailed = "runtime_restore_failed";
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];
 
-/** ImageConstraints describes decoded-byte budgets and supported image MIME types. */
+/** ImageConstraints describes image-picker byte budgets and supported MIME types. */
 export interface ImageConstraints {
   allowedMediaTypes: string[];
   maxImageBytes: number /* int */;
@@ -1295,19 +1277,37 @@ export interface BotFixCIReq {
   repo: string;
 }
 
-/** PendingInputImage identifies original and thumbnail resources for a pending attachment. */
-export interface PendingInputImage {
+/**
+ * InputImage identifies a prompt attachment's original, thumbnail, and preview.
+ * To submit images, use multipart/form-data with a first "request" part holding
+ * the JSON request. Each Prompt.Images URL is "cid:image-N" referencing the
+ * subsequent binary part named "image-N", in zero-based image order. Text-only
+ * requests use JSON. Responses contain immutable task-owned download URLs.
+ */
+export interface InputImage {
   url: string;
-  thumbnailURL: string;
+  /** Compact thumbnail, at most 96px on either axis. */
+  thumbnailURL?: string;
+  /** Inline preview, at most 480px on either axis. */
+  previewURL?: string;
+}
+
+/** Prompt bundles user text with optional images. */
+export interface Prompt {
+  text: string;
+  images?: InputImage[];
 }
 
 /** PendingInput is a task's single pending prompt without embedded image payloads. */
 export interface PendingInput {
+  /**
+   * Delivered means the agent accepted the prompt but clearing the durable pending record failed.
+   * Clients must not offer to edit and resend it, which would duplicate delivery.
+   */
   delivered?: boolean;
   delivering?: boolean;
   id: string;
-  text: string;
-  images: PendingInputImage[];
+  prompt: Prompt;
   error?: string;
 }
 
@@ -1556,20 +1556,6 @@ export interface TaskInfo {
   recorded: TaskInfoRecorded;
   observed?: TaskInfoObservedRuntime;
   warnings?: string[];
-}
-
-/** ImageData carries a single base64-encoded image. */
-export interface ImageData {
-  /** e.g. "image/png", "image/jpeg" */
-  mediaType: string;
-  /** base64-encoded */
-  data: string;
-}
-
-/** Prompt bundles user text with optional images. */
-export interface Prompt {
-  text: string;
-  images?: ImageData[];
 }
 
 /** RepoSpec describes a repository to associate with a task at creation time. */

@@ -19,18 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
-// PromptToAgent converts v1.Prompt to agent.Prompt at the API boundary.
-func PromptToAgent(p v1.Prompt) agent.Prompt {
-	var images []logv3.ImageData
-	if len(p.Images) > 0 {
-		images = make([]logv3.ImageData, len(p.Images))
-		for i, img := range p.Images {
-			images[i] = logv3.ImageData{MediaType: img.MediaType, Data: img.Data}
-		}
-	}
-	return agent.Prompt{Text: p.Text, Images: images}
-}
-
 // Harness converts harness.Name to v1.Harness.
 func Harness(h harness.Name) (v1.Harness, error) {
 	switch h {

@@ -516,7 +516,7 @@ func TestReadAndDecodeBody(t *testing.T) {
 	})
 	t.Run("oversizedValue", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", io.MultiReader(strings.NewReader(`{"instructions":"`), io.LimitReader(zeroSpaceReader{}, 33554432), strings.NewReader(`"}`)))
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", io.MultiReader(strings.NewReader(`{"instructions":"`), io.LimitReader(zeroSpaceReader{}, maxJSONRequestBytes), strings.NewReader(`"}`)))
 		var in v1.CompactReq
 		w := httptest.NewRecorder()
 		if readAndDecodeBody(w, req, &in) || w.Code != 413 {
@@ -526,7 +526,7 @@ func TestReadAndDecodeBody(t *testing.T) {
 
 	t.Run("boundary", func(t *testing.T) {
 		t.Parallel()
-		for _, n := range []int{33554431, 33554432, 33554433} {
+		for _, n := range []int{maxJSONRequestBytes - 1, maxJSONRequestBytes, maxJSONRequestBytes + 1} {
 			for _, known := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%d/known=%t", n, known), func(t *testing.T) {
 					t.Parallel()
@@ -537,7 +537,7 @@ func TestReadAndDecodeBody(t *testing.T) {
 					w := httptest.NewRecorder()
 					var in v1.CompactReq
 					ok := readAndDecodeBody(w, req, &in)
-					if n > 33554432 {
+					if n > maxJSONRequestBytes {
 						if ok || w.Code != 413 {
 							t.Fatalf("oversized body accepted: %d", w.Code)
 						}
@@ -553,20 +553,6 @@ func TestReadAndDecodeBody(t *testing.T) {
 					}
 				})
 			}
-		}
-	})
-	t.Run("nearMaximumImages", func(t *testing.T) {
-		t.Parallel()
-		// Two canonical base64 payloads total just under the existing 20 MiB decoded allowance.
-		data := strings.Repeat("A", 13981012)
-		body := `{"initialPrompt":{"images":[{"mediaType":"image/png","data":"` + data + `"},{"mediaType":"image/png","data":"` + data + `"}]},"harness":"claude"}`
-		var in v1.CreateTaskReq
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", strings.NewReader(body))
-		if !readAndDecodeBody(httptest.NewRecorder(), req, &in) {
-			t.Fatal("maximum canonical images rejected")
-		}
-		if err := in.Validate(); err != nil {
-			t.Fatal(err)
 		}
 	})
 	t.Run("bodyFailures", func(t *testing.T) {
@@ -619,7 +605,7 @@ func TestReadAndDecodeBody(t *testing.T) {
 			status  int
 		}{
 			{name: "valid", size: 2, status: 200},
-			{name: "decompressionBomb", size: 33554433, status: 413},
+			{name: "decompressionBomb", size: maxJSONRequestBytes + 1, status: 413},
 			{name: "lateChecksumError", size: 65536, corrupt: true, status: 400},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

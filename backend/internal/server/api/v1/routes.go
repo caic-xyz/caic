@@ -243,7 +243,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "createTask",
-		Doc:    "Creates and starts a new coding agent task.",
+		Doc:    "Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks",
 		Req:    reflect.TypeFor[CreateTaskReq](),
@@ -259,7 +259,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "sendInput",
-		Doc:    "Sends user input immediately, or queues it for the next waiting turn.",
+		Doc:    "Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/input",
 		Req:    reflect.TypeFor[InputReq](),
@@ -267,7 +267,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "restartTask",
-		Doc:    "Restarts a completed or errored task with a new prompt.",
+		Doc:    "Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/restart",
 		Req:    reflect.TypeFor[RestartReq](),

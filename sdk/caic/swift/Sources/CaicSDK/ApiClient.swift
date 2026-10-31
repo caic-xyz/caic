@@ -411,7 +411,7 @@ public final class ApiClient {
     public func getTaskInfo(id: String) async throws -> TaskInfo {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/info")
     }
-    /// Creates and starts a new coding agent task.
+    /// Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage.
     public func createTask(req: CreateTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks", body: try encoder.encode(req))
     }
@@ -419,11 +419,11 @@ public final class ApiClient {
     public func cancelQueuedInput(id: String, req: CancelQueuedInputReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/input/cancel", body: try encoder.encode(req))
     }
-    /// Sends user input immediately, or queues it for the next waiting turn.
+    /// Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage.
     public func sendInput(id: String, req: InputReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/input", body: try encoder.encode(req))
     }
-    /// Restarts a completed or errored task with a new prompt.
+    /// Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage.
     public func restartTask(id: String, req: RestartReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/restart", body: try encoder.encode(req))
     }

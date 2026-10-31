@@ -162,7 +162,7 @@ func TestTaskService(t *testing.T) {
 					workers.Wait()
 				})
 				workers.Go(func() {
-					response, err := testTaskHandlers(s).taskSvc.sendInput(ctx, e, &v1.InputReq{Prompt: v1.Prompt{Text: "accepted input"}})
+					response, err := testTaskHandlers(s).taskSvc.sendInput(ctx, e, &v1.InputReq{Prompt: v1.Prompt{Text: "accepted input"}}, nil)
 					if err == nil && (response == nil || response.Status != "sent") {
 						err = fmt.Errorf("input response = %+v", response)
 					}

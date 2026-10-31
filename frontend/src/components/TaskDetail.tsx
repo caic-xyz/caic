@@ -52,6 +52,7 @@ import type {
 } from "@sdk/types.gen";
 import { RootConversationProjection } from "../rootConversation";
 import type { DraftImage } from "../images";
+import { rememberTaskViewOrigin } from "../taskView";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "@maruel/gomode/web/HostMode";
@@ -81,7 +82,7 @@ import { compareHistoryPosition, historyPositionKey } from "../historyPosition";
 import { createLiveDuration } from "../liveDuration";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { createHistoryScroll } from "../historyScroll";
-import { attachmentThumbnailWidth, taskAttachmentURL, taskAttachmentViewURL, taskViewURL } from "../runtimePath";
+import { inputImageViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
 import { VisualTimingTracker, formatTimingDuration } from "../timing";
@@ -1551,11 +1552,18 @@ export default function TaskDetail(props: Props) {
               </Show>
               <div class={styles.queuedInput} data-testid="queued-input">
                 <div class={styles.queuedContent}>
-                  <div class={styles.queuedText}>{q().text}</div>
-                  <Show when={q().images.length > 0}>
+                  <div class={styles.queuedText}>{q().prompt.text}</div>
+                  <Show when={q().prompt.images?.length}>
                     <div class={styles.queuedImages}>
-                      <For each={q().images.map((image) => image.thumbnailURL)}>
-                        {(src, index) => <QueuedImage src={src} index={index()} />}
+                      {/* Immutable URL keys keep previews mounted across task updates. */}
+                      <For each={q().prompt.images?.map((image) => image.thumbnailURL || image.url)}>
+                        {(src, index) => (
+                          <Show when={q().prompt.images?.[index()]}>
+                            {(image) => (
+                              <QueuedImage taskId={props.taskId} url={image().url} src={src} index={index()} />
+                            )}
+                          </Show>
+                        )}
                       </For>
                     </div>
                   </Show>
@@ -2083,38 +2091,14 @@ function GroupContent(props: {
               <div class={styles.userInputImages}>
                 <For each={ui.images}>
                   {(img) => (
-                    <Show
-                      when={img.hash}
-                      fallback={
-                        <img
-                          class={styles.userInputImage}
-                          src={`data:${img.mediaType};base64,${img.data}`}
-                          alt="attached"
-                        />
-                      }
+                    <A
+                      class={styles.userInputImageLink}
+                      href={inputImageViewURL(props.taskId, img.url)}
+                      aria-label="Open attached image"
+                      onClick={(event) => rememberTaskViewOrigin(event.currentTarget)}
                     >
-                      {(hash) => (
-                        <A
-                          class={styles.userInputImageLink}
-                          href={taskAttachmentViewURL(props.taskId, hash())}
-                          aria-label="Open attached image"
-                        >
-                          <img
-                            class={styles.userInputImage}
-                            src={taskAttachmentURL(props.taskId, hash(), attachmentThumbnailWidth)}
-                            alt="attached"
-                            onError={(event) => {
-                              // The event still carries the payload, so a digest the
-                              // log cannot resolve falls back to the inline image,
-                              // once: a failed inline decode must not retry itself.
-                              const image = event.currentTarget;
-                              if (image.src.startsWith("data:")) return;
-                              image.src = `data:${img.mediaType};base64,${img.data}`;
-                            }}
-                          />
-                        </A>
-                      )}
-                    </Show>
+                      <img class={styles.userInputImage} src={img.previewURL} alt="attached" />
+                    </A>
                   )}
                 </For>
               </div>
@@ -3121,20 +3105,27 @@ function AskQuestionCard(props: {
 }
 
 // Queue image URLs identify immutable attachments; errors stay visible until the row leaves.
-function QueuedImage(props: { src: string; index: number }) {
+function QueuedImage(props: { taskId: string; url: string; src: string; index: number }) {
   const [failed, setFailed] = createSignal(false);
   return (
-    <Show when={!failed()} fallback={<span>Attachment {props.index + 1}: preview unavailable</span>}>
-      <img
-        class={styles.queuedImage}
-        src={props.src}
-        alt={`Queued attachment ${props.index + 1}`}
-        loading="lazy"
-        decoding="async"
-        width="48"
-        height="48"
-        onError={() => setFailed(true)}
-      />
-    </Show>
+    <A
+      class={styles.queuedImageLink}
+      href={inputImageViewURL(props.taskId, props.url)}
+      aria-label={`Open queued attachment ${props.index + 1}`}
+      onClick={(event) => rememberTaskViewOrigin(event.currentTarget)}
+    >
+      <Show when={!failed()} fallback={<span>Attachment {props.index + 1}: preview unavailable</span>}>
+        <img
+          class={styles.queuedImage}
+          src={props.src}
+          alt={`Queued attachment ${props.index + 1}`}
+          loading="lazy"
+          decoding="async"
+          width="48"
+          height="48"
+          onError={() => setFailed(true)}
+        />
+      </Show>
+    </A>
   );
 }

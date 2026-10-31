@@ -1,6 +1,6 @@
-// Owns Blob image drafts, preview URLs, bounded submission encoding, and browser captures.
+// Owns Blob image drafts, preview URLs, and browser captures.
 
-import type { ImageConstraints, ImageData as APIImageData } from "@sdk/types.gen";
+import type { ImageConstraints } from "@sdk/types.gen";
 
 export interface DraftImage {
   readonly id: string;
@@ -57,27 +57,6 @@ export class ImageDraftOwner {
     this.disposed = true;
     this.release([...this.images]);
   }
-}
-
-/** Encode images serially; only the final wire values grow with the bounded prompt.
- * Raw reads and binary strings are limited to 48 KiB. A multiple of three keeps
- * independently encoded chunks padding-free except for the final slice.
- * Preview decoding and the final base64/JSON request are outside this work budget.
- */
-export async function imagesToAPI(images: readonly DraftImage[], signal: AbortSignal): Promise<APIImageData[]> {
-  const result: APIImageData[] = [];
-  for (const img of images) {
-    let data = "";
-    for (let offset = 0; offset < img.blob.size; offset += 48 * 1024) {
-      signal.throwIfAborted();
-      const bytes = new Uint8Array(await img.blob.slice(offset, offset + 48 * 1024).arrayBuffer());
-      signal.throwIfAborted();
-      data += btoa(String.fromCharCode(...bytes));
-    }
-    result.push({ mediaType: img.blob.type, data });
-  }
-  signal.throwIfAborted();
-  return result;
 }
 
 export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {

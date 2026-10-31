@@ -1,8 +1,6 @@
 // Browser coverage for one pending prompt, attachment restoration, editing, steering, and delivery.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
-const QUEUED_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4zwAE/wEHAAH/4iOeWQAAAABJRU5ErkJggg==";
-
 for (const mobile of [false, true]) {
   test(`queued prompts survive reload and send after the current turn (${mobile ? "mobile" : "desktop"})`, async ({
     page,
@@ -17,16 +15,36 @@ for (const mobile of [false, true]) {
     await page.screenshot({ path: testInfo.outputPath("new-task.png") });
     const id = await createTaskAPI(api, "FAKE_DEMO_GATED queue journey");
     await waitForTaskState(api, id, "running");
-    await api.sendInput(id, {
-      prompt: {
-        text: "send this after the answer",
-        images: [
-          { mediaType: "image/png", data: QUEUED_PNG },
-          { mediaType: "image/png", data: QUEUED_PNG },
-        ],
-      },
-      queue: true,
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 1600;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("2d canvas unavailable");
+      const gradient = context.createLinearGradient(0, 0, 320, 1600);
+      gradient.addColorStop(0, "#203c61");
+      gradient.addColorStop(1, "#84bdc8");
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, 320, 1600);
+      context.fillStyle = "#fff";
+      context.font = "32px sans-serif";
+      context.fillText("Portrait preview", 40, 800);
+      const data = canvas.toDataURL("image/png");
+      return data.slice(data.indexOf(",") + 1);
     });
+    await api.sendInput(
+      id,
+      {
+        prompt: {
+          text: "send this after the answer",
+        },
+        queue: true,
+      },
+      {
+        images: [0, 1].map(() => new Blob([Buffer.from(png, "base64")], { type: "image/png" })),
+        signal: new AbortController().signal,
+      },
+    );
     await page.goto(`/task/@${id}`);
     const queue = page.getByRole("region", { name: "Pending prompt" });
     await expect(queue.getByTestId("queued-input")).toHaveCount(1);
@@ -37,11 +55,27 @@ for (const mobile of [false, true]) {
     await expect
       .poll(() =>
         thumbnails.evaluateAll((images) =>
-          images.every((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth === 2),
+          images.every(
+            (image) =>
+              image instanceof HTMLImageElement &&
+              image.complete &&
+              image.naturalWidth === 19 &&
+              image.naturalHeight === 96,
+          ),
         ),
       )
       .toBe(true);
     await page.screenshot({ path: testInfo.outputPath("queue.png") });
+    await queue.getByRole("link", { name: "Open queued attachment 1" }).click();
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}/view\\?image=`));
+    const full = page.getByRole("img", { name: "attachment", exact: true });
+    await expect(full).toBeVisible();
+    expect(await full.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(320);
+    await page.screenshot({ path: testInfo.outputPath("queued-image.png") });
+    await page.reload();
+    await expect(page.getByRole("img", { name: "attachment", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Close view" }).click();
+    await expect(queue).toBeVisible();
     const prompt = page.getByTestId("task-detail-prompt");
     await prompt.fill("keep this draft");
     await page.getByRole("button", { name: "Send options", exact: true }).click();

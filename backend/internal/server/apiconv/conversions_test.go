@@ -277,26 +277,6 @@ func TestRepoForge(t *testing.T) {
 	}
 }
 
-func TestPromptToAgent(t *testing.T) {
-	t.Parallel()
-
-	prompt := v1.Prompt{
-		Text: "Explain this screenshot",
-		Images: []v1.ImageData{
-			{MediaType: "image/png", Data: "iVBORw0KGgo="},
-		},
-	}
-	want := agent.Prompt{
-		Text: "Explain this screenshot",
-		Images: []logv3.ImageData{
-			{MediaType: "image/png", Data: "iVBORw0KGgo="},
-		},
-	}
-	if got := PromptToAgent(prompt); !reflect.DeepEqual(got, want) {
-		t.Errorf("PromptToAgent() = %#v, want %#v", got, want)
-	}
-}
-
 func TestSafetyIssues(t *testing.T) {
 	t.Parallel()
 

@@ -162,7 +162,7 @@ func TestSourceSections(t *testing.T) {
 						return c.batches[input["batch"]], nil
 					}}
 				}}}
-				source, err := NewSource(t.Context(), path, resolver)
+				source, err := NewSource(t.Context(), path, "", resolver)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -230,7 +230,7 @@ func TestSourceSections(t *testing.T) {
 	t.Run("setup excludes interleaved transcript", func(t *testing.T) {
 		t.Parallel()
 		path := writeFixture(t, claudeHeader, `{"t":"log","line":"first setup line"}`, twoTexts, `{"t":"log","line":"later setup line"}`)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -294,7 +294,7 @@ func TestSourceSections(t *testing.T) {
 						}}
 					}}}
 					open := func(path string) *Source {
-						source, err := NewSource(t.Context(), path, resolver)
+						source, err := NewSource(t.Context(), path, "", resolver)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -394,7 +394,7 @@ func TestSourceSections(t *testing.T) {
 			`{"t":"agent","ts":5.000,"msg":{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":100}}}`,
 			`{"t":"agent","ts":6.000,"msg":{"type":"system","subtype":"init","session_id":"second","model":"claude-sonnet-4-6"}}`,
 			delta)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,7 +447,7 @@ func TestSourceSections(t *testing.T) {
 	t.Run("within one raw record", func(t *testing.T) {
 		t.Parallel()
 		path := writeFixture(t, claudeHeader, twoTexts, noOutput)
-		source, err := NewSource(t.Context(), path, backends.Default("", nil))
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -674,7 +674,7 @@ func TestSectionIndex(t *testing.T) {
 		messages := []v1.EventMessage{
 			{Kind: v1.EventKindInit, Ts: 100, Init: &v1.EventInit{SessionID: "root"}},
 			{Kind: v1.EventKindSystem, Ts: 120, System: &v1.EventSystem{Subtype: "active"}},
-			{Kind: v1.EventKindUserInput, Ts: 140, UserInput: &v1.EventUserInput{Text: "continue"}},
+			{Kind: v1.EventKindUserInput, Ts: 140, UserInput: &v1.Prompt{Text: "continue"}},
 			{Kind: v1.EventKindResult, Ts: 200, Result: &v1.EventResult{}},
 			{Kind: v1.EventKindCommitSnapshot, Ts: 220, CommitSnapshot: &v1.EventCommitSnapshot{}},
 			{Kind: v1.EventKindSystem, Ts: 240, System: &v1.EventSystem{Subtype: "compact_boundary"}},

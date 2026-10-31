@@ -110,13 +110,13 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}`),
     /** Returns recorded and observed runtime metadata for a task. */
     getTaskInfo: (id: string): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/info`),
-    /** Creates and starts a new coding agent task. */
+    /** Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. */
     createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
     /** Cancels a queued prompt before delivery. */
     cancelQueuedInput: (id: string, req: CancelQueuedInputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input/cancel`, req),
-    /** Sends user input immediately, or queues it for the next waiting turn. */
+    /** Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. */
     sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input`, req),
-    /** Restarts a completed or errored task with a new prompt. */
+    /** Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. */
     restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/restart`, req),
     /** Clears context and restarts the agent session without a prompt. */
     clearContext: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/clear-context`),

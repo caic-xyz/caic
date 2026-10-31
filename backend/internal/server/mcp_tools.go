@@ -361,7 +361,7 @@ func (m *mcpTools) handleTaskCreate(ctx context.Context, call *mcp.ToolRequest[m
 		if len(call.Arguments.Repos) != 0 || call.Arguments.Harness != "" || call.Arguments.Model != "" || call.Arguments.Effort != "" || call.Arguments.RuntimeName != "" || call.Arguments.Display || call.Arguments.Tailscale || call.Arguments.USB || call.Arguments.Sudo || call.Arguments.GitHubToken {
 			return mcp.ToolError[mcpTaskCreatedOutput]("Task-scoped MCP may only set prompt")
 		}
-		resp, err := m.taskSvc.createTask(ctx, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: call.Arguments.Prompt}})
+		resp, err := m.taskSvc.createTask(ctx, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: call.Arguments.Prompt}}, nil)
 		if err != nil {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
@@ -394,7 +394,7 @@ func (m *mcpTools) handleTaskCreate(ctx context.Context, call *mcp.ToolRequest[m
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskCreatedOutput](err)
 	}
-	resp, err := m.taskSvc.createTask(ctx, req)
+	resp, err := m.taskSvc.createTask(ctx, req, nil)
 	if err != nil {
 		return m.taskCreateToolError(ctx, call.Arguments, err)
 	}
@@ -693,7 +693,7 @@ func (m *mcpTools) handleTaskFork(ctx context.Context, call *mcp.ToolRequest[mcp
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
-	resp, err := m.taskSvc.forkTask(ctx, entry, req)
+	resp, err := m.taskSvc.forkTask(ctx, entry, req, nil)
 	if err != nil {
 		return m.taskForkToolError(call.Arguments, entry.Task(), err)
 	}
@@ -858,7 +858,7 @@ func (m *mcpTools) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, fie
 	if args.Message == "" {
 		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: " + field})
 	}
-	_, err = m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
+	_, err = m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}}, nil)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}

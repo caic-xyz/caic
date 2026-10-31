@@ -1221,7 +1221,7 @@ object WarningCategorySerializer : KSerializer<WarningCategory> {
 
 typealias DiffStat = List<DiffFileStat>
 
-/** ImageConstraints describes decoded-byte budgets and supported image MIME types. */
+/** ImageConstraints describes image-picker byte budgets and supported MIME types. */
 @Serializable
 data class ImageConstraints(
     val allowedMediaTypes: List<String>,
@@ -1672,21 +1672,37 @@ data class RepoBranchesResp(val branches: List<BranchInfo>)
 @Serializable
 data class BotFixCIReq(val repo: String)
 
-/** PendingInputImage identifies original and thumbnail resources for a pending attachment. */
+/**
+ * InputImage identifies a prompt attachment's original, thumbnail, and preview.
+ * To submit images, use multipart/form-data with a first "request" part holding
+ * the JSON request. Each Prompt.Images URL is "cid:image-N" referencing the
+ * subsequent binary part named "image-N", in zero-based image order. Text-only
+ * requests use JSON. Responses contain immutable task-owned download URLs.
+ */
 @Serializable
-data class PendingInputImage(
+data class InputImage(
     val url: String,
-    @SerialName("thumbnailURL") val thumbnailURL: String,
+    /** Compact thumbnail, at most 96px on either axis. */
+    @SerialName("thumbnailURL") val thumbnailURL: String? = null,
+    /** Inline preview, at most 480px on either axis. */
+    @SerialName("previewURL") val previewURL: String? = null,
 )
+
+/** Prompt bundles user text with optional images. */
+@Serializable
+data class Prompt(val text: String, val images: List<InputImage>? = null)
 
 /** PendingInput is a task's single pending prompt without embedded image payloads. */
 @Serializable
 data class PendingInput(
+    /**
+     * Delivered means the agent accepted the prompt but clearing the durable pending record failed.
+     * Clients must not offer to edit and resend it, which would duplicate delivery.
+     */
     val delivered: Boolean? = null,
     val delivering: Boolean? = null,
     val id: String,
-    val text: String,
-    val images: List<PendingInputImage>,
+    val prompt: Prompt,
     val error: String? = null,
 )
 
@@ -1950,19 +1966,6 @@ data class TaskInfo(
     val observed: TaskInfoObservedRuntime? = null,
     val warnings: List<String>? = null,
 )
-
-/** ImageData carries a single base64-encoded image. */
-@Serializable
-data class ImageData(
-    /** e.g. "image/png", "image/jpeg" */
-    val mediaType: String,
-    /** base64-encoded */
-    val data: String,
-)
-
-/** Prompt bundles user text with optional images. */
-@Serializable
-data class Prompt(val text: String, val images: List<ImageData>? = null)
 
 /** RepoSpec describes a repository to associate with a task at creation time. */
 @Serializable
@@ -2738,23 +2741,6 @@ data class EventSystem(
     val contextTokensAfter: Long? = null,
 )
 
-/**
- * EventImageData describes one prompt image carried by a user-input event.
- *
- * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
- * task attachment route. Data stays until clients fetch images only by Hash.
- */
-@Serializable
-data class EventImageData(
-    val mediaType: String,
-    val data: String,
-    val hash: String? = null,
-)
-
-/** EventUserInput is emitted when a user sends a text message to the agent. */
-@Serializable
-data class EventUserInput(val text: String, val images: List<EventImageData>? = null)
-
 /** TodoItem is a single todo entry from a TodoWrite tool call. */
 @Serializable
 data class TodoItem(
@@ -2964,7 +2950,7 @@ data class EventMessage(
     val usage: EventUsage? = null,
     val result: EventResult? = null,
     val system: EventSystem? = null,
-    val userInput: EventUserInput? = null,
+    val userInput: Prompt? = null,
     val todo: EventTodo? = null,
     val diffStat: EventDiffStat? = null,
     val error: EventError? = null,

@@ -112,3 +112,38 @@ describe("URLs", () => {
     expect(taskViewURL("abc", "/home/user/a b.md")).toBe("/task/@abc/view?path=%2Fhome%2Fuser%2Fa+b.md");
   });
 });
+
+// URL resources stay within the authenticated image endpoints.
+it("accepts immutable image resources and rejects external or alternate endpoint URLs", async () => {
+  const { inputImageSource, inputImageViewURL } = await import("./runtimePath");
+  const url = "/api/caic/v1/tasks/abc/input/def/images/0";
+  expect(inputImageSource(url)).toBe(url);
+  expect(inputImageSource("/api/caic/v1/tasks/abc/input/def/images/0")).not.toBeNull();
+  expect(inputImageSource(`/api/caic/v1/tasks/abc/attachments/${"a".repeat(64)}`)).toBeNull();
+  for (const invalid of [
+    "https://other.test/image.png",
+    "//other.test/image.png",
+    "/api/caic/v1/tasks/abc/raw?path=secret",
+    url + "?max=96",
+    url + "/../x",
+  ])
+    expect(inputImageSource(invalid)).toBeNull();
+  expect(new URL(inputImageViewURL("abc", url), "https://caic.test").searchParams.get("image")).toBe(url);
+});
+
+it("opens conversation images with downscaled pane previews", async () => {
+  const { inputImageViewURL, taskAttachmentURL } = await import("./runtimePath");
+  const location = "2/0/0";
+  const source = `/api/caic/v1/tasks/abc/attachments/${location}`;
+  const view = new URL(inputImageViewURL("abc", source), "https://caic.test");
+  expect(view.searchParams.get("attachment")).toBe(location);
+  expect(taskAttachmentURL("abc", location, 1280)).toBe(source + "?max=1280");
+  expect(taskAttachmentURL("abc", location, null)).toBe(source);
+});
+
+it("rejects malformed log locations before constructing document image requests", async () => {
+  const { taskAttachmentLocation } = await import("./runtimePath");
+  expect(taskAttachmentLocation("42/3/1")).toBe("42/3/1");
+  for (const value of ["0/0/0", "1/00/0", "1/-1/0", "1/0", "1/0/0/1", "../../raw", "1/0/0?max=480", "1/0/0#x"])
+    expect(taskAttachmentLocation(value)).toBeNull();
+});

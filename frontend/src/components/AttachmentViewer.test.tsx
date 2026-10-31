@@ -5,13 +5,22 @@ import { Route, Router } from "@solidjs/router";
 import { expect } from "@tests/expect";
 import AttachmentViewer from "./AttachmentViewer";
 
-const hash = "a".repeat(64);
+const location = "2/0/0";
 
 function fixture() {
-  window.history.replaceState(null, "", `/task/@abc/view?attachment=${hash}`);
+  window.history.replaceState(null, "", `/task/@abc/view?attachment=${location}`);
   return render(() => (
     <Router>
-      <Route path="/*" component={() => <AttachmentViewer taskId="abc" taskPath="/task/@abc" hash={hash} />} />
+      <Route
+        path="/*"
+        component={() => (
+          <AttachmentViewer
+            taskPath="/task/@abc"
+            url={`/api/caic/v1/tasks/abc/attachments/${location}`}
+            previewURL={`/api/caic/v1/tasks/abc/attachments/${location}?max=1280`}
+          />
+        )}
+      />
     </Router>
   ));
 }
@@ -22,9 +31,9 @@ describe("AttachmentViewer", () => {
   it("shows the full image and links to the raw bytes", () => {
     fixture();
     const image = screen.getByRole("img", { name: "attachment" });
-    expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${hash}?w=1280`);
+    expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${location}?max=1280`);
     const raw = screen.getByRole("link", { name: "full image" });
-    expect(raw.getAttribute("href")).toBe(`/api/caic/v1/tasks/abc/attachments/${hash}`);
+    expect(raw.getAttribute("href")).toBe(`/api/caic/v1/tasks/abc/attachments/${location}`);
     expect(raw.getAttribute("target")).toBe("_blank");
   });
 

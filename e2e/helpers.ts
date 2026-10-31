@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import { createApiClient, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
+import { type FetchFn } from "../sdk/caic/ts/v1/api.gen";
+import { createPromptClient } from "../frontend/src/api";
 import type { HistoryBootstrap, PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
 
 // Exercise the public asynchronous native bridge, including its page/identity/scope binding.
@@ -77,8 +78,15 @@ export async function invokeFrontendTool(page: Page, name: string, args: Record<
 function playwrightFetch(request: APIRequestContext): FetchFn {
   return async (url: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? "GET";
-    const data = init?.body != null ? JSON.parse(init.body as string) : undefined;
-    const pwRes = await request.fetch(url, { method, data });
+    const encoded =
+      init?.body instanceof FormData ? new Request("https://caic.test", { method, body: init.body }) : null;
+    const data = encoded
+      ? Buffer.from(await encoded.arrayBuffer())
+      : init?.body != null
+        ? JSON.parse(init.body as string)
+        : undefined;
+    const headers = encoded ? { "Content-Type": encoded.headers.get("Content-Type")! } : undefined;
+    const pwRes = await request.fetch(url, { method, data, headers });
     const body = await pwRes.body();
     // Copy into a plain Uint8Array: Node's Buffer is not a DOM BodyInit.
     return new Response(new Uint8Array(body), {
@@ -93,7 +101,7 @@ function playwrightFetch(request: APIRequestContext): FetchFn {
 // ---------------------------------------------------------------------------
 
 function createClient(request: APIRequestContext) {
-  return createApiClient(playwrightFetch(request));
+  return createPromptClient(playwrightFetch(request));
 }
 
 export type APIClient = ReturnType<typeof createClient>;

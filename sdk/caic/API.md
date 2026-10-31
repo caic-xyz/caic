@@ -60,10 +60,10 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[]` |
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
-| POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
+| POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. | `CreateTaskReq` | `Task` |
 | POST | `/api/caic/v1/tasks/{id}/input/cancel` | Cancels a queued prompt before delivery. | `CancelQueuedInputReq` | `StatusResp` |
-| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input immediately, or queues it for the next waiting turn. | `InputReq` | `StatusResp` |
-| POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. | `InputReq` | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
@@ -473,7 +473,7 @@ WarningCategory identifies a warning independently of translated display text.
 
 ### ImageConstraints
 
-ImageConstraints describes decoded-byte budgets and supported image MIME types.
+ImageConstraints describes image-picker byte budgets and supported MIME types.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -941,14 +941,28 @@ The server fetches CI logs, builds a prompt, and creates a fix task.
 |-------|------|-------------|----------|
 | `repo` | `string` |  | yes |
 
-### PendingInputImage
+### InputImage
 
-PendingInputImage identifies original and thumbnail resources for a pending attachment.
+InputImage identifies a prompt attachment's original, thumbnail, and preview.
+To submit images, use multipart/form-data with a first "request" part holding
+the JSON request. Each Prompt.Images URL is "cid:image-N" referencing the
+subsequent binary part named "image-N", in zero-based image order. Text-only
+requests use JSON. Responses contain immutable task-owned download URLs.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `url` | `string` |  | yes |
-| `thumbnailURL` | `string` |  | yes |
+| `thumbnailURL` | `string` | Compact thumbnail, at most 96px on either axis. |  |
+| `previewURL` | `string` | Inline preview, at most 480px on either axis. |  |
+
+### Prompt
+
+Prompt bundles user text with optional images.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+| `images` | `InputImage[]` |  |  |
 
 ### PendingInput
 
@@ -956,11 +970,11 @@ PendingInput is a task's single pending prompt without embedded image payloads.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `delivered` | `boolean` |  |  |
+| `delivered` | `boolean` | Delivered means the agent accepted the prompt but clearing the durable pending record failed.
+Clients must not offer to edit and resend it, which would duplicate delivery. |  |
 | `delivering` | `boolean` |  |  |
 | `id` | `string` |  | yes |
-| `text` | `string` |  | yes |
-| `images` | `PendingInputImage[]` |  | yes |
+| `prompt` | `Prompt` |  | yes |
 | `error` | `string` |  |  |
 
 ### TaskRepo
@@ -1227,24 +1241,6 @@ TaskInfo is the detailed metadata response for a task.
 | `recorded` | `TaskInfoRecorded` |  | yes |
 | `observed` | `TaskInfoObservedRuntime` |  |  |
 | `warnings` | `string[]` |  |  |
-
-### ImageData
-
-ImageData carries a single base64-encoded image.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `mediaType` | `string` | e.g. "image/png", "image/jpeg" | yes |
-| `data` | `string` | base64-encoded | yes |
-
-### Prompt
-
-Prompt bundles user text with optional images.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-| `images` | `ImageData[]` |  |  |
 
 ### RepoSpec
 
@@ -2101,28 +2097,6 @@ compact_boundary. Zero means the harness did not report it. |  |
 | `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
 compact_boundary, measured or estimated. Zero means it did not report it. |  |
 
-### EventImageData
-
-EventImageData describes one prompt image carried by a user-input event.
-
-Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
-task attachment route. Data stays until clients fetch images only by Hash.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `mediaType` | `string` |  | yes |
-| `data` | `string` |  | yes |
-| `hash` | `string` |  |  |
-
-### EventUserInput
-
-EventUserInput is emitted when a user sends a text message to the agent.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `text` | `string` |  | yes |
-| `images` | `EventImageData[]` |  |  |
-
 ### TodoItem
 
 TodoItem is a single todo entry from a TodoWrite tool call.
@@ -2350,7 +2324,7 @@ EventMessage is one backend-neutral message in cached history and its live strea
 | `usage` | `EventUsage` |  |  |
 | `result` | `EventResult` |  |  |
 | `system` | `EventSystem` |  |  |
-| `userInput` | `EventUserInput` |  |  |
+| `userInput` | `Prompt` |  |  |
 | `todo` | `EventTodo` |  |  |
 | `diffStat` | `EventDiffStat` |  |  |
 | `error` | `EventError` |  |  |

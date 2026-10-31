@@ -3,9 +3,6 @@
 package apiconv
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -36,6 +33,7 @@ const maxPendingToolTimings = 1024
 // The harness is fixed at construction; the per-stream state
 // (pending, window) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
+	taskID     string
 	harness    harness.Name
 	cost       task.CostTracker
 	pricer     usage.ModelPricer
@@ -46,8 +44,9 @@ type ToolTimingTracker struct {
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
 // harness into API events.
-func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer) *ToolTimingTracker {
+func NewToolTimingTracker(taskID string, h harness.Name, model string, pricer usage.ModelPricer) *ToolTimingTracker {
 	return &ToolTimingTracker{
+		taskID:  taskID,
 		harness: h,
 		cost:    task.CostTracker{Harness: h, Model: model},
 		pricer:  pricer,
@@ -56,8 +55,9 @@ func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer
 }
 
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
-func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
-	events := tt.convertMessage(msg, now)
+// The physical record ID and zero-based parsed message index address its images.
+func (tt *ToolTimingTracker) ConvertMessage(recordID uint64, messageIndex int, msg agent.Message, now time.Time) []v1.EventMessage {
+	events := tt.convertMessage(recordID, messageIndex, msg, now)
 	for i := range events {
 		events[i].Source = v1.EventMessageSource(*msg.Provenance())
 	}
@@ -65,7 +65,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 }
 
 // convertMessage projects event payloads; ConvertMessage attaches their common origin.
-func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
+func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, msg agent.Message, now time.Time) []v1.EventMessage {
 	turnCost, hasCost := tt.cost.Observe(msg, now, tt.pricer)
 	var ts int64
 	if !now.IsZero() {
@@ -170,14 +170,15 @@ func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 		if m.Text == "" && len(m.Images) == 0 {
 			return nil
 		}
-		var images []v1.EventImageData
-		for _, img := range m.Images {
-			images = append(images, v1.EventImageData{MediaType: img.MediaType, Data: img.Data, Hash: imageDigest(img.Data)})
+		var images []v1.InputImage
+		for imageIndex := range m.Images {
+			url := fmt.Sprintf("/api/caic/v1/tasks/%s/attachments/%d/%d/%d", tt.taskID, recordID, messageIndex, imageIndex)
+			images = append(images, InputImage(url))
 		}
 		return []v1.EventMessage{{
 			Kind:      v1.EventKindUserInput,
 			Ts:        ts,
-			UserInput: &v1.EventUserInput{Text: m.Text, Images: images},
+			UserInput: &v1.Prompt{Text: m.Text, Images: images},
 		}}
 	case *agent.ToolResultMessage:
 		nativeDuration, _ := agent.NativeDuration(m)
@@ -492,16 +493,4 @@ func TodoItems(items []agent.TodoItem) []v1.TodoItem {
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.
 type toolInputProbe struct {
 	RunInBackground bool `json:"run_in_background"`
-}
-
-// imageDigest returns the hex SHA-256 of a base64 image payload, matching the
-// task attachment route. An undecodable payload has no addressable identity, so
-// the digest stays empty and clients keep the inline data.
-func imageDigest(data string) string {
-	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(decoded)
-	return hex.EncodeToString(sum[:])
 }

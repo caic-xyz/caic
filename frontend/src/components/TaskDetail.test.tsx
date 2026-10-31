@@ -468,68 +468,29 @@ it("automatically restores completed activity timing while keeping live observat
 });
 
 it("links a sent image to its document view at the conversation width", async () => {
-  const hash = "a".repeat(64);
+  const location = "2/0/0";
   taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
     emit(handlers, {
       kind: "userInput",
       ts: 1000,
       userInput: {
         text: "look",
-        images: [{ mediaType: "image/png", data: "aW1n", hash }],
+        images: [
+          {
+            url: `/api/caic/v1/tasks/abc/attachments/${location}`,
+            previewURL: `/api/caic/v1/tasks/abc/attachments/${location}?max=480`,
+            thumbnailURL: `/api/caic/v1/tasks/abc/attachments/${location}?max=96`,
+          },
+        ],
       },
     });
     return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
   });
   await renderTaskDetail();
   const image = await screen.findByRole("img", { name: "attached" });
-  expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${hash}?w=480`);
+  expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${location}?max=480`);
   const link = screen.getByRole("link", { name: "Open attached image" });
-  expect(link.getAttribute("href")).toBe(`/task/@abc/view?attachment=${hash}`);
-});
-
-it("falls back to the inline image when the attachment cannot load", async () => {
-  const hash = "a".repeat(64);
-  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
-    emit(handlers, {
-      kind: "userInput",
-      ts: 1000,
-      userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n", hash }] },
-    });
-    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
-  });
-  await renderTaskDetail();
-  const image = await screen.findByRole("img", { name: "attached" });
-  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(image) as object, "src");
-  if (!descriptor?.get || !descriptor.set) throw new Error("Missing HTMLImageElement.src accessors");
-  let assignments = 0;
-  Object.defineProperty(image, "src", {
-    configurable: true,
-    get: () => descriptor.get?.call(image),
-    set: (value: string) => {
-      assignments++;
-      descriptor.set?.call(image, value);
-    },
-  });
-  fireEvent.error(image);
-  expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1n");
-  expect(assignments).toBe(1);
-  fireEvent.error(image);
-  expect(assignments).toBe(1);
-});
-
-it("keeps rendering an image inline when it has no digest", async () => {
-  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
-    emit(handlers, {
-      kind: "userInput",
-      ts: 1000,
-      userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n" }] },
-    });
-    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
-  });
-  await renderTaskDetail();
-  const image = await screen.findByRole("img", { name: "attached" });
-  expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1n");
-  expect(screen.queryByRole("link", { name: "Open attached image" })).not.toBeInTheDocument();
+  expect(link.getAttribute("href")).toBe("/task/@abc/view?attachment=2%2F0%2F0");
 });
 
 it("keeps a child-first card mounted and open as parent content and lifecycle metadata arrive", async () => {
@@ -2457,7 +2418,7 @@ describe("streamed conversation", () => {
 
   it("keeps one pending prompt while allowing steering and editing a cleared draft", async () => {
     vi.useRealTimers();
-    const queued = { id: "queued1", text: "follow up", images: [] };
+    const queued = { id: "queued1", prompt: { text: "follow up", images: [] } };
     const [draft, setDraft] = createSignal("another draft");
     const edit = vi.fn(async () => {});
     const send = vi.fn(async (_steer: boolean) => {});
@@ -2485,13 +2446,16 @@ describe("streamed conversation", () => {
     vi.useRealTimers();
     const [queue, setQueue] = createSignal({
       id: "queued1",
-      text: "first",
-      images: [
-        {
-          url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
-          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
-        },
-      ],
+      prompt: {
+        text: "first",
+        images: [
+          {
+            url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+            previewURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=480",
+            thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96",
+          },
+        ],
+      },
     });
     renderTaskDetail({
       get pendingInput() {
@@ -2501,13 +2465,16 @@ describe("streamed conversation", () => {
     const image = screen.getByRole("img", { name: "Queued attachment 1" });
     setQueue({
       id: "queued1",
-      text: "updated",
-      images: [
-        {
-          url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
-          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
-        },
-      ],
+      prompt: {
+        text: "updated",
+        images: [
+          {
+            url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+            previewURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=480",
+            thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96",
+          },
+        ],
+      },
     });
     await waitFor(() => expect(screen.getByText("updated")).toBeInTheDocument());
     expect(screen.getByRole("img", { name: "Queued attachment 1" })).toBe(image);
@@ -2518,8 +2485,10 @@ describe("streamed conversation", () => {
     renderTaskDetail({
       pendingInput: {
         id: "queued1",
-        text: "sent once",
-        images: [],
+        prompt: {
+          text: "sent once",
+          images: [],
+        },
         delivered: true,
         error: "Prompt sent; cancel to prevent replay.",
       },
@@ -2536,19 +2505,22 @@ describe("streamed conversation", () => {
     renderTaskDetail({
       pendingInput: {
         id: "queued1",
-        text: "follow up",
-        images: [
-          {
-            url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
-            thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
-          },
-        ],
+        prompt: {
+          text: "follow up",
+          images: [
+            {
+              url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+              previewURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=480",
+              thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96",
+            },
+          ],
+        },
       },
     });
     const queue = screen.getByRole("region", { name: "Pending prompt" });
     expect(within(queue).getByText("follow up")).toBeInTheDocument();
     const image = within(queue).getByRole("img", { name: "Queued attachment 1" });
-    expect(image).toHaveAttribute("src", "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96");
+    expect(image).toHaveAttribute("src", "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96");
     fireEvent.error(image);
     expect(within(queue).getByText("Attachment 1: preview unavailable")).toBeInTheDocument();
     fireEvent.click(within(queue).getByRole("button", { name: "Cancel pending prompt" }));

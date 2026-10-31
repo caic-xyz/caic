@@ -680,7 +680,7 @@ public struct WarningCategory: Codable, Equatable, Hashable {
 /// DiffStat summarises the changes in a branch relative to its base.
 public typealias DiffStat = [DiffFileStat]
 
-/// ImageConstraints describes decoded-byte budgets and supported image MIME types.
+/// ImageConstraints describes image-picker byte budgets and supported MIME types.
 public struct ImageConstraints: Codable {
     public let allowedMediaTypes: [String]
     public let maxImageBytes: Int
@@ -1083,19 +1083,33 @@ public struct BotFixCIReq: Codable {
     public let repo: String
 }
 
-/// PendingInputImage identifies original and thumbnail resources for a pending attachment.
-public struct PendingInputImage: Codable {
+/// InputImage identifies a prompt attachment's original, thumbnail, and preview.
+/// To submit images, use multipart/form-data with a first "request" part holding
+/// the JSON request. Each Prompt.Images URL is "cid:image-N" referencing the
+/// subsequent binary part named "image-N", in zero-based image order. Text-only
+/// requests use JSON. Responses contain immutable task-owned download URLs.
+public struct InputImage: Codable {
     public let url: String
-    public let thumbnailURL: String
+    /// Compact thumbnail, at most 96px on either axis.
+    public let thumbnailURL: String?
+    /// Inline preview, at most 480px on either axis.
+    public let previewURL: String?
+}
+
+/// Prompt bundles user text with optional images.
+public struct Prompt: Codable {
+    public let text: String
+    public let images: [InputImage]?
 }
 
 /// PendingInput is a task's single pending prompt without embedded image payloads.
 public struct PendingInput: Codable {
+    /// Delivered means the agent accepted the prompt but clearing the durable pending record failed.
+    /// Clients must not offer to edit and resend it, which would duplicate delivery.
     public let delivered: Bool?
     public let delivering: Bool?
     public let id: String
-    public let text: String
-    public let images: [PendingInputImage]
+    public let prompt: Prompt
     public let error: String?
 }
 
@@ -1338,20 +1352,6 @@ public struct TaskInfo: Codable {
     public let recorded: TaskInfoRecorded
     public let observed: TaskInfoObservedRuntime?
     public let warnings: [String]?
-}
-
-/// ImageData carries a single base64-encoded image.
-public struct ImageData: Codable {
-    /// e.g. "image/png", "image/jpeg"
-    public let mediaType: String
-    /// base64-encoded
-    public let data: String
-}
-
-/// Prompt bundles user text with optional images.
-public struct Prompt: Codable {
-    public let text: String
-    public let images: [ImageData]?
 }
 
 /// RepoSpec describes a repository to associate with a task at creation time.
@@ -2077,22 +2077,6 @@ public struct EventSystem: Codable {
     public let contextTokensAfter: Int?
 }
 
-/// EventImageData describes one prompt image carried by a user-input event.
-///
-/// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
-/// task attachment route. Data stays until clients fetch images only by Hash.
-public struct EventImageData: Codable {
-    public let mediaType: String
-    public let data: String
-    public let hash: String?
-}
-
-/// EventUserInput is emitted when a user sends a text message to the agent.
-public struct EventUserInput: Codable {
-    public let text: String
-    public let images: [EventImageData]?
-}
-
 /// TodoItem is a single todo entry from a TodoWrite tool call.
 public struct TodoItem: Codable {
     public let content: String
@@ -2274,7 +2258,7 @@ public struct EventMessage: Codable {
     public let usage: EventUsage?
     public let result: EventResult?
     public let system: EventSystem?
-    public let userInput: EventUserInput?
+    public let userInput: Prompt?
     public let todo: EventTodo?
     public let diffStat: EventDiffStat?
     public let error: EventError?

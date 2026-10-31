@@ -73,6 +73,7 @@ declare const classes: {
   readonly "queuedContent": string;
   readonly "queuedError": string;
   readonly "queuedImage": string;
+  readonly "queuedImageLink": string;
   readonly "queuedImages": string;
   readonly "queuedInput": string;
   readonly "queuedLabel": string;

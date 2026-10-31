@@ -1,19 +1,19 @@
-// Tests prompt image serving from task logs, including resize, cache, and EXIF rules.
+// Tests and benchmarks prompt image serving, bounded resizing, caching, and EXIF rules.
 
 package server
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
 	"image/jpeg"
+	"image/png"
+	"strconv"
 
 	"net/http"
 	"net/http/httptest"
@@ -21,22 +21,29 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/maruel/ksid"
 	"golang.org/x/image/draw"
 )
 
+func newAttachmentTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid.ID) {
+	s, runtime, id := newTaskDiffTestRouter(t)
+	s.taskMgr.Backends = backends.Default("", nil)
+	return s, runtime, id
+}
+
 // attachmentImageLog writes a task log whose input record carries one image and
-// returns its path, digest, and bytes.
-func attachmentImageLog(t *testing.T, mediaType string, data []byte) (path, digest string) {
+// returns its path and attachment location.
+func attachmentImageLog(t *testing.T, mediaType string, data []byte) (path, location string) {
 	t.Helper()
 	dir := t.TempDir()
 	path = filepath.Join(dir, "task.jsonl")
-	record := fmt.Sprintf(`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"turn/start","params":{"input":[{"type":"image","url":%q}]}}}`,
-		"data:"+mediaType+";base64,"+base64.StdEncoding.EncodeToString(data))
-	if err := os.WriteFile(path, []byte(record+"\n"), 0o600); err != nil {
+	record := fmt.Sprintf(`{"t":"user_input","ts":1.000,"images":[{"media_type":%q,"data":%q}]}`, mediaType, base64.StdEncoding.EncodeToString(data))
+	if err := os.WriteFile(path, []byte(`{"t":"caic_meta","version":3,"harness":"claude","prompt":"original"}`+"\n"+record+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(data)
-	return path, hex.EncodeToString(sum[:])
+	return path, "2/0/0"
 }
 
 // testImage builds a large image by scaling a two-pixel color tile, so it needs
@@ -62,11 +69,11 @@ func testJPEG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-func attachmentRequest(t *testing.T, s *testRouter, id, digest, query string) *httptest.ResponseRecorder {
+func attachmentRequest(t *testing.T, s *testRouter, id, location, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet,
-		"/tasks/"+id+"/attachments/"+digest+query, nil)
+		"/tasks/"+id+"/attachments/"+location+query, nil)
 	testTaskHandlers(s).routes().ServeHTTP(w, req)
 	return w
 }
@@ -76,25 +83,25 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, ok := s.taskMgr.GetEntry(id)
 		if !ok {
 			t.Fatal("task entry missing")
 		}
 		jpegData := testJPEG(t, 1600, 900)
-		logPath, digest := attachmentImageLog(t, "image/jpeg", jpegData)
+		logPath, location := attachmentImageLog(t, "image/jpeg", jpegData)
 		entry.LogPath.Set(logPath)
 
 		t.Run("original bytes", func(t *testing.T) {
 			t.Parallel()
-			w := attachmentRequest(t, s, id.String(), digest, "")
+			w := attachmentRequest(t, s, id.String(), location, "")
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 			}
 			if got := w.Header().Get("Content-Type"); got != "image/jpeg" {
 				t.Errorf("Content-Type = %q, want image/jpeg", got)
 			}
-			if got := w.Header().Get("Cache-Control"); got != "private, max-age=31536000, immutable" {
+			if got := w.Header().Get("Cache-Control"); got != "private, max-age=2592000, immutable" {
 				t.Errorf("Cache-Control = %q, want immutable", got)
 			}
 			if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
@@ -108,34 +115,36 @@ func TestTaskAttachment(t *testing.T) {
 			}
 		})
 
-		t.Run("conversation width", func(t *testing.T) {
-			t.Parallel()
-			w := attachmentRequest(t, s, id.String(), digest, "?w=480")
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-			}
-			cfg, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.Width != attachmentConversationWidth {
-				t.Errorf("width = %d, want %d", cfg.Width, attachmentConversationWidth)
-			}
-			if w.Body.Len() >= len(jpegData) {
-				t.Errorf("thumbnail = %d bytes, want fewer than the %d stored bytes", w.Body.Len(), len(jpegData))
-			}
-		})
+		for _, width := range []int{96, 480, 1280} {
+			t.Run(strconv.Itoa(width), func(t *testing.T) {
+				t.Parallel()
+				w := attachmentRequest(t, s, id.String(), location, "?max="+strconv.Itoa(width))
+				if w.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+				}
+				cfg, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Width != width {
+					t.Errorf("width = %d, want %d", cfg.Width, width)
+				}
+				if w.Body.Len() >= len(jpegData) {
+					t.Errorf("thumbnail = %d bytes, want fewer than the %d stored bytes", w.Body.Len(), len(jpegData))
+				}
+			})
+		}
 
 		t.Run("conditional request", func(t *testing.T) {
 			t.Parallel()
-			first := attachmentRequest(t, s, id.String(), digest, "?w=480")
+			first := attachmentRequest(t, s, id.String(), location, "?max=480")
 			w := httptest.NewRecorder()
 			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet,
-				"/tasks/"+id.String()+"/attachments/"+digest+"?w=480", nil)
+				"/tasks/"+id.String()+"/attachments/"+location+"?max=480", nil)
 			req.Header.Set("If-None-Match", first.Header().Get("ETag"))
 			testTaskHandlers(s).routes().ServeHTTP(w, req)
-			if w.Code != http.StatusNotModified {
-				t.Fatalf("status = %d, want 304", w.Code)
+			if w.Code != http.StatusNotModified || w.Header().Get("Cache-Control") != "private, max-age=2592000, immutable" {
+				t.Fatalf("conditional response = %d %v", w.Code, w.Header())
 			}
 			if w.Body.Len() != 0 {
 				t.Errorf("body = %d bytes, want empty", w.Body.Len())
@@ -145,12 +154,12 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("conditional request skips the log", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
-		_, digest := attachmentImageLog(t, "image/png", []byte("never read"))
-		etag := `"` + digest + "-480-" + attachmentVariant + `"`
+		s, _, id := newAttachmentTestRouter(t)
+		_, location := attachmentImageLog(t, "image/png", []byte("never read"))
+		etag := `"` + location + "-480" + `"`
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet,
-			"/tasks/"+id.String()+"/attachments/"+digest+"?w=480", nil)
+			"/tasks/"+id.String()+"/attachments/"+location+"?max=480", nil)
 		req.Header.Set("If-None-Match", etag)
 		testTaskHandlers(s).routes().ServeHTTP(w, req)
 		if w.Code != http.StatusNotModified {
@@ -160,7 +169,7 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("gif is served verbatim", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
 		var buf bytes.Buffer
 		palette := color.Palette{color.Black, color.White}
@@ -169,9 +178,9 @@ func TestTaskAttachment(t *testing.T) {
 			t.Fatal(err)
 		}
 		gifData := buf.Bytes()
-		logPath, digest := attachmentImageLog(t, "image/gif", gifData)
+		logPath, location := attachmentImageLog(t, "image/gif", gifData)
 		entry.LogPath.Set(logPath)
-		w := attachmentRequest(t, s, id.String(), digest, "?w=480")
+		w := attachmentRequest(t, s, id.String(), location, "?max=480")
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 		}
@@ -182,12 +191,12 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("webp is served verbatim", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
 		webpData := []byte("RIFF\x1a\x00\x00\x00WEBPVP8L")
-		logPath, digest := attachmentImageLog(t, "image/webp", webpData)
+		logPath, location := attachmentImageLog(t, "image/webp", webpData)
 		entry.LogPath.Set(logPath)
-		w := attachmentRequest(t, s, id.String(), digest, "?w=480")
+		w := attachmentRequest(t, s, id.String(), location, "?max=480")
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 		}
@@ -198,12 +207,12 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("oversized frame is served unchanged", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
 		huge := pngHeader(7000, 7000)
-		logPath, digest := attachmentImageLog(t, "image/png", huge)
+		logPath, location := attachmentImageLog(t, "image/png", huge)
 		entry.LogPath.Set(logPath)
-		w := attachmentRequest(t, s, id.String(), digest, "?w=480")
+		w := attachmentRequest(t, s, id.String(), location, "?max=480")
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 		}
@@ -214,12 +223,12 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("oriented jpeg keeps its bytes", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
 		jpegData := orientedJPEG(t, testJPEG(t, 1600, 900), 6)
-		logPath, digest := attachmentImageLog(t, "image/jpeg", jpegData)
+		logPath, location := attachmentImageLog(t, "image/jpeg", jpegData)
 		entry.LogPath.Set(logPath)
-		w := attachmentRequest(t, s, id.String(), digest, "?w=480")
+		w := attachmentRequest(t, s, id.String(), location, "?max=480")
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 		}
@@ -230,24 +239,30 @@ func TestTaskAttachment(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		s, _, id := newTaskDiffTestRouter(t)
+		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
-		logPath, digest := attachmentImageLog(t, "image/png", []byte("\x89PNG\r\n\x1a\npayload"))
+		logPath, location := attachmentImageLog(t, "image/png", []byte("\x89PNG\r\n\x1a\npayload"))
 		entry.LogPath.Set(logPath)
 		for _, tc := range []struct {
-			name   string
-			digest string
-			query  string
-			status int
+			name     string
+			location string
+			query    string
+			status   int
 		}{
-			{"unknown digest", hex.EncodeToString(bytes.Repeat([]byte{7}, sha256.Size)), "", http.StatusNotFound},
-			{"malformed digest", "abc", "", http.StatusBadRequest},
-			{"unsupported width", digest, "?w=481", http.StatusBadRequest},
-			{"non-numeric width", digest, "?w=wide", http.StatusBadRequest},
+			{"unknown location", "99/0/0", "", http.StatusNotFound},
+			{"malformed location", "abc/0/0", "", http.StatusBadRequest},
+			{"zero record", "0/0/0", "", http.StatusBadRequest},
+			{"negative index", "2/-1/0", "", http.StatusBadRequest},
+			{"overflow index", "2/18446744073709551616/0", "", http.StatusBadRequest},
+			{"noncanonical index", "2/00/0", "", http.StatusBadRequest},
+			{"missing message", "2/1/0", "", http.StatusNotFound},
+			{"missing image", "2/0/1", "", http.StatusNotFound},
+			{"unsupported max dimension", location, "?max=481", http.StatusBadRequest},
+			{"non-numeric max dimension", location, "?max=wide", http.StatusBadRequest},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				w := attachmentRequest(t, s, id.String(), tc.digest, tc.query)
+				w := attachmentRequest(t, s, id.String(), tc.location, tc.query)
 				if w.Code != tc.status {
 					t.Fatalf("status = %d, want %d: %s", w.Code, tc.status, w.Body.String())
 				}
@@ -261,8 +276,8 @@ func TestTaskAttachment(t *testing.T) {
 		}
 		t.Run("no log", func(t *testing.T) {
 			t.Parallel()
-			absent, _, absentID := newTaskDiffTestRouter(t)
-			w := attachmentRequest(t, absent, absentID.String(), digest, "")
+			absent, _, absentID := newAttachmentTestRouter(t)
+			w := attachmentRequest(t, absent, absentID.String(), location, "")
 			if w.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404", w.Code)
 			}
@@ -316,16 +331,41 @@ func TestDownscaleImage(t *testing.T) {
 	small := testJPEG(t, 400, 200)
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		scaled, ok := downscaleImage(jpegData, "image/jpeg", attachmentConversationWidth)
-		if !ok {
-			t.Fatal("downscaleImage reported no resize for a large JPEG")
-		}
-		cfg, _, err := image.DecodeConfig(bytes.NewReader(scaled))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Width != attachmentConversationWidth {
-			t.Errorf("width = %d, want %d", cfg.Width, attachmentConversationWidth)
+		for _, tc := range []struct {
+			name                                 string
+			width, height, wantWidth, wantHeight int
+		}{
+			{"landscape", 1600, 320, 480, 96},
+			{"portrait", 320, 1600, 96, 480},
+			{"square", 800, 800, 480, 480},
+			{"thin landscape", 1600, 1, 480, 1},
+			{"thin portrait", 1, 1600, 1, 480},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for _, mediaType := range []string{"image/jpeg", "image/png"} {
+					t.Run(mediaType, func(t *testing.T) {
+						t.Parallel()
+						var buf bytes.Buffer
+						img := testImage(tc.width, tc.height)
+						if mediaType == "image/png" {
+							if err := png.Encode(&buf, img); err != nil {
+								t.Fatal(err)
+							}
+						} else if err := jpeg.Encode(&buf, img, nil); err != nil {
+							t.Fatal(err)
+						}
+						scaled, ok := downscaleImage(buf.Bytes(), mediaType, 480)
+						if !ok {
+							t.Fatal("large image was not resized")
+						}
+						cfg, _, err := image.DecodeConfig(bytes.NewReader(scaled))
+						if err != nil || cfg.Width != tc.wantWidth || cfg.Height != tc.wantHeight {
+							t.Fatalf("config = %+v, err = %v, want %dx%d", cfg, err, tc.wantWidth, tc.wantHeight)
+						}
+					})
+				}
+			})
 		}
 	})
 	t.Run("error", func(t *testing.T) {
@@ -336,10 +376,10 @@ func TestDownscaleImage(t *testing.T) {
 			mediaType string
 			width     int
 		}{
-			{"animated format", jpegData, "image/gif", attachmentConversationWidth},
-			{"already narrow", small, "image/jpeg", attachmentConversationWidth},
-			{"not an image", []byte("not an image"), "image/jpeg", attachmentConversationWidth},
-			{"oriented", orientedJPEG(t, jpegData, 6), "image/jpeg", attachmentConversationWidth},
+			{"animated format", jpegData, "image/gif", apiconv.ConversationImageMaxDimension},
+			{"already small", small, "image/jpeg", apiconv.ConversationImageMaxDimension},
+			{"not an image", []byte("not an image"), "image/jpeg", apiconv.ConversationImageMaxDimension},
+			{"oriented", orientedJPEG(t, jpegData, 6), "image/jpeg", apiconv.ConversationImageMaxDimension},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -384,4 +424,31 @@ func TestJPEGOrientation(t *testing.T) {
 			})
 		}
 	})
+}
+
+func BenchmarkDownscaleImage(b *testing.B) {
+	for _, shape := range []struct {
+		name          string
+		width, height int
+	}{
+		{"landscape", 2752, 1536},
+		{"tall screenshot", 640, 8000},
+	} {
+		b.Run(shape.name, func(b *testing.B) {
+			var buf bytes.Buffer
+			if err := jpeg.Encode(&buf, testImage(shape.width, shape.height), &jpeg.Options{Quality: 90}); err != nil {
+				b.Fatal(err)
+			}
+			data := buf.Bytes()
+			for _, size := range []int{480, 1280} {
+				b.Run(strconv.Itoa(size), func(b *testing.B) {
+					b.ReportAllocs()
+					b.SetBytes(int64(len(data)))
+					for b.Loop() {
+						_, _ = downscaleImage(data, "image/jpeg", size)
+					}
+				})
+			}
+		})
+	}
 }

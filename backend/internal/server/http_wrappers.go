@@ -124,9 +124,8 @@ func toDTO(err error) error {
 	return &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 }
 
-// maxJSONRequestBytes bounds decompressed JSON, including base64 images. The
-// existing 20 MiB image allowance needs about 27 MiB of canonical JSON payload,
-// leaving room for text and metadata within this 32 MiB request limit.
+// maxJSONRequestBytes bounds buffering for text prompts, settings, and metadata.
+// Keep room for large pasted logs.
 const maxJSONRequestBytes = 32 << 20
 
 // readAndDecodeBody decodes a bounded request into input, rejecting unknown
@@ -152,7 +151,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 		message := "failed to read request body"
 		if _, ok := errors.AsType[*http.MaxBytesError](readErr); ok {
 			status = http.StatusRequestEntityTooLarge
-			message = "request body exceeds 32 MiB limit"
+			message = fmt.Sprintf("request body exceeds %d MiB limit", maxJSONRequestBytes>>20)
 		}
 		writeError(r.Context(), w, &api.Error{Status: status, Code: api.CodeBadRequest, Message: message})
 		return false

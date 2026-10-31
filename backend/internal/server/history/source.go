@@ -75,7 +75,7 @@ type Source struct {
 // until Refresh. Projection is a pure function of the ordered physical log:
 // native costs and usage are retained, while live pricing estimates and the
 // latest-visible-plan lookup belong to revalidated endpoints.
-func NewSource(ctx context.Context, path string, resolver taskslog.WireResolver) (*Source, error) {
+func NewSource(ctx context.Context, path, taskID string, resolver taskslog.WireResolver) (*Source, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func NewSource(ctx context.Context, path string, resolver taskslog.WireResolver)
 	if err != nil {
 		return nil, errors.Join(err, cursor.Close())
 	}
-	tracker := apiconv.NewToolTimingTracker(cursor.Harness, cursor.RequestedModel, nil)
+	tracker := apiconv.NewToolTimingTracker(taskID, cursor.Harness, cursor.RequestedModel, nil)
 	journal, err := newCostJournal(filepath.Dir(path))
 	if err != nil {
 		return nil, errors.Join(err, cursor.Close(), f.Close())
@@ -127,7 +127,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 		var events []Event
-		for _, parsed := range record.Messages {
+		for messageIndex, parsed := range record.Messages {
 			m := parsed.Message
 			index := uint32(len(events)) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			if fact := costFactFor(parsed, Position{RecordID: record.ID, Index: index}); fact != nil {
@@ -139,7 +139,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			if !s.exitStatus.Observe(m) {
 				continue
 			}
-			projected := s.tracker.ConvertMessage(m, parsed.ProducerTime)
+			projected := s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			for i := range projected {
 				events = append(events, Event{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			}

@@ -1,4 +1,4 @@
-// Benchmarks capped JSON request decoding, including large canonical image payloads.
+// Benchmarks capped JSON request decoding, including large text and URL image references.
 
 package server
 
@@ -20,11 +20,11 @@ import (
 )
 
 func requestBodyFixture(size int) string {
-	return `{"initialPrompt":{"images":[{"mediaType":"image/png","data":"` + strings.Repeat("A", size) + `"}]},"harness":"claude"}`
+	return `{"initialPrompt":{"text":"` + strings.Repeat("A", size) + `","images":[{"url":"cid:image-0"}]},"harness":"claude"}`
 }
 
 func BenchmarkReadAndDecodeBody(b *testing.B) {
-	for _, size := range []int{1024, 1 << 20, 27962024} {
+	for _, size := range []int{1024, 1 << 20, maxJSONRequestBytes - 1024} {
 		b.Run(fmt.Sprintf("Bytes%d", size), func(b *testing.B) {
 			body := requestBodyFixture(size)
 			ctx := context.WithValue(b.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler))
@@ -49,7 +49,7 @@ func TestRequestBodyPeak(t *testing.T) {
 	if os.Getenv("CAIC_REQUEST_HEAP_SAMPLE") != "1" {
 		t.Skip("set CAIC_REQUEST_HEAP_SAMPLE=1 for isolated heap sampling")
 	}
-	body := requestBodyFixture(27962024)
+	body := requestBodyFixture(maxJSONRequestBytes - 1024)
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", strings.NewReader(body))
 	runtime.GC()
 	var before runtime.MemStats

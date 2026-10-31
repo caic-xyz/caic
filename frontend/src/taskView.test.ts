@@ -13,7 +13,8 @@ describe("taskViewMode", () => {
   });
   it("defaults to docked and accepts only the explicit fullscreen flag", () => {
     expect(taskViewMode("/task/@abc/view", "?path=notes.md")).toBe("docked");
-    expect(taskViewMode("/task/@abc/view", "?attachment=" + "a".repeat(64))).toBe("docked");
+    expect(taskViewMode("/task/@abc/view", "?image=%2Fapi%2Fimage")).toBe("docked");
+    expect(taskViewMode("/task/@abc/view", "?attachment=2%2F0%2F0")).toBe("docked");
     expect(taskViewMode("/task/@abc/view", "?path=notes.md&fullscreen=true")).toBe("docked");
     expect(taskViewMode("/task/@abc+slug/view", "?path=%2Fnotes.md&fullscreen=1")).toBe("fullscreen");
   });

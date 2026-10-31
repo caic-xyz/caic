@@ -181,10 +181,10 @@ func Task(in *TaskInput) (v1.Task, error) {
 	}
 	out.Owner = in.Owner
 	if q := in.PendingInput; q != nil {
-		pending := &v1.PendingInput{ID: q.ID, Text: q.Prompt.Text, Images: make([]v1.PendingInputImage, 0, len(q.Prompt.Images)), Delivering: q.Delivering, Error: q.Error, Delivered: q.Delivered}
+		pending := &v1.PendingInput{ID: q.ID, Prompt: v1.Prompt{Text: q.Prompt.Text, Images: make([]v1.InputImage, 0, len(q.Prompt.Images))}, Delivering: q.Delivering, Error: q.Error, Delivered: q.Delivered}
 		for index := range q.Prompt.Images {
 			url := fmt.Sprintf("/api/caic/v1/tasks/%s/input/%s/images/%d", t.ID, q.ID, index)
-			pending.Images = append(pending.Images, v1.PendingInputImage{URL: url, ThumbnailURL: url + "?w=96"})
+			pending.Prompt.Images = append(pending.Prompt.Images, InputImage(url))
 		}
 		out.PendingInput = pending
 	}

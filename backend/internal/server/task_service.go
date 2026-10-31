@@ -1,4 +1,4 @@
-// Task commands, durable prompt queue APIs, accepted input delivery, frontend focus, artifacts, DTOs, and Git summaries.
+// Task commands, durable prompt queue APIs, accepted input delivery, prompt image inputs, frontend focus, artifacts, DTOs, and Git summaries.
 
 package server
 
@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -500,9 +501,13 @@ func taskInfoTailscaleURL(s *task.Snapshot) string {
 	return ""
 }
 
-func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
+func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq, images []logv3.ImageData) (*v1.Task, error) {
 	if sourceID, ok := taskMCPTaskID(ctx); ok {
 		return s.createDelegatedTask(ctx, sourceID, req)
+	}
+	prompt, resolveErr := promptToAgent(req.InitialPrompt, images)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 	if req.CaicMCP && !s.taskMgr.TaskMCPAvailable() {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
@@ -541,7 +546,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	}
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
 		OwnerID:             ownerID,
-		Prompt:              apiconv.PromptToAgent(req.InitialPrompt),
+		Prompt:              prompt,
 		Repos:               taskRepos,
 		Harness:             harnessName,
 		ResumeSessionID:     req.ResumeSessionID,
@@ -634,7 +639,7 @@ func (s *taskService) createDelegatedTask(ctx context.Context, sourceID ksid.ID,
 	githubToken := source.GitHubTokenEnabled()
 	newID, err := sourceEntry.Lifecycle.ForkDelegated(ctx, &taskmgr.ForkParams{
 		OwnerID:             source.OwnerID,
-		Prompt:              apiconv.PromptToAgent(req.InitialPrompt),
+		Prompt:              agent.Prompt{Text: req.InitialPrompt.Text},
 		GitHubToken:         githubToken,
 		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(source.OwnerID, githubToken),
 		Tailscale:           source.Tailscale,
@@ -694,16 +699,20 @@ func (s *taskService) cancelQueuedInput(_ context.Context, entry *taskmgr.Entry,
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
-func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
+func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq, images []logv3.ImageData) (*v1.StatusResp, error) {
+	prompt, resolveErr := promptToAgent(req.Prompt, images)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	var err error
 	if req.Queue {
 		var queued bool
-		queued, err = entry.Lifecycle.QueueInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
+		queued, err = entry.Lifecycle.QueueInput(context.WithoutCancel(ctx), prompt)
 		if err == nil && queued {
 			return &v1.StatusResp{Status: "queued"}, nil
 		}
 	} else {
-		err = entry.Lifecycle.SendInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
+		err = entry.Lifecycle.SendInput(context.WithoutCancel(ctx), prompt)
 	}
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
@@ -752,8 +761,12 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 	}
 }
 
-func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
-	if err := entry.Lifecycle.Restart(ctx, apiconv.PromptToAgent(req.Prompt)); err != nil {
+func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req *v1.RestartReq, images []logv3.ImageData) (*v1.StatusResp, error) {
+	prompt, resolveErr := promptToAgent(req.Prompt, images)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if err := entry.Lifecycle.Restart(ctx, prompt); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
@@ -798,9 +811,13 @@ func (s *taskService) getTaskHandoff(_ context.Context, entry *taskmgr.Entry, _ 
 	return &v1.TaskHandoffResp{Prompt: task.BuildHandoffPrompt(entry.Task(), 0)}, nil
 }
 
-func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
+func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq, images []logv3.ImageData) (*v1.Task, error) {
 	if delegatingTaskID, ok := taskMCPTaskID(ctx); ok {
 		return s.forkDelegatedTask(ctx, delegatingTaskID, entry, req)
+	}
+	prompt, resolveErr := promptToAgent(req.Prompt, images)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 	source := entry.Task()
 
@@ -849,7 +866,7 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 
 	newID, err := entry.Lifecycle.Fork(ctx, &taskmgr.ForkParams{
 		OwnerID:             ownerID,
-		Prompt:              apiconv.PromptToAgent(req.Prompt),
+		Prompt:              prompt,
 		Harness:             selectedHarness,
 		Model:               req.Model,
 		Effort:              req.Effort,
@@ -897,7 +914,7 @@ func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ks
 	githubToken := source.GitHubTokenEnabled()
 	newID, err := sourceEntry.Lifecycle.ForkDelegatedFor(ctx, delegatingTaskID, &taskmgr.ForkParams{
 		OwnerID:             delegatingTask.OwnerID,
-		Prompt:              apiconv.PromptToAgent(req.Prompt),
+		Prompt:              agent.Prompt{Text: req.Prompt.Text},
 		GitHubToken:         githubToken,
 		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(delegatingTask.OwnerID, githubToken),
 		Tailscale:           source.Tailscale,

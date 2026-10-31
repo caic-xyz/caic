@@ -9,7 +9,7 @@ for (const width of [390, 1280]) {
       page.on("pageerror", (error) => errors.push(error.message));
       const id = await createTaskAPI(api, uniquePrompt("image sizing"));
       await waitForTaskState(api, id, "waiting");
-      const hash = "a".repeat(64);
+      const location = "2/0/0";
       for (const [name, imageWidth, imageHeight] of [
         ["portrait", 600, 1800],
         ["landscape", 1800, 600],
@@ -28,8 +28,9 @@ for (const width of [390, 1280]) {
             ctx.fillRect(0, 0, imageWidth, imageHeight);
             const full = canvas.toDataURL("image/png").split(",")[1]!;
             const preview = document.createElement("canvas");
-            preview.width = Math.min(imageWidth, 1280);
-            preview.height = Math.round((imageHeight * preview.width) / imageWidth);
+            const scale = Math.min(1, 1280 / Math.max(imageWidth, imageHeight));
+            preview.width = Math.max(1, Math.floor(imageWidth * scale));
+            preview.height = Math.max(1, Math.floor(imageHeight * scale));
             preview.getContext("2d")!.drawImage(canvas, 0, 0, preview.width, preview.height);
             return { full, pane: preview.toDataURL("image/png").split(",")[1]! };
           },
@@ -40,19 +41,23 @@ for (const width of [390, 1280]) {
           route.fulfill({
             contentType: "image/png",
             body: Buffer.from(
-              new URL(route.request().url()).searchParams.has("w") ? images.pane : images.full,
+              new URL(route.request().url()).searchParams.has("max") ? images.pane : images.full,
               "base64",
             ),
           }),
         );
-        const query = source === "file" ? `path=%2F${name}.png` : `attachment=${hash}`;
+        const query = source === "file" ? `path=%2F${name}.png` : `attachment=${location}`;
         await page.goto(`/task/@${id}/view?${query}`);
         const pane = page.getByTestId("document-pane");
         const image = pane.getByRole("img");
         await expect(image).toBeVisible();
         await expect
           .poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth))
-          .toBe(source === "attachment" ? Math.min(imageWidth, 1280) : imageWidth);
+          .toBe(
+            source === "attachment"
+              ? Math.max(1, Math.floor(imageWidth * Math.min(1, 1280 / Math.max(imageWidth, imageHeight))))
+              : imageWidth,
+          );
         const fitted = await image.boundingBox();
         const bounds = await pane.boundingBox();
         if (!fitted || !bounds) throw new Error("Missing image bounds");
@@ -79,7 +84,7 @@ for (const width of [390, 1280]) {
         }
         await pane.getByRole("button", { name: "Zoom image to actual size", exact: true }).click();
         if (source === "attachment")
-          await expect(image).toHaveAttribute("src", `/api/caic/v1/tasks/${id}/attachments/${hash}`);
+          await expect(image).toHaveAttribute("src", `/api/caic/v1/tasks/${id}/attachments/${location}`);
         await expect(image).toHaveJSProperty("clientWidth", imageWidth);
         await expect(image).toHaveJSProperty("clientHeight", imageHeight);
         // Scroll the image's viewport, keeping overflow inside the document pane.

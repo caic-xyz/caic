@@ -10,9 +10,25 @@ const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12
 test("UI: a sent image opens in the document pane and survives a reload", async ({ page, api, uniquePrompt }) => {
   const id = await createTaskAPI(api, uniquePrompt("attachment-pane"));
   await waitForTaskState(api, id, "waiting");
-  await api.sendInput(id, {
-    prompt: { text: "with image", images: [{ mediaType: "image/png", data: TINY_PNG_B64 }] },
+  const portrait = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 1600;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#203c61";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png").split(",")[1]!;
   });
+  await api.sendInput(
+    id,
+    {
+      prompt: { text: "with image" },
+    },
+    {
+      images: [new Blob([Buffer.from(portrait, "base64")], { type: "image/png" })],
+      signal: new AbortController().signal,
+    },
+  );
   await waitForTaskState(api, id, "waiting");
 
   const attachmentRequests: string[] = [];
@@ -24,16 +40,27 @@ test("UI: a sent image opens in the document pane and survives a reload", async 
   const link = page.getByRole("link", { name: "Open attached image" });
   await expect(link).toBeVisible();
   await expect(link.getByRole("img", { name: "attached" })).toBeVisible();
-  await expect.poll(() => attachmentRequests.some((url) => url.endsWith("?w=480"))).toBe(true);
+  await expect.poll(() => attachmentRequests.some((url) => url.endsWith("?max=480"))).toBe(true);
+  await expect(link.getByRole("img")).toHaveJSProperty("naturalWidth", 96);
+  await expect(link.getByRole("img")).toHaveJSProperty("naturalHeight", 480);
 
+  const previewResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.includes(`/tasks/${id}/attachments/`) && url.searchParams.get("max") === "1280";
+  });
   await link.click();
-  await expect(page).toHaveURL(new RegExp(`/task/@${id}/view\\?attachment=[0-9a-f]{64}$`));
+  expect((await previewResponse).headers()["cache-control"]).toBe("private, max-age=2592000, immutable");
+  await expect(page).toHaveURL(new RegExp(`/task/@${id}/view\\?attachment=[1-9][0-9]*%2F[0-9]+%2F[0-9]+$`));
   const image = page.getByRole("img", { name: "attachment" });
   await expect(image).toBeVisible();
-  expect(await image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+  await expect(image).toHaveJSProperty("naturalWidth", 256);
+  await expect(image).toHaveJSProperty("naturalHeight", 1280);
 
   await page.reload();
   await expect(page.getByRole("img", { name: "attachment" })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom image to actual size", exact: true }).click();
+  await expect(page.getByRole("img", { name: "attachment" })).toHaveJSProperty("naturalWidth", 320);
+  await expect(page.getByRole("img", { name: "attachment" })).toHaveJSProperty("naturalHeight", 1600);
 
   await api.purgeTask(id);
   await waitForTaskState(api, id, "purged");
@@ -134,9 +161,9 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
 interface DraftProbe {
   created: string[];
   revoked: string[];
-  holdReads: boolean;
-  readStarted: boolean;
-  finishedReads: number;
+  holdUploads: boolean;
+  uploadStarted: boolean;
+  finishedUploads: number;
   resume: (() => void) | null;
 }
 declare global {
@@ -152,9 +179,9 @@ async function observeDrafts(page: import("@playwright/test").Page) {
     const probe: DraftProbe = {
       created: [],
       revoked: [],
-      holdReads: false,
-      readStarted: false,
-      finishedReads: 0,
+      holdUploads: false,
+      uploadStarted: false,
+      finishedUploads: 0,
       resume: null,
     };
     window.draftProbe = probe;
@@ -169,22 +196,20 @@ async function observeDrafts(page: import("@playwright/test").Page) {
       probe.revoked.push(url);
       revoke(url);
     };
-    const slice = Blob.prototype.slice;
-    Blob.prototype.slice = function (start, end, type) {
-      const chunk = slice.call(this, start, end, type);
-      if (this.type === "image/png" && probe.holdReads) {
-        const read = chunk.arrayBuffer;
-        chunk.arrayBuffer = async () => {
-          probe.readStarted = true;
-          await new Promise<void>((resolve) => {
-            probe.resume = resolve;
-          });
-          const bytes = await read.call(chunk);
-          probe.finishedReads++;
-          return bytes;
-        };
+    const originalFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      if (init?.body instanceof FormData && probe.holdUploads) {
+        probe.uploadStarted = true;
+        await new Promise<void>((resolve) => {
+          probe.resume = resolve;
+        });
+        try {
+          return await originalFetch(input, init);
+        } finally {
+          probe.finishedUploads++;
+        }
       }
-      return chunk;
+      return originalFetch(input, init);
     };
   });
 }
@@ -232,15 +257,15 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   await expect(thumbnail).toHaveAttribute("src", /^blob:/);
   await prompt.fill("first image draft");
   await page.evaluate(() => {
-    window.draftProbe.holdReads = true;
+    window.draftProbe.holdUploads = true;
   });
   await form.getByTestId("submit-task").click();
-  await page.waitForFunction(() => window.draftProbe.readStarted);
+  await page.waitForFunction(() => window.draftProbe.uploadStarted);
   await expect(form.getByTestId("submit-task")).toBeDisabled();
   await expect(form.getByTestId("submit-task")).toHaveAttribute("aria-busy", "true");
   // Let focus restore the editor's caret before fill selects its contents.
   await prompt.click();
-  await prompt.fill("edited during conversion");
+  await prompt.fill("edited during upload");
   await chooser.setInputFiles({ ...pngFile, name: "second.png" });
   await expect(thumbnail).toHaveCount(2);
   const requests: import("../../sdk/caic/ts/v1/types.gen").CreateTaskReq[] = [];
@@ -249,7 +274,13 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
       await route.continue();
       return;
     }
-    requests.push(route.request().postDataJSON());
+    const request = new Request("https://caic.test", {
+      method: "POST",
+      headers: { "Content-Type": route.request().headers()["content-type"]! },
+      body: new Uint8Array(route.request().postDataBuffer()!),
+    });
+    const form = await request.formData();
+    requests.push(JSON.parse(String(form.get("request"))));
     if (requests.length === 1) {
       await route.fulfill({
         status: 400,
@@ -260,17 +291,17 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
     } else await route.continue();
   });
   await page.evaluate(() => {
-    window.draftProbe.holdReads = false;
+    window.draftProbe.holdUploads = false;
     window.draftProbe.resume?.();
   });
   await expect(page.getByText("Task creation failed: Please retry this image")).toBeVisible();
   ok(requests[0]);
   expect(requests[0].initialPrompt).toEqual({
     text: "first image draft",
-    images: [{ mediaType: "image/png", data: TINY_PNG_B64 }],
+    images: [{ url: "cid:image-0" }],
   });
   expect(await page.evaluate(() => window.draftProbe.revoked)).toEqual([]);
-  await expect(prompt).toHaveText("edited during conversion");
+  await expect(prompt).toHaveText("edited during upload");
   await expect(thumbnail).toHaveCount(2);
   const createdResponse = page.waitForResponse(
     (response) =>
@@ -291,11 +322,7 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   await waitForTaskState(api, created.id, "purged");
 });
 
-test("UI: task switching cancels conversion, retains the original draft, and releases previews on removal", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
+test("UI: a dispatched image submission stays with its task across navigation", async ({ page, api, uniquePrompt }) => {
   const first = await createTaskAPI(api, uniquePrompt("draft-first"));
   const second = await createTaskAPI(api, uniquePrompt("draft-second"));
   await waitForTaskState(api, first, "waiting");
@@ -309,7 +336,7 @@ test("UI: task switching cancels conversion, retains the original draft, and rel
   await form.locator('input[type="file"]').setInputFiles(pngFile);
   const originalURL = await thumbnail.getAttribute("src");
   await page.evaluate(() => {
-    window.draftProbe.holdReads = true;
+    window.draftProbe.holdUploads = true;
   });
   let sent = 0;
   await page.route("**/input", async (route) => {
@@ -317,20 +344,17 @@ test("UI: task switching cancels conversion, retains the original draft, and rel
     await route.continue();
   });
   await form.getByTestId("send-input").click();
-  await page.waitForFunction(() => window.draftProbe.readStarted);
+  await page.waitForFunction(() => window.draftProbe.uploadStarted);
   await page.locator(`[data-task-id="${second}"]`).click();
   await expect(thumbnail).toHaveCount(0);
   await page.evaluate(() => {
-    window.draftProbe.holdReads = false;
+    window.draftProbe.holdUploads = false;
     window.draftProbe.resume?.();
   });
-  await page.waitForFunction(() => window.draftProbe.finishedReads === 1);
+  await page.waitForFunction(() => window.draftProbe.finishedUploads === 1);
   await page.locator(`[data-task-id="${first}"]`).click();
-  await expect(thumbnail).toHaveAttribute("src", originalURL ?? "");
-  expect(sent).toBe(0);
-  expect(await page.evaluate(() => window.draftProbe.revoked)).toEqual([]);
-  await form.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(thumbnail).toHaveCount(0);
+  expect(sent).toBe(1);
   expect(await page.evaluate(() => window.draftProbe.revoked)).toEqual([originalURL]);
   await api.purgeTask(first);
   await api.purgeTask(second);

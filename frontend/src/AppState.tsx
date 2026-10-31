@@ -42,7 +42,7 @@ import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
-import { ImageDraftOwner, imagesToAPI, type DraftImage } from "./images";
+import { ImageDraftOwner, type DraftImage } from "./images";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -1380,26 +1380,27 @@ function createAppStore() {
               ...(r.branch ? { baseBranch: r.branch } : {}),
             }))
           : undefined;
-      const images = await imagesToAPI(imgs, accountController.signal);
       accountController.signal.throwIfAborted();
-      const data = await api.createTask({
-        initialPrompt: {
-          text: p,
-          ...(images.length > 0 ? { images } : {}),
+      const data = await api.createTask(
+        {
+          initialPrompt: {
+            text: p,
+          },
+          repos: repoSpecs,
+          harness: harness as Harness,
+          ...(sessionID.trim() ? { resumeSessionID: sessionID.trim() } : {}),
+          ...(runtimeName ? { runtimeName } : {}),
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
+          ...(ts ? { tailscale: true } : {}),
+          ...(usb ? { usb: true } : {}),
+          ...(disp ? { display: true } : {}),
+          ...(sudo ? { sudo: true } : {}),
+          ...(ght ? { gitHubToken: true } : {}),
+          ...(mcp ? { caicMCP: true } : {}),
         },
-        repos: repoSpecs,
-        harness: harness as Harness,
-        ...(sessionID.trim() ? { resumeSessionID: sessionID.trim() } : {}),
-        ...(runtimeName ? { runtimeName } : {}),
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {}),
-        ...(ts ? { tailscale: true } : {}),
-        ...(usb ? { usb: true } : {}),
-        ...(disp ? { display: true } : {}),
-        ...(sudo ? { sudo: true } : {}),
-        ...(ght ? { gitHubToken: true } : {}),
-        ...(mcp ? { caicMCP: true } : {}),
-      });
+        { images: imgs.map((image) => image.blob), signal: accountController.signal },
+      );
       accountController.signal.throwIfAborted();
       setPrefModel(harness, model);
       setPrefEffort(harness, model, effort);
@@ -1621,7 +1622,7 @@ function createAppStore() {
     try {
       const signal = AbortSignal.any([controller.signal, accountController.signal]);
       const blobs: Blob[] = [];
-      for (const image of queued.images) {
+      for (const image of queued.prompt.images ?? []) {
         const response = await fetch(image.url, { signal });
         if (!response.ok) throw new Error("Could not load the pending attachment. Try again.");
         blobs.push(await response.blob());
@@ -1635,7 +1636,7 @@ function createAppStore() {
       await api.cancelQueuedInput(id, { id: queued.id });
       if (accountController.signal.aborted || !taskMembership.has(id)) return;
       batch(() => {
-        setInputDraft(id, queued.text);
+        setInputDraft(id, queued.prompt.text);
         setInputImageDrafts((prev) => new Map(prev).set(id, images));
         setInputImageGenerations((prev) => new Map(prev).set(id, inputImageGeneration(id) + 1));
       });
@@ -1665,14 +1666,17 @@ function createAppStore() {
     setInputImageGenerations((prev) => new Map(prev).set(id, inputImageGeneration(id) + 1));
     try {
       const signal = AbortSignal.any([controller.signal, accountController.signal]);
-      const images = await imagesToAPI(drafts, signal);
       signal.throwIfAborted();
-      // Route changes cancel conversion; a dispatched request still owns its original task.
+      // A dispatched request owns its original task across route changes.
       dispatchedInputs.add(id);
-      await api.sendInput(id, {
-        prompt: { text, ...(images.length ? { images } : {}) },
-        queue: !steer,
-      });
+      await api.sendInput(
+        id,
+        {
+          prompt: { text },
+          queue: !steer,
+        },
+        { images: drafts.map((image) => image.blob), signal },
+      );
       signal.throwIfAborted();
       if ((inputRevisions.get(id) ?? 0) === revision) setInputDraft(id, "");
       removeInputImages(id, drafts);

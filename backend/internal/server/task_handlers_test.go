@@ -391,19 +391,29 @@ func TestTaskHandlers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if apiTask.PendingInput == nil || len(apiTask.PendingInput.Images) != 1 {
+			if apiTask.PendingInput == nil || len(apiTask.PendingInput.Prompt.Images) != 1 {
 				t.Fatalf("pending input = %+v", apiTask.PendingInput)
 			}
-			attachment := apiTask.PendingInput.Images[0]
+			attachment := apiTask.PendingInput.Prompt.Images[0]
 			for _, tc := range []struct {
 				url   string
 				width int
-			}{{attachment.URL, 960}, {attachment.ThumbnailURL, 96}} {
+			}{{attachment.URL, 960}, {attachment.ThumbnailURL, 96}, {attachment.PreviewURL, 480}} {
 				w := httptest.NewRecorder()
 				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, strings.TrimPrefix(tc.url, "/api/caic/v1"), nil)
 				testTaskHandlers(s).routes().ServeHTTP(w, req)
 				if w.Code != http.StatusOK {
 					t.Fatalf("image status = %d: %s", w.Code, w.Body.String())
+				}
+				if w.Header().Get("Cache-Control") != attachmentCacheControl {
+					t.Fatalf("cache for %s: %v", tc.url, w.Header())
+				}
+				conditional := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, strings.TrimPrefix(tc.url, "/api/caic/v1"), nil)
+				conditional.Header.Set("If-None-Match", w.Header().Get("ETag"))
+				cached := httptest.NewRecorder()
+				testTaskHandlers(s).routes().ServeHTTP(cached, conditional)
+				if cached.Code != 304 || cached.Header().Get("Cache-Control") != attachmentCacheControl {
+					t.Fatalf("conditional %d %v", cached.Code, cached.Header())
 				}
 				config, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
 				if err != nil || config.Width != tc.width || config.Height != tc.width/2 {
@@ -435,7 +445,7 @@ func TestTaskHandlers(t *testing.T) {
 					if w.Code != 200 {
 						t.Fatalf("status=%d: %s", w.Code, w.Body.String())
 					}
-					if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "image/png" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+					if w.Header().Get("Cache-Control") != attachmentCacheControl || w.Header().Get("Content-Type") != "image/png" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
 						t.Fatalf("unsafe headers: %v", w.Header())
 					}
 					if method == http.MethodHead {

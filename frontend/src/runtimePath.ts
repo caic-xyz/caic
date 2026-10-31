@@ -1,4 +1,4 @@
-// Resolves task-runtime file destinations and builds their viewer and raw URLs.
+// Resolves task files and prompt images and builds viewer and resource URLs.
 
 const markdownExtension = /\.(md|markdown)$/i;
 const stlExtension = /\.stl$/i;
@@ -79,19 +79,31 @@ export function taskViewURL(taskId: string, path: string): string {
   return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ path })}`;
 }
 
-/** The conversation width the attachment route accepts for prompt images. */
-export const attachmentThumbnailWidth = 480;
+/** The maximum image dimension used for document-pane previews. */
+export const attachmentPaneMaxDimension = 1280;
 
-/** The document-pane width the attachment route accepts for prompt images. */
-export const attachmentPaneWidth = 1280;
-
-/** The prompt image endpoint for one content digest, optionally downscaled. */
-export function taskAttachmentURL(taskId: string, hash: string, width: number | null): string {
-  const query = width === null ? "" : `?${new URLSearchParams({ w: String(width) })}`;
-  return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(hash)}${query}`;
+/** Accepts canonical numeric task-log coordinates from a document-viewer URL. */
+export function taskAttachmentLocation(value: string): string | null {
+  return /^[1-9][0-9]*\/(?:0|[1-9][0-9]*)\/(?:0|[1-9][0-9]*)$/.test(value) ? value : null;
 }
 
-/** The document route that shows one prompt image. */
-export function taskAttachmentViewURL(taskId: string, hash: string): string {
-  return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ attachment: hash })}`;
+/** The prompt image endpoint at one task-log location, optionally downscaled. */
+export function taskAttachmentURL(taskId: string, location: string, maxDimension: number | null): string {
+  const query = new URLSearchParams();
+  if (maxDimension !== null) {
+    query.set("max", String(maxDimension));
+  }
+  return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/attachments/${location.split("/").map(encodeURIComponent).join("/")}${query.size ? `?${query}` : ""}`;
+}
+
+/** Opens prompt images in the document viewer using their resource identity. */
+export function inputImageViewURL(taskId: string, url: string): string {
+  const prefix = `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/attachments/`;
+  const query = new URLSearchParams(url.startsWith(prefix) ? { attachment: url.slice(prefix.length) } : { image: url });
+  return `/task/@${encodeURIComponent(taskId)}/view?${query}`;
+}
+
+/** Accepts only caic input-image resources as document-viewer sources. */
+export function inputImageSource(url: string): string | null {
+  return /^\/api\/caic\/v1\/tasks\/[a-zA-Z0-9]+\/input\/[a-zA-Z0-9]+\/images\/\d+$/.test(url) ? url : null;
 }

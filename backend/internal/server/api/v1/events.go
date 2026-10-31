@@ -68,7 +68,7 @@ type EventMessage struct {
 	Usage             *EventUsage             `json:"usage,omitempty"`
 	Result            *EventResult            `json:"result,omitempty"`
 	System            *EventSystem            `json:"system,omitempty"`
-	UserInput         *EventUserInput         `json:"userInput,omitempty"`
+	UserInput         *Prompt                 `json:"userInput,omitempty"`
 	Todo              *EventTodo              `json:"todo,omitempty"`
 	DiffStat          *EventDiffStat          `json:"diffStat,omitempty"`
 	Error             *EventError             `json:"error,omitempty"`
@@ -277,22 +277,6 @@ type EventSystem struct {
 	// ContextTokensAfter is the context size the harness reported after a
 	// compact_boundary, measured or estimated. Zero means it did not report it.
 	ContextTokensAfter int64 `json:"contextTokensAfter,omitempty"`
-}
-
-// EventUserInput is emitted when a user sends a text message to the agent.
-type EventUserInput struct {
-	Text   string           `json:"text"`
-	Images []EventImageData `json:"images,omitempty"`
-}
-
-// EventImageData describes one prompt image carried by a user-input event.
-//
-// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
-// task attachment route. Data stays until clients fetch images only by Hash.
-type EventImageData struct {
-	MediaType string `json:"mediaType"`
-	Data      string `json:"data"`
-	Hash      string `json:"hash,omitempty"`
 }
 
 // TodoItem is a single todo entry from a TodoWrite tool call.

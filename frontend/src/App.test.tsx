@@ -1471,7 +1471,10 @@ describe("App keyboard shortcuts", () => {
     await user.type(screen.getByTestId("prompt-input"), "Use the selected runtime");
     await user.click(screen.getByTestId("submit-task"));
     await waitFor(() =>
-      expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ runtimeName: "podman" })),
+      expect(api.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ runtimeName: "podman" }),
+        expect.objectContaining({ images: [] }),
+      ),
     );
   });
 
@@ -3942,11 +3945,9 @@ function editDraft(el: HTMLElement, text: string) {
 }
 
 describe("account-owned image drafts", () => {
-  it("preserves edits and added images during conversion, sends the snapshot, and releases only submitted URLs", async () => {
+  it("preserves edits and added images during submission, sends the snapshot, and releases only submitted URLs", async () => {
     const { create, revoke } = enableImageDrafts();
-    const read = deferred<ArrayBuffer>();
     const file = new File(["first"], "first.png", { type: "image/png" });
-    const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
     const request = deferred<Task>();
     vi.mocked(api.createTask).mockReturnValue(request.promise);
     const view = renderApp();
@@ -3957,18 +3958,14 @@ describe("account-owned image drafts", () => {
     editDraft(prompt, "first prompt");
     chooseDraftImage(form, file);
     fireEvent.click(within(form).getByTestId("submit-task"));
-    expect(slice).toHaveBeenCalledOnce();
-    expect(api.createTask).not.toHaveBeenCalled();
+    expect(api.createTask).toHaveBeenCalledOnce();
     editDraft(prompt, "new prompt");
     chooseDraftImage(form, new File(["second"], "second.png", { type: "image/png" }));
-    read.resolve(new TextEncoder().encode("first").buffer);
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
     const createCall = vi.mocked(api.createTask).mock.calls[0];
     assert.ok(createCall !== undefined);
-    expect(createCall[0].initialPrompt).toEqual({
-      text: "first prompt",
-      images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }],
-    });
+    expect(createCall[0].initialPrompt).toEqual({ text: "first prompt" });
+    expect(createCall[1]?.images).toEqual([file]);
     request.resolve(makeTask());
     await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
     expect(prompt).toHaveTextContent("new prompt");
@@ -4006,11 +4003,11 @@ describe("account-owned image drafts", () => {
     expect(revoke).toHaveBeenCalledOnce();
   });
 
-  it("cancels pending conversion on account-provider disposal before calling the API", async () => {
+  it("cancels an in-flight submission on account-provider disposal", async () => {
     const { revoke } = enableImageDrafts();
-    const read = deferred<ArrayBuffer>();
+    const request = deferred<Task>();
+    vi.mocked(api.createTask).mockReturnValueOnce(request.promise);
     const file = new File(["image"], "image.png", { type: "image/png" });
-    const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
     const view = renderApp();
     const prompt = await screen.findByTestId("prompt-input");
     const form = prompt.closest("form");
@@ -4018,13 +4015,14 @@ describe("account-owned image drafts", () => {
     await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
     chooseDraftImage(form, file);
     fireEvent.click(within(form).getByTestId("submit-task"));
-    expect(slice).toHaveBeenCalledOnce();
+    expect(api.createTask).toHaveBeenCalledOnce();
+    const signal = vi.mocked(api.createTask).mock.calls[0]?.[1]?.signal;
     view.unmount();
+    expect(signal?.aborted).toBe(true);
     expect(revoke).toHaveBeenCalledOnce();
-    read.resolve(new ArrayBuffer(5));
-    await read.promise;
-    // The converter's continuation is registered before this continuation.
-    expect(api.createTask).not.toHaveBeenCalled();
+    request.resolve(makeTask());
+    await request.promise;
+    expect(api.createTask).toHaveBeenCalledOnce();
   });
 });
 
@@ -4040,19 +4038,21 @@ for (const state of ["asking", "has_plan"] as const) {
     editDraft(prompt, "answer now");
     fireEvent.keyDown(prompt, { key: "Enter" });
     await waitFor(() =>
-      expect(api.sendInput).toHaveBeenCalledWith("task1", { prompt: { text: "answer now" }, queue: false }),
+      expect(api.sendInput).toHaveBeenCalledWith(
+        "task1",
+        { prompt: { text: "answer now" }, queue: false },
+        expect.objectContaining({ images: [] }),
+      ),
     );
   });
 }
 
-it("preserves the task's newer text and attachments after sending its conversion snapshot", async () => {
+it("preserves the task's newer text and attachments after sending its submission snapshot", async () => {
   const { create, revoke } = enableImageDrafts();
   vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting" }));
   const sent = deferred<Awaited<ReturnType<typeof api.sendInput>>>();
   vi.mocked(api.sendInput).mockReturnValue(sent.promise);
-  const read = deferred<ArrayBuffer>();
   const file = new File(["first"], "first.png", { type: "image/png" });
-  const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
   const view = renderApp("/task/@task1+task");
   await waitForTaskEventsSubscription();
   dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ state: "waiting" })] });
@@ -4062,15 +4062,17 @@ it("preserves the task's newer text and attachments after sending its conversion
   editDraft(prompt, "original task prompt");
   chooseDraftImage(form, file);
   fireEvent.click(within(form).getByTestId("send-input"));
-  expect(slice).toHaveBeenCalledOnce();
   editDraft(prompt, "next task prompt");
   chooseDraftImage(form, new File(["second"], "second.png", { type: "image/png" }));
-  read.resolve(new TextEncoder().encode("first").buffer);
   await waitFor(() =>
-    expect(api.sendInput).toHaveBeenCalledWith("task1", {
-      prompt: { text: "original task prompt", images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }] },
-      queue: true,
-    }),
+    expect(api.sendInput).toHaveBeenCalledWith(
+      "task1",
+      {
+        prompt: { text: "original task prompt" },
+        queue: true,
+      },
+      expect.objectContaining({ images: [file] }),
+    ),
   );
   sent.resolve({ status: "ok" });
   const firstResult = create.mock.results[0];
@@ -4085,8 +4087,10 @@ it("preserves the task's newer text and attachments after sending its conversion
   expect(revoke).toHaveBeenCalledTimes(2);
 });
 
-it("keeps a screenshot started during conversion when the preceding submission succeeds", async () => {
+it("keeps a screenshot started during submission when the preceding submission succeeds", async () => {
   const { revoke } = enableImageDrafts();
+  const request = deferred<Task>();
+  vi.mocked(api.createTask).mockReturnValueOnce(request.promise);
   const devices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
@@ -4106,9 +4110,7 @@ it("keeps a screenshot started during conversion when the preceding submission s
   const encode = vi.spyOn(window.HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => {
     finishCapture = callback;
   });
-  const read = deferred<ArrayBuffer>();
   const file = new File(["first"], "first.png", { type: "image/png" });
-  vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
   const view = renderApp();
   try {
     const prompt = await screen.findByTestId("prompt-input");
@@ -4120,7 +4122,7 @@ it("keeps a screenshot started during conversion when the preceding submission s
     fireEvent.click(within(form).getByTestId("attach-images"));
     fireEvent.click(screen.getByTestId("screenshot-menu-item"));
     await waitFor(() => expect(encode).toHaveBeenCalledOnce());
-    read.resolve(new TextEncoder().encode("first").buffer);
+    request.resolve(makeTask());
     await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
     finishCapture(new Blob(["next capture"], { type: "image/jpeg" }));
     await waitFor(() => expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1));
@@ -4185,7 +4187,12 @@ it("reports a dispatched message failure after navigation and retains the origin
   expect(within(retry).getByRole("img", { name: "attached" })).toBeInTheDocument();
   fireEvent.click(within(retry).getByTestId("send-input"));
   await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
-  expect(vi.mocked(api.sendInput).mock.calls[1]).toEqual(vi.mocked(api.sendInput).mock.calls[0]);
+  expect(vi.mocked(api.sendInput).mock.calls[1]?.slice(0, 2)).toEqual(
+    vi.mocked(api.sendInput).mock.calls[0]?.slice(0, 2),
+  );
+  expect(vi.mocked(api.sendInput).mock.calls[1]?.[2]?.images).toEqual(
+    vi.mocked(api.sendInput).mock.calls[0]?.[2]?.images,
+  );
   view.unmount();
 });
 
@@ -4537,13 +4544,16 @@ for (const outcome of ["download failure", "new draft", "navigation"] as const) 
     const { revoke } = enableImageDrafts();
     const queued = {
       id: "pending1",
-      text: "original pending prompt",
-      images: [
-        {
-          url: "/api/caic/v1/tasks/task1/input/pending1/images/0",
-          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
-        },
-      ],
+      prompt: {
+        text: "original pending prompt",
+        images: [
+          {
+            url: "/api/caic/v1/tasks/task1/input/pending1/images/0",
+            previewURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=480",
+            thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96",
+          },
+        ],
+      },
     };
     const task = makeTask({ state: "running", pendingInput: queued });
     vi.mocked(api.getTask).mockResolvedValue(task);
@@ -4570,7 +4580,7 @@ for (const outcome of ["download failure", "new draft", "navigation"] as const) 
       await screen.findByText("Edit failed: Could not load the pending attachment. Try again.");
       expect(cancel).not.toHaveBeenCalled();
       expect(within(form).getByRole("textbox")).toHaveTextContent("");
-      expect(screen.getByRole("region", { name: "Pending prompt" })).toHaveTextContent(queued.text);
+      expect(screen.getByRole("region", { name: "Pending prompt" })).toHaveTextContent(queued.prompt.text);
       expect(revoke).not.toHaveBeenCalled();
     } else if (outcome === "new draft") {
       // Exercise the owning boundary's second check after asynchronous download.
@@ -4589,7 +4599,7 @@ for (const outcome of ["download failure", "new draft", "navigation"] as const) 
       const restored = await screen.findByTestId("task-detail-form");
       expect(within(restored).getByRole("textbox")).toHaveAttribute("aria-disabled", "true");
       canceled.resolve({ status: "canceled" });
-      await waitFor(() => expect(within(restored).getByRole("textbox")).toHaveTextContent(queued.text));
+      await waitFor(() => expect(within(restored).getByRole("textbox")).toHaveTextContent(queued.prompt.text));
       expect(within(restored).getByRole("textbox")).not.toHaveAttribute("aria-disabled");
       expect(within(restored).getByRole("img", { name: "attached" })).toBeInTheDocument();
       expect(revoke).not.toHaveBeenCalled();

@@ -28,7 +28,7 @@ import (
 // Change it whenever event conversion, serialization, or line framing changes.
 // Generation is the task object's random incarnation, invalidated on restart;
 // deterministic same-generation reconstruction can reuse published range URLs.
-const historyProjectionVersion = "2"
+const historyProjectionVersion = "3"
 
 // historyHandlers serves task history for every task state.
 type historyHandlers struct{ *taskHandlers }

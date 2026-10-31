@@ -9,7 +9,13 @@ import CadViewer from "../components/CadViewer";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import styles from "./FileViewerPage.module.css";
-import { isCadPath } from "../runtimePath";
+import {
+  attachmentPaneMaxDimension,
+  inputImageSource,
+  isCadPath,
+  taskAttachmentLocation,
+  taskAttachmentURL,
+} from "../runtimePath";
 
 export default function FileViewerPage() {
   const s = useAppState();
@@ -17,7 +23,8 @@ export default function FileViewerPage() {
   const [query] = useSearchParams();
   const id = () => taskIdFromParam(params.taskId);
   const path = () => (typeof query.path === "string" ? query.path : null);
-  const attachment = () => (typeof query.attachment === "string" ? query.attachment : null);
+  const attachment = () => (typeof query.attachment === "string" ? taskAttachmentLocation(query.attachment) : null);
+  const image = () => (typeof query.image === "string" ? inputImageSource(query.image) : null);
 
   return (
     <Show when={id()} keyed>
@@ -44,9 +51,20 @@ export default function FileViewerPage() {
               )}
             </Match>
             <Match when={attachment()} keyed>
-              {(hash) => (
+              {(location) => (
                 <section class={styles.document} aria-label="Document" data-testid="document-pane">
-                  <AttachmentViewer taskId={taskId} taskPath={tp()} hash={hash} />
+                  <AttachmentViewer
+                    taskPath={tp()}
+                    url={taskAttachmentURL(taskId, location, null)}
+                    previewURL={taskAttachmentURL(taskId, location, attachmentPaneMaxDimension)}
+                  />
+                </section>
+              )}
+            </Match>
+            <Match when={image()} keyed>
+              {(url) => (
+                <section class={styles.document} aria-label="Document" data-testid="document-pane">
+                  <AttachmentViewer taskPath={tp()} url={url} previewURL={url} />
                 </section>
               )}
             </Match>

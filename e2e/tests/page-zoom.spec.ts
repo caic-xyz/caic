@@ -43,7 +43,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
   // layout fixture fixed while native zoom and scrolling are being asserted.
   const snapshot: TaskListEvent = {
     kind: "snapshot",
-    snapshot: [{ ...task, state: "running", pendingInput: { id, text: prompt, images: [] } }],
+    snapshot: [{ ...task, state: "running", pendingInput: { id, prompt: { text: prompt, images: [] } } }],
     complete: true,
   };
   const events = createServer((_request, response) => {
