@@ -26,7 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth"
@@ -914,7 +914,7 @@ func TestMCPHandlers(t *testing.T) {
 				updates <- update
 				count++
 				if count == 1 {
-					tk.SetState(taskslog.StateWaiting)
+					tk.SetState(task.StateWaiting)
 					s.taskMgr.NotifyTaskChange()
 				}
 				if count == 2 {
@@ -927,7 +927,7 @@ func TestMCPHandlers(t *testing.T) {
 			wg.Wait()
 		})
 
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		s.taskMgr.NotifyTaskChange()
 		for range 2 {
 			select {
@@ -986,7 +986,7 @@ func TestMCPHandlers(t *testing.T) {
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude)
 		tk.SetTitle("Fix tests")
-		tk.SetState(taskslog.StateWaiting)
+		tk.SetState(task.StateWaiting)
 		insertTestTask(s, id, tk)
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)

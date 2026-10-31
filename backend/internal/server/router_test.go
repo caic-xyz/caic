@@ -45,6 +45,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
@@ -479,8 +480,8 @@ func TestLoginCallbackPublic(t *testing.T) {
 	}
 }
 
-func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name) *task.Task {
-	tk, err := task.NewTask(id, prompt, h, "", "", "", "", "")
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name) *taskrun.Task {
+	tk, err := taskrun.NewTask(id, prompt, h, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +491,7 @@ func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name) 
 // insertTestTask registers a task in the test server's manager, keyed by the
 // task's own ID (and by the supplied path id when a test addresses it
 // differently).
-func insertTestTask(s *testRouter, id ksid.ID, tk *task.Task) {
+func insertTestTask(s *testRouter, id ksid.ID, tk *taskrun.Task) {
 	e := s.taskMgr.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
 	if tk.ID != id {
@@ -780,7 +781,7 @@ func TestHandleTaskInput(t *testing.T) {
 }
 
 // testRestart is a helper for TestHandleRestart subtests.
-func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
+func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 	tk.SetState(state)
@@ -804,12 +805,12 @@ func TestHandleRestart(t *testing.T) {
 	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, taskslog.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, api.CodeConflict)
+		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, api.CodeConflict)
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, taskslog.StateWaiting, `{"prompt":{"text":""}}`, http.StatusInternalServerError, api.CodeInternalError)
+		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusInternalServerError, api.CodeInternalError)
 	})
 }
 
@@ -838,8 +839,8 @@ func TestHandlePurge(t *testing.T) {
 	t.Run("Waiting", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
-		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
-		tk.SetState(taskslog.StateWaiting)
+		tk.Repos = []repo.Mount{{Name: "r"}}
+		tk.SetState(task.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)
@@ -866,8 +867,8 @@ func TestHandlePurge(t *testing.T) {
 	t.Run("CancelledContext", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
-		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
-		tk.SetState(taskslog.StateRunning)
+		tk.Repos = []repo.Mount{{Name: "r"}}
+		tk.SetState(task.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)
@@ -1381,7 +1382,7 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
+		tk.Repos = []repo.Mount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
@@ -1410,7 +1411,7 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
+		tk.Repos = []repo.Mount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
@@ -3227,7 +3228,7 @@ func TestBackgroundWorkers(t *testing.T) {
 }
 
 // recordRouterTaskLog gives retained-task fixtures the durable history required by lifecycle operations.
-func recordRouterTaskLog(t testing.TB, s *testRouter, tk *task.Task) {
+func recordRouterTaskLog(t testing.TB, s *testRouter, tk *taskrun.Task) {
 	t.Helper()
 	log, path, err := s.logStore.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {

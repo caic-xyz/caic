@@ -17,7 +17,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func TestCIHandlers(t *testing.T) {
@@ -116,7 +115,7 @@ func TestCIHandlers(t *testing.T) {
 
 			s := newTestRouter(t, nil)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-			task.Repos = []taskslog.RepoMount{{Name: "local"}}
+			task.Repos = []repo.Mount{{Name: "local"}}
 			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1", nil)
@@ -143,7 +142,7 @@ func TestCIHandlers(t *testing.T) {
 			checkout.Repository = &repo.Repository{Remote: "https://example.com/acme/project.git"}
 			registerRouterCheckout(t, s.checkouts, "project", checkout)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-			task.Repos = []taskslog.RepoMount{{Name: "project"}}
+			task.Repos = []repo.Mount{{Name: "project"}}
 			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1", nil)
@@ -173,7 +172,7 @@ func TestCIHandlers(t *testing.T) {
 			checkout.Repository = &repo.Repository{ForgeKind: forge.KindGitHub, ForgeOwner: "acme", ForgeRepo: "project"}
 			registerRouterCheckout(t, s.checkouts, "project", checkout)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-			task.Repos = []taskslog.RepoMount{{Name: "project"}}
+			task.Repos = []repo.Mount{{Name: "project"}}
 			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1?jobID=1", nil)

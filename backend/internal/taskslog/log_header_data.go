@@ -12,7 +12,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	v10 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v10"
 )
 
@@ -78,7 +80,7 @@ func headerTaskFromData(t *v10.Task) *LoadedTask {
 		Harness:               harness.Name(t.Harness),
 		StartedAt:             t.StartedAt,
 		LastStateUpdateAt:     t.LastStateUpdateAt,
-		State:                 State(t.State),
+		State:                 task.State(t.State),
 		ForgeIssue:            t.ForgeIssue,
 		OwnerID:               t.OwnerID,
 		ForkedFromTaskID:      t.ForkedFromTaskID,
@@ -106,7 +108,7 @@ func headerTaskFromData(t *v10.Task) *LoadedTask {
 	}
 }
 
-func headerReposToData(in []RepoMount) []v10.Repo {
+func headerReposToData(in []repo.Mount) []v10.Repo {
 	if in == nil {
 		return nil
 	}
@@ -117,13 +119,13 @@ func headerReposToData(in []RepoMount) []v10.Repo {
 	return out
 }
 
-func headerReposFromData(in []v10.Repo) []RepoMount {
+func headerReposFromData(in []v10.Repo) []repo.Mount {
 	if in == nil {
 		return nil
 	}
-	out := make([]RepoMount, len(in))
+	out := make([]repo.Mount, len(in))
 	for i := range in {
-		out[i] = RepoMount(in[i])
+		out[i] = repo.Mount(in[i])
 	}
 	return out
 }
@@ -194,7 +196,7 @@ func headerDiffStatFromData(in []v10.DiffFileStat) []v3.DiffFileStat {
 	return out
 }
 
-func headerResultToData(r *Result) *v10.Result {
+func headerResultToData(r *task.Result) *v10.Result {
 	if r == nil {
 		return nil
 	}
@@ -209,7 +211,7 @@ func headerResultToData(r *Result) *v10.Result {
 	return &v10.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
 }
 
-func headerResultFromData(r *v10.Result) *Result {
+func headerResultFromData(r *v10.Result) *task.Result {
 	if r == nil {
 		return nil
 	}
@@ -221,7 +223,7 @@ func headerResultFromData(r *v10.Result) *Result {
 	if r.StartupFailure != nil {
 		failure = new(v3.StartupFailure(*r.StartupFailure))
 	}
-	return &Result{State: State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
+	return &task.Result{State: task.State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }
 
 func headerUsageToData(u agent.Usage) v10.Usage {

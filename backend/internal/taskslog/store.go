@@ -25,6 +25,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
 )
@@ -373,14 +374,14 @@ func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) er
 }
 
 // WriteResultTrailer appends a MetaResultMessage to an active task log.
-func (*Store) WriteResultTrailer(log agent.LogSink, title string, res *Result) error {
+func (*Store) WriteResultTrailer(log agent.LogSink, title string, res *task.Result) error {
 	if log == nil {
 		return ErrNoLog
 	}
 	return log.AppendMessage(resultTrailer(title, res))
 }
 
-func resultTrailer(title string, res *Result) *agent.MetaResultMessage {
+func resultTrailer(title string, res *task.Result) *agent.MetaResultMessage {
 	mr := &agent.MetaResultMessage{
 		MessageType:    "caic_result",
 		State:          res.State.String(),
@@ -411,7 +412,7 @@ func (*Store) WriteContextCleared(log agent.LogSink) error {
 // Compress closes log and compresses path only when state is non-revivable.
 // Closing the live writer first ensures the compressed source contains every
 // completed append. A failed compression leaves the plain source for retry.
-func (s *Store) Compress(path string, log agent.LogSink, state State) (string, error) {
+func (s *Store) Compress(path string, log agent.LogSink, state task.State) (string, error) {
 	if log != nil {
 		if err := log.Close(); err != nil {
 			return path, fmt.Errorf("close task log before compression: %w", err)

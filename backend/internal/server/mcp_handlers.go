@@ -14,7 +14,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth/oauthserver"
 )
@@ -45,12 +45,12 @@ func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 	h.protocol.HandleMCP(w, r)
 }
 
-func taskMCPStateActive(state taskslog.State) bool {
+func taskMCPStateActive(state task.State) bool {
 	switch state {
-	case taskslog.StatePending, taskslog.StateBranching, taskslog.StateProvisioning,
-		taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting,
-		taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling,
-		taskslog.StatePushing:
+	case task.StatePending, task.StateBranching, task.StateProvisioning,
+		task.StateStarting, task.StateRunning, task.StateWaiting,
+		task.StateAsking, task.StateHasPlan, task.StatePulling,
+		task.StatePushing:
 		return true
 	default:
 		return false

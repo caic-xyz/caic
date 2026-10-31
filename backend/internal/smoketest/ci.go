@@ -8,13 +8,13 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // SimulateCI polls until the task reaches a reviewable state, then sets a
 // fake PR and transitions CI from pending to success with progressive check
 // completion.
-func SimulateCI(ctx context.Context, t *task.Task) {
+func SimulateCI(ctx context.Context, t *taskrun.Task) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -22,9 +22,9 @@ func SimulateCI(ctx context.Context, t *task.Task) {
 		case <-time.After(100 * time.Millisecond):
 		}
 		switch t.GetState() {
-		case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan:
+		case task.StateWaiting, task.StateAsking, task.StateHasPlan:
 			goto ready
-		case taskslog.StatePurged, taskslog.StateFailed:
+		case task.StatePurged, task.StateFailed:
 			return
 		default:
 		}

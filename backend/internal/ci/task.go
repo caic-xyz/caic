@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // GitHubAppClient provides forge operations scoped to a GitHub App installation.
@@ -48,10 +48,10 @@ type WarningDetail struct {
 
 // TaskEntry is an abstract task handle for CI monitoring.
 type TaskEntry interface {
-	Task() *task.Task
+	Task() *taskrun.Task
 	MonitorBranch() string
 	SetMonitorBranch(branch string)
-	Result() *taskslog.Result
+	Result() *task.Result
 }
 
 // Backend is the single dependency the CI service needs from the server.
@@ -82,7 +82,7 @@ type Backend interface {
 
 // lastResultText returns the Result field of the most recent ResultMessage in
 // the task's message history. Used as the squash-merge commit body.
-func lastResultText(t *task.Task) string {
+func lastResultText(t *taskrun.Task) string {
 	for msg := range t.BackwardMessages() {
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result

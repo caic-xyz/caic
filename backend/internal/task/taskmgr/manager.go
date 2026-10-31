@@ -1,8 +1,8 @@
-// Package taskmgr owns task state, lifecycle, pending prompts and attachments, and ordered runtime history import.
+// Package taskmgr coordinates task execution, pending prompts, attachments, and ordered runtime history import.
 //
-// It sits between the HTTP adapter (internal/server) and the domain layer
-// (internal/task): task.Task / repo.Checkout are domain types, Manager owns
-// their registry state, and Lifecycle performs operations for one task.
+// It sits between the HTTP adapter (internal/server) and task execution
+// (internal/task/taskrun). Manager owns the registry of running tasks and
+// repository checkouts; Lifecycle performs operations for one task.
 //
 // Two contexts coexist here. Methods accept a request-scoped ctx that is
 // honored for synchronous work (state checks, logging). Background goroutines
@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/gomode/mcp"
@@ -298,7 +299,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 }
 
 // NewEntry creates an unregistered entry with its immutable lifecycle.
-func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
+func (m *Manager) NewEntry(t *taskrun.Task, lt *taskslog.LoadedTask) *Entry {
 	var taskMCP mcp.Registry
 	if t.CaicMCP {
 		taskMCP = m.mcpExecutor.Wrap(m.taskMCPScoper.ForTask(t.ID))
@@ -316,7 +317,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 		manager: m,
 		entry:   e,
 		ctx:     context.WithoutCancel(m.serverCtx),
-		agentRuntime: task.AgentRuntime{
+		agentRuntime: taskrun.AgentRuntime{
 			Backends:             m.Backends,
 			LogStore:             m.logStore,
 			LogPath:              &e.LogPath,
@@ -498,13 +499,13 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 		return 0, badRequestf("%s does not support images", string(p.Harness))
 	}
 
-	// Build RepoMount slice. ContainerPath follows the fixed "~/src/<name>"
+	// Build repository mounts. ContainerPath follows the fixed "~/src/<name>"
 	// convention used by the instance provisioner. Use the basename unless
 	// another registered repo shares it.
-	mounts := make([]taskslog.RepoMount, len(p.Repos))
+	mounts := make([]repo.Mount, len(p.Repos))
 	for i, rs := range p.Repos {
 		r, _ := m.Checkouts.Checkout(rs.Name)
-		mounts[i] = taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
+		mounts[i] = repo.Mount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
 	t, err := m.newTask(p.Prompt, p.Harness, p.Model, p.Effort, p.BaseImage, p.ContainerPlatform, "")
@@ -586,7 +587,7 @@ func (m *Manager) Entries() iter.Seq2[ksid.ID, *Entry] {
 }
 
 // EffectiveBaseBranch returns the branch the task was forked from.
-func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
+func (m *Manager) EffectiveBaseBranch(t *taskrun.Task) string {
 	p := t.Primary()
 	if p == nil {
 		return ""
@@ -606,7 +607,7 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 // Returns "" when the task does not use sudo or has no instance yet. The
 // fetched password is cached on the task so subsequent calls avoid the SSH
 // round-trip. A lookup failure is logged and returns "".
-func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
+func (m *Manager) SudoPassword(ctx context.Context, t *taskrun.Task) string {
 	enabled, instanceID, cached := t.SudoLookupState()
 	if !enabled || instanceID == "" {
 		return ""
@@ -803,7 +804,7 @@ func (m *Manager) ListPendingBotTasks() []BotPendingTask {
 			continue
 		}
 		st := snap.State
-		if st == taskslog.StateWaiting || st == taskslog.StateStopped || st == taskslog.StateCrashed || st == taskslog.StateFailed || st == taskslog.StatePurged {
+		if st == task.StateWaiting || st == task.StateStopped || st == task.StateCrashed || st == task.StateFailed || st == task.StatePurged {
 			continue
 		}
 		out = append(out, BotPendingTask{
@@ -825,9 +826,9 @@ func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (stat
 	for {
 		st := entry.task.GetState()
 		switch st {
-		case taskslog.StateWaiting, taskslog.StateStopped, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurged:
+		case task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged:
 			return st.String(), lastResultText(entry.task), nil
-		case taskslog.StatePending, taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling, taskslog.StatePushing, taskslog.StateStopping, taskslog.StatePurging:
+		case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing, task.StateStopping, task.StatePurging:
 			// Not yet done; keep waiting below.
 		}
 		m.mu.Lock()
@@ -842,7 +843,7 @@ func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (stat
 }
 
 // lastResultText returns the Result field of the most recent ResultMessage.
-func lastResultText(t *task.Task) string {
+func lastResultText(t *taskrun.Task) string {
 	for msg := range t.BackwardMessages() {
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result
@@ -984,8 +985,8 @@ func (m *Manager) updatePendingInputsLocked(updates map[*Entry]*PendingInput) er
 }
 
 // newTask creates a task and attaches the manager's model pricer.
-func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*task.Task, error) {
-	t, err := task.NewTask(ksid.NewID(), prompt, h, model, effort, baseImage, containerPlatform, title)
+func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*taskrun.Task, error) {
+	t, err := taskrun.NewTask(ksid.NewID(), prompt, h, model, effort, baseImage, containerPlatform, title)
 	if err != nil {
 		return nil, err
 	}
@@ -1012,7 +1013,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 	loaded := 0
 	for _, lt := range lts {
 		if lt.LastTrailer == nil {
-			lt.LastTrailer = &taskslog.Result{State: taskslog.StateFailed}
+			lt.LastTrailer = &task.Result{State: task.StateFailed}
 		}
 		taskID := ksid.NewID()
 		parsedID := false
@@ -1057,7 +1058,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			}
 			parentTaskID = parsed
 		}
-		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+		t, err := taskrun.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 		if err != nil {
 			m.log.Warn("skipping purged task with invalid metadata", "task", lt.TaskID, "err", err)
 			continue
@@ -1081,13 +1082,13 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.GitHubToken = lt.GitHubToken
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		t.SetSessionMetadata(lt.SessionMetadata)
-		if lt.State == taskslog.StateRunning {
+		if lt.State == task.StateRunning {
 			// Nothing adopted the instance that was running this log, so the task can
 			// never settle. Name the downgrade: a bare failure with no error gives the
 			// task list no way to explain what happened.
 			m.log.Warn("loaded running task log without an adopted instance; marking failed",
 				"task", lt.TaskID, "harness", lt.Harness, "log", lt.LogPath(), "state", lt.State)
-			t.SetState(taskslog.StateFailed)
+			t.SetState(task.StateFailed)
 		}
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
@@ -1100,7 +1101,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 	return loaded, nil
 }
 
-func (m *Manager) writeTaskResultTrailer(entry *Entry, res *taskslog.Result) error {
+func (m *Manager) writeTaskResultTrailer(entry *Entry, res *task.Result) error {
 	t := entry.Task()
 	// A tracked path preserves the filename actually on disk; only recompute
 	// it from the task when no log has been opened yet in this process.
@@ -1185,7 +1186,7 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 
 // lockPreparation locks a sorted, deduplicated repository set. The small map
 // mutex is released before acquiring any preparation lock or running Git.
-func (m *Manager) lockPreparation(mounts []taskslog.RepoMount) (func(), error) {
+func (m *Manager) lockPreparation(mounts []repo.Mount) (func(), error) {
 	names := make([]string, 0, len(mounts))
 	for _, mount := range mounts {
 		if _, ok := m.Checkouts.Checkout(mount.Name); !ok {
@@ -1261,7 +1262,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 		children := 0
 		for _, candidate := range m.tasks {
 			child := candidate.Task()
-			if child.ParentTaskID == t.ParentTaskID && child.GetState() != taskslog.StatePurged {
+			if child.ParentTaskID == t.ParentTaskID && child.GetState() != task.StatePurged {
 				children++
 			}
 		}
@@ -1287,7 +1288,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 // Requires all participating repository preparation locks through publication:
 // the immutable log header and filename embed these branch names, and a newly
 // adopted local branch must become associated before another creator checks it.
-func (m *Manager) allocateBranchesLocked(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) ([]*repo.AllocatedBranch, error) {
+func (m *Manager) allocateBranchesLocked(ctx context.Context, t *taskrun.Task, mounts []repo.Mount, reserveOnly int, adoptLocal bool) ([]*repo.AllocatedBranch, error) {
 	var created []*repo.AllocatedBranch
 	// Resolve adoption first; adopted repos keep their own branch name.
 	var shared []int
@@ -1495,7 +1496,7 @@ func (m *Manager) updateDiskUsage(ctx context.Context, ids []runtime.ID) {
 		return
 	}
 	m.mu.Lock()
-	tasks := make(map[runtime.ID]*task.Task, len(usage))
+	tasks := make(map[runtime.ID]*taskrun.Task, len(usage))
 	for _, e := range m.tasks {
 		if _, ok := usage[e.task.RuntimeInstanceID()]; ok {
 			tasks[e.task.RuntimeInstanceID()] = e.task
@@ -1565,7 +1566,7 @@ func (m *Manager) waitStatsRetry(ctx context.Context, ids []runtime.ID, d time.D
 
 func (m *Manager) pushStatsSample(sample *runtime.StatsSample) {
 	m.mu.Lock()
-	var target *task.Task
+	var target *taskrun.Task
 	for _, e := range m.tasks {
 		if e.task.RuntimeInstanceID() != sample.InstanceID {
 			continue
@@ -1582,18 +1583,18 @@ func (m *Manager) pushStatsSample(sample *runtime.StatsSample) {
 	target.PushStats(&s)
 }
 
-func statsStateActive(st taskslog.State) bool {
+func statsStateActive(st task.State) bool {
 	switch st {
-	case taskslog.StatePurged, taskslog.StateFailed, taskslog.StateCrashed, taskslog.StateStopped, taskslog.StateStopping, taskslog.StatePurging:
+	case task.StatePurged, task.StateFailed, task.StateCrashed, task.StateStopped, task.StateStopping, task.StatePurging:
 		return false
 	default:
 		return true
 	}
 }
 
-func diskUsageStateActive(st taskslog.State) bool {
+func diskUsageStateActive(st task.State) bool {
 	switch st {
-	case taskslog.StatePurged, taskslog.StateFailed, taskslog.StateCrashed, taskslog.StateStopped, taskslog.StatePurging:
+	case task.StatePurged, task.StateFailed, task.StateCrashed, task.StateStopped, task.StatePurging:
 		return false
 	default:
 		return true
@@ -1738,9 +1739,9 @@ func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runt
 	// mid-cleanup and race the cleanup goroutine. Guarding and transitioning in
 	// one lock also prevents clobbering a state a concurrent Stop/Purge sets
 	// between our check and our write.
-	prevState, changed := t.SetStateUnless(taskslog.StateStopped,
-		taskslog.StatePurged, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StateStopped,
-		taskslog.StateStopping, taskslog.StatePurging, taskslog.StateProvisioning, taskslog.StateStarting)
+	prevState, changed := t.SetStateUnless(task.StateStopped,
+		task.StatePurged, task.StateCrashed, task.StateFailed, task.StateStopped,
+		task.StateStopping, task.StatePurging, task.StateProvisioning, task.StateStarting)
 	if !changed {
 		return
 	}
@@ -1759,12 +1760,12 @@ func (m *Manager) handleRuntimeDestroy(ctx context.Context, instanceID runtime.I
 		return
 	}
 	t := entry.Task()
-	if _, changed := t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurged, taskslog.StatePurging, taskslog.StateFailed, taskslog.StateStopping); !changed {
+	if _, changed := t.SetStateUnless(task.StateFailed, task.StatePurged, task.StatePurging, task.StateFailed, task.StateStopping); !changed {
 		return
 	}
 	err := errors.New("runtime instance was destroyed")
 	t.DetachSession()
-	entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: err})
+	entry.Finish(&task.Result{State: task.StateFailed, Err: err})
 	m.log.WarnContext(ctx, "runtime instance destroyed", "instance", instanceID, "task", t.ID)
 	m.NotifyTaskChange()
 }
@@ -1788,7 +1789,7 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 		return
 	}
 	t := entry.Task()
-	if _, changed := t.SetStateIfAny(taskslog.StateWaiting, taskslog.StateStopped); !changed {
+	if _, changed := t.SetStateIfAny(task.StateWaiting, task.StateStopped); !changed {
 		return
 	}
 	entry.Lifecycle.reconnectImportedSession()
@@ -1826,7 +1827,7 @@ func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
 
 // watchRateLimitEvents forwards task quota changes to the shared change
 // channel, letting task and usage SSE subscribers refresh immediately.
-func (m *Manager) watchRateLimitEvents(t *task.Task) {
+func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
 	m.quotaWatchMu.Lock()
 	defer m.quotaWatchMu.Unlock()
 	if m.quotaWatchClosed {
@@ -1879,7 +1880,7 @@ func (m *Manager) taskChangedLocked() {
 }
 
 // resolveCheckout returns the checkout for a task's primary repo, if any.
-func (m *Manager) resolveCheckout(t *task.Task) *repo.Checkout {
+func (m *Manager) resolveCheckout(t *taskrun.Task) *repo.Checkout {
 	if p := t.Primary(); p != nil {
 		r, _ := m.Checkouts.Checkout(p.Name)
 		return r
@@ -1887,7 +1888,7 @@ func (m *Manager) resolveCheckout(t *task.Task) *repo.Checkout {
 	return nil
 }
 
-func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
+func applyLoadedSessionMetadata(t *taskrun.Task, lt *taskslog.LoadedTask) {
 	if lt == nil {
 		return
 	}
@@ -1989,7 +1990,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	lt.SetWireResolver(m)
 	// Persisted user shutdown intent does not need a readable relay snapshot.
 	// Skip probes so unavailable output cannot prevent completing that intent.
-	shutdownIntent := lt.State == taskslog.StateStopping || lt.State == taskslog.StatePurging || lt.State == taskslog.StateStopped || lt.State == taskslog.StatePurged
+	shutdownIntent := lt.State == task.StateStopping || lt.State == task.StatePurging || lt.State == task.StateStopped || lt.State == task.StatePurged
 	// Check relay liveness.
 	var relayAlive bool
 	relayConfirmedDead := isExited
@@ -2028,7 +2029,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if stateUpdatedAt.IsZero() {
 		stateUpdatedAt = time.Now().UTC()
 	}
-	var mounts []taskslog.RepoMount
+	var mounts []repo.Mount
 	if relPath != "" {
 		primaryBaseBranch := ""
 		if lp != nil {
@@ -2042,7 +2043,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if containerPath == "" {
 			containerPath = m.containerPathForRepo(relPath)
 		}
-		mounts = []taskslog.RepoMount{{Name: relPath, BaseBranch: primaryBaseBranch, GitRoot: checkout.Dir, Branch: branch, ContainerPath: containerPath}}
+		mounts = []repo.Mount{{Name: relPath, BaseBranch: primaryBaseBranch, GitRoot: checkout.Dir, Branch: branch, ContainerPath: containerPath}}
 		// Build lookup of instance repos by branch for ContainerPath.
 		runtimeRepoByBranch := make(map[string]string, len(c.Repos))
 		for _, cr := range c.Repos {
@@ -2057,7 +2058,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			if containerPath == "" {
 				containerPath = m.containerPathForRepo(lm.Name)
 			}
-			mounts = append(mounts, taskslog.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, ContainerPath: containerPath})
+			mounts = append(mounts, repo.Mount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, ContainerPath: containerPath})
 		}
 	}
 
@@ -2085,7 +2086,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		rt = c.ID.RuntimeName()
 	}
 
-	t, err := task.NewTask(taskID, agent.Prompt{Text: prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+	t, err := taskrun.NewTask(taskID, agent.Prompt{Text: prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 	if err != nil {
 		return nil, fmt.Errorf("import task %q: %w", taskID.String(), err)
 	}
@@ -2115,7 +2116,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if lt.GitHubToken || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
-	t.SetStateAt(taskslog.StateRunning, stateUpdatedAt)
+	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if c.Sudo {
 		if pw, err := m.Runtimes.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
@@ -2168,9 +2169,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.SetRelayOffset(relaySize)
 	}
 	var importFailure error
-	if lt.LogPath() != "" && lt.State == taskslog.StateRunning && t.InitialPrompt.Text != "" && !t.HasAcceptedInputEvidence() && t.LastExitError() == "" {
-		importFailure = task.ErrInitialPromptNotAccepted
-		t.SetStateAt(taskslog.StateFailed, stateUpdatedAt)
+	if lt.LogPath() != "" && lt.State == task.StateRunning && t.InitialPrompt.Text != "" && !t.HasAcceptedInputEvidence() && t.LastExitError() == "" {
+		importFailure = taskrun.ErrInitialPromptNotAccepted
+		t.SetStateAt(task.StateFailed, stateUpdatedAt)
 		m.log.ErrorContext(ctx, "imported task startup incomplete", "task", t.ID, "instance", c.ID, "err", importFailure)
 		if !isExited {
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
@@ -2201,10 +2202,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.MarkDiffCreated()
 	}
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
-	if importFailure == nil && lt.State == taskslog.StateFailed {
+	if importFailure == nil && lt.State == task.StateFailed {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
-	if importFailure == nil && lt.State == taskslog.StateCrashed && t.LastExitError() != "" {
+	if importFailure == nil && lt.State == task.StateCrashed && t.LastExitError() != "" {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
 
@@ -2220,11 +2221,11 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	if isExited {
-		if importFailure == nil && t.GetState() != taskslog.StateCrashed {
+		if importFailure == nil && t.GetState() != task.StateCrashed {
 			if t.LastExitError() != "" {
 				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before import"))
 			} else {
-				t.SetState(taskslog.StateStopped)
+				t.SetState(task.StateStopped)
 			}
 		}
 	} else if relayConfirmedDead {
@@ -2238,8 +2239,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
 				m.log.ErrorContext(ctx, "stop failed after imported relay crash", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 			}
-		} else if t.GetState() == taskslog.StateRunning {
-			t.SetStateAt(taskslog.StateWaiting, stateUpdatedAt)
+		} else if t.GetState() == task.StateRunning {
+			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			m.log.WarnContext(ctx, "relay", "msg", "dead, marking waiting",
 				"repo", relPath, "br", branch, "instance", c.ID,
 				"sess", t.GetSessionID(), "msgs", t.MessageCount())
@@ -2247,7 +2248,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	if shutdownIntent {
-		t.SetState(taskslog.StateStopped)
+		t.SetState(task.StateStopped)
 		if !isExited {
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // completing persisted user intent uses the Manager lifetime
 				return nil, fmt.Errorf("complete persisted stop intent: %w", err)
@@ -2256,7 +2257,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 	recoverImported := importFailure == nil && relayConfirmedDead && canRecoverImportedTask(t, lt)
 	if recoverImported {
-		t.SetState(taskslog.StateProvisioning)
+		t.SetState(task.StateProvisioning)
 	}
 	recoveryState := t.GetState()
 	entry := m.NewEntry(t, lt)
@@ -2264,19 +2265,19 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// Import reconstructs the full timeline because the task may resume live;
 	// subsequent lookups must use that authoritative in-memory fold.
 	entry.historyInMemory = true
-	if t.GetState() == taskslog.StateCrashed || t.GetState() == taskslog.StateFailed {
+	if t.GetState() == task.StateCrashed || t.GetState() == task.StateFailed {
 		resultErr := importFailure
 		if resultErr == nil {
 			resultErr = errors.New("agent session failed")
 		}
-		if t.GetState() == taskslog.StateCrashed {
+		if t.GetState() == task.StateCrashed {
 			resultErr = errors.New("agent session crashed")
 		}
 		if exitErr := t.LastExitError(); exitErr != "" {
 			resultErr = errors.New(exitErr)
 		}
 		costUSD, numTurns, duration, usage, _ := t.LiveStats()
-		result := &taskslog.Result{
+		result := &task.Result{
 			State:       t.GetState(),
 			DiffStat:    t.LiveDiffStat(),
 			CostUSD:     costUSD,
@@ -2330,17 +2331,17 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 	// Auto-reconnect immediately so imported live tasks can accept input as
 	// soon as startup returns. The attach must not race the first user reply.
-	if importFailure == nil && t.GetState() != taskslog.StateStopped && relayAlive {
+	if importFailure == nil && t.GetState() != task.StateStopped && relayAlive {
 		entry.Lifecycle.reconnectImportedSession() //nolint:contextcheck // imported watcher uses the Manager lifetime.
-	} else if relayConfirmedDead && t.GetState() != taskslog.StateStopped && t.GetState() != taskslog.StateCrashed && t.GetState() != taskslog.StateFailed {
+	} else if relayConfirmedDead && t.GetState() != task.StateStopped && t.GetState() != task.StateCrashed && t.GetState() != task.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", relPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
-		t.SetState(taskslog.StateStopping)
+		t.SetState(task.StateStopping)
 		if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
 			m.log.ErrorContext(ctx, "stop failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 		}
-		t.SetState(taskslog.StateStopped)
+		t.SetState(task.StateStopped)
 	}
 
 	return entry, nil
@@ -2348,7 +2349,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 // canRecoverImportedTask requires trusted resumable history and excludes
 // intentional stop/purge records and incomplete startup failures.
-func canRecoverImportedTask(t *task.Task, lt *taskslog.LoadedTask) bool {
+func canRecoverImportedTask(t *taskrun.Task, lt *taskslog.LoadedTask) bool {
 	if t.GetSessionID() == "" || !t.HasAcceptedInputEvidence() {
 		return false
 	}
@@ -2358,9 +2359,9 @@ func canRecoverImportedTask(t *task.Task, lt *taskslog.LoadedTask) bool {
 		return false
 	}
 	switch lt.State {
-	case taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateStarting, taskslog.StateProvisioning, taskslog.StateCrashed:
+	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStarting, task.StateProvisioning, task.StateCrashed:
 		return lt.LastTrailer == nil || lt.LastTrailer.StartupFailure == nil
-	case taskslog.StateFailed:
+	case task.StateFailed:
 		return lt.LastTrailer != nil && lt.LastTrailer.Err != nil && strings.HasPrefix(lt.LastTrailer.Err.Error(), "revive instance:")
 	default:
 		return false
@@ -2406,7 +2407,7 @@ func (m *Manager) drainInputQueue(ctx context.Context) {
 		if ctx.Err() != nil {
 			break
 		}
-		if q == nil || q.Delivering || q.Error != "" || e.Task().GetState() != taskslog.StateWaiting {
+		if q == nil || q.Delivering || q.Error != "" || e.Task().GetState() != task.StateWaiting {
 			continue
 		}
 		next := *q
@@ -2449,7 +2450,7 @@ func (m *Manager) pruneInputQueueLocked(ctx context.Context) {
 
 func (m *Manager) deliverQueuedInput(ctx context.Context, e *Entry, id ksid.ID, p agent.Prompt) {
 	e.Lifecycle.inputMu.Lock()
-	waiting := e.Task().GetState() == taskslog.StateWaiting
+	waiting := e.Task().GetState() == task.StateWaiting
 	var err error
 	if waiting {
 		err = e.Lifecycle.sendInputLocked(ctx, p)

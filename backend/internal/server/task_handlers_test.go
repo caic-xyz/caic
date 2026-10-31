@@ -26,7 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 type fileDiffCall struct {
@@ -78,7 +78,7 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid
 	testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, backend)
 	registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
-	tk.Repos = []taskslog.RepoMount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
+	tk.Repos = []repo.Mount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 	insertTestTask(s, tk.ID, tk)
 	return s, backend, tk.ID
@@ -380,7 +380,7 @@ func TestTaskHandlers(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-			tk.SetState(taskslog.StateAsking)
+			tk.SetState(task.StateAsking)
 			insertTestTask(s, tk.ID, tk)
 			entry, _ := s.taskMgr.GetEntry(tk.ID)
 			data := testJPEG(t, 960, 480)
@@ -431,7 +431,7 @@ func TestTaskHandlers(t *testing.T) {
 					t.Parallel()
 					s := newTestRouter(t, nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, "")
-					tk.SetState(taskslog.StateAsking)
+					tk.SetState(task.StateAsking)
 					insertTestTask(s, tk.ID, tk)
 					entry, _ := s.taskMgr.GetEntry(tk.ID)
 					data := bytes.Repeat([]byte("queued attachment bytes"), 1000)
@@ -486,7 +486,7 @@ func TestTaskHandlers(t *testing.T) {
 					s := newTestRouter(t, nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, "")
 					tk.OwnerID = "owner"
-					tk.SetState(taskslog.StateAsking)
+					tk.SetState(task.StateAsking)
 					insertTestTask(s, tk.ID, tk)
 					entry, _ := s.taskMgr.GetEntry(tk.ID)
 					// Exercise both the initial read and the streamed continuation.

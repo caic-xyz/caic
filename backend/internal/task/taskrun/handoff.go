@@ -1,6 +1,6 @@
 // Builds a bounded prompt for continuing a task on another harness.
 
-package task
+package taskrun
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 )
 
 const (
@@ -133,7 +133,7 @@ type handoffPromptInput struct {
 	title         string
 	harness       harness.Name
 	model         string
-	repos         []taskslog.RepoMount
+	repos         []repo.Mount
 	rateLimit     RateLimit
 	diffStat      v3.DiffStat
 	result        handoffResult

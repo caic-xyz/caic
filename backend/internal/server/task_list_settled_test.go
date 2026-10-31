@@ -18,8 +18,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
 )
@@ -192,7 +192,7 @@ func TestTaskListDTOFailurePreservesMembership(t *testing.T) {
 		t.Fatalf("initial snapshot = %+v", initial)
 	}
 	readNextTaskListEvent(t, r)
-	tk.SetState(taskslog.State("invalid-state"))
+	tk.SetState(task.State("invalid-state"))
 	out, _, membership := testTaskHandlers(s).taskSvc.taskListSnapshotWithReplay(testHTTPContext(t), map[string]uint64{})
 	if len(out) != 0 {
 		t.Fatalf("failed DTO count = %d", len(out))
@@ -213,7 +213,7 @@ func TestTaskListDTOFailurePreservesMembership(t *testing.T) {
 			break
 		}
 	}
-	tk.SetState(taskslog.StateWaiting)
+	tk.SetState(task.StateWaiting)
 	s.taskMgr.NotifyTaskChange()
 	for {
 		event := readNextTaskListEvent(t, r)
@@ -230,7 +230,7 @@ func TestTaskListIncompleteDTOOnConnect(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "private prompt"}, harness.Claude)
-	tk.SetState(taskslog.State("invalid-state"))
+	tk.SetState(task.State("invalid-state"))
 	insertTestTask(s, tk.ID, tk)
 	s.taskMgr.CompleteRestoration(nil)
 	ctx, cancel := context.WithCancel(testHTTPContext(t))

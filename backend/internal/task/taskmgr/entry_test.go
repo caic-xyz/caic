@@ -14,23 +14,24 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
-func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model string) *task.Task {
-	tk, err := task.NewTask(id, prompt, h, model, "", "", "", "")
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model string) *taskrun.Task {
+	tk, err := taskrun.NewTask(id, prompt, h, model, "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tk
 }
 
-func newTestEntry(t *testing.T, tk *task.Task) *Entry {
+func newTestEntry(t *testing.T, tk *taskrun.Task) *Entry {
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	return m.NewEntry(tk, nil)
 }
 
-func newTestPurgedEntry(t *testing.T, tk *task.Task, r *taskslog.Result, lt *taskslog.LoadedTask) *Entry {
+func newTestPurgedEntry(t *testing.T, tk *taskrun.Task, r *task.Result, lt *taskslog.LoadedTask) *Entry {
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	e := m.NewEntry(tk, lt)
 	e.Finish(r)
@@ -43,7 +44,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		e := m.NewEntry(tk, nil)
 		m.Insert(tk.ID, e)
 		if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "next"}); err != nil {
@@ -75,9 +76,9 @@ func TestEntry(t *testing.T) {
 			t.Run(fmt.Sprintf("new_result_%t", replaced), func(t *testing.T) {
 				t.Parallel()
 				e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-				old := &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old failure")}
+				old := &task.Result{State: task.StateFailed, Err: errors.New("old failure")}
 				e.Finish(old)
-				newResult := &taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("new failure")}
+				newResult := &task.Result{State: task.StateCrashed, Err: errors.New("new failure")}
 				if replaced {
 					e.Finish(newResult)
 				}
@@ -132,7 +133,7 @@ func TestEntry(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			e.Finish(&taskslog.Result{State: taskslog.StateFailed})
+			e.Finish(&task.Result{State: task.StateFailed})
 			select {
 			case <-e.Done():
 			default:
@@ -142,7 +143,7 @@ func TestEntry(t *testing.T) {
 		t.Run("reset_reopens", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			e.Finish(&taskslog.Result{State: taskslog.StateFailed})
+			e.Finish(&task.Result{State: task.StateFailed})
 			e.Reset()
 			select {
 			case <-e.Done():
@@ -160,7 +161,7 @@ func TestEntry(t *testing.T) {
 		t.Run("valid_closes_and_sets_result", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			r := &taskslog.Result{State: taskslog.StateFailed}
+			r := &task.Result{State: task.StateFailed}
 			e.Finish(r)
 			select {
 			case <-e.Done():
@@ -174,8 +175,8 @@ func TestEntry(t *testing.T) {
 		t.Run("valid_after_finished", func(t *testing.T) {
 			t.Parallel()
 			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
-			first := &taskslog.Result{State: taskslog.StateCrashed}
-			second := &taskslog.Result{State: taskslog.StatePurged}
+			first := &task.Result{State: task.StateCrashed}
+			second := &task.Result{State: task.StatePurged}
 			e.Finish(first)
 			e.Finish(second)
 			if e.Result() != second {

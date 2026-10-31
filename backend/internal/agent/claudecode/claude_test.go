@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/task"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/genai/providers/claudecode"
@@ -29,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 func TestWritePrompt(t *testing.T) {
@@ -777,7 +777,7 @@ func TestControlConn(t *testing.T) {
 	})
 	t.Run("ReconnectAfterAcceptedAnswer", func(t *testing.T) {
 		t.Parallel()
-		tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+		tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}

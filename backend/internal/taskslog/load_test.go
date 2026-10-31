@@ -28,6 +28,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 )
 
@@ -429,7 +431,7 @@ func TestLoadLogHeader(t *testing.T) {
 							if loaded.SessionID != "root" || loaded.ReportedModel != "claude-opus-x" || loaded.ReportedEffort != "high" || loaded.AgentVersion != "2.1.0" {
 								t.Fatalf("root session metadata lost: %+v", loaded)
 							}
-							if loaded.State != State(tc.state) || loaded.Title != "reviving" || loaded.ForgeOwner != "org" || loaded.ForgeRepo != "repo" || loaded.ForgePR != 7 || !loaded.DiffCreated || !loaded.LastStateUpdateAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 500000000, time.UTC)) {
+							if loaded.State != task.State(tc.state) || loaded.Title != "reviving" || loaded.ForgeOwner != "org" || loaded.ForgeRepo != "repo" || loaded.ForgePR != 7 || !loaded.DiffCreated || !loaded.LastStateUpdateAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 500000000, time.UTC)) {
 								t.Fatalf("control metadata lost: %+v", loaded)
 							}
 							if loaded.Prompt != "task" || loaded.RequestedModel != "requested" || loaded.RequestedEffort != "medium" || loaded.OwnerID != "owner" || loaded.ParentTaskID != "parent" || loaded.ForkedFromTaskID != "fork" || !loaded.CaicMCP || loaded.ForgeIssue != 5 || len(loaded.Repos) != 1 || loaded.Repos[0].Name != "org/repo" {
@@ -439,7 +441,7 @@ func TestLoadLogHeader(t *testing.T) {
 							if r == nil || r.CostUSD != tc.cost || r.Duration != tc.duration || r.NumTurns != tc.turns || !r.Usage.Equal(tc.usage) {
 								t.Fatalf("completed-run accounting lost: %+v, want usage %+v", r, tc.usage)
 							}
-							if r.State != State(tc.state) || r.DiskUsedBytes == nil || *r.DiskUsedBytes != 456 || r.Err == nil || r.Err.Error() != "launch failed" || r.AgentResult != "completed" || r.StartupFailure == nil || *r.StartupFailure != (v3.StartupFailure{Harness: "claude", Phase: "launch", Cause: "interrupted"}) || len(r.DiffStat) != 1 || r.DiffStat[0].Path != "main.go" || r.DiffStat[0].LinesAdded != 4 || r.DiffStat[0].LinesDeleted != 1 {
+							if r.State != task.State(tc.state) || r.DiskUsedBytes == nil || *r.DiskUsedBytes != 456 || r.Err == nil || r.Err.Error() != "launch failed" || r.AgentResult != "completed" || r.StartupFailure == nil || *r.StartupFailure != (v3.StartupFailure{Harness: "claude", Phase: "launch", Cause: "interrupted"}) || len(r.DiffStat) != 1 || r.DiffStat[0].Path != "main.go" || r.DiffStat[0].LinesAdded != 4 || r.DiffStat[0].LinesDeleted != 1 {
 								t.Fatalf("latest trailer metadata lost: %+v", r)
 							}
 							if loaded.Timeline != nil {
@@ -608,8 +610,8 @@ func TestLoadLogHeader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if loaded.State != StatePurged {
-			t.Fatalf("state = %s, want %s", loaded.State, StatePurged)
+		if loaded.State != task.StatePurged {
+			t.Fatalf("state = %s, want %s", loaded.State, task.StatePurged)
 		}
 	})
 
@@ -639,7 +641,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if loaded.State != StatePurged || loaded.LastTrailer == nil || loaded.LastTrailer.CostUSD != 9.99 {
+		if loaded.State != task.StatePurged || loaded.LastTrailer == nil || loaded.LastTrailer.CostUSD != 9.99 {
 			t.Fatalf("stale cache after log change: state=%v result=%+v", loaded.State, loaded.LastTrailer)
 		}
 	})
@@ -1480,7 +1482,7 @@ func TestLoadedTask(t *testing.T) {
 		})
 		t.Run("WithRepos", func(t *testing.T) {
 			t.Parallel()
-			lt := &LoadedTask{Repos: []RepoMount{{Name: "a/b", Branch: "caic-0"}}}
+			lt := &LoadedTask{Repos: []repo.Mount{{Name: "a/b", Branch: "caic-0"}}}
 			if p := lt.Primary(); p == nil || p.Name != "a/b" {
 				t.Errorf("Primary() = %+v, want a/b", p)
 			}
@@ -1547,13 +1549,13 @@ func TestParseState(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		in   string
-		want State
+		want task.State
 	}{
-		{"failed", StateFailed},
-		{"crashed", StateCrashed},
-		{"stopped", StateStopped},
-		{"purged", StatePurged},
-		{"unknown", StateFailed},
+		{"failed", task.StateFailed},
+		{"crashed", task.StateCrashed},
+		{"stopped", task.StateStopped},
+		{"purged", task.StatePurged},
+		{"unknown", task.StateFailed},
 	} {
 		t.Run(tt.in, func(t *testing.T) {
 			t.Parallel()

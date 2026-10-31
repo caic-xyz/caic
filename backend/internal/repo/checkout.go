@@ -115,7 +115,7 @@ func LiveBranchesByRoot(instances []runtime.Instance) map[string][]string {
 }
 
 // TaskView is the read/write surface Checkout needs from a task.
-// *task.Task satisfies it structurally.
+// *taskrun.Task satisfies it structurally.
 type TaskView interface {
 	GitTarget() GitTarget
 	SetRepoBranch(i int, branch string)

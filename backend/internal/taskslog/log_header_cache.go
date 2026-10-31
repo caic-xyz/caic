@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caic-xyz/caic/backend/internal/task"
 	v10 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v10"
 )
 
@@ -116,11 +117,11 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 		Task *struct {
 			v10.Task
 
-			State  State `json:"state"`
+			State  task.State `json:"state"`
 			Result *struct {
 				v10.Result
 
-				State State `json:"state"`
+				State task.State `json:"state"`
 			} `json:"result"`
 		} `json:"task"`
 	}
@@ -138,10 +139,10 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 		entry.Task.Result.Result.State = string(entry.Task.Result.State)
 		entry.Task.LastTrailer = &entry.Task.Result.Result
 	}
-	task := headerTaskFromData(&entry.Task.Task)
-	task.path = path
-	task.LogSize = info.Size()
-	return task, true
+	lt := headerTaskFromData(&entry.Task.Task)
+	lt.path = path
+	lt.LogSize = info.Size()
+	return lt, true
 }
 
 // writeHeaderCache stores the header beside the log so the next load skips the

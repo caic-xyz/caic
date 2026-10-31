@@ -27,24 +27,26 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 type testTask struct {
 	ID            ksid.ID
 	InitialPrompt agent.Prompt
-	Repos         []RepoMount
+	Repos         []repo.Mount
 	Harness       harness.Name
 	Model         string
 	Effort        string
 }
 
 func (t *testTask) logFilename() string {
-	repo, branch := "", ""
+	repoName, branch := "", ""
 	if len(t.Repos) > 0 {
-		repo = strings.ReplaceAll(t.Repos[0].Name, "/", "-")
+		repoName = strings.ReplaceAll(t.Repos[0].Name, "/", "-")
 		branch = strings.ReplaceAll(t.Repos[0].Branch, "/", "-")
 	}
-	return t.ID.String() + "-" + repo + "-" + branch + ".jsonl"
+	return t.ID.String() + "-" + repoName + "-" + branch + ".jsonl"
 }
 
 func (t *testTask) logHeader() *agent.MetaMessage {
@@ -210,8 +212,8 @@ func TestStore(t *testing.T) {
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
 		t.Parallel()
 		b := &agenttest.LogSink{}
-		res := &Result{
-			State:         StateWaiting,
+		res := &task.Result{
+			State:         task.StateWaiting,
 			DiskUsedBytes: new(int64(456)),
 			Usage: agent.Usage{
 				ReasoningOutputTokens:    123,
@@ -247,7 +249,7 @@ func TestStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		plainPath := log.path
-		summary := &LoadedTask{State: StateFailed, LastTrailer: &Result{State: StateFailed}}
+		summary := &LoadedTask{State: task.StateFailed, LastTrailer: &task.Result{State: task.StateFailed}}
 		compressed, err := store.CompressTerminal(log.path, log, summary)
 		if err != nil {
 			t.Fatal(err)
@@ -263,7 +265,7 @@ func TestStore(t *testing.T) {
 		if !ok {
 			t.Fatal("Compress did not publish a terminal header cache")
 		}
-		if cached.LastTrailer == nil || cached.LastTrailer.State != StateFailed {
+		if cached.LastTrailer == nil || cached.LastTrailer.State != task.StateFailed {
 			t.Fatalf("cached result = %#v, want failed", cached.LastTrailer)
 		}
 		if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: "after compression"}); !errors.Is(err, os.ErrClosed) {
@@ -276,7 +278,7 @@ func TestStore(t *testing.T) {
 		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test prompt"},
-			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0", ContainerPath: "~/src/org/repo"}},
+			Repos:         []repo.Mount{{Name: "org/repo", Branch: "caic-0", ContainerPath: "~/src/org/repo"}},
 			Harness:       harness.Codex,
 			Model:         "model-1",
 			Effort:        "high",
@@ -383,7 +385,7 @@ func TestStore(t *testing.T) {
 		tk := &testTask{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: "test"},
-			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+			Repos:         []repo.Mount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       harness.Codex,
 		}
 		path := filepath.Join(dir, tk.logFilename())
@@ -433,7 +435,7 @@ func TestStore(t *testing.T) {
 					t.Fatal(err)
 				}
 				plain := log.path
-				archive, err := store.Compress(plain, log, StateFailed)
+				archive, err := store.Compress(plain, log, task.StateFailed)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -553,7 +555,7 @@ func TestStore(t *testing.T) {
 			if !ok {
 				t.Fatal("SettleTerminal did not publish a terminal header cache")
 			}
-			if cached.LastTrailer == nil || cached.LastTrailer.State != StatePurged {
+			if cached.LastTrailer == nil || cached.LastTrailer.State != task.StatePurged {
 				t.Fatalf("cached result = %#v, want purged", cached.LastTrailer)
 			}
 			st := NewStore(testLogger(), dir)
@@ -680,7 +682,7 @@ func TestStore(t *testing.T) {
 					errs[0] = st.SettleTerminal(nil)
 				})
 				wg.Go(func() {
-					_, errs[1] = st.Compress(path, nil, StatePurged)
+					_, errs[1] = st.Compress(path, nil, task.StatePurged)
 				})
 				wg.Wait()
 				if errs[0] != nil || errs[1] != nil {
@@ -896,8 +898,8 @@ func TestStore(t *testing.T) {
 			if tasks[0].Prompt != "task1" {
 				t.Errorf("Prompt = %q, want %q", tasks[0].Prompt, "task1")
 			}
-			if tasks[0].State != StatePurged {
-				t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
+			if tasks[0].State != task.StatePurged {
+				t.Errorf("State = %v, want %v", tasks[0].State, task.StatePurged)
 			}
 		})
 		t.Run("NativeInputDoesNotProjectOutputMetadata", func(t *testing.T) {
@@ -947,7 +949,7 @@ func TestStore(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if loaded.Prompt != "control task" || loaded.Harness != harness.Codex || loaded.State != StatePurged {
+					if loaded.Prompt != "control task" || loaded.Harness != harness.Codex || loaded.State != task.StatePurged {
 						t.Fatalf("task metadata=%+v", loaded)
 					}
 					if loaded.SessionID != "session-1" || loaded.ReportedModel != "model-1" || loaded.AgentVersion != "agent-1" {
@@ -1163,7 +1165,7 @@ func TestStore(t *testing.T) {
 			if lt.Prompt != "compressed" {
 				t.Errorf("Prompt = %q, want compressed", lt.Prompt)
 			}
-			if lt.State != StatePurged {
+			if lt.State != task.StatePurged {
 				t.Errorf("State = %v, want StatePurged", lt.State)
 			}
 			if lt.ForgePR != 7 {

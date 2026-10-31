@@ -18,8 +18,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/gomode/mcp"
 )
 
@@ -27,11 +27,11 @@ func BenchmarkTaskListSnapshot(b *testing.B) {
 	s := newTestRouter(b, nil)
 	for i := range 10 {
 		id := ksid.NewID()
-		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
 		if i%2 == 0 {
-			task.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 		}
-		insertTestTask(s, id, task)
+		insertTestTask(s, id, tk)
 	}
 
 	taskSvc := testTaskHandlers(s).taskSvc
@@ -48,11 +48,11 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 	s := newTestRouter(b, nil)
 	for i := range 10 {
 		id := ksid.NewID()
-		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
 		if i%2 == 0 {
-			task.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 		}
-		insertTestTask(s, id, task)
+		insertTestTask(s, id, tk)
 	}
 
 	taskSvc := testTaskHandlers(s).taskSvc
@@ -92,8 +92,8 @@ func BenchmarkMCPTaskListPage(b *testing.B) {
 	s := newTestRouter(b, nil)
 	for range 100 {
 		id := ksid.NewID()
-		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
-		insertTestTask(s, id, task)
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		insertTestTask(s, id, tk)
 	}
 	registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 	b.ReportAllocs()

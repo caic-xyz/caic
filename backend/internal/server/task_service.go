@@ -33,8 +33,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/metrics"
 )
@@ -42,7 +42,7 @@ import (
 // FakeCIHook generate fake tasks.
 //
 // TODO: Cleaner interface.
-type FakeCIHook func(ctx context.Context, t *task.Task)
+type FakeCIHook func(ctx context.Context, t *taskrun.Task)
 
 // taskService owns task command orchestration and API DTO assembly.
 //
@@ -122,7 +122,7 @@ func (s *taskService) runtimeNameForCreate(requested string, settings *preferenc
 	return id
 }
 
-func (s *taskService) maybeFakeCI(t *task.Task) {
+func (s *taskService) maybeFakeCI(t *taskrun.Task) {
 	if s.fakeCI == nil {
 		return
 	}
@@ -142,8 +142,8 @@ func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
 // taskStateReplay is the state transition history a task-list SSE connection
 // has not yet observed for one task.
 type taskStateReplay struct {
-	seq     uint64                 // Task state sequence the DTO state corresponds to.
-	history []task.StateTransition // Retained transitions newer than the connection cursor.
+	seq     uint64                    // Task state sequence the DTO state corresponds to.
+	history []taskrun.StateTransition // Retained transitions newer than the connection cursor.
 }
 
 // taskListSnapshotWithReplay returns the task DTOs plus each task's retained
@@ -227,7 +227,7 @@ func taskDTOWithReplay(ctx context.Context, entry *taskmgr.Entry, after uint64, 
 
 // taskDTOFromSnapshot projects a pre-read snapshot so callers can read the
 // task's state transition history and DTO state in one critical section.
-func taskDTOFromSnapshot(ctx context.Context, entry *taskmgr.Entry, snap *task.Snapshot, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, error) {
+func taskDTOFromSnapshot(ctx context.Context, entry *taskmgr.Entry, snap *taskrun.Snapshot, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, error) {
 	t := entry.Task()
 
 	repos := make([]v1.TaskRepo, len(snap.Repos))
@@ -488,7 +488,7 @@ func taskInfoNormalizeMount(m v1.TaskInfoMount, hostHome string) v1.TaskInfoMoun
 	}
 }
 
-func taskInfoTailscaleURL(s *task.Snapshot) string {
+func taskInfoTailscaleURL(s *taskrun.Snapshot) string {
 	if s.TailscaleFQDN != "" {
 		return "https://" + s.TailscaleFQDN
 	}
@@ -808,7 +808,7 @@ func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *a
 }
 
 func (s *taskService) getTaskHandoff(_ context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.TaskHandoffResp, error) {
-	return &v1.TaskHandoffResp{Prompt: task.BuildHandoffPrompt(entry.Task(), 0)}, nil
+	return &v1.TaskHandoffResp{Prompt: taskrun.BuildHandoffPrompt(entry.Task(), 0)}, nil
 }
 
 func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq, images []logv3.ImageData) (*v1.Task, error) {
@@ -973,7 +973,7 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 }
 
 // repositoryStatuses keeps task-list cards coherent with successful Git reads.
-func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, t *task.Task, target repo.GitTarget) ([]runtime.RepositoryStatus, error) {
+func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, t *taskrun.Task, target repo.GitTarget) ([]runtime.RepositoryStatus, error) {
 	snapshot, err := checkout.RepositoryStatuses(ctx, s.runtimes, target)
 	if err == nil && t.SetLiveRepositorySummary(&snapshot) {
 		s.taskMgr.NotifyTaskChange()

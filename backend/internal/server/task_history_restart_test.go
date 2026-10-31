@@ -26,14 +26,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 func TestHistoryProcessRestart(t *testing.T) {
 	if path := os.Getenv("CAIC_HISTORY_RESTART_LOG"); path != "" {
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 		tk := mustNewTask(t, ksid.ID(1), agent.Prompt{Text: "restart history"}, harness.Claude)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		insertTestTask(s, tk.ID, tk)
 		e, _ := s.taskMgr.GetEntry(tk.ID)
 		e.LogPath.Set(path)

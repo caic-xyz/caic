@@ -1,7 +1,7 @@
 // Shared task test doubles and fixtures: fake agent backends, a fake runtime
 // lifecycle, and git test-repo helpers.
 
-package task
+package taskrun
 
 import (
 	"context"

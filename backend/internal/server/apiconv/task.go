@@ -11,14 +11,14 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // TaskInput is the complete server-resolved task state needed for an API DTO.
 type TaskInput struct {
-	Task               *task.Task
-	Snapshot           task.Snapshot
-	Result             *taskslog.Result
+	Task               *taskrun.Task
+	Snapshot           taskrun.Snapshot
+	Result             *task.Result
 	Repos              []v1.TaskRepo
 	SudoPassword       string
 	ContextWindowLimit int
@@ -134,7 +134,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	out.CacheExpiresAt = snap.CacheExpiresAt
 	out.AutoCompactTokenLimit = snap.AutoCompactTokenLimit
 	out.StoppedDiskUsedBytes = -1
-	if snap.State == taskslog.StateStopped {
+	if snap.State == task.StateStopped {
 		if result != nil && result.DiskUsedBytes != nil {
 			out.StoppedDiskUsedBytes = *result.DiskUsedBytes
 		} else if snap.DiskKnown {
@@ -191,7 +191,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	return out, nil
 }
 
-func tailscaleURLFromSnapshot(s *task.Snapshot) string {
+func tailscaleURLFromSnapshot(s *taskrun.Snapshot) string {
 	if s.TailscaleFQDN != "" {
 		return "https://" + s.TailscaleFQDN
 	}

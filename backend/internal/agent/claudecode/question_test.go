@@ -17,7 +17,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 const questionMetadata = `{"t":"caic_meta","version":3,"harness":"claude","prompt":"question test","repos":[],"started_at":"2026-10-30T00:00:00Z"}`
@@ -516,7 +516,7 @@ func TestWireFormat(t *testing.T) {
 					for _, line := range lines {
 						appendRecord(line)
 					}
-					tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+					tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -545,7 +545,7 @@ func TestWireFormat(t *testing.T) {
 						t.Fatal(err)
 					}
 					appendRecord(string(completed))
-					restored, err := task.NewTask(tk.ID, agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+					restored, err := taskrun.NewTask(tk.ID, agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
 					if err != nil {
 						t.Fatal(err)
 					}

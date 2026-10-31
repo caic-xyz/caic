@@ -1,6 +1,6 @@
 // Task metadata conversion helpers.
 
-package task
+package taskrun
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"

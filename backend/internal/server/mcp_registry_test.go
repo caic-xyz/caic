@@ -20,11 +20,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
 
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
 )
@@ -47,7 +47,7 @@ func TestMCPRegistry(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			target := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "target"}, harness.Claude)
-			target.SetState(taskslog.StateAsking)
+			target.SetState(task.StateAsking)
 			insertTestTask(s, target.ID, target)
 			session, gate := newGatedInputSession(t, target)
 			executor := agent.NewMCPExecutor(t.Context())
@@ -110,7 +110,7 @@ func TestMCPRegistry(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		log, path, err := s.logStore.Open(tk.LogFilename(), tk.LogHeader())
 		if err != nil {
 			t.Fatal(err)
@@ -137,7 +137,7 @@ func TestMCPRegistry(t *testing.T) {
 		session := agent.NewSession(ctx, cmd, conn, stdout, messages, testLogger())
 		dispatchDone := make(chan struct{})
 		close(dispatchDone)
-		h := &task.SessionHandle{Session: session, MsgCh: messages, DispatchDone: dispatchDone, Log: agent.DiscardLogSink{}}
+		h := &taskrun.SessionHandle{Session: session, MsgCh: messages, DispatchDone: dispatchDone, Log: agent.DiscardLogSink{}}
 		tk.AttachSession(h)
 		t.Cleanup(func() {
 			cancel()
@@ -152,7 +152,7 @@ func TestMCPRegistry(t *testing.T) {
 		}
 		select {
 		case <-entry.Done():
-			if tk.GetState() != taskslog.StateStopped {
+			if tk.GetState() != task.StateStopped {
 				t.Fatalf("self stop=%s", tk.GetState())
 			}
 		case <-time.After(time.Second):

@@ -20,7 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // Lifecycle coordinates state transitions, session watching, and user
@@ -28,7 +28,7 @@ import (
 type Lifecycle struct {
 	manager      *Manager
 	entry        *Entry
-	agentRuntime task.AgentRuntime
+	agentRuntime taskrun.AgentRuntime
 	ctx          context.Context
 	wg           sync.WaitGroup
 
@@ -60,7 +60,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	defer r.purgeMu.Unlock()
 	if r.purgeScheduled {
 		switch t.GetState() {
-		case taskslog.StateStopping, taskslog.StateStopped, taskslog.StatePurging:
+		case task.StateStopping, task.StateStopped, task.StatePurging:
 			return nil
 		default:
 			return conflict("task is no longer stopped for scheduled purge")
@@ -68,27 +68,27 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	}
 
 	state := t.GetState()
-	purgeStoppedImmediately := state == taskslog.StateStopped
-	intentState := taskslog.StateStopping
+	purgeStoppedImmediately := state == task.StateStopped
+	intentState := task.StateStopping
 	switch state {
-	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
-		if _, changed := t.SetStateIfAny(taskslog.StateStopping,
-			taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning); !changed {
+	case task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning:
+		if _, changed := t.SetStateIfAny(task.StateStopping,
+			task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning); !changed {
 			return conflict("task state changed while scheduling purge")
 		}
-	case taskslog.StateStopping:
-	case taskslog.StateStopped:
-		intentState = taskslog.StatePurging
-		if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
+	case task.StateStopping:
+	case task.StateStopped:
+		intentState = task.StatePurging
+		if !t.SetStateIf(task.StateStopped, task.StatePurging) {
 			return conflict("task state changed while starting purge")
 		}
-	case taskslog.StateCrashed:
-		intentState = taskslog.StateStopped
-		t.SetState(taskslog.StateStopped)
+	case task.StateCrashed:
+		intentState = task.StateStopped
+		t.SetState(task.StateStopped)
 	default:
 		return conflict("task is not running, waiting, stopped, or crashed")
 	}
-	if err := r.manager.writeTaskResultTrailer(r.entry, &taskslog.Result{State: taskslog.StatePurging}); err != nil {
+	if err := r.manager.writeTaskResultTrailer(r.entry, &task.Result{State: task.StatePurging}); err != nil {
 		t.SetStateIf(intentState, state)
 		return fmt.Errorf("persist purge intent: %w", err)
 	}
@@ -110,7 +110,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 			r.purgeMu.Unlock()
 		}()
 		if !purgeStoppedImmediately {
-			if state != taskslog.StateStopping && state != taskslog.StateCrashed {
+			if state != task.StateStopping && state != task.StateCrashed {
 				// Yield so the task-list snapshot loop can observe the stopping
 				// state before StopTask advances it. This is best-effort: the
 				// state transition journal is what guarantees the transition is
@@ -126,14 +126,14 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 			if !r.waitForPurgeDelay(purgeCtx, delay) {
 				return
 			}
-			if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
+			if !t.SetStateIf(task.StateStopped, task.StatePurging) {
 				r.manager.log.InfoContext(purgeCtx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
 				return
 			}
 			r.manager.NotifyTaskChange()
 		}
 		cleanupCtx := context.WithoutCancel(purgeCtx)
-		r.cleanup(cleanupCtx, taskslog.StatePurged)
+		r.cleanup(cleanupCtx, task.StatePurged)
 		r.manager.log.InfoContext(cleanupCtx, "purge completed", "task", t.ID, "final_state", t.GetState())
 	})
 	return nil
@@ -147,18 +147,18 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 	}
 	defer r.operationMu.Unlock()
 	t := r.entry.Task()
-	if (t.GetState() == taskslog.StateFailed || t.GetState() == taskslog.StateCrashed) && t.RuntimeInstanceID() == "" {
+	if (t.GetState() == task.StateFailed || t.GetState() == task.StateCrashed) && t.RuntimeInstanceID() == "" {
 		return conflict("task has no runtime instance to stop")
 	}
-	state, changed := t.SetStateIfAny(taskslog.StateStopping,
-		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning, taskslog.StateFailed, taskslog.StateCrashed)
+	state, changed := t.SetStateIfAny(task.StateStopping,
+		task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning, task.StateFailed, task.StateCrashed)
 	if !changed {
 		return conflict("task is not running or waiting")
 	}
 	// Persist user intent before the relay or runtime can be stopped. A
 	// restart during shutdown must not reinterpret that death as a crash.
-	if err := r.manager.writeTaskResultTrailer(r.entry, &taskslog.Result{State: taskslog.StateStopping}); err != nil {
-		t.SetStateIf(taskslog.StateStopping, state)
+	if err := r.manager.writeTaskResultTrailer(r.entry, &task.Result{State: task.StateStopping}); err != nil {
+		t.SetStateIf(task.StateStopping, state)
 		return fmt.Errorf("persist stop intent: %w", err)
 	}
 	r.manager.NotifyTaskChange()
@@ -182,7 +182,7 @@ func (r *Lifecycle) Revive() error {
 	}
 	defer r.operationMu.Unlock()
 	t := r.entry.Task()
-	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed); !changed {
+	if _, changed := t.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
 	return r.reviveLocked()
@@ -191,7 +191,7 @@ func (r *Lifecycle) Revive() error {
 // Restart starts a fresh agent session with prompt.
 func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 	t := r.entry.Task()
-	prevState, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
+	prevState, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan)
 	if !changed {
 		return conflict("task is not waiting or asking")
 	}
@@ -204,7 +204,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 			err = errors.New("agent connection target missing SSH host")
 		}
 		if err != nil {
-			t.SetStateIf(taskslog.StateStarting, prevState)
+			t.SetStateIf(task.StateStarting, prevState)
 			return internalErr(err, "read plan from instance")
 		}
 	}
@@ -220,7 +220,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 // ClearContext starts a fresh idle agent session.
 func (r *Lifecycle) ClearContext() error {
 	t := r.entry.Task()
-	if _, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan); !changed {
+	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
 	}
 	if r.agentRuntime.Checkout == nil {
@@ -255,8 +255,8 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	t := r.entry.Task()
 	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
 	if err != nil {
-		result := &taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "start task")}
-		if startupErr, ok := errors.AsType[*task.StartupError](err); ok {
+		result := &task.Result{State: task.StateFailed, Err: internalErr(err, "start task")}
+		if startupErr, ok := errors.AsType[*taskrun.StartupError](err); ok {
 			details := startupErr.Details()
 			result.StartupFailure = &details
 		}
@@ -280,7 +280,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	source := r.entry.Task()
 	state := source.GetState()
 	switch state {
-	case taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateStopped, taskslog.StateCrashed:
+	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStopped, task.StateCrashed:
 	default:
 		return 0, conflict("task must be active, stopped, or crashed to fork")
 	}
@@ -328,7 +328,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	for _, repoMount := range sourceRepos {
 		sourceRepoNames[repoMount.Name] = struct{}{}
 	}
-	var extraMounts []taskslog.RepoMount
+	var extraMounts []repo.Mount
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return 0, badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
@@ -337,10 +337,10 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 		if !ok {
 			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
 		}
-		extraMounts = append(extraMounts, taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
+		extraMounts = append(extraMounts, repo.Mount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
 	}
 
-	mounts := make([]taskslog.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
+	mounts := make([]repo.Mount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
 	copy(mounts, sourceRepos)
 	mounts = append(mounts, extraMounts...)
 	t, err := r.manager.newTask(p.Prompt, forkHarness, forkModel, forkEffort, source.BaseImage, source.ContainerPlatform, "")
@@ -379,14 +379,14 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 		if metadata == nil {
 			metadata = runtime.Metadata{}
 		}
-		maps.Copy(metadata, task.MakeMetadata(t))
+		maps.Copy(metadata, taskrun.MakeMetadata(t))
 		forkOpts := &runtime.ForkOptions{RuntimeName: source.RuntimeName, Display: p.Display, Tailscale: p.Tailscale, USB: p.USB, Sudo: p.Sudo, Metadata: metadata, Harness: forkHarness, Mounts: slices.Clone(source.Mounts), MaxCPUs: source.MaxCPUs}
 		if p.ResolvedGitHubToken != "" {
 			forkOpts.ExtraEnv = []string{"GITHUB_TOKEN=" + p.ResolvedGitHubToken}
 		}
 		h, err := forkEntry.Lifecycle.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
 		if err != nil {
-			forkEntry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "fork task")})
+			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -417,11 +417,11 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
 	t := r.entry.Task()
 	switch t.GetState() {
-	case taskslog.StatePending:
+	case task.StatePending:
 		return nil, conflict("task has no instance yet")
-	case taskslog.StateStopping, taskslog.StateStopped, taskslog.StatePurging, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurged:
+	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateCrashed, task.StateFailed, task.StatePurged:
 		return nil, conflict("task is in a terminal state")
-	case taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling, taskslog.StatePushing:
+	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
 		// Syncable states; continue below.
 	}
 	if target == SyncTargetDefault && force {
@@ -467,7 +467,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, error) {
 	// Busy tasks can enqueue independently of a blocked transport write. Only
 	// the immediate waiting path needs the same serialization as SendInput.
-	sendNow := r.entry.Task().GetState() == taskslog.StateWaiting
+	sendNow := r.entry.Task().GetState() == task.StateWaiting
 	if sendNow {
 		r.inputMu.Lock()
 		defer r.inputMu.Unlock()
@@ -480,7 +480,7 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 	}
 	m := r.manager
 	switch t.GetState() {
-	case taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan:
+	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
 	default:
 		return false, conflict("task is not ready for queued input")
 	}
@@ -490,7 +490,7 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 		m.inputMu.Unlock()
 		return false, conflict("pending prompt is being delivered or was already sent")
 	}
-	if pending == nil && sendNow && t.GetState() == taskslog.StateWaiting {
+	if pending == nil && sendNow && t.GetState() == task.StateWaiting {
 		m.inputMu.Unlock()
 		return false, r.sendInputLocked(ctx, prompt)
 	}
@@ -541,14 +541,14 @@ func (r *Lifecycle) sendInputLocked(ctx context.Context, prompt agent.Prompt) er
 		}
 	}
 	if err := t.SendInput(ctx, prompt); err != nil {
-		if !errors.Is(err, task.ErrNoActiveSession) {
+		if !errors.Is(err, taskrun.ErrNoActiveSession) {
 			return conflictErr(err, "send input")
 		}
 		var failedReconnect error
 		if reconnectErr := r.reconnectForInput(); reconnectErr == nil { //nolint:contextcheck // The replacement session belongs to the server lifetime.
 			if retryErr := t.SendInput(ctx, prompt); retryErr == nil {
 				return nil
-			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
+			} else if !errors.Is(retryErr, taskrun.ErrNoActiveSession) {
 				return conflictErr(retryErr, "send input")
 			} else {
 				err = retryErr
@@ -579,7 +579,7 @@ func (r *Lifecycle) waitForPurgeDelay(ctx context.Context, delay time.Duration) 
 	defer timer.Stop()
 	for {
 		changed := r.manager.Changed()
-		if r.entry.Task().GetState() != taskslog.StateStopped {
+		if r.entry.Task().GetState() != task.StateStopped {
 			return false
 		}
 		select {
@@ -593,9 +593,9 @@ func (r *Lifecycle) waitForPurgeDelay(ctx context.Context, delay time.Duration) 
 }
 
 func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
-	for r.entry.Task().GetState() == taskslog.StateStopping {
+	for r.entry.Task().GetState() == task.StateStopping {
 		changed := r.manager.Changed()
-		if r.entry.Task().GetState() != taskslog.StateStopping {
+		if r.entry.Task().GetState() != task.StateStopping {
 			continue
 		}
 		select {
@@ -604,12 +604,12 @@ func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
 			return false
 		}
 	}
-	return r.entry.Task().GetState() == taskslog.StateStopped
+	return r.entry.Task().GetState() == task.StateStopped
 }
 
 // scheduleImportedRecovery waits until buffered inventory events are applied
 // before stopping and reviving the selected retained instance.
-func (r *Lifecycle) scheduleImportedRecovery(expectedState taskslog.State) {
+func (r *Lifecycle) scheduleImportedRecovery(expectedState task.State) {
 	r.wg.Go(func() {
 		if err := r.manager.WaitForRuntimeImport(r.manager.serverCtx); err != nil {
 			return
@@ -622,19 +622,19 @@ func (r *Lifecycle) scheduleImportedRecovery(expectedState taskslog.State) {
 
 // recoverImportedSession reserves the task before stopping the retained runtime,
 // so user input and manual revival cannot race startup recovery.
-func (r *Lifecycle) recoverImportedSession(expectedState taskslog.State) error {
+func (r *Lifecycle) recoverImportedSession(expectedState task.State) error {
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 	defer r.operationMu.Unlock()
 	t := r.entry.Task()
-	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, expectedState); !changed {
+	if _, changed := t.SetStateIfAny(task.StateProvisioning, expectedState); !changed {
 		return conflict("task state changed before startup recovery")
 	}
 	r.manager.NotifyTaskChange()
 	if err := r.manager.Runtimes.Stop(r.ctx, t.RuntimeInstanceID()); err != nil {
-		t.SetState(taskslog.StateCrashed)
-		result := &taskslog.Result{State: taskslog.StateCrashed, Err: fmt.Errorf("stop retained instance before recovery: %w", err)}
+		t.SetState(task.StateCrashed)
+		result := &task.Result{State: task.StateCrashed, Err: fmt.Errorf("stop retained instance before recovery: %w", err)}
 		r.entry.Finish(result)
 		r.manager.NotifyTaskChange()
 		return errors.Join(result.Err, r.manager.writeTaskResultTrailer(r.entry, result))
@@ -658,8 +658,8 @@ func (r *Lifecycle) reviveLocked() error {
 			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
 			// Failures after revive begins preserve a retryable crashed state.
 			// Precondition failures still terminate an incomplete startup.
-			t.SetStateIf(taskslog.StateProvisioning, taskslog.StateFailed)
-			r.entry.Finish(&taskslog.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
+			t.SetStateIf(task.StateProvisioning, task.StateFailed)
+			r.entry.Finish(&task.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
 			r.manager.NotifyTaskChange()
 			return
 		}
@@ -679,7 +679,7 @@ func (r *Lifecycle) reconnectForInput() error {
 		return nil
 	}
 	switch t.GetState() {
-	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
+	case task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning:
 	default:
 		return conflict("task is not ready for input")
 	}
@@ -731,14 +731,14 @@ func (r *Lifecycle) reconnectImportedSession() {
 		if err != nil {
 			tlog.Warn("ensure session failed", "err", err)
 			// Failed readiness cannot resolve a pending question or plan.
-			t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
+			t.SetStateIf(task.StateRunning, task.StateWaiting)
 			r.manager.NotifyTaskChange()
 			return
 		}
 		r.entry.clearResult(previousResult)
 		tlog.Debug("auto-reconnect succeeded")
 		t.SetVNCPort(r.manager.Runtimes.VNCPort(r.ctx, t.RuntimeInstanceID()))
-		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == taskslog.StateWaiting || t.GetState() == taskslog.StateAsking || t.GetState() == taskslog.StateHasPlan) {
+		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == task.StateWaiting || t.GetState() == task.StateAsking || t.GetState() == task.StateHasPlan) {
 			snapshot, err := checkout.DiffStat(r.ctx, r.manager.log, r.manager.Runtimes, t.GitTarget())
 			if err != nil {
 				tlog.Warn("restore branch diff stat failed", "err", err)
@@ -756,7 +756,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 //
 // It uses manager.serverCtx rather than r.ctx so it exits on server shutdown.
 // Lifecycle work uses r.ctx to finish cleanly during shutdown.
-func (r *Lifecycle) watchSession(h *task.SessionHandle) {
+func (r *Lifecycle) watchSession(h *taskrun.SessionHandle) {
 	r.wg.Go(func() {
 		t := r.entry.Task()
 		ctx, tk := trace.NewTask(r.manager.serverCtx, "session.watch:"+t.ID.String())
@@ -793,7 +793,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 						crashErr = errors.New(exitErr)
 					}
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &taskslog.Result{State: taskslog.StateCrashed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: crashErr}
+					result := &task.Result{State: task.StateCrashed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: crashErr}
 					r.entry.Finish(result)
 					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write crashed task trailer failed", append(attrs, "err", err)...)
@@ -804,7 +804,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 						failureErr = errors.New(exitErr)
 					}
 					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					result := &taskslog.Result{State: taskslog.StateFailed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: failureErr}
+					result := &task.Result{State: task.StateFailed, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: failureErr}
 					r.entry.Finish(result)
 					if err := r.manager.writeTaskResultTrailer(r.entry, result); err != nil {
 						r.manager.log.WarnContext(ctx, "write failed task trailer failed", append(attrs, "err", err)...)
@@ -812,7 +812,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 				}
 			} else {
 				r.manager.log.InfoContext(ctx, "session exited", attrs...)
-				t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
+				t.SetStateIf(task.StateRunning, task.StateWaiting)
 			}
 			r.manager.NotifyTaskChange()
 		case <-r.entry.Done():
@@ -821,7 +821,7 @@ func (r *Lifecycle) watchSession(h *task.SessionHandle) {
 	})
 }
 
-func (r *Lifecycle) stopFailedSessionInstance(ctx context.Context, t *task.Task, attrs []any) {
+func (r *Lifecycle) stopFailedSessionInstance(ctx context.Context, t *taskrun.Task, attrs []any) {
 	id := t.RuntimeInstanceID()
 	if id == "" {
 		return
@@ -831,11 +831,11 @@ func (r *Lifecycle) stopFailedSessionInstance(ctx context.Context, t *task.Task,
 	}
 }
 
-func (r *Lifecycle) cleanup(ctx context.Context, reason taskslog.State) {
+func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 	r.entry.Cleanup(func() {
 		start := time.Now()
 		t := r.entry.Task()
-		if reason == taskslog.StatePurged {
+		if reason == task.StatePurged {
 			t.DiscardRollup()
 		}
 		result := r.agentRuntime.Cleanup(ctx, t, reason)

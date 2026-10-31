@@ -1,6 +1,6 @@
 // Golden and invariant tests for quota handoff prompt generation.
 
-package task
+package taskrun
 
 import (
 	"encoding/json"
@@ -18,7 +18,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 func TestBuildHandoffPrompt(t *testing.T) {
@@ -29,7 +30,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Add quota-aware task recovery."}, harness.Codex, "gpt-5.2-codex", "high")
 		tk.SetTitle("Add quota-aware recovery")
-		tk.Repos = []taskslog.RepoMount{{Name: "caic", BaseBranch: "main", Branch: "caic-42"}}
+		tk.Repos = []repo.Mount{{Name: "caic", BaseBranch: "main", Branch: "caic-42"}}
 		tk.SeedTimeline([]agent.Message{
 			&agent.UserInputMessage{Text: "Add quota-aware task recovery."},
 			&agent.TextMessage{Text: "I added normalized quota state and started the recovery flow."},
@@ -248,10 +249,10 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 	if _, ok := foreign.(*agent.SystemMessage); !ok || foreign.Provenance().IsChild() {
 		t.Fatalf("foreign message=%#v", foreign)
 	}
-	if ClearsExitError(foreign) {
+	if task.ClearsExitError(foreign) {
 		t.Fatal("foreign activity clears root error")
 	}
-	var window ResultTextWindow
+	var window task.ResultTextWindow
 	window.Update(&agent.TextMessage{Text: "Root answer"})
 	window.Update(foreign)
 	if window.Value() != "Root answer" {

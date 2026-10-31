@@ -19,8 +19,8 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
-	taskpkg "github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/gomode/mcp"
@@ -613,7 +613,7 @@ func (m *mcpTools) handleTaskRevive(ctx context.Context, call *mcp.ToolRequest[m
 
 // taskForkToolError adds a recovery step only when the rejected override can
 // be omitted to inherit the source task's configuration.
-func (m *mcpTools) taskForkToolError(args mcpTaskForkArgs, source *taskpkg.Task, err error) mcp.ToolResult[mcpTaskForkOutput] {
+func (m *mcpTools) taskForkToolError(args mcpTaskForkArgs, source *taskrun.Task, err error) mcp.ToolResult[mcpTaskForkOutput] {
 	apiErr, ok := errors.AsType[*api.Error](err)
 	if !ok {
 		return domainToolError[mcpTaskForkOutput](err)
@@ -645,7 +645,7 @@ func (m *mcpTools) taskForkToolError(args mcpTaskForkArgs, source *taskpkg.Task,
 	return mcp.ToolErrorWithMeta[mcpTaskForkOutput](message, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
 }
 
-func (m *mcpTools) forkWithoutHarnessValid(source *taskpkg.Task, modelOverride string) bool {
+func (m *mcpTools) forkWithoutHarnessValid(source *taskrun.Task, modelOverride string) bool {
 	backend, ok := m.taskSvc.taskMgr.Backends[source.Harness]
 	model := modelOverride
 	if model == "" {
@@ -656,7 +656,7 @@ func (m *mcpTools) forkWithoutHarnessValid(source *taskpkg.Task, modelOverride s
 
 // forkWithoutModelValid reports whether the effective harness can accept the
 // source model after an explicit model override is omitted.
-func (m *mcpTools) forkWithoutModelValid(source *taskpkg.Task, harnessOverride string) bool {
+func (m *mcpTools) forkWithoutModelValid(source *taskrun.Task, harnessOverride string) bool {
 	harnessName := source.Harness
 	if harnessOverride != "" {
 		apiHarness, err := apiconv.ParseHarness(harnessOverride)

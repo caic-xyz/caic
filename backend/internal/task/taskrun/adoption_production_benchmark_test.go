@@ -1,6 +1,6 @@
 // Benchmarks v3 task-log adoption, timeline restoration, and backward message lookup.
 
-package task_test
+package taskrun_test
 
 import (
 	"bufio"
@@ -19,12 +19,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
-func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
-	tk, err := task.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *taskrun.Task {
+	tk, err := taskrun.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			b.Fatal(err)
 		}
 		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark adoption"})
-		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-0"}}
+		tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
 		w, _, err := store.Reopen(name, tk.LogHeader())
 		if err != nil {
 			b.Fatal(err)

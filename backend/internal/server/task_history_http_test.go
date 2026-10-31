@@ -35,13 +35,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
-func historyHTTPFixture(t testing.TB) (*testRouter, *task.Task, string) {
+func historyHTTPFixture(t testing.TB) (*testRouter, *taskrun.Task, string) {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "history"}, harness.Claude)
-	tk.SetState(taskslog.StateRunning)
+	tk.SetState(task.StateRunning)
 	insertTestTask(s, tk.ID, tk)
 	e, _ := s.taskMgr.GetEntry(tk.ID)
 	p := filepath.Join(t.TempDir(), "history.jsonl")
@@ -227,7 +227,7 @@ func historyRequest(t testing.TB, s *testRouter, target, user string) *httptest.
 	s.taskHandlers.routes().ServeHTTP(w, r)
 	return w
 }
-func historyBootstrap(t testing.TB, s *testRouter, tk *task.Task, user string) v1.HistoryBootstrap {
+func historyBootstrap(t testing.TB, s *testRouter, tk *taskrun.Task, user string) v1.HistoryBootstrap {
 	w := historyRequest(t, s, "/tasks/"+tk.ID.String()+"/history/manifest", user)
 	if w.Code != 200 {
 		t.Fatalf("bootstrap %d: %s", w.Code, w.Body)
@@ -335,7 +335,7 @@ func TestHistoryResources(t *testing.T) {
 			}
 		}
 		replacement := mustNewTask(t, tk.ID, agent.Prompt{Text: "replacement"}, harness.Claude)
-		replacement.SetState(taskslog.StateRunning)
+		replacement.SetState(task.StateRunning)
 		insertTestTask(s, tk.ID, replacement)
 		if w := historyRequest(t, s, recentHistoryURL(&b), ""); w.Code != 409 {
 			t.Fatalf("replacement accepted old reference: %d", w.Code)
@@ -427,7 +427,7 @@ func readHistoryFrameIncludingMetadata(t testing.TB, r *bufio.Reader) historyTes
 		}
 	}
 }
-func historyStream(t testing.TB, s *testRouter, tk *task.Task, cursor, header string) (*bufio.Reader, context.CancelFunc) {
+func historyStream(t testing.TB, s *testRouter, tk *taskrun.Task, cursor, header string) (*bufio.Reader, context.CancelFunc) {
 	server := httptest.NewServer(s.taskHandlers.routes())
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -472,7 +472,7 @@ func assertStatsSnapshot(t testing.TB, r *bufio.Reader) {
 
 func TestTaskResourceSnapshot(t *testing.T) {
 	t.Parallel()
-	for _, state := range []taskslog.State{taskslog.StatePurged, taskslog.StateStopped} {
+	for _, state := range []task.State{task.StatePurged, task.StateStopped} {
 		for _, retained := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/retained=%v", state, retained), func(t *testing.T) {
 				t.Parallel()
@@ -981,7 +981,7 @@ func TestHistoryCompressionAndRevival(t *testing.T) {
 	if err := encoder.Close(); err != nil {
 		t.Fatal(err)
 	}
-	tk.SetState(taskslog.StatePurged)
+	tk.SetState(task.StatePurged)
 	entry.LogPath.Set(compressed)
 	owner.prune(false)
 	if err := os.Remove(path); err != nil {
@@ -1002,7 +1002,7 @@ func TestHistoryCompressionAndRevival(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry.LogPath.Set(path)
-	tk.SetState(taskslog.StateRunning)
+	tk.SetState(task.StateRunning)
 	revived := historyBootstrap(t, s, tk, "")
 	if revived.Through != initial.Through+1 {
 		t.Fatalf("revived prefix: %+v", revived)
@@ -1058,7 +1058,7 @@ func BenchmarkHistoryTaskOpen(b *testing.B) {
 		}
 		b.Run(format, func(b *testing.B) {
 			s, tk, path := historyHTTPFixture(b)
-			tk.SetState(taskslog.StatePurged)
+			tk.SetState(task.StatePurged)
 			var raw strings.Builder
 			raw.WriteString(`{"t":"caic_meta","version":3,"harness":"claude","prompt":"history"}` + "\n")
 			for i := range 1000 {

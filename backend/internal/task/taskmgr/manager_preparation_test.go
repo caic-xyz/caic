@@ -18,7 +18,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/ksid"
 )
 
@@ -110,7 +109,7 @@ func preparationTask(t *testing.T, m *Manager, names ...string) *Entry {
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "preparation"}, "fake", "")
 	for _, n := range names {
 		c, _ := m.Checkouts.Checkout(n)
-		tk.Repos = append(tk.Repos, taskslog.RepoMount{Name: n, GitRoot: c.Dir})
+		tk.Repos = append(tk.Repos, repo.Mount{Name: n, GitRoot: c.Dir})
 	}
 	return m.NewEntry(tk, nil)
 }

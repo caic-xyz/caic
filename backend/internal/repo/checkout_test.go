@@ -29,8 +29,8 @@ import (
 )
 
 // fakeTaskView is a minimal TaskView implementation for tests. It cannot be
-// replaced with *task.Task: internal/task imports internal/repo, so a
-// test in package repo importing internal/task would create an import
+// replaced with *taskrun.Task: internal/task/taskrun imports internal/repo, so a
+// test in package repo importing internal/task/taskrun would create an import
 // cycle.
 type fakeTaskView struct {
 	instanceID runtime.ID

@@ -11,8 +11,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // importedTaskWiring connects restored tasks back to forge and CI automation.
@@ -93,7 +93,7 @@ func (w *importedTaskWiring) LookupExternalPRForTask(ctx context.Context, entry 
 	w.ciService.MonitorCI(ctx, entry, f, checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, sha)
 }
 
-func importedHeadSHA(ctx context.Context, f forge.Forge, t *task.Task, repository *repo.Repository, branch string) (string, error) {
+func importedHeadSHA(ctx context.Context, f forge.Forge, t *taskrun.Task, repository *repo.Repository, branch string) (string, error) {
 	pr, err := f.FindPRByBranch(ctx, repository.ForgeOwner, repository.ForgeRepo, branch)
 	if err == nil && pr.HeadSHA != "" {
 		if pr.Number > 0 {

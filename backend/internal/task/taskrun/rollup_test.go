@@ -1,6 +1,6 @@
 // Rollup sink tests: spy-pinned fold forwarding plus real-store replay resume through the task folds.
 
-package task
+package taskrun
 
 import (
 	"encoding/json"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
@@ -209,7 +210,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		// NewTask always wires DiscardRollup, so folding is safe without a
 		// real sink: one task through the live path, one through restore.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
-		if _, ok := tk.Rollup.(DiscardRollup); !ok {
+		if _, ok := tk.Rollup.(task.DiscardRollup); !ok {
 			t.Fatalf("default Rollup = %T, want DiscardRollup", tk.Rollup)
 		}
 		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})

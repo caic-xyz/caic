@@ -25,7 +25,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
@@ -716,7 +718,7 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 	if mr.Title != "" {
 		lt.Title = mr.Title
 	}
-	lt.LastTrailer = &Result{
+	lt.LastTrailer = &task.Result{
 		State:          lt.State,
 		CostUSD:        mr.CostUSD,
 		Duration:       time.Duration(mr.Duration * float64(time.Second)),
@@ -744,11 +746,11 @@ type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
 	Prompt            string
 	Title             string
-	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
+	Repos             []repo.Mount // GitRoot will be empty for purged tasks loaded from logs.
 	Harness           harness.Name
 	StartedAt         time.Time
 	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State             State
+	State             task.State
 	ForgeIssue        int // Originating issue number for bot comment callbacks.
 	OwnerID           string
 	ForkedFromTaskID  string
@@ -768,11 +770,11 @@ type LoadedTask struct {
 	MaxCPUs           int
 	CacheMounts       []runtime.CacheMount
 	Mounts            []runtime.Mount
-	RequestedModel    string  // User-requested model.
-	RequestedEffort   string  // User-requested reasoning effort.
-	LogSize           int64   // Byte size of the log file on disk; populated by Store.Load.
-	DiffCreated       bool    // True if any non-empty diff was recorded in the log; sticky across the run.
-	LastTrailer       *Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
+	RequestedModel    string       // User-requested model.
+	RequestedEffort   string       // User-requested reasoning effort.
+	LogSize           int64        // Byte size of the log file on disk; populated by Store.Load.
+	DiffCreated       bool         // True if any non-empty diff was recorded in the log; sticky across the run.
+	LastTrailer       *task.Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
 	Timeline          []agent.TimedMessage
 
 	path           string       // Absolute path for lazy message loading via LoadMessages.
@@ -841,9 +843,9 @@ func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *Lo
 }
 
 func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
-	repos := make([]RepoMount, len(meta.Repos))
+	repos := make([]repo.Mount, len(meta.Repos))
 	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
+		repos[i] = repo.Mount{Name: mr.Name, BaseBranch: mr.BaseBranch, Branch: mr.Branch, ContainerPath: mr.ContainerPath}
 	}
 	return &LoadedTask{
 		path:              path,
@@ -856,7 +858,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		RequestedEffort:   meta.RequestedEffort,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: modified,
-		State:             StateRunning,
+		State:             task.StateRunning,
 		ForgeIssue:        meta.ForgeIssue,
 		OwnerID:           meta.OwnerID,
 		ForkedFromTaskID:  meta.ForkedFromTaskID,
@@ -942,8 +944,8 @@ func LoadHistorySource(path string) (loaded *LoadedTask, retErr error) {
 	return loaded, nil
 }
 
-// Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
-func (lt *LoadedTask) Primary() *RepoMount {
+// Primary returns a pointer to the primary repository mount (Repos[0]), or nil for no-repo tasks.
+func (lt *LoadedTask) Primary() *repo.Mount {
 	if len(lt.Repos) == 0 {
 		return nil
 	}
@@ -1694,10 +1696,10 @@ func tsToTime(ts float64) time.Time {
 // parseState converts a persisted state string back to a State value.
 // An unrecognized value (corrupt or from a newer version) is treated as
 // failed rather than rejected, so one bad historical log cannot block startup.
-func parseState(s string) State {
-	state := State(s)
+func parseState(s string) task.State {
+	state := task.State(s)
 	if state.Validate() != nil {
-		return StateFailed
+		return task.StateFailed
 	}
 	return state
 }

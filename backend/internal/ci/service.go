@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // Service orchestrates CI monitoring, auto-fix loops, and PR creation for
@@ -198,7 +198,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		case <-ticker.C:
 		}
 		st := t.GetState()
-		if st != taskslog.StateWaiting && st != taskslog.StateAsking && st != taskslog.StateHasPlan {
+		if st != task.StateWaiting && st != task.StateAsking && st != task.StateHasPlan {
 			return
 		}
 		if checkOnce() {
@@ -364,7 +364,7 @@ func (svc *Service) startWorker(ctx context.Context, fn func(context.Context)) {
 // waitForAgentResult subscribes to task messages and blocks until the agent
 // emits a ResultMessage (end of turn) or ctx is cancelled. Returns true when
 // a ResultMessage arrives, false on cancellation or closed channel.
-func (svc *Service) waitForAgentResult(ctx context.Context, t *task.Task) bool {
+func (svc *Service) waitForAgentResult(ctx context.Context, t *taskrun.Task) bool {
 	_, live, unsub := t.SubscribeLiveMessages(ctx)
 	defer unsub()
 	for {
@@ -394,7 +394,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 
 	// Only proceed if the task is still waiting for input (agent finished cleanly).
 	st := t.GetState()
-	if st != taskslog.StateWaiting && st != taskslog.StateAsking {
+	if st != task.StateWaiting && st != task.StateAsking {
 		return
 	}
 
@@ -448,7 +448,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 // maybeAutoFix creates a new task to fix CI failures when auto-fix is enabled
 // in the task owner's preferences. It is called when the original task's agent
 // session is no longer active and cannot receive CI failure input directly.
-func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forge, ciSummary FailurePrompt) {
+func (svc *Service) maybeAutoFix(ctx context.Context, t *taskrun.Task, f forge.Forge, ciSummary FailurePrompt) {
 	ownerID := t.OwnerID
 	if ownerID == "" {
 		ownerID = "default"

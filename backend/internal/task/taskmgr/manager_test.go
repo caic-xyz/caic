@@ -42,6 +42,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
@@ -792,7 +793,7 @@ func TestManager(t *testing.T) {
 			store := taskslog.NewStore(testLogger(), t.TempDir())
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			prompt := agent.Prompt{Text: "first", Images: []logdata.ImageData{{MediaType: "image/png", Data: "aGVsbG8="}}}
@@ -815,7 +816,7 @@ func TestManager(t *testing.T) {
 			// Reconstruct both the manager and task, preserving only their durable identities.
 			restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 			rt := mustNewTask(t, tk.ID, agent.Prompt{Text: "initial"}, harness.Codex, "")
-			rt.SetState(taskslog.StateAsking)
+			rt.SetState(task.StateAsking)
 			re := restored.NewEntry(rt, nil)
 			restored.Insert(rt.ID, re)
 			queue := re.PendingInput()
@@ -861,11 +862,11 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt.AttachSession(&task.SessionHandle{Session: session})
-			rt.SetState(taskslog.StateWaiting)
+			rt.AttachSession(&taskrun.SessionHandle{Session: session})
+			rt.SetState(task.StateWaiting)
 			restored.drainInputQueue(t.Context())
 			awaitQueueCondition(t, restored, func() bool { return re.PendingInput() == nil })
-			if rt.GetState() != taskslog.StateRunning {
+			if rt.GetState() != task.StateRunning {
 				t.Fatalf("delivery state=%v", rt.GetState())
 			}
 			b.mu.Lock()
@@ -884,14 +885,14 @@ func TestManager(t *testing.T) {
 			store := taskslog.NewStore(testLogger(), t.TempDir())
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			recordTestTaskLog(t, m, e)
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "discard me", Images: []logdata.ImageData{{MediaType: "image/png", Data: "aGVsbG8="}}}); err != nil {
 				t.Fatal(err)
 			}
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			m.background.Go(func() { m.watchInputQueue(m.serverCtx) })
 			t.Cleanup(func() { m.cancelServerCtx(); m.background.Wait() })
 			if err := e.Lifecycle.Purge(t.Context(), 0); err != nil {
@@ -915,7 +916,7 @@ func TestManager(t *testing.T) {
 			ids := make([]ksid.ID, 0, 2)
 			for range 2 {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-				tk.SetState(taskslog.StateRunning)
+				tk.SetState(task.StateRunning)
 				e := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, e)
 				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "retained work"}); err != nil {
@@ -935,7 +936,7 @@ func TestManager(t *testing.T) {
 				}
 			}
 			tk := mustNewTask(t, ids[1], agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			restored.Insert(tk.ID, restored.NewEntry(tk, nil))
 			restored.CompleteRestoration(nil)
 			restored.drainInputQueue(t.Context())
@@ -948,11 +949,11 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			blocked := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			blocked.SetState(taskslog.StateRunning)
+			blocked.SetState(task.StateRunning)
 			e := m.NewEntry(blocked, nil)
 			m.Insert(blocked.ID, e)
 			session, conn := newGatedQueueSession(t)
-			blocked.AttachSession(&task.SessionHandle{Session: session})
+			blocked.AttachSession(&taskrun.SessionHandle{Session: session})
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "blocked prompt"}); err != nil {
 				t.Fatal(err)
 			}
@@ -960,7 +961,7 @@ func TestManager(t *testing.T) {
 			if pending == nil || e.PendingInput() != pending {
 				t.Fatal("pending input was not returned directly")
 			}
-			blocked.SetState(taskslog.StateWaiting)
+			blocked.SetState(task.StateWaiting)
 			m.drainInputQueue(t.Context())
 			select {
 			case <-conn.started:
@@ -980,12 +981,12 @@ func TestManager(t *testing.T) {
 			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}}
 			t.Cleanup(b.stop)
 			healthy := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, "")
-			healthy.SetState(taskslog.StateWaiting)
+			healthy.SetState(task.StateWaiting)
 			hs, err := b.AttachRelay(t.Context(), &agent.Options{Logger: testLogger(), MsgCh: make(chan agent.TimedMessage, 8)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			healthy.AttachSession(&task.SessionHandle{Session: hs})
+			healthy.AttachSession(&taskrun.SessionHandle{Session: hs})
 			he := m.NewEntry(healthy, nil)
 			m.Insert(healthy.ID, he)
 			if _, err := he.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "healthy prompt"}); err != nil {
@@ -1004,7 +1005,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("failed_import_reconnect_preserves_prompt_gate", func(t *testing.T) {
 			t.Parallel()
-			for _, state := range []taskslog.State{taskslog.StateAsking, taskslog.StateHasPlan} {
+			for _, state := range []task.State{task.StateAsking, task.StateHasPlan} {
 				for _, stage := range []string{"attach", "readiness"} {
 					t.Run(string(state)+"/"+stage, func(t *testing.T) {
 						t.Parallel()
@@ -1052,15 +1053,15 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			session, conn := newGatedQueueSession(t)
-			tk.AttachSession(&task.SessionHandle{Session: session})
+			tk.AttachSession(&taskrun.SessionHandle{Session: session})
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "deliver once"}); err != nil {
 				t.Fatal(err)
 			}
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			m.drainInputQueue(t.Context())
 			select {
 			case <-conn.started:
@@ -1080,7 +1081,7 @@ func TestManager(t *testing.T) {
 			if !q.Delivered || q.Delivering {
 				t.Fatalf("accepted prompt state=%+v", q)
 			}
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			m.drainInputQueue(t.Context())
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
@@ -1093,13 +1094,13 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "retry me"}); err != nil {
 				t.Fatal(err)
 			}
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			m.drainInputQueue(t.Context())
 			awaitQueueCondition(t, m, func() bool { return e.PendingInput().Error != "" })
 			q := e.PendingInput()
@@ -1242,7 +1243,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "")
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		entry := m.NewEntry(tk, nil)
 		m.Insert(tk.ID, entry)
 		recordTestTaskLog(t, m, entry)
@@ -1255,7 +1256,7 @@ func TestManager(t *testing.T) {
 			t.Fatal("Stop did not reach the runtime backend")
 		}
 		intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
-		if err != nil || len(intent) != 1 || intent[0].State != taskslog.StateStopping {
+		if err != nil || len(intent) != 1 || intent[0].State != task.StateStopping {
 			t.Fatalf("stop intent=%v err=%v", intent, err)
 		}
 
@@ -1590,7 +1591,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 42)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("acme", "magic", 42)
@@ -1605,7 +1606,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 42)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("other", "repo", 42)
@@ -1621,7 +1622,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-1")
@@ -1633,7 +1634,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-2")
@@ -1649,7 +1650,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
 			e := m.NewEntry(tk, nil)
 			e.SetMonitorBranch("caic-1")
@@ -1663,7 +1664,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMonitoringBranch("acme", "magic")
@@ -1680,9 +1681,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.ForgeIssue = 5
-			tk.Repos = []taskslog.RepoMount{{Name: "repo/a"}}
+			tk.Repos = []repo.Mount{{Name: "repo/a"}}
 			tk.SetPR("acme", "magic", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 1 {
@@ -1696,7 +1697,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 0 {
@@ -1706,7 +1707,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_skips_terminal_states", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			for _, st := range []taskslog.State{taskslog.StateWaiting, taskslog.StateStopped, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StatePurged} {
+			for _, st := range []task.State{task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged} {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 				tk.ForgeIssue = 1
 				tk.SetState(st)
@@ -1727,7 +1728,7 @@ func TestManager(t *testing.T) {
 			r := &repo.Checkout{Dir: "/tmp/test"}
 			registerCheckout(t, m.Checkouts, "my/repo", r)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo"}}
 			got := m.resolveCheckout(tk)
 			if got != r {
 				t.Error("resolveCheckout returned wrong checkout")
@@ -1851,7 +1852,7 @@ func TestManager(t *testing.T) {
 				BaseBranch: "develop",
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", BaseBranch: "main"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo", BaseBranch: "main"}}
 			if got := m.EffectiveBaseBranch(tk); got != "main" {
 				t.Errorf("EffectiveBaseBranch = %q, want %q", got, "main")
 			}
@@ -1863,7 +1864,7 @@ func TestManager(t *testing.T) {
 				BaseBranch: "develop",
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "my/repo"}}
+			tk.Repos = []repo.Mount{{Name: "my/repo"}}
 			if got := m.EffectiveBaseBranch(tk); got != "develop" {
 				t.Errorf("EffectiveBaseBranch = %q, want %q", got, "develop")
 			}
@@ -1898,7 +1899,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			state, result, err := m.WatchTaskCompletion(t.Context(), tk.ID)
 			if err != nil {
@@ -1927,12 +1928,12 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			var workers sync.WaitGroup
 			workers.Go(func() {
 				time.Sleep(50 * time.Millisecond)
-				tk.SetState(taskslog.StateStopped)
+				tk.SetState(task.StateStopped)
 				m.NotifyTaskChange()
 			})
 			t.Cleanup(workers.Wait)
@@ -1948,7 +1949,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
@@ -1967,7 +1968,7 @@ func TestManager(t *testing.T) {
 		// before they are reached (see server.getTask).
 		type tc struct {
 			name  string
-			state taskslog.State
+			state task.State
 			want  ErrorKind
 			call  func(m *Manager, e *Entry) error
 		}
@@ -1986,11 +1987,11 @@ func TestManager(t *testing.T) {
 			return err
 		}
 		cases := []tc{
-			{"stop_wrong_state", taskslog.StateStopped, KindConflict, stop},
-			{"revive_not_stopped", taskslog.StateRunning, KindConflict, revive},
-			{"sync_terminal_state", taskslog.StateStopped, KindConflict, syncOrigin},
-			{"sync_force_default", taskslog.StateWaiting, KindBadRequest, syncForceDefault},
-			{"fork_wrong_state", taskslog.StateStopping, KindConflict, fork},
+			{"stop_wrong_state", task.StateStopped, KindConflict, stop},
+			{"revive_not_stopped", task.StateRunning, KindConflict, revive},
+			{"sync_terminal_state", task.StateStopped, KindConflict, syncOrigin},
+			{"sync_force_default", task.StateWaiting, KindBadRequest, syncForceDefault},
+			{"fork_wrong_state", task.StateStopping, KindConflict, fork},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
@@ -2271,11 +2272,11 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: "/tmp/my-repo"})
 			src := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "src"}, "fake", "")
-			src.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1", GitRoot: "/tmp/my-repo"}}
+			src.Repos = []repo.Mount{{Name: "my/repo", Branch: "caic-1", GitRoot: "/tmp/my-repo"}}
 			src.MaxCPUs = 5
 			src.GitHubToken = true
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
-			src.SetState(taskslog.StateWaiting)
+			src.SetState(task.StateWaiting)
 			e := m.NewEntry(src, nil)
 			m.Insert(src.ID, e)
 			return m, e
@@ -2366,10 +2367,10 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, harness.Claude, "")
-			parent.SetState(taskslog.StateWaiting)
+			parent.SetState(task.StateWaiting)
 			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, harness.Claude, "")
 			child.ParentTaskID = parent.ID
-			child.SetState(taskslog.StateWaiting)
+			child.SetState(task.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
 			m.Insert(parent.ID, parentEntry)
 			m.Insert(child.ID, m.NewEntry(child, nil))
@@ -2378,18 +2379,18 @@ func TestManager(t *testing.T) {
 			if err := parentEntry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
-			if got := child.GetState(); got != taskslog.StateWaiting {
-				t.Errorf("child state = %s, want %s", got, taskslog.StateWaiting)
+			if got := child.GetState(); got != task.StateWaiting {
+				t.Errorf("child state = %s, want %s", got, task.StateWaiting)
 			}
 		})
 		t.Run("parent_purge_does_not_change_child", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, harness.Claude, "")
-			parent.SetState(taskslog.StateStopped)
+			parent.SetState(task.StateStopped)
 			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, harness.Claude, "")
 			child.ParentTaskID = parent.ID
-			child.SetState(taskslog.StateWaiting)
+			child.SetState(task.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
 			m.Insert(parent.ID, parentEntry)
 			m.Insert(child.ID, m.NewEntry(child, nil))
@@ -2403,8 +2404,8 @@ func TestManager(t *testing.T) {
 			if err := parentEntry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
-			if got := child.GetState(); got != taskslog.StateWaiting {
-				t.Errorf("child state = %s, want %s", got, taskslog.StateWaiting)
+			if got := child.GetState(); got != task.StateWaiting {
+				t.Errorf("child state = %s, want %s", got, task.StateWaiting)
 			}
 		})
 		t.Run("does_not_corrupt_source_log_path", func(t *testing.T) {
@@ -2439,7 +2440,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_stopped_source", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			src.Task().SetState(taskslog.StateStopped)
+			src.Task().SetState(task.StateStopped)
 			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
@@ -2453,14 +2454,14 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("fork did not finish")
 			}
-			if got := src.Task().GetState(); got != taskslog.StateStopped {
-				t.Errorf("source state = %v, want %v", got, taskslog.StateStopped)
+			if got := src.Task().GetState(); got != task.StateStopped {
+				t.Errorf("source state = %v, want %v", got, task.StateStopped)
 			}
 		})
 		t.Run("valid_crashed_source", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			src.Task().SetState(taskslog.StateCrashed)
+			src.Task().SetState(task.StateCrashed)
 			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
@@ -2474,8 +2475,8 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("fork did not finish")
 			}
-			if got := src.Task().GetState(); got != taskslog.StateCrashed {
-				t.Errorf("source state = %v, want %v", got, taskslog.StateCrashed)
+			if got := src.Task().GetState(); got != task.StateCrashed {
+				t.Errorf("source state = %v, want %v", got, task.StateCrashed)
 			}
 		})
 		t.Run("valid_metadata_matches_task", func(t *testing.T) {
@@ -2487,7 +2488,7 @@ func TestManager(t *testing.T) {
 			}
 			awaitTaskCleanup(t, m, id)
 			e, _ := m.GetEntry(id)
-			metadata := task.MakeMetadata(e.Task())
+			metadata := taskrun.MakeMetadata(e.Task())
 			if metadata[runtime.MetadataTaskID] != e.Task().ID.String() {
 				t.Errorf("metadata[%s] = %q, want %q", runtime.MetadataTaskID, metadata[runtime.MetadataTaskID], e.Task().ID.String())
 			}
@@ -2512,7 +2513,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			src := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "src"}, "fake", "")
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
-			src.SetState(taskslog.StateWaiting)
+			src.SetState(task.StateWaiting)
 			e := m.NewEntry(src, nil)
 			m.Insert(src.ID, e)
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
@@ -2531,7 +2532,7 @@ func TestManager(t *testing.T) {
 			// agent.ReadPlan fails and Restart returns KindInternal.
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{})
@@ -2547,7 +2548,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{Text: "go"})
@@ -2567,7 +2568,7 @@ func TestManager(t *testing.T) {
 			// carrying the underlying diagnostic message.
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
@@ -2594,7 +2595,7 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "reconnect", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
@@ -2623,7 +2624,7 @@ func TestManager(t *testing.T) {
 			e := m.NewEntry(tk, nil)
 			e.LogPath.Set(path)
 			m.Insert(tk.ID, e)
-			e.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old reconnect failure")})
+			e.Finish(&task.Result{State: task.StateFailed, Err: errors.New("old reconnect failure")})
 
 			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "A"}); err != nil {
 				t.Fatal(err)
@@ -2655,8 +2656,8 @@ func TestManager(t *testing.T) {
 			if len(prompts) != 1 || prompts[0].Text != "A" {
 				t.Fatalf("prompts = %#v, want answer prompt", prompts)
 			}
-			if got := tk.GetState(); got != taskslog.StateRunning {
-				t.Fatalf("state = %s, want %s", got, taskslog.StateRunning)
+			if got := tk.GetState(); got != task.StateRunning {
+				t.Fatalf("state = %s, want %s", got, task.StateRunning)
 			}
 		})
 		t.Run("error_reconnect_preserves_failure", func(t *testing.T) {
@@ -2665,10 +2666,10 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			recordTestTaskLog(t, m, e)
-			old := &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old reconnect failure")}
+			old := &task.Result{State: task.StateFailed, Err: errors.New("old reconnect failure")}
 			e.Finish(old)
 			m.Insert(tk.ID, e)
 			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "retry"}); err == nil {
@@ -2687,7 +2688,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 
 			cmdCtx, cmdCancel := context.WithCancel(t.Context())
 			cmd := exec.CommandContext(cmdCtx, "sleep", "60")
@@ -2708,7 +2709,7 @@ func TestManager(t *testing.T) {
 				cmdCancel()
 				_ = s.Wait()
 			})
-			tk.AttachSession(&task.SessionHandle{Session: s})
+			tk.AttachSession(&taskrun.SessionHandle{Session: s})
 
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -2726,8 +2727,8 @@ func TestManager(t *testing.T) {
 			if taskErr.Kind != KindConflict {
 				t.Errorf("Kind = %s, want %s", taskErr.Kind, KindConflict)
 			}
-			if got := tk.GetState(); got != taskslog.StateWaiting {
-				t.Errorf("state = %s, want %s", got, taskslog.StateWaiting)
+			if got := tk.GetState(); got != task.StateWaiting {
+				t.Errorf("state = %s, want %s", got, task.StateWaiting)
 			}
 			if msgs := tk.Messages(); len(msgs) != 0 {
 				t.Fatalf("messages = %d, want 0", len(msgs))
@@ -2776,7 +2777,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.ClearContext()
@@ -2789,7 +2790,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.ClearContext()
@@ -2805,7 +2806,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Compact(t.Context(), "shorten")
@@ -2889,12 +2890,12 @@ func TestManager(t *testing.T) {
 			rb := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: &runtimetest.FakeInfo{}, backend: rb})})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-dead"))
-			if got := tk.GetState(); got != taskslog.StateStopped {
+			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
 			}
 		})
@@ -2903,10 +2904,10 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
-			tk.SetState(taskslog.StatePurged)
+			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purged"))
-			if got := tk.GetState(); got != taskslog.StatePurged {
+			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
 			}
 		})
@@ -2918,10 +2919,10 @@ func TestManager(t *testing.T) {
 			// A purge in progress: removing the instance emits the very "die"
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
-			tk.SetState(taskslog.StatePurging)
+			tk.SetState(task.StatePurging)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purging"))
-			if got := tk.GetState(); got != taskslog.StatePurging {
+			if got := tk.GetState(); got != task.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
 			}
 		})
@@ -2930,10 +2931,10 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopping"), runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
-			tk.SetState(taskslog.StateStopping)
+			tk.SetState(task.StateStopping)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopping"))
-			if got := tk.GetState(); got != taskslog.StateStopping {
+			if got := tk.GetState(); got != task.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
 			}
 		})
@@ -2942,10 +2943,10 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopped"), runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopped"))
-			if got := tk.GetState(); got != taskslog.StateStopped {
+			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
 			}
 		})
@@ -2954,10 +2955,10 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-alive"), runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-other"))
-			if got := tk.GetState(); got != taskslog.StateRunning {
+			if got := tk.GetState(); got != task.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
 			}
 		})
@@ -2998,7 +2999,7 @@ func TestManager(t *testing.T) {
 				},
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", "")
-			entry := newTestPurgedEntry(t, tk, &taskslog.Result{State: taskslog.StatePurged}, logs[0])
+			entry := newTestPurgedEntry(t, tk, &task.Result{State: task.StatePurged}, logs[0])
 			source, err := m.HistorySource(entry)
 			if err != nil {
 				t.Fatal(err)
@@ -3117,9 +3118,9 @@ func TestManager(t *testing.T) {
 					Title:             "Test Title",
 					Harness:           "claude",
 					RuntimeName:       "docker",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
-					State:             taskslog.StateStopped,
-					LastTrailer:       &taskslog.Result{State: taskslog.StateStopped},
+					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
+					State:             task.StateStopped,
+					LastTrailer:       &task.Result{State: task.StateStopped},
 					StartedAt:         now.Add(-1 * time.Hour),
 					LastStateUpdateAt: now,
 					Tailscale:         true,
@@ -3183,7 +3184,7 @@ func TestManager(t *testing.T) {
 			if tk.GetPR() != 42 {
 				t.Errorf("PR = %d, want 42", tk.GetPR())
 			}
-			if e.Result() == nil || e.Result().State != taskslog.StateStopped {
+			if e.Result() == nil || e.Result().State != task.StateStopped {
 				t.Errorf("Result = %v, want StateStopped", e.Result())
 			}
 		})
@@ -3195,8 +3196,8 @@ func TestManager(t *testing.T) {
 				TaskID:            id.String(),
 				Prompt:            "old task",
 				Harness:           "claude",
-				State:             taskslog.StateStopped,
-				LastTrailer:       &taskslog.Result{State: taskslog.StateStopped},
+				State:             task.StateStopped,
+				LastTrailer:       &task.Result{State: task.StateStopped},
 				LastStateUpdateAt: time.Now().UTC(),
 			}}
 			if err := m.LoadPurgedTasks(all); err != nil {
@@ -3270,8 +3271,8 @@ func TestManager(t *testing.T) {
 				{
 					TaskID:            id.String(),
 					Prompt:            "was running",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
-					State:             taskslog.StateRunning,
+					Repos:             []repo.Mount{{Name: "repo/a"}},
+					State:             task.StateRunning,
 					LastStateUpdateAt: now,
 				},
 			}
@@ -3280,7 +3281,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("LoadPurgedTasks: %v", err)
 			}
 			e, _ := m.GetEntry(id)
-			if got := e.Task().GetState(); got != taskslog.StateFailed {
+			if got := e.Task().GetState(); got != task.StateFailed {
 				t.Errorf("state = %v, want StateFailed (running→failed)", got)
 			}
 		})
@@ -3294,7 +3295,7 @@ func TestManager(t *testing.T) {
 					TaskID:            id.String(),
 					Prompt:            "this is the prompt",
 					LastStateUpdateAt: now,
-					State:             taskslog.StateStopped,
+					State:             task.StateStopped,
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
@@ -3317,7 +3318,7 @@ func TestManager(t *testing.T) {
 			}
 			_ = m.LoadPurgedTasks(all)
 			e, _ := m.GetEntry(id)
-			if got := e.Result().State; got != taskslog.StateFailed {
+			if got := e.Result().State; got != task.StateFailed {
 				t.Errorf("Result.State = %v, want StateFailed (fallback)", got)
 			}
 		})
@@ -3330,7 +3331,7 @@ func TestManager(t *testing.T) {
 					TaskID:            "invalid",
 					Prompt:            "test",
 					LastStateUpdateAt: now,
-					State:             taskslog.StateStopped,
+					State:             task.StateStopped,
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
@@ -3344,7 +3345,7 @@ func TestManager(t *testing.T) {
 			now := time.Now().UTC()
 			activeID := ksid.NewID()
 			active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, "", "")
-			active.Repos = []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-live"}}
+			active.Repos = []repo.Mount{{Name: "repo/a", Branch: "caic-live"}}
 			active.SetTitle("active")
 			m.Insert(activeID, m.NewEntry(active, nil))
 			duplicateBranchID := ksid.NewID()
@@ -3353,23 +3354,23 @@ func TestManager(t *testing.T) {
 				{
 					TaskID:            activeID.String(),
 					Prompt:            "replacement by id",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-old"}},
+					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-old"}},
 					LastStateUpdateAt: now,
-					State:             taskslog.StateStopped,
+					State:             task.StateStopped,
 				},
 				{
 					TaskID:            duplicateBranchID.String(),
 					Prompt:            "replacement by branch",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-live"}},
+					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-live"}},
 					LastStateUpdateAt: now,
-					State:             taskslog.StateStopped,
+					State:             task.StateStopped,
 				},
 				{
 					TaskID:            keptID.String(),
 					Prompt:            "kept",
-					Repos:             []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-kept"}},
+					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-kept"}},
 					LastStateUpdateAt: now,
-					State:             taskslog.StateStopped,
+					State:             task.StateStopped,
 				},
 			}
 			if err := m.LoadPurgedTasks(all); err != nil {
@@ -3414,9 +3415,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
 			registerCheckout(t, m.Checkouts, "repo", checkout)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
+			tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
 			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(tk.RuntimeInstanceID()), DiffStat: logdata.DiffStat{{Path: "committed.go", LinesAdded: 3}, {Path: "pending.go", LinesAdded: 1}}})
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -3444,7 +3445,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StatePending)
+			tk.SetState(task.StatePending)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
@@ -3457,7 +3458,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StatePurging)
+			tk.SetState(task.StatePurging)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
@@ -3470,7 +3471,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateProvisioning)
+			tk.SetState(task.StateProvisioning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
@@ -3483,7 +3484,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetDefault, true)
@@ -3508,7 +3509,7 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
@@ -3537,7 +3538,7 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
@@ -3568,7 +3569,7 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateCrashed)
+			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
@@ -3594,7 +3595,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Purge(t.Context(), -time.Millisecond)
@@ -3607,7 +3608,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StatePurged)
+			tk.SetState(task.StatePurged)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Purge(t.Context(), time.Millisecond)
@@ -3622,9 +3623,9 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateCrashed)
+			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
-			entry.Finish(&taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("agent crashed")})
+			entry.Finish(&task.Result{State: task.StateCrashed, Err: errors.New("agent crashed")})
 			m.Insert(tk.ID, entry)
 
 			recordTestTaskLog(t, m, entry)
@@ -3640,7 +3641,7 @@ func TestManager(t *testing.T) {
 			}
 			deadline := time.Now().Add(time.Second)
 			for {
-				if result := entry.Result(); result != nil && result.State == taskslog.StatePurged {
+				if result := entry.Result(); result != nil && result.State == task.StatePurged {
 					return
 				}
 				if time.Now().After(deadline) {
@@ -3660,7 +3661,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
@@ -3678,7 +3679,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("Purge: %v", err)
 			}
 			intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
-			if err != nil || len(intent) != 1 || intent[0].State != taskslog.StatePurging {
+			if err != nil || len(intent) != 1 || intent[0].State != task.StatePurging {
 				t.Fatalf("purge intent=%v err=%v", intent, err)
 			}
 			select {
@@ -3701,7 +3702,7 @@ func TestManager(t *testing.T) {
 
 			deadline := time.Now().Add(time.Second)
 			for {
-				if result := entry.Result(); result != nil && result.State == taskslog.StatePurged {
+				if result := entry.Result(); result != nil && result.State == task.StatePurged {
 					break
 				}
 				if time.Now().After(deadline) {
@@ -3717,7 +3718,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Stop(t.Context())
@@ -3733,43 +3734,43 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			id := runtime.NewID("test-runtime", "ctr-1")
 			tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateFailed)
+			tk.SetState(task.StateFailed)
 			log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateFailed}); err != nil {
+			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &task.Result{State: task.StateFailed}); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
 				t.Fatal(err)
 			}
-			path, err = m.logStore.Compress(path, nil, taskslog.StateFailed)
+			path, err = m.logStore.Compress(path, nil, task.StateFailed)
 			if err != nil {
 				t.Fatal(err)
 			}
 			entry := m.NewEntry(tk, nil)
 			entry.LogPath.Set(path)
-			entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: errors.New("previous revive failed")})
+			entry.Finish(&task.Result{State: task.StateFailed, Err: errors.New("previous revive failed")})
 			m.Insert(tk.ID, entry)
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			entry.Lifecycle.wg.Wait()
-			if got := tk.GetState(); got != taskslog.StateStopped {
+			if got := tk.GetState(); got != task.StateStopped {
 				t.Fatalf("state = %s, want stopped", got)
 			}
 			if got := fake.Status(id); got != runtimetest.StatusStopped {
 				t.Fatalf("runtime status = %s, want stopped", got)
 			}
-			if res := entry.Result(); res == nil || res.State != taskslog.StateStopped || res.Err != nil {
+			if res := entry.Result(); res == nil || res.State != task.StateStopped || res.Err != nil {
 				t.Fatalf("result = %+v, want stopped without old failure", res)
 			}
 			loaded, err := m.logStore.LoadUnsettled()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(loaded) != 1 || loaded[0].LastTrailer.State != taskslog.StateStopped {
+			if len(loaded) != 1 || loaded[0].LastTrailer.State != task.StateStopped {
 				t.Fatalf("loaded task = %+v, want stopped trailer", loaded)
 			}
 		})
@@ -3780,7 +3781,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
@@ -3792,7 +3793,7 @@ func TestManager(t *testing.T) {
 			// Stop runs StopTask on a background goroutine; wait for the task to
 			// settle rather than sleeping a fixed duration.
 			deadline := time.Now().Add(2 * time.Second)
-			for tk.GetState() != taskslog.StateStopped {
+			for tk.GetState() != task.StateStopped {
 				if time.Now().After(deadline) {
 					t.Fatalf("state = %v, want StateStopped", tk.GetState())
 				}
@@ -3809,9 +3810,9 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			entry := m.NewEntry(tk, nil)
-			entry.Finish(&taskslog.Result{State: taskslog.StateStopped})
+			entry.Finish(&task.Result{State: task.StateStopped})
 			done := entry.Done()
 			// Stop has published the task state but still owns trailer/result
 			// publication. Revive must not reset this entry incarnation yet.
@@ -3820,7 +3821,7 @@ func TestManager(t *testing.T) {
 			if err := entry.Lifecycle.Revive(); err == nil {
 				t.Fatal("Revive accepted an unfinished stop")
 			}
-			if entry.Done() != done || tk.GetState() != taskslog.StateStopped {
+			if entry.Done() != done || tk.GetState() != task.StateStopped {
 				t.Fatal("Revive reset the entry before stop completion")
 			}
 		})
@@ -3828,7 +3829,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Revive()
@@ -3844,14 +3845,14 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateCrashed)
+			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
-			if got := tk.GetState(); got != taskslog.StateProvisioning {
+			if got := tk.GetState(); got != task.StateProvisioning {
 				t.Fatalf("state = %v, want provisioning", got)
 			}
 			close(releaseRevive)
@@ -3874,12 +3875,12 @@ func TestManager(t *testing.T) {
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(taskslog.StateStopped)
+			tk.SetState(task.StateStopped)
 			log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateStopped}); err != nil {
+			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &task.Result{State: task.StateStopped}); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -3912,11 +3913,11 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("failed revive did not notify")
 			}
-			if got := tk.GetState(); got != taskslog.StateCrashed {
+			if got := tk.GetState(); got != task.StateCrashed {
 				t.Fatalf("state = %v, want StateCrashed", got)
 			}
 			result := entry.Result()
-			if result == nil || result.State != taskslog.StateCrashed || result.Err == nil {
+			if result == nil || result.State != task.StateCrashed || result.Err == nil {
 				t.Fatalf("Result = %v, want crashed result with error", result)
 			}
 			if got := fake.Status(tk.RuntimeInstanceID()); got != runtimetest.StatusStopped {
@@ -3931,8 +3932,8 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/tmp/repo"})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "fake", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "repo/a"}}
-			tk.SetState(taskslog.StateWaiting)
+			tk.Repos = []repo.Mount{{Name: "repo/a"}}
+			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go", Images: []logdata.ImageData{{}}})
@@ -3962,10 +3963,10 @@ func TestManager(t *testing.T) {
 			close(dispatchDone)
 			log := slog.New(slog.DiscardHandler)
 			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{}, codex.New("", nil).NewWire()), stdout, msgCh, log)
-			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
+			h := &taskrun.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
@@ -3979,7 +3980,7 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("watchSession did not finish")
 			}
-			if got := tk.GetState(); got != taskslog.StateCrashed {
+			if got := tk.GetState(); got != task.StateCrashed {
 				t.Fatalf("state = %v, want crashed", got)
 			}
 			if got := runtimeBackend.Status("ssh-failed"); got != runtimetest.StatusStopped {
@@ -4007,7 +4008,7 @@ func TestManager(t *testing.T) {
 			close(dispatchDone)
 			log := slog.New(slog.DiscardHandler)
 			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{}, codex.New("", nil).NewWire()), stdout, msgCh, log)
-			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
+			h := &taskrun.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)
 			if err != nil {
@@ -4015,7 +4016,7 @@ func TestManager(t *testing.T) {
 			}
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: "ssh-restart"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
 			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 			entry := m.NewEntry(tk, nil)
@@ -4031,7 +4032,7 @@ func TestManager(t *testing.T) {
 				t.Fatal("server shutdown finished the task")
 			case <-time.After(100 * time.Millisecond):
 			}
-			if got := tk.GetState(); got != taskslog.StateRunning {
+			if got := tk.GetState(); got != task.StateRunning {
 				t.Fatalf("state = %v, want running", got)
 			}
 			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusRunning {
@@ -4118,9 +4119,9 @@ func TestManager(t *testing.T) {
 			r := &repo.Checkout{Dir: "/tmp/repo"}
 			registerCheckout(t, m.Checkouts, "repo/a", r)
 			src := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "src"}, sourceHarness, "")
-			src.Repos = []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}}
+			src.Repos = []repo.Mount{{Name: "repo/a", Branch: "caic-1"}}
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
-			src.SetState(taskslog.StateWaiting)
+			src.SetState(task.StateWaiting)
 			e := m.NewEntry(src, nil)
 			m.Insert(src.ID, e)
 			return e
@@ -4220,7 +4221,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "fake", defaultBackends)
-			e.Task().SetState(taskslog.StateProvisioning)
+			e.Task().SetState(task.StateProvisioning)
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -4286,7 +4287,7 @@ func TestManager(t *testing.T) {
 					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
 						t.Fatal(err)
 					}
-					if err := m.logStore.WriteResultTrailer(log, "", &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old failure")}); err != nil {
+					if err := m.logStore.WriteResultTrailer(log, "", &task.Result{State: task.StateFailed, Err: errors.New("old failure")}); err != nil {
 						t.Fatal(err)
 					}
 					if err := log.Close(); err != nil {
@@ -4499,11 +4500,11 @@ func TestManager(t *testing.T) {
 				t.Fatalf("len(adopted) = %d, want 1", len(adopted))
 			}
 			entry := adopted[0]
-			if got := entry.Task().GetState(); got != taskslog.StateFailed {
+			if got := entry.Task().GetState(); got != task.StateFailed {
 				t.Errorf("state = %s, want failed", got)
 			}
 			result := entry.Result()
-			if result == nil || !errors.Is(result.Err, task.ErrInitialPromptNotAccepted) {
+			if result == nil || !errors.Is(result.Err, taskrun.ErrInitialPromptNotAccepted) {
 				t.Errorf("result = %#v, want incomplete-startup failure", result)
 			}
 			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusStopped {
@@ -4540,7 +4541,7 @@ func TestManager(t *testing.T) {
 						t.Fatal(err)
 					}
 					if compressed {
-						if _, err := store.Compress(path, log, taskslog.StateWaiting); err != nil {
+						if _, err := store.Compress(path, log, task.StateWaiting); err != nil {
 							t.Fatal(err)
 						}
 					} else if err := log.Close(); err != nil {
@@ -4590,7 +4591,7 @@ func TestManager(t *testing.T) {
 									}
 								}
 							}
-							if results != 1 || entry.Task().GetState() != taskslog.StateWaiting {
+							if results != 1 || entry.Task().GetState() != task.StateWaiting {
 								t.Fatalf("results = %d, state = %s; want one terminal error and waiting", results, entry.Task().GetState())
 							}
 							if got := entry.Task().Snapshot().AutoCompactTokenLimit; got != 244800 {
@@ -4723,10 +4724,10 @@ func TestManager(t *testing.T) {
 			if !adopted[0].Task().HasAcceptedInputEvidence() {
 				t.Fatal("durable OpenCode session/prompt did not restore accepted input")
 			}
-			if got := adopted[0].Task().GetState(); got == taskslog.StateFailed {
+			if got := adopted[0].Task().GetState(); got == task.StateFailed {
 				t.Fatalf("state = %s, accepted OpenCode prompt was misclassified", got)
 			}
-			if result := adopted[0].Result(); result != nil && errors.Is(result.Err, task.ErrInitialPromptNotAccepted) {
+			if result := adopted[0].Result(); result != nil && errors.Is(result.Err, taskrun.ErrInitialPromptNotAccepted) {
 				t.Fatalf("result = %#v, accepted OpenCode prompt was misclassified", result)
 			}
 		})
@@ -4783,7 +4784,7 @@ func TestManager(t *testing.T) {
 			}}, []*taskslog.LoadedTask{{
 				TaskID:  taskID.String(),
 				Harness: harness.Claude,
-				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Repos:   []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
 			}})
 
 			if err == nil || !strings.Contains(err.Error(), "harness metadata unavailable") {
@@ -4816,7 +4817,7 @@ func TestManager(t *testing.T) {
 				}, []*taskslog.LoadedTask{{
 					TaskID:  taskID.String(),
 					Harness: harness.Claude,
-					Repos:   []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
+					Repos:   []repo.Mount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
 					Timeline: []agent.TimedMessage{{Message: &agent.RateLimitMessage{
 						Status:        agent.RateLimitStatusRejected,
 						ResetsAt:      resetAt,
@@ -4882,7 +4883,7 @@ func TestManager(t *testing.T) {
 				}}, []*taskslog.LoadedTask{{
 					TaskID:  taskID.String(),
 					Harness: harness.Claude,
-					Repos:   []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-6"}},
+					Repos:   []repo.Mount{{Name: "caic-xyz/caic", Branch: "caic-6"}},
 				}})
 			if err != nil {
 				t.Fatalf("ImportInstances: %v", err)
@@ -4926,7 +4927,7 @@ func TestManager(t *testing.T) {
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*taskslog.LoadedTask{{
 				TaskID:  otherTaskID.String(),
-				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Repos:   []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: harness.Claude,
 			}})
 
@@ -4949,7 +4950,7 @@ func TestManager(t *testing.T) {
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*taskslog.LoadedTask{{
 				TaskID:  taskID.String(),
-				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Repos:   []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: "unknown",
 			}})
 
@@ -5165,7 +5166,7 @@ func TestManager(t *testing.T) {
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}},
 			}}, []*taskslog.LoadedTask{{
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "restore diff",
-				Repos: []taskslog.RepoMount{{Name: "repo/a", BaseBranch: "main", Branch: "caic-9"}},
+				Repos: []repo.Mount{{Name: "repo/a", BaseBranch: "main", Branch: "caic-9"}},
 			}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -5512,7 +5513,7 @@ func TestManager(t *testing.T) {
 					TaskID:  taskID.String(),
 					Harness: "reconnect",
 
-					Repos: []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
+					Repos: []repo.Mount{{Name: "repo/a", Branch: "caic-10"}},
 				}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -5595,7 +5596,7 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task().GetState(); got != taskslog.StateCrashed {
+			if got := adopted[0].Task().GetState(); got != task.StateCrashed {
 				t.Errorf("state = %v, want crashed", got)
 			}
 			if adopted[0].Result() == nil {
@@ -5669,7 +5670,7 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task().GetState(); got != taskslog.StateCrashed {
+			if got := adopted[0].Task().GetState(); got != task.StateCrashed {
 				t.Fatalf("state = %v, want crashed", got)
 			}
 			if err := adopted[0].Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
@@ -5712,7 +5713,7 @@ func TestManager(t *testing.T) {
 					TaskID:  taskID.String(),
 					Harness: harness.Claude,
 
-					Repos: []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
+					Repos: []repo.Mount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
 				}})
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
@@ -5720,7 +5721,7 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task().GetState(); got != taskslog.StateStopped {
+			if got := adopted[0].Task().GetState(); got != task.StateStopped {
 				t.Fatalf("state = %v, want stopped", got)
 			}
 			if got := adopted[0].Task().LastExitError(); got != "" {
@@ -5786,7 +5787,7 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			if got := adopted[0].Task().GetState(); got != taskslog.StateStopped {
+			if got := adopted[0].Task().GetState(); got != task.StateStopped {
 				t.Fatalf("state = %v, want stopped", got)
 			}
 			if got := adopted[0].Task().LastExitError(); got != "" {
@@ -5861,7 +5862,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		var workers sync.WaitGroup
@@ -5906,7 +5907,7 @@ func TestManager(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		id := runtime.NewID("test-runtime", "ctr-1")
 		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 		var workers sync.WaitGroup
 		workers.Go(func() { m.watchStats(ctx) })
@@ -5919,7 +5920,7 @@ func TestManager(t *testing.T) {
 
 		// Running and waiting tasks both retain their running container. Updates
 		// to either task's data must not reset the runtime's sampling interval.
-		tk.SetState(taskslog.StateWaiting)
+		tk.SetState(task.StateWaiting)
 		m.NotifyTaskChange()
 		select {
 		case <-started:
@@ -5930,7 +5931,7 @@ func TestManager(t *testing.T) {
 		other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "y"}, "", "")
 		otherID := runtime.NewID("test-runtime", "ctr-2")
 		other.SetRuntimeConnectionInfo(otherID, runtime.ConnectionTarget{SSHHost: "ctr-2"}, "", "", 0)
-		other.SetState(taskslog.StateRunning)
+		other.SetState(task.StateRunning)
 		m.Insert(other.ID, m.NewEntry(other, nil))
 		select {
 		case ids := <-started:
@@ -5940,7 +5941,7 @@ func TestManager(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("did not restart stats stream after adding a container")
 		}
-		other.SetState(taskslog.StateStopped)
+		other.SetState(task.StateStopped)
 		m.NotifyTaskChange()
 		select {
 		case ids := <-started:
@@ -5961,7 +5962,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 		var workers sync.WaitGroup
 		workers.Go(func() { m.watchStats(ctx) })
@@ -6001,7 +6002,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(taskslog.StateRunning)
+		tk.SetState(task.StateRunning)
 		tk.PushStats(&runtime.Stats{CPUPerc: 2.5, DiskUsed: -1})
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
@@ -6017,9 +6018,9 @@ func TestManager(t *testing.T) {
 			t.Fatal("timed out waiting for initial disk usage")
 		}
 
-		tk.SetState(taskslog.StateStopping)
+		tk.SetState(task.StateStopping)
 		m.NotifyTaskChange()
-		tk.SetState(taskslog.StateStopped)
+		tk.SetState(task.StateStopped)
 		m.NotifyTaskChange()
 		select {
 		case ids := <-started:
@@ -6076,12 +6077,12 @@ func TestManager(t *testing.T) {
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-import"), runtime.ConnectionTarget{SSHHost: "ctr-import"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			if _, err := m.ImportInstances(t.Context(), []runtime.Instance{}, nil); err != nil {
 				t.Fatal(err)
 			}
-			if got := tk.GetState(); got != taskslog.StateStopped {
+			if got := tk.GetState(); got != task.StateStopped {
 				t.Fatalf("state = %v, want StateStopped", got)
 			}
 		})
@@ -6106,9 +6107,9 @@ func TestManager(t *testing.T) {
 			rb := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: fake, backend: rb})})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
+			tk.Repos = []repo.Mount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
-			tk.SetState(taskslog.StateRunning)
+			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -6120,7 +6121,7 @@ func TestManager(t *testing.T) {
 
 			// Wait for the state transition rather than sleeping a fixed duration.
 			deadline := time.Now().Add(2 * time.Second)
-			for tk.GetState() != taskslog.StateStopped {
+			for tk.GetState() != task.StateStopped {
 				if time.Now().After(deadline) {
 					t.Fatalf("state = %v, want StateStopped after instance death", tk.GetState())
 				}
@@ -6132,12 +6133,12 @@ func TestManager(t *testing.T) {
 			for _, tt := range []struct {
 				name    string
 				harness harness.Name
-				initial taskslog.State
+				initial task.State
 				kind    runtime.EventKind
-				want    taskslog.State
+				want    task.State
 			}{
-				{"start_restores_stopped_task", "fake", taskslog.StateStopped, runtime.EventStart, taskslog.StateWaiting},
-				{"destroy_keeps_purged_task", "", taskslog.StatePurged, runtime.EventDestroy, taskslog.StatePurged},
+				{"start_restores_stopped_task", "fake", task.StateStopped, runtime.EventStart, task.StateWaiting},
+				{"destroy_keeps_purged_task", "", task.StatePurged, runtime.EventDestroy, task.StatePurged},
 			} {
 				t.Run(tt.name, func(t *testing.T) {
 					t.Parallel()
@@ -6158,11 +6159,11 @@ func TestManager(t *testing.T) {
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-oom"), runtime.ConnectionTarget{SSHHost: "ctr-oom"}, "", "", 0)
-				tk.SetState(taskslog.StateRunning)
+				tk.SetState(task.StateRunning)
 				m.Insert(tk.ID, m.NewEntry(tk, nil))
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventOOM})
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventDie})
-				if got := tk.GetState(); got != taskslog.StateCrashed {
+				if got := tk.GetState(); got != task.StateCrashed {
 					t.Fatalf("state = %v, want StateCrashed", got)
 				}
 			})
@@ -6171,10 +6172,10 @@ func TestManager(t *testing.T) {
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-unknown"), runtime.ConnectionTarget{SSHHost: "ctr-unknown"}, "", "", 0)
-				tk.SetState(taskslog.StateRunning)
+				tk.SetState(task.StateRunning)
 				m.Insert(tk.ID, m.NewEntry(tk, nil))
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-unknown"), Kind: "unknown"})
-				if got := tk.GetState(); got != taskslog.StateRunning {
+				if got := tk.GetState(); got != task.StateRunning {
 					t.Fatalf("state = %v, want StateRunning", got)
 				}
 			})
@@ -6205,7 +6206,7 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		}
 		m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 		if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{{
-			TaskID: id.String(), Prompt: "initial", State: taskslog.StateStopped,
+			TaskID: id.String(), Prompt: "initial", State: task.StateStopped,
 		}}); err != nil {
 			t.Fatal(err)
 		}
@@ -6240,8 +6241,8 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 			all = append(all, &taskslog.LoadedTask{
 				TaskID:            ksid.NewID().String(),
 				Prompt:            "unsettled",
-				Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
-				State:             taskslog.StateStopped,
+				Repos:             []repo.Mount{{Name: "repo/a"}},
+				State:             task.StateStopped,
 				LastStateUpdateAt: now.Add(time.Duration(i) * time.Second),
 			})
 		}
@@ -6259,8 +6260,8 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{{
 			TaskID:            id.String(),
 			Prompt:            "was running",
-			Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
-			State:             taskslog.StateRunning,
+			Repos:             []repo.Mount{{Name: "repo/a"}},
+			State:             task.StateRunning,
 			LastStateUpdateAt: time.Now().UTC(),
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
@@ -6269,7 +6270,7 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		if !ok {
 			t.Fatal("entry not found")
 		}
-		if got := e.Task().GetState(); got != taskslog.StateFailed {
+		if got := e.Task().GetState(); got != task.StateFailed {
 			t.Errorf("state = %v, want StateFailed (running coerced)", got)
 		}
 	})
@@ -6282,8 +6283,8 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 			TaskID:            id.String(),
 			ParentTaskID:      parentID.String(),
 			Prompt:            "delegated work",
-			Repos:             []taskslog.RepoMount{{Name: "repo/a"}},
-			State:             taskslog.StateStopped,
+			Repos:             []repo.Mount{{Name: "repo/a"}},
+			State:             task.StateStopped,
 			LastStateUpdateAt: time.Now().UTC(),
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
@@ -6307,7 +6308,7 @@ func runAllocateBranchesTests(t *testing.T) {
 	t.Run("adoptionDisablesSharing", runAllocateBranchesAdoptionDisablesSharing)
 }
 
-func allocateTestBranches(ctx context.Context, m *Manager, tk *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
+func allocateTestBranches(ctx context.Context, m *Manager, tk *taskrun.Task, mounts []repo.Mount, reserveOnly int, adoptLocal bool) error {
 	unlock, err := m.lockPreparation(mounts)
 	if err != nil {
 		return err
@@ -6335,7 +6336,7 @@ func runAllocateBranchesBasic(t *testing.T) {
 	// from its own checkout, so the fork never shares a branch with the
 	// still-checked-out source instance. Index 0 is not special. Both repos
 	// share one name: the highest next sequence number across their checkouts.
-	mounts := []taskslog.RepoMount{
+	mounts := []repo.Mount{
 		{Name: "acme/app", Branch: "caic-2"},
 		{Name: "caic-xyz/caic", Branch: "caic-18"},
 	}
@@ -6355,7 +6356,7 @@ func runAllocateBranchesBasic(t *testing.T) {
 
 	// A repo with no registered checkout is a hard error.
 	bad := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-	bad.Repos = []taskslog.RepoMount{{Name: "ghost/repo", Branch: "caic-1"}}
+	bad.Repos = []repo.Mount{{Name: "ghost/repo", Branch: "caic-1"}}
 	if err := allocateTestBranches(t.Context(), m, bad, bad.ReposSnapshot(), 1, false); err == nil {
 		t.Fatal("allocateForkBranches error = nil, want error for unregistered repo")
 	}
@@ -6395,9 +6396,9 @@ func runAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	checkout := &repo.Checkout{Dir: dir, BaseBranch: "main", GitTimeout: time.Minute}
 	registerCheckout(t, m.Checkouts, "repo", checkout)
 
-	allocate := func(base string) *task.Task {
+	allocate := func(base string) *taskrun.Task {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.Repos = []taskslog.RepoMount{{Name: "repo", BaseBranch: base, GitRoot: dir}}
+		tk.Repos = []repo.Mount{{Name: "repo", BaseBranch: base, GitRoot: dir}}
 		m.insertEntry(tk.ID, m.NewEntry(tk, nil))
 		if err := allocateTestBranches(t.Context(), m, tk, tk.ReposSnapshot(), 1, true); err != nil {
 			t.Fatal(err)
@@ -6476,7 +6477,7 @@ func runAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
 		lib.ReserveBranchName()
 	}
 
-	mounts := []taskslog.RepoMount{
+	mounts := []repo.Mount{
 		{Name: "acme/app", GitRoot: dirApp},
 		{Name: "acme/lib", GitRoot: dirLib},
 	}
@@ -6520,7 +6521,7 @@ func runAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
 	registerCheckout(t, m.Checkouts, "acme/app", &repo.Checkout{Dir: dirApp, BaseBranch: "main", GitTimeout: time.Minute})
 	registerCheckout(t, m.Checkouts, "acme/lib", &repo.Checkout{Dir: dirLib, BaseBranch: "main", GitTimeout: time.Minute})
 
-	mounts := []taskslog.RepoMount{
+	mounts := []repo.Mount{
 		{Name: "acme/app", GitRoot: dirApp},
 		{Name: "acme/lib", GitRoot: dirLib},
 	}
@@ -6549,7 +6550,7 @@ func runAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
 	registerCheckout(t, m.Checkouts, "acme/app", &repo.Checkout{Dir: dirApp, BaseBranch: "main", GitTimeout: time.Minute})
 	registerCheckout(t, m.Checkouts, "acme/lib", &repo.Checkout{Dir: dirLib, BaseBranch: "main", GitTimeout: time.Minute})
 
-	mounts := []taskslog.RepoMount{
+	mounts := []repo.Mount{
 		{Name: "acme/app", BaseBranch: "local-work", GitRoot: dirApp},
 		{Name: "acme/lib", GitRoot: dirLib},
 	}
@@ -6729,14 +6730,14 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 			}
 			lt := &taskslog.LoadedTask{
 				TaskID: fmt.Sprintf("load-%d", i),
-				State:  taskslog.StatePurged,
+				State:  task.StatePurged,
 			}
 			if err := m.LoadPurgedTasks([]*taskslog.LoadedTask{lt}); err != nil {
 				t.Error(err)
 				return
 			}
 			if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{
-				{TaskID: fmt.Sprintf("unsettled-%d", i), State: taskslog.StateRunning},
+				{TaskID: fmt.Sprintf("unsettled-%d", i), State: task.StateRunning},
 			}); err != nil {
 				t.Error(err)
 				return
@@ -6795,7 +6796,7 @@ type importedRecoverySetup struct {
 	runtimeState string
 	statusErr    error
 	alive        bool
-	state        taskslog.State
+	state        task.State
 	reason       string
 	startErr     error
 }
@@ -6845,7 +6846,7 @@ func setupImportedRecovery(t *testing.T, s *importedRecoverySetup) *importedReco
 		},
 		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 	}
-	tk, err := task.NewTask(id, agent.Prompt{Text: "accepted prompt"}, h, "", "", "", "", "existing title")
+	tk, err := taskrun.NewTask(id, agent.Prompt{Text: "accepted prompt"}, h, "", "", "", "", "existing title")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6859,7 +6860,7 @@ func setupImportedRecovery(t *testing.T, s *importedRecoverySetup) *importedReco
 	if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteResultTrailer(log, "existing title", &taskslog.Result{State: s.state, Err: errors.New(s.reason)}); err != nil {
+	if err := store.WriteResultTrailer(log, "existing title", &task.Result{State: s.state, Err: errors.New(s.reason)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Compress(path, log, s.state); err != nil {
@@ -6915,25 +6916,25 @@ func TestManagerImportedRecovery(t *testing.T) {
 			sendInput    bool
 			statusErr    error
 			alive        bool
-			state        taskslog.State
+			state        task.State
 			reason       string
 			recover      bool
 		}{
-			{name: "input_during_readiness", sendInput: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
-			{name: "success", state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
-			{name: "deliberately_stopped", state: taskslog.StateStopped},
-			{name: "relay_crash", state: taskslog.StateRunning, recover: true},
-			{name: "waiting_relay_crash", state: taskslog.StateWaiting, recover: true},
-			{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: taskslog.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
-			{name: "codex_relay_crash", harness: harness.Codex, state: taskslog.StateRunning, recover: true},
-			{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: taskslog.StateRunning, recover: true},
-			{name: "persisted_stop_intent", state: taskslog.StateStopping},
-			{name: "live_persisted_stop_intent", alive: true, state: taskslog.StateStopping},
-			{name: "uncertain_persisted_stop_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StateStopping},
-			{name: "live_persisted_purge_intent", alive: true, state: taskslog.StatePurging},
-			{name: "uncertain_persisted_purge_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StatePurging},
-			{name: "persisted_purge_intent", state: taskslog.StatePurging},
-			{name: "ordinary_failure", state: taskslog.StateFailed, reason: "agent startup failed"},
+			{name: "input_during_readiness", sendInput: true, state: task.StateFailed, reason: "revive instance: missing host branch", recover: true},
+			{name: "success", state: task.StateFailed, reason: "revive instance: missing host branch", recover: true},
+			{name: "deliberately_stopped", state: task.StateStopped},
+			{name: "relay_crash", state: task.StateRunning, recover: true},
+			{name: "waiting_relay_crash", state: task.StateWaiting, recover: true},
+			{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: task.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
+			{name: "codex_relay_crash", harness: harness.Codex, state: task.StateRunning, recover: true},
+			{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: task.StateRunning, recover: true},
+			{name: "persisted_stop_intent", state: task.StateStopping},
+			{name: "live_persisted_stop_intent", alive: true, state: task.StateStopping},
+			{name: "uncertain_persisted_stop_intent", statusErr: errors.New("SSH unavailable"), state: task.StateStopping},
+			{name: "live_persisted_purge_intent", alive: true, state: task.StatePurging},
+			{name: "uncertain_persisted_purge_intent", statusErr: errors.New("SSH unavailable"), state: task.StatePurging},
+			{name: "persisted_purge_intent", state: task.StatePurging},
+			{name: "ordinary_failure", state: task.StateFailed, reason: "agent startup failed"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -6948,9 +6949,9 @@ func TestManagerImportedRecovery(t *testing.T) {
 				if env.err != nil || len(env.entries) != 1 {
 					t.Fatalf("import entries=%v err=%v", env.entries, env.err)
 				}
-				shutdownIntent := tc.state == taskslog.StateStopping || tc.state == taskslog.StatePurging || tc.state == taskslog.StateStopped || tc.state == taskslog.StatePurged
+				shutdownIntent := tc.state == task.StateStopping || tc.state == task.StatePurging || tc.state == task.StateStopped || tc.state == task.StatePurged
 				if !tc.recover {
-					if shutdownIntent && (env.entries[0].Task().GetState() != taskslog.StateStopped || env.rb.Status(env.instanceID) != runtimetest.StatusStopped) {
+					if shutdownIntent && (env.entries[0].Task().GetState() != task.StateStopped || env.rb.Status(env.instanceID) != runtimetest.StatusStopped) {
 						t.Fatal("persisted shutdown intent was not completed")
 					}
 					select {
@@ -6983,9 +6984,9 @@ func TestManagerImportedRecovery(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				want := taskslog.StateWaiting
+				want := task.StateWaiting
 				if tc.sendInput {
-					want = taskslog.StateRunning
+					want = task.StateRunning
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
@@ -7008,7 +7009,7 @@ func TestManagerImportedRecovery(t *testing.T) {
 					func() {
 						entry.Lifecycle.operationMu.Lock()
 						defer entry.Lifecycle.operationMu.Unlock()
-						if entry.Task().GetState() != taskslog.StateRunning {
+						if entry.Task().GetState() != task.StateRunning {
 							t.Fatal("readiness overwrote the new prompt's running state")
 						}
 					}()
@@ -7027,13 +7028,13 @@ func TestManagerImportedRecovery(t *testing.T) {
 			t.Parallel()
 			for _, tc := range []struct {
 				name      string
-				state     taskslog.State
+				state     task.State
 				statusErr error
 				alive     bool
 			}{
-				{name: "running_uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateRunning},
-				{name: "live_relay_missing_output", alive: true, state: taskslog.StateRunning},
-				{name: "uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateFailed},
+				{name: "running_uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: task.StateRunning},
+				{name: "live_relay_missing_output", alive: true, state: task.StateRunning},
+				{name: "uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: task.StateFailed},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
@@ -7061,7 +7062,7 @@ func TestManagerImportedRecovery(t *testing.T) {
 		t.Run("resume_failure", func(t *testing.T) {
 			t.Parallel()
 			env := setupImportedRecovery(t, &importedRecoverySetup{
-				state:    taskslog.StateFailed,
+				state:    task.StateFailed,
 				reason:   "revive instance: missing host branch",
 				startErr: errors.New("resume rejected"),
 			})
@@ -7079,10 +7080,10 @@ func TestManagerImportedRecovery(t *testing.T) {
 			entry := env.entries[0]
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			for entry.Task().GetState() != taskslog.StateCrashed {
+			for entry.Task().GetState() != task.StateCrashed {
 				select {
 				case <-ctx.Done():
-					t.Fatalf("state=%s want=%s", entry.Task().GetState(), taskslog.StateCrashed)
+					t.Fatalf("state=%s want=%s", entry.Task().GetState(), task.StateCrashed)
 				case <-time.After(time.Millisecond):
 				}
 			}
@@ -7106,7 +7107,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
-		state    taskslog.State
+		state    task.State
 		err      string
 		session  string
 		accepted bool
@@ -7114,20 +7115,20 @@ func TestCanRecoverImportedTask(t *testing.T) {
 		harness  harness.Name
 		want     bool
 	}{
-		{name: "legacy_failed_revive", state: taskslog.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Pi, want: true},
-		{name: "active", state: taskslog.StateRunning, session: "saved", accepted: true, harness: harness.Pi, want: true},
-		{name: "stopped", state: taskslog.StateStopped, session: "saved", accepted: true, harness: harness.Pi},
-		{name: "ordinary_failure", state: taskslog.StateFailed, err: "agent failed", session: "saved", accepted: true, harness: harness.Pi},
-		{name: "crashed", state: taskslog.StateCrashed, session: "saved", accepted: true, harness: harness.Pi, want: true},
-		{name: "missing_session", state: taskslog.StateRunning, accepted: true, harness: harness.Pi},
-		{name: "unaccepted_input", state: taskslog.StateRunning, session: "saved", harness: harness.Pi},
-		{name: "agent_exit", state: taskslog.StateRunning, session: "saved", accepted: true, exit: true, harness: harness.Pi, want: true},
-		{name: "other_harness", state: taskslog.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Codex, want: true},
-		{name: "unknown_harness", state: taskslog.StateRunning, session: "saved", accepted: true, harness: "unknown"},
+		{name: "legacy_failed_revive", state: task.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "active", state: task.StateRunning, session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "stopped", state: task.StateStopped, session: "saved", accepted: true, harness: harness.Pi},
+		{name: "ordinary_failure", state: task.StateFailed, err: "agent failed", session: "saved", accepted: true, harness: harness.Pi},
+		{name: "crashed", state: task.StateCrashed, session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "missing_session", state: task.StateRunning, accepted: true, harness: harness.Pi},
+		{name: "unaccepted_input", state: task.StateRunning, session: "saved", harness: harness.Pi},
+		{name: "agent_exit", state: task.StateRunning, session: "saved", accepted: true, exit: true, harness: harness.Pi, want: true},
+		{name: "other_harness", state: task.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Codex, want: true},
+		{name: "unknown_harness", state: task.StateRunning, session: "saved", accepted: true, harness: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "prompt"}, tc.harness, "", "", "", "", "")
+			tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "prompt"}, tc.harness, "", "", "", "", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7142,7 +7143,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 			tk.SeedTimeline(messages)
 			lt := &taskslog.LoadedTask{State: tc.state}
 			if tc.err != "" {
-				lt.LastTrailer = &taskslog.Result{Err: errors.New(tc.err)}
+				lt.LastTrailer = &task.Result{Err: errors.New(tc.err)}
 			}
 			if got := canRecoverImportedTask(tk, lt); got != tc.want {
 				t.Fatalf("eligible=%v want=%v", got, tc.want)
@@ -7167,15 +7168,15 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 		_ = m.Close()
 		backend.stop()
 	})
-	tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Pi, "", "", "", "", "")
+	tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Pi, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tk.SetState(taskslog.StateFailed)
+	tk.SetState(task.StateFailed)
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
 	tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 	tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
-	tk.SetState(taskslog.StateFailed)
+	tk.SetState(task.StateFailed)
 	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {
 		t.Fatal(err)
@@ -7188,7 +7189,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	m.Insert(tk.ID, entry)
 	result := make(chan error, 1)
 	var workers sync.WaitGroup
-	workers.Go(func() { result <- entry.Lifecycle.recoverImportedSession(taskslog.StateFailed) })
+	workers.Go(func() { result <- entry.Lifecycle.recoverImportedSession(task.StateFailed) })
 	t.Cleanup(func() {
 		select {
 		case <-rb.release:
@@ -7202,7 +7203,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("recovery did not stop retained runtime")
 	}
-	if got := tk.GetState(); got != taskslog.StateProvisioning {
+	if got := tk.GetState(); got != task.StateProvisioning {
 		t.Fatalf("reservation state=%s", got)
 	}
 	if err := entry.Lifecycle.Purge(t.Context(), 0); err == nil {
@@ -7214,7 +7215,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	if err := entry.Lifecycle.Revive(); err == nil {
 		t.Fatal("manual revival accepted during recovery")
 	}
-	if got := tk.GetState(); got != taskslog.StateProvisioning {
+	if got := tk.GetState(); got != task.StateProvisioning {
 		t.Fatalf("concurrent operation overwrote reservation: %s", got)
 	}
 	close(rb.release)
@@ -7247,7 +7248,7 @@ func TestLifecycleIntentFailure(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Pi, "")
 			id := runtime.NewID("test-runtime", "missing-log")
 			tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{}, "", "", 0)
-			tk.SetState(taskslog.StateWaiting)
+			tk.SetState(task.StateWaiting)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 			var err error
@@ -7259,7 +7260,7 @@ func TestLifecycleIntentFailure(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "persist") {
 				t.Fatalf("intent error=%v", err)
 			}
-			if tk.GetState() != taskslog.StateWaiting || rb.Status(id) == runtimetest.StatusStopped || rb.Status(id) == runtimetest.StatusPurged {
+			if tk.GetState() != task.StateWaiting || rb.Status(id) == runtimetest.StatusStopped || rb.Status(id) == runtimetest.StatusPurged {
 				t.Fatal("failed intent persistence changed task or runtime")
 			}
 		})
@@ -7283,7 +7284,7 @@ func (i *observedRuntimeInfo) Inspect(_ context.Context, id runtime.ID) (*runtim
 
 func TestApplyLoadedSessionMetadata(t *testing.T) {
 	t.Parallel()
-	tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "", "", "", "")
+	tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,6 @@
 // Benchmarks Codex turn-cost pricing while restoring a task timeline.
 
-package task
+package taskrun
 
 import (
 	"testing"

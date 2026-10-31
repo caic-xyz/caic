@@ -24,6 +24,7 @@ import (
 	"github.com/maruel/ksid"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 func TestTaskInfoCompareWarnings(t *testing.T) {
@@ -114,7 +115,7 @@ func TestTaskService(t *testing.T) {
 		s := newTestRouter(t, nil)
 		inactiveID := ksid.NewID()
 		inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
-		inactive.SetState(taskslog.StateStopped)
+		inactive.SetState(task.StateStopped)
 		insertTestTask(s, inactiveID, inactive)
 
 		activeID := ksid.NewID()
@@ -139,7 +140,7 @@ func TestTaskService(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-				tk.SetState(taskslog.StateWaiting)
+				tk.SetState(task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				e, _ := s.taskMgr.GetEntry(tk.ID)
 				_, live, unsubscribe := tk.Subscribe(t.Context())
@@ -185,7 +186,7 @@ func TestTaskService(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("accepted send did not finish")
 				}
-				if tk.GetState() != taskslog.StateRunning || e.Result() != nil {
+				if tk.GetState() != task.StateRunning || e.Result() != nil {
 					t.Fatalf("accepted input state=%s result=%+v", tk.GetState(), e.Result())
 				}
 				select {
@@ -230,11 +231,11 @@ func (c *gatedInputConn) SendPrompt(p agent.Prompt, data []byte) error {
 	return c.Conn.SendPrompt(p, data)
 }
 
-func newGatedInputSession(t *testing.T, tk *task.Task) (*agent.Session, *gatedInputConn) {
+func newGatedInputSession(t *testing.T, tk *taskrun.Task) (*agent.Session, *gatedInputConn) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{}}
-	r := &task.AgentRuntime{
+	r := &taskrun.AgentRuntime{
 		Backends:         agent.Backends{harness.Claude: backend},
 		LogStore:         taskslog.NewStore(testLogger(), t.TempDir()),
 		LogPath:          &taskslog.Path{},

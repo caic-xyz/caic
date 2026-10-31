@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/maruel/ksid"
@@ -17,9 +18,9 @@ import (
 // closed, so any goroutine that observes done closed is guaranteed to observe
 // a published snapshot (and therefore result) via a later load.
 type entryTerminal struct {
-	done     chan struct{}    // Closed exactly when terminal first becomes true.
-	result   *taskslog.Result // Completion result; non-nil whenever terminal.
-	terminal bool             // True once the entry has reached a terminal state.
+	done     chan struct{} // Closed exactly when terminal first becomes true.
+	result   *task.Result  // Completion result; non-nil whenever terminal.
+	terminal bool          // True once the entry has reached a terminal state.
 }
 
 // Entry is a single registered task plus its mutable lifecycle state.
@@ -36,7 +37,7 @@ type Entry struct {
 	// LogPath owns the current physical log path for this entry lifecycle.
 	LogPath taskslog.Path
 
-	task *task.Task
+	task *taskrun.Task
 
 	// New and adopted tasks keep their active timeline in Task. Restored cold
 	// tasks leave it empty and read rare history requests from loadedTask.
@@ -53,9 +54,9 @@ type Entry struct {
 	cleanupOnce   sync.Once
 }
 
-// Task returns the underlying task. The returned *task.Task is itself
+// Task returns the underlying task. The returned *taskrun.Task is itself
 // concurrency-safe via its own internal locking.
-func (e *Entry) Task() *task.Task { return e.task }
+func (e *Entry) Task() *taskrun.Task { return e.task }
 
 // PendingInput returns this task's immutable pending prompt, or nil.
 func (e *Entry) PendingInput() *PendingInput {
@@ -101,7 +102,7 @@ func (e *Entry) Done() <-chan struct{} {
 
 // Result returns the completion result of the current incarnation, or nil if
 // the task hasn't completed.
-func (e *Entry) Result() *taskslog.Result {
+func (e *Entry) Result() *task.Result {
 	return e.term.Load().result
 }
 
@@ -124,7 +125,7 @@ func (e *Entry) SetMonitorBranch(b string) {
 // observes Done() closed is guaranteed to also observe Result(). Concurrent
 // callers race and the last store wins. If the task is already terminal,
 // Finish only refreshes the result.
-func (e *Entry) Finish(r *taskslog.Result) {
+func (e *Entry) Finish(r *task.Result) {
 	for {
 		cur := e.term.Load()
 		next := &entryTerminal{done: cur.done, result: r, terminal: true}
@@ -159,7 +160,7 @@ func (e *Entry) Reset() {
 
 // clearResult reopens completion only if the result captured before reconnect
 // is still current. A newer failure or shutdown result must remain visible.
-func (e *Entry) clearResult(expected *taskslog.Result) {
+func (e *Entry) clearResult(expected *task.Result) {
 	if expected == nil {
 		return
 	}

@@ -16,17 +16,17 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/maruel/gomode/mcp"
 )
 
 func TestTaskAccess(t *testing.T) {
 	t.Parallel()
 	parentID := ksid.NewID()
-	child := &task.Task{OwnerID: "owner", ParentTaskID: parentID}
-	foreign := &task.Task{OwnerID: "other", ParentTaskID: ksid.NewID()}
-	ownedRoot := &task.Task{OwnerID: "owner"}
-	foreignChild := &task.Task{OwnerID: "other", ParentTaskID: parentID}
+	child := &taskrun.Task{OwnerID: "owner", ParentTaskID: parentID}
+	foreign := &taskrun.Task{OwnerID: "other", ParentTaskID: ksid.NewID()}
+	ownedRoot := &taskrun.Task{OwnerID: "owner"}
+	foreignChild := &taskrun.Task{OwnerID: "other", ParentTaskID: parentID}
 
 	t.Run("user", func(t *testing.T) {
 		t.Parallel()

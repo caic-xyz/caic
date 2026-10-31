@@ -400,3 +400,11 @@ func TestCostTracker(t *testing.T) {
 		}
 	})
 }
+
+// fakePricer prices a fixed set of models; unlisted models are unpriced.
+type fakePricer map[string]usage.ModelPrice
+
+func (p fakePricer) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (usage.ModelPrice, bool) {
+	price, ok := p[modelID]
+	return price, ok
+}

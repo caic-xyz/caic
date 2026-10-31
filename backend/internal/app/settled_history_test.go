@@ -102,7 +102,7 @@ func TestRunSettledHistory(t *testing.T) {
 	running := writeSettledHistoryLog(t, dir, idBeta.String()+".jsonl", "", now.Add(-time.Hour))
 	staleTerminal := writeSettledHistoryLog(t, dir, idGamma.String()+".jsonl", "purged", now.Add(-cutoffAgo))
 	staleCompressed := writeSettledHistoryLog(t, dir, idDelta.String()+".jsonl", "purged", now.Add(-cutoffAgo))
-	if _, err := logStore.Compress(staleCompressed, nil, taskslog.StatePurged); err != nil {
+	if _, err := logStore.Compress(staleCompressed, nil, task.StatePurged); err != nil {
 		t.Fatal(err)
 	}
 	corruptPath := filepath.Join(dir, ksid.NewID().String()+".jsonl")

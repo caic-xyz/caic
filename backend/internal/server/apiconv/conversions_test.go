@@ -16,13 +16,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/ksid"
 )
 
-func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
-	tk, err := task.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
+func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *taskrun.Task {
+	tk, err := taskrun.NewTask(id, prompt, harness.Claude, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,25 +318,25 @@ func TestTaskState(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		state taskslog.State
+		state task.State
 		want  v1.TaskState
 	}{
-		{taskslog.StatePending, v1.TaskStatePending},
-		{taskslog.StateBranching, v1.TaskStateBranching},
-		{taskslog.StateProvisioning, v1.TaskStateProvisioning},
-		{taskslog.StateStarting, v1.TaskStateStarting},
-		{taskslog.StateRunning, v1.TaskStateRunning},
-		{taskslog.StateWaiting, v1.TaskStateWaiting},
-		{taskslog.StateAsking, v1.TaskStateAsking},
-		{taskslog.StateHasPlan, v1.TaskStateHasPlan},
-		{taskslog.StatePulling, v1.TaskStatePulling},
-		{taskslog.StatePushing, v1.TaskStatePushing},
-		{taskslog.StateStopping, v1.TaskStateStopping},
-		{taskslog.StateStopped, v1.TaskStateStopped},
-		{taskslog.StatePurging, v1.TaskStatePurging},
-		{taskslog.StateCrashed, v1.TaskStateCrashed},
-		{taskslog.StateFailed, v1.TaskStateFailed},
-		{taskslog.StatePurged, v1.TaskStatePurged},
+		{task.StatePending, v1.TaskStatePending},
+		{task.StateBranching, v1.TaskStateBranching},
+		{task.StateProvisioning, v1.TaskStateProvisioning},
+		{task.StateStarting, v1.TaskStateStarting},
+		{task.StateRunning, v1.TaskStateRunning},
+		{task.StateWaiting, v1.TaskStateWaiting},
+		{task.StateAsking, v1.TaskStateAsking},
+		{task.StateHasPlan, v1.TaskStateHasPlan},
+		{task.StatePulling, v1.TaskStatePulling},
+		{task.StatePushing, v1.TaskStatePushing},
+		{task.StateStopping, v1.TaskStateStopping},
+		{task.StateStopped, v1.TaskStateStopped},
+		{task.StatePurging, v1.TaskStatePurging},
+		{task.StateCrashed, v1.TaskStateCrashed},
+		{task.StateFailed, v1.TaskStateFailed},
+		{task.StatePurged, v1.TaskStatePurged},
 	} {
 		got, err := TaskState(test.state)
 		if err != nil {
@@ -346,7 +346,7 @@ func TestTaskState(t *testing.T) {
 			t.Errorf("TaskState(%q) = %q, want %q", test.state, got, test.want)
 		}
 	}
-	if _, err := TaskState(taskslog.State("bogus")); err == nil {
+	if _, err := TaskState(task.State("bogus")); err == nil {
 		t.Error("TaskState(bogus) error = nil, want error")
 	}
 }
@@ -380,7 +380,7 @@ func TestTask(t *testing.T) {
 	t.Run("OverageDoesNotBlock", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StatePending)
+		tk.SetState(task.StatePending)
 		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
 			ResetsAt:       time.Now().Add(time.Hour),
@@ -401,7 +401,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StatePending)
+		tk.SetState(task.StatePending)
 		tk.SeedTimeline([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
@@ -429,7 +429,7 @@ func TestTask(t *testing.T) {
 	t.Run("AllowsEmptyQuotaProvider", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StatePending)
+		tk.SetState(task.StatePending)
 		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
 			Status:      agent.RateLimitStatusRejected,
 			ResetsAt:    time.Now().Add(time.Hour),
@@ -447,7 +447,7 @@ func TestTask(t *testing.T) {
 	t.Run("RejectsUnsupportedQuotaProvider", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StatePending)
+		tk.SetState(task.StatePending)
 		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
 			Status:        agent.RateLimitStatusRejected,
 			ResetsAt:      time.Now().Add(time.Hour),
@@ -466,7 +466,7 @@ func TestTask(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.ForkedFromTaskID = forkedFromTaskID
 		tk.ParentTaskID = parentTaskID
-		tk.SetState(taskslog.StatePending)
+		tk.SetState(task.StatePending)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -482,7 +482,7 @@ func TestTask(t *testing.T) {
 	t.Run("IncludesStoppedDiskUsage", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StateStopped)
+		tk.SetState(task.StateStopped)
 		tk.UpdateDiskUsage(1024)
 
 		live, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
@@ -497,7 +497,7 @@ func TestTask(t *testing.T) {
 		durable, err := Task(&TaskInput{
 			Task:     tk,
 			Snapshot: tk.Snapshot(),
-			Result:   &taskslog.Result{State: taskslog.StateStopped, DiskUsedBytes: &durableDisk},
+			Result:   &task.Result{State: task.StateStopped, DiskUsedBytes: &durableDisk},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -506,7 +506,7 @@ func TestTask(t *testing.T) {
 			t.Fatalf("durable stopped disk = %v, want %d", durable.StoppedDiskUsedBytes, durableDisk)
 		}
 
-		tk.SetState(taskslog.StateWaiting)
+		tk.SetState(task.StateWaiting)
 		notStopped, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
@@ -516,7 +516,7 @@ func TestTask(t *testing.T) {
 		}
 
 		oldTask := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "old task"})
-		oldTask.SetState(taskslog.StateStopped)
+		oldTask.SetState(task.StateStopped)
 		old, err := Task(&TaskInput{Task: oldTask, Snapshot: oldTask.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
@@ -528,13 +528,13 @@ func TestTask(t *testing.T) {
 	t.Run("IncludesStartupFailure", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(taskslog.StateFailed)
+		tk.SetState(task.StateFailed)
 
 		got, err := Task(&TaskInput{
 			Task:     tk,
 			Snapshot: tk.Snapshot(),
-			Result: &taskslog.Result{
-				State: taskslog.StateFailed,
+			Result: &task.Result{
+				State: task.StateFailed,
 				StartupFailure: &logv3.StartupFailure{
 					Harness: "claude",
 					Phase:   "agent startup",

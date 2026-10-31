@@ -19,7 +19,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // pinnedHeaderCacheFixture is a fully populated LoadedTask: every slice
@@ -31,7 +33,7 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		TaskID: "task",
 		Prompt: "prompt",
 		Title:  "title",
-		Repos: []RepoMount{{
+		Repos: []repo.Mount{{
 			Name:          "repo",
 			BaseBranch:    "main",
 			Branch:        "caic-0",
@@ -41,7 +43,7 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		Harness:           harness.Claude,
 		StartedAt:         time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
 		LastStateUpdateAt: time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
-		State:             StatePurged,
+		State:             task.StatePurged,
 		ForgeIssue:        1,
 		OwnerID:           "user-1",
 		ForkedFromTaskID:  "fork",
@@ -81,8 +83,8 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		AutoCompactTokenLimit: 244800,
 		LogSize:               1,
 		DiffCreated:           true,
-		LastTrailer: &Result{
-			State:       StatePurged,
+		LastTrailer: &task.Result{
+			State:       task.StatePurged,
 			DiffStat:    diffStat,
 			CostUSD:     1,
 			Duration:    time.Second,
@@ -200,7 +202,7 @@ func TestHeaderCache(t *testing.T) {
 	t.Run("OptionalFieldsAndCollections", func(t *testing.T) {
 		t.Parallel()
 		fixture := pinnedHeaderCacheFixture()
-		fixture.Repos = []RepoMount{}
+		fixture.Repos = []repo.Mount{}
 		fixture.CacheMounts = nil
 		fixture.Mounts = []runtime.Mount{}
 		fixture.LastTrailer.DiffStat = v3.DiffStat{{Path: "binary", OldSize: 42, NewSize: 84}}
