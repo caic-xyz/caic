@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/genai"
@@ -1885,8 +1887,11 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		stateChanged = summaryChanged || t.state != initialState || t.inPlanMode != initialPlanMode || t.planExitID != initialPlanID || t.planContent != initialPlanContent
 		t.mu.Unlock()
 	}()
+	priorMetadata := t.sessionMetadata
 	t.sessionMetadata.Apply(m)
-	if _, ok := m.(*agent.MetaSessionMessage); ok {
+	if agent.IsSessionMetadataUpdate(m) {
+		summaryChanged = t.sessionMetadata != priorMetadata
+		t.costTracker.Observe(m, parsed.ProducerTime, t.Pricer)
 		return stateChanged, persistErr
 	}
 	producerAt := parsed.ProducerTime
@@ -2188,7 +2193,7 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 // into the same LoadedTask shape used by startup. Completion already has these
 // values in memory, so persisting this projection avoids decoding the newly
 // compressed message body on the next process start.
-func (t *Task) terminalLogSummary(res *task.Result) *taskslog.LoadedTask {
+func (t *Task) terminalLogSummary(res *task.Result) *taskhistory.LoadedTask {
 	snapshot := t.Snapshot()
 	// GitRoot is process-local checkout state and is absent from the durable
 	// log header. Do not let the fast completion path persist a stale host path
@@ -2200,7 +2205,7 @@ func (t *Task) terminalLogSummary(res *task.Result) *taskslog.LoadedTask {
 	if t.ParentTaskID != 0 {
 		parentTaskID = t.ParentTaskID.String()
 	}
-	return &taskslog.LoadedTask{
+	return &taskhistory.LoadedTask{
 		SessionMetadata:   snapshot.SessionMetadata,
 		TaskID:            t.ID.String(),
 		Prompt:            t.InitialPrompt.Text,

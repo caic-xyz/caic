@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model string) *taskrun.Task {
@@ -31,7 +32,7 @@ func newTestEntry(t *testing.T, tk *taskrun.Task) *Entry {
 	return m.NewEntry(tk, nil)
 }
 
-func newTestPurgedEntry(t *testing.T, tk *taskrun.Task, r *task.Result, lt *taskslog.LoadedTask) *Entry {
+func newTestPurgedEntry(t *testing.T, tk *taskrun.Task, r *task.Result, lt *taskhistory.LoadedTask) *Entry {
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	e := m.NewEntry(tk, lt)
 	e.Finish(r)

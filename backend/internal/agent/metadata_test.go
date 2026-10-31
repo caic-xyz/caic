@@ -39,6 +39,17 @@ func TestSessionMetadata(t *testing.T) {
 			t.Fatalf("root reroute and boundary = %+v, want %+v", m, want)
 		}
 	})
+	t.Run("authoritative partial reports and restoration", func(t *testing.T) {
+		t.Parallel()
+		m := SessionMetadata{SessionID: "root", ReportedModel: "old", ReportedEffort: "low", AgentVersion: "1"}
+		m.Apply(&SessionMetadataMessage{ReportedModel: "new", ReportedEffort: "high"})
+		m.Apply(&SessionMetadataMessage{Source: MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child", AgentVersion: "child"})
+		m.Apply(&MetaSessionMessage{SessionID: "root", ReportedModel: "stale", ReportedEffort: "low"})
+		want := SessionMetadata{SessionID: "root", ReportedModel: "new", ReportedEffort: "high", AgentVersion: "1"}
+		if m != want {
+			t.Fatalf("partial metadata = %+v, want %+v", m, want)
+		}
+	})
 	t.Run("Restore", func(t *testing.T) {
 		t.Parallel()
 		m := SessionMetadata{ReportedModel: "native-model", ReportedEffort: "high"}

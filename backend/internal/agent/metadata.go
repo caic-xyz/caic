@@ -25,6 +25,8 @@ func (m *SessionMetadata) Apply(msg Message) {
 			ReportedEffort: src.ReportedEffort, AgentVersion: src.Version,
 			AutoCompactTokenLimit: src.AutoCompactTokenLimit,
 		})
+	case *SessionMetadataMessage:
+		m.Update(src.SessionMetadata)
 	case *MetaSessionMessage:
 		m.Restore(SessionMetadata{
 			SessionID: src.SessionID, ReportedModel: src.ReportedModel,
@@ -75,5 +77,17 @@ func (m *SessionMetadata) Update(src SessionMetadata) {
 	}
 	if src.AutoCompactTokenLimit > 0 {
 		m.AutoCompactTokenLimit = src.AutoCompactTokenLimit
+	}
+}
+
+// IsSessionMetadataUpdate reports settings observations that do not begin a
+// session or establish accepted user work. Authoritative native updates and
+// restoration defaults share this activity policy, with distinct value precedence.
+func IsSessionMetadataUpdate(msg Message) bool {
+	switch msg.(type) {
+	case *SessionMetadataMessage, *MetaSessionMessage:
+		return true
+	default:
+		return false
 	}
 }

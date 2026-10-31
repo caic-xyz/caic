@@ -107,9 +107,17 @@ func runPiRelayHelper() {
 		}
 		switch cmd.Type {
 		case "set_model":
-			fmt.Println(`{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`)
+			data := os.Getenv("PI_SSH_HELPER_MODEL")
+			if data == "" {
+				data = `{}`
+			}
+			fmt.Printf(`{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":%s}}`+"\n", data)
 		case "get_state":
-			fmt.Println(`{"t":"agent","ts":2.000,"msg":{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openai-codex","id":"gpt-5.6-terra"},"thinkingLevel":"high"}}}`)
+			response := os.Getenv("PI_SSH_HELPER_STATE_RESPONSE")
+			if response == "" {
+				response = `{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openai-codex","id":"gpt-5.6-terra"},"thinkingLevel":"high"}}`
+			}
+			fmt.Printf(`{"t":"agent","ts":2.000,"msg":%s}`+"\n", response)
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -403,9 +411,9 @@ func TestBackend(t *testing.T) {
 			t.Errorf("Pi relay launches = %d, want 2", len(count))
 		}
 		msg := <-msgs
-		meta, ok := msg.Message.(*agent.MetaSessionMessage)
+		meta, ok := msg.Message.(*agent.InitMessage)
 		if !ok {
-			t.Fatalf("startup message = %T, want *agent.MetaSessionMessage", msg.Message)
+			t.Fatalf("startup message = %T, want *agent.InitMessage", msg.Message)
 		}
 		if meta.ReportedModel != "openai-codex/gpt-5.6-terra" || meta.ReportedEffort != "high" {
 			t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
@@ -416,6 +424,102 @@ func TestBackend(t *testing.T) {
 		defer cancel()
 		if err := sess.Stop(stopCtx); err != nil {
 			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	t.Run("partial native startup metadata", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			state string
+			want  agent.SessionMetadata
+		}{
+			{"state without session ID", `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.6"},"thinkingLevel":"high"}}`, agent.SessionMetadata{ReportedModel: "openai/gpt-5.6", ReportedEffort: "high"}},
+			{"failed state retains selected model", `{"type":"response","command":"get_state","success":false,"error":"interrupted state"}`, agent.SessionMetadata{ReportedModel: "anthropic/claude-opus-4-7"}},
+			{"requested model resume", `{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","thinkingLevel":"high"}}`, agent.SessionMetadata{SessionID: "ses-1", ReportedModel: "anthropic/claude-opus-4-7", ReportedEffort: "high"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir := t.TempDir()
+				if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(piSSHHelperEnv, "1")
+				t.Setenv("PATH", dir)
+				t.Setenv("PI_SSH_HELPER_DIR", dir)
+				t.Setenv("PI_SSH_HELPER_MODEL", `{"provider":"anthropic","id":"claude-opus-4-7","contextWindow":200000}`)
+				t.Setenv("PI_SSH_HELPER_STATE_RESPONSE", tc.state)
+				if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				msgs := make(chan agent.TimedMessage, 8)
+				log := &agenttest.LogSink{}
+				sess, err := New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", Model: "requested/model", ResumeSessionID: tc.want.SessionID, MsgCh: msgs, Log: log})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got agent.SessionMetadata
+				var boundaries int
+				for len(msgs) > 0 {
+					msg := (<-msgs).Message
+					if init, ok := msg.(*agent.InitMessage); ok {
+						if init.SessionID != tc.want.SessionID || init.ReportedModel != tc.want.ReportedModel || init.ReportedEffort != tc.want.ReportedEffort {
+							t.Fatalf("live session boundary = %+v, want known metadata %+v", init, tc.want)
+						}
+						boundaries++
+					}
+					got.Apply(msg)
+				}
+				wantBoundaries := 0
+				if tc.want.SessionID != "" {
+					wantBoundaries = 1
+				}
+				if boundaries != wantBoundaries {
+					t.Fatalf("live session boundaries = %d, want %d", boundaries, wantBoundaries)
+				}
+				if got != tc.want {
+					t.Fatalf("live metadata = %+v, want %+v", got, tc.want)
+				}
+				for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+					physical, err := agent.NewLogRecordParser(parser)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var restored agent.SessionMetadata
+					boundaries = 0
+					for line := range strings.SplitSeq(log.String(), "\n") {
+						if line == "" {
+							continue
+						}
+						record, err := physical.ParseRecord([]byte(line))
+						if err != nil {
+							t.Fatalf("%s replay: %v", name, err)
+						}
+						for _, msg := range record.Messages {
+							if init, ok := msg.Message.(*agent.InitMessage); ok {
+								if init.SessionID != tc.want.SessionID || init.ReportedModel != tc.want.ReportedModel || init.ReportedEffort != tc.want.ReportedEffort {
+									t.Fatalf("%s replay session boundary = %+v, want known metadata %+v", name, init, tc.want)
+								}
+								boundaries++
+							}
+							restored.Apply(msg.Message)
+						}
+					}
+					if boundaries != wantBoundaries {
+						t.Fatalf("%s replay session boundaries = %d, want %d", name, boundaries, wantBoundaries)
+					}
+					if restored != tc.want {
+						t.Fatalf("%s replay metadata = %+v, want %+v", name, restored, tc.want)
+					}
+				}
+				stopCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				t.Cleanup(cancel)
+				if err := sess.Stop(stopCtx); err != nil {
+					t.Errorf("Stop: %v", err)
+				}
+			})
 		}
 	})
 
@@ -620,7 +724,7 @@ func TestPiWireFormat(t *testing.T) {
 	t.Parallel()
 	t.Run("MessageStartIncludesSessionMetadata", func(t *testing.T) {
 		t.Parallel()
-		w := &piWireFormat{sessionID: "ses-1"}
+		w := &piWireFormat{session: agent.SessionMetadata{SessionID: "ses-1"}}
 		msgs, err := w.ParseOutput([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6"}}`))
 		if err != nil {
 			t.Fatal(err)
@@ -628,12 +732,13 @@ func TestPiWireFormat(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("len(msgs) = %d, want 1", len(msgs))
 		}
-		init, ok := msgs[0].(*agent.InitMessage)
+		metadata, ok := msgs[0].(*agent.SessionMetadataMessage)
 		if !ok {
-			t.Fatalf("message type = %T, want *agent.InitMessage", msgs[0])
+			t.Fatalf("message type = %T, want *agent.SessionMetadataMessage", msgs[0])
 		}
-		if init.SessionID != "ses-1" || init.ReportedModel != "openrouter/anthropic/claude-opus-4-6" || init.Version != "" {
-			t.Fatalf("InitMessage = %+v", init)
+		want := agent.SessionMetadata{ReportedModel: "openrouter/anthropic/claude-opus-4-6"}
+		if metadata.SessionMetadata != want {
+			t.Fatalf("message-start metadata = %+v, want %+v", metadata.SessionMetadata, want)
 		}
 	})
 

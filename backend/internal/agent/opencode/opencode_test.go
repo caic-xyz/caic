@@ -1,4 +1,4 @@
-// Tests OpenCode handshakes, model discovery, ACP capabilities, and task MCP registration.
+// Tests OpenCode handshakes, persisted metadata parity, ACP capabilities, and task MCP registration.
 
 package opencode
 
@@ -169,7 +169,7 @@ func TestHandshake(t *testing.T) {
 		const generation = `{"t":"relay_generation","generation":"generation-1"}` + "\n"
 		var stdin bytes.Buffer
 		stdout := bufio.NewReader(strings.NewReader(generation + v3Records(strings.Join([]string{
-			`{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"promptCapabilities":{"image":true}}}}`,
+			`{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"1.18.31"},"agentCapabilities":{"promptCapabilities":{"image":true}}}}`,
 			`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model","type":"select","currentValue":"anthropic/claude-sonnet-4","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
@@ -232,6 +232,43 @@ func TestHandshake(t *testing.T) {
 		if inputs != 4 || agentRecords != 4 || generations != 1 {
 			t.Fatalf("persisted handshake records = inputs:%d agent:%d generations:%d", inputs, agentRecords, generations)
 		}
+		want := agent.SessionMetadata{SessionID: "session-1", ReportedModel: selectedModel, ReportedEffort: "high", AgentVersion: "1.18.31"}
+		live := agent.SessionMetadata{SessionID: hs.wire.session.SessionID, ReportedModel: hs.currentModel, ReportedEffort: hs.currentEffort, AgentVersion: hs.agentVersion}
+		if live != want {
+			t.Fatalf("live metadata = %+v, want %+v", live, want)
+		}
+		for name, native := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+			t.Run(name+" replay", func(t *testing.T) {
+				t.Parallel()
+				parser, err := agent.NewLogRecordParser(native)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got agent.SessionMetadata
+				starts, reports := 0, 0
+				for _, physical := range persisted {
+					record, err := parser.ParseRecord(physical)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, timed := range record.Messages {
+						got.Apply(timed.Message)
+						switch message := timed.Message.(type) {
+						case *agent.InitMessage:
+							starts++
+							if message.SessionID != "session-1" || message.ReportedModel != "anthropic/claude-sonnet-4" || message.ReportedEffort != "low" || message.Version != "1.18.31" {
+								t.Fatalf("native session start = %+v", message)
+							}
+						case *agent.SessionMetadataMessage:
+							reports++
+						}
+					}
+				}
+				if got != want || starts != 1 || reports != 3 {
+					t.Fatalf("replay metadata = %+v, starts = %d, partial reports = %d; want %+v, 1, 3", got, starts, reports, want)
+				}
+			})
+		}
 	})
 
 	t.Run("services task scoped MCP during session creation", func(t *testing.T) {
@@ -266,7 +303,7 @@ func TestWritePromptInputPersistence(t *testing.T) {
 
 	var stdin bytes.Buffer
 	log := &agenttest.LogSink{}
-	wire := &wireFormat{sessionID: "session-1"}
+	wire := &wireFormat{session: agent.SessionMetadata{SessionID: "session-1"}}
 	if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +320,7 @@ func TestWireFormat(t *testing.T) {
 		if !ok {
 			t.Fatal("backend returned an unexpected wire format")
 		}
-		w.sessionID = "session"
+		w.session.SessionID = "session"
 		release := make(chan struct{})
 		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
 		var workers sync.WaitGroup

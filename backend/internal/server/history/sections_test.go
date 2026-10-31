@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,197 @@ import (
 
 func TestSourceSections(t *testing.T) {
 	t.Parallel()
+	t.Run("native settings preserve session sections across restart", func(t *testing.T) {
+		t.Parallel()
+		path := writeFixture(t,
+			`{"t":"caic_meta","version":3,"harness":"opencode","prompt":"hi"}`,
+			`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}}`,
+			`{"t":"agent","ts":1.001,"msg":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"version":"1.15.10"}}}}`,
+			`{"t":"input","ts":1.002,"msg":{"jsonrpc":"2.0","id":2,"method":"session/new","params":{}}}`,
+			`{"t":"agent","ts":1.003,"msg":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_1","models":{"currentModelId":"a/b"}}}}`,
+			`{"t":"session","session_id":"ses_1","model":"a/b","agent_version":"1.15.10"}`,
+			`{"t":"input","ts":1.004,"msg":{"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{"sessionId":"ses_1","configId":"model","value":"c/d"}}}`,
+			`{"t":"agent","ts":1.005,"msg":{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","currentValue":"c/d"}]}}}`,
+			`{"t":"agent","ts":1.006,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"effort","currentValue":"high"}]}}}}`,
+			`{"t":"input","ts":1.007,"msg":{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"hi"}]}}}`,
+			`{"t":"agent","ts":1.008,"msg":{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn","usage":{"inputTokens":100000}}}}`,
+			`{"t":"exit","exit_code":0}`,
+			`{"t":"input","ts":2.000,"msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}}`,
+			`{"t":"agent","ts":2.001,"msg":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"version":"1.15.10"}}}}`,
+			`{"t":"input","ts":2.002,"msg":{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"ses_1"}}}`,
+			`{"t":"agent","ts":2.003,"msg":{"jsonrpc":"2.0","id":2,"result":{"models":{"currentModelId":"c/d"}}}}`,
+			`{"t":"session","session_id":"ses_1","model":"c/d","agent_version":"1.15.10"}`,
+			`{"t":"input","ts":2.004,"msg":{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"again"}]}}}`,
+			`{"t":"agent","ts":2.005,"msg":{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn","usage":{"inputTokens":100000}}}}`,
+		)
+		// Each subtest releases its decoded records and anonymous projection
+		// spools before constructing a fresh source from the same durable bytes.
+		for attempt := range 2 {
+			t.Run(fmt.Sprintf("projection=%d", attempt), func(t *testing.T) { //nolint:paralleltest // The next rebuild starts only after this source and its spools close.
+				var suffix []byte
+				if attempt == 0 {
+					complete, err := os.ReadFile(filepath.Clean(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					end := bytes.IndexByte(complete, '\n') + 1
+					suffix = complete[end:]
+					if err := os.WriteFile(path, complete[:end], 0o600); err != nil { //nolint:gosec // writeFixture returns a path inside this test's private temporary directory.
+						t.Fatal(err)
+					}
+				}
+				source, _ := newFixtureSource(t, path)
+				for line := range bytes.SplitSeq(bytes.TrimSuffix(suffix, []byte("\n")), []byte("\n")) {
+					if len(line) == 0 {
+						continue
+					}
+					appendFixture(t, path, string(line)+"\n")
+					if _, err := source.Refresh(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				snapshot, err := source.Refresh(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, sections, metadata, err := source.Sections(t.Context(), "hi")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(sections) != 1 || sections[0].TurnCount != 2 {
+					t.Fatalf("sections = %+v, want one session containing two turns", sections)
+				}
+				if metadata.InitialInit == nil || metadata.InitialInit.RecordID != 5 || metadata.InitialInit.Message.Init.SessionID != "ses_1" || metadata.InitialInit.Message.Init.AgentVersion != "1.15.10" {
+					t.Fatalf("session card = %+v, want proven session at record 5", metadata.InitialInit)
+				}
+				var initIDs []uint64
+				var inputTokens, results int
+				for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if event.Message.Init != nil {
+						initIDs = append(initIDs, event.RecordID)
+					}
+					if event.Message.Result != nil {
+						inputTokens += event.Message.Result.Usage.InputTokens
+						results++
+					}
+				}
+				if !slices.Equal(initIDs, []uint64{5, 16}) || inputTokens != 200000 || results != 2 {
+					t.Fatalf("presentation init IDs=%v input tokens=%d results=%d", initIDs, inputTokens, results)
+				}
+				var total float64
+				var turns int
+				for cost, err := range source.TurnCosts(t.Context(), snapshot, snapshot.Through, journalPricer{}) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if cost.Model != "c/d" {
+						t.Fatalf("partial model missing from rebuilt pricing journal: %+v", cost)
+					}
+					total += cost.Cost.USD
+					turns++
+				}
+				if turns != 2 || math.Abs(total-0.4) > 1e-9 {
+					t.Fatalf("repriced session turns=%d total=%v", turns, total)
+				}
+			})
+		}
+	})
+	t.Run("Pi model reports preserve session sections", func(t *testing.T) {
+		t.Parallel()
+		path := writeFixture(t,
+			`{"t":"caic_meta","version":3,"harness":"pi","prompt":"hi"}`,
+			`{"t":"input","ts":1.000,"msg":{"type":"set_model","provider":"openrouter","modelId":"auto"}}`,
+			`{"t":"agent","ts":1.001,"msg":{"type":"response","command":"set_model","success":true,"data":{"provider":"openrouter","id":"auto","contextWindow":262144}}}`,
+			`{"t":"input","ts":1.002,"msg":{"type":"get_state"}}`,
+			`{"t":"agent","ts":1.003,"msg":{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openrouter","id":"auto"},"thinkingLevel":"high"}}}`,
+			`{"t":"agent","ts":1.004,"msg":{"type":"agent_start"}}`,
+			`{"t":"agent","ts":1.005,"msg":{"type":"message_start","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4.7","content":[]}}}`,
+			`{"t":"agent","ts":1.006,"msg":{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4.7","usage":{"input":10,"output":4,"totalTokens":14,"cost":{"total":0.25}}}}}`,
+			`{"t":"agent","ts":1.007,"msg":{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10,"output":4,"totalTokens":14,"cost":{"total":0.25}}}]}}`,
+			`{"t":"exit","exit_code":0}`,
+			`{"t":"input","ts":2.000,"msg":{"type":"set_model","provider":"openrouter","modelId":"selected"}}`,
+			`{"t":"agent","ts":2.001,"msg":{"type":"response","command":"set_model","success":true,"data":{"provider":"openrouter","id":"selected"}}}`,
+			`{"t":"input","ts":2.002,"msg":{"type":"get_state"}}`,
+			`{"t":"agent","ts":2.003,"msg":{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1"}}}`,
+			`{"t":"agent","ts":2.004,"msg":{"type":"agent_start"}}`,
+			`{"t":"agent","ts":2.005,"msg":{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"selected","usage":{"input":10,"output":4,"totalTokens":14,"cost":{"total":0.25}}}}}`,
+			`{"t":"agent","ts":2.006,"msg":{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10,"output":4,"totalTokens":14,"cost":{"total":0.25}}}]}}`,
+		)
+		// Each subtest releases its decoded records and anonymous projection
+		// spools before constructing a fresh source from the same durable bytes.
+		for attempt := range 2 {
+			t.Run(fmt.Sprintf("projection=%d", attempt), func(t *testing.T) { //nolint:paralleltest // The next rebuild starts only after this source and its spools close.
+				var suffix []byte
+				if attempt == 0 {
+					complete, err := os.ReadFile(filepath.Clean(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					end := bytes.IndexByte(complete, '\n') + 1
+					suffix = complete[end:]
+					if err := os.WriteFile(path, complete[:end], 0o600); err != nil { //nolint:gosec // writeFixture returns a path inside this test's private temporary directory.
+						t.Fatal(err)
+					}
+				}
+				source, _ := newFixtureSource(t, path)
+				for line := range bytes.SplitSeq(bytes.TrimSuffix(suffix, []byte("\n")), []byte("\n")) {
+					if len(line) == 0 {
+						continue
+					}
+					appendFixture(t, path, string(line)+"\n")
+					if _, err := source.Refresh(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				snapshot, err := source.Refresh(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, sections, metadata, err := source.Sections(t.Context(), "hi")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(sections) != 1 || sections[0].TurnCount != 2 {
+					t.Fatalf("sections = %+v, want one Pi session containing two turns", sections)
+				}
+				if metadata.InitialInit == nil || metadata.InitialInit.RecordID != 5 || metadata.InitialInit.Message.Init.SessionID != "ses-1" || metadata.InitialInit.Message.Init.ReportedModel != "openrouter/auto" {
+					t.Fatalf("session card = %+v, want proven Pi session at record 5", metadata.InitialInit)
+				}
+				var initIDs []uint64
+				var inputTokens, results int
+				for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if event.Message.Init != nil {
+						initIDs = append(initIDs, event.RecordID)
+					}
+					if event.Message.Result != nil {
+						inputTokens += event.Message.Result.Usage.InputTokens
+						results++
+					}
+				}
+				if !slices.Equal(initIDs, []uint64{5}) || inputTokens != 20 || results != 2 {
+					t.Fatalf("presentation init IDs=%v input tokens=%d results=%d", initIDs, inputTokens, results)
+				}
+				var total float64
+				var turns int
+				for cost, err := range source.TurnCosts(t.Context(), snapshot, snapshot.Through, journalPricer{}) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					total += cost.Cost.USD
+					turns++
+				}
+				if turns != 2 || math.Abs(total-0.00012) > 1e-9 {
+					t.Fatalf("repriced session turns=%d total=%v", turns, total)
+				}
+			})
+		}
+	})
 	t.Run("actor body bounds ignore unrelated records and include ownership revisions", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()

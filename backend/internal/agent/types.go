@@ -5,12 +5,13 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
@@ -147,6 +148,17 @@ type InitMessage struct {
 
 // Type implements Message.
 func (m *InitMessage) Type() string { return "init" }
+
+// SessionMetadataMessage reports authoritative native settings without starting
+// a session. Its known values replace prior reports; omitted values are retained.
+// Native records persist the report, so this runtime event has no owned log encoding.
+type SessionMetadataMessage struct {
+	MessageProvenance
+	SessionMetadata
+}
+
+// Type implements Message.
+func (*SessionMetadataMessage) Type() string { return "session_metadata" }
 
 // SystemMessage is a generic system message (status, compact_boundary, etc.).
 //
@@ -1109,23 +1121,6 @@ type MetaMessage v3.MetaMessage
 // Type implements Message.
 func (m *MetaMessage) Type() string { return messageTypeMeta }
 
-// Validate checks that all required fields are present and the version is supported.
-func (m *MetaMessage) Validate() error {
-	if m.MessageType != messageTypeMeta {
-		return fmt.Errorf("unexpected type %q", m.MessageType)
-	}
-	if m.Version != LogVersionV3 {
-		return fmt.Errorf("unsupported log version %d", m.Version)
-	}
-	if m.Prompt == "" {
-		return errors.New("missing prompt")
-	}
-	if m.Harness == "" {
-		return errors.New("missing harness")
-	}
-	return nil
-}
-
 // MetaSessionMessage records the backend-native session identifier needed to
 // resume a stateful harness after server restart.
 //
@@ -1198,10 +1193,10 @@ var _ LogSink = DiscardLogSink{}
 // the harness's stdin. V3 persists them separately from relay
 // output so protocol commands remain durable without becoming relay offsets.
 func AppendInputNativeRecord(log LogSink, data []byte) error {
-	return appendNativeRecord(log, logRecordInput, data)
+	return appendNativeRecord(log, taskslog.KindInput, data)
 }
 
-func appendNativeRecord(log LogSink, token logRecordType, data []byte) error {
+func appendNativeRecord(log LogSink, token taskslog.Kind, data []byte) error {
 	data = bytes.TrimSuffix(data, []byte{'\n'})
 	if len(data) == 0 {
 		return nil
@@ -1298,45 +1293,43 @@ type MetaPRMessage v3.MetaPRMessage
 // Type implements Message.
 func (m *MetaPRMessage) Type() string { return messageTypePR }
 
-func v3ControlToken(m Message) (logRecordType, error) {
+func v3ControlToken(m Message) (taskslog.Kind, error) {
 	switch m.Type() {
-	case messageTypeMeta:
-		return logRecordMeta, nil
 	case messageTypeDiffStat:
-		return logRecordGitSummary, nil
+		return taskslog.KindGitSummary, nil
 	case messageTypeExit:
-		return logRecordExit, nil
+		return taskslog.KindExit, nil
 	case messageTypeStrippedEnv:
-		return logRecordStrippedEnv, nil
+		return taskslog.KindStrippedEnv, nil
 	case messageTypeSession:
-		return logRecordSession, nil
+		return taskslog.KindSession, nil
 	case messageTypeModelInfo:
-		return logRecordModelInfo, nil
+		return taskslog.KindModelInfo, nil
 	case messageTypePR:
-		return logRecordPR, nil
+		return taskslog.KindPR, nil
 	case messageTypeResult:
-		return logRecordResult, nil
+		return taskslog.KindResult, nil
 	case messageTypeTurnCommitSnapshot:
-		return logRecordTurnCommitSnapshot, nil
+		return taskslog.KindTurnCommitSnapshot, nil
 	case messageTypePendingUserAction:
-		return logRecordPendingUserAction, nil
+		return taskslog.KindPendingUserAction, nil
 	case messageTypeProvisioningLog:
-		return logRecordProvisioningLog, nil
+		return taskslog.KindProvisioningLog, nil
 	case messageTypeText:
-		return logRecordText, nil
+		return taskslog.KindText, nil
 	case messageTypeUserInput:
-		return logRecordUserInput, nil
+		return taskslog.KindUserInput, nil
 	case messageTypeRelayGeneration:
-		return logRecordRelayGeneration, nil
+		return taskslog.KindRelayGeneration, nil
 	case messageTypeSystem:
 		if m, ok := m.(*SystemMessage); ok {
 			switch m.Subtype {
 			case messageSubtypeContextCleared:
-				return logRecordContextCleared, nil
+				return taskslog.KindContextCleared, nil
 			case SystemSubtypeInputDeliveryFailed:
-				return logRecordInputDeliveryFailed, nil
+				return taskslog.KindInputDeliveryFailed, nil
 			case SystemSubtypeInputDeliveryStarted, SystemSubtypeInputDeliveryCompleted:
-				return logRecordInputDelivery, nil
+				return taskslog.KindInputDelivery, nil
 			}
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/mcp/mcptest"
 )
@@ -407,13 +408,14 @@ func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan a
 // liveTaskLog retains the same ordered physical history reconnect uses in
 // production, including client commands absent from the relay output file.
 func liveTaskLog(t *testing.T) (agent.LogSink, string) {
-	store := taskslog.NewStore(slog.Default(), t.TempDir())
-	log, path, err := store.Open("live.jsonl", &agent.MetaMessage{
+	store := taskslog.NewStore(t.TempDir())
+	writer, path, err := store.Open("live.jsonl", &v3.MetaMessage{
 		MessageType: "caic_meta", Version: 3, Prompt: "live relay", Harness: "antigravity",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	log := agent.NewRecordedLog(writer)
 	t.Cleanup(func() {
 		if err := log.Close(); err != nil {
 			t.Error(err)

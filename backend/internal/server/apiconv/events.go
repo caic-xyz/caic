@@ -33,13 +33,14 @@ const maxPendingToolTimings = 1024
 // The harness is fixed at construction; the per-stream state
 // (pending, window) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
-	taskID     string
-	harness    harness.Name
-	cost       task.CostTracker
-	pricer     usage.ModelPricer
-	pending    map[agent.ToolKey]time.Time
-	window     task.ResultTextWindow
-	skillReads agent.SkillReadTracker // Confirms inferred skill loads.
+	taskID           string
+	harness          harness.Name
+	cost             task.CostTracker
+	pricer           usage.ModelPricer
+	pending          map[agent.ToolKey]time.Time
+	window           task.ResultTextWindow
+	skillReads       agent.SkillReadTracker // Confirms inferred skill loads.
+	presentedSession string                 // Root session start already projected by native init or restoration.
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
@@ -76,8 +77,11 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 	}
 	countable, confirmed := tt.skillReads.Confirm(msg)
 	// Session controls remain restoration events for runtime folds. History
-	// presents their session fields using the established init event shape.
+	// presents a missing native start using the established init event shape.
 	if m, ok := msg.(*agent.MetaSessionMessage); ok {
+		if !m.Source.IsChild() && m.SessionID != "" && m.SessionID == tt.presentedSession {
+			return nil
+		}
 		msg = &agent.InitMessage{
 			MessageProvenance: m.MessageProvenance,
 			SessionID:         m.SessionID, ReportedModel: m.ReportedModel,
@@ -86,7 +90,12 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		}
 	}
 	switch m := msg.(type) {
+	case *agent.SessionMetadataMessage:
+		return nil
 	case *agent.InitMessage:
+		if !m.Source.IsChild() {
+			tt.presentedSession = m.SessionID
+		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindInit,
 			Ts:   ts,
@@ -101,6 +110,9 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			},
 		}}
 	case *agent.SystemMessage:
+		if !m.Source.IsChild() && m.Subtype == "context_cleared" {
+			tt.presentedSession = ""
+		}
 		if agent.IsInputDeliveryControl(m) {
 			return nil
 		}
@@ -342,6 +354,9 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			DiffStat: &v1.EventDiffStat{DiffStat: DiffStat(m.DiffStat)},
 		}}
 	case *agent.ExitMessage:
+		if !m.Source.IsChild() {
+			tt.presentedSession = ""
+		}
 		if m.ExitCode == 0 {
 			return nil
 		}

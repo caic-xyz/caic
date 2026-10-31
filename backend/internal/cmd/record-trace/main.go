@@ -17,6 +17,10 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"encoding/json"
 	"errors"
 	"flag"
@@ -44,7 +48,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 const image = "ghcr.io/caic-xyz/md-user:latest"
@@ -641,7 +644,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
-	md, err := taskslog.ExportDiscussion(outputPath, agent.Backends{b.Harness(): b})
+	md, err := taskhistory.ExportDiscussion(outputPath, agent.Backends{b.Harness(): b})
 	if err != nil {
 		return fmt.Errorf("export discussion: %w", err)
 	}
@@ -690,7 +693,7 @@ func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative
 
 // buildGoldenContent prepends a caic_meta header and appends a caic_result footer.
 func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string) (string, error) {
-	meta := agent.MetaMessage{
+	meta := v3.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     agent.LogVersionV3,
 		Prompt:      promptText,
@@ -698,7 +701,7 @@ func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string)
 		Repos:       []v3.MetaRepo{},
 		StartedAt:   time.Now().UTC(),
 	}
-	metaJSON, err := agent.MarshalLogMessage(&meta)
+	metaJSON, err := taskslog.EncodeHeader(&meta)
 	if err != nil {
 		return "", fmt.Errorf("marshal meta: %w", err)
 	}

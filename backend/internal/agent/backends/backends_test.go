@@ -19,17 +19,33 @@ func TestDefault(t *testing.T) {
 	if _, ok := b[harness.Antigravity].(*antigravity.Backend); !ok {
 		t.Fatalf("Antigravity backend = %T, want native implementation", b[harness.Antigravity])
 	}
-	first, err := b.ResolveWire(harness.Antigravity)
+	first, err := b.ResolveParser(harness.Antigravity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := b.ResolveWire(harness.Antigravity)
+	second, err := b.ResolveParser(harness.Antigravity)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first == second {
 		t.Fatal("Antigravity tasks share a wire")
 	}
+	t.Run("IndependentMetadataParsers", func(t *testing.T) {
+		t.Parallel()
+		for h := range b {
+			first, err := b.ResolveMetadataParser(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := b.ResolveMetadataParser(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first == second {
+				t.Fatalf("%s shares metadata parser state", h)
+			}
+		}
+	})
 
 	t.Run("DirectionalParsing", func(t *testing.T) {
 		t.Parallel()

@@ -24,6 +24,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 	"github.com/klauspost/compress/zstd"
 
@@ -627,6 +629,30 @@ func TestTask(t *testing.T) {
 			t.Fatalf("ContextWindowLimit = %d, want 180000", got)
 		}
 	})
+	t.Run("PartialMetadataNotifiesWithoutStartingTurn", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
+		tk.SetState(task.StateWaiting)
+		tk.addParsedMessage(agent.TimedMessage{Message: &agent.ExitMessage{ExitCode: 1, Error: "failed"}})
+		before := tk.Snapshot()
+		message := &agent.SessionMetadataMessage{ReportedModel: "native", ReportedEffort: "high", AgentVersion: "1"}
+		if changed := tk.addParsedMessage(agent.TimedMessage{Message: message}); !changed {
+			t.Fatal("metadata change did not notify task observers")
+		}
+		after := tk.Snapshot()
+		if after.SessionMetadata != message.SessionMetadata || after.State != before.State || after.TurnStartedAt != before.TurnStartedAt || after.NumTurns != before.NumTurns || tk.LastExitError() == "" {
+			t.Fatalf("settings changed activity: before=%+v after=%+v exit=%q", before, after, tk.LastExitError())
+		}
+		if changed := tk.addParsedMessage(agent.TimedMessage{Message: message}); changed {
+			t.Fatal("unchanged metadata notified observers")
+		}
+		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
+		replayed.SetState(task.StateWaiting)
+		replayed.SeedTimeline([]agent.Message{&agent.ExitMessage{ExitCode: 1, Error: "failed"}, message})
+		if got := replayed.Snapshot(); got.SessionMetadata != after.SessionMetadata || got.NumTurns != after.NumTurns || replayed.LastExitError() != tk.LastExitError() {
+			t.Fatalf("replay settings/activity = %+v, exit=%q", got, replayed.LastExitError())
+		}
+	})
 	t.Run("SessionMetadataLiveAndPersistedReplay", func(t *testing.T) {
 		t.Parallel()
 		child := agent.MessageProvenance{Source: agent.MessageSource{DelegationToolUseID: "child"}}
@@ -665,7 +691,7 @@ func TestTask(t *testing.T) {
 			t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
-				store := taskslog.NewStore(testLogger(), dir)
+				store := taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 				id := ksid.NewID()
 				name := id.String() + "-metadata.jsonl"
 				if compressed {
@@ -705,7 +731,7 @@ func TestTask(t *testing.T) {
 						t.Fatalf("step %d live metadata = %+v, want %+v", i, got, step.want)
 					}
 					for _, cache := range []string{"scan", "cache"} {
-						var loaded []*taskslog.LoadedTask
+						var loaded []*taskhistory.LoadedTask
 						if compressed {
 							loaded, err = store.LoadSettled()
 						} else {
@@ -718,7 +744,7 @@ func TestTask(t *testing.T) {
 						if lt.SessionMetadata != step.want {
 							t.Fatalf("step %d %s inventory metadata = %+v, want %+v", i, cache, lt.SessionMetadata, step.want)
 						}
-						if err := lt.LoadMessagesWithResolver(backends.Default("", nil)); err != nil {
+						if err := lt.LoadMessages(); err != nil {
 							t.Fatal(err)
 						}
 						replayed := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
@@ -4170,7 +4196,7 @@ func TestTask(t *testing.T) {
 				ForgeRepo:   "widget",
 				ForgePR:     42,
 			}
-			log, _, err := (taskslog.NewStore(testLogger(), dir)).Reopen(tk.LogFilename(), tk.LogHeader())
+			log, _, err := (taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))).Reopen(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4634,7 +4660,7 @@ func TestPricedCost(t *testing.T) {
 			if !total.Equal(want) || last.CacheCreationInputTokens != 7 {
 				t.Fatalf("replay %v: total=%+v, last=%+v", replay, total, last)
 			}
-			store := taskslog.NewStore(logtest.Logger(t), t.TempDir())
+			store := taskhistory.NewStore(logtest.Logger(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
@@ -5074,7 +5100,7 @@ func TestGitSummaryLogRoundTrip(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.Repos = []repo.Mount{{Name: "repo", Branch: "main", ContainerPath: "/repo"}}
 			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
-			store := taskslog.NewStore(logtest.Logger(t), t.TempDir())
+			store := taskhistory.NewStore(logtest.Logger(t), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			log, err := openTaskLog(store, tk)
 			if err != nil {
 				t.Fatal(err)
@@ -5115,7 +5141,7 @@ func TestGitSummaryLogRoundTrip(t *testing.T) {
 			if err != nil || len(loaded) != 1 {
 				t.Fatalf("load = %+v, %v", loaded, err)
 			}
-			loaded[0].SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
+
 			if err := loaded[0].LoadMessages(); err != nil {
 				t.Fatal(err)
 			}

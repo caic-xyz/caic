@@ -24,6 +24,10 @@ import (
 	"sync"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
@@ -77,7 +81,7 @@ type Config struct {
 	Log       *slog.Logger
 	// LogStore is the task-log directory the Manager appends task logs to. It
 	// must be non-nil.
-	LogStore *taskslog.Store
+	LogStore *taskhistory.Store
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes             *runtime.Router
 	Backends             agent.Backends
@@ -137,7 +141,7 @@ type Manager struct {
 	log                  *slog.Logger
 	serverCtx            context.Context // lifetime of the Manager; for goroutines that outlive requests
 	cancelServerCtx      context.CancelFunc
-	logStore             *taskslog.Store
+	logStore             *taskhistory.Store
 	harnessEnv           map[string][]string
 	runtimeMetadata      runtime.Metadata
 	runtimeStartTimeout  time.Duration
@@ -162,7 +166,7 @@ type Manager struct {
 
 	// Serializes pending-input persistence and registration.
 	inputMu          sync.Mutex
-	unrestoredInputs map[ksid.ID]taskslog.QueuedPrompt
+	unrestoredInputs map[ksid.ID]queuedPrompt
 
 	background sync.WaitGroup
 
@@ -239,13 +243,27 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		preparationLocks:     make(map[string]*sync.Mutex),
 		changed:              make(chan struct{}),
 	}
-	inputs, err := m.logStore.LoadInputQueue()
+	inputs, err := m.logStore.Journal.LoadInputQueue()
 	if err != nil {
 		cancelServerCtx()
 		return nil, err
 	}
-	m.unrestoredInputs = make(map[ksid.ID]taskslog.QueuedPrompt, len(inputs))
-	for _, q := range inputs {
+	m.unrestoredInputs = make(map[ksid.ID]queuedPrompt, len(inputs))
+	for _, entry := range inputs {
+		id, err := ksid.Parse(entry.ID)
+		if err != nil {
+			cancelServerCtx()
+			return nil, fmt.Errorf("queued prompt id: %w", err)
+		}
+		taskID, err := ksid.Parse(entry.TaskID)
+		if err != nil {
+			cancelServerCtx()
+			return nil, fmt.Errorf("queued task id: %w", err)
+		}
+		q := queuedPrompt{ID: id, TaskID: taskID, Prompt: agent.Prompt{Text: entry.Text}}
+		for _, img := range entry.Images {
+			q.Prompt.Images = append(q.Prompt.Images, v3.ImageData{MediaType: img.MediaType, Data: img.Data})
+		}
 		if _, exists := m.unrestoredInputs[q.TaskID]; exists {
 			cancelServerCtx()
 			return nil, fmt.Errorf("task %s has multiple pending prompts", q.TaskID)
@@ -299,7 +317,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 }
 
 // NewEntry creates an unregistered entry with its immutable lifecycle.
-func (m *Manager) NewEntry(t *taskrun.Task, lt *taskslog.LoadedTask) *Entry {
+func (m *Manager) NewEntry(t *taskrun.Task, lt *taskhistory.LoadedTask) *Entry {
 	var taskMCP mcp.Registry
 	if t.CaicMCP {
 		taskMCP = m.mcpExecutor.Wrap(m.taskMCPScoper.ForTask(t.ID))
@@ -632,7 +650,7 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 
 // ImportInstances registers preexisting runtime instances as tasks. Failures
 // return an ImportError counting affected instances alongside successful entries.
-func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Instance, allLogs []*taskslog.LoadedTask) ([]*Entry, error) {
+func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Instance, allLogs []*taskhistory.LoadedTask) ([]*Entry, error) {
 	defer m.completeRuntimeImport(ctx)
 	if instances == nil {
 		return nil, nil
@@ -856,7 +874,7 @@ func lastResultText(t *taskrun.Task) string {
 // without any per-repo cap. Plain logs are the working set: live tasks, terminal
 // logs not yet compressed, and abandoned logs. The caller scans with the
 // retention cutoff, so only recent logs arrive here.
-func (m *Manager) LoadUnsettledTasks(plain []*taskslog.LoadedTask) error {
+func (m *Manager) LoadUnsettledTasks(plain []*taskhistory.LoadedTask) error {
 	loaded, err := m.insertLoadedTasks(plain)
 	if err != nil {
 		return err
@@ -870,7 +888,7 @@ func (m *Manager) LoadUnsettledTasks(plain []*taskslog.LoadedTask) error {
 
 // LoadPurgedTasks registers settled task logs selected by the taskslog settled
 // scan, which already caps entries per repo before a full decode.
-func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
+func (m *Manager) LoadPurgedTasks(purged []*taskhistory.LoadedTask) error {
 	if len(purged) == 0 {
 		m.log.Info("no purged tasks to load")
 		return nil
@@ -891,7 +909,7 @@ func (m *Manager) LoadPurgedTasks(purged []*taskslog.LoadedTask) error {
 // HistorySource opens a header-only raw-log reader for stopped or terminal
 // history. It is the cold-history path: live readers should use the Task
 // timeline rather than repeatedly reparsing its growing log.
-func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
+func (m *Manager) HistorySource(entry *Entry) (*taskhistory.LoadedTask, error) {
 	if entry == nil {
 		return nil, errors.New("task history entry is nil")
 	}
@@ -899,11 +917,10 @@ func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	if path == "" {
 		return nil, taskslog.ErrNoLog
 	}
-	loaded, err := taskslog.LoadHistorySource(path)
+	loaded, err := m.logStore.LoadSource(path)
 	if err != nil {
 		return nil, fmt.Errorf("load task history source: %w", err)
 	}
-	loaded.SetWireResolver(m)
 	entry.SetLoadedTask(loaded)
 	return loaded, nil
 }
@@ -962,7 +979,7 @@ func (m *Manager) BranchAssociated(repoName, branch string) bool {
 // updatePendingInputsLocked persists changes before publishing them on entries.
 // The caller holds inputMu; disk I/O never holds an Entry's mu.
 func (m *Manager) updatePendingInputsLocked(updates map[*Entry]*PendingInput) error {
-	entries := make([]taskslog.QueuedPrompt, 0, len(m.unrestoredInputs))
+	entries := make([]queuedPrompt, 0, len(m.unrestoredInputs))
 	for _, q := range m.unrestoredInputs {
 		entries = append(entries, q)
 	}
@@ -972,10 +989,18 @@ func (m *Manager) updatePendingInputsLocked(updates map[*Entry]*PendingInput) er
 			q = e.PendingInput()
 		}
 		if q != nil {
-			entries = append(entries, taskslog.QueuedPrompt{ID: q.ID, TaskID: id, Prompt: q.Prompt})
+			entries = append(entries, queuedPrompt{ID: q.ID, TaskID: id, Prompt: q.Prompt})
 		}
 	}
-	if err := m.logStore.SaveInputQueue(entries); err != nil {
+	encoded := make([]inputqueue.Entry, 0, len(entries))
+	for _, q := range entries {
+		entry := inputqueue.Entry{ID: q.ID.String(), TaskID: q.TaskID.String(), Text: q.Prompt.Text}
+		for _, img := range q.Prompt.Images {
+			entry.Images = append(entry.Images, inputqueue.Image{MediaType: img.MediaType, Data: img.Data})
+		}
+		encoded = append(encoded, entry)
+	}
+	if err := m.logStore.Journal.SaveInputQueue(encoded); err != nil {
 		return err
 	}
 	for e, q := range updates {
@@ -999,7 +1024,7 @@ func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, ba
 // whose id or repo/branch already exists. It is shared by LoadUnsettledTasks
 // (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
 // scan).
-func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
+func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) {
 	m.inputMu.Lock()
 	defer m.inputMu.Unlock()
 	m.mu.Lock()
@@ -1033,7 +1058,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 				continue
 			}
 		}
-		lt.SetWireResolver(m)
+
 		rt := m.Runtimes.Runtimes[0].Name()
 		if lt.RuntimeName != "" {
 			rt = lt.RuntimeName
@@ -1888,7 +1913,7 @@ func (m *Manager) resolveCheckout(t *taskrun.Task) *repo.Checkout {
 	return nil
 }
 
-func applyLoadedSessionMetadata(t *taskrun.Task, lt *taskslog.LoadedTask) {
+func applyLoadedSessionMetadata(t *taskrun.Task, lt *taskhistory.LoadedTask) {
 	if lt == nil {
 		return
 	}
@@ -1900,7 +1925,7 @@ func applyLoadedSessionMetadata(t *taskrun.Task, lt *taskslog.LoadedTask) {
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.
-func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]ksid.ID, allLogs []*taskslog.LoadedTask) (*Entry, error) {
+func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]ksid.ID, allLogs []*taskhistory.LoadedTask) (*Entry, error) {
 	ctx, importTask := trace.NewTask(ctx, "import-instance")
 	defer importTask.End()
 	relPath := ""
@@ -1936,7 +1961,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	// Find the log file for this task.
-	var matchingLogs []*taskslog.LoadedTask
+	var matchingLogs []*taskhistory.LoadedTask
 	for _, log := range allLogs {
 		if log != nil && log.TaskID == taskID.String() {
 			matchingLogs = append(matchingLogs, log)
@@ -1987,7 +2012,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if !ok || backend == nil {
 		return nil, fmt.Errorf("unknown harness %q for imported task %s", lt.Harness, taskID)
 	}
-	lt.SetWireResolver(m)
+
 	// Persisted user shutdown intent does not need a readable relay snapshot.
 	// Skip probes so unavailable output cannot prevent completing that intent.
 	shutdownIntent := lt.State == task.StateStopping || lt.State == task.StatePurging || lt.State == task.StateStopped || lt.State == task.StatePurged
@@ -2136,7 +2161,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// for reconciliation, then decode the final history once in provider order.
 	var encoded []byte
 	if len(relayTimeline.RelayRecords) > 0 {
-		records, generation, err := taskslog.LoadRelayBoundaries(importLogPath)
+		records, generation, err := m.logStore.LoadRelayBoundaries(importLogPath)
 		if err != nil {
 			return nil, fmt.Errorf("load imported relay boundaries %s: %w", taskID, err)
 		}
@@ -2154,13 +2179,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if err := errors.Join(log.AppendRecord(agent.PhysicalRecord{Encoded: encoded}), log.Close()); err != nil {
 			return nil, fmt.Errorf("persist imported relay snapshot %s: %w", taskID, err)
 		}
-		lt, err = taskslog.LoadHistorySource(path)
+		lt, err = m.logStore.LoadSource(path)
 		if err != nil {
 			return nil, fmt.Errorf("open reconciled task history %s: %w", taskID, err)
 		}
-		lt.SetWireResolver(m)
 	}
-	if err := lt.LoadMessagesWithResolver(m); err != nil {
+	if err := lt.LoadMessages(); err != nil {
 		return nil, fmt.Errorf("load reconciled task history %s: %w", taskID, err)
 	}
 	t.SeedTimelineParts(lt.Timeline, nil)
@@ -2349,7 +2373,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 // canRecoverImportedTask requires trusted resumable history and excludes
 // intentional stop/purge records and incomplete startup failures.
-func canRecoverImportedTask(t *taskrun.Task, lt *taskslog.LoadedTask) bool {
+func canRecoverImportedTask(t *taskrun.Task, lt *taskhistory.LoadedTask) bool {
 	if t.GetSessionID() == "" || !t.HasAcceptedInputEvidence() {
 		return false
 	}
@@ -2432,10 +2456,10 @@ func (m *Manager) pruneInputQueueLocked(ctx context.Context) {
 			removed[e] = nil
 		}
 	}
-	var missing map[ksid.ID]taskslog.QueuedPrompt
+	var missing map[ksid.ID]queuedPrompt
 	if m.TaskListComplete() {
 		missing = m.unrestoredInputs
-		m.unrestoredInputs = make(map[ksid.ID]taskslog.QueuedPrompt)
+		m.unrestoredInputs = make(map[ksid.ID]queuedPrompt)
 	}
 	if len(removed) == 0 && len(missing) == 0 {
 		return
@@ -2602,4 +2626,11 @@ func relayFingerprintOverlap(records, snapshot []agent.RelayRecordBoundary) (int
 		return 0, errors.New("unmarked relay history has ambiguous repeated physical overlap")
 	}
 	return matchEnd, nil
+}
+
+// queuedPrompt is a validated coordinator-owned pending prompt.
+type queuedPrompt struct {
+	ID     ksid.ID
+	TaskID ksid.ID
+	Prompt agent.Prompt
 }

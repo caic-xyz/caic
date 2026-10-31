@@ -29,7 +29,6 @@ import (
 //   - ToolOutputDeltaMessage — tool_call_update (in_progress with output)
 //   - TodoMessage          — plan update
 //   - UserInputMessage     — user_message_chunk
-//   - UsageMessage         — usage_update
 //   - SystemMessage        — current_mode_update
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
@@ -111,19 +110,6 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		msgs, err := parsePlanUpdate(update)
 		return msgs, nil, err
 
-	case opencode.UpdateUsageUpdate:
-		// ACP reports cumulative session cost, including compaction, separately
-		// from the prompt result. Retain the snapshot for the task fold.
-		var u opencode.UsageUpdateUpdate
-		if err := json.Unmarshal(update, &u); err != nil {
-			return nil, nil, fmt.Errorf("usage_update: %w", err)
-		}
-		usage := &agent.UsageMessage{ContextWindow: u.Size}
-		if u.Cost.Currency == "USD" {
-			usage.CumulativeCostUSD = &u.Cost.Amount
-		}
-		return []agent.Message{usage}, nil, nil
-
 	case opencode.UpdateCurrentModeUpdate:
 		var u opencode.CurrentModeUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
@@ -138,7 +124,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 	case opencode.UpdateSessionInfoUpdate:
 		return nil, nil, nil // cosmetic, skip
 
-	case opencode.UpdateAvailableCommandsUpdate, opencode.UpdateConfigOptionUpdate:
+	case opencode.UpdateAvailableCommandsUpdate:
 		return nil, nil, nil // internal, skip
 
 	default:

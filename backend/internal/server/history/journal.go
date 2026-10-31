@@ -68,6 +68,11 @@ func costFactFor(message agent.TimedMessage, position Position) *data.Fact {
 		fact = &data.Fact{Kind: data.KindExit}
 	case *agent.InitMessage:
 		fact = &data.Fact{Kind: data.KindInit, Model: m.ReportedModel}
+	case *agent.SessionMetadataMessage:
+		if m.ReportedModel == "" {
+			return nil
+		}
+		fact = &data.Fact{Kind: data.KindMetadata, Model: m.ReportedModel}
 	case *agent.SystemMessage:
 		fact = &data.Fact{Kind: data.KindSystem, Model: m.ReportedModel, Subtype: m.Subtype}
 	case *agent.UsageMessage:
@@ -91,6 +96,8 @@ func factMessage(f *data.Fact) (agent.Message, error) {
 		return &agent.ExitMessage{MessageProvenance: p}, nil
 	case data.KindInit:
 		return &agent.InitMessage{MessageProvenance: p, ReportedModel: f.Model}, nil
+	case data.KindMetadata:
+		return &agent.SessionMetadataMessage{MessageProvenance: p, ReportedModel: f.Model}, nil
 	case data.KindSystem:
 		return &agent.SystemMessage{Source: agent.MessageSource(f.Source), Subtype: f.Subtype, ReportedModel: f.Model}, nil
 	case data.KindUsage:

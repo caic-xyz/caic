@@ -21,6 +21,7 @@ import (
 type decodedItem struct {
 	raw           json.RawMessage
 	activity      *codex.SubAgentActivityItem
+	collaboration *codex.CollabAgentToolCallItem
 	typ           codex.ItemType
 	statusChanged *codex.ThreadStatusChangedNotification
 	turnCompleted *codex.TurnCompletedNotification
@@ -65,6 +66,9 @@ func (n *nativeSubagents) parse(item *decodedItem) ([]agent.Message, error) {
 	case codex.ItemTypeSubAgentActivity:
 		return n.parseActivity(item.activity), nil
 	case codex.ItemTypeCollabAgentToolCall:
+		if item.collaboration != nil {
+			return n.observeCollabToolCall(item.collaboration), nil
+		}
 		return n.parseCollabToolCall(item.raw)
 	default:
 		return nil, nil
@@ -159,6 +163,10 @@ func (n *nativeSubagents) parseCollabToolCall(raw json.RawMessage) ([]agent.Mess
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return nil, err
 	}
+	return n.observeCollabToolCall(&item), nil
+}
+
+func (n *nativeSubagents) observeCollabToolCall(item *codex.CollabAgentToolCallItem) []agent.Message {
 	var out []agent.Message
 	// Only the app-server spawn tool proves a spawn. The remaining
 	// collaborative tools (wait, sendInput, resumeAgent, closeAgent, ...) and
@@ -192,7 +200,7 @@ func (n *nativeSubagents) parseCollabToolCall(raw json.RawMessage) ([]agent.Mess
 		n.remember(id, &s)
 		out = append(out, n.timeline.Observe(&s)...)
 	}
-	return out, nil
+	return out
 }
 
 // codexThreadIdentity is the canonical card identity for a Codex agent thread.

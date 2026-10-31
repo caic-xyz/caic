@@ -4,6 +4,7 @@
 
 - **Prompt**: Read the file nonexistent_file.txt
 - **Harness**: opencode
+- **Model**: opencode/big-pickle
 - **Started**: 2026-05-28 23:52:07
 - **State**: completed
 

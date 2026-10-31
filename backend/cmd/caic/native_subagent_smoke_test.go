@@ -460,17 +460,21 @@ func compareCards(ui, recorded []agent.NativeSubagent) string {
 // production wires, so the recorded native records travel through the same
 // adapter a live session uses.
 func smokeReplayWire(h harness.Name) agent.WireFormat {
+	return smokeReplayBackend(h).NewWire()
+}
+
+func smokeReplayBackend(h harness.Name) agent.Backend {
 	switch h {
 	case harness.Claude:
-		return claudecode.New().NewWire()
+		return claudecode.New()
 	case harness.Codex:
-		return codex.New("", nil).NewWire()
+		return codex.New("", nil)
 	case harness.OpenCode:
-		return opencode.New("", nil).NewWire()
+		return opencode.New("", nil)
 	case harness.Pi:
-		return pi.New("", nil).NewWire()
+		return pi.New("", nil)
 	default:
-		panic("no replay wire for harness " + string(h))
+		panic("no replay backend for harness " + string(h))
 	}
 }
 

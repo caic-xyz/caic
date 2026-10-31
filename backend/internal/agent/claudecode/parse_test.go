@@ -14,7 +14,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
 )
 
 // parseMessage decodes a single Claude Code NDJSON line without widget
@@ -110,13 +109,13 @@ func TestParseMessage(t *testing.T) {
 			`{"type":"result","usage":{}}`,
 		}
 		wire := newWireFormat()
-		var inventory metadata.Parser
+		var inventory metadataParser
 		for _, parser := range []struct {
 			name  string
 			parse func([]byte) ([]agent.Message, error)
 		}{
 			{"live", wire.ParseOutput},
-			{"inventory", inventory.Parse},
+			{"inventory", inventory.ParseOutput},
 		} {
 			t.Run(parser.name, func(t *testing.T) {
 				t.Parallel()

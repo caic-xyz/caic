@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
@@ -39,7 +41,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 	name := id.String() + "-org-repo-caic-0.jsonl"
 	path := filepath.Join(dir, name)
 	writeProductionAdoptionFixture(b, path)
-	store := taskslog.NewStore(slog.New(slog.DiscardHandler), dir)
+	store := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(dir), backends.Default("", nil))
 
 	b.ResetTimer()
 	b.StartTimer()
@@ -52,13 +54,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			b.Fatalf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 		}
 		lt := logs[0]
-		lt.SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
 
-		if lt.SessionID == "" || lt.AgentVersion == "" {
-			if err := lt.LoadSessionMetadata(); err != nil {
-				b.Fatal(err)
-			}
-		}
 		if err := lt.LoadMessages(); err != nil {
 			b.Fatal(err)
 		}

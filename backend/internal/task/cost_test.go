@@ -183,6 +183,19 @@ func TestCostTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("PartialMetadataPreservesRequestCoverage", func(t *testing.T) {
+		t.Parallel()
+		for _, h := range []harness.Name{harness.Codex, harness.OpenCode, harness.Pi} {
+			c := CostTracker{Harness: h, Model: "gpt-6-sol"}
+			c.Observe(&agent.UsageMessage{PerCall: true, Usage: agent.Usage{InputTokens: 100_000}}, at, prices)
+			c.Observe(&agent.SessionMetadataMessage{ReportedModel: "gpt-6-luna"}, at, prices)
+			c.Observe(&agent.SessionMetadataMessage{Source: agent.MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child-model"}, at, prices)
+			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, prices)
+			if !ok || c.Model != "gpt-6-luna" || math.Abs(cost.USD-0.2) > 1e-9 || math.Abs(c.TotalUSD-0.2) > 1e-9 {
+				t.Fatalf("%s partial metadata cost = %+v/%v, model=%s total=%v", h, cost, ok, c.Model, c.TotalUSD)
+			}
+		}
+	})
 	t.Run("CodexSessionBoundaryResetsRequestCoverage", func(t *testing.T) {
 		t.Parallel()
 		for _, boundary := range []agent.Message{agent.ContextCleared(), &agent.ExitMessage{}, &agent.InitMessage{SessionID: "next"}} {

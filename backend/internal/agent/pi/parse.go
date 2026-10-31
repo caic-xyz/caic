@@ -117,11 +117,6 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		// Lifecycle events with no semantic content; skip.
 		return nil, decodedRecord{}, nil
 
-	case pi.EventResponse:
-		// Command responses (e.g. set_model ack); skip unless error.
-		msgs, err := parseResponse(line)
-		return msgs, decodedRecord{}, err
-
 	case pi.EventCompactionStart:
 		var ev pi.CompactionStartEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
@@ -134,8 +129,8 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		}}, decodedRecord{}, nil
 
 	case pi.EventCompactionEnd:
-		var ev pi.CompactionEndEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
+		ev, err := decodeCompactionEnd(line)
+		if err != nil {
 			return nil, decodedRecord{}, fmt.Errorf("unmarshal compaction_end: %w", err)
 		}
 		// A retry reschedules summarization, so the retried attempt owns the
@@ -343,33 +338,6 @@ func parseToolExecEnd(line []byte) ([]agent.Message, *pi.ToolExecEndEvent, error
 		msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: ev.ToolCallID, Delta: resultText})
 	}
 	return append(msgs, res), &ev, nil
-}
-
-// parseResponse handles response envelopes. A failed prompt is terminal since
-// Pi will never emit agent events; other failures are passed through as raw.
-func parseResponse(line []byte) ([]agent.Message, error) {
-	var resp pi.Response
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-	if !resp.Success && resp.Error != "" {
-		if resp.Command == pi.CmdPrompt {
-			return []agent.Message{&agent.ResultMessage{
-				MessageType: "result",
-				Subtype:     "error",
-				IsError:     true,
-				Result:      resp.Error,
-			}}, nil
-		}
-		return []agent.Message{&agent.RawMessage{
-			MessageType: "response:" + string(resp.Command),
-			Raw:         append([]byte(nil), line...),
-		}}, nil
-	}
-	return []agent.Message{&agent.RawMessage{
-		MessageType: "response:" + string(resp.Command),
-		Raw:         append([]byte(nil), line...),
-	}}, nil
 }
 
 func newToolUseMessage(id, rawName, name string, input json.RawMessage) *agent.ToolUseMessage {

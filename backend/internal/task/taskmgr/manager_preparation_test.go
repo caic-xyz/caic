@@ -177,7 +177,7 @@ func runPreparationTests(t *testing.T) {
 		if got := preparationGit(t, b.Dir, "for-each-ref", "--format=%(refname)", "refs/heads/caic-*"); got != "" {
 			t.Errorf("owned branches survived: %s", got)
 		}
-		files, err := os.ReadDir(m.logStore.LogDir)
+		files, err := os.ReadDir(m.logStore.Journal.LogDir)
 		if err != nil || len(files) != 0 {
 			t.Errorf("failed log left files: %v %v", files, err)
 		}
@@ -360,7 +360,7 @@ func runPreparationTests(t *testing.T) {
 			extra := e.Task().ReposSnapshot()[1]
 			c, _ := m.Checkouts.Checkout(extra.Name)
 			refs := preparationGit(t, c.Dir, "for-each-ref", "--format=%(refname)", "refs/heads/caic-*")
-			_, err := os.Stat(filepath.Join(m.logStore.LogDir, e.Task().LogFilename()))
+			_, err := os.Stat(filepath.Join(m.logStore.Journal.LogDir, e.Task().LogFilename()))
 			if published {
 				if refs == "" || err != nil {
 					t.Fatalf("published resources missing: %q %v", refs, err)

@@ -1,6 +1,6 @@
 // Converts persisted mount configuration into runtime values.
 
-package taskslog
+package history
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"

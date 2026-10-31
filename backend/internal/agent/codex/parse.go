@@ -48,9 +48,11 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 	switch msg.Method {
 	case codex.MethodThreadStarted:
 		var p codex.ThreadStartedNotification
-		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, decodedItem{}, fmt.Errorf("thread/started params: %w", err)
+		thread, err := threadMetadata(msg.Params, "thread")
+		if err != nil {
+			return nil, decodedItem{}, err
 		}
+		p.Thread = thread
 		return []agent.Message{&agent.InitMessage{
 			SessionID:      p.Thread.ID,
 			Cwd:            p.Thread.CWD,
@@ -64,8 +66,8 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 
 	case codex.MethodTurnCompleted:
 		var p codex.TurnCompletedNotification
-		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, decodedItem{}, fmt.Errorf("turn/completed params: %w", err)
+		if err := turnMetadata(msg.Params, &p); err != nil {
+			return nil, decodedItem{}, err
 		}
 		durationMs := int64(0)
 		if p.Turn.Duration != nil {

@@ -70,6 +70,29 @@ func testSourcePricingInputs(t *testing.T) {
 			t.Fatalf("restoration changed native request model or pricing: %+v", costs)
 		}
 	})
+	t.Run("partial native metadata preserves request accounting", func(t *testing.T) {
+		t.Parallel()
+		source, _ := costFixture(t, harness.OpenCode,
+			[]agent.Message{&agent.InitMessage{SessionID: "root", ReportedModel: "first"}},
+			[]agent.Message{&agent.UsageMessage{PerCall: true, Usage: agent.Usage{InputTokens: 100_000}}},
+			[]agent.Message{&agent.SessionMetadataMessage{ReportedModel: "second"}},
+			[]agent.Message{&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}},
+		)
+		snapshot, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var costs []TurnEstimate
+		for cost, err := range source.TurnCosts(t.Context(), snapshot, snapshot.Through, journalPricer{}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			costs = append(costs, cost)
+		}
+		if len(costs) != 1 || costs[0].Model != "second" || math.Abs(costs[0].Cost.USD-0.2) > 1e-9 || math.Abs(costs[0].TotalUSD-0.2) > 1e-9 {
+			t.Fatalf("partial metadata cost projection = %+v", costs)
+		}
+	})
 	t.Run("derived model retains per-request context pricing", func(t *testing.T) {
 		t.Parallel()
 		source, _ := costFixture(t, harness.Codex,

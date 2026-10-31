@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -49,7 +51,7 @@ type Entry struct {
 
 	mu            sync.Mutex
 	pendingInput  *PendingInput
-	loadedTask    *taskslog.LoadedTask
+	loadedTask    *taskhistory.LoadedTask
 	monitorBranch string
 	cleanupOnce   sync.Once
 }
@@ -76,14 +78,14 @@ func (e *Entry) PendingInputImage(id ksid.ID, index int) (v3.ImageData, bool) {
 
 // LoadedTask returns the on-disk log handle, or nil before a task log has been
 // validated for stored-history reads.
-func (e *Entry) LoadedTask() *taskslog.LoadedTask {
+func (e *Entry) LoadedTask() *taskhistory.LoadedTask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.loadedTask
 }
 
 // SetLoadedTask records a freshly validated on-disk log handle for stored-history reads.
-func (e *Entry) SetLoadedTask(lt *taskslog.LoadedTask) {
+func (e *Entry) SetLoadedTask(lt *taskhistory.LoadedTask) {
 	e.mu.Lock()
 	e.loadedTask = lt
 	if lt != nil {

@@ -24,6 +24,9 @@ import (
 	"testing"
 	"time"
 
+	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/ksid"
@@ -99,7 +102,7 @@ type testRouter struct {
 	*Router
 
 	taskMgr               *taskmgr.Manager
-	logStore              *taskslog.Store
+	logStore              *taskhistory.Store
 	checkouts             *repo.Registry
 	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
@@ -140,7 +143,7 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 		cfg.Rollup = task.DiscardRollup{}
 	}
 	if cfg.LogStore == nil {
-		cfg.LogStore = taskslog.NewStore(testLogger(), t.TempDir())
+		cfg.LogStore = taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
 	}
 	if cfg.RuntimeStartTimeout == 0 {
 		cfg.RuntimeStartTimeout = time.Hour
@@ -180,7 +183,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
-	logStore := taskslog.NewStore(testLogger(), t.TempDir())
+	logStore := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
 	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry, LogStore: logStore})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
@@ -512,7 +515,7 @@ func testEntries(s *testRouter) []*taskmgr.Entry {
 // settleLogs compresses the terminal plain logs in logDir, moving them to the
 // settled (compressed) form that the per-repo cap applies to.
 func settleLogs(t *testing.T, logDir string) {
-	if err := taskslog.NewStore(testLogger(), logDir).SettleTerminal(nil); err != nil {
+	if err := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)).SettleTerminal(nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -520,7 +523,7 @@ func settleLogs(t *testing.T, logDir string) {
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
 func loadPurgedTasksForTest(s *testRouter, logDir string) error {
-	store := taskslog.NewStore(testLogger(), logDir)
+	store := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil))
 	plain, err := store.LoadUnsettled()
 	if err != nil {
 		return err
@@ -549,7 +552,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr := newTestTaskManager(t, taskmgr.Config{
 		ServerCtx:  t.Context(),
-		LogStore:   taskslog.NewStore(testLogger(), logDir),
+		LogStore:   taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)),
 		Runtimes:   runtimeRouter,
 		Backends:   backends,
 		HarnessEnv: harnessEnv,

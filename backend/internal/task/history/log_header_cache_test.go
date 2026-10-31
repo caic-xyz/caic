@@ -1,6 +1,6 @@
 // Tests versioned header-cache snapshots, exact disk shapes, and corrupt-cache recovery.
 
-package taskslog
+package history
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
@@ -124,7 +126,7 @@ func TestHeaderCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, source := range []string{"rebuild", "cache"} {
-			loaded, err := loadLogHeader(testLogger(), path, true)
+			loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,7 +148,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, version := range []int{6, 7, 8, 9} {
+		for _, version := range []int{6, 7, 8, 9, 10} {
 			body := fmt.Sprintf(`{"version":%d,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, version, info.ModTime().UnixNano(), pinnedHeaderTask)
 			if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -167,7 +169,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"version":10,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
+		body := fmt.Sprintf(`{"version":11,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
 		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +249,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":10,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":11,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -276,14 +278,14 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":10,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":11,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					if _, ok := readHeaderCache(path); ok {
 						t.Fatal("cache accepted invalid header")
 					}
-					got, err := loadLogHeader(testLogger(), path, true)
+					got, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 					if err != nil || got.Prompt != "rebuild" {
 						t.Fatalf("rebuild = %+v, %v", got, err)
 					}

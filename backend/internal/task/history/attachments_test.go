@@ -1,6 +1,6 @@
 // Tests and benchmarks coordinate-based prompt image lookup in plain and compressed task logs.
 
-package taskslog
+package history
 
 import (
 	"bytes"
@@ -63,7 +63,7 @@ func TestFindAttachment(t *testing.T) {
 	})
 	t.Run("message index and parser state", func(t *testing.T) {
 		t.Parallel()
-		resolver := newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		resolver := newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			seen := false
 			return &agenttest.Wire{Output: func(raw []byte) ([]agent.Message, error) {
 				if string(raw) == `{"setup":true}` {

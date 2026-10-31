@@ -1592,6 +1592,9 @@ func TestWireFormat(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":7,"method":"thread/resume","params":{"threadId":"t1"}}`)); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := w.ParseOutput(response); err != nil {
 				t.Fatal(err)
 			}

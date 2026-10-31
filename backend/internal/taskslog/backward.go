@@ -1,4 +1,4 @@
-// Streams task history backward from a seekable decompressed-log spool.
+// Spools journal bytes under validated header authority and reads bounded records backward.
 
 package taskslog
 
@@ -10,9 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 const (
@@ -20,154 +19,46 @@ const (
 	maxBackwardRecordBytes = 32 << 20
 )
 
-// stableBackwardRecord returns record-local messages whose values do not
-// depend on earlier native records. Stateful records fall back to ordered
-// reconstruction of their turn window.
-func stableBackwardRecord(record agent.ParsedRecord, parseErr error) ([]agent.TimedMessage, bool) {
-	if parseErr != nil {
-		return nil, false
-	}
-	messages := record.Messages
-	if record.Control {
-		messages = slices.DeleteFunc(slices.Clone(messages), func(message agent.TimedMessage) bool {
-			return !isHistoryStreamControlMessage(message.Message)
-		})
-		return messages, true
-	}
-	if len(messages) == 0 {
-		return nil, false
-	}
-	for _, parsed := range messages {
-		switch parsed.Message.(type) {
-		case *agent.ResultMessage, *agent.UsageMessage, *agent.ToolOutputDeltaMessage, *agent.WidgetDeltaMessage:
-			return nil, false
-		}
-	}
-	return messages, true
+// Spool owns one seekable temporary file and its validated physical header.
+// The owner closes it after semantic backward queries finish.
+type Spool struct {
+	File      *os.File
+	Harness   string
+	Header    Frame
+	HeaderEnd int64
+	End       int64
 }
 
-// findBackwardWindow returns the start of the newest independently replayable
-// suffix ending at windowEnd. Native result records reset every harness's
-// per-turn parsing state. The newest native result belongs to the suffix; an
-// earlier result, or the first result preceded in reverse order by newer native
-// records, is the boundary immediately before it.
-func findBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, windowEnd int64) (start int64, more bool, err error) {
-	wire, err := lt.resolver.ResolveWire(spool.authority.Harness)
-	if err != nil {
-		return 0, false, err
-	}
-	parser, err := agent.NewLogRecordParser(wire)
-	if err != nil {
-		return 0, false, err
-	}
-	if _, err := parser.ParseRecord(spool.header); err != nil {
-		return 0, false, err
-	}
-
-	reader := backwardRecordReader{file: spool.file, start: spool.headerEnd, pos: windowEnd}
-	haveNewerNative := false
-	for {
-		if err := ctx.Err(); err != nil {
-			return 0, false, err
-		}
-		line, _, lineEnd, ok, err := reader.previous()
-		if err != nil {
-			return 0, false, err
-		}
-		if !ok {
-			return spool.headerEnd, false, nil
-		}
-		record, parseErr := parser.ParseRecord(line)
-		if parseErr != nil {
-			// Reverse probing intentionally does not promise ordered parser state.
-			// The bounded forward replay below reports real parse failures. Treat an
-			// unprobeable physical record as native so it cannot create a false cut.
-			haveNewerNative = true
-			continue
-		}
-		if record.Control {
-			continue
-		}
-		hasResult := false
-		for _, parsed := range record.Messages {
-			if _, ok := parsed.Message.(*agent.ResultMessage); ok {
-				hasResult = true
-				break
-			}
-		}
-		if hasResult && haveNewerNative {
-			return lineEnd, true, nil
-		}
-		haveNewerNative = true
-	}
-}
-
-func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, start, end int64) ([]agent.TimedMessage, error) {
-	wire, err := lt.resolver.ResolveWire(spool.authority.Harness)
-	if err != nil {
-		return nil, err
-	}
-	parser, err := agent.NewLogRecordParser(wire)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := parser.ParseRecord(spool.header); err != nil {
-		return nil, err
-	}
-
-	scanner := newPhysicalLogScanner(io.NewSectionReader(spool.file, start, end-start), spool.file.Name())
-	scanner.headerSet = true
-	scanner.authority = spool.authority
-	var messages []agent.TimedMessage
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		record, err := parser.ParseRecord(scanner.Bytes())
-		if err != nil {
-			return nil, err
-		}
-		for _, message := range record.Messages {
-			if record.Control && !isHistoryStreamControlMessage(message.Message) {
-				continue
-			}
-			messages = append(messages, message)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-type backwardHistorySpool struct {
-	file      *os.File
-	authority logAuthority
-	header    []byte
-	headerEnd int64
-	end       int64
-}
-
-func newBackwardHistorySpool(ctx context.Context, path string) (*backwardHistorySpool, error) {
+// NewSpool copies a journal under immutable header authority with bounded memory.
+// Native frames are validated when selected records are decoded, avoiding a
+// redundant payload scan during the byte-copy pass. Header/control framing and
+// compressed EOF are checked while copying. A backward query that stops early
+// does not promise to detect corruption in older native frames it never reads.
+func NewSpool(ctx context.Context, path string) (*Spool, error) {
 	file, err := os.CreateTemp("", "caic-task-history-*.jsonl")
 	if err != nil {
 		return nil, fmt.Errorf("create task history spool: %w", err)
 	}
-	spool := &backwardHistorySpool{file: file}
+	spool := &Spool{File: file}
 	if err := spool.load(ctx, path); err != nil {
-		return nil, errors.Join(err, spool.cleanup())
+		return nil, errors.Join(err, spool.Close())
 	}
 	return spool, nil
 }
 
-func (s *backwardHistorySpool) load(ctx context.Context, path string) error {
-	writer := bufio.NewWriterSize(s.file, 1<<20)
+// Close releases the spool descriptor and removes its temporary file.
+func (s *Spool) Close() error {
+	return errors.Join(s.File.Close(), os.Remove(s.File.Name()))
+}
+
+func (s *Spool) load(ctx context.Context, path string) (retErr error) {
+	writer := bufio.NewWriterSize(s.File, 1<<20)
 	writeRecord := func(line []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		n, err := writer.Write(line)
-		s.end += int64(n)
+		s.End += int64(n)
 		if err != nil {
 			return err
 		}
@@ -177,24 +68,45 @@ func (s *backwardHistorySpool) load(ctx context.Context, path string) error {
 		if err := writer.WriteByte('\n'); err != nil {
 			return err
 		}
-		s.end++
+		s.End++
 		return nil
 	}
-	err := scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		s.authority = scanner.authority
-		s.header = bytes.Clone(scanner.headerRaw)
-		if err := writeRecord(s.header); err != nil {
-			return err
+	reader, err := OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, reader.Close()) }()
+	scanner := NewScanner(reader, path)
+	if _, err := scanner.ReadHeader(); err != nil {
+		return err
+	}
+	s.Harness = scanner.Harness
+	s.Header = scanner.HeaderFrame
+	if err := writeRecord(s.Header.Encoded); err != nil {
+		return err
+	}
+	s.HeaderEnd = s.End
+	for scanner.scanner.Scan() {
+		line := scanner.scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
 		}
-		s.headerEnd = s.end
-		for scanner.Scan() {
-			if err := writeRecord(scanner.Bytes()); err != nil {
-				return err
+		// Canonical native prefixes establish that this is not a segment
+		// header. Their payloads remain opaque until semantic selection.
+		if !bytes.HasPrefix(line, []byte(v3AgentRecordPrefix)) && !bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
+			frame, err := DecodeFrame(line)
+			if err != nil {
+				return fmt.Errorf("%s: invalid physical record: %w", path, err)
+			}
+			if meta, ok := frame.Control.(*v3.MetaMessage); ok && meta.Harness != s.Harness {
+				return fmt.Errorf("%s: log segment harness changed from %q to %q", path, s.Harness, meta.Harness)
 			}
 		}
-		return scanner.Err()
-	})
-	if err != nil {
+		if err := writeRecord(line); err != nil {
+			return err
+		}
+	}
+	if err := scanner.scanner.Err(); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {
@@ -203,11 +115,8 @@ func (s *backwardHistorySpool) load(ctx context.Context, path string) error {
 	return nil
 }
 
-func (s *backwardHistorySpool) cleanup() error {
-	return errors.Join(s.file.Close(), os.Remove(s.file.Name()))
-}
-
-type backwardRecordReader struct {
+// ReverseReader borrows a spool file and reads bounded physical lines backward.
+type ReverseReader struct {
 	file  *os.File
 	start int64
 	pos   int64
@@ -215,7 +124,13 @@ type backwardRecordReader struct {
 	line  []byte
 }
 
-func (r *backwardRecordReader) previous() (line []byte, start, end int64, ok bool, err error) {
+// NewReverseReader reads bounded records backward from a seekable journal spool.
+func NewReverseReader(file *os.File, start, end int64) *ReverseReader {
+	return &ReverseReader{file: file, start: start, pos: end}
+}
+
+// Previous returns the preceding encoded record and its byte boundaries.
+func (r *ReverseReader) Previous() (line []byte, start, end int64, ok bool, err error) {
 	if r.pos <= r.start {
 		return nil, 0, 0, false, nil
 	}

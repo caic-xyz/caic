@@ -1,4 +1,4 @@
-// Package pi implements Pi RPC sessions with adapter-owned token accounting.
+// Package pi implements Pi RPC sessions with shared native metadata and token accounting.
 //
 // Pi uses a custom type-dispatched JSONL protocol over stdin/stdout (not
 // JSON-RPC 2.0). There is no handshake — the subprocess is immediately ready
@@ -127,6 +127,11 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 }
 
+// NewMetadataParser implements agent.Backend with an independent metadata projection.
+func (*Backend) NewMetadataParser() agent.MessageParser {
+	return &piMetadata{}
+}
+
 // WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
 // when model is non-empty.
 func (*Backend) WritePrePrompt(w io.Writer, model string, log agent.LogSink) error {
@@ -172,16 +177,19 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			err = reapPiProcessExit(rp, err)
 			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
 		}
-		if cw := parseModelContextWindow(&resp); cw > 0 {
-			wire.modelCtxWindow = cw
-			// Persist to relay output so replay/import restores the
-			// context window (otherwise it falls back to the harness
-			// hardcoded default of 200k).
-			if err := opts.Log.AppendMessage(&agent.ModelInfoMessage{
-				MessageType:   "caic_model_info",
-				ContextWindow: cw,
-			}); err != nil {
-				return nil, fmt.Errorf("write caic_model_info: %w", err)
+		metadata, err := wire.responseMessages(&resp)
+		if err != nil {
+			return nil, fmt.Errorf("pi: set_model metadata: %w", err)
+		}
+		wire.applyMetadata(metadata)
+		for _, msg := range metadata {
+			switch m := msg.(type) {
+			case *agent.SessionMetadataMessage:
+				opts.MsgCh <- agent.TimedMessage{Message: m}
+			case *agent.ModelInfoMessage:
+				if err := opts.Log.AppendMessage(m); err != nil {
+					return nil, fmt.Errorf("write caic_model_info: %w", err)
+				}
 			}
 		}
 	}
@@ -195,9 +203,8 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 
-	sessionID := ""
-	reportedModel := ""
-	reportedEffort := ""
+	var state []agent.Message
+	var metadata agent.SessionMetadata
 	if err := writeGetState(rp.Stdin, opts.Log); err != nil {
 		opts.Logger.WarnContext(ctx, "pi: write get_state failed", "err", err)
 	} else {
@@ -216,34 +223,28 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			}
 			opts.Logger.WarnContext(ctx, "pi: get_state failed", "err", err)
 		} else {
-			var state pi.StateData
-			if err := json.Unmarshal(resp.Data, &state); err != nil {
+			state, err = wire.responseMessages(&resp)
+			if err != nil {
 				opts.Logger.WarnContext(ctx, "pi: parse get_state failed", "err", err)
 			} else {
-				sessionID = state.SessionID
-				if state.Model != nil {
-					reportedModel = resolvedModel(state.Model.Provider, "", state.Model.ID)
+				wire.applyMetadata(state)
+				for _, msg := range state {
+					metadata.Apply(msg)
 				}
-				reportedEffort = string(state.ThinkingLevel)
 			}
 		}
 	}
-	if opts.ResumeSessionID != "" && sessionID != opts.ResumeSessionID {
+	if opts.ResumeSessionID != "" && metadata.SessionID != opts.ResumeSessionID {
 		_ = rp.Cmd.Process.Kill()
 		_ = rp.Cmd.Wait()
-		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", sessionID, opts.ResumeSessionID)
+		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", metadata.SessionID, opts.ResumeSessionID)
 	}
 	rp.Stdout = bufferedRelayOutput{Reader: records.Reader(), Closer: rp.Stdout}
-	wire.sessionID = sessionID
-
-	if sessionID != "" {
-		initMsg := &agent.InitMessage{SessionID: sessionID, ReportedModel: reportedModel, ReportedEffort: reportedEffort}
-		opts.MsgCh <- agent.TimedMessage{Message: &agent.MetaSessionMessage{
-			MessageType:    "caic_session",
-			SessionID:      initMsg.SessionID,
-			ReportedModel:  initMsg.ReportedModel,
-			ReportedEffort: initMsg.ReportedEffort,
-		}}
+	for _, msg := range state {
+		opts.MsgCh <- agent.TimedMessage{Message: msg}
+	}
+	if metadata != (agent.SessionMetadata{}) {
+		initMsg := &agent.InitMessage{SessionID: metadata.SessionID, ReportedModel: metadata.ReportedModel, ReportedEffort: metadata.ReportedEffort}
 		if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 			_ = rp.Cmd.Process.Kill()
 			_ = rp.Cmd.Wait()
@@ -390,16 +391,9 @@ const maxTrackedToolOutputs = 1024
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	nativeSubagents  nativeSubagents
-	usageSinceResult bool // Parser-owned coverage of the native result snapshot.
-	mu               sync.Mutex
-	initSent         bool
-	sessionID        string
-	startTime        time.Time // When the prompt was written.
-	numTurns         int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	piMetadata
 
-	modelCtxWindow int64  // Model's context window from set_model response; 0 if unknown.
-	modelProvider  string // Provider of the active model, from message events; "" if unknown.
+	nativeSubagents nativeSubagents
 
 	// Per-tool accumulated output length for computing incremental deltas.
 	// Pi's tool_execution_update events carry the full accumulated output;
@@ -458,22 +452,8 @@ func (w *piWireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, msg := range msgs {
-		switch m := msg.(type) {
-		case *agent.UsageMessage:
-			m.Additive = true
-			if !m.Source.IsChild() {
-				w.usageSinceResult = true
-			}
-		case *agent.ResultMessage:
-			if !m.Source.IsChild() {
-				m.UsageIsSnapshot = w.usageSinceResult
-				if typ == pi.EventAgentEnd {
-					w.usageSinceResult = false
-				}
-			}
-		}
-	}
+	w.applyMetadata(msgs)
+	w.markAccounting(typ, msgs)
 	return msgs, nil
 }
 
@@ -509,6 +489,18 @@ func (*piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 }
 
 func (w *piWireFormat) parseNativeMessage(typ pi.EventType, line []byte) ([]agent.Message, error) {
+	if typ == pi.EventResponse {
+		resp, err := decodeResponse(line)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		msgs, err := w.responseMessages(&resp)
+		if err != nil || len(msgs) > 0 {
+			return msgs, err
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: "response:" + string(resp.Command), Raw: append([]byte(nil), line...)}}, nil
+	}
+
 	// Intercept agent_end for final usage.
 	if typ == pi.EventAgentEnd {
 		return w.handleAgentEnd(line)
@@ -647,29 +639,6 @@ func messagesFromAgentMessage(msg *pi.AgentMessage) []agent.Message {
 	return out
 }
 
-// handleMessageStart emits a one-shot InitMessage carrying the model name on
-// the first message_start event that reports a configured or served model.
-func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) {
-	var ev pi.MessageStartEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("unmarshal message_start: %w", err)
-	}
-	if ev.Message.Model == "" && ev.Message.ResponseModel == "" {
-		return nil, nil
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if ev.Message.Provider != "" {
-		w.modelProvider = ev.Message.Provider
-	}
-	if w.initSent {
-		return nil, nil
-	}
-	w.initSent = true
-	model := resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model)
-	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, ReportedModel: model}}, nil
-}
-
 // resolvedModel returns the provider-served model when available, otherwise
 // the configured model. Pi reports responseModel when a router resolves an
 // alias to a concrete model.
@@ -690,36 +659,6 @@ func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, 
 		result = ev.AssistantMessageEvent.Error.ErrorMessage
 	}
 	return w.errorResultMessages(result), nil
-}
-
-// errorResultMessages builds the terminal messages for a Pi error stop. When
-// the error text names a provider quota or rate limit, it prepends a
-// RateLimitMessage attributed to the active model's quota provider so the UI
-// surfaces the quota banner instead of a bare error; Pi relays only free-text
-// errors, so status is "rejected" with no reset time or window.
-func (w *piWireFormat) errorResultMessages(errMsg string) []agent.Message {
-	var msgs []agent.Message
-	if isQuotaError(errMsg) {
-		w.mu.Lock()
-		provider := agent.QuotaProviderForModel(w.modelProvider + "/x")
-		w.mu.Unlock()
-		if provider.Valid() {
-			msgs = append(msgs, &agent.RateLimitMessage{
-				Status:        "rejected",
-				QuotaProvider: provider,
-				QuotaLabel:    provider.String(),
-				QuotaWindow:   agent.QuotaWindowRequest,
-			})
-		} else {
-			msgs = append(msgs, &agent.RateLimitMessage{Status: "rejected"})
-		}
-	}
-	return append(msgs, &agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "error",
-		IsError:     true,
-		Result:      errMsg,
-	})
 }
 
 // quotaErrorMarkers are lowercase substrings that identify a provider quota or
@@ -772,81 +711,6 @@ func toAgentUsage(u *pi.MessageUsage) agent.Usage {
 		usage.CacheTTLSeconds = 300
 	}
 	return usage
-}
-
-// handleAgentEnd sums the invocation's assistant costs and emits a ResultMessage
-// with the last call's usage and the invocation duration.
-func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
-	var envelope agentEndEnvelope
-	if err := json.Unmarshal(line, &envelope); err != nil {
-		return nil, fmt.Errorf("unmarshal agent_end envelope: %w", err)
-	}
-	if envelope.WillRetry {
-		return nil, nil
-	}
-
-	var ev pi.AgentEndEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("unmarshal agent_end: %w", err)
-	}
-
-	// agent_end contains this invocation's messages. Costs are per call, while
-	// result usage remains the last call because turn_end already emits each
-	// call's additive usage.
-	var usage agent.Usage
-	var totalCostUSD float64
-	for i := range ev.Messages {
-		msg := &ev.Messages[i]
-		if msg.Role != pi.RoleAssistant {
-			continue
-		}
-		usage = toAgentUsage(&msg.Usage)
-		totalCostUSD += msg.Usage.Cost.Total
-	}
-
-	w.mu.Lock()
-	var durationMs int64
-	if !w.startTime.IsZero() {
-		durationMs = time.Since(w.startTime).Milliseconds()
-		w.startTime = time.Time{}
-	}
-	numTurns := w.numTurns
-	w.numTurns = 0
-	w.mu.Unlock()
-
-	return []agent.Message{&agent.ResultMessage{
-		MessageType:  "result",
-		Subtype:      "result",
-		DurationMs:   durationMs,
-		NumTurns:     numTurns,
-		TotalCostUSD: totalCostUSD,
-		Usage:        usage,
-	}}, nil
-}
-
-// handleTurnEnd extracts per-turn usage from the turn's assistant message and
-// increments the turn counter consumed by handleAgentEnd.
-func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
-	var ev pi.TurnEndEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("unmarshal turn_end: %w", err)
-	}
-	w.mu.Lock()
-	if ev.Message.Provider != "" {
-		w.modelProvider = ev.Message.Provider
-	}
-	w.numTurns++
-	w.mu.Unlock()
-	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
-		return []agent.Message{&agent.UsageMessage{
-			PerCall:         true,
-			Usage:           toAgentUsage(&ev.Message.Usage),
-			ReportedCostUSD: &ev.Message.Usage.Cost.Total,
-			ReportedModel:   resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model),
-			ContextWindow:   int(w.modelCtxWindow),
-		}}, nil
-	}
-	return nil, nil
 }
 
 type agentEndEnvelope struct {
@@ -931,18 +795,6 @@ func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd
 		res := <-ch
 		return pi.Response{}, errors.Join(fmt.Errorf("%w for %s: %w", errResponseTimeout, cmd, ctx.Err()), res.err)
 	}
-}
-
-// parseModelContextWindow extracts the context window from a set_model response.
-func parseModelContextWindow(resp *pi.Response) int64 {
-	if resp.Command != pi.CmdSetModel {
-		return 0
-	}
-	var m pi.Model
-	if err := json.Unmarshal(resp.Data, &m); err != nil {
-		return 0
-	}
-	return m.ContextWindow
 }
 
 // writeSetModel sends a set_model command to Pi. The model string is split on

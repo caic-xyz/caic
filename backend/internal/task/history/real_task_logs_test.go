@@ -1,7 +1,7 @@
 // Tests and benchmarks the local caic task-log corpus without modifying its source.
 //go:build real_task_logs
 
-package taskslog
+package history
 
 import (
 	"errors"
@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 )
@@ -65,7 +67,7 @@ func TestRealTaskLogCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+	tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +103,7 @@ func BenchmarkRealTaskLogCorpus(b *testing.B) {
 		// Clear the header cache each iteration to measure the cold scan, the
 		// same way the synthetic settled benchmarks do.
 		clearHeaderCaches(b, dir)
-		if _, err := NewStore(testLogger(), dir).LoadUnsettled(); err != nil {
+		if _, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled(); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -131,7 +133,7 @@ func copyRealTaskLogCorpus(source, destination string) (int64, error) {
 	}
 	var bytes int64
 	for _, entry := range entries {
-		if entry.IsDir() || !IsLogName(entry.Name()) {
+		if entry.IsDir() || !taskslog.IsLogName(entry.Name()) {
 			continue
 		}
 		sourcePath := filepath.Join(source, entry.Name())

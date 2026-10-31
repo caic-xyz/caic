@@ -1,6 +1,6 @@
 // Tests for task loading and configuration resolution.
 
-package taskslog
+package history
 
 import (
 	"bufio"
@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 
@@ -37,9 +39,9 @@ func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return claudecode.New().NewWire(), nil
-		}))
+		})
 	}
 }
 
@@ -65,8 +67,8 @@ func seqOf(lines ...string) iter.Seq[[]byte] {
 }
 
 func writeCompressedLogFile(t *testing.T, dir, name string, lines iter.Seq[[]byte]) {
-	if !isLogCompressed(name) {
-		t.Fatalf("compressed test log name %q must end in %s", name, logCompressedExt)
+	if !taskslog.IsCompressed(name) {
+		t.Fatalf("compressed test log name %q must end in %s", name, ".jsonl.zst")
 	}
 	out, err := os.OpenFile(filepath.Clean(filepath.Join(dir, name)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -111,6 +113,11 @@ func mustJSON(t testing.TB, v any) string {
 	switch m := v.(type) {
 	case agent.MetaMessage:
 		return mustJSON(t, &m)
+	case *agent.MetaMessage:
+		// Fixtures include deliberately unsupported headers for reader validation.
+		meta := v3.MetaMessage(*m)
+		meta.MessageType = "caic_meta"
+		data, err = json.Marshal(meta)
 	case agent.MetaSessionMessage:
 		return mustJSON(t, &m)
 	case agent.MetaPRMessage:
@@ -160,175 +167,13 @@ func claudeInit(t *testing.T, sessionID string) string {
 	return nativeLogLine(mustJSON(t, map[string]any{"type": "system", "subtype": "init", "session_id": sessionID}))
 }
 
-func TestScanPhysicalLogHeaderOnlyAndEOFValidation(t *testing.T) {
-	t.Parallel()
-	path := writePhysicalTestLog(t, false, mustJSON(t, agent.MetaMessage{
-		MessageType: "caic_meta",
-		Version:     int(agent.LogVersionV3),
-		Prompt:      "header only",
-		Harness:     string(harness.Claude),
-	}))
-
-	t.Run("HeaderOnly", func(t *testing.T) {
-		t.Parallel()
-		var got agent.MetaMessage
-		err := scanPhysicalLog(path, false, func(_ os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
-			got = meta
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Prompt != "header only" {
-			t.Errorf("header prompt = %q, want %q", got.Prompt, "header only")
-		}
-	})
-
-	t.Run("RequiresEOF", func(t *testing.T) {
-		t.Parallel()
-		err := scanPhysicalLog(path, true, func(_ os.FileInfo, _ *physicalLogScanner, _ agent.MetaMessage) error {
-			return nil
-		})
-		if err == nil || !strings.Contains(err.Error(), "did not reach EOF") {
-			t.Fatalf("scanPhysicalLog error = %v, want EOF validation error", err)
-		}
-	})
-}
-
-// readLogAuthority scans a physical log and returns its authority. Used
-// only by tests: production loads determine authority via the scanner.
-func readLogAuthority(path string) (authority logAuthority, retErr error) {
-	retErr = scanPhysicalLog(path, false, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		for scanner.Scan() {
-		}
-		authority = scanner.authority
-		return scanner.Err()
-	})
-	return authority, retErr
-}
-
-func TestReadLogAuthority(t *testing.T) {
-	t.Parallel()
-	const header = `{"t":"caic_meta","version":3,"prompt":"task","repos":[],"harness":"claude"}`
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		for _, compressed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
-				t.Parallel()
-				path := writePhysicalTestLog(t, compressed, "", header, nativeLogLine(`{"type":"assistant"}`), header)
-				authority, err := readLogAuthority(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if authority.Harness != harness.Claude {
-					t.Fatalf("authority=%+v", authority)
-				}
-			})
-		}
-	})
-	t.Run("error", func(t *testing.T) {
-		t.Parallel()
-		cases := []struct {
-			name      string
-			lines     []string
-			errorText string
-		}{
-			{"missing header", []string{nativeLogLine(`{"type":"assistant"}`)}, "missing version"},
-			{"malformed header", []string{`{"t":"caic_meta"`}, "unexpected end of JSON input"},
-			{"missing version", []string{`{"t":"caic_meta","prompt":"task","harness":"claude"}`}, "missing version"},
-			{"v1 header", []string{`{"type":"caic_meta","version":1,"prompt":"task","harness":"claude"}`}, "unsupported log version 1"},
-			{"v2 header", []string{`{"t":"caic_meta","version":2,"prompt":"task","harness":"claude"}`}, "unsupported log version 2"},
-			{"future header", []string{`{"t":"caic_meta","version":4,"prompt":"task","harness":"claude"}`}, "unsupported log version 4"},
-			{"changed harness", []string{header, `{"t":"caic_meta","version":3,"prompt":"task","harness":"codex"}`}, `harness changed from "claude" to "codex"`},
-			{"changed version", []string{header, `{"t":"caic_meta","version":2,"prompt":"task","harness":"claude"}`}, "unsupported log version 2"},
-			{"duplicate prompt", []string{`{"t":"caic_meta","version":3,"prompt":"first","prompt":"last","harness":"claude"}`}, `duplicate raw key "prompt"`},
-			{"duplicate discriminator", []string{header, `{"t":"caic_meta","t":"agent","version":3,"prompt":"task","harness":"claude"}`}, `duplicate raw key "t"`},
-			{"unknown field", []string{`{"t":"caic_meta","version":3,"prompt":"task","harness":"claude","unknown":true}`}, `unknown field "unknown"`},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				for _, compressed := range []bool{false, true} {
-					t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
-						t.Parallel()
-						path := writePhysicalTestLog(t, compressed, tc.lines...)
-						if _, err := readLogAuthority(path); err == nil || !strings.Contains(err.Error(), tc.errorText) {
-							t.Fatalf("invalid authority error = %v, want %q", err, tc.errorText)
-						}
-					})
-				}
-			})
-		}
-	})
-	t.Run("deep native record", func(t *testing.T) {
-		t.Parallel()
-		deep := strings.Repeat(`{"k":`, maxJSONNesting+2) + `1` + strings.Repeat(`}`, maxJSONNesting+2)
-		path := writePhysicalTestLog(t, false, header, nativeLogLine(`{"type":"assistant","data":`+deep+`}`))
-		if _, err := readLogAuthority(path); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("unreadable", func(t *testing.T) {
-		t.Parallel()
-		if _, err := readLogAuthority(filepath.Join(t.TempDir(), "missing.jsonl")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("missing file error=%v", err)
-		}
-	})
-}
-
-func TestDecodeDiscriminatorProbe(t *testing.T) {
-	t.Parallel()
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		for _, tc := range []struct {
-			name, line string
-			candidate  bool
-		}{
-			{"agent", `{"t":"agent","ts":1.000,"msg":{"type":"assistant"}}`, false},
-			{"input", `{"t":"input","ts":1.000,"msg":{"type":"user"}}`, false},
-			{"header", `{"t":"caic_meta","version":3}`, true},
-			{"reordered header", `{"prompt":"task","t":"caic_meta"}`, true},
-			{"whitespace", `{"t": "caic_meta"}`, true},
-			{"escaped value", `{"t":"a\"b"}`, false},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				candidate, err := decodeDiscriminatorProbe([]byte(tc.line))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if candidate != tc.candidate {
-					t.Fatalf("header candidate=%t,want %t", candidate, tc.candidate)
-				}
-			})
-		}
-	})
-	t.Run("error", func(t *testing.T) {
-		t.Parallel()
-		deep := strings.Repeat(`{"k":`, maxJSONNesting+2) + `1` + strings.Repeat(`}`, maxJSONNesting+2)
-		if _, err := decodeDiscriminatorProbe([]byte(`{"t":` + deep + `}`)); !errors.Is(err, errJSONNesting) {
-			t.Fatalf("nesting error=%v", err)
-		}
-	})
-}
-
-// inventoryJSON renders LoadedTask's JSON projection for testing comparison,
-// sidestepping time.Time DeepEqual location sensitivity.
-func inventoryJSON(t *testing.T, lt *LoadedTask) []byte {
-	data, err := json.Marshal(headerTaskToData(lt))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
 func TestLoadLogHeader(t *testing.T) {
 	t.Parallel()
 	t.Run("RecordedClaudeReasoningLifecycle", func(t *testing.T) {
 		t.Parallel()
 		// This retained trace reports 58, 237 and 43 thinking tokens in usage
 		// events, while its final native result omits output_tokens_details.
-		f, err := os.Open("../agent/claudecode/testdata/read-edit-bash.jsonl")
+		f, err := os.Open("../../agent/claudecode/testdata/read-edit-bash.jsonl")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -354,7 +199,7 @@ func TestLoadLogHeader(t *testing.T) {
 				path := writePhysicalTestLog(t, compressed, lines...)
 				var first []byte
 				for pass := range 2 {
-					loaded, err := loadLogHeader(testLogger(), path, true)
+					loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -370,7 +215,7 @@ func TestLoadLogHeader(t *testing.T) {
 					if _, ok := readHeaderCache(path); !ok {
 						t.Fatal("terminal inventory did not populate a usable cache")
 					}
-					if err := loaded.LoadMessagesWithResolver(agent.Backends{harness.Claude: claudecode.New()}); err != nil {
+					if err := loadMessagesForTest(loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
 						t.Fatal(err)
 					}
 					if after := inventoryJSON(t, loaded); !bytes.Equal(before, after) {
@@ -424,7 +269,7 @@ func TestLoadLogHeader(t *testing.T) {
 						}
 						var expected []byte
 						for pass := range 2 { // Second load reopens the terminal header cache.
-							loaded, err := loadLogHeader(testLogger(), path, true)
+							loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 							if err != nil {
 								t.Fatal(err)
 							}
@@ -458,7 +303,7 @@ func TestLoadLogHeader(t *testing.T) {
 									t.Fatal("terminal inventory did not populate a usable header cache")
 								}
 							}
-							if err := loaded.LoadMessagesWithResolver(agent.Backends{harness.Claude: claudecode.New()}); err != nil {
+							if err := loadMessagesForTest(loaded, agent.Backends{harness.Claude: claudecode.New()}); err != nil {
 								t.Fatal(err)
 							}
 							if after := inventoryJSON(t, loaded); !bytes.Equal(after, before) {
@@ -507,7 +352,7 @@ func TestLoadLogHeader(t *testing.T) {
 							t.Fatalf("semantic auto-compact threshold = %d, want 244800", semantic.AutoCompactTokenLimit)
 						}
 						for range 2 {
-							loaded, err := loadLogHeader(testLogger(), path, true)
+							loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 							if err != nil {
 								t.Fatal(err)
 							}
@@ -515,7 +360,7 @@ func TestLoadLogHeader(t *testing.T) {
 								t.Fatalf("restored auto-compact threshold = %d, want 244800", loaded.AutoCompactTokenLimit)
 							}
 							before := inventoryJSON(t, loaded)
-							if err := loaded.LoadMessagesWithResolver(resolver); err != nil {
+							if err := loadMessagesForTest(loaded, resolver); err != nil {
 								t.Fatal(err)
 							}
 							if !bytes.Equal(inventoryJSON(t, loaded), before) {
@@ -531,7 +376,7 @@ func TestLoadLogHeader(t *testing.T) {
 	t.Run("RoundTripServesCache", func(t *testing.T) {
 		t.Parallel()
 		path := writeMetaLog(t, t.TempDir(), "task1")
-		first, err := loadLogHeader(testLogger(), path, true)
+		first, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +417,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 			t.Fatal(err)
 		}
-		cached, err := loadLogHeader(testLogger(), path, true)
+		cached, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -606,7 +451,7 @@ func TestLoadLogHeader(t *testing.T) {
 			string(snapshot),
 			string(trailer),
 		)
-		loaded, err := loadLogHeader(testLogger(), path, true)
+		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -623,7 +468,7 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "task1", Harness: "claude"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "running"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true); err != nil {
+		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is test-controlled.
@@ -637,7 +482,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatal(err)
 		}
-		loaded, err := loadLogHeader(testLogger(), path, true)
+		loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -664,7 +509,7 @@ func TestLoadLogHeader(t *testing.T) {
 				if err := os.WriteFile(logHeaderCachePath(path), tc.body, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				loaded, err := loadLogHeader(testLogger(), path, true)
+				loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -672,7 +517,7 @@ func TestLoadLogHeader(t *testing.T) {
 					t.Fatal("forged header cache content was served")
 				}
 				// The bad header cache entry must have been replaced by a valid one.
-				again, err := loadLogHeader(testLogger(), path, true)
+				again, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -691,7 +536,7 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "task1", Harness: "claude"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed", Error: "boom"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true); err != nil {
+		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		cached, ok := readHeaderCache(path)
@@ -710,7 +555,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "task-b.header.json"), []byte(`{"version":3,"task":{"task_id":"forged"}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -723,15 +568,15 @@ func TestLoadLogHeader(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := writeMetaLog(t, dir, "task1")
-		if _, err := loadLogHeader(testLogger(), path, true); err != nil {
+		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		entry := logHeaderCachePath(path)
 		if _, err := os.Stat(entry); err != nil {
 			t.Fatalf("expected header cache after scan: %v", err)
 		}
-		store := NewStore(testLogger(), dir)
-		compressed, err := store.compressPath(path)
+		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
+		compressed, err := store.Journal.Compress(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -746,7 +591,7 @@ func TestLoadLogHeader(t *testing.T) {
 		}
 		// Compression changed the log size, so the stale header cache entry is
 		// rejected and a full scan rewrites it with the same projection.
-		loaded, err := loadLogHeader(testLogger(), compressed, true)
+		loaded, err := loadLogHeader(testLogger(), compressed, true, backends.Default("", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -764,79 +609,13 @@ func TestLoadLogHeader(t *testing.T) {
 			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "live", Harness: "claude"}),
 			claudeAssistant(t, map[string]any{"type": "text", "text": "working"}),
 		)
-		if _, err := loadLogHeader(testLogger(), path, true); err != nil {
+		if _, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil)); err != nil {
 			t.Fatal(err)
 		}
 		// A live (non-terminal) log must not get a header cache: it is not the
 		// compressed set and changes on every append.
 		if _, err := os.Stat(logHeaderCachePath(path)); !os.IsNotExist(err) {
 			t.Fatalf("live task must not be cached: header cache exists (%v)", err)
-		}
-	})
-}
-
-func TestLoadRelayBoundaries(t *testing.T) {
-	t.Parallel()
-	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "boundary scan", Harness: string(harness.OpenCode)})
-	t.Run("unmarked repeated native records", func(t *testing.T) {
-		t.Parallel()
-		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
-		path := writePhysicalTestLog(t, false, meta, native, native)
-		records, generation, err := LoadRelayBoundaries(path)
-		if err != nil || generation != "" || len(records) != 2 {
-			t.Fatalf("boundaries = %+v, generation = %q, error = %v", records, generation, err)
-		}
-		for i, record := range records {
-			if want := int64((i + 1) * (len(native) + 1)); record.RelayEnd != want {
-				t.Fatalf("boundary %d = %+v, want offset %d", i, record, want)
-			}
-		}
-	})
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		for _, compressed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("compressed_%v", compressed), func(t *testing.T) {
-				t.Parallel()
-				old := `{"t":"relay_generation","generation":"old"}`
-				current := `{"t":"relay_generation","generation":"current"}`
-				native := `{"t":"agent","ts":1.000,"msg":{"untyped":true}}`
-				input := `{"t":"input","ts":2.000,"msg":{"client":"request"}}`
-				host := mustJSON(t, &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "host"})
-				path := writePhysicalTestLog(t, compressed, meta, old, native, current, native, input, host, native)
-				records, generation, err := LoadRelayBoundaries(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if generation != "current" || len(records) != 3 {
-					t.Fatalf("generation = %q, records = %+v", generation, records)
-				}
-				want := []int64{int64(len(current) + 1), int64(len(current) + len(native) + 2), int64(len(current) + 2*len(native) + 3)}
-				for i, record := range records {
-					if record.Generation != "current" || record.RelayEnd != want[i] {
-						t.Fatalf("record %d = %+v, want current generation offset %d", i, record, want[i])
-					}
-				}
-				if records[1].Fingerprint == ([32]byte{}) || records[2].Fingerprint != records[1].Fingerprint {
-					t.Fatalf("native fingerprints = %x, %x", records[1].Fingerprint, records[2].Fingerprint)
-				}
-			})
-		}
-	})
-	t.Run("error", func(t *testing.T) {
-		t.Parallel()
-		for _, line := range []string{
-			`{"t":"agent","ts":1.000,"msg":{"invalid":}}`,
-			`{"t":"input","ts":1,"msg":{"client":"request"}}`,
-			`{"t":"relay_generation","generation":""}`,
-			`{"t":"result","state":123}`,
-		} {
-			t.Run(line, func(t *testing.T) {
-				t.Parallel()
-				path := writePhysicalTestLog(t, true, meta, line)
-				if records, generation, err := LoadRelayBoundaries(path); err == nil || records != nil || generation != "" {
-					t.Fatalf("boundaries = %+v, generation = %q, err = %v", records, generation, err)
-				}
-			})
 		}
 	})
 }
@@ -872,7 +651,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 		`{"t":"input","ts":1.000,"msg":`+input+`}`,
 		`{"t":"agent","ts":2.000,"msg":`+output+`}`,
 	)
-	tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+	tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,7 +660,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 	}
 	var native [][]byte
 	var directions []string
-	if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(h harness.Name) (agent.WireFormat, error) {
+	if err := loadMessagesForTest(tasks[0], newTestParserResolver(func(h harness.Name) (agent.WireFormat, error) {
 		if h != harness.Claude {
 			return nil, fmt.Errorf("harness = %q, want %q", h, harness.Claude)
 		}
@@ -920,7 +699,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeLogFile(t, dir, "t.jsonl", meta, a1, pr, a2, trailer)
 
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -955,7 +734,7 @@ func TestLoadedTask(t *testing.T) {
 		second := claudeAssistant(t, map[string]any{"type": "text", "text": "second"})
 		writeLogFile(t, dir, "t.jsonl", meta, first, second)
 
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -992,17 +771,17 @@ func TestLoadedTask(t *testing.T) {
 			nativeLogLine(`{"type":"assistant","message":{"content":[]}}`),
 		)
 
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
 		calls := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		tasks[0].resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
 				calls++
 				return []agent.Message{&agent.TextMessage{Text: "message"}}, nil
 			}}, nil
-		}))
+		})
 
 		for _, err := range tasks[0].StreamMessages(t.Context()) {
 			if err != nil {
@@ -1023,7 +802,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "failed"})
 		writeLogFile(t, dir, "t.jsonl", meta, setupLog, trailer)
 
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1064,14 +843,14 @@ func TestLoadedTask(t *testing.T) {
 			`{"t":"log","line":"provisioning"}`,
 			`{"t":"context_cleared"}`,
 		)
-		tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
 		if err != nil {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
-		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
-		}))
+		})
 
 		var replayed []string
 		for parsed, err := range lt.StreamMessages(t.Context()) {
@@ -1104,7 +883,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
 		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, a1, a2, trailer))
 
-		st := NewStore(testLogger(), dir)
+		st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 		st.cutoff, st.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := st.LoadSettled()
 		if err != nil {
@@ -1134,7 +913,7 @@ func TestLoadedTask(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(meta, first, second, trailer))
 
-		store := NewStore(testLogger(), dir)
+		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := store.LoadSettled()
 		if err != nil {
@@ -1170,14 +949,14 @@ func TestLoadedTask(t *testing.T) {
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
 		))
 
-		store := NewStore(testLogger(), dir)
+		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := store.LoadSettled()
 		if err != nil {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		tasks[0].resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1198,7 +977,7 @@ func TestLoadedTask(t *testing.T) {
 					return nil, nil
 				}
 			}}, nil
-		}))
+		})
 
 		var got []string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1241,7 +1020,7 @@ func TestLoadedTask(t *testing.T) {
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
 		))
 
-		store := NewStore(testLogger(), dir)
+		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := store.LoadSettled()
 		if err != nil {
@@ -1250,7 +1029,7 @@ func TestLoadedTask(t *testing.T) {
 		if len(tasks) != 1 {
 			t.Fatalf("loaded tasks = %d, want 1", len(tasks))
 		}
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		tasks[0].resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1268,7 +1047,7 @@ func TestLoadedTask(t *testing.T) {
 					return nil, nil
 				}
 			}}, nil
-		}))
+		})
 
 		var got []string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1303,14 +1082,14 @@ func TestLoadedTask(t *testing.T) {
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
 		))
 
-		store := NewStore(testLogger(), dir)
+		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
 		tasks, err := store.LoadSettled()
 		if err != nil {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		tasks[0].resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1328,7 +1107,7 @@ func TestLoadedTask(t *testing.T) {
 				}
 				return nil, nil
 			}}, nil
-		}))
+		})
 
 		var got string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1366,9 +1145,9 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 					return claudecode.New().NewWire(), nil
-				}))
+				})
 
 				var gotErr error
 				for _, err := range lt.StreamMessages(t.Context()) {
@@ -1382,9 +1161,9 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, message, mismatch)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 					return claudecode.New().NewWire(), nil
-				}))
+				})
 
 				var gotErr error
 				var messages int
@@ -1405,9 +1184,9 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, "", "  ", meta, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 					return claudecode.New().NewWire(), nil
-				}))
+				})
 
 				var messages int
 				for msg, err := range lt.StreamMessages(t.Context()) {
@@ -1433,11 +1212,11 @@ func TestLoadedTask(t *testing.T) {
 			`{"t":"caic_meta","version":3,"prompt":"task","harness":"claude"}`,
 			`{"t":"agent","ts":1788122692.466,"msg":{"type":"assistant"}}`,
 		)
-		loaded, err := LoadHistorySource(path)
+		loaded, err := NewStore(testLogger(), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		if err := loadMessagesForTest(loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return []agent.Message{message}, nil }}, nil
 		})); err != nil {
 			t.Fatal(err)
@@ -1459,7 +1238,7 @@ func TestLoadedTask(t *testing.T) {
 		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
 		path := writePhysicalTestLog(t, false, meta, native, native)
 		loaded := &LoadedTask{path: path}
-		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		err := loadMessagesForTest(loaded, newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		}))
 
@@ -1504,42 +1283,12 @@ func TestLoadedTask(t *testing.T) {
 		t.Run("NoPath", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{}
-			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 				return claudecode.New().NewWire(), nil
-			}))
+			})
 
 			if err := lt.LoadMessages(); err != nil {
 				t.Fatal(err)
-			}
-		})
-		t.Run("NoParser", func(t *testing.T) {
-			t.Parallel()
-			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
-			if err := lt.LoadMessages(); err == nil {
-				t.Fatal("expected error when no parser is set")
-			}
-		})
-		t.Run("LoadLogFileNoParser", func(t *testing.T) {
-			t.Parallel()
-			_, err := loadSemanticTask("/does/not/exist.jsonl", nil)
-			if err == nil {
-				t.Fatal("expected error when resolver is nil")
-			}
-			if !strings.Contains(err.Error(), "resolver is nil") {
-				t.Errorf("error = %q, want resolver nil error", err.Error())
-			}
-		})
-		t.Run("StreamNoParser", func(t *testing.T) {
-			t.Parallel()
-			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
-			var gotErr bool
-			for _, e := range lt.StreamMessages(t.Context()) {
-				if e != nil {
-					gotErr = true
-				}
-			}
-			if !gotErr {
-				t.Error("StreamMessages without parser should yield an error")
 			}
 		})
 	})
@@ -1582,7 +1331,7 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			t.Parallel()
 			path := writePhysicalTestLog(t, compressed, meta, nativeLogLine(`{"type":"text","text":"visible"}`))
-			markdown, err := ExportDiscussion(path, newTestWireResolver(func(got harness.Name) (agent.WireFormat, error) {
+			markdown, err := ExportDiscussion(path, newTestParserResolver(func(got harness.Name) (agent.WireFormat, error) {
 				if got != harness.Claude {
 					t.Fatalf("resolver harness = %q, want claude", got)
 				}
@@ -1605,4 +1354,13 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// inventoryJSON compares the owned cache projection without time-location identity.
+func inventoryJSON(t *testing.T, lt *LoadedTask) []byte {
+	data, err := json.Marshal(headerTaskToData(lt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

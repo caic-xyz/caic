@@ -169,14 +169,19 @@ func TestHandshake(t *testing.T) {
 		t.Parallel()
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
 {"id":2,"result":{"data":[],"nextCursor":null}}
+{"id":98,"error":{"code":-1,"message":"unrelated failed request"}}
+{"id":99,"result":{"thread":{"id":"other-session"},"model":"wrong-model"}}
 {"id":3,"result":{"thread":{"id":"saved-session"},"model":"gpt-5.4"}}
 `
 		var stdin bytes.Buffer
-		_, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{
+		wire, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{
 			Dir: "/repo", Model: "gpt-5.4", ResumeSessionID: "saved-session", Log: &agenttest.LogSink{},
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if wire.threadID != "saved-session" || wire.reportedModel != "gpt-5.4" {
+			t.Fatalf("matched resume metadata = session:%q model:%q", wire.threadID, wire.reportedModel)
 		}
 		var req struct {
 			Method string                   `json:"method"`

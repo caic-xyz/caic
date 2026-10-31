@@ -46,6 +46,32 @@ func TestToolTimingTracker(t *testing.T) {
 				t.Fatalf("session presentation = %+v, want %+v", events, want)
 			}
 		})
+		t.Run("NativeStartOwnsRestorationPresentation", func(t *testing.T) {
+			t.Parallel()
+			tracker := NewToolTimingTracker("", harness.OpenCode, "", nil)
+			native := &agent.InitMessage{SessionID: "root", ReportedModel: "native"}
+			restored := &agent.MetaSessionMessage{SessionID: "root", ReportedModel: "stale"}
+			if events := tracker.ConvertMessage(2, 0, native, time.Time{}); len(events) != 1 || events[0].Init == nil {
+				t.Fatalf("native start = %+v", events)
+			}
+			if events := tracker.ConvertMessage(2, 0, &agent.SessionMetadataMessage{ReportedModel: "configured"}, time.Time{}); len(events) != 0 {
+				t.Fatalf("settings became conversation events: %+v", events)
+			}
+			if events := tracker.ConvertMessage(2, 0, restored, time.Time{}); len(events) != 0 {
+				t.Fatalf("restoration duplicated native start: %+v", events)
+			}
+			if tracker.cost.Model != "configured" {
+				t.Fatalf("restoration replaced configured model: %s", tracker.cost.Model)
+			}
+			tracker.ConvertMessage(2, 0, &agent.ExitMessage{}, time.Time{})
+			if events := tracker.ConvertMessage(2, 0, restored, time.Time{}); len(events) != 1 || events[0].Init == nil {
+				t.Fatalf("native-free restart lost restoration card: %+v", events)
+			}
+			tracker.ConvertMessage(2, 0, agent.ContextCleared(), time.Time{})
+			if events := tracker.ConvertMessage(2, 0, restored, time.Time{}); len(events) != 1 || events[0].Init == nil {
+				t.Fatalf("cleared context lost restoration card: %+v", events)
+			}
+		})
 		t.Run("PrivateDeliveryControlsAreNotEvents", func(t *testing.T) {
 			t.Parallel()
 			gt := NewToolTimingTracker("", harness.Claude, "", nil)

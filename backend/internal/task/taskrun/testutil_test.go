@@ -60,6 +60,14 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
+// NewWire matches the Claude parser used by testBackend's live connection.
+func (*testBackend) NewWire() agent.WireFormat { return claudecode.New().NewWire() }
+
+// NewMetadataParser reconstructs the same fake connection without a transcript.
+func (*testBackend) NewMetadataParser() agent.MessageParser {
+	return claudecode.New().NewMetadataParser()
+}
+
 type attachCaptureBackend struct {
 	testBackend
 

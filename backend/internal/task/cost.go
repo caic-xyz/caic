@@ -63,6 +63,10 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if m.ReportedModel != "" {
 			c.Model = m.ReportedModel
 		}
+	case *agent.SessionMetadataMessage:
+		if !m.Source.IsChild() && m.ReportedModel != "" {
+			c.Model = m.ReportedModel
+		}
 	case *agent.SystemMessage:
 		if m.Source.IsChild() {
 			break

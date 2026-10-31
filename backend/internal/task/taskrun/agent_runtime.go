@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/md"
@@ -59,7 +61,7 @@ var mutatingTools = map[string]struct{}{
 type AgentRuntime struct {
 	// Immutable.
 	Backends         agent.Backends
-	LogStore         *taskslog.Store
+	LogStore         *taskhistory.Store
 	LogPath          *taskslog.Path
 	Runtimes         *runtime.Router
 	Log              *slog.Logger

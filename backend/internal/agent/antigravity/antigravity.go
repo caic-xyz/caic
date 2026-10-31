@@ -181,7 +181,12 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 
 // NewWire creates independent per-session parser state.
 func (*Backend) NewWire() agent.WireFormat {
-	return &wireFormat{steps: make(map[string]*step), textConversations: make(map[string]struct{}), parents: make(map[string]string)}
+	return &wireFormat{steps: make(map[string]*step), textConversations: make(map[string]struct{}), accounting: newAccounting()}
+}
+
+// NewMetadataParser creates independent conversation and accounting state.
+func (*Backend) NewMetadataParser() agent.MessageParser {
+	return &metadataParser{accounting: newAccounting()}
 }
 
 // FetchModelInventory discovers models on the agent's SSH target.
@@ -211,7 +216,6 @@ var (
 // conversation ID because child conversations can use the same step index.
 type step struct {
 	started  bool
-	done     bool
 	text     strings.Builder
 	overflow bool
 }
@@ -219,12 +223,10 @@ type step struct {
 // wireFormat state belongs to the single message-reading goroutine. Writing a
 // prompt does not mutate it, so live parsing and prompt writes can run together.
 type wireFormat struct {
-	steps              map[string]*step
-	usage              antigravity.JSONUsage
-	model              string
-	textConversations  map[string]struct{}
-	parents            map[string]string // Explicit SubagentInfo conversation relationships only.
-	rootConversationID string
+	accounting
+
+	steps             map[string]*step
+	textConversations map[string]struct{}
 }
 
 // WritePrompt sends text and image input and records native input provenance in v3 logs.
@@ -297,16 +299,11 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	}
 	switch ev.Event {
 	case antigravity.EventInit:
-		w.model = ev.Init.Model
-		w.rootConversationID = ev.ConversationID
+		w.observeInit(ev.ConversationID, ev.Init.Model)
 		return []agent.Message{&agent.InitMessage{Source: w.conversationSource(ev.ConversationID), SessionID: ev.ConversationID, Cwd: ev.Init.Cwd, Tools: ev.Init.Tools, ReportedModel: ev.Init.Model}}, nil
 	case antigravity.EventStepUpdate:
 		s := &ev.StepUpdate
-		for _, child := range s.SubagentInfo.Subagents {
-			if s.ConversationID != "" && child.ConversationID != "" && child.ConversationID != s.ConversationID {
-				w.parents[child.ConversationID] = s.ConversationID
-			}
-		}
+		w.observeRelationships(s)
 		source := w.conversationSource(s.ConversationID)
 		index, err := agent.JSONField(line, "step_update", "step_index")
 		if err != nil {
@@ -320,7 +317,11 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 			// Retain its activity visibly without applying root tool/usage effects.
 			return []agent.Message{&agent.SystemMessage{Source: source, MessageType: "system", Subtype: agent.SystemSubtypeExternalActivity, Detail: string(line)}}, nil
 		}
-		messages := w.parseStep(s)
+		usage, accepted := w.observeStep(s)
+		if !accepted {
+			return nil, nil
+		}
+		messages := append(w.parseStep(s), usage...)
 		for _, message := range messages {
 			*message.Provenance() = source
 		}
@@ -346,6 +347,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 				delete(w.steps, key)
 			}
 		}
+		w.finishConversation(r.ConversationID)
 		if source.IsChild() {
 			// Declared child completion cannot finish the root turn or consume
 			// its inclusive usage. No native lifecycle status is inferred.
@@ -354,35 +356,11 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		// Result usage, duration, and turn count are conversation-wide, including
 		// resumed processes. Only DONE steps from the task's proven conversations
 		// contribute to the neutral per-turn usage.
-		m.Usage = convertUsage(&w.usage)
-		w.usage = antigravity.JSONUsage{}
+		m.Usage = w.finishResult()
 		return append(messages, m), nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
 	}
-}
-
-// conversationSource retains native identity. Only explicit delegation chains
-// reaching the initialized root establish child ownership; mismatches do not.
-func (w *wireFormat) conversationSource(id string) agent.MessageSource {
-	s := agent.MessageSource{ThreadID: id}
-	parent := id
-	for range len(w.parents) + 1 {
-		if parent != "" && parent == w.rootConversationID {
-			s.RootThreadID = parent
-			break
-		}
-		var found bool
-		parent, found = w.parents[parent]
-		if !found {
-			break
-		}
-	}
-	return s
-}
-
-func (w *wireFormat) foreignConversation(source *agent.MessageSource) bool {
-	return w.rootConversationID != "" && source.ThreadID != "" && source.ThreadID != w.rootConversationID && !source.IsChild()
 }
 
 func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message {
@@ -391,9 +369,6 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 	if st == nil {
 		st = &step{}
 		w.steps[id] = st
-	}
-	if st.done {
-		return nil
 	}
 	var msgs []agent.Message
 	switch s.StepType {
@@ -435,13 +410,6 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 		}
 	case antigravity.StepUserInput, antigravity.StepFinish:
 		// User text is retained by the recorded stdin; finish is followed by result.
-	}
-	if s.State == antigravity.StepDone {
-		st.done = true
-		if s.Usage != (antigravity.JSONUsage{}) {
-			w.usage.Add(&s.Usage)
-			msgs = append(msgs, &agent.UsageMessage{Usage: convertUsage(&s.Usage), ReportedModel: w.model, ModelDerived: true})
-		}
 	}
 	return msgs
 }

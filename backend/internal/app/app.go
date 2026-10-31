@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
@@ -81,8 +83,12 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err := os.MkdirAll(cfg.Dirs.CacheDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create cache directory: %w", err)
 	}
-	logStore := taskslog.NewStore(log, filepath.Join(cfg.Dirs.CacheDir, "tasks"))
-	if err := cleanupLegacyReplayArtifacts(logStore.LogDir); err != nil {
+	agentBackends := backends.Default(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
+	if cfg.Agent.Backends != nil {
+		agentBackends = cfg.Agent.Backends
+	}
+	logStore := taskhistory.NewStore(log, taskslog.NewStore(filepath.Join(cfg.Dirs.CacheDir, "tasks")), agentBackends)
+	if err := cleanupLegacyReplayArtifacts(logStore.Journal.LogDir); err != nil {
 		return nil, fmt.Errorf("remove legacy replay artifacts: %w", err)
 	}
 	usageRollup, err := usagedb.New(ctx, usagedb.Config{
@@ -220,10 +226,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	agentBackends := backends.Default(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
-	if cfg.Agent.Backends != nil {
-		agentBackends = cfg.Agent.Backends
-	}
 	cache, err := forgecache.Open(filepath.Join(cfg.Dirs.CacheDir, "ci_results.json"))
 	if err != nil {
 		appLog.WarnContext(ctx, "cannot open CI cache; falling back to in-memory", "err", err)
@@ -532,7 +534,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		// Partial inventory, live logs, or import also leave membership incomplete.
 		taskMgr.CompleteRestoration(errors.Join(instanceRes.err, loadErr, importErr, historyErr))
 
-		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx, taskMgr)); err != nil {
+		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx)); err != nil {
 			if ctx.Err() != nil {
 				appLog.InfoContext(ctx, "usage rollup backfill interrupted by shutdown", "err", err)
 			} else {
@@ -737,7 +739,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 // between phases, so a shutdown interrupts the pass at the next phase boundary
 // (a phase in flight — the scan or compression loops — still runs to
 // completion).
-func runSettledHistory(ctx context.Context, log *slog.Logger, logStore *taskslog.Store, taskMgr *taskmgr.Manager) error {
+func runSettledHistory(ctx context.Context, log *slog.Logger, logStore *taskhistory.Store, taskMgr *taskmgr.Manager) error {
 	startupCtx, tk := trace.NewTask(ctx, "prepare-purged-task-logs")
 	defer tk.End()
 	log = log.With("phase", "settled-history")
@@ -783,7 +785,7 @@ func runSettledHistory(ctx context.Context, log *slog.Logger, logStore *taskslog
 	return nil
 }
 
-func loadRuntimeTaskLogs(ctx context.Context, logStore *taskslog.Store, inventory *runtime.Router, instances []runtime.Instance) ([]*taskslog.LoadedTask, error) {
+func loadRuntimeTaskLogs(ctx context.Context, logStore *taskhistory.Store, inventory *runtime.Router, instances []runtime.Instance) ([]*taskhistory.LoadedTask, error) {
 	ids := make([]string, 0, len(instances))
 	var errs []error
 	for i := range instances {

@@ -109,9 +109,12 @@ func (*SmokeBackend) AgentArgs(agent.HarnessArgs) []string {
 	return []string{"python3", "-u", smokeAgentPath}
 }
 
+// NewMetadataParser creates an independent fixture metadata projection.
+func (*SmokeBackend) NewMetadataParser() agent.MessageParser { return &fixtureMetadataParser{} }
+
 // NewWire implements agent.Backend.
-func (b *SmokeBackend) NewWire() agent.WireFormat {
-	return b
+func (*SmokeBackend) NewWire() agent.WireFormat {
+	return &SmokeBackend{}
 }
 
 // WritePrompt writes the prompt as plain text.

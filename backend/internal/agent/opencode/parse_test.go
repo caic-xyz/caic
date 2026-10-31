@@ -354,7 +354,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := parseTestMessage(input)
+		msgs, err := New("", nil).NewWire().ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -711,8 +711,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 5
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      5,
@@ -755,8 +757,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("Cancelled", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 7
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":7,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      7,
@@ -785,8 +789,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("CacheOnlyUsage", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 8
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":8,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      8,
@@ -816,8 +822,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("Error", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 9
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":9,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      9,
@@ -847,8 +855,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("EmptyPromptUsageStaysEmpty", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 3
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      3,
@@ -871,8 +881,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("NonPromptResponse", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 5
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      99, // Different ID.
@@ -890,46 +902,18 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("ReplayPromptResponseWithoutRequestID", func(t *testing.T) {
+	t.Run("UncorrelatedPromptShapedResponse", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
-		for _, text := range []string{"Done", "."} {
-			chunk := mustJSON(t, map[string]any{
-				"jsonrpc": "2.0",
-				"method":  "session/update",
-				"params": map[string]any{
-					"sessionId": "ses_1",
-					"update": map[string]any{
-						"sessionUpdate": "agent_message_chunk",
-						"content":       map[string]any{"type": "text", "text": text},
-					},
-				},
-			})
-			if _, err := w.ParseOutput(chunk); err != nil {
-				t.Fatal(err)
-			}
-		}
-		resp := mustJSON(t, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      42,
-			"result":  map[string]any{"stopReason": "end_turn"},
-		})
-		msgs, err := w.ParseOutput(resp)
+		msgs, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","id":42,"result":{"stopReason":"end_turn"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 2 {
-			t.Fatalf("msgs = %d, want 2", len(msgs))
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want raw response", len(msgs))
 		}
-		tm, ok := msgs[0].(*agent.TextMessage)
-		if !ok {
-			t.Fatalf("msgs[0] type = %T, want *agent.TextMessage", msgs[0])
-		}
-		if tm.Text != "Done." {
-			t.Errorf("Text = %q, want Done.", tm.Text)
-		}
-		if _, ok := msgs[1].(*agent.ResultMessage); !ok {
-			t.Fatalf("msgs[1] type = %T, want *agent.ResultMessage", msgs[1])
+		if _, ok := msgs[0].(*agent.RawMessage); !ok {
+			t.Fatalf("response = %T, want raw", msgs[0])
 		}
 	})
 
@@ -1005,8 +989,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("SyntheticFinalMessages", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{sessionID: "ses_1"}
-		w.promptReqID = 10
+		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 
 		// Simulate streaming chunks.
 		for _, text := range []string{"Hello ", "world"} {
@@ -1077,7 +1063,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("AccumulationOverflowKeepsStreamingHistoryAuthoritative", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{promptReqID: 10}
+		w := &wireFormat{}
+		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{}}`)); err != nil {
+			t.Fatal(err)
+		}
 		chunk := func(text string) []byte {
 			return mustJSON(t, map[string]any{
 				"jsonrpc": "2.0",

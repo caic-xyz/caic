@@ -1,4 +1,4 @@
-// Defines the Backend interface and model inventories shared by coding-agent implementations.
+// Defines backend capabilities, model inventories, and fresh full and metadata parser factories.
 
 package agent
 
@@ -62,21 +62,34 @@ type Backend interface {
 	// NewWire creates a fresh WireFormat for this backend. Each call returns
 	// independent state; suitable for use outside the normal relay transport.
 	NewWire() WireFormat
+
+	// NewMetadataParser creates independent directional state for session and
+	// accounting reconstruction without decoding transcript payloads.
+	NewMetadataParser() MessageParser
 }
 
 // Backends maps each configured harness to its agent backend.
 //
-// ResolveWire returns an independent wire format for one harness, suitable for
+// ResolveParser returns an independent message parser for one harness, suitable for
 // stateful task-log reconstruction.
 type Backends map[harness.Name]Backend
 
-// ResolveWire constructs a fresh wire format for h.
-func (b Backends) ResolveWire(h harness.Name) (WireFormat, error) {
+// ResolveParser constructs a fresh full message parser for h.
+func (b Backends) ResolveParser(h harness.Name) (MessageParser, error) {
 	backend := b[h]
 	if backend == nil {
 		return nil, fmt.Errorf("unknown harness %q", h)
 	}
 	return backend.NewWire(), nil
+}
+
+// ResolveMetadataParser constructs a fresh lightweight metadata parser for h.
+func (b Backends) ResolveMetadataParser(h harness.Name) (MessageParser, error) {
+	backend := b[h]
+	if backend == nil {
+		return nil, fmt.Errorf("unknown harness %q", h)
+	}
+	return backend.NewMetadataParser(), nil
 }
 
 // Model describes the configuration choices supported by one model.

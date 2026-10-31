@@ -60,6 +60,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
 	"github.com/maruel/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
@@ -749,272 +751,6 @@ func (s *Session) Wait() error {
 	return s.err
 }
 
-// LogRecordParser validates v3 physical task-log records and optionally decodes
-// harness-native messages. A parser holds ordered log state and is not safe for
-// concurrent use.
-type LogRecordParser struct {
-	native        MessageParser
-	contextWindow int
-}
-
-// NewLogRecordParser constructs a v3 task-log parser.
-// native owns ordered input/output protocol state for the complete stream.
-func NewLogRecordParser(native MessageParser) (*LogRecordParser, error) {
-	if native == nil {
-		return nil, errors.New("native message parser is nil")
-	}
-	return &LogRecordParser{native: native}, nil
-}
-
-// NewPhysicalLogRecordParser validates framing, native JSON and host controls
-// without interpreting provider payloads.
-//
-// Reconciliation uses it before the complete ordered history is available for
-// semantic decoding.
-func NewPhysicalLogRecordParser() *LogRecordParser {
-	return &LogRecordParser{native: physicalMessageParser{}}
-}
-
-// ParseRecord decodes one v3 physical task-log record.
-// Classification belongs to this parser so task-log consumers
-// never duplicate or guess control vocabulary.
-func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
-	return parseV3Record(p, line)
-}
-
-func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
-	switch kind {
-	case logControlMeta:
-		var m MetaMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if err := m.Validate(); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		return []Message{&m}, nil
-	case logControlDiffStat:
-		var m DiffStatMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeDiffStat
-		return []Message{&m}, nil
-	case logControlExit:
-		var m ExitMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeExit
-		return []Message{&m}, nil
-	case logControlStrippedEnv:
-		var m StrippedEnvMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeStrippedEnv
-		return []Message{&m}, nil
-	case logControlSession:
-		var m MetaSessionMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeSession
-		return []Message{&m}, nil
-	case logControlModelInfo:
-		var m ModelInfoMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if m.ContextWindow > 0 {
-			if int64(int(m.ContextWindow)) != m.ContextWindow {
-				return nil, fmt.Errorf("decode %s: context_window out of range", token)
-			}
-			p.contextWindow = int(m.ContextWindow)
-		}
-		return nil, nil
-	case logControlPR:
-		var m MetaPRMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypePR
-		return []Message{&m}, nil
-	case logControlResult:
-		var m MetaResultMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeResult
-		return []Message{&m}, nil
-	case logControlTurnCommitSnapshot:
-		var m TurnCommitSnapshotMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeTurnCommitSnapshot
-		return []Message{&m}, nil
-	case logControlPendingUserAction:
-		var m PendingUserActionMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = PendingUserActionMessageType
-		return []Message{&m}, nil
-	case logControlProvisioningLog:
-		var m LogMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		m.MessageType = messageTypeProvisioningLogRecord
-		return []Message{&m}, nil
-	case logControlContextCleared:
-		var m SystemMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if m.Subtype != "" && m.Subtype != messageSubtypeContextCleared {
-			return nil, fmt.Errorf("decode %s: unexpected subtype %q", token, m.Subtype)
-		}
-		cleared := ContextCleared()
-		*cleared.Provenance() = *m.Provenance()
-		return []Message{cleared}, nil
-	case logControlInputDeliveryFailed:
-		var m SystemMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if m.Subtype != SystemSubtypeInputDeliveryFailed {
-			return nil, fmt.Errorf("decode %s: unexpected subtype %q", token, m.Subtype)
-		}
-		m.MessageType = messageTypeSystem
-		return []Message{&m}, nil
-	case logControlInputDelivery:
-		var m SystemMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if !IsInputDeliveryControl(&m) {
-			return nil, fmt.Errorf("decode %s: unexpected subtype %q", token, m.Subtype)
-		}
-		m.MessageType = messageTypeSystem
-		return []Message{&m}, nil
-	case logControlText:
-		var m TextMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		return []Message{&m}, nil
-	case logControlUserInput:
-		var m UserInputMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		return []Message{&m}, nil
-	case logControlMCPRequest:
-		var m MCPRequestMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if m.ID == "" || (mcp.Method(m.Method) != mcp.MethodToolsList && (mcp.Method(m.Method) != mcp.MethodToolsCall || m.Name == "")) {
-			return nil, fmt.Errorf("decode %s: invalid MCP request", token)
-		}
-		return []Message{&m}, nil
-	case logControlRelayGeneration:
-		var m RelayGenerationMessage
-		if err := decodeLogControl(line, &m); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", token, err)
-		}
-		if m.Generation == "" {
-			return nil, fmt.Errorf("decode %s: generation is empty", token)
-		}
-		m.MessageType = messageTypeRelayGeneration
-		return []Message{&m}, nil
-	default:
-		return nil, fmt.Errorf("decode %s: unknown control kind %d", token, kind)
-	}
-}
-
-func (p *LogRecordParser) parseAndApplyNative(line []byte, input bool) ([]Message, error) {
-	var msgs []Message
-	var err error
-	if input {
-		msgs, err = p.native.ParseInput(line)
-	} else {
-		msgs, err = p.native.ParseOutput(line)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return p.applyMessageState(msgs)
-}
-
-func wrapParsedMessages(msgs []Message, producerTime time.Time) []TimedMessage {
-	if len(msgs) == 0 {
-		return nil
-	}
-	out := make([]TimedMessage, len(msgs))
-	for i, msg := range msgs {
-		out[i] = TimedMessage{Message: msg, ProducerTime: producerTime}
-	}
-	return out
-}
-
-func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
-	for i, msg := range msgs {
-		if messageIsNil(msg) {
-			return nil, fmt.Errorf("native message %d is nil", i)
-		}
-	}
-	if len(msgs) == 0 {
-		return nil, nil
-	}
-	out := make([]Message, 0, len(msgs))
-	for _, msg := range msgs {
-		if m, ok := msg.(*UsageMessage); ok && !m.Source.IsChild() && m.ContextWindow == 0 && p.contextWindow > 0 {
-			m.ContextWindow = p.contextWindow
-		}
-		out = append(out, msg)
-	}
-	return out, nil
-}
-
-type physicalMessageParser struct{}
-
-func (physicalMessageParser) ParseInput([]byte) ([]Message, error)  { return nil, nil }
-func (physicalMessageParser) ParseOutput([]byte) ([]Message, error) { return nil, nil }
-
-type logControlKind int
-
-const (
-	logControlMeta logControlKind = iota
-	logControlDiffStat
-	logControlExit
-	logControlStrippedEnv
-	logControlSession
-	logControlModelInfo
-	logControlPR
-	logControlResult
-	logControlTurnCommitSnapshot
-	logControlPendingUserAction
-	logControlProvisioningLog
-	logControlContextCleared
-	logControlInputDeliveryFailed
-	logControlInputDelivery
-	logControlText
-	logControlUserInput
-	logControlMCPRequest
-	logControlRelayGeneration
-)
-
-// ParsedRecord is a parser-owned semantic task-log record. Control reports
-// whether the physical discriminator identifies a caic-owned control.
-type ParsedRecord struct {
-	Messages   []TimedMessage
-	Provenance RecordProvenance
-	Control    bool
-}
-
 // RelayRecordReader reads one physical relay record at a time. Agent payloads
 // are returned as their unchanged native JSON; caic controls are returned only
 // as parsed controls and never presented as native handshake data. log is the
@@ -1508,7 +1244,7 @@ func relayOutputGeneration(ctx context.Context, container string) (string, error
 	if err := json.Unmarshal(out, &record); err != nil {
 		return "", fmt.Errorf("decode relay generation: %w", err)
 	}
-	if record.Type != string(logRecordRelayGeneration) {
+	if record.Type != string(taskslog.KindRelayGeneration) {
 		return "", nil
 	}
 	if record.Generation == "" {
@@ -1524,7 +1260,6 @@ func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
 // readRelayTailRecords parses one stat-bounded relay snapshot and returns the
 // exact physical offset consumed, including a skipped partial tail record.
 func readRelayTailRecords(r io.Reader, start int64, skipFirst bool, src, generation string) (timeline RelaySnapshot, offset int64, err error) {
-	parser := NewPhysicalLogRecordParser()
 	reader := bufio.NewReaderSize(r, 1<<20)
 	offset = start
 	currentGeneration := generation
@@ -1548,7 +1283,8 @@ func readRelayTailRecords(r io.Reader, start int64, skipFirst bool, src, generat
 		if len(line) == 0 {
 			continue
 		}
-		parsed, parseErr := parser.ParseRecord(line)
+		frame, parseErr := taskslog.DecodeFrame(line)
+		parsed := ParsedRecord{Provenance: FrameProvenance(&frame)}
 		if parseErr != nil {
 			return timeline, offset, fmt.Errorf("parse relay record from %s: %w", src, parseErr)
 		}

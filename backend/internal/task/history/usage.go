@@ -1,16 +1,17 @@
 // Usage rollup projections stream neutral aggregate rows from retained task logs.
 
-package taskslog
+package history
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -35,12 +36,8 @@ type usageLogPath struct {
 	startedAt time.Time
 }
 
-func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.Seq2[data.UsageRow, error] {
+func storeUsageRows(s *Store, ctx context.Context) iter.Seq2[data.UsageRow, error] {
 	return func(yield func(data.UsageRow, error) bool) {
-		if resolver == nil {
-			yield(data.UsageRow{}, errors.New("native wire resolver is required"))
-			return
-		}
 		if err := ctx.Err(); err != nil {
 			yield(data.UsageRow{}, err)
 			return
@@ -64,7 +61,7 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 						results[i].err = err
 						return
 					}
-					results[i].task, results[i].err = loadLogHeader(s.log, path, false)
+					results[i].task, results[i].err = loadLogHeader(s.log, path, false, s.resolver)
 				})
 			}
 			wg.Wait()
@@ -77,7 +74,7 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 					s.log.WarnContext(ctx, "skip unreadable task log during usage backfill", "path", paths[start+i], "err", result.err)
 					continue
 				}
-				result.task.SetWireResolver(resolver)
+
 				for row, err := range result.task.UsageRows(ctx) {
 					if err != nil {
 						s.log.WarnContext(ctx, "skip unreadable task log during usage backfill", "path", result.task.LogPath(), "err", err)
@@ -96,7 +93,7 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 }
 
 func usageLogPaths(ctx context.Context, s *Store) ([]string, error) {
-	paths, err := readOnlyLogPaths(s.LogDir)
+	paths, err := readOnlyLogPaths(s.Journal.LogDir)
 	if err != nil {
 		return nil, err
 	}
@@ -139,22 +136,9 @@ func usageLogPaths(ctx context.Context, s *Store) ([]string, error) {
 // loadUsageStartedAt reads the header timestamp needed to order a retained
 // log stream. Its small initial scanner buffer avoids allocating a full scan
 // buffer for every path during the metadata-only ordering pass.
-func loadUsageStartedAt(path string) (startedAt time.Time, retErr error) {
-	r, err := openLogReader(path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer func() {
-		if err := r.Close(); retErr == nil {
-			retErr = err
-		}
-	}()
-	scanner := newPhysicalLogScannerWithBuffer(r, path, 4<<10)
-	meta, err := scanner.ReadHeader()
-	if err != nil {
-		return time.Time{}, err
-	}
-	return meta.StartedAt, nil
+func loadUsageStartedAt(path string) (time.Time, error) {
+	meta, err := taskslog.ReadHeader(path)
+	return meta.StartedAt, err
 }
 
 func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow, error] {
@@ -261,6 +245,10 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 func usageClaudeModel(current string, m agent.Message) string {
 	switch m := m.(type) {
 	case *agent.InitMessage:
+		if m.ReportedModel != "" {
+			return m.ReportedModel
+		}
+	case *agent.SessionMetadataMessage:
 		if m.ReportedModel != "" {
 			return m.ReportedModel
 		}

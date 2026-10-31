@@ -1,4 +1,4 @@
-// Package opencode implements agent.Backend for OpenCode via ACP with task-scoped MCP.
+// Package opencode implements ACP sessions with shared directional metadata and task-scoped MCP.
 // ACP (Agent Client Protocol) uses JSON-RPC 2.0 over stdin/stdout.
 package opencode
 
@@ -90,7 +90,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
-		SessionID:      hs.wire.sessionID,
+		SessionID:      hs.wire.session.SessionID,
 		ReportedModel:  hs.currentModel,
 		ReportedEffort: hs.currentEffort,
 		Version:        hs.agentVersion,
@@ -137,7 +137,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	if opts.ResumeSessionID == "" {
 		return nil, errors.New("opencode: missing session ID for relay attach")
 	}
-	wire := &wireFormat{sessionID: opts.ResumeSessionID, nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
+	wire := &wireFormat{session: agent.SessionMetadata{SessionID: opts.ResumeSessionID}, nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
@@ -146,6 +146,9 @@ func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
 	return &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 }
+
+// NewMetadataParser implements agent.Backend with an independent metadata projection.
+func (*Backend) NewMetadataParser() agent.MessageParser { return &metadataState{} }
 
 // FetchModelInventory implements agent.ModelFetcher.
 func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
@@ -171,13 +174,12 @@ const maxAccumulatedOutputBytes = 1 << 20
 // It holds per-session state: the session ID, a request ID counter,
 // prompt state and image support flag.
 type wireFormat struct {
-	nativeSubagents nativeSubagents
-	sessionID       string // Set during handshake; read-only after.
-	supportsImage   bool   // Set during handshake; read-only after.
+	metadataState
 
-	mu             sync.Mutex
+	nativeSubagents nativeSubagents
+	supportsImage   bool // Set during handshake; read-only after.
+
 	nextID         int64
-	promptReqID    int64               // JSON-RPC ID of the current session/prompt request.
 	skillReadCalls map[string]struct{} // active tool calls whose skill read was emitted
 	textAccum      strings.Builder     // Accumulated text from agent_message_chunk.
 	thinkAccum     strings.Builder     // Accumulated text from agent_thought_chunk.
@@ -188,14 +190,17 @@ type wireFormat struct {
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
 	w.mu.Lock()
-	if w.sessionID == "" {
+	if w.session.SessionID == "" {
 		w.mu.Unlock()
 		return errors.New("opencode: no session ID (handshake not completed)")
 	}
 	id := w.allocIDLocked()
-	w.promptReqID = id
+	if w.requests == nil {
+		w.requests = make(map[int64]pendingRequest)
+	}
+	w.requests[id] = pendingRequest{method: opencode.MethodSessionPrompt}
 	w.resetAccumulatedOutputLocked()
-	sessionID, supportsImage := w.sessionID, w.supportsImage
+	sessionID, supportsImage := w.session.SessionID, w.supportsImage
 	w.mu.Unlock()
 	content := make([]opencode.PromptContent, 0, 1+len(p.Images))
 	content = append(content, opencode.PromptContent{Type: opencode.ContentText, Text: p.Text})
@@ -233,13 +238,18 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal input: %w", err)
 	}
+	if _, err := w.metadataState.ParseInput(line); err != nil {
+		return nil, err
+	}
 	if probe.ID != nil && string(probe.ID) != "null" && probe.Method != "" {
 		var id int64
 		if err := json.Unmarshal(probe.ID, &id); err != nil {
 			return nil, fmt.Errorf("unmarshal request ID: %w", err)
 		}
 		if opencode.Method(probe.Method) == opencode.MethodSessionPrompt {
-			w.notePromptRequest(id)
+			w.mu.Lock()
+			w.resetAccumulatedOutputLocked()
+			w.mu.Unlock()
 			var prompt opencode.SessionPromptParams
 			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
 				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
@@ -278,17 +288,19 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
-	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
-		var id int64
-		if json.Unmarshal(probe.ID, &id) == nil {
-			w.mu.Lock()
-			isPromptResp := id == w.promptReqID && w.promptReqID != 0
-			w.mu.Unlock()
-			if isPromptResp || isPromptResultResponse(line) {
-				return w.handlePromptResponseLocked(line)
+	metadata, handled, err := w.parseOutput(line, &probe)
+	if err != nil {
+		return nil, err
+	}
+	if handled {
+		if len(metadata) > 0 {
+			if result, ok := metadata[0].(*agent.ResultMessage); ok {
+				return w.finishPrompt(result), nil
 			}
 		}
-		// Other responses pass through as RawMessage.
+		return metadata, nil
+	}
+	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
 	}
 
@@ -347,13 +359,6 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	return msgs, nil
 }
 
-func (w *wireFormat) notePromptRequest(id int64) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.promptReqID = id
-	w.resetAccumulatedOutputLocked()
-}
-
 func (w *wireFormat) resetAccumulatedOutputLocked() {
 	w.textAccum.Reset()
 	w.thinkAccum.Reset()
@@ -370,15 +375,6 @@ func appendAccumulatedOutput(builder *strings.Builder, overflow *bool, text stri
 	builder.WriteString(text)
 }
 
-func isPromptResultResponse(line []byte) bool {
-	var resp opencode.JSONRPCMessage
-	if err := json.Unmarshal(line, &resp); err != nil || resp.Result == nil {
-		return false
-	}
-	var pr opencode.PromptResult
-	return json.Unmarshal(resp.Result, &pr) == nil && pr.StopReason != ""
-}
-
 // allocIDLocked returns the next JSON-RPC request ID. Not thread-safe; callers
 // must hold mu or be in the single-threaded handshake phase.
 func (w *wireFormat) allocIDLocked() int64 {
@@ -386,46 +382,8 @@ func (w *wireFormat) allocIDLocked() int64 {
 	return w.nextID
 }
 
-// handlePromptResponseLocked converts a session/prompt JSON-RPC response into
-// a ResultMessage with accumulated usage. Emits synthetic TextMessage and
-// ThinkingMessage from accumulated deltas before the ResultMessage.
-// Must not be called under mu.
-func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, error) {
-	var resp opencode.JSONRPCMessage
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal prompt response: %w", err)
-	}
-	rm := &agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "result",
-	}
-	if resp.Error != nil {
-		rm.IsError = true
-		rm.Result = resp.Error.Message
-	} else if resp.Result != nil {
-		var pr opencode.PromptResult
-		if err := json.Unmarshal(resp.Result, &pr); err == nil {
-			if pr.StopReason == opencode.StopReasonCancelled || pr.StopReason == opencode.StopReasonRefusal {
-				rm.IsError = true
-				rm.Result = string(pr.StopReason)
-			}
-			if pr.Usage != (opencode.PromptUsage{}) {
-				// ACP reports cache reads and writes but no duration bucket or
-				// applied retention policy. OpenCode supports many providers and
-				// gateways, so leave the cache TTL unknown rather than inferring it
-				// from the selected model or request adapter:
-				// https://github.com/anomalyco/opencode/blob/69c172e8a7c0086887b1f93ed5a162f14b6aa0c5/packages/opencode/src/acp/usage.ts
-				// https://github.com/anomalyco/opencode/blob/69c172e8a7c0086887b1f93ed5a162f14b6aa0c5/packages/opencode/src/provider/transform.ts
-				rm.Usage = agent.Usage{
-					InputTokens:              pr.Usage.InputTokens,
-					OutputTokens:             pr.Usage.OutputTokens,
-					CacheReadInputTokens:     pr.Usage.CachedReadTokens,
-					CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
-					ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
-				}
-			}
-		}
-	}
+// finishPrompt emits consolidated output before the normalized terminal report.
+func (w *wireFormat) finishPrompt(rm *agent.ResultMessage) []agent.Message {
 	// Emit synthetic final messages from accumulated deltas, then reset.
 	w.mu.Lock()
 	var msgs []agent.Message
@@ -439,7 +397,7 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 	clear(w.skillReadCalls)
 	w.mu.Unlock()
 	msgs = append(msgs, rm)
-	return msgs, nil
+	return msgs
 }
 
 // handshakeResult bundles everything returned by a successful handshake.
@@ -496,7 +454,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 		return err
 	}
 
-	initResp, err := readJSONRPCResponse(ctx, records, handleMCP)
+	initResp, err := readJSONRPCResponse(ctx, records, initReq.ID, handleMCP)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read initialize response: %w", err)
 	}
@@ -504,10 +462,15 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	// Extract capabilities and agent info.
 	var initResult opencode.InitializeResult
 	if initResp.Result != nil {
-		if json.Unmarshal(initResp.Result, &initResult) == nil {
-			w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
-			res.agentVersion = initResult.AgentInfo.Version
+		if err := json.Unmarshal(initResp.Result, &initResult); err != nil {
+			return nil, nil, fmt.Errorf("parse initialize result: %w", err)
 		}
+		w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
+		metadata, err := sessionResultMetadata(opencode.MethodInitialize, "", initResp.Result)
+		if err != nil {
+			return nil, nil, err
+		}
+		res.agentVersion = metadata.AgentVersion
 	}
 
 	// 2. Create or resume session. Use ACP's native MCP registration so user
@@ -555,7 +518,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	}
 
 	// Read session response.
-	resp, err := readJSONRPCResponse(ctx, records, handleMCP)
+	resp, err := readJSONRPCResponse(ctx, records, sessionReq.ID, handleMCP)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read session response: %w", err)
 	}
@@ -565,16 +528,12 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
 		return nil, nil, fmt.Errorf("parse session result: %w", err)
 	}
-	if snResult.SessionID != "" {
-		w.sessionID = snResult.SessionID
-	} else if opts.ResumeSessionID != "" {
-		// session/load doesn't return sessionId in the result.
-		w.sessionID = opts.ResumeSessionID
+	metadata, err := sessionResultMetadata(sessionReq.Method, opts.ResumeSessionID, resp.Result)
+	if err != nil {
+		return nil, nil, fmt.Errorf("session metadata: %w", err)
 	}
-	if w.sessionID == "" {
-		return nil, nil, errors.New("session response missing sessionId")
-	}
-	res.setModels(snResult.Models)
+	w.session.SessionID = metadata.SessionID
+	res.currentModel, res.currentEffort = metadata.ReportedModel, metadata.ReportedEffort
 	if err := res.setConfigOptions(snResult.ConfigOptions); err != nil {
 		return nil, nil, err
 	}
@@ -595,24 +554,24 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 		}
 	}
 
+	w.session.Update(agent.SessionMetadata{ReportedModel: res.currentModel, ReportedEffort: res.currentEffort, AgentVersion: res.agentVersion})
 	return res, records.Reader(), nil
-}
-
-func (res *handshakeResult) setModels(models opencode.ModelsInfo) {
-	res.currentModel = models.CurrentModelID
 }
 
 func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) error {
 	res.configOptions = options
-	if model := res.configOption(opencode.ConfigOptionModel); model != nil {
-		if err := json.Unmarshal(model.CurrentValue, &res.currentModel); err != nil {
-			return fmt.Errorf("decode current model configuration: %w", err)
+	m := &agent.SessionMetadata{}
+	for i := range options {
+		option := &options[i]
+		if err := applyConfigValue(m, option.ID, option.CurrentValue); err != nil {
+			return err
 		}
 	}
-	if effort := res.configOption(opencode.ConfigOptionEffort); effort != nil {
-		if err := json.Unmarshal(effort.CurrentValue, &res.currentEffort); err != nil {
-			return fmt.Errorf("decode current effort configuration: %w", err)
-		}
+	if m.ReportedModel != "" {
+		res.currentModel = m.ReportedModel
+	}
+	if m.ReportedEffort != "" {
+		res.currentEffort = m.ReportedEffort
 	}
 	return nil
 }
@@ -637,16 +596,17 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	if id != opencode.ConfigOptionModel && !hasConfigValue(option.Options, value) {
 		return fmt.Errorf("opencode ACP %q value %q is unavailable", id, value)
 	}
-	params, err := marshalParams(opencode.SetSessionConfigOptionParams{SessionID: res.wire.sessionID, ConfigID: id, Value: value})
+	params, err := marshalParams(opencode.SetSessionConfigOptionParams{SessionID: res.wire.session.SessionID, ConfigID: id, Value: value})
 	if err != nil {
 		return fmt.Errorf("marshal session/set_config_option params: %w", err)
 	}
+	requestID := res.wire.allocIDLocked()
 	if err := writeJSONInput(stdin, opencode.JSONRPCRequest{
-		JSONRPC: "2.0", ID: res.wire.allocIDLocked(), Method: opencode.MethodSessionSetConfigOption, Params: params,
+		JSONRPC: "2.0", ID: requestID, Method: opencode.MethodSessionSetConfigOption, Params: params,
 	}, log); err != nil {
 		return fmt.Errorf("write session/set_config_option: %w", err)
 	}
-	resp, err := readJSONRPCResponse(ctx, records, handleMCP)
+	resp, err := readJSONRPCResponse(ctx, records, requestID, handleMCP)
 	if err != nil {
 		return fmt.Errorf("read session/set_config_option response: %w", err)
 	}
@@ -719,10 +679,9 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 	return nil
 }
 
-// readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
-// (has "id" field). It services task-scoped MCP controls so an eager MCP
-// client cannot block the ACP handshake; other notifications are skipped.
-func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, handleMCP func(agent.MCPRequest) error) (*opencode.JSONRPCMessage, error) {
+// readJSONRPCResponse waits for the expected request reply, servicing task-scoped
+// MCP controls so an eager client cannot block the ACP handshake.
+func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, expectedID int64, handleMCP func(agent.MCPRequest) error) (*opencode.JSONRPCMessage, error) {
 	for {
 		line, controls, err := r.ReadRecord()
 		if err != nil {
@@ -752,6 +711,13 @@ func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, handle
 			return nil, fmt.Errorf("unmarshal response: %w", err)
 		}
 		if msg.IsResponse() {
+			var id int64
+			if err := json.Unmarshal(msg.ID, &id); err != nil {
+				return nil, fmt.Errorf("decode response ID: %w", err)
+			}
+			if id != expectedID {
+				continue
+			}
 			if msg.Error != nil {
 				return nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)
 			}

@@ -1,12 +1,13 @@
-// Encodes and decodes v3 task-log controls as semantic messages.
+// Encodes semantic controls and forwards exact native records to physical journal writers.
 
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
@@ -48,10 +49,6 @@ func MarshalLogMessage(m Message) ([]byte, error) {
 		record = r
 	case *ExitMessage:
 		r := v3.ExitMessage(*m)
-		r.MessageType = string(token)
-		record = r
-	case *MetaMessage:
-		r := v3.MetaMessage(*m)
 		r.MessageType = string(token)
 		record = r
 	case *MetaSessionMessage:
@@ -96,122 +93,7 @@ func MarshalLogMessage(m Message) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func decodeLogData[T any](line []byte, strict bool) (T, error) {
-	var record T
-	if !strict {
-		err := json.Unmarshal(line, &record)
-		return record, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	decoder.DisallowUnknownFields()
-	err := decoder.Decode(&record)
-	return record, err
-}
-func decodeLogControl(line []byte, out Message) error {
-	switch out := out.(type) {
-	case *TextMessage:
-		record, err := decodeLogData[v3.TextMessage](line, true)
-		if err != nil {
-			return err
-		}
-		*out = TextMessage(record)
-	case *UserInputMessage:
-		record, err := decodeLogData[v3.UserInputMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = UserInputMessage(record)
-	case *SystemMessage:
-		record, err := decodeLogData[v3.SystemMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = SystemMessage(record)
-	case *LogMessage:
-		record, err := decodeLogData[v3.LogMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = LogMessage(record)
-	case *StrippedEnvMessage:
-		record, err := decodeLogData[v3.StrippedEnvMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = StrippedEnvMessage(record)
-	case *DiffStatMessage:
-		record, err := decodeLogData[v3.DiffStatMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = DiffStatMessage(record)
-	case *ExitMessage:
-		record, err := decodeLogData[v3.ExitMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = ExitMessage(record)
-	case *MetaMessage:
-		record, err := decodeLogData[v3.MetaMessage](line, true)
-		if err != nil {
-			return err
-		}
-		*out = MetaMessage(record)
-	case *MetaSessionMessage:
-		record, err := decodeLogData[v3.MetaSessionMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = MetaSessionMessage(record)
-	case *RelayGenerationMessage:
-		record, err := decodeLogData[v3.RelayGenerationMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = RelayGenerationMessage(record)
-	case *ModelInfoMessage:
-		record, err := decodeLogData[v3.ModelInfoMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = ModelInfoMessage(record)
-	case *MetaResultMessage:
-		record, err := decodeLogData[v3.MetaResultMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = logV3MetaResultMessageFromData(&record)
-	case *MetaPRMessage:
-		record, err := decodeLogData[v3.MetaPRMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = MetaPRMessage(record)
-	case *TurnCommitSnapshotMessage:
-		record, err := decodeLogData[v3.TurnCommitSnapshotMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = TurnCommitSnapshotMessage(record)
-	case *PendingUserActionMessage:
-		record, err := decodeLogData[v3.PendingUserActionMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = PendingUserActionMessage(record)
-	case *MCPRequestMessage:
-		record, err := decodeLogData[v3.MCPRequestMessage](line, false)
-		if err != nil {
-			return err
-		}
-		*out = MCPRequestMessage(record)
-	default:
-		return fmt.Errorf("unsupported task-log control %T", out)
-	}
-	return nil
-}
-
-func logV3MetaResultMessageToData(m *MetaResultMessage, token logRecordType) v3.MetaResultMessage {
+func logV3MetaResultMessageToData(m *MetaResultMessage, token taskslog.Kind) v3.MetaResultMessage {
 	return v3.MetaResultMessage{
 		MessageProvenance:        m.MessageProvenance,
 		MessageType:              string(token),
@@ -273,3 +155,26 @@ func logCacheWritesFromData(total, oneHour int, buckets []v3.CacheWrite) []v3.Ca
 	}
 	return out
 }
+
+// RecordedLog encodes runtime controls over an owned physical byte writer.
+type RecordedLog struct{ writer taskslog.Writer }
+
+// NewRecordedLog transfers the writer's close ownership to the agent recorder.
+func NewRecordedLog(writer taskslog.Writer) *RecordedLog { return &RecordedLog{writer: writer} }
+
+// AppendRecord forwards exact bytes; append provenance belongs to the task owner.
+func (l *RecordedLog) AppendRecord(record PhysicalRecord) error {
+	return l.writer.Append(record.Encoded)
+}
+
+// AppendMessage encodes one caic-owned control before writing it.
+func (l *RecordedLog) AppendMessage(m Message) error {
+	data, err := MarshalLogMessage(m)
+	if err != nil {
+		return err
+	}
+	return l.writer.Append(append(data, '\n'))
+}
+
+// Close closes the owned byte writer.
+func (l *RecordedLog) Close() error { return l.writer.Close() }

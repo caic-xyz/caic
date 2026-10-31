@@ -20,7 +20,7 @@ import (
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -127,6 +127,11 @@ func (*Backend) NewWire() agent.WireFormat {
 	return newWireFormat()
 }
 
+// NewMetadataParser creates an independent content-free session/accounting parser.
+func (*Backend) NewMetadataParser() agent.MessageParser {
+	return &metadataParser{childModels: make(map[agent.ToolKey]string)}
+}
+
 var _ agent.Backend = (*Backend)(nil)
 
 // recordedQuestion is input interpretation context, not a delivery outcome.
@@ -146,11 +151,11 @@ type recordedQuestion struct {
 // instance is created for every session so this state can't leak between
 // concurrent Claude Code tasks sharing the registered Backend singleton.
 type wireFormat struct {
+	metadataState
+
 	nativeSubagents    nativeSubagents
 	backgroundCommands backgroundCommands
 	widgetTracker      *WidgetTracker
-	reasoning          metadata.Reasoning
-	reportedModel      string
 	// pendingSkillUses maps a Skill tool use ID to the skill its success
 	// loads into the main context, until the paired tool result arrives. The
 	// value is empty for a call naming no skill and for a subagent's call.
@@ -158,8 +163,6 @@ type wireFormat struct {
 	// askSources retains Ask ownership across controls and retries until completion.
 	askSources       map[agent.ToolKey]agent.MessageSource
 	questionRequests map[string]recordedQuestion
-	sessionID        string
-	childModels      map[agent.ToolKey]string
 	// loadedSkill is the skill whose Skill call succeeded. Its load waits one
 	// record for the synthetic injection that names the skill directory.
 	loadedSkill *agent.SkillLoadMessage
@@ -206,7 +209,6 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 				clear(w.askSources)
 				clear(w.questionRequests)
 			}
-			w.sessionID = init.SessionID
 		}
 	}
 	if record.source.ThreadID == "" && record.harnessRecord && !record.askControl {
@@ -341,7 +343,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if record.cancelRequestID != "" {
 		w.retireQuestion(record.cancelRequestID)
 	}
-	w.reasoning.Apply(&record.source, record.reasoningEstimate, msgs)
+	w.apply(&record.source, record.reasoningEstimate, msgs, line)
 	if loaded != nil && agent.ToolKeyForSource(loaded.Provenance(), "") == agent.ToolKeyForSource(&record.source, "") {
 		loaded.Path = skillPath(record.user)
 	}
@@ -349,10 +351,6 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	for _, msg := range msgs {
 		keep := true
 		switch m := msg.(type) {
-		case *agent.InitMessage:
-			if m.ReportedModel != "" && !m.Source.IsChild() {
-				w.reportedModel = m.ReportedModel
-			}
 		case *agent.SkillReadMessage:
 			// Track the read so its paired tool result stays suppressed, even
 			// when the read itself is dropped below for lacking a skill name.
@@ -387,32 +385,10 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 					w.loadedSkill = &agent.SkillLoadMessage{Source: *m.Provenance(), Skill: load}
 				}
 			}
-		case *agent.UsageMessage:
-			switch {
-			case m.Source.IsChild():
-				key := agent.ToolKeyForSource(m.Provenance(), "")
-				if m.ReportedModel != "" {
-					w.childModels[key] = m.ReportedModel
-				} else if model := w.childModels[key]; model != "" {
-					m.ReportedModel, m.ModelDerived = model, true
-				}
-			case m.ReportedModel != "":
-				w.reportedModel = m.ReportedModel
-			case w.reportedModel != "":
-				// message_delta usage events carry no model; attribute them
-				// to the session's active model. The stamp is derived, so the
-				// task pricing fold must not price this record per call: the
-				// assistant record already covers the same API call.
-				m.ReportedModel = w.reportedModel
-				m.ModelDerived = true
-			}
 		case *agent.ResultMessage:
 			if m.Source.IsChild() {
 				break
 			}
-			// Claude Code reports the active model's context window only in the
-			// turn result, so this is the earliest point caic can learn it.
-			m.ContextWindow = resultContextWindow(line, w.reportedModel)
 			// A turn boundary drops skill reads whose result never arrived.
 			clear(w.pendingSkillUses)
 		}
@@ -431,7 +407,8 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 // model is unambiguous even when the session model is still unknown.
 func resultContextWindow(line []byte, model string) int {
 	var w claudecode.OutputResultMsg
-	if json.Unmarshal(line, &w) != nil {
+	raw, err := agent.JSONField(line, "modelUsage")
+	if err != nil || len(raw) == 0 || json.Unmarshal(raw, &w.ModelUsage) != nil {
 		return 0
 	}
 	if e, ok := w.ModelUsage[model]; ok && e.ContextWindow > 0 {

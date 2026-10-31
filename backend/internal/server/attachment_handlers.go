@@ -12,10 +12,11 @@ import (
 	"net/http"
 	"strings"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"golang.org/x/image/draw"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 
 // attachmentError maps a lookup failure to its client-facing status.
 func attachmentError(err error) error {
-	if errors.Is(err, taskslog.ErrAttachmentNotFound) {
+	if errors.Is(err, taskhistory.ErrAttachmentNotFound) {
 		return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "image not found"}
 	}
 	return err

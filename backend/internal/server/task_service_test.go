@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"path/filepath"
 	"testing"
 
@@ -237,7 +240,7 @@ func newGatedInputSession(t *testing.T, tk *taskrun.Task) (*agent.Session, *gate
 	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{}}
 	r := &taskrun.AgentRuntime{
 		Backends:         agent.Backends{harness.Claude: backend},
-		LogStore:         taskslog.NewStore(testLogger(), t.TempDir()),
+		LogStore:         taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
 		LogPath:          &taskslog.Path{},
 		Log:              testLogger(),
 		NotifyTaskChange: func() {},

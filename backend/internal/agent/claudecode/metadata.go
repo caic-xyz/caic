@@ -1,6 +1,6 @@
-// Package metadata projects Claude session metadata and normalizes ordered token accounting without retaining transcript content.
+// Projects Claude session metadata and normalizes ordered token accounting without retaining transcript content.
 
-package metadata
+package claudecode
 
 import (
 	"encoding/json"
@@ -14,16 +14,16 @@ import (
 	"github.com/maruel/genai/providers/claudecode"
 )
 
-// Reasoning accumulates root-turn thinking usage until its completed result.
+// reasoning accumulates root-turn thinking usage until its completed result.
 // Live parsing and inventory use the same precedence and turn boundary.
-type Reasoning struct {
+type reasoning struct {
 	actual    int
 	estimated int
 }
 
 // Apply observes one decoded record. Child accounting cannot alter the root
 // turn. Explicit result usage wins over preceding actual usage, then estimates.
-func (r *Reasoning) Apply(source *agent.MessageSource, estimate int, messages []agent.Message) {
+func (r *reasoning) Apply(source *agent.MessageSource, estimate int, messages []agent.Message) {
 	r.observe(source, estimate, 0)
 	for _, message := range messages {
 		if message.Provenance().IsChild() {
@@ -44,22 +44,22 @@ func (r *Reasoning) Apply(source *agent.MessageSource, estimate int, messages []
 	}
 }
 
-func (r *Reasoning) observe(source *agent.MessageSource, estimate, actual int) {
+func (r *reasoning) observe(source *agent.MessageSource, estimate, actual int) {
 	if !source.IsChild() {
 		r.actual += actual
 		r.estimated += max(0, estimate)
 	}
 }
 
-// Parser projects ordered native metadata for inventory. It borrows usage
+// metadataParser projects ordered native metadata for inventory. It borrows usage
 // fields and never decodes assistant content, tools or streamed thinking text.
-type Parser struct {
-	reasoning Reasoning
+type metadataParser struct {
+	metadataState
 }
 
-// Parse returns session reports, assistant model reports and normalized results.
+// ParseOutput returns session reports, assistant model reports and normalized results.
 // Other records only contribute their root-turn reasoning accounting.
-func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
+func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 	typ, err := borrowedString(line, "type")
 	if err != nil {
 		return nil, err
@@ -84,37 +84,39 @@ func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		if claudecode.SystemSubtype(subtype) == claudecode.SystemInit {
-			msg, err := ParseInit(line)
+			msg, err := parseInit(line)
 			if err != nil {
 				return nil, err
 			}
-			return []agent.Message{msg}, nil
+			messages := []agent.Message{msg}
+			p.apply(msg.Provenance(), 0, messages, line)
+			return messages, nil
 		}
 		if claudecode.SystemSubtype(subtype) != claudecode.SystemThinkingTokens {
 			return nil, nil
 		}
-		estimate, err = ReasoningEstimate(line)
+		estimate, err = reasoningEstimate(line)
 		if err != nil {
 			return nil, err
 		}
 	case claudecode.OutputResult:
-		msg, err := ParseResult(line)
+		msg, err := parseResult(line)
 		if err != nil {
 			return nil, err
 		}
 		messages := []agent.Message{msg}
-		p.reasoning.Apply(msg.Provenance(), 0, messages)
+		p.apply(msg.Provenance(), 0, messages, line)
 		return messages, nil
 	default:
 		return nil, nil
 	}
-	parent, err := agent.JSONString(line, "parent_tool_use_id")
+	source, err := parseSource(line)
 	if err != nil {
 		return nil, err
 	}
-	source := agent.MessageSource{DelegationToolUseID: parent}
-	var actual int
-	var published bool
+	if source.ThreadID == "" {
+		source.ThreadID = p.sessionID
+	}
 	if len(usagePath) != 0 {
 		raw, err := agent.JSONField(line, usagePath...)
 		if err != nil {
@@ -123,19 +125,32 @@ func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
 		if len(raw) == 0 {
 			return nil, nil
 		}
-		actual, published, err = reasoningUsage(raw, claudecode.OutputType(typ) == claudecode.OutputAssistant)
-		if err != nil {
+		var usage claudecode.MsgUsage
+		if err := json.Unmarshal(raw, &usage); err != nil {
 			return nil, err
 		}
-	}
-	p.reasoning.observe(&source, estimate, actual)
-	if published && claudecode.OutputType(typ) == claudecode.OutputAssistant {
-		model, err := agent.JSONString(line, "message", "model")
-		if err != nil {
-			return nil, err
+		model := ""
+		if claudecode.OutputType(typ) == claudecode.OutputAssistant {
+			model, err = agent.JSONString(line, "message", "model")
+			if err != nil {
+				return nil, err
+			}
 		}
-		return []agent.Message{&agent.UsageMessage{Source: source, ReportedModel: model}}, nil
+		var message *agent.UsageMessage
+		if claudecode.OutputType(typ) == claudecode.OutputAssistant {
+			message = assistantUsage(&usage, model)
+		} else if normalized := normalizeUsage(&usage); hasUsage(normalized) {
+			message = &agent.UsageMessage{Usage: normalized}
+		}
+		if message == nil {
+			return nil, nil
+		}
+		message.Source = source
+		messages := []agent.Message{message}
+		p.apply(&source, estimate, messages, line)
+		return messages, nil
 	}
+	p.reasoning.observe(&source, estimate, 0)
 	return nil, nil
 }
 
@@ -155,63 +170,8 @@ func borrowedString(line []byte, keys ...string) ([]byte, error) {
 	return jsonparser.Unescape(value, nil)
 }
 
-// reasoningUsage borrows only the scalar fields needed by the ordered fold.
-// Inventory has no consumer for cache buckets or per-iteration usage.
-func reasoningUsage(raw []byte, assistant bool) (actual int, published bool, err error) {
-	if string(raw) == "null" {
-		return 0, false, nil
-	}
-	var counts [4]int64
-	var thinking int64
-	err = jsonparser.ObjectEach(raw, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
-		if kind == jsonparser.Null {
-			return nil
-		}
-		var dst *int64
-		switch string(key) {
-		case "input_tokens":
-			dst = &counts[0]
-		case "output_tokens":
-			dst = &counts[1]
-		case "cache_creation_input_tokens":
-			dst = &counts[2]
-		case "cache_read_input_tokens":
-			dst = &counts[3]
-		case "output_tokens_details":
-			if kind != jsonparser.Object {
-				return fmt.Errorf("%s: expected object", key)
-			}
-			return jsonparser.ObjectEach(value, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
-				if string(key) != "thinking_tokens" || kind == jsonparser.Null {
-					return nil
-				}
-				if kind != jsonparser.Number {
-					return errors.New("thinking_tokens: expected integer")
-				}
-				var err error
-				thinking, err = jsonparser.ParseInt(value)
-				return err
-			})
-		default:
-			return nil
-		}
-		if kind != jsonparser.Number {
-			return fmt.Errorf("%s: expected integer", key)
-		}
-		n, err := jsonparser.ParseInt(value)
-		*dst = n
-		return err
-	})
-	// Assistant usage is published only when a token count is present.
-	// Stream deltas can carry reasoning alone.
-	if assistant && counts[0] <= 0 && counts[1] <= 0 && counts[2] <= 0 && counts[3] <= 0 {
-		return 0, false, err
-	}
-	return int(thinking), true, err
-}
-
-// ReasoningEstimate decodes the incremental system/thinking_tokens estimate.
-func ReasoningEstimate(line []byte) (int, error) {
+// reasoningEstimate decodes the incremental system/thinking_tokens estimate.
+func reasoningEstimate(line []byte) (int, error) {
 	raw, err := agent.JSONField(line, "estimated_tokens_delta")
 	if err != nil || len(raw) == 0 || string(raw) == "null" {
 		return 0, err
@@ -223,8 +183,8 @@ func ReasoningEstimate(line []byte) (int, error) {
 	return int(max(0, delta)), nil
 }
 
-// ParseInit decodes native session initialization, including its provenance.
-func ParseInit(line []byte) (*agent.InitMessage, error) {
+// parseInit decodes native session initialization, including its provenance.
+func parseInit(line []byte) (*agent.InitMessage, error) {
 	var w claudecode.OutputInitMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
@@ -244,11 +204,41 @@ func ParseInit(line []byte) (*agent.InitMessage, error) {
 	}, nil
 }
 
-// ParseResult decodes a native completed result, including its provenance.
-// The ordered Reasoning fold supplies usage omitted from this record.
-func ParseResult(line []byte) (*agent.ResultMessage, error) {
+// parseResult decodes a native completed result, including its provenance.
+// The ordered reasoning fold supplies usage omitted from this record.
+func parseResult(line []byte) (*agent.ResultMessage, error) {
 	var w claudecode.OutputResultMsg
-	if err := json.Unmarshal(line, &w); err != nil {
+	if err := jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
+		var dst any
+		switch string(key) {
+		case "type":
+			dst = &w.Type
+		case "subtype":
+			dst = &w.Subtype
+		case "is_error":
+			dst = &w.IsError
+		case "duration_ms":
+			dst = &w.Duration
+		case "duration_api_ms":
+			dst = &w.DurationAPI
+		case "num_turns":
+			dst = &w.NumTurns
+		case "session_id":
+			dst = &w.SessionID
+		case "total_cost_usd":
+			dst = &w.TotalCostUSD
+		case "usage":
+			dst = &w.Usage
+		case "uuid":
+			dst = &w.UUID
+		default:
+			return nil
+		}
+		if kind == jsonparser.String {
+			value = append(append([]byte{'"'}, value...), '"')
+		}
+		return json.Unmarshal(value, dst)
+	}); err != nil {
 		return nil, err
 	}
 	source, err := parseSource(line)
@@ -263,10 +253,9 @@ func ParseResult(line []byte) (*agent.ResultMessage, error) {
 		DurationMs:    w.Duration.AsDuration().Milliseconds(),
 		DurationAPIMs: w.DurationAPI.AsDuration().Milliseconds(),
 		NumTurns:      w.NumTurns,
-		Result:        w.Result,
 		SessionID:     w.SessionID,
 		TotalCostUSD:  w.TotalCostUSD,
-		Usage:         Usage(&w.Usage),
+		Usage:         normalizeUsage(&w.Usage),
 		UUID:          w.UUID,
 	}, nil
 }
@@ -283,8 +272,8 @@ func parseSource(line []byte) (source agent.MessageSource, err error) {
 	return source, nil
 }
 
-// Usage converts the wire MsgUsage to the backend-neutral agent.Usage.
-func Usage(u *claudecode.MsgUsage) agent.Usage {
+// normalizeUsage converts the wire MsgUsage to the backend-neutral agent.Usage.
+func normalizeUsage(u *claudecode.MsgUsage) agent.Usage {
 	usage := agent.Usage{
 		InputTokens:              int(u.InputTokens),
 		OutputTokens:             int(u.OutputTokens),
@@ -315,4 +304,68 @@ func Usage(u *claudecode.MsgUsage) agent.Usage {
 		usage.CacheTTLSeconds = 3600
 	}
 	return usage
+}
+
+// ParseInput ignores client content; Claude initialization is reported on stdout.
+func (*metadataParser) ParseInput([]byte) ([]agent.Message, error) { return nil, nil }
+
+// metadataState owns model attribution and turn accounting in both projections.
+type metadataState struct {
+	reasoning     reasoning
+	reportedModel string
+	sessionID     string
+	childModels   map[agent.ToolKey]string
+}
+
+func (s *metadataState) apply(source *agent.MessageSource, estimate int, messages []agent.Message, line []byte) {
+	s.reasoning.Apply(source, estimate, messages)
+	for _, message := range messages {
+		switch m := message.(type) {
+		case *agent.InitMessage:
+			if !m.Source.IsChild() {
+				if m.SessionID != "" {
+					s.sessionID = m.SessionID
+				}
+				if m.ReportedModel != "" {
+					s.reportedModel = m.ReportedModel
+				}
+			}
+		case *agent.UsageMessage:
+			switch {
+			case m.Source.IsChild():
+				key := agent.ToolKeyForSource(m.Provenance(), "")
+				if m.ReportedModel != "" {
+					s.childModels[key] = m.ReportedModel
+				} else if model := s.childModels[key]; model != "" {
+					m.ReportedModel, m.ModelDerived = model, true
+				}
+			case m.ReportedModel != "":
+				s.reportedModel = m.ReportedModel
+			case s.reportedModel != "":
+				m.ReportedModel, m.ModelDerived = s.reportedModel, true
+			}
+		case *agent.ResultMessage:
+			if !m.Source.IsChild() {
+				// Native results are the first report of the active context window.
+				m.ContextWindow = resultContextWindow(line, s.reportedModel)
+			}
+		}
+	}
+}
+
+// assistantUsage publishes only the token-bearing native assistant reports.
+// Reasoning-only deltas have a separate publication rule.
+func assistantUsage(u *claudecode.MsgUsage, model string) *agent.UsageMessage {
+	if u.InputTokens <= 0 && u.OutputTokens <= 0 && u.CacheCreationInputTokens <= 0 && u.CacheReadInputTokens <= 0 {
+		return nil
+	}
+	return &agent.UsageMessage{Usage: normalizeUsage(u), ReportedModel: model}
+}
+
+func hasUsage(u agent.Usage) bool {
+	return u.InputTokens > 0 ||
+		u.OutputTokens > 0 ||
+		u.CacheCreationInputTokens > 0 ||
+		u.CacheReadInputTokens > 0 ||
+		u.ReasoningOutputTokens > 0
 }

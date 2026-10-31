@@ -1,6 +1,6 @@
 // Benchmarks realistic warm and cold task-log adoption scans.
 
-package taskslog
+package history
 
 import (
 	"bufio"
@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -140,9 +143,9 @@ func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 		LogSize: f.size,
 		path:    f.path,
 	}
-	lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+	lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 		return claudecode.New().NewWire(), nil
-	}))
+	})
 
 	return lt
 }
@@ -164,14 +167,15 @@ type adoptionProcessIO struct {
 func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 	b.StopTimer()
 	fixture := newAdoptionBenchmarkFixture(b)
-	store := NewStore(testLogger(), fixture.dir)
+	resolver := backends.Default("", nil)
+	store := NewStore(testLogger(), taskslog.NewStore(fixture.dir), resolver)
 	bl := testLogger()
 	operations := []adoptionBenchmarkOperation{
 		{
 			name: "LoadLogHeader",
 			prepare: func() func() error {
 				return func() error {
-					if _, err := loadLogHeader(bl, fixture.path, true); err != nil {
+					if _, err := loadLogHeader(bl, fixture.path, true, resolver); err != nil {
 						return err
 					}
 					return nil
@@ -188,7 +192,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 					if err := os.Remove(logHeaderCachePath(fixture.path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 						return err
 					}
-					if _, err := loadLogHeader(bl, fixture.path, true); err != nil {
+					if _, err := loadLogHeader(bl, fixture.path, true, resolver); err != nil {
 						return err
 					}
 					return nil
@@ -199,7 +203,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			name: "StoreLoad",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := NewStore(bl, fixture.dir).LoadUnsettled()
+					logs, err := NewStore(bl, taskslog.NewStore(fixture.dir), resolver).LoadUnsettled()
 					if err != nil {
 						return err
 					}
@@ -208,13 +212,6 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 					}
 					return nil
 				}
-			},
-		},
-		{
-			name: "LoadSessionMetadata",
-			prepare: func() func() error {
-				lt := fixture.loadedTask()
-				return lt.LoadSessionMetadata
 			},
 		},
 		{
@@ -278,7 +275,7 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			name: "CombinedLiveAdoption",
 			prepare: func() func() error {
 				return func() error {
-					logs, err := NewStore(bl, fixture.dir).LoadForTaskIDs([]string{fixture.id.String()})
+					logs, err := NewStore(bl, taskslog.NewStore(fixture.dir), resolver).LoadForTaskIDs([]string{fixture.id.String()})
 					if err != nil {
 						return err
 					}
@@ -286,15 +283,10 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 						return fmt.Errorf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 					}
 					lt := logs[0]
-					lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+					lt.resolver = newTestParserResolver(func(harness.Name) (agent.WireFormat, error) {
 						return claudecode.New().NewWire(), nil
-					}))
+					})
 
-					if lt.SessionID == "" || lt.AgentVersion == "" {
-						if err := lt.LoadSessionMetadata(); err != nil {
-							return err
-						}
-					}
 					if err := lt.LoadMessages(); err != nil {
 						return err
 					}
@@ -386,7 +378,7 @@ func BenchmarkDecodeDiscriminatorProbe(b *testing.B) {
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
 			for range b.N {
-				_, _ = decodeDiscriminatorProbe(line)
+				_, _ = taskslog.DecodeFrame(line)
 			}
 		})
 	}
@@ -502,7 +494,7 @@ func BenchmarkSettledScanAgeFilter(b *testing.B) {
 				b.StopTimer()
 				clearHeaderCaches(b, dir)
 				b.StartTimer()
-				st := NewStore(testLogger(), dir)
+				st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 				st.cutoff, st.maxSettledPerRepo = tc.cutoff, 0
 				if _, err := st.LoadSettled(); err != nil {
 					b.Fatal(err)
@@ -584,7 +576,7 @@ func BenchmarkSettledLoadCap(b *testing.B) {
 				b.StopTimer()
 				clearHeaderCaches(b, dir)
 				b.StartTimer()
-				st := NewStore(testLogger(), dir)
+				st := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
 				st.cutoff, st.maxSettledPerRepo = cutoff, tc.limitPerRepo
 				if _, err := st.LoadSettled(); err != nil {
 					b.Fatal(err)

@@ -1,410 +1,182 @@
-// Strict canonical v3 task-log decoding, including input delivery outcomes and observation times.
+// Converts validated v3 frames to ordered agent events and relay provenance.
 
 package agent
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math"
-	"slices"
-	"strconv"
 	"time"
-	"unicode/utf8"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-// logRecordType is the compact top-level "t" discriminator in v3 task-log records.
-type logRecordType string
-
-func decodeV3ControlFields(line []byte) (token logRecordType, fields []string, err error) {
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	opening, err := decoder.Token()
-	if err != nil {
-		return "", nil, err
+// FrameProvenance classifies a validated relay frame without provider decoding.
+// Local appends and import batches choose local provenance at their owner.
+func FrameProvenance(frame *taskslog.Frame) RecordProvenance {
+	var p RecordProvenance
+	switch frame.Kind { //nolint:exhaustive // Only relay-owned kinds carry remote cursor provenance.
+	case taskslog.KindAgent, taskslog.KindDiffStat, taskslog.KindExit, taskslog.KindStrippedEnv, taskslog.KindMCPRequest, taskslog.KindRelayGeneration:
+		p.Source = RecordSourceRelay
 	}
-	if opening != json.Delim('{') {
-		return "", nil, errors.New("record must be a JSON object")
+	if m, ok := frame.Control.(*v3.RelayGenerationMessage); ok {
+		p.Generation = m.Generation
 	}
-
-	seen := make(map[string]struct{})
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return "", nil, err
-		}
-		field, ok := keyToken.(string)
-		if !ok {
-			return "", nil, errors.New("record field name is not a string")
-		}
-		if _, duplicate := seen[field]; duplicate {
-			return "", nil, fmt.Errorf("duplicate top-level field %q", field)
-		}
-		seen[field] = struct{}{}
-		fields = append(fields, field)
-
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return "", nil, err
-		}
-		if field == "t" {
-			if err := json.Unmarshal(value, &token); err != nil {
-				return "", nil, fmt.Errorf("top-level t must be a string: %w", err)
-			}
-		}
-	}
-	closing, err := decoder.Token()
-	if err != nil {
-		return "", nil, err
-	}
-	if closing != json.Delim('}') {
-		return "", nil, errors.New("record has an invalid closing delimiter")
-	}
-	if trailing, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid trailing data: %w", err)
-		}
-		return "", nil, fmt.Errorf("unexpected trailing token %v", trailing)
-	}
-	return token, fields, nil
+	return p
 }
 
-func (t logRecordType) controlKind() (logControlKind, bool) {
-	switch t {
-	case logRecordMeta:
-		return logControlMeta, true
-	case logRecordDiffStat, logRecordGitSummary:
-		return logControlDiffStat, true
-	case logRecordExit:
-		return logControlExit, true
-	case logRecordStrippedEnv:
-		return logControlStrippedEnv, true
-	case logRecordSession:
-		return logControlSession, true
-	case logRecordModelInfo:
-		return logControlModelInfo, true
-	case logRecordPR:
-		return logControlPR, true
-	case logRecordResult:
-		return logControlResult, true
-	case logRecordTurnCommitSnapshot:
-		return logControlTurnCommitSnapshot, true
-	case logRecordPendingUserAction:
-		return logControlPendingUserAction, true
-	case logRecordProvisioningLog:
-		return logControlProvisioningLog, true
-	case logRecordContextCleared:
-		return logControlContextCleared, true
-	case logRecordInputDeliveryFailed:
-		return logControlInputDeliveryFailed, true
-	case logRecordInputDelivery:
-		return logControlInputDelivery, true
-	case logRecordText:
-		return logControlText, true
-	case logRecordUserInput:
-		return logControlUserInput, true
-	case logRecordMCPRequest:
-		return logControlMCPRequest, true
-	case logRecordRelayGeneration:
-		return logControlRelayGeneration, true
-	default:
-		return 0, false
-	}
+// LogRecordParser interprets validated frames with ordered native protocol state.
+// ParseRecord also performs physical validation for live relay readers.
+// A parser is not safe for concurrent use.
+type LogRecordParser struct {
+	native        MessageParser
+	contextWindow int
 }
 
-func (t logRecordType) relayOwned() bool {
-	return t == logRecordAgent || t == logRecordDiffStat || t == logRecordExit ||
-		t == logRecordStrippedEnv || t == logRecordMCPRequest || t == logRecordRelayGeneration
+// NewLogRecordParser constructs a v3 task-log parser.
+// native owns ordered input/output protocol state for the complete stream.
+func NewLogRecordParser(native MessageParser) (*LogRecordParser, error) {
+	if native == nil {
+		return nil, errors.New("native message parser is nil")
+	}
+	return &LogRecordParser{native: native}, nil
 }
 
-const (
-	logRecordAgent    logRecordType = "agent"
-	logRecordInput    logRecordType = "input"
-	logRecordMeta     logRecordType = "caic_meta"
-	logRecordDiffStat logRecordType = "diff_stat"
-	logRecordExit     logRecordType = "exit"
-	// Host summaries must never contribute bytes to generation-local relay offsets.
-	logRecordGitSummary          logRecordType = "git_summary"
-	logRecordStrippedEnv         logRecordType = "stripped_env"
-	logRecordSession             logRecordType = "session"
-	logRecordModelInfo           logRecordType = "model_info"
-	logRecordPR                  logRecordType = "pr"
-	logRecordResult              logRecordType = "result"
-	logRecordTurnCommitSnapshot  logRecordType = "turn_commit_snapshot"
-	logRecordPendingUserAction   logRecordType = "pending_user_action"
-	logRecordProvisioningLog     logRecordType = "log"
-	logRecordContextCleared      logRecordType = "context_cleared"
-	logRecordInputDeliveryFailed logRecordType = "input_delivery_failed"
-	logRecordInputDelivery       logRecordType = "input_delivery"
-	logRecordText                logRecordType = "text"
-	logRecordUserInput           logRecordType = "user_input"
-	logRecordMCPRequest          logRecordType = "mcp_request"
-	logRecordRelayGeneration     logRecordType = "relay_generation"
-)
-
-const (
-	v3AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
-	v3InputRecordPrefix   = `{"t":"` + string(logRecordInput) + `","ts":`
-	v3AgentMessagePrefix  = `,"msg":`
-	v3MaxEncodedRecordLen = 32 << 20
-	v3MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
-)
-
-// parseV3Record validates and decodes one canonical v3 physical record.
-// Agent records use the zero-copy fast path; control records use the general
-// decoder and update parser state before the resulting messages are returned.
-func parseV3Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
-	if err := validateV3RecordBytes(line); err != nil {
-		return ParsedRecord{}, err
-	}
-	if bytes.HasPrefix(line, []byte(v3AgentRecordPrefix)) {
-		msgs, err := parseV3NativeRecord(p, line, v3AgentRecordPrefix)
-		return ParsedRecord{Messages: msgs, Provenance: RecordProvenance{Source: RecordSourceRelay}}, err
-	}
-	if bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
-		msgs, err := parseV3NativeRecord(p, line, v3InputRecordPrefix)
-		return ParsedRecord{Messages: msgs}, err
-	}
-
-	// Controls are small and retain ordinary decoding. Canonical agent records
-	// take the branch above, so no valid agent envelope reaches this decoder.
-	token, fields, err := decodeV3ControlFields(line)
+// ParseRecord decodes one v3 physical task-log record.
+// Classification belongs to this parser so task-log consumers
+// never duplicate or guess control vocabulary.
+func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
+	frame, err := taskslog.DecodeFrame(line)
 	if err != nil {
-		return ParsedRecord{}, fmt.Errorf("corrupt v3 log record: decode control discriminator: %w", err)
+		return ParsedRecord{Control: frame.Kind != "" && frame.Kind != taskslog.KindAgent && frame.Kind != taskslog.KindInput, Provenance: FrameProvenance(&frame)}, err
 	}
-	if token == "" {
-		if containsV3ControlField(fields, "type") {
-			return ParsedRecord{}, errors.New("corrupt v3 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v3")
-		}
-		return ParsedRecord{}, errors.New("corrupt v3 log record: missing top-level t")
-	}
-	if token == logRecordAgent {
-		return ParsedRecord{}, errors.New("corrupt v3 agent record: noncanonical envelope")
-	}
-	kind, ok := token.controlKind()
-	if !ok {
-		return ParsedRecord{}, fmt.Errorf("corrupt v3 log record: unknown top-level t %q", token)
-	}
-	record := ParsedRecord{Control: true}
-	if token.relayOwned() {
-		record.Provenance.Source = RecordSourceRelay
-	}
-	if err := validateV3ControlFields(kind, token, fields); err != nil {
+	return p.DecodeFrame(&frame)
+}
+
+// DecodeFrame interprets a validated frame with this scan's ordered native state.
+func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, error) {
+	record := ParsedRecord{Provenance: FrameProvenance(frame), Control: frame.Control != nil}
+	if !record.Control {
+		msgs, err := p.parseAndApplyNative(frame.Native, frame.Kind == taskslog.KindInput)
+		record.Messages = wrapParsedMessages(msgs, frame.ProducerTime)
 		return record, err
 	}
-	msgs, err := p.parseControl(kind, string(token), line)
-	if err != nil {
-		return record, err
+	var msgs []Message
+	switch m := frame.Control.(type) {
+	case *v3.MetaMessage:
+		msgs = []Message{new(MetaMessage(*m))}
+	case *v3.DiffStatMessage:
+		msg := DiffStatMessage(*m)
+		msg.MessageType = messageTypeDiffStat
+		msgs = []Message{&msg}
+	case *v3.ExitMessage:
+		msg := ExitMessage(*m)
+		msg.MessageType = messageTypeExit
+		msgs = []Message{&msg}
+	case *v3.StrippedEnvMessage:
+		msg := StrippedEnvMessage(*m)
+		msg.MessageType = messageTypeStrippedEnv
+		msgs = []Message{&msg}
+	case *v3.MetaSessionMessage:
+		msg := MetaSessionMessage(*m)
+		msg.MessageType = messageTypeSession
+		msgs = []Message{&msg}
+	case *v3.MetaPRMessage:
+		msg := MetaPRMessage(*m)
+		msg.MessageType = messageTypePR
+		msgs = []Message{&msg}
+	case *v3.TurnCommitSnapshotMessage:
+		msg := TurnCommitSnapshotMessage(*m)
+		msg.MessageType = messageTypeTurnCommitSnapshot
+		msgs = []Message{&msg}
+	case *v3.PendingUserActionMessage:
+		msg := PendingUserActionMessage(*m)
+		msg.MessageType = PendingUserActionMessageType
+		msgs = []Message{&msg}
+	case *v3.LogMessage:
+		msg := LogMessage(*m)
+		msg.MessageType = messageTypeProvisioningLogRecord
+		msgs = []Message{&msg}
+	case *v3.TextMessage:
+		msgs = []Message{new(TextMessage(*m))}
+	case *v3.UserInputMessage:
+		msgs = []Message{new(UserInputMessage(*m))}
+	case *v3.MCPRequestMessage:
+		msgs = []Message{new(MCPRequestMessage(*m))}
+
+	case *v3.MetaResultMessage:
+		msg := logV3MetaResultMessageFromData(m)
+		msg.MessageType = messageTypeResult
+		msgs = []Message{&msg}
+	case *v3.ModelInfoMessage:
+		if m.ContextWindow > 0 {
+			p.contextWindow = int(m.ContextWindow)
+		}
+	case *v3.RelayGenerationMessage:
+	case *v3.SystemMessage:
+		msg := SystemMessage(*m)
+		if frame.Kind == taskslog.KindContextCleared {
+			msg = *ContextCleared()
+			msg.MessageProvenance = m.MessageProvenance
+		} else {
+			msg.MessageType = messageTypeSystem
+		}
+		msgs = []Message{&msg}
 	}
+	var err error
 	msgs, err = p.applyMessageState(msgs)
-	record.Messages = wrapParsedMessages(msgs, time.Time{})
-	if kind == logControlUserInput {
-		for i := range record.Messages {
-			input, ok := record.Messages[i].Message.(*UserInputMessage)
-			if !ok {
-				return record, errors.New("invalid user input control message")
-			}
-			if input.Ts < 0 || input.Ts > float64(math.MaxInt64)/1000 {
-				return record, errors.New("invalid user input observation timestamp")
-			}
-			if input.Ts > 0 {
-				record.Messages[i].ProducerTime = time.UnixMilli(int64(math.Round(input.Ts * 1000)))
-			}
-		}
-	}
-	if token == logRecordRelayGeneration && len(msgs) == 1 {
-		generation, ok := msgs[0].(*RelayGenerationMessage)
-		if !ok {
-			return record, errors.New("corrupt v3 relay generation: unexpected message type")
-		}
-		record.Provenance.Generation = generation.Generation
-		record.Messages = nil
-	}
+	record.Messages = wrapParsedMessages(msgs, frame.ProducerTime)
 	return record, err
 }
 
-func containsV3ControlField(fields []string, want string) bool {
-	return slices.Contains(fields, want)
-}
-
-func validateV3ControlFields(kind logControlKind, token logRecordType, fields []string) error {
-	for _, field := range fields {
-		if field == "type" {
-			return errors.New("corrupt v3 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v3")
-		}
-		// The strict decoder in parseControl validates caic_meta fields after
-		// this pass has enforced the v3 discriminator and duplicate-key rules.
-		if kind == logControlMeta || v3ControlFieldAllowed(kind, field) {
-			continue
-		}
-		return fmt.Errorf("corrupt v3 %s record: unknown top-level field %q", token, field)
+func (p *LogRecordParser) parseAndApplyNative(line []byte, input bool) ([]Message, error) {
+	var msgs []Message
+	var err error
+	if input {
+		msgs, err = p.native.ParseInput(line)
+	} else {
+		msgs, err = p.native.ParseOutput(line)
 	}
-	return nil
-}
-
-func v3ControlFieldAllowed(kind logControlKind, field string) bool {
-	if field == "t" || field == "source" {
-		return true
-	}
-	switch kind {
-	case logControlMeta:
-		return false
-	case logControlDiffStat:
-		return field == "diff_stat" || field == "repos" || field == "ts"
-	case logControlExit:
-		switch field {
-		case "cmd", "error", "exit_code", "signal", "stderr_truncated", "ts":
-			return true
-		}
-	case logControlStrippedEnv:
-		return field == "variables"
-	case logControlSession:
-		switch field {
-		case "agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id":
-			return true
-		}
-	case logControlModelInfo:
-		return field == "context_window"
-	case logControlPR:
-		switch field {
-		case "forge_owner", "forge_pr", "forge_repo":
-			return true
-		}
-	case logControlResult:
-		switch field {
-		case "agent_result", "cache_creation_1h_input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title":
-			return true
-		}
-	case logControlTurnCommitSnapshot:
-		return field == "repository_commits" || field == "baseline" || field == "change_stat"
-	case logControlPendingUserAction:
-		return field == "action"
-	case logControlProvisioningLog:
-		return field == "line"
-	case logControlContextCleared, logControlInputDeliveryFailed, logControlInputDelivery:
-		// Released writers emitted the complete SystemMessage projection. Accept
-		// those established fields alongside the compact marker, so RestartSession
-		// history remains replayable; unrelated fields are still rejected.
-		switch field {
-		case "subtype", "session_id", "uuid", "detail", "model", "context_tokens_before", "context_tokens_after":
-			return true
-		}
-		return false
-	case logControlText:
-		switch field {
-		case "phase", "text":
-			return true
-		}
-	case logControlUserInput:
-		switch field {
-		case "images", "text", "ts":
-			return true
-		}
-	case logControlMCPRequest:
-		return field == "id" || field == "method" || field == "name" || field == "arguments"
-	case logControlRelayGeneration:
-		return field == "generation"
-	}
-	return false
-}
-
-func validateV3RecordBytes(line []byte) error {
-	if len(line) >= v3MaxEncodedRecordLen-1 {
-		return fmt.Errorf(
-			"corrupt v3 log record: encoded size with LF must be smaller than %d bytes",
-			v3MaxEncodedRecordLen,
-		)
-	}
-	if !utf8.Valid(line) {
-		return errors.New("corrupt v3 log record: invalid UTF-8")
-	}
-	if bytes.IndexByte(line, '\n') >= 0 {
-		return errors.New("corrupt v3 log record: unexpected LF")
-	}
-	return nil
-}
-
-func parseV3NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]TimedMessage, error) {
-	rest := line[len(prefix):]
-	delimiter := bytes.IndexByte(rest, ',')
-	if delimiter < 0 || !bytes.HasPrefix(rest[delimiter:], []byte(v3AgentMessagePrefix)) {
-		return nil, errors.New("corrupt v3 agent record: invalid timestamp delimiter")
-	}
-	producerTime, err := parseV3ProducerTime(rest[:delimiter])
-	if err != nil {
-		return nil, fmt.Errorf("corrupt v3 agent record: invalid ts: %w", err)
-	}
-
-	msgStart := len(prefix) + delimiter + len(v3AgentMessagePrefix)
-	if msgStart >= len(line) || line[len(line)-1] != '}' {
-		return nil, errors.New("corrupt v3 agent record: missing final msg or closing brace")
-	}
-	msg := line[msgStart : len(line)-1]
-	if len(msg) == 0 {
-		return nil, errors.New("corrupt v3 agent record: missing msg")
-	}
-	if isJSONWhitespace(msg[0]) || isJSONWhitespace(msg[len(msg)-1]) {
-		return nil, errors.New("corrupt v3 agent record: msg has surrounding JSON whitespace")
-	}
-	if bytes.Equal(msg, []byte("null")) {
-		return nil, errors.New("corrupt v3 agent record: null msg")
-	}
-	if !json.Valid(msg) {
-		return nil, errors.New("corrupt v3 agent record: invalid or noncanonical msg envelope")
-	}
-	// msg aliases the scanner-owned record and is valid only for this
-	// synchronous callback. The native parser must not retain it.
-	msgs, err := p.parseAndApplyNative(msg, prefix == v3InputRecordPrefix)
 	if err != nil {
 		return nil, err
 	}
-	return wrapParsedMessages(msgs, producerTime), nil
+	return p.applyMessageState(msgs)
 }
 
-func parseV3ProducerTime(raw []byte) (time.Time, error) {
-	if len(raw) < len("0.000") || raw[len(raw)-4] != '.' {
-		return time.Time{}, errors.New("timestamp must have exactly three fractional digits")
+func wrapParsedMessages(msgs []Message, producerTime time.Time) []TimedMessage {
+	if len(msgs) == 0 {
+		return nil
 	}
-	whole := raw[:len(raw)-4]
-	fraction := raw[len(raw)-3:]
-	if len(whole) == 0 || (whole[0] == '0' && len(whole) != 1) {
-		return time.Time{}, errors.New("timestamp has a noncanonical integer part")
+	out := make([]TimedMessage, len(msgs))
+	for i, msg := range msgs {
+		out[i] = TimedMessage{Message: msg, ProducerTime: producerTime}
 	}
-	for _, digit := range whole {
-		if digit < '0' || digit > '9' {
-			return time.Time{}, errors.New("timestamp integer part must contain only digits")
-		}
-	}
-	for _, digit := range fraction {
-		if digit < '0' || digit > '9' {
-			return time.Time{}, errors.New("timestamp fraction must contain only digits")
-		}
-	}
-
-	seconds, err := strconv.ParseInt(string(whole), 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("timestamp integer is out of range: %w", err)
-	}
-	if seconds > v3MaxUnixSeconds {
-		return time.Time{}, errors.New("timestamp is outside the supported Unix time range")
-	}
-	milliseconds := int64(0)
-	for _, digit := range fraction {
-		milliseconds = milliseconds*10 + int64(digit-'0')
-	}
-	if seconds == 0 && milliseconds == 0 {
-		return time.Time{}, errors.New("timestamp must be positive")
-	}
-
-	nanoseconds := milliseconds * int64(time.Millisecond)
-	producerTime := time.Unix(seconds, nanoseconds).UTC()
-	if producerTime.Unix() != seconds || producerTime.Nanosecond() != int(nanoseconds) {
-		return time.Time{}, errors.New("timestamp is outside the supported Unix time range")
-	}
-	return producerTime, nil
+	return out
 }
 
-func isJSONWhitespace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
+	for i, msg := range msgs {
+		if messageIsNil(msg) {
+			return nil, fmt.Errorf("native message %d is nil", i)
+		}
+	}
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if m, ok := msg.(*UsageMessage); ok && !m.Source.IsChild() && m.ContextWindow == 0 && p.contextWindow > 0 {
+			m.ContextWindow = p.contextWindow
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+// ParsedRecord is a parser-owned semantic task-log record. Control reports
+// whether the physical discriminator identifies a caic-owned control.
+type ParsedRecord struct {
+	Messages   []TimedMessage
+	Provenance RecordProvenance
+	Control    bool
 }

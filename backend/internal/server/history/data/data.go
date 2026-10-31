@@ -10,11 +10,12 @@ type Kind string
 
 // Kind values retained by the pricing journal.
 const (
-	KindExit   Kind = "exit"
-	KindInit   Kind = "init"
-	KindResult Kind = "result"
-	KindSystem Kind = "system"
-	KindUsage  Kind = "usage"
+	KindExit     Kind = "exit"
+	KindInit     Kind = "init"
+	KindMetadata Kind = "metadata"
+	KindResult   Kind = "result"
+	KindSystem   Kind = "system"
+	KindUsage    Kind = "usage"
 )
 
 // Source preserves canonical ownership without importing another schema or runtime.

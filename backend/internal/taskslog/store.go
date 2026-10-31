@@ -1,192 +1,43 @@
-// Store owns task-log initialization, preparation rollback, queued prompts, log segments,
-// sidecar header caches, metadata trailers, terminal compression, and the
-// trimmed startup scans (plain unsettled load, capped settled load, task-ID
-// lookup).
+// Store owns physical task-log initialization, byte appenders, queue sidecars, and compression.
 
 package taskslog
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"iter"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-	"github.com/maruel/ksid"
-
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
 )
 
-// SettledRetention bounds how far back a task log's mtime can be and still
-// reload at startup. Logs last modified before this are skipped by the scan,
-// so their compressed streams are never opened or decoded. It is the Store's
-// default age cutoff, selected by the constructors.
-const SettledRetention = 14 * 24 * time.Hour
-
-// MaxSettledPerRepo caps how many settled (compressed) task logs load per
-// repository, most recently updated first. The cap is applied in the scan,
-// before a log is fully decoded, so capped logs cost only a header read. It
-// is the Store's default per-repo cap, selected by the constructors.
-const MaxSettledPerRepo = 5
-
-// QueuedPrompt is a durable prompt awaiting a task's next waiting turn.
-type QueuedPrompt struct {
-	ID     ksid.ID
-	TaskID ksid.ID
-	Prompt agent.Prompt
+// Writer accepts exact LF-terminated records or batches. Success permits the
+// caller's cursor advancement, without implying fsync or stronger delivery.
+type Writer interface {
+	Append(encoded []byte) error
+	Close() error
 }
 
-// Store owns one task-log directory and its files: JSONL log segments, their
-// sidecar header caches, metadata trailers, and terminal compression. Every
-// operation on the directory goes through the Store, so the layout stays
-// inside this package.
+// Store owns one physical journal directory and serializes compression.
 type Store struct {
-	LogDir string
-
-	log *slog.Logger
-
-	// cutoff is the mtime cutoff for the LoadUnsettled and LoadSettled
-	// scans: logs last modified before it are skipped before decode; zero
-	// scans all ages. maxSettledPerRepo caps LoadSettled at that many logs
-	// per repository; zero loads every repo's full settled history.
-	cutoff            time.Time
-	maxSettledPerRepo int
-
-	// compressMu serializes compressPath calls, so concurrent settlements of
-	// the same log (the startup pass and a task's own terminal path) cannot
-	// interleave on the shared temp file; the loser deterministically adopts
-	// the winner's compressed log.
+	LogDir     string
 	compressMu sync.Mutex
 }
 
-// NewStore creates a Store that owns logDir and every file under it. logDir
-// is the final task-log directory (for example <cacheDir>/tasks); the caller
-// decides where it sits in the cache layout. The directory is created lazily
-// on first write.
-//
-// The scan fields start at the production configuration — the
-// SettledRetention age cutoff and the MaxSettledPerRepo per-repo cap;
-// in-package tests that probe other scan configurations override them
-// directly.
-func NewStore(log *slog.Logger, logDir string) *Store {
-	return &Store{
-		LogDir:            filepath.Clean(logDir),
-		log:               log,
-		cutoff:            time.Now().UTC().Add(-SettledRetention),
-		maxSettledPerRepo: MaxSettledPerRepo,
-	}
-}
-
-// LoadUnsettled scans LogDir for plain (uncompressed) task logs and loads
-// every header, uncapped. This set is a superset of the live tasks: a task is
-// compressed only once terminal, so it also includes recently-terminal logs
-// not yet compressed and abandoned logs that were never settled. Only the
-// header and result trailer are parsed; call LoadMessages for full
-// conversation history. Logs last modified before the Store's age cutoff are
-// skipped, and invalid or corrupt logs are skipped so one historical file
-// cannot prevent startup.
-func (s *Store) LoadUnsettled() ([]*LoadedTask, error) {
-	paths, err := logPaths(s.log, s.LogDir, nil, false, s.cutoff)
-	if err != nil {
-		return nil, err
-	}
-	return loadLogsFromPaths(s.log, paths, logLoadHistory, true)
-}
-
-// LoadSettled scans LogDir for compressed (settled) task logs and loads their
-// headers, capping the load at the Store's per-repo limit (MaxSettledPerRepo
-// by default) in the scan before full decode so capped logs cost only a
-// header read. A base that also has a plain source is skipped so the plain
-// source stays authoritative after an interrupted compression. Logs last
-// modified before the Store's age cutoff are skipped before decode, which
-// keeps cold start cheap as terminal history grows.
-// Unreadable historical logs are logged at ERROR and skipped without failing
-// the scan; runtime restoration uses the strict LoadForTaskIDs path instead.
-func (s *Store) LoadSettled() ([]*LoadedTask, error) {
-	paths, err := logPaths(s.log, s.LogDir, nil, true, s.cutoff)
-	if err != nil {
-		return nil, err
-	}
-	if s.maxSettledPerRepo > 0 {
-		paths = capSettledPaths(s.log, paths, s.maxSettledPerRepo)
-	}
-	return loadLogsFromPaths(s.log, paths, logLoadHistory, true)
-}
-
-// LoadAllReadOnly loads every retained plain or compressed task log without
-// modifying the task-log directory. Plain sources win over compressed siblings
-// left by interrupted settlement. It is intended for background consumers
-// that need complete retained history rather than the bounded startup view.
-func (s *Store) LoadAllReadOnly() ([]*LoadedTask, error) {
-	paths, err := readOnlyLogPaths(s.LogDir)
-	if err != nil {
-		return nil, err
-	}
-	// A path that vanishes or becomes unreadable after ReadDir is unresolved
-	// historical input, not a harmless omission: callers must retry instead of
-	// treating the one-pass scan as complete and writing their sentinel.
-	return loadLogsFromPaths(s.log, paths, logLoadRequired, false)
-}
-
-// LoadForTaskIDs loads plain or archived logs for retained runtime task IDs.
-// Plain sources take precedence over archives left by interrupted compression.
-// Unrelated historical tasks are excluded from startup restoration.
-func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
-	idSet := make(map[string]struct{}, len(taskIDs))
-	for _, id := range taskIDs {
-		if id != "" {
-			idSet[id] = struct{}{}
-		}
-	}
-	if len(idSet) == 0 {
-		return nil, nil
-	}
-	paths, err := logPaths(s.log, s.LogDir, idSet, false, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-	archives, err := logPaths(s.log, s.LogDir, idSet, true, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-	paths = append(paths, archives...)
-	found := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		found[taskIDFromLogBase(trimLogExt(filepath.Base(path)))] = struct{}{}
-	}
-	missing := make([]string, 0)
-	for id := range idSet {
-		if _, ok := found[id]; !ok {
-			missing = append(missing, id)
-		}
-	}
-	slices.Sort(missing)
-
-	tasks, loadErr := loadLogsFromPaths(s.log, paths, logLoadRequired, true)
-	if len(missing) > 0 {
-		loadErr = errors.Join(loadErr, fmt.Errorf("missing task logs for IDs: %s", strings.Join(missing, ", ")))
-	}
-	return tasks, loadErr
-}
+// NewStore creates a physical store; the directory is created on first write.
+func NewStore(logDir string) *Store { return &Store{LogDir: filepath.Clean(logDir)} }
 
 // Open creates a JSONL log segment with a v3 metadata header, or reopens an
 // existing segment without rewriting its header. name must be a base
 // filename (no path separators or "."/".." elements); Open resolves it under
 // LogDir and returns the resolved path.
-func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, string, error) {
+func (s *Store) Open(name string, header *v3.MetaMessage) (Writer, string, error) {
 	path, err := s.resolveName(name)
 	if err != nil {
 		return nil, "", err
@@ -209,7 +60,7 @@ func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, str
 // Initialize exclusively creates and closes a new log with its metadata header.
 // Errors remove the newly created file. Existing files are never reopened or
 // modified. The caller owns Rollback until publication succeeds.
-func (s *Store) Initialize(name string, header *agent.MetaMessage) (*PreparedLog, error) {
+func (s *Store) Initialize(name string, header *v3.MetaMessage) (*PreparedLog, error) {
 	path, err := s.resolveName(name)
 	if err != nil {
 		return nil, err
@@ -261,12 +112,12 @@ func removeOwnedLog(path string, info os.FileInfo) error {
 // header. name must be a base filename (no path separators or "."/".."
 // elements); Reopen resolves it under LogDir and returns the resolved path.
 // A compressed log is restored to a validated plain log before appending.
-func (s *Store) Reopen(name string, header *agent.MetaMessage) (agent.LogSink, string, error) {
+func (s *Store) Reopen(name string, header *v3.MetaMessage) (Writer, string, error) {
 	path, err := s.resolveName(name)
 	if err != nil {
 		return nil, "", err
 	}
-	if isLogCompressed(path) {
+	if IsCompressed(path) {
 		s.compressMu.Lock()
 		defer s.compressMu.Unlock()
 		plain := strings.TrimSuffix(path, ".zst")
@@ -286,9 +137,6 @@ func (s *Store) Reopen(name string, header *agent.MetaMessage) (agent.LogSink, s
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, "", errors.Join(err, w.Close())
 		}
-		if err := os.Remove(logHeaderCachePath(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, "", errors.Join(err, w.Close())
-		}
 		return w, plain, nil
 	}
 	w, _, err := openTaskLogForAppend(path, header, false)
@@ -300,8 +148,8 @@ func (s *Store) Reopen(name string, header *agent.MetaMessage) (agent.LogSink, s
 
 // restorePlainLog publishes a complete, validated decoded log. A decode or
 // header error leaves the archive intact and never publishes a partial log.
-func restorePlainLog(path, plain string, header *agent.MetaMessage) (err error) {
-	in, err := openLogReader(path)
+func restorePlainLog(path, plain string, header *v3.MetaMessage) (err error) {
+	in, err := OpenReader(path)
 	if err != nil {
 		return err
 	}
@@ -330,7 +178,7 @@ func restorePlainLog(path, plain string, header *agent.MetaMessage) (err error) 
 	return nil
 }
 
-func openTaskLogForAppend(path string, header *agent.MetaMessage, create bool) (w *taskLogWriter, created bool, err error) {
+func openTaskLogForAppend(path string, header *v3.MetaMessage, create bool) (w *taskLogWriter, created bool, err error) {
 	cleanPath := filepath.Clean(path)
 	if create {
 		w, err = newTaskLogWriter(cleanPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND)
@@ -355,16 +203,16 @@ func openTaskLogForAppend(path string, header *agent.MetaMessage, create bool) (
 // validateRawLogAppend validates the immutable header needed to safely select
 // the append encoding. caic owns task-log writes, so reopening does not rescan
 // historical records.
-func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) error {
+func validateRawLogAppend(f *os.File, path string, header *v3.MetaMessage) error {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	scanner := newPhysicalLogScanner(f, path)
+	scanner := NewScanner(f, path)
 	if _, err := scanner.ReadHeader(); err != nil {
 		return fmt.Errorf("validate task log for append: %w", err)
 	}
-	if string(scanner.authority.Harness) != header.Harness {
-		return fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, header.Harness)
+	if scanner.Harness != header.Harness {
+		return fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.Harness, header.Harness)
 	}
 
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
@@ -373,122 +221,8 @@ func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) er
 	return nil
 }
 
-// WriteResultTrailer appends a MetaResultMessage to an active task log.
-func (*Store) WriteResultTrailer(log agent.LogSink, title string, res *task.Result) error {
-	if log == nil {
-		return ErrNoLog
-	}
-	return log.AppendMessage(resultTrailer(title, res))
-}
-
-func resultTrailer(title string, res *task.Result) *agent.MetaResultMessage {
-	mr := &agent.MetaResultMessage{
-		MessageType:    "caic_result",
-		State:          res.State.String(),
-		Title:          title,
-		CostUSD:        res.CostUSD,
-		Duration:       res.Duration.Seconds(),
-		NumTurns:       res.NumTurns,
-		DiffStat:       res.DiffStat,
-		DiskUsedBytes:  res.DiskUsedBytes,
-		AgentResult:    res.AgentResult,
-		StartupFailure: res.StartupFailure,
-	}
-	mr.SetUsage(res.Usage)
-	if res.Err != nil {
-		mr.Error = res.Err.Error()
-	}
-	return mr
-}
-
-// WriteContextCleared appends a context_cleared system message to the task log.
-func (*Store) WriteContextCleared(log agent.LogSink) error {
-	if log == nil {
-		return ErrNoLog
-	}
-	return log.AppendMessage(agent.ContextCleared())
-}
-
-// Compress closes log and compresses path only when state is non-revivable.
-// Closing the live writer first ensures the compressed source contains every
-// completed append. A failed compression leaves the plain source for retry.
-func (s *Store) Compress(path string, log agent.LogSink, state task.State) (string, error) {
-	if log != nil {
-		if err := log.Close(); err != nil {
-			return path, fmt.Errorf("close task log before compression: %w", err)
-		}
-	}
-	if !state.IsTerminal() {
-		return path, nil
-	}
-	return s.compressPath(path)
-}
-
-// CompressTerminal closes and compresses a terminal log, then publishes the
-// caller's already-computed task summary beside the immutable compressed file.
-// Cache publication is best-effort: a missing cache only makes the next load
-// fall back to scanning the log, while compression remains authoritative.
-func (s *Store) CompressTerminal(path string, log agent.LogSink, summary *LoadedTask) (string, error) {
-	if summary == nil {
-		return path, errors.New("compress terminal task log: summary is nil")
-	}
-	if !summary.State.IsTerminal() {
-		return path, fmt.Errorf("compress terminal task log: state %q is revivable", summary.State)
-	}
-	if summary.LastTrailer == nil || summary.LastTrailer.State != summary.State {
-		return path, errors.New("compress terminal task log: summary result is missing or inconsistent")
-	}
-	compressed, err := s.Compress(path, log, summary.State)
-	if err != nil {
-		return compressed, err
-	}
-	info, err := os.Stat(filepath.Clean(compressed))
-	if err != nil {
-		return compressed, fmt.Errorf("stat compressed task log: %w", err)
-	}
-	summary.path = compressed
-	summary.LogSize = info.Size()
-	if err := writeHeaderCache(compressed, summary); err != nil {
-		// The immutable log remains the source of truth. Keep completion
-		// successful and make the startup-cost regression visible.
-		s.log.Warn("write compressed task log header cache", "path", compressed, "err", err)
-	}
-	return compressed, nil
-}
-
-// SettleTerminal compresses every terminal plain log in LogDir, regardless of
-// age, skipping the paths in exclude. It runs at startup so terminal logs that
-// fall outside the retention cutoff — which only bounds what the scans
-// register — are settled instead of accumulating uncompressed forever.
-// Exclusions keep the owner's compression authoritative: the caller passes
-// the logs owned by live registry entries so the pass yields to the per-task
-// terminal path; compressPath's compression mutex makes concurrent
-// settlement of the same path safe regardless. Exclude keys are
-// filepath.Clean-ed absolute log paths.
-func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
-	paths, err := logPaths(s.log, s.LogDir, nil, false, time.Time{})
-	if err != nil {
-		return err
-	}
-	logs, err := loadLogsFromPaths(s.log, paths, logLoadSettlement, false)
-	if err != nil {
-		return err
-	}
-	return s.compressTerminalLogs(logs, exclude)
-}
-
-// UsageRows streams reconstructed rows from every retained task log.
-//
-// Loading and parsing begin only when the sequence is iterated. resolver
-// supplies a fresh native wire for each physical log's validated harness.
-// Per-log read or parse failures are logged and skipped; a non-nil error is
-// yielded only for source-wide failures and terminates the sequence.
-func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[data.UsageRow, error] {
-	return storeUsageRows(s, ctx, resolver)
-}
-
 // LoadInputQueue reads pending prompts; an absent file is an empty queue.
-func (s *Store) LoadInputQueue() ([]QueuedPrompt, error) {
+func (s *Store) LoadInputQueue() ([]inputqueue.Entry, error) {
 	f, err := os.Open(filepath.Join(s.LogDir, "input-queue.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -505,25 +239,13 @@ func (s *Store) LoadInputQueue() ([]QueuedPrompt, error) {
 	if token != json.Delim('[') {
 		return nil, errors.New("input queue must be an array")
 	}
-	var out []QueuedPrompt
+	var out []inputqueue.Entry
 	for dec.More() {
 		var entry inputqueue.Entry
 		if err := dec.Decode(&entry); err != nil {
 			return nil, fmt.Errorf("read queued prompt: %w", err)
 		}
-		id, err := ksid.Parse(entry.ID)
-		if err != nil {
-			return nil, fmt.Errorf("queued prompt id: %w", err)
-		}
-		taskID, err := ksid.Parse(entry.TaskID)
-		if err != nil {
-			return nil, fmt.Errorf("queued task id: %w", err)
-		}
-		q := QueuedPrompt{ID: id, TaskID: taskID, Prompt: agent.Prompt{Text: entry.Text}}
-		for _, img := range entry.Images {
-			q.Prompt.Images = append(q.Prompt.Images, v3.ImageData{MediaType: img.MediaType, Data: img.Data})
-		}
-		out = append(out, q)
+		out = append(out, entry)
 	}
 	if _, err := dec.Token(); err != nil {
 		return nil, fmt.Errorf("close input queue: %w", err)
@@ -536,7 +258,7 @@ func (s *Store) LoadInputQueue() ([]QueuedPrompt, error) {
 }
 
 // SaveInputQueue commits a complete replacement before callers publish it.
-func (s *Store) SaveInputQueue(entries []QueuedPrompt) error {
+func (s *Store) SaveInputQueue(entries []inputqueue.Entry) error {
 	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
 		return err
 	}
@@ -557,11 +279,7 @@ func (s *Store) SaveInputQueue(entries []QueuedPrompt) error {
 				break
 			}
 		}
-		entry := inputqueue.Entry{ID: q.ID.String(), TaskID: q.TaskID.String(), Text: q.Prompt.Text}
-		for _, img := range q.Prompt.Images {
-			entry.Images = append(entry.Images, inputqueue.Image{MediaType: img.MediaType, Data: img.Data})
-		}
-		err = enc.Encode(entry)
+		err = enc.Encode(q)
 	}
 	if err == nil {
 		_, err = f.WriteString("]\n")
@@ -576,46 +294,15 @@ func (s *Store) SaveInputQueue(entries []QueuedPrompt) error {
 	return os.Rename(f.Name(), filepath.Join(s.LogDir, "input-queue.json"))
 }
 
-func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]struct{}) error {
-	var errs []error
-	for _, lt := range logs {
-		if lt == nil || !lt.State.IsTerminal() || isLogCompressed(lt.path) {
-			continue
-		}
-		if exclude != nil {
-			if _, ok := exclude[filepath.Clean(lt.path)]; ok {
-				continue
-			}
-		}
-		compressed, err := s.CompressTerminal(lt.path, nil, lt)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		lt.path = compressed
-	}
-	return errors.Join(errs...)
-}
-
-// resolveName validates name is a plain task-log filename and joins it under
-// LogDir, denying any path that escapes it (separators, "..", or absolute
-// paths).
-func (s *Store) resolveName(name string) (string, error) {
-	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
-		return "", fmt.Errorf("task log name must be a base filename, got %q", name)
-	}
-	return filepath.Join(s.LogDir, name), nil
-}
-
-// compressPath atomically replaces a plain terminal task log with its zstd
+// Compress atomically replaces a plain terminal task log with its zstd
 // representation. A failed compression leaves the source log intact. Calls
 // for the same path are serialized by compressMu, so a concurrent compressor
 // either observes the compressed result and returns it, or sees the plain
 // source gone with the compressed sibling present and adopts it.
-func (s *Store) compressPath(path string) (string, error) {
+func (s *Store) Compress(path string) (string, error) {
 	s.compressMu.Lock()
 	defer s.compressMu.Unlock()
-	if path == "" || isLogCompressed(path) {
+	if path == "" || IsCompressed(path) {
 		return path, nil
 	}
 	if !strings.HasSuffix(path, logPlainExt) {
@@ -682,6 +369,16 @@ func (s *Store) compressPath(path string) (string, error) {
 	return dst, nil
 }
 
+// resolveName validates name is a plain task-log filename and joins it under
+// LogDir, denying any path that escapes it (separators, "..", or absolute
+// paths).
+func (s *Store) resolveName(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return "", fmt.Errorf("task log name must be a base filename, got %q", name)
+	}
+	return filepath.Join(s.LogDir, name), nil
+}
+
 // PreparedLog is an initialized, closed task log ready for publication.
 type PreparedLog struct {
 	Path string
@@ -694,10 +391,36 @@ func (p *PreparedLog) Rollback() error {
 	return removeOwnedLog(p.Path, p.info)
 }
 
-func writeMetadataHeader(log agent.LogSink, header *agent.MetaMessage) error {
+// EncodeHeader encodes and validates the canonical v3 physical header without LF.
+func EncodeHeader(header *v3.MetaMessage) ([]byte, error) {
 	meta := *header
-	meta.Version = agent.LogVersionV3
-	if err := log.AppendMessage(&meta); err != nil {
+	meta.Version = 3
+	meta.MessageType = "caic_meta"
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	_, err = DecodeFrame(encoded)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	encoded, err = json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+func writeMetadataHeader(log Writer, header *v3.MetaMessage) error {
+	encoded, err := EncodeHeader(header)
+	if err != nil {
+		return err
+	}
+	if err := log.Append(append(encoded, '\n')); err != nil {
 		return fmt.Errorf("write log metadata: %w", err)
 	}
 	return nil

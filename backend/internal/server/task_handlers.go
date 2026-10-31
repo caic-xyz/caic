@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/coder/websocket"
 	"github.com/maruel/ksid"
 
@@ -34,7 +36,6 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
 // taskHandlers owns task HTTP protocol concerns.
@@ -755,7 +756,7 @@ func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Reque
 		writeError(ctx, w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "image not found"})
 		return
 	}
-	mediaType, data, err := taskslog.FindAttachment(ctx, logPath, h.taskMgr.Backends, location[0], location[1], location[2])
+	mediaType, data, err := taskhistory.FindAttachment(ctx, logPath, h.taskMgr.Backends, location[0], location[1], location[2])
 	if err != nil {
 		writeError(ctx, w, attachmentError(err))
 		return

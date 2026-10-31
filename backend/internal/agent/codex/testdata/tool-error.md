@@ -4,6 +4,7 @@
 
 - **Prompt**: Read the file nonexistent_file.txt
 - **Harness**: codex
+- **Model**: gpt-5.4-mini
 - **Started**: 2026-05-29 14:35:54
 - **State**: completed
 

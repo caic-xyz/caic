@@ -87,19 +87,18 @@ type ReplayRecording struct {
 type ReplayBackend struct {
 	agent.Base
 
-	newWire    func() agent.WireFormat
+	backend    agent.Backend
 	recordings []ReplayRecording
 }
 
 // NewReplayBackend creates a backend that replays one harness's recordings inside
-// the container. A task's prompt selects among them. newWire creates the harness
-// wire format; adapters are stateful, so each caller needs its own factory.
-func NewReplayBackend(newWire func() agent.WireFormat, recordings ...ReplayRecording) (*ReplayBackend, error) {
+// the container. A task's prompt selects among them. backend supplies independent full and metadata parsers for each projection.
+func NewReplayBackend(backend agent.Backend, recordings ...ReplayRecording) (*ReplayBackend, error) {
 	if len(recordings) == 0 {
 		return nil, errors.New("replay backend needs at least one recording")
 	}
-	if newWire == nil {
-		return nil, errors.New("replay backend needs a wire factory")
+	if backend == nil {
+		return nil, errors.New("replay backend needs a provider backend")
 	}
 	seen := make(map[string]struct{}, len(recordings))
 	for _, rec := range recordings {
@@ -118,7 +117,7 @@ func NewReplayBackend(newWire func() agent.WireFormat, recordings ...ReplayRecor
 		}
 		seen[rec.Prompt] = struct{}{}
 	}
-	b := &ReplayBackend{newWire: newWire, recordings: recordings}
+	b := &ReplayBackend{backend: backend, recordings: recordings}
 	b.Base = agent.Base{HarnessID: recordings[0].Harness}
 	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "replay-model", ContextWindow: 200_000}}})
 	return b, nil
@@ -164,7 +163,12 @@ func (*ReplayBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
 
 // NewWire implements agent.Backend. Each call returns an independent wire, so a
 // replayed task log never reuses the session's adapter state.
-func (b *ReplayBackend) NewWire() agent.WireFormat { return NewReplayWire(b.newWire()) }
+func (b *ReplayBackend) NewWire() agent.WireFormat { return NewReplayWire(b.backend.NewWire()) }
+
+// NewMetadataParser reconstructs metadata with the same replay turn marker.
+func (b *ReplayBackend) NewMetadataParser() agent.MessageParser {
+	return replayParser{inner: b.backend.NewMetadataParser()}
+}
 
 // selectRecording returns the recording a task's prompt identifies. A backend
 // that holds one recording accepts any prompt; a harness that retains several
@@ -187,15 +191,15 @@ func (b *ReplayBackend) selectRecording(prompt string) (ReplayRecording, error) 
 
 // NewReplayWire wraps a harness wire so a replay agent's end marker turns into a
 // completed turn, which a minimized recording does not carry.
-func NewReplayWire(inner agent.WireFormat) agent.WireFormat { return replayWire{inner: inner} }
+func NewReplayWire(inner agent.WireFormat) agent.WireFormat {
+	return replayWire{inner: inner}
+}
 
 var _ agent.Backend = (*ReplayBackend)(nil)
 
 // replayWire parses one recording's native records with the harness's own wire
 // and turns the replay agent's end marker into a completed turn.
-type replayWire struct {
-	inner agent.WireFormat
-}
+type replayWire struct{ replayParser }
 
 // WritePrompt writes the prompt as plain text: the replay agent only needs to
 // know that a turn started.
@@ -203,8 +207,10 @@ func (replayWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) er
 	return agent.PlainTextWritePrompt(w, p, log)
 }
 
+type replayParser struct{ inner agent.MessageParser }
+
 // ParseOutput delegates to the harness wire and ends the turn on the marker.
-func (w replayWire) ParseOutput(line []byte) ([]agent.Message, error) {
+func (w replayParser) ParseOutput(line []byte) ([]agent.Message, error) {
 	if bytes.Equal(bytes.TrimSpace(line), replayEndMarker) {
 		return []agent.Message{&agent.ResultMessage{
 			MessageType: "result",
@@ -249,4 +255,6 @@ func replaySessionID() string {
 }
 
 // ParseInput delegates client records to the same harness wire.
-func (w replayWire) ParseInput(line []byte) ([]agent.Message, error) { return w.inner.ParseInput(line) }
+func (w replayParser) ParseInput(line []byte) ([]agent.Message, error) {
+	return w.inner.ParseInput(line)
+}

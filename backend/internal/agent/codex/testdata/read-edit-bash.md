@@ -4,6 +4,7 @@
 
 - **Prompt**: Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
 - **Harness**: codex
+- **Model**: gpt-5.4-mini
 - **Started**: 2026-05-29 14:35:39
 - **State**: completed
 

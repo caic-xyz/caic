@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -232,7 +234,7 @@ func (*testLogSink) Close() error { return nil }
 // appendRelayNativeRecord appends bytes received from a relay in the exact
 // physical task-log format, matching what a live relay writes.
 func appendRelayNativeRecord(log LogSink, data []byte) error {
-	return appendNativeRecord(log, logRecordAgent, data)
+	return appendNativeRecord(log, taskslog.KindAgent, data)
 }
 
 // canceledRegistry models an MCP operation that waits on another transport.
@@ -968,8 +970,8 @@ func TestMarshalLogMessage(t *testing.T) {
 		t.Parallel()
 		messages := []Message{
 			&TextMessage{}, &UserInputMessage{}, ContextCleared(), InputDeliveryStarted(), InputDeliveryCompleted(), InputDeliveryFailed(errors.New("closed")), &LogMessage{},
-			&StrippedEnvMessage{}, &DiffStatMessage{}, &ExitMessage{}, &MetaMessage{},
-			&MetaSessionMessage{}, &RelayGenerationMessage{}, &ModelInfoMessage{},
+			&StrippedEnvMessage{}, &DiffStatMessage{}, &ExitMessage{},
+			&MetaSessionMessage{}, &RelayGenerationMessage{Generation: "g"}, &ModelInfoMessage{},
 			&MetaResultMessage{}, &MetaPRMessage{}, &TurnCommitSnapshotMessage{}, &PendingUserActionMessage{},
 		}
 		source := MessageSource{ThreadID: "child", TurnID: "turn", ItemID: "item", RootThreadID: "root", AgentID: "native:child", DelegationToolUseID: "delegate"}
@@ -987,21 +989,31 @@ func TestMarshalLogMessage(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				out, ok := reflect.TypeAssert[Message](reflect.New(reflect.TypeOf(message).Elem()))
+				_, ok := reflect.TypeAssert[Message](reflect.New(reflect.TypeOf(message).Elem()))
 				if !ok {
 					t.Fatal("control does not implement Message")
 				}
-				if err := decodeLogControl(encoded, out); err != nil {
+				frame, err := taskslog.DecodeFrame(encoded)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if *out.Provenance() != source {
-					t.Errorf("v3 source lost: %+v", out.Provenance())
+				outSource, ok := reflect.TypeAssert[MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
+				if !ok {
+					t.Fatal("control has no source schema")
 				}
-				if err := decodeLogControl(absent, out); err != nil {
+				if outSource.Source != source {
+					t.Errorf("v3 source lost: %+v", outSource.Source)
+				}
+				frame, err = taskslog.DecodeFrame(absent)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if !out.Provenance().IsZero() {
-					t.Errorf("absent source = %+v", out.Provenance())
+				outSource, ok = reflect.TypeAssert[MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
+				if !ok {
+					t.Fatal("control has no source schema")
+				}
+				if !outSource.Source.IsZero() {
+					t.Errorf("absent source = %+v", outSource.Source)
 				}
 			})
 		}
@@ -1130,27 +1142,6 @@ func TestMarshalLogMessage(t *testing.T) {
 		}
 		if !record.Control || record.Provenance.Source != RecordSourceRelay || record.Provenance.Generation != "generation-1" || len(record.Messages) != 0 {
 			t.Fatalf("parsed relay generation = %#v", record)
-		}
-	})
-	t.Run("V3MetaPreservesDurableSettings", func(t *testing.T) {
-		t.Parallel()
-		data, err := MarshalLogMessage(&MetaMessage{
-			MessageType:     messageTypeMeta,
-			Version:         int(LogVersionV3),
-			Prompt:          "test",
-			Harness:         "codex",
-			RequestedModel:  "gpt-5.6",
-			RequestedEffort: "high",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if raw["model"] != "gpt-5.6" || raw["effort"] != "high" || raw["requested_model"] != nil || raw["requested_effort"] != nil {
-			t.Fatalf("v3 header settings = %#v", raw)
 		}
 	})
 }

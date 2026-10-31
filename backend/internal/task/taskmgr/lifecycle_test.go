@@ -16,6 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/task"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -25,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
 	"github.com/maruel/ksid"
 )
 
@@ -33,7 +37,7 @@ func TestLifecycle(t *testing.T) {
 	t.Run("QueueInput", func(t *testing.T) {
 		t.Run("append_is_immutable_durable_and_rejects_stale_edits", func(t *testing.T) {
 			t.Parallel()
-			store := taskslog.NewStore(testLogger(), t.TempDir())
+			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 			tk.SetState(task.StateRunning)
@@ -61,8 +65,11 @@ func TestLifecycle(t *testing.T) {
 			if err := e.Lifecycle.CancelQueuedInput(old.ID); err == nil {
 				t.Fatal("stale edit removed appended content")
 			}
-			loaded, err := store.LoadInputQueue()
-			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID || !reflect.DeepEqual(loaded[0].Prompt, want) {
+			loaded, err := store.Journal.LoadInputQueue()
+			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID.String() || loaded[0].Text != want.Text || !reflect.DeepEqual(loaded[0].Images, []inputqueue.Image{
+				{MediaType: "image/png", Data: "Zmlyc3Q="},
+				{MediaType: "image/jpeg", Data: "c2Vjb25k"},
+			}) {
 				t.Fatalf("persisted queue = %+v, %v", loaded, err)
 			}
 		})
@@ -157,7 +164,7 @@ func TestLifecycle(t *testing.T) {
 		t.Run("write_failure_preserves_queue", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), dir)})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)

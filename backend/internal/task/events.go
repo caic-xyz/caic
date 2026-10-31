@@ -129,12 +129,12 @@ func (s *ExitStatus) Observe(msg agent.Message) bool {
 // ClearsExitError reports whether accepted activity clears the last exit error from a
 // prior turn. Messages that accompany a turn without starting a new one (exit,
 // diff stat, native subagent updates, background command updates, raw relay
-// lines, pending user actions, parse errors, log output, stripped env) never
+// lines, pending user actions, metadata updates, log output, stripped env) never
 // clear it; a ResultMessage clears it only when the turn succeeded; every
 // other message starts a new turn. Ordered folds use ExitStatus to defer this
 // interpretation for input attempts whose delivery is not yet established.
 func ClearsExitError(msg agent.Message) bool {
-	if msg.Provenance().IsChild() {
+	if msg.Provenance().IsChild() || agent.IsSessionMetadataUpdate(msg) {
 		return false
 	}
 	switch m := msg.(type) {

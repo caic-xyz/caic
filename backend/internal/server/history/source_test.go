@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -22,6 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -30,12 +35,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 type parsingSpy struct {
-	agent.WireFormat
+	agent.MessageParser
 
 	spy *resolverSpy
 }
@@ -46,7 +50,7 @@ func (s *parsingSpy) ParseOutput(data []byte) ([]agent.Message, error) {
 		close(block.started)
 		<-block.release
 	}
-	return s.WireFormat.ParseOutput(data)
+	return s.MessageParser.ParseOutput(data)
 }
 
 type resolverSpy struct {
@@ -55,12 +59,16 @@ type resolverSpy struct {
 	block    *parseBlock
 }
 
-func (s *resolverSpy) ResolveWire(h harness.Name) (agent.WireFormat, error) {
-	wire, err := s.backends.ResolveWire(h)
+func (s *resolverSpy) ResolveParser(h harness.Name) (agent.MessageParser, error) {
+	wire, err := s.backends.ResolveParser(h)
 	if err != nil {
 		return nil, err
 	}
-	return &parsingSpy{WireFormat: wire, spy: s}, nil
+	return &parsingSpy{MessageParser: wire, spy: s}, nil
+}
+
+func (s *resolverSpy) ResolveMetadataParser(h harness.Name) (agent.MessageParser, error) {
+	return s.backends.ResolveMetadataParser(h)
 }
 
 type parseBlock struct {
@@ -495,11 +503,10 @@ func TestSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		loaded, err := taskslog.LoadHistorySource(path)
+		loaded, err := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		loaded.SetWireResolver(backends.Default("", nil))
 		tracker := apiconv.NewToolTimingTracker("", loaded.Harness, loaded.RequestedModel, nil)
 		var expected []v1.EventMessage
 		for parsed, err := range loaded.StreamMessages(t.Context()) {
@@ -769,7 +776,7 @@ func TestSourceStickyFailure(t *testing.T) {
 		if !reflect.DeepEqual(urls, []string{"/api/caic/v1/tasks/task/attachments/2/1/0", "/api/caic/v1/tasks/task/attachments/2/1/1"}) {
 			t.Fatalf("URLs = %v", urls)
 		}
-		media, image, err := taskslog.FindAttachment(t.Context(), path, resolver, 2, 1, 1)
+		media, image, err := taskhistory.FindAttachment(t.Context(), path, resolver, 2, 1, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -865,11 +872,11 @@ func BenchmarkSource(b *testing.B) {
 func benchmarkSource(b *testing.B, path string, appends []string) {
 	resolver := backends.Default("", nil)
 	b.Run("RawReplayBaseline", func(b *testing.B) {
-		loaded, err := taskslog.LoadHistorySource(path)
+		loaded, err := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), backends.Default("", nil)).LoadSource(path)
 		if err != nil {
 			b.Fatal(err)
 		}
-		loaded.SetWireResolver(resolver)
+
 		b.ReportAllocs()
 		for b.Loop() {
 			tracker := apiconv.NewToolTimingTracker("", harness.Claude, "", nil)
@@ -973,7 +980,7 @@ func benchmarkSource(b *testing.B, path string, appends []string) {
 				}
 				return
 			}
-			cursor, err := taskslog.OpenRecordCursor(path, resolver)
+			cursor, err := taskhistory.OpenRecordCursor(path, resolver)
 			if err != nil {
 				b.Fatal(err)
 			}

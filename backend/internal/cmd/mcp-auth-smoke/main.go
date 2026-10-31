@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"encoding/json"
 	"errors"
 	"flag"
@@ -185,7 +188,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	taskMgr, err := taskmgr.New(taskmgr.Config{ //nolint:contextcheck // Config.ServerCtx passes this caller context to the Manager-owned MCP executor.
 		ServerCtx:           ctx,
 		Log:                 stateLog,
-		LogStore:            taskslog.NewStore(stateLog, filepath.Join(stateDir, "tasks")),
+		LogStore:            taskhistory.NewStore(stateLog, taskslog.NewStore(filepath.Join(stateDir, "tasks")), backends.Default("", nil)),
 		Runtimes:            runtimeRouter,
 		Checkouts:           checkoutRegistry,
 		Rollup:              task.DiscardRollup{},

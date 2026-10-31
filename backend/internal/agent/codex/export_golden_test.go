@@ -12,12 +12,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/task/history"
 )
 
 func TestExportDiscussionGolden(t *testing.T) {
 	t.Parallel()
 	agenttest.RunExportDiscussionGolden(t, func(path string, backends agent.Backends) (string, error) {
-		return taskslog.ExportDiscussion(path, backends)
+		return history.ExportDiscussion(path, backends)
 	}, codex.New("", nil))
 }

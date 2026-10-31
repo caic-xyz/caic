@@ -10,8 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode/metadata"
-
 	"github.com/buger/jsonparser"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -239,7 +237,10 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Messa
 		msgs, err := parseUser(line, &record)
 		return msgs, record, err
 	case claudecode.OutputResult:
-		msg, err := metadata.ParseResult(line)
+		msg, err := parseResult(line)
+		if err == nil {
+			msg.Result, err = agent.JSONString(line, "result")
+		}
 		if err != nil {
 			return nil, record, err
 		}
@@ -376,14 +377,14 @@ func decodeAskUserQuestionInput(raw json.RawMessage) (claudecode.AskUserQuestion
 
 func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Message, error) {
 	if claudecode.SystemSubtype(subtype) == claudecode.SystemInit {
-		msg, err := metadata.ParseInit(line)
+		msg, err := parseInit(line)
 		if err != nil {
 			return nil, err
 		}
 		return []agent.Message{msg}, nil
 	}
 	if claudecode.SystemSubtype(subtype) == claudecode.SystemThinkingTokens {
-		estimate, err := metadata.ReasoningEstimate(line)
+		estimate, err := reasoningEstimate(line)
 		if err != nil {
 			return nil, err
 		}
@@ -464,13 +465,8 @@ func parseAssistant(line []byte) ([]agent.Message, error) {
 			continue
 		}
 	}
-	u := w.Message.Usage
-	if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
-		usage := metadata.Usage(&u)
-		msgs = append(msgs, &agent.UsageMessage{
-			Usage:         usage,
-			ReportedModel: w.Message.Model,
-		})
+	if usage := assistantUsage(&w.Message.Usage, w.Message.Model); usage != nil {
+		msgs = append(msgs, usage)
 	}
 	if len(msgs) == 0 {
 		// Preserve as raw if nothing was extracted (e.g. empty content).
@@ -850,7 +846,7 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 	case "content_block_start", "content_block_stop",
 		"message_start", "message_stop", "message_delta", "ping":
 		if w.Event.Type == "message_delta" && !w.Event.Usage.IsZero() {
-			usage := metadata.Usage(&w.Event.Usage)
+			usage := normalizeUsage(&w.Event.Usage)
 			if hasUsage(usage) {
 				return []agent.Message{&agent.UsageMessage{Usage: usage}}, nil
 			}
@@ -864,14 +860,6 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
 	}
-}
-
-func hasUsage(u agent.Usage) bool {
-	return u.InputTokens > 0 ||
-		u.OutputTokens > 0 ||
-		u.CacheCreationInputTokens > 0 ||
-		u.CacheReadInputTokens > 0 ||
-		u.ReasoningOutputTokens > 0
 }
 
 // extractPartialWidgetCode extracts the widget_code value from a partially

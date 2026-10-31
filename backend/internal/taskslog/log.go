@@ -1,8 +1,4 @@
-// Package taskslog owns durable task-log persistence, compression, and replay loading.
-//
-// Restored completed tasks read history here without materializing a live task
-// timeline. Full scans are acceptable for their rare history reads but must not
-// block startup metadata loading.
+// Package taskslog owns physical task-log framing, files, compression, and bounded raw iteration.
 package taskslog
 
 import (
@@ -15,8 +11,6 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-
-	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 // ErrNoLog reports that a task has no active or persisted log to append to.
@@ -33,7 +27,7 @@ func IsLogName(name string) bool {
 }
 
 // taskLogWriter owns serialized physical appends to one task log. Callers
-// provide complete encoded records, batches or semantic caic controls; raw file
+// provide complete encoded records or batches; raw file
 // writes never escape this type.
 type taskLogWriter struct {
 	mu     sync.Mutex
@@ -50,34 +44,24 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	return &taskLogWriter{file: f}, nil
 }
 
-// AppendRecord appends complete encoded physical records without interpreting
-// provenance. The task owner advances its live relay cursor after success.
-func (w *taskLogWriter) AppendRecord(record agent.PhysicalRecord) error {
+// Append writes complete LF-terminated encoded records without interpreting them.
+func (w *taskLogWriter) Append(encoded []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
 		return os.ErrClosed
 	}
-	if len(record.Encoded) == 0 || record.Encoded[len(record.Encoded)-1] != '\n' {
+	if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
 		return errors.New("task log record is not LF-terminated")
 	}
-	n, err := w.file.Write(record.Encoded)
+	n, err := w.file.Write(encoded)
 	if err != nil {
 		return err
 	}
-	if n != len(record.Encoded) {
+	if n != len(encoded) {
 		return io.ErrShortWrite
 	}
 	return nil
-}
-
-// AppendMessage encodes and appends one backend-owned control record.
-func (w *taskLogWriter) AppendMessage(m agent.Message) error {
-	data, err := agent.MarshalLogMessage(m)
-	if err != nil {
-		return err
-	}
-	return w.AppendRecord(agent.PhysicalRecord{Encoded: append(data, '\n')})
 }
 
 // Close closes the underlying task log file once.
@@ -91,13 +75,13 @@ func (w *taskLogWriter) Close() error {
 	return w.file.Close()
 }
 
-// isLogCompressed reports whether path names a zstd-compressed task log.
-func isLogCompressed(path string) bool {
+// IsCompressed reports whether path names a zstd-compressed task log.
+func IsCompressed(path string) bool {
 	return strings.HasSuffix(path, logCompressedExt)
 }
 
-// trimLogExt removes either task log extension from name.
-func trimLogExt(name string) string {
+// TrimExt removes either task log extension from name.
+func TrimExt(name string) string {
 	if base, ok := strings.CutSuffix(name, logCompressedExt); ok {
 		return base
 	}
@@ -106,7 +90,7 @@ func trimLogExt(name string) string {
 
 // compressedLogPath returns the zstd path for a task log path.
 func compressedLogPath(path string) string {
-	if isLogCompressed(path) {
+	if IsCompressed(path) {
 		return path
 	}
 	return path + ".zst"
@@ -117,9 +101,9 @@ func compressedLogTempPath(path string) string {
 	return compressedLogPath(path) + ".tmp"
 }
 
-// openLogReader opens a plain or zstd-compressed task log for reading.
-func openLogReader(path string) (io.ReadCloser, error) {
-	if isLogCompressed(path) {
+// OpenReader opens a plain or zstd-compressed task log for reading.
+func OpenReader(path string) (io.ReadCloser, error) {
+	if IsCompressed(path) {
 		return openCompressedLogReader(path)
 	}
 	return os.Open(filepath.Clean(path))

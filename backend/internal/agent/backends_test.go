@@ -1,4 +1,4 @@
-// Tests configured backend-set lookup and fresh wire construction.
+// Tests configured backend lookup and independent full and metadata parser factories.
 
 package agent_test
 
@@ -14,31 +14,37 @@ import (
 func TestBackends(t *testing.T) {
 	t.Parallel()
 
-	t.Run("ResolveWire", func(t *testing.T) {
-		t.Parallel()
+	for _, factory := range []string{"ResolveParser", "ResolveMetadataParser"} {
+		t.Run(factory, func(t *testing.T) {
+			t.Parallel()
 
-		backends := agent.Backends{
-			harness.Claude: &agenttest.FakeBackend{HarnessName: harness.Claude},
-		}
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			first, err := backends.ResolveWire(harness.Claude)
-			if err != nil {
-				t.Fatal(err)
+			backends := agent.Backends{
+				harness.Claude: &agenttest.FakeBackend{HarnessName: harness.Claude},
 			}
-			second, err := backends.ResolveWire(harness.Claude)
-			if err != nil {
-				t.Fatal(err)
+			resolve := backends.ResolveParser
+			if factory == "ResolveMetadataParser" {
+				resolve = backends.ResolveMetadataParser
 			}
-			if first == second {
-				t.Error("ResolveWire returned a shared wire")
-			}
+			t.Run("valid", func(t *testing.T) {
+				t.Parallel()
+				first, err := resolve(harness.Claude)
+				if err != nil {
+					t.Fatal(err)
+				}
+				second, err := resolve(harness.Claude)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if first == second {
+					t.Errorf("%s returned a shared parser", factory)
+				}
+			})
+			t.Run("unknown", func(t *testing.T) {
+				t.Parallel()
+				if _, err := resolve(harness.Pi); err == nil || !strings.Contains(err.Error(), "unknown harness") {
+					t.Fatalf("%s error = %v, want unknown harness", factory, err)
+				}
+			})
 		})
-		t.Run("unknown", func(t *testing.T) {
-			t.Parallel()
-			if _, err := backends.ResolveWire(harness.Pi); err == nil || !strings.Contains(err.Error(), "unknown harness") {
-				t.Fatalf("ResolveWire error = %v, want unknown harness", err)
-			}
-		})
-	})
+	}
 }

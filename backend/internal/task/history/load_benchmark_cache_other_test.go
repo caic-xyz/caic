@@ -1,7 +1,7 @@
 // Reports unsupported cold-cache task adoption benchmarks on non-Linux systems.
 //go:build !linux
 
-package taskslog
+package history
 
 func prepareColdAdoptionFixture(string) error {
 	return errAdoptionColdUnsupported

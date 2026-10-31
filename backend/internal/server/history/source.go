@@ -17,12 +17,13 @@ import (
 	"path/filepath"
 	"slices"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/history/data"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -58,7 +59,7 @@ type Snapshot struct {
 // or shutdown. A projection error is sticky: discard the source to recover.
 type Source struct {
 	gate       chan struct{}
-	cursor     *taskslog.RecordCursor
+	cursor     *taskhistory.RecordCursor
 	tracker    *apiconv.ToolTimingTracker
 	spool      *os.File
 	writer     *bufio.Writer
@@ -75,11 +76,11 @@ type Source struct {
 // until Refresh. Projection is a pure function of the ordered physical log:
 // native costs and usage are retained, while live pricing estimates and the
 // latest-visible-plan lookup belong to revalidated endpoints.
-func NewSource(ctx context.Context, path, taskID string, resolver taskslog.WireResolver) (*Source, error) {
+func NewSource(ctx context.Context, path, taskID string, resolver taskhistory.ParserResolver) (*Source, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cursor, err := taskslog.OpenRecordCursor(path, resolver)
+	cursor, err := taskhistory.OpenRecordCursor(path, resolver)
 	if err != nil {
 		return nil, err
 	}

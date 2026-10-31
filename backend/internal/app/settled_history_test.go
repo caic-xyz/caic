@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -63,7 +66,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 	return path
 }
 
-func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskmgr.Manager {
+func newSettledHistoryTestManager(t *testing.T, logStore *taskhistory.Store) *taskmgr.Manager {
 	router, err := runtime.NewRouter([]runtime.System{
 		&runtimetest.FakeSystem{},
 	}, metrics.Nop{})
@@ -90,11 +93,11 @@ func TestRunSettledHistory(t *testing.T) {
 	dir := t.TempDir()
 	var diagnostics bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&diagnostics, nil))
-	logStore := taskslog.NewStore(log, dir)
+	logStore := taskhistory.NewStore(log, taskslog.NewStore(dir), backends.Default("", nil))
 	taskMgr := newSettledHistoryTestManager(t, logStore)
 
 	now := time.Now().UTC()
-	cutoffAgo := 2 * taskslog.SettledRetention
+	cutoffAgo := 2 * taskhistory.SettledRetention
 	// Task IDs are ksids: the loader only registers a parsed ID (insertLoadedTasks
 	// randomises unparseable ones), and the filename base must equal the ID.
 	idAlpha, idBeta, idGamma, idDelta := ksid.NewID(), ksid.NewID(), ksid.NewID(), ksid.NewID()

@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -210,7 +213,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 	m, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           t.Context(),
 		Log:                 slog.New(slog.DiscardHandler),
-		LogStore:            taskslog.NewStore(testLogger(), t.TempDir()),
+		LogStore:            taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil)),
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),

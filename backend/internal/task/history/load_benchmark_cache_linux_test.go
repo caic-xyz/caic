@@ -1,7 +1,7 @@
 // Provides Linux page-cache eviction for task adoption benchmarks.
 //go:build linux
 
-package taskslog
+package history
 
 import (
 	"errors"

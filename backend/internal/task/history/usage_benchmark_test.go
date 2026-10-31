@@ -1,6 +1,6 @@
 // Usage rollup projection benchmarks measure retained-log reconstruction and publication.
 
-package taskslog_test
+package history_test
 
 import (
 	"fmt"
@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/maruel/ksid"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -43,8 +44,8 @@ func BenchmarkUsageBackfill(b *testing.B) {
 		bytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
 	}
 
-	logStore := taskslog.NewStore(slog.New(slog.DiscardHandler), logDir)
-	resolver := usageResolver()
+	logStore := history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(logDir), usageResolver())
+
 	b.SetBytes(int64(bytes))
 	b.ReportAllocs()
 	b.StartTimer()
@@ -56,7 +57,7 @@ func BenchmarkUsageBackfill(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if err := rollup.Backfill(b.Context(), logStore.UsageRows(b.Context(), resolver)); err != nil {
+		if err := rollup.Backfill(b.Context(), logStore.UsageRows(b.Context())); err != nil {
 			b.Fatal(err)
 		}
 		if err := rollup.Close(); err != nil {
@@ -66,7 +67,7 @@ func BenchmarkUsageBackfill(b *testing.B) {
 }
 
 func writeUsageBenchmarkLog(b *testing.B, dir, id string, times []time.Time) int {
-	meta := agent.MetaMessage{
+	meta := v3.MetaMessage{
 		MessageType:    "caic_meta",
 		Version:        3,
 		Prompt:         "backfill benchmark",
@@ -74,7 +75,7 @@ func writeUsageBenchmarkLog(b *testing.B, dir, id string, times []time.Time) int
 		Harness:        string(harness.Claude),
 		RequestedModel: "claude-test",
 	}
-	header, err := agent.MarshalLogMessage(&meta)
+	header, err := taskslog.EncodeHeader(&meta)
 	if err != nil {
 		b.Fatal(err)
 	}

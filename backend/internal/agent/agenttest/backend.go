@@ -55,7 +55,8 @@ type FakeBackend struct {
 	// parser) for tests that replay stored wire output; the default is a fresh
 	// no-op Wire, since agenttest cannot import a specific harness without a
 	// cycle.
-	WireFactory func() agent.WireFormat
+	WireFactory     func() agent.WireFormat
+	MetadataFactory func() agent.MessageParser
 }
 
 // Harness implements agent.Backend, reporting HarnessName or "fake" if unset.
@@ -101,6 +102,14 @@ func (f *FakeBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
 func (f *FakeBackend) NewWire() agent.WireFormat {
 	if f.WireFactory != nil {
 		return f.WireFactory()
+	}
+	return &Wire{}
+}
+
+// NewMetadataParser implements agent.Backend with independent metadata state.
+func (f *FakeBackend) NewMetadataParser() agent.MessageParser {
+	if f.MetadataFactory != nil {
+		return f.MetadataFactory()
 	}
 	return &Wire{}
 }

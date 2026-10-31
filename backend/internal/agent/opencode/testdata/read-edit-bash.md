@@ -4,6 +4,7 @@
 
 - **Prompt**: Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
 - **Harness**: opencode
+- **Model**: opencode/big-pickle
 - **Started**: 2026-05-28 23:51:51
 - **State**: completed
 

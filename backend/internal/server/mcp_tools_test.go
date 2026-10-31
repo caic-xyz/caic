@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
 
@@ -36,7 +38,6 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
@@ -1967,7 +1968,7 @@ func TestMCPTools(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
-			loaded := &taskslog.LoadedTask{State: task.StatePurged, LastTrailer: &task.Result{State: task.StatePurged}}
+			loaded := &taskhistory.LoadedTask{State: task.StatePurged, LastTrailer: &task.Result{State: task.StatePurged}}
 			entry := s.taskMgr.NewEntry(tk, loaded)
 			s.taskMgr.Insert(tk.ID, entry)
 

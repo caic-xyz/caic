@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
@@ -76,7 +78,8 @@ func assertV3FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	if recordBytes != wantRecord {
 		t.Fatalf("record bytes = %q, want %q", recordBytes, wantRecord)
 	}
-	wantTime, err := parseV3ProducerTime([]byte(timestamp))
+	frame, err := taskslog.DecodeFrame([]byte(strings.TrimSuffix(recordBytes, "\n")))
+	wantTime := frame.ProducerTime
 	if err != nil {
 		t.Fatalf("timestamp %q is not canonical: %v", timestamp, err)
 	}
@@ -105,7 +108,7 @@ func assertV3FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 		t.Fatal(err)
 	}
 	line := []byte(strings.TrimSuffix(recordBytes, "\n"))
-	msgs, err := parseV3Record(p, line)
+	msgs, err := p.ParseRecord(line)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +152,7 @@ func TestV3AgentRecord(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				msgs, err := parseV3Record(p, record)
+				msgs, err := p.ParseRecord(record)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -259,7 +262,7 @@ func TestV3AgentRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 		meta := []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)
-		msgs, err := parseV3Record(p, meta)
+		msgs, err := p.ParseRecord(meta)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -270,7 +273,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 3 {
 			t.Fatalf("meta message = %#v", msgs.Messages[0].Message)
 		}
-		msgs, err = parseV3Record(p, []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","model":"gpt-5.6","effort":"high"}`))
+		msgs, err = p.ParseRecord([]byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","model":"gpt-5.6","effort":"high"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -278,7 +281,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if !ok || parsedMeta.RequestedModel != "gpt-5.6" || parsedMeta.RequestedEffort != "high" {
 			t.Fatalf("v3 meta settings = %#v", msgs.Messages[0].Message)
 		}
-		msgs, err = parseV3Record(p, []byte(`{"t":"session","session_id":"s","model":"gpt-5.6","agent_version":"1"}`))
+		msgs, err = p.ParseRecord([]byte(`{"t":"session","session_id":"s","model":"gpt-5.6","agent_version":"1"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,16 +289,16 @@ func TestV3AgentRecord(t *testing.T) {
 		if !ok || init.ReportedModel != "gpt-5.6" {
 			t.Fatalf("v3 session = %#v", msgs.Messages[0].Message)
 		}
-		if _, err := parseV3Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
+		if _, err := p.ParseRecord([]byte(`{"t":"caic_meta","type":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
 			t.Fatal("v3 meta accepted the top-level type field")
 		}
-		if _, err := parseV3Record(p, []byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","unknown":true}`)); err == nil || !strings.Contains(err.Error(), `json: unknown field "unknown"`) {
+		if _, err := p.ParseRecord([]byte(`{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"claude","unknown":true}`)); err == nil || !strings.Contains(err.Error(), `json: unknown field "unknown"`) {
 			t.Fatalf("v3 meta error = %v, want strict unknown-field error", err)
 		}
-		if _, err := parseV3Record(p, []byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
+		if _, err := p.ParseRecord([]byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
-		msgs, err = parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
+		msgs, err = p.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":{}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -319,7 +322,7 @@ func TestV3AgentRecord(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := parseV3Record(p, []byte(`{"t":"agent","ts":1.001,"msg":{}}`))
+			msgs, err := p.ParseRecord([]byte(`{"t":"agent","ts":1.001,"msg":{}}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -343,7 +346,7 @@ func TestV3AgentRecord(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := parseV3Record(p, []byte(`{"t":"agent","ts":0.001,"msg":false}`))
+			msgs, err := p.ParseRecord([]byte(`{"t":"agent","ts":0.001,"msg":false}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -418,7 +421,7 @@ func TestV3AgentRecord(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := parseV3Record(p, tc.line); err == nil {
+				if _, err := p.ParseRecord(tc.line); err == nil {
 					t.Fatal("expected corruption error")
 				}
 				if calls != tc.wantCalls {
@@ -438,7 +441,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)); err == nil {
+		if _, err := p.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":{"x":}}`)); err == nil {
 			t.Fatal("malformed native payload was accepted")
 		}
 		if calls != 0 {
@@ -450,8 +453,8 @@ func TestV3AgentRecord(t *testing.T) {
 		t.Parallel()
 		prefix := []byte(`{"t":"agent","ts":1.000,"msg":"`)
 		suffix := []byte(`"}`)
-		payloadLen := v3MaxEncodedRecordLen - 2 - len(prefix) - len(suffix)
-		line := make([]byte, 0, v3MaxEncodedRecordLen-2)
+		payloadLen := (32 << 20) - 2 - len(prefix) - len(suffix)
+		line := make([]byte, 0, (32<<20)-2)
 		line = append(line, prefix...)
 		line = append(line, bytes.Repeat([]byte{'a'}, payloadLen)...)
 		line = append(line, suffix...)
@@ -463,7 +466,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := parseV3Record(p, line); err != nil {
+		if _, err := p.ParseRecord(line); err != nil {
 			t.Fatalf("maximum accepted record: %v", err)
 		}
 		if calls != 1 {
@@ -471,7 +474,7 @@ func TestV3AgentRecord(t *testing.T) {
 		}
 		line = append(line[:len(line)-len(suffix)], 'a')
 		line = append(line, suffix...)
-		if _, err := parseV3Record(p, line); err == nil || !strings.Contains(err.Error(), "encoded size") {
+		if _, err := p.ParseRecord(line); err == nil || !strings.Contains(err.Error(), "encoded size") {
 			t.Fatalf("oversized record error = %v", err)
 		}
 		if calls != 1 {
@@ -495,11 +498,11 @@ func TestV3AgentRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 		line := []byte(`{"t":"agent","ts":1.000,"msg":{}}`)
-		if _, err := parseV3Record(p, line); err == nil || !strings.Contains(err.Error(), "native message 1 is nil") {
+		if _, err := p.ParseRecord(line); err == nil || !strings.Contains(err.Error(), "native message 1 is nil") {
 			t.Fatalf("invalid batch error = %v", err)
 		}
 		batch = []Message{action}
-		msgs, err := parseV3Record(p, line)
+		msgs, err := p.ParseRecord(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -519,7 +522,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = parseV3Record(p, []byte(`{"t":"agent","ts":1.000,"msg":{}}`))
+		_, err = p.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":{}}`))
 		if !errors.Is(err, wantErr) || calls != 1 {
 			t.Fatalf("error = %v, calls = %d", err, calls)
 		}

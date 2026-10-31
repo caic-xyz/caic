@@ -92,9 +92,12 @@ func (*FakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session
 	return nil, errors.New("fake backend does not support relay")
 }
 
+// NewMetadataParser creates an independent fixture metadata projection.
+func (*FakeBackend) NewMetadataParser() agent.MessageParser { return &fixtureMetadataParser{} }
+
 // NewWire implements agent.Backend.
-func (b *FakeBackend) NewWire() agent.WireFormat {
-	return b
+func (*FakeBackend) NewWire() agent.WireFormat {
+	return &FakeBackend{}
 }
 
 // VisualModelInventory defines the selected documentation models and their

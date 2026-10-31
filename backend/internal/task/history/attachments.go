@@ -1,6 +1,6 @@
 // Resolves prompt image payloads by physical task-log record, message, and image indexes.
 
-package taskslog
+package history
 
 import (
 	"context"
@@ -17,7 +17,7 @@ var ErrAttachmentNotFound = errors.New("task log attachment not found")
 // FindAttachment reads the image at a physical log record and zero-based message
 // and image indexes. Replaying the cursor preserves native parser state and keeps
 // addresses identical to history projection in plain and compressed logs.
-func FindAttachment(ctx context.Context, path string, resolver WireResolver, recordID, messageIndex, imageIndex uint64) (mediaType string, data []byte, retErr error) {
+func FindAttachment(ctx context.Context, path string, resolver ParserResolver, recordID, messageIndex, imageIndex uint64) (mediaType string, data []byte, retErr error) {
 	c, err := OpenRecordCursor(path, resolver)
 	if err != nil {
 		return "", nil, fmt.Errorf("open task log: %w", err)

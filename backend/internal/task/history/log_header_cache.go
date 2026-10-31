@@ -24,7 +24,7 @@
 // small header projection, not the message stream, and has no coupling to any
 // replay or proof machinery.
 
-package taskslog
+package history
 
 import (
 	"encoding/json"
@@ -33,8 +33,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+
 	"github.com/caic-xyz/caic/backend/internal/task"
-	v10 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v10"
+	v11 "github.com/caic-xyz/caic/backend/internal/task/history/data/headercache/v11"
 )
 
 const (
@@ -45,7 +47,7 @@ const (
 
 	// currentVersion guards both the schema and its projection semantics.
 	// Bump it when either changes so older entries rebuild from the journal.
-	currentVersion = 10
+	currentVersion = 11
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid
 	// entry is a few kilobytes; anything larger is treated as corrupt.
@@ -87,7 +89,7 @@ func reapHeaderCaches(logDir string, entries []os.DirEntry, logBases map[string]
 // log's base name (extension stripped) so the plain and compressed forms of the
 // same log share one entry.
 func logHeaderCachePath(path string) string {
-	return filepath.Join(filepath.Dir(path), trimLogExt(filepath.Base(path))+headerCacheExt)
+	return filepath.Join(filepath.Dir(path), taskslog.TrimExt(filepath.Base(path))+headerCacheExt)
 }
 
 // readHeaderCache returns the cached header when the entry matches the log's
@@ -112,14 +114,14 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 	// preserves its rejection of explicit null/unknown states, while omitted
 	// states retain their historical zero value.
 	var entry struct {
-		v10.Entry
+		v11.Entry
 
 		Task *struct {
-			v10.Task
+			v11.Task
 
 			State  task.State `json:"state"`
 			Result *struct {
-				v10.Result
+				v11.Result
 
 				State task.State `json:"state"`
 			} `json:"result"`
@@ -154,7 +156,7 @@ func writeHeaderCache(path string, lt *LoadedTask) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(v10.Entry{
+	data, err := json.Marshal(v11.Entry{
 		Version:      currentVersion,
 		LogSize:      info.Size(),
 		LogMTimeNano: info.ModTime().UnixNano(),

@@ -1,4 +1,4 @@
-// Package codex implements agent.Backend for Codex CLI.
+// Package codex implements app-server transport and shared ordered session metadata and accounting.
 package codex
 
 import (
@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -218,6 +219,11 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
 }
 
+// NewMetadataParser creates independent directional session/accounting state.
+func (*Backend) NewMetadataParser() agent.MessageParser {
+	return &metadataParser{wire: &wireFormat{nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}}
+}
+
 var (
 	_ agent.Backend          = (*Backend)(nil)
 	_ agent.ModelFetcher     = (*Backend)(nil)
@@ -297,11 +303,13 @@ func modelsForModelInfo(models []string, modelInfo []codex.ModelInfo) []agent.Mo
 // and the requested reasoning effort level.
 type wireFormat struct {
 	nativeSubagents   nativeSubagents
-	threadID          string
-	requestedEffort   string // Requested effort sent with each turn/start request.
+	requests          []recordedRequest // Directional parsing owns request correlation.
 	suppressUserInput bool
 	nextID            atomic.Int64
+
 	mu                sync.Mutex
+	threadID          string
+	requestedEffort   string // Requested effort sent with each turn/start request.
 	agentVersion      string
 	reportedModel     string      // Resolved by thread/start; updated by model/rerouted.
 	reportedEffort    string      // Resolved by thread/start.
@@ -365,26 +373,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	}
 
 	// Read thread/start response — contains the thread info.
-	resp, err := readJSONRPCResponse(ctx, records)
+	resp, err := readJSONRPCResponse(ctx, records, threadReq.ID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read thread/start response: %w", err)
 	}
 
 	// Extract thread ID from the response result.
-	var result codex.ThreadStartResponse
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
+	result, err := threadResponseMetadata(resp.Result)
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
 	if result.Thread.ID == "" {
 		return nil, nil, nil, errors.New("thread/start response missing thread.id")
 	}
-	w.threadID = result.Thread.ID
-	w.threadTurnStarted = map[string]bool{result.Thread.ID: false}
-	w.agentVersion = result.Thread.CLIVersion
-	w.reportedModel = result.Model
-	if result.ReasoningEffort != nil {
-		w.reportedEffort = string(*result.ReasoningEffort)
-	}
+	w.applyThreadResponse(&result)
 	return w, models, records.Reader(), nil
 }
 
@@ -447,11 +449,12 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 }
 
 // ParseInput preserves client requests without interpreting them as output notifications.
-func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal input: %w", err)
 	}
+	w.rememberRequest(&probe)
 	typ := "jsonrpc_request"
 	if probe.ID == nil || string(probe.ID) == "null" {
 		typ = probe.Method
@@ -472,42 +475,31 @@ func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 //
 // It also captures the thread ID from InitMessage (thread/started).
 func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
+	return w.parseOutput(line, parseMessage)
+}
+
+// parseOutput owns ordered protocol state independently of transcript projection.
+func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPCEnvelope) ([]agent.Message, decodedItem, error)) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 	if codex.Method(probe.Method) == codex.MethodTurnStarted {
-		var p codex.TurnStartedNotification
-		if err := json.Unmarshal(probe.Params, &p); err != nil {
-			return nil, fmt.Errorf("turn/started params: %w", err)
+		threadID, err := agent.JSONString(probe.Params, "threadId")
+		if err != nil {
+			return nil, err
 		}
 		w.mu.Lock()
 		if w.threadTurnStarted == nil {
 			w.threadTurnStarted = make(map[string]bool)
 		}
-		w.threadTurnStarted[p.ThreadID] = true
+		w.threadTurnStarted[threadID] = true
 		w.mu.Unlock()
 	}
 	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
-		var response struct {
-			Result struct {
-				Thread struct {
-					ID string `json:"id"`
-				} `json:"thread"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal(line, &response); err != nil {
-			return nil, fmt.Errorf("thread response: %w", err)
-		}
-		if response.Result.Thread.ID != "" {
-			// A thread response precedes any saved usage snapshot. A turn
-			// may start without one when the thread has no earlier usage.
-			w.mu.Lock()
-			if w.threadTurnStarted == nil {
-				w.threadTurnStarted = make(map[string]bool)
-			}
-			w.threadTurnStarted[response.Result.Thread.ID] = false
-			w.mu.Unlock()
+		messages, handled, err := w.threadResponse(line, &probe)
+		if err != nil || handled {
+			return messages, err
 		}
 	}
 	if codex.Method(probe.Method) == codex.MethodTokenUsageUpdated {
@@ -593,7 +585,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		return []agent.Message{usageMsg}, nil
 	}
 
-	msgs, record, err := parseMessage(line, &probe)
+	msgs, record, err := decode(line, &probe)
 	if err != nil {
 		return nil, err
 	}
@@ -709,6 +701,86 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	return out, nil
 }
 
+func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) {
+	if probe.Method == "initialize" {
+		w.requests = nil
+	}
+	if probe.ID == nil || string(probe.ID) == "null" {
+		return
+	}
+	id := string(probe.ID)
+	i := slices.IndexFunc(w.requests, func(r recordedRequest) bool { return r.id == id })
+	r := recordedRequest{id: id, method: probe.Method}
+	if i < 0 {
+		w.requests = append(w.requests, r)
+	} else {
+		w.requests[i] = r
+	}
+}
+
+func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, bool, error) {
+	i := slices.IndexFunc(w.requests, func(r recordedRequest) bool { return r.id == string(probe.ID) })
+	if i < 0 {
+		return nil, false, nil
+	}
+	method := w.requests[i].method
+	w.requests = slices.Delete(w.requests, i, i+1)
+	if method != "thread/start" && method != "thread/resume" {
+		return nil, false, nil
+	}
+	failure, err := agent.JSONField(line, "error")
+	if err != nil {
+		return nil, true, err
+	}
+	if len(failure) != 0 && string(failure) != "null" {
+		return nil, true, nil
+	}
+	raw, err := agent.JSONField(line, "result")
+	if err != nil {
+		return nil, true, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true, nil
+	}
+	r, err := threadResponseMetadata(raw)
+	if err != nil {
+		return nil, true, err
+	}
+	if r.Thread.ID == "" {
+		return nil, true, fmt.Errorf("%s response missing thread.id", method)
+	}
+	m := w.applyThreadResponse(&r)
+	return []agent.Message{m}, true, nil
+}
+
+func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.InitMessage {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.threadID = r.Thread.ID
+	if w.threadTurnStarted == nil {
+		w.threadTurnStarted = make(map[string]bool)
+	}
+	w.threadTurnStarted[r.Thread.ID] = false
+	if r.Thread.CLIVersion != "" {
+		w.agentVersion = r.Thread.CLIVersion
+	}
+	model := r.Model
+	if model == "" {
+		model = r.Thread.Model
+	}
+	if model != "" {
+		w.reportedModel = model
+	}
+	effort := string(r.Thread.ReasoningEffort)
+	if r.ReasoningEffort != nil {
+		effort = string(*r.ReasoningEffort)
+	}
+	if effort != "" {
+		w.reportedEffort = effort
+	}
+	return &agent.InitMessage{Source: agent.MessageSource{ThreadID: r.Thread.ID, RootThreadID: r.Thread.ID}, SessionID: r.Thread.ID, Cwd: r.Thread.CWD, ReportedModel: model, ReportedEffort: effort, Version: r.Thread.CLIVersion}
+}
+
 // scopeSource adds session ownership without inferring it from arrival order.
 func (w *wireFormat) scopeSource(s *agent.MessageSource) {
 	if s.ThreadID == "" {
@@ -780,7 +852,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records reco
 	}
 
 	// Read initialize response.
-	if _, err := readJSONRPCResponse(ctx, records); err != nil {
+	if _, err := readJSONRPCResponse(ctx, records, initReq.ID); err != nil {
 		return nil, fmt.Errorf("read initialize response: %w", err)
 	}
 
@@ -797,10 +869,11 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records reco
 		if err != nil {
 			return nil, fmt.Errorf("marshal model/list params: %w", err)
 		}
-		if err := writeJSONInput(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}, log); err != nil {
+		request := codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}
+		if err := writeJSONInput(stdin, request, log); err != nil {
 			return nil, fmt.Errorf("write model/list: %w", err)
 		}
-		mlResp, err := readJSONRPCResponse(ctx, records)
+		mlResp, err := readJSONRPCResponse(ctx, records, request.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read model/list response: %w", err)
 		}
@@ -876,9 +949,9 @@ func (r *appServerReader) ReadRecord() ([]byte, []agent.TimedMessage, error) {
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
-// (has "id" field). Notifications encountered during the handshake are logged
+// matching expectedID. Notifications and unrelated replies during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
-func readJSONRPCResponse(ctx context.Context, r recordReader) (*codex.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r recordReader, expectedID int64) (*codex.JSONRPCMessage, error) {
 	for {
 		line, controls, err := r.ReadRecord()
 		if err != nil {
@@ -899,7 +972,7 @@ func readJSONRPCResponse(ctx context.Context, r recordReader) (*codex.JSONRPCMes
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("unmarshal response: %w", err)
 		}
-		if msg.IsResponse() {
+		if msg.IsResponse() && string(msg.ID) == strconv.FormatInt(expectedID, 10) {
 			if msg.Error != nil {
 				return nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)
 			}

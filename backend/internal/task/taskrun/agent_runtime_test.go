@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/klauspost/compress/zstd"
@@ -289,7 +292,7 @@ func newTestAgentRuntime(t testing.TB, checkout *repo.Checkout, logDir string, b
 	}
 	return &AgentRuntime{
 		Backends:             backends,
-		LogStore:             taskslog.NewStore(testLogger(), logDir),
+		LogStore:             taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agent.Backends(backends)),
 		LogPath:              &taskslog.Path{},
 		Runtimes:             runtimes,
 		Log:                  logtest.Logger(t),
@@ -309,12 +312,12 @@ func newTestAgentRuntimeWithRuntime(t testing.TB, backend testRuntimeBackend, ba
 	return r
 }
 
-func openTaskLog(s *taskslog.Store, tk *Task) (agent.LogSink, error) {
+func openTaskLog(s *taskhistory.Store, tk *Task) (agent.LogSink, error) {
 	log, _, err := s.Open(tk.LogFilename(), tk.LogHeader())
 	return log, err
 }
 
-func reopenTaskLog(s *taskslog.Store, tk *Task, path string) (agent.LogSink, error) {
+func reopenTaskLog(s *taskhistory.Store, tk *Task, path string) (agent.LogSink, error) {
 	name := tk.LogFilename()
 	if path != "" {
 		name = filepath.Base(path)
@@ -837,14 +840,13 @@ func TestRunner(t *testing.T) {
 			if _, err := r.Start(t.Context(), tk, ""); err == nil {
 				t.Fatal("want launch error")
 			}
-			logs, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
+			logs, err := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)).LoadSettled()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(logs) != 1 {
 				t.Fatalf("loaded %d logs, want 1", len(logs))
 			}
-			logs[0].SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
 
 			if err := logs[0].LoadMessages(); err != nil {
 				t.Fatal(err)
@@ -1077,7 +1079,7 @@ func TestRunner(t *testing.T) {
 			}
 
 			// Load the log and verify the trailer was written.
-			lt, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
+			lt, err := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)).LoadSettled()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1417,8 +1419,9 @@ func TestRunner(t *testing.T) {
 				backends map[harness.Name]agent.Backend
 			}{
 				{
-					name:    "runtime_revive",
-					runtime: &reviveFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}},
+					name:     "runtime_revive",
+					runtime:  &reviveFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}},
+					backends: map[harness.Name]agent.Backend{"test": &agenttest.FakeBackend{}},
 				},
 				{
 					name:    "session_start",
@@ -1468,7 +1471,7 @@ func TestRunner(t *testing.T) {
 					if got := status.Status(tk.RuntimeInstanceID()); got != runtimetest.StatusStopped {
 						t.Fatalf("runtime status = %s, want stopped", got)
 					}
-					loaded, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
+					loaded, err := r.LogStore.LoadUnsettled()
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -2063,14 +2066,13 @@ func testRunnerSessions(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
-			store := taskslog.NewStore(testLogger(), logDir)
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "model-1", "high")
+			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil))
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "model-1", "high")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
 			w, err := openTaskLog(store, tk)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { _ = w.Close() }()
 			// Write something and close.
 			_ = w.AppendRecord(agent.PhysicalRecord{Encoded: []byte("test\n")})
 			_ = w.Close()
@@ -2108,7 +2110,7 @@ func testRunnerSessions(t *testing.T) {
 			// caic_meta header. Otherwise every server restart that re-adopts
 			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
-			store := taskslog.NewStore(testLogger(), logDir)
+			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil))
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
 
@@ -2144,7 +2146,7 @@ func testRunnerSessions(t *testing.T) {
 			t.Parallel()
 			// Reopen must report os.ErrNotExist without creating a replacement
 			// header because a reconnect cannot infer the running relay format.
-			store := taskslog.NewStore(testLogger(), filepath.Join(t.TempDir(), "logs"))
+			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(filepath.Join(t.TempDir(), "logs")), agentbackends.Default("", nil))
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
 			if _, err := reopenTaskLog(store, tk, ""); !errors.Is(err, os.ErrNotExist) {
@@ -2836,7 +2838,7 @@ func testRunnerSessions(t *testing.T) {
 
 		// Create an initial session with a log writer by using the backend
 		// directly (Checkout.Start needs a instance backend).
-		logW, err := openTaskLog(taskslog.NewStore(testLogger(), logDir), tk)
+		logW, err := openTaskLog(taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), agentbackends.Default("", nil)), tk)
 		if err != nil {
 			t.Fatal(err)
 		}

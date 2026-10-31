@@ -444,7 +444,7 @@ func TestSmoke(t *testing.T) {
 		// are shared, and each task's prompt selects its harness recording.
 		backendSet := map[harness.Name]agent.Backend{}
 		for h, recordings := range byHarness {
-			backend, err := smoketest.NewReplayBackend(func() agent.WireFormat { return smokeReplayWire(h) }, recordings...)
+			backend, err := smoketest.NewReplayBackend(smokeReplayBackend(h), recordings...)
 			if err != nil {
 				t.Fatalf("%s replay backend: %v", h, err)
 			}

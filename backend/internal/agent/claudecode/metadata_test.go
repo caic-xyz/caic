@@ -1,6 +1,6 @@
 // Tests Claude token-accounting normalization shared by inventory and live parsing.
 
-package metadata
+package claudecode
 
 import (
 	"testing"
@@ -10,11 +10,11 @@ import (
 	genclaudecode "github.com/maruel/genai/providers/claudecode"
 )
 
-func TestUsage(t *testing.T) {
+func TestNormalizeUsage(t *testing.T) {
 	t.Parallel()
 	t.Run("inconsistent breakdown", func(t *testing.T) {
 		t.Parallel()
-		u := Usage(&genclaudecode.MsgUsage{CacheCreationInputTokens: 20, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}})
+		u := normalizeUsage(&genclaudecode.MsgUsage{CacheCreationInputTokens: 20, CacheCreation: genclaudecode.CacheCreation{Ephemeral5mInputTokens: 10, Ephemeral1hInputTokens: 100}})
 		if u.CacheWriteBuckets().Total() != 20 {
 			t.Fatalf("write buckets exceed total: %+v", u)
 		}
@@ -32,7 +32,7 @@ func TestUsage(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			usage := Usage(&tt.in)
+			usage := normalizeUsage(&tt.in)
 			if usage.CacheWriteBuckets().Count(time.Hour) != int64(tt.in.CacheCreation.Ephemeral1hInputTokens) {
 				t.Fatalf("one-hour tokens lost: %+v", usage)
 			}
@@ -43,7 +43,7 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-func TestParser(t *testing.T) {
+func TestMetadataParser(t *testing.T) {
 	t.Parallel()
 	t.Run("Parse", func(t *testing.T) {
 		t.Parallel()
@@ -66,11 +66,11 @@ func TestParser(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					var parser Parser
-					if _, err := parser.Parse([]byte(tc.line)); err != nil {
+					var parser metadataParser
+					if _, err := parser.ParseOutput([]byte(tc.line)); err != nil {
 						t.Fatal(err)
 					}
-					messages, err := parser.Parse([]byte(`{"type":"result","usage":{}}`))
+					messages, err := parser.ParseOutput([]byte(`{"type":"result","usage":{}}`))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -103,12 +103,60 @@ func TestParser(t *testing.T) {
 			} {
 				t.Run(line, func(t *testing.T) {
 					t.Parallel()
-					var parser Parser
-					if _, err := parser.Parse([]byte(line)); err == nil {
+					var parser metadataParser
+					if _, err := parser.ParseOutput([]byte(line)); err == nil {
 						t.Fatal("invalid accounting accepted")
 					}
 				})
 			}
 		})
+	})
+	t.Run("ordered models and child accounting", func(t *testing.T) {
+		t.Parallel()
+		for _, projection := range []string{"full", "metadata"} {
+			t.Run(projection, func(t *testing.T) {
+				t.Parallel()
+				var parser agent.MessageParser = New().NewWire()
+				if projection == "metadata" {
+					parser = New().NewMetadataParser()
+				}
+				var metadata agent.SessionMetadata
+				var results []*agent.ResultMessage
+				var call *agent.UsageMessage
+				for _, line := range []string{
+					`{"type":"system","subtype":"init","session_id":"root","model":"claude-sonnet-4-6","effort":"high","claude_code_version":"2.1.0"}`,
+					`{"type":"assistant","parent_tool_use_id":"child","message":{"model":"child-model","content":[],"usage":{"input_tokens":99,"output_tokens":1,"output_tokens_details":{"thinking_tokens":500}}}}`,
+					`{"type":"assistant","message":{"model":"claude-opus-4-6","content":[],"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":5},"output_tokens_details":{"thinking_tokens":7}}}}`,
+					`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":1,"output_tokens_details":{"thinking_tokens":3}}}}`,
+					`{"type":"result","parent_tool_use_id":"child","usage":{"output_tokens_details":{"thinking_tokens":900}}}`,
+					`{"type":"result","usage":{"input_tokens":100,"output_tokens":20},"modelUsage":{"claude-opus-4-6":{"contextWindow":200000}}}`,
+					`{"type":"system","subtype":"init","effort":"medium"}`,
+				} {
+					messages, err := parser.ParseOutput([]byte(line))
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, m := range messages {
+						metadata.Apply(m)
+						if usage, ok := m.(*agent.UsageMessage); ok && !usage.ModelDerived && !usage.Source.IsChild() {
+							call = usage
+						}
+						if result, ok := m.(*agent.ResultMessage); ok && !result.Source.IsChild() {
+							results = append(results, result)
+						}
+					}
+				}
+				want := agent.SessionMetadata{SessionID: "root", ReportedModel: "claude-opus-4-6", ReportedEffort: "medium", AgentVersion: "2.1.0"}
+				if metadata != want {
+					t.Fatalf("metadata = %+v, want %+v", metadata, want)
+				}
+				if len(results) != 1 || results[0].Usage.ReasoningOutputTokens != 10 || results[0].ContextWindow != 200000 {
+					t.Fatalf("root reasoning/window = %+v", results)
+				}
+				if call == nil || call.ReportedModel != "claude-opus-4-6" || call.Usage.CacheTTLSeconds != 300 || call.Usage.CacheWriteBuckets().Count(5*time.Minute) != 5 {
+					t.Fatalf("native call accounting = %+v", call)
+				}
+			})
+		}
 	})
 }
