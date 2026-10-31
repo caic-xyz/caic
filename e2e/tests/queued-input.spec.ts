@@ -1,5 +1,6 @@
-// Browser coverage for one pending prompt, attachment restoration, editing, steering, and delivery.
+// Browser coverage for queued prompt appending, keyboard recall, attachment restoration, steering, and delivery.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 
 for (const mobile of [false, true]) {
   test(`queued prompts survive reload and send after the current turn (${mobile ? "mobile" : "desktop"})`, async ({
@@ -77,44 +78,64 @@ for (const mobile of [false, true]) {
     await page.getByRole("button", { name: "Close view" }).click();
     await expect(queue).toBeVisible();
     const prompt = page.getByTestId("task-detail-prompt");
+    const composer = page.getByTestId("task-detail-form");
     await prompt.fill("keep this draft");
+    await composer
+      .locator('input[type="file"]')
+      .setInputFiles({ name: "follow-up.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") });
+    await expect(composer.getByRole("img", { name: "attached" })).toHaveCount(1);
     await page.getByRole("button", { name: "Send options", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: /Send now/ })).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath("send-options.png") });
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Send options", exact: true })).toBeFocused();
     await expect(queue.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
-    await expect(page.getByTestId("send-input")).toBeDisabled();
-    await prompt.press("Enter");
+    await expect(page.getByTestId("send-input")).toBeEnabled();
+    await prompt.press("ArrowUp");
     await expect(prompt).toHaveText("keep this draft");
-    await prompt.fill("");
+    await expect(queue).toBeVisible();
+    await prompt.press("Enter");
+    await expect(prompt).toHaveText("");
+    const combinedText = "send this after the answer\nkeep this draft";
+    await expect.poll(async () => (await api.getTask(id)).pendingInput?.prompt.text).toBe(combinedText);
+    await expect(queue.getByRole("img")).toHaveCount(3);
+    for (const thumbnail of await queue.getByRole("img").all()) {
+      await expect(thumbnail).toHaveJSProperty("naturalHeight", 96);
+    }
+    await page.screenshot({ path: testInfo.outputPath("appended.png") });
     const cancelPath = `**/tasks/${id}/input/cancel`;
     await page.route(cancelPath, (route) =>
       route.fulfill({
         status: 409,
         contentType: "application/json",
-        body: JSON.stringify({ error: "Try again", code: "conflict" }),
+        body: JSON.stringify({ error: { code: "CONFLICT", message: "Try again" } } satisfies ErrorResponse),
       }),
     );
-    await queue.getByRole("button", { name: "Edit pending prompt" }).click();
-    await expect(page.getByText(/Edit failed:/)).toBeVisible();
+    if (mobile) await queue.getByRole("button", { name: "Edit pending prompt" }).click();
+    else await prompt.press("ArrowUp");
+    await expect(page.getByText("Edit failed: Try again")).toBeVisible();
     await expect(queue).toContainText("send this after the answer");
     await expect(prompt).toHaveText("");
     await page.unroute(cancelPath);
-    await queue.getByRole("button", { name: "Edit pending prompt" }).click();
+    if (mobile) await queue.getByRole("button", { name: "Edit pending prompt" }).click();
+    else await prompt.press("ArrowUp");
     await expect(queue).toHaveCount(0);
     await expect(prompt).toBeFocused();
-    await expect(prompt).toHaveText("send this after the answer");
-    const composer = page.getByTestId("task-detail-form");
-    await expect(composer.getByRole("img", { name: "attached" })).toHaveCount(2);
+    await expect(prompt).toHaveText(combinedText, { useInnerText: true });
+    await prompt.pressSequentially(" updated");
+    await expect(prompt).toHaveText(`${combinedText} updated`, { useInnerText: true });
+    await expect(composer.getByRole("img", { name: "attached" })).toHaveCount(3);
     await expect(page.getByText("Let me write a test first, then fix it.")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("editing.png") });
     await prompt.fill("edited pending prompt");
     await prompt.press("Enter");
     await expect(queue).toContainText("edited pending prompt");
     await expect(prompt).toHaveText("");
-    await expect(queue.getByRole("img")).toHaveCount(2);
-    await expect(api.sendInput(id, { prompt: { text: "second pending prompt" }, queue: true })).rejects.toThrow();
+    await expect(queue.getByRole("img")).toHaveCount(3);
+    await api.sendInput(id, { prompt: { text: "second pending prompt" }, queue: true });
+    await expect
+      .poll(async () => (await api.getTask(id)).pendingInput?.prompt.text)
+      .toBe("edited pending prompt\nsecond pending prompt");
     await page.reload();
     await expect(queue).toContainText("edited pending prompt");
     await prompt.fill("answer");
@@ -134,7 +155,9 @@ for (const mobile of [false, true]) {
     } else await prompt.press("Control+Enter");
     expect((await sent).postDataJSON()).toMatchObject({ queue: false });
     await expect(queue).toHaveCount(0);
-    await expect.poll(async () => (await api.getTask(id)).numTurns).toBe(3);
+    // Fake results report cumulative turns: 1 + 2 + 3 for the initial
+    // request and the two lines of the combined queued prompt.
+    await expect.poll(async () => (await api.getTask(id)).numTurns).toBe(6);
     await waitForTaskState(api, id, "waiting");
     const task = await api.getTask(id);
     expect(task.pendingInput).toBeNull();

@@ -62,7 +62,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. | `CreateTaskReq` | `Task` |
 | POST | `/api/caic/v1/tasks/{id}/input/cancel` | Cancels a queued prompt before delivery. | `CancelQueuedInputReq` | `StatusResp` |
-| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. | `InputReq` | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
@@ -1285,7 +1285,7 @@ InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `queue` | `boolean` | Deliver when waiting instead of steering the active turn. |  |
+| `queue` | `boolean` | Append to the pending prompt, or deliver when waiting instead of steering the active turn. |  |
 | `prompt` | `Prompt` |  | yes |
 
 ### RestartReq

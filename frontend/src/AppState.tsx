@@ -1631,7 +1631,7 @@ function createAppStore() {
       if (inputDraft(id).trim() || inputImages(id).length) {
         throw new Error("Send or clear your draft before editing the pending prompt.");
       }
-      if (blobs.length) images = imageOwner.adopt([], blobs);
+      if (blobs.length) images = imageOwner.restore(blobs);
       dispatchedInputs.add(id);
       await api.cancelQueuedInput(id, { id: queued.id });
       if (accountController.signal.aborted || !taskMembership.has(id)) return;

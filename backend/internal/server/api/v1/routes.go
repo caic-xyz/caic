@@ -259,7 +259,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "sendInput",
-		Doc:    "Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage.",
+		Doc:    "Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/input",
 		Req:    reflect.TypeFor[InputReq](),

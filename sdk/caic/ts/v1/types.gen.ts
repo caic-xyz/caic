@@ -1591,7 +1591,7 @@ export interface CancelQueuedInputReq {
 
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 export interface InputReq {
-  /** Deliver when waiting instead of steering the active turn. */
+  /** Append to the pending prompt, or deliver when waiting instead of steering the active turn. */
   queue?: boolean;
   prompt: Prompt;
 }

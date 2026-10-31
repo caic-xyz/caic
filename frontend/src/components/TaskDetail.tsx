@@ -1,4 +1,4 @@
-// TaskDetail renders current-context history, archived disclosures, pending prompt editing, file links, and task actions.
+// TaskDetail renders current-context history, archived disclosures, queued prompt appending and keyboard editing, file links, and task actions.
 
 import {
   createSignal,
@@ -374,6 +374,22 @@ export default function TaskDetail(props: Props) {
   }
 
   function handlePromptNavigation(event: KeyboardEvent) {
+    if (
+      event.key === "ArrowUp" &&
+      !event.defaultPrevented &&
+      !event.isComposing &&
+      !event.repeat &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      canEditQueuedInput()
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      void editQueuedInput();
+      return;
+    }
     if (event.key === "Escape") {
       if (taskViewMode(location.pathname, location.search) !== "closed") return;
       event.preventDefault();
@@ -657,7 +673,7 @@ export default function TaskDetail(props: Props) {
   });
   async function sendInput(steer: boolean) {
     if (!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)) return;
-    if (steer !== true && !repliesImmediately() && props.pendingInput) return;
+    if (steer !== true && queueBlocked()) return;
     notifications.requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
     setSending(true);
     setActionError(null);
@@ -668,29 +684,54 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function editQueuedInput(queued: PendingInput) {
+  const canEditQueuedInput = () =>
+    !!props.pendingInput &&
+    !props.pendingInput.delivering &&
+    !props.pendingInput.delivered &&
+    !sending() &&
+    !props.inputEditing &&
+    !clearingInput() &&
+    !props.inputDraft.trim() &&
+    props.inputImages.length === 0;
+
+  async function editQueuedInput() {
+    const queued = props.pendingInput;
+    if (!queued || !canEditQueuedInput()) return;
     setActionError(null);
     try {
       await props.onEditQueuedInput(queued);
-      if (inputActive) {
-        promptRef?.focus();
+      if (inputActive && promptRef) {
+        const prompt = promptRef;
+        prompt.focus();
+        // Let the editor restore focus before placing the recalled prompt's caret.
+        queueMicrotask(() => {
+          if (!inputActive || document.activeElement !== prompt) return;
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.selectNodeContents(prompt);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        });
       }
     } catch (err) {
       if (inputActive) setActionError(`Edit failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
   }
 
-  const [cancelingInput, setCancelingInput] = createSignal<string | null>(null);
-  async function cancelQueuedInput(id: string) {
-    setCancelingInput(id);
+  const [clearingInput, setClearingInput] = createSignal(false);
+  async function clearSentInput(id: string) {
+    setClearingInput(true);
     setActionError(null);
     try {
       await api.cancelQueuedInput(props.taskId, { id });
       if (inputActive) promptRef?.focus();
     } catch (err) {
-      setActionError(`Cancel failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      if (inputActive) setActionError(`Clear failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
-      setCancelingInput(null);
+      if (inputActive) setClearingInput(false);
     }
   }
 
@@ -736,7 +777,8 @@ export default function TaskDetail(props: Props) {
     props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan" || isPendingAsk();
   const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
   const canSendInput = () => isActive() && props.taskState !== "purging" && !props.inputEditing;
-  const queueOccupied = () => !!props.pendingInput && !repliesImmediately();
+  const queueBlocked = () =>
+    !repliesImmediately() && !!(props.pendingInput?.delivering || props.pendingInput?.delivered);
   const prURL = () => {
     const owner = props.forgeOwner;
     const repo = props.forgeRepo;
@@ -1581,16 +1623,9 @@ export default function TaskDetail(props: Props) {
                         ? "Finish your draft first"
                         : "Edit pending prompt"
                     }
-                    disabled={
-                      q().delivering ||
-                      q().delivered ||
-                      sending() ||
-                      props.inputEditing ||
-                      cancelingInput() === q().id ||
-                      !!props.inputDraft.trim() ||
-                      props.inputImages.length > 0
-                    }
-                    onClick={() => void editQueuedInput(q())}
+                    aria-keyshortcuts="ArrowUp"
+                    disabled={!canEditQueuedInput()}
+                    onClick={() => void editQueuedInput()}
                   >
                     <Show
                       when={!props.inputEditing}
@@ -1599,14 +1634,15 @@ export default function TaskDetail(props: Props) {
                       <EditIcon class={styles.promptControlIcon} width="16" height="16" />
                     </Show>
                   </ActionButton>
-                  <ActionButton
-                    label="Cancel pending prompt"
-                    title="Cancel pending prompt"
-                    disabled={q().delivering || props.inputEditing || cancelingInput() === q().id}
-                    onClick={() => void cancelQueuedInput(q().id)}
-                  >
-                    <CloseIcon class={styles.queuedCancelIcon} width="16" height="16" />
-                  </ActionButton>
+                  <Show when={q().delivered}>
+                    <ActionButton
+                      label="Clear sent prompt"
+                      disabled={q().delivering || props.inputEditing || clearingInput()}
+                      onClick={() => void clearSentInput(q().id)}
+                    >
+                      <CloseIcon class={styles.promptControlIcon} width="16" height="16" />
+                    </ActionButton>
+                  </Show>
                 </div>
               </div>
             </section>
@@ -1636,11 +1672,9 @@ export default function TaskDetail(props: Props) {
               placeholder={
                 isRecoverable()
                   ? "Revive or fork to continue..."
-                  : queueOccupied()
-                    ? "Message to steer now..."
-                    : props.taskState === "running"
-                      ? "Message for next turn..."
-                      : "Send message to agent..."
+                  : props.taskState === "running"
+                    ? "Message for next turn..."
+                    : "Send message to agent..."
               }
               disabled={!canSendInput()}
               class={styles.textInput}
@@ -1658,17 +1692,11 @@ export default function TaskDetail(props: Props) {
                   type="submit"
                   disabled={
                     !canSendInput() ||
-                    queueOccupied() ||
+                    queueBlocked() ||
                     sending() ||
                     (!props.inputDraft.trim() && props.inputImages.length === 0)
                   }
-                  title={
-                    queueOccupied()
-                      ? "A prompt is already queued"
-                      : props.taskState === "running"
-                        ? "Queue for next turn (Enter)"
-                        : "Send (Enter)"
-                  }
+                  title={props.taskState === "running" ? "Queue for next turn (Enter)" : "Send (Enter)"}
                   data-testid="send-input"
                 >
                   <SendIcon class={styles.promptSendIcon} width="20" height="20" />

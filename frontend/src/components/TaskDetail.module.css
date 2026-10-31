@@ -1435,10 +1435,6 @@ a.ciStatus:hover {
   color: var(--color-danger);
 }
 
-.queuedCancelIcon {
-  fill: var(--color-danger);
-}
-
 .promptControlIcon {
   fill: currentcolor;
 }

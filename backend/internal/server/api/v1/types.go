@@ -790,7 +790,7 @@ func (r *BotFixPRReq) Validate() error {
 
 // InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 type InputReq struct {
-	Queue  bool   `json:"queue,omitempty"` // Deliver when waiting instead of steering the active turn.
+	Queue  bool   `json:"queue,omitempty"` // Append to the pending prompt, or deliver when waiting instead of steering the active turn.
 	Prompt Prompt `json:"prompt"`
 }
 

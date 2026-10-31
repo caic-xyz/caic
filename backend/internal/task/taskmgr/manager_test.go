@@ -803,8 +803,8 @@ func TestManager(t *testing.T) {
 				t.Fatalf("caller mutated pending attachment: %+v", got)
 			}
 			prompt.Images[0] = original
-			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "second"}); err == nil {
-				t.Fatal("accepted a second pending prompt")
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "second"}); err != nil {
+				t.Fatal(err)
 			}
 			m.drainInputQueue(t.Context())
 			if got := e.PendingInput(); got == nil {
@@ -817,7 +817,7 @@ func TestManager(t *testing.T) {
 			re := restored.NewEntry(rt, nil)
 			restored.Insert(rt.ID, re)
 			queue := re.PendingInput()
-			if queue == nil || queue.Prompt.Text != "first" || len(queue.Prompt.Images) != 1 {
+			if queue == nil || queue.Prompt.Text != "first\nsecond" || len(queue.Prompt.Images) != 1 {
 				t.Fatalf("restored queue: %+v", queue)
 			}
 			// Runtime adoption replaces the cold entry after its pending input was exposed.

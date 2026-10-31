@@ -69,7 +69,6 @@ declare const classes: {
   readonly "promptControlIcon": string;
   readonly "promptSendIcon": string;
   readonly "queuedActions": string;
-  readonly "queuedCancelIcon": string;
   readonly "queuedContent": string;
   readonly "queuedError": string;
   readonly "queuedImage": string;

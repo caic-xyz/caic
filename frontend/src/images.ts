@@ -1,4 +1,4 @@
-// Owns Blob image drafts, preview URLs, and browser captures.
+// Owns Blob draft previews, picker validation, queued attachment restoration, and browser captures.
 
 import type { ImageConstraints } from "@sdk/types.gen";
 
@@ -18,7 +18,6 @@ export class ImageDraftOwner {
 
   /** Validate the entire selection before allocating previews or reading any bytes. */
   adopt(current: readonly DraftImage[], blobs: readonly Blob[]): DraftImage[] {
-    if (this.disposed) throw new Error("This attachment draft is closed.");
     const limits = this.constraints();
     if (!limits) throw new Error("Image attachments are unavailable until server limits load.");
     let total = current.reduce((sum, img) => sum + img.blob.size, 0);
@@ -33,6 +32,12 @@ export class ImageDraftOwner {
         throw new Error(`Attachments must total ${limits.maxPromptImageBytes / (1024 * 1024)} MiB or less.`);
       }
     }
+    return [...current, ...this.restore(blobs)];
+  }
+
+  /** Restore accepted queued attachments without applying image-picker byte budgets. */
+  restore(blobs: readonly Blob[]): DraftImage[] {
+    if (this.disposed) throw new Error("This attachment draft is closed.");
     const added: DraftImage[] = [];
     try {
       for (const blob of blobs) {
@@ -44,7 +49,7 @@ export class ImageDraftOwner {
       this.release(added);
       throw err;
     }
-    return [...current, ...added];
+    return added;
   }
 
   release(images: readonly DraftImage[]): void {

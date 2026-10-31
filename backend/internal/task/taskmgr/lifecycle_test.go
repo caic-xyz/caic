@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +30,108 @@ import (
 func TestLifecycle(t *testing.T) {
 	t.Parallel()
 	t.Run("QueueInput", func(t *testing.T) {
+		t.Run("append_is_immutable_durable_and_rejects_stale_edits", func(t *testing.T) {
+			t.Parallel()
+			store := taskslog.NewStore(testLogger(), t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			first := agent.Prompt{Text: "first", Images: []v3.ImageData{{MediaType: "image/png", Data: "Zmlyc3Q="}}}
+			if _, err := e.Lifecycle.QueueInput(t.Context(), first); err != nil {
+				t.Fatal(err)
+			}
+			old := e.PendingInput()
+			tk.SetState(taskslog.StateWaiting)
+			second := agent.Prompt{Text: "second", Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "c2Vjb25k"}}}
+			if queued, err := e.Lifecycle.QueueInput(t.Context(), second); err != nil || !queued {
+				t.Fatalf("append = %v, %v", queued, err)
+			}
+			q := e.PendingInput()
+			want := agent.Prompt{Text: "first\nsecond", Images: []v3.ImageData{first.Images[0], second.Images[0]}}
+			if q.ID == old.ID || !reflect.DeepEqual(q.Prompt, want) {
+				t.Fatalf("appended input = %+v", q)
+			}
+			second.Images[0].Data = "caller mutation"
+			if !reflect.DeepEqual(old.Prompt, first) || !reflect.DeepEqual(q.Prompt, want) {
+				t.Fatal("append mutated an immutable prompt")
+			}
+			if err := e.Lifecycle.CancelQueuedInput(old.ID); err == nil {
+				t.Fatal("stale edit removed appended content")
+			}
+			loaded, err := store.LoadInputQueue()
+			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID || !reflect.DeepEqual(loaded[0].Prompt, want) {
+				t.Fatalf("persisted queue = %+v, %v", loaded, err)
+			}
+		})
+		for _, tc := range []struct{ name, first, second, want string }{
+			{"image then text", "", "second", "second"},
+			{"text then image", "first", "", "first"},
+			{"images only", "", "", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+				tk.SetState(taskslog.StateRunning)
+				e := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, e)
+				for _, text := range []string{tc.first, tc.second} {
+					if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: text, Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				q := e.PendingInput()
+				if q.Prompt.Text != tc.want || len(q.Prompt.Images) != 2 {
+					t.Fatalf("appended prompt = %+v", q.Prompt)
+				}
+			})
+		}
+		t.Run("concurrent_appends_keep_every_message", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			var wg sync.WaitGroup
+			for _, text := range []string{"one", "two", "three", "four"} {
+				wg.Go(func() {
+					if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: text}); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			wg.Wait()
+			lines := strings.Split(e.PendingInput().Prompt.Text, "\n")
+			slices.Sort(lines)
+			if !reflect.DeepEqual(lines, []string{"four", "one", "three", "two"}) {
+				t.Fatalf("appended lines = %q", lines)
+			}
+		})
+		for _, state := range []string{"delivering", "delivered"} {
+			t.Run("append_rejects_"+state, func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+				tk.SetState(taskslog.StateRunning)
+				e := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, e)
+				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "first"}); err != nil {
+					t.Fatal(err)
+				}
+				q := *e.PendingInput()
+				q.Delivering, q.Delivered = state == "delivering", state == "delivered"
+				e.setPendingInput(&q)
+				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "second"}); err == nil {
+					t.Fatal("append changed a reserved prompt")
+				}
+				if e.PendingInput() != &q {
+					t.Fatal("failed append changed pending input")
+				}
+			})
+		}
 		t.Run("startup_prompts_wait_for_a_ready_turn", func(t *testing.T) {
 			t.Parallel()
 			for _, state := range []taskslog.State{taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting} {

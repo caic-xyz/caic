@@ -1,4 +1,4 @@
-// Lifecycle executes task operations, durable prompt queue edits, and guarded startup recovery.
+// Lifecycle executes task operations, durable queued prompt appends and edits, and guarded startup recovery.
 
 package taskmgr
 
@@ -461,7 +461,8 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
-// QueueInput sends immediately when waiting, otherwise persists one pending prompt.
+// QueueInput appends to a pending prompt, or sends immediately when waiting.
+// Otherwise it persists a new pending prompt.
 // It reports whether the prompt was queued rather than sent.
 func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, error) {
 	// Busy tasks can enqueue independently of a blocked transport write. Only
@@ -484,16 +485,27 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 		return false, conflict("task is not ready for queued input")
 	}
 	m.inputMu.Lock()
-	if r.entry.PendingInput() != nil {
+	pending := r.entry.PendingInput()
+	if pending != nil && (pending.Delivering || pending.Delivered) {
 		m.inputMu.Unlock()
-		return false, conflict("task already has a pending prompt; edit or cancel it first")
+		return false, conflict("pending prompt is being delivered or was already sent")
 	}
-	if sendNow && t.GetState() == taskslog.StateWaiting {
+	if pending == nil && sendNow && t.GetState() == taskslog.StateWaiting {
 		m.inputMu.Unlock()
 		return false, r.sendInputLocked(ctx, prompt)
 	}
 	defer m.inputMu.Unlock()
-	prompt.Images = slices.Clone(prompt.Images)
+	if pending != nil {
+		text := pending.Prompt.Text
+		if text != "" && prompt.Text != "" {
+			text += "\n"
+		}
+		prompt.Text = text + prompt.Text
+		prompt.Images = append(slices.Clone(pending.Prompt.Images), prompt.Images...)
+	} else {
+		prompt.Images = slices.Clone(prompt.Images)
+	}
+	// New identity rejects edits that started before this content was appended.
 	q := &PendingInput{ID: ksid.NewID(), Prompt: prompt}
 	if err := m.updatePendingInputsLocked(map[*Entry]*PendingInput{r.entry: q}); err != nil {
 		return false, internalErr(err, "save pending prompt")

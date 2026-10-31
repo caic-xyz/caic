@@ -114,7 +114,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
     /** Cancels a queued prompt before delivery. */
     cancelQueuedInput: (id: string, req: CancelQueuedInputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input/cancel`, req),
-    /** Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. */
+    /** Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage. */
     sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input`, req),
     /** Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. */
     restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/restart`, req),

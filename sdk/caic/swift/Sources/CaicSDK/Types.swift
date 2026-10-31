@@ -1387,7 +1387,7 @@ public struct CancelQueuedInputReq: Codable {
 
 /// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 public struct InputReq: Codable {
-    /// Deliver when waiting instead of steering the active turn.
+    /// Append to the pending prompt, or deliver when waiting instead of steering the active turn.
     public let queue: Bool?
     public let prompt: Prompt
 }

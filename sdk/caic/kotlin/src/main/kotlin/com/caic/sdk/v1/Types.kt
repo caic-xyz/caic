@@ -1999,7 +1999,7 @@ data class CancelQueuedInputReq(val id: String)
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 @Serializable
 data class InputReq(
-    /** Deliver when waiting instead of steering the active turn. */
+    /** Append to the pending prompt, or deliver when waiting instead of steering the active turn. */
     val queue: Boolean? = null,
     val prompt: Prompt,
 )

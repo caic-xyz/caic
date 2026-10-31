@@ -419,7 +419,7 @@ public final class ApiClient {
     public func cancelQueuedInput(id: String, req: CancelQueuedInputReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/input/cancel", body: try encoder.encode(req))
     }
-    /// Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage.
+    /// Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage.
     public func sendInput(id: String, req: InputReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/input", body: try encoder.encode(req))
     }

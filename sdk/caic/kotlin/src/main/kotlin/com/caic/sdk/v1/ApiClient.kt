@@ -150,7 +150,7 @@ class ApiClient(
     suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Cancels a queued prompt before delivery. */
     suspend fun cancelQueuedInput(id: String, req: CancelQueuedInputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input/cancel", json.encodeToString(req))
-    /** Sends user input immediately, or queues it for the next waiting turn. Images use multipart/form-data; see InputImage. */
+    /** Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage. */
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input", json.encodeToString(req))
     /** Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/restart", json.encodeToString(req))

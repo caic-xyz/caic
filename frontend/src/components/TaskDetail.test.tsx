@@ -2416,7 +2416,7 @@ describe("streamed conversation", () => {
     });
   }
 
-  it("keeps one pending prompt while allowing steering and editing a cleared draft", async () => {
+  it("appends to one pending prompt while allowing steering and editing a cleared draft", async () => {
     vi.useRealTimers();
     const queued = { id: "queued1", prompt: { text: "follow up", images: [] } };
     const [draft, setDraft] = createSignal("another draft");
@@ -2431,16 +2431,51 @@ describe("streamed conversation", () => {
       onSendInput: send,
     });
     expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "ArrowUp" });
+    expect(edit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("send-input")).toBeEnabled();
     fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter" });
-    expect(send).not.toHaveBeenCalled();
+    await waitFor(() => expect(send).toHaveBeenCalledWith(false));
     fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(send).toHaveBeenCalledWith(true));
     setDraft("\n");
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Edit pending prompt" }));
+    const prompt = screen.getByTestId("task-detail-prompt");
+    for (const modifiers of [
+      { shiftKey: true },
+      { ctrlKey: true },
+      { altKey: true },
+      { metaKey: true },
+      { isComposing: true },
+      { repeat: true },
+    ])
+      fireEvent.keyDown(prompt, { key: "ArrowUp", ...modifiers });
+    expect(edit).not.toHaveBeenCalled();
+    fireEvent.keyDown(prompt, { key: "ArrowUp" });
     await waitFor(() => expect(edit).toHaveBeenCalledWith(queued));
     expect(screen.getByTestId("task-detail-prompt")).toHaveFocus();
   });
+
+  for (const [name, overrides] of [
+    ["no queued prompt", { pendingInput: null }],
+    ["an edit in progress", { inputEditing: true }],
+    ["delivery in progress", { pendingInput: { id: "queued1", prompt: { text: "follow up" }, delivering: true } }],
+    ["a draft attachment", { inputImages: [{ id: "draft1", blob: new Blob(["image"]), previewURL: "blob:draft1" }] }],
+  ] satisfies [string, Partial<Parameters<typeof TaskDetail>[0]>][]) {
+    it(`leaves Arrow Up alone with ${name}`, () => {
+      vi.useRealTimers();
+      const edit = vi.fn(async () => {});
+      renderTaskDetail({
+        pendingInput: { id: "queued1", prompt: { text: "follow up" } },
+        ...overrides,
+        onEditQueuedInput: edit,
+      });
+      const event = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true });
+      screen.getByTestId("task-detail-prompt").dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(edit).not.toHaveBeenCalled();
+    });
+  }
 
   it("retains attachment elements when queue summaries update", async () => {
     vi.useRealTimers();
@@ -2480,8 +2515,10 @@ describe("streamed conversation", () => {
     expect(screen.getByRole("img", { name: "Queued attachment 1" })).toBe(image);
   });
 
-  it("pauses failed delivery and prevents editing an already delivered prompt", async () => {
+  it("pauses failed delivery and lets an already delivered prompt be cleared", async () => {
     vi.useRealTimers();
+    const cancel = vi.spyOn(api, "cancelQueuedInput").mockResolvedValue({ status: "ok" });
+    const edit = vi.fn(async () => {});
     renderTaskDetail({
       pendingInput: {
         id: "queued1",
@@ -2492,17 +2529,25 @@ describe("streamed conversation", () => {
         delivered: true,
         error: "Prompt sent; cancel to prevent replay.",
       },
+      onEditQueuedInput: edit,
     });
     expect(screen.getByRole("region", { name: "Pending prompt" })).toHaveTextContent("Delivery paused");
     expect(screen.getByRole("alert")).toHaveTextContent("cancel to prevent replay");
     expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Cancel pending prompt" })).toBeEnabled();
+    fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "ArrowUp" });
+    expect(edit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear sent prompt" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("abc", { id: "queued1" }));
+    cancel.mockRestore();
   });
 
-  it("keeps queued prompts visible when cancellation fails", async () => {
+  it("keeps queued prompts visible when editing fails", async () => {
     vi.useRealTimers();
-    const cancel = vi.spyOn(api, "cancelQueuedInput").mockRejectedValue(new Error("Offline"));
+    const edit = vi.fn(async () => {
+      throw new Error("Offline");
+    });
     renderTaskDetail({
+      onEditQueuedInput: edit,
       pendingInput: {
         id: "queued1",
         prompt: {
@@ -2523,11 +2568,10 @@ describe("streamed conversation", () => {
     expect(image).toHaveAttribute("src", "/api/caic/v1/tasks/abc/input/queued1/images/0?max=96");
     fireEvent.error(image);
     expect(within(queue).getByText("Attachment 1: preview unavailable")).toBeInTheDocument();
-    fireEvent.click(within(queue).getByRole("button", { name: "Cancel pending prompt" }));
-    await waitFor(() => expect(screen.getByText("Cancel failed: Offline")).toBeInTheDocument());
-    expect(cancel).toHaveBeenCalledWith("abc", { id: "queued1" });
+    fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "ArrowUp" });
+    await waitFor(() => expect(screen.getByText("Edit failed: Offline")).toBeInTheDocument());
+    expect(edit).toHaveBeenCalledOnce();
     expect(within(queue).getByText("follow up")).toBeInTheDocument();
-    cancel.mockRestore();
   });
 
   it("sends the reply with Ctrl+Enter from an action button without opening it", async () => {

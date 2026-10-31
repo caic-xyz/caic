@@ -4539,6 +4539,48 @@ it("lets a foreground account menu consume Escape before a hovered health toolti
   expect(menu).toHaveFocus();
 });
 
+it("restores an appended queue whose attachments exceed one picker selection", async () => {
+  const { revoke } = enableImageDrafts();
+  const config = await api.getConfig();
+  vi.mocked(api.getConfig).mockResolvedValue({
+    ...config,
+    imageConstraints: { allowedMediaTypes: ["image/png"], maxImageBytes: 1, maxPromptImageBytes: 1 },
+  });
+  const queued = {
+    id: "pending1",
+    prompt: {
+      text: "combined pending prompt",
+      images: [0, 1].map((i) => ({ url: `/api/caic/v1/tasks/task1/input/pending1/images/${i}` })),
+    },
+  };
+  const task = makeTask({ state: "running", pendingInput: queued });
+  vi.mocked(api.getTask).mockResolvedValue(task);
+  const cancel = vi.spyOn(api, "cancelQueuedInput").mockResolvedValue({ status: "canceled" });
+  const fallback = globalThis.fetch;
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((input, init) =>
+      String(input).includes("/input/pending1/images/")
+        ? Promise.resolve(new Response(new Blob(["x"], { type: "image/png" })))
+        : fallback(input, init),
+    );
+  const view = renderApp("/task/@task1+task");
+  try {
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const form = await screen.findByTestId("task-detail-form");
+    fireEvent.keyDown(within(form).getByRole("textbox"), { key: "ArrowUp" });
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("task1", { id: queued.id }));
+    await waitFor(() => expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(2));
+    expect(within(form).getByRole("textbox")).toHaveTextContent(queued.prompt.text);
+  } finally {
+    view.unmount();
+    cancel.mockRestore();
+    fetch.mockRestore();
+  }
+  expect(revoke).toHaveBeenCalledTimes(2);
+});
+
 for (const outcome of ["download failure", "new draft", "navigation"] as const) {
   it(`preserves pending prompt ownership during ${outcome}`, async () => {
     const { revoke } = enableImageDrafts();

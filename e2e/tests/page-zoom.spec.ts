@@ -146,12 +146,10 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
       await worker.evaluate(`chrome.tabs.setZoom(${zoom})`);
       await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(zoom);
       await expect(pending).toBeVisible();
-      for (const name of ["Edit pending prompt", "Cancel pending prompt"]) {
-        const button = pending.getByRole("button", { name });
-        await expect(button).toBeInViewport({ ratio: 1 });
-        await button.focus();
-        await expect(button).toBeFocused();
-      }
+      const edit = pending.getByRole("button", { name: "Edit pending prompt" });
+      await expect(edit).toBeInViewport({ ratio: 1 });
+      await edit.focus();
+      await expect(edit).toBeFocused();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.getByTestId("task-detail-prompt").fill("Please focus on the failing test");
       await page.getByRole("button", { name: "Send options", exact: true }).click();
