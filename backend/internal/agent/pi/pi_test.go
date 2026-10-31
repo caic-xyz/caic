@@ -459,12 +459,12 @@ func TestBackend(t *testing.T) {
 	t.Run("NewWire", func(t *testing.T) {
 		msgUpdateWithAccumulatedMessage := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"message":{"role":"assistant","content":[{"type":"text","text":"ignored accumulated text"}]}}`
 		// Regression: replay (relay output during adoption, and on-disk logs) uses
-		// NewWire().ParseMessage. It must use the stateful wire format so agent_end
+		// NewWire().ParseOutput. It must use the stateful wire format so agent_end
 		// produces a terminal ResultMessage; without it SeedTimeline cannot infer
 		// the waiting state and adopted pi tasks stay stuck as "running".
 		t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
 			agentEnd := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":10,"output":5}}]}`)
-			msgs, err := New("", nil).NewWire().ParseMessage(agentEnd)
+			msgs, err := New("", nil).NewWire().ParseOutput(agentEnd)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -475,12 +475,12 @@ func TestBackend(t *testing.T) {
 				}
 			}
 			if !hasResult {
-				t.Fatalf("NewWire().ParseMessage produced no ResultMessage for agent_end: %#v", msgs)
+				t.Fatalf("NewWire().ParseOutput produced no ResultMessage for agent_end: %#v", msgs)
 			}
 		})
 
 		t.Run("message_update ignores accumulated message payload", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
-			msgs, err := New("", nil).NewWire().ParseMessage([]byte(msgUpdateWithAccumulatedMessage))
+			msgs, err := New("", nil).NewWire().ParseOutput([]byte(msgUpdateWithAccumulatedMessage))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -498,7 +498,7 @@ func TestBackend(t *testing.T) {
 
 		t.Run("message_end emits consolidated text", func(t *testing.T) {
 			t.Parallel()
-			msgs, err := New("", nil).NewWire().ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final text"}],"stopReason":"stop"}}`))
+			msgs, err := New("", nil).NewWire().ParseOutput([]byte(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final text"}],"stopReason":"stop"}}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -516,7 +516,7 @@ func TestBackend(t *testing.T) {
 
 		t.Run("tool_execution_update emits incremental deltas", func(t *testing.T) {
 			t.Parallel()
-			parser := New("", nil).NewWire().ParseMessage
+			parser := New("", nil).NewWire().ParseOutput
 
 			// Simulate two tool_execution_update events with accumulated text.
 			// The second event contains the full accumulated text (first + new).
@@ -572,20 +572,20 @@ func TestBackend(t *testing.T) {
 				return []byte(`{"type":"tool_execution_update","toolCallId":"` + id + `","partialResult":{"content":[{"type":"text","text":"x"}]}}`)
 			}
 			for i := range maxTrackedToolOutputs {
-				if _, err := wire.ParseMessage(update("tool-" + strconv.Itoa(i))); err != nil {
+				if _, err := wire.ParseOutput(update("tool-" + strconv.Itoa(i))); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if got := len(wire.toolOutputLen); got != maxTrackedToolOutputs {
 				t.Fatalf("tracked tool outputs = %d, want %d", got, maxTrackedToolOutputs)
 			}
-			if _, err := wire.ParseMessage(update("overflow")); err != nil {
+			if _, err := wire.ParseOutput(update("overflow")); err != nil {
 				t.Fatal(err)
 			}
 			if got := len(wire.toolOutputLen); got != 1 {
 				t.Fatalf("tracked tool outputs after reset = %d, want 1", got)
 			}
-			if _, err := wire.ParseMessage([]byte(`{"type":"tool_execution_end","toolCallId":"overflow"}`)); err != nil {
+			if _, err := wire.ParseOutput([]byte(`{"type":"tool_execution_end","toolCallId":"overflow"}`)); err != nil {
 				t.Fatal(err)
 			}
 			if got := len(wire.toolOutputLen); got != 0 {
@@ -595,7 +595,7 @@ func TestBackend(t *testing.T) {
 
 		t.Run("prompt command parses to UserInputMessage", func(t *testing.T) {
 			t.Parallel()
-			parser := New("", nil).NewWire().ParseMessage
+			parser := New("", nil).NewWire().ParseInput
 			line := []byte(`{"type":"prompt","message":"run rpi/446b-camera/build-annotate-cv.sh without docker","streamingBehavior":"steer"}`)
 			msgs, err := parser(line)
 			if err != nil {
@@ -621,7 +621,7 @@ func TestPiWireFormat(t *testing.T) {
 	t.Run("MessageStartIncludesSessionMetadata", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{sessionID: "ses-1"}
-		msgs, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6"}}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"message_start","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -640,7 +640,7 @@ func TestPiWireFormat(t *testing.T) {
 	t.Run("MessageEndQuotaErrorEmitsRateLimit", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		msgs, err := w.ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: The usage limit has been reached"}}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: The usage limit has been reached"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -671,10 +671,10 @@ func TestPiWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		// A message_start from the codex provider records the active provider.
-		if _, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","content":[],"model":"gpt-5.6-terra","provider":"openai-codex"}}`)); err != nil {
+		if _, err := w.ParseOutput([]byte(`{"type":"message_start","message":{"role":"assistant","content":[],"model":"gpt-5.6-terra","provider":"openai-codex"}}`)); err != nil {
 			t.Fatal(err)
 		}
-		msgs, err := w.ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"The usage limit has been reached"}}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"The usage limit has been reached"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -690,7 +690,7 @@ func TestPiWireFormat(t *testing.T) {
 	t.Run("MessageEndGenericErrorEmitsNoRateLimit", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		msgs, err := w.ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection refused"}}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection refused"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -746,7 +746,7 @@ func TestWireUsageAccounting(t *testing.T) {
 				var total int
 				var snapshots []bool
 				for _, event := range tc.events {
-					messages, err := w.ParseMessage([]byte(event))
+					messages, err := w.ParseOutput([]byte(event))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -782,7 +782,7 @@ func TestWireUsageAccounting(t *testing.T) {
 		}
 		var snapshots []bool
 		for _, event := range events {
-			messages, err := w.ParseMessage([]byte(event))
+			messages, err := w.ParseOutput([]byte(event))
 			if err != nil {
 				t.Fatal(err)
 			}

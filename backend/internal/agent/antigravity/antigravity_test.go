@@ -80,19 +80,19 @@ func TestWireFormat(t *testing.T) {
 			if out.String() != want {
 				t.Fatalf("input = %q", out.String())
 			}
-			msgs, err := w.ParseMessage(out.Bytes())
+			msgs, err := w.ParseInput(out.Bytes())
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("parse input = %v, %v", msgs, err)
 			}
 			if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
 				t.Fatalf("input = %+v", msgs[0])
 			}
-			parser, err := agent.NewLogRecordParser(New("", nil).NewWire().ParseMessage)
+			parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
 			if err != nil {
 				t.Fatal(err)
 			}
 			record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
-			if err != nil || record.RelayRecord || len(record.Messages) != 1 {
+			if err != nil || record.Provenance.Source == agent.RecordSourceRelay || len(record.Messages) != 1 {
 				t.Fatalf("input record = %#v, %v", record, err)
 			}
 			if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
@@ -116,7 +116,7 @@ func TestWireFormat(t *testing.T) {
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
 			}
-			msgs, err := w.ParseMessage(out.Bytes())
+			msgs, err := w.ParseInput(out.Bytes())
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("parse input = %v, %v", msgs, err)
 			}
@@ -140,7 +140,7 @@ func TestWireFormat(t *testing.T) {
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
 			}
-			msgs, err := w.ParseMessage(out.Bytes())
+			msgs, err := w.ParseInput(out.Bytes())
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("parse input = %v, %v", msgs, err)
 			}
@@ -174,7 +174,7 @@ func TestWireFormat(t *testing.T) {
 			var text string
 			var result *agent.ResultMessage
 			for sc.Scan() {
-				msgs, err := w.ParseMessage(sc.Bytes())
+				msgs, err := w.ParseOutput(sc.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -220,7 +220,7 @@ func TestWireFormat(t *testing.T) {
 			var result *agent.ResultMessage
 			var text strings.Builder
 			for sc.Scan() {
-				msgs, err := w.ParseMessage(sc.Bytes())
+				msgs, err := w.ParseOutput(sc.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -288,7 +288,7 @@ func TestWireFormat(t *testing.T) {
 			var results []*agent.ToolResultMessage
 			var turns []*agent.ResultMessage
 			for _, line := range lines {
-				msgs, err := w.ParseMessage([]byte(line))
+				msgs, err := w.ParseOutput([]byte(line))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -317,7 +317,7 @@ func TestWireFormat(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			line := []byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"output":"build failed\n","error":{"type":"error","message":"command failed"}}}}`)
-			msgs, err := w.ParseMessage(line)
+			msgs, err := w.ParseOutput(line)
 			if err != nil || len(msgs) != 3 {
 				t.Fatalf("completion = %v, %v", msgs, err)
 			}
@@ -333,7 +333,7 @@ func TestWireFormat(t *testing.T) {
 			if !ok || result.ToolUseID != use.ToolUseID || result.Error != "command failed" {
 				t.Fatalf("result = %+v", msgs[2])
 			}
-			if msgs, err := w.ParseMessage(line); err != nil || len(msgs) != 0 {
+			if msgs, err := w.ParseOutput(line); err != nil || len(msgs) != 0 {
 				t.Fatalf("duplicate completion = %v, %v", msgs, err)
 			}
 		})
@@ -349,7 +349,7 @@ func TestWireFormat(t *testing.T) {
 			}
 			var types, texts []string
 			for _, line := range lines {
-				msgs, err := w.ParseMessage([]byte(line))
+				msgs, err := w.ParseOutput([]byte(line))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -367,7 +367,7 @@ func TestWireFormat(t *testing.T) {
 		})
 		t.Run("response fallback", func(t *testing.T) {
 			t.Parallel()
-			msgs, err := New("", nil).NewWire().ParseMessage([]byte(`{"event":"result","result":{"status":"SUCCESS","response":"answer"}}`))
+			msgs, err := New("", nil).NewWire().ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS","response":"answer"}}`))
 			if err != nil || len(msgs) != 2 || msgs[0].Type() != "text" || msgs[1].Type() != "result" {
 				t.Fatalf("fallback = %v, %v", msgs, err)
 			}
@@ -376,10 +376,10 @@ func TestWireFormat(t *testing.T) {
 			t.Parallel()
 			b := New("", nil)
 			first, second := b.NewWire(), b.NewWire()
-			if _, err := first.ParseMessage([]byte(`{"event":"step_update","step_update":{"state":"DONE","step_type":"agent_response","usage":{"input_tokens":123}}}`)); err != nil {
+			if _, err := first.ParseOutput([]byte(`{"event":"step_update","step_update":{"state":"DONE","step_type":"agent_response","usage":{"input_tokens":123}}}`)); err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := second.ParseMessage([]byte(`{"event":"result","result":{"status":"SUCCESS"}}`))
+			msgs, err := second.ParseOutput([]byte(`{"event":"result","result":{"status":"SUCCESS"}}`))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("fresh result = %v, %v", msgs, err)
 			}
@@ -391,11 +391,11 @@ func TestWireFormat(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			for _, line := range []string{`{`, `{"event":"user","message":{"content":[{"type":"image"}]}}`} {
-				if _, err := w.ParseMessage([]byte(line)); err == nil {
+				if _, err := w.ParseInput([]byte(line)); err == nil {
 					t.Fatalf("accepted %s", line)
 				}
 			}
-			if _, err := w.ParseMessage([]byte(`{"event":"init","future":true}`)); err != nil {
+			if _, err := w.ParseOutput([]byte(`{"event":"init","future":true}`)); err != nil {
 				t.Fatal(err)
 			}
 		})

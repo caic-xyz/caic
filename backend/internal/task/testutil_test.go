@@ -57,7 +57,7 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 type attachCaptureBackend struct {
@@ -80,7 +80,7 @@ func (b *attachCaptureBackend) AttachRelay(ctx context.Context, opts *agent.Opti
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 // testWire implements agent.WireFormat for testing.
@@ -112,8 +112,12 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) err
 	return nil
 }
 
-func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
+func (w *testWire) ParseOutput(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
+}
+
+func (*testWire) ParseInput(line []byte) ([]agent.Message, error) {
+	return claudecode.New().NewWire().ParseInput(line)
 }
 
 // testContainer returns a fake runtime whose Diff and compact status probe

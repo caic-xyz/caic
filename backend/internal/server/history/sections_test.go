@@ -154,7 +154,7 @@ func TestSourceSections(t *testing.T) {
 				}
 				path := writeFixture(t, lines...)
 				resolver := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
-					return &agenttest.Wire{Parse: func(data []byte) ([]agent.Message, error) {
+					return &agenttest.Wire{Output: func(data []byte) ([]agent.Message, error) {
 						var input map[string]int
 						if err := json.Unmarshal(data, &input); err != nil {
 							return nil, err
@@ -283,7 +283,7 @@ func TestSourceSections(t *testing.T) {
 					}
 					batches := [][]agent.Message{prefix, suffix, append(slices.Clone(prefix), suffix...)}
 					resolver := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
-						return &agenttest.Wire{Parse: func(data []byte) ([]agent.Message, error) {
+						return &agenttest.Wire{Output: func(data []byte) ([]agent.Message, error) {
 							var input struct {
 								Batch int `json:"batch"`
 							}

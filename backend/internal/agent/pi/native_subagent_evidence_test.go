@@ -85,7 +85,7 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	restoredWire := New("", nil).NewWire()
 	var restoredObservations []agent.NativeSubagent
 	for index, payload := range history {
-		messages, err := restoredWire.ParseMessage(payload)
+		messages, err := restoredWire.ParseOutput(payload)
 		if err != nil {
 			t.Fatalf("history record %d: %v", index, err)
 		}
@@ -176,7 +176,7 @@ func TestDelegationTransportOwnership(t *testing.T) {
 		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +184,7 @@ func TestDelegationTransportOwnership(t *testing.T) {
 			for _, line := range evidence.Payloads {
 				var messages []agent.Message
 				if !physical {
-					messages, err = wire.ParseMessage(line)
+					messages, err = wire.ParseOutput(line)
 				} else {
 					record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + string(line) + `}`))
 					err = e

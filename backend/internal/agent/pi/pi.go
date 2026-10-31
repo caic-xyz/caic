@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	"github.com/maruel/genai/providers/pi"
@@ -438,11 +440,11 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, log agent
 	return writeJSONLine(wr, cmd, log)
 }
 
-// ParseMessage adapts native Pi records and marks unique token contributions.
+// ParseOutput adapts native Pi records and marks unique token contributions.
 // turn_end and compaction summaries are additive; a result repeats the last
 // call when those reports already account for it. This state is reconstructed
 // from native records during replay, including result-only histories.
-func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
+func (w *piWireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	typ, err := decodeEventType(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
@@ -473,6 +475,37 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+// ParseInput decodes recorded Pi commands without changing output lifecycle or usage.
+func (*piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+	typ, err := decodeEventType(line)
+	if err != nil {
+		return nil, err
+	}
+	switch typ {
+	case pi.CmdPrompt:
+		// Persisted stdin prompt command; convert to UserInputMessage.
+		var cmd pi.PromptCmd
+		if err := json.Unmarshal(line, &cmd); err != nil {
+			return nil, fmt.Errorf("unmarshal prompt cmd: %w", err)
+		}
+		ui := &agent.UserInputMessage{Text: cmd.Message}
+		for _, img := range cmd.Images {
+			ui.Images = append(ui.Images, v3.ImageData{
+				MediaType: img.MimeType,
+				Data:      img.Data,
+			})
+		}
+		return []agent.Message{ui}, nil
+
+	case pi.CmdCompact:
+		// Stdin compact command logged by relay; skip during replay.
+		return nil, nil
+
+	default:
+		return []agent.Message{&agent.RawMessage{MessageType: string(typ), Raw: append([]byte(nil), line...)}}, nil
+	}
 }
 
 func (w *piWireFormat) parseNativeMessage(typ pi.EventType, line []byte) ([]agent.Message, error) {

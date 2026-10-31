@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -73,11 +75,11 @@ func TestRecordCursorAuthority(t *testing.T) {
 		}
 		path := writePhysicalTestLog(t, false, header, text)
 		replacement := writePhysicalTestLog(t, false, `{"t":"text","text":"foreign"}`)
-		resolver := newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		resolver := newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
 			if err := os.Rename(replacement, path); err != nil {
 				t.Fatal(err)
 			}
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		})
 		cursor, err := OpenRecordCursor(path, resolver)
 		if err != nil {
@@ -119,11 +121,11 @@ func TestRecordCursorAuthority(t *testing.T) {
 	t.Run("changed during wire resolution", func(t *testing.T) {
 		t.Parallel()
 		path := writePhysicalTestLog(t, false, header, text)
-		resolver := newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		resolver := newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
 			if err := os.WriteFile(path, []byte(text+"\n"+strings.Repeat(" ", len(header))), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		})
 		cursor, err := OpenRecordCursor(path, resolver)
 		if err != nil {

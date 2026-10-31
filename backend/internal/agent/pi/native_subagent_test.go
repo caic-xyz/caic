@@ -57,7 +57,7 @@ func TestSubagentPausedRunIsNotRunning(t *testing.T) {
 	t.Parallel()
 	wire := New("", nil).NewWire()
 	feed := func(line string) []agent.NativeSubagent {
-		msgs, err := wire.ParseMessage([]byte(line))
+		msgs, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatalf("ParseMessage(%s): %v", line, err)
 		}
@@ -131,7 +131,7 @@ func TestSubagentAsyncSnapshotSettlesRun(t *testing.T) {
 	}
 	wire := New("", nil).NewWire()
 	feed := func(line []byte) []agent.NativeSubagent {
-		msgs, err := wire.ParseMessage(line)
+		msgs, err := wire.ParseOutput(line)
 		if err != nil {
 			t.Fatalf("ParseMessage(%s): %v", line, err)
 		}
@@ -173,7 +173,7 @@ func TestSubagentManagementNeverSpawns(t *testing.T) {
 		`{"type":"tool_execution_end","toolCallId":"c3","toolName":"bg_wait","result":{"content":[{"type":"text","text":"bash job done"}],"details":{"mode":"management","results":[],"completions":[{"runId":"job-1","agent":"bash","mode":"background","state":"complete","success":true,"results":[]}]}},"isError":false}`,
 	} {
 		wire := New("", nil).NewWire()
-		msgs, err := wire.ParseMessage([]byte(line))
+		msgs, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatalf("ParseMessage(%s): %v", line, err)
 		}

@@ -22,7 +22,7 @@ func TestTaskLifecycleEvidence(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	p, err := agent.NewLogRecordParser(New().NewWire().ParseMessage)
+	p, err := agent.NewLogRecordParser(New().NewWire())
 	if err != nil {
 		t.Fatal(err)
 	}

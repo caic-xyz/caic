@@ -97,20 +97,17 @@ type TimedMessage struct {
 }
 
 // RelayRecordBoundary identifies one relay-owned physical record by its end
-// offset within a relay generation and the following semantic timeline position.
+// offset within a relay generation and its exact byte fingerprint.
 type RelayRecordBoundary struct {
 	Generation  string
 	RelayEnd    int64
-	MessageEnd  int
 	ByteEnd     int
 	Fingerprint [32]byte
 }
 
-// ParsedTimeline contains semantic messages and adoption-only relay record
-// boundaries from one ordered physical-record scan. Encoded holds validated
-// relay bytes when the scan came directly from a bounded relay snapshot.
-type ParsedTimeline struct {
-	Messages     []TimedMessage
+// RelaySnapshot contains validated bytes and physical record boundaries from
+// one bounded relay snapshot. Semantic restoration uses the reconciled task log.
+type RelaySnapshot struct {
 	RelayRecords []RelayRecordBoundary
 	Encoded      []byte
 }
@@ -1146,11 +1143,39 @@ type RelayGenerationMessage v3.RelayGenerationMessage
 // Type implements Message.
 func (m *RelayGenerationMessage) Type() string { return messageTypeRelayGeneration }
 
-// LogSink appends complete task-log records through the task-owned physical
-// log authority. Native records are already encoded physical records; semantic
-// messages are backend controls encoded as v3 records.
+// RecordSource identifies whether a physical append advances a live relay cursor.
+type RecordSource uint8
+
+const (
+	// RecordSourceLocal includes client input, host controls and reconciled import
+	// batches. Import establishes its verified relay anchor separately.
+	RecordSourceLocal RecordSource = iota
+	// RecordSourceRelay identifies a validated record from live relay output.
+	RecordSourceRelay
+)
+
+// RecordProvenance carries classification established by the record's owner.
+type RecordProvenance struct {
+	Source RecordSource
+	// Generation is nonempty only for a validated relay generation marker.
+	Generation string
+}
+
+// PhysicalRecord carries complete LF-terminated encoded records without copying.
+// Local batches use the zero provenance; live relay records use the parser's
+// provenance. The byte slice remains owned by the caller during AppendRecord.
+type PhysicalRecord struct {
+	Encoded    []byte
+	Provenance RecordProvenance
+}
+
+// LogSink appends physical task-log records through the task-owned authority.
+// Callers supply already encoded records and their validated provenance;
+// semantic messages are backend controls encoded as v3 records.
 type LogSink interface {
-	AppendNative(data []byte) error
+	// AppendRecord persists the original bytes. Success permits relay cursor
+	// advancement; it does not imply fsync or stronger delivery guarantees.
+	AppendRecord(record PhysicalRecord) error
 	AppendMessage(message Message) error
 	Close() error
 }
@@ -1158,8 +1183,8 @@ type LogSink interface {
 // DiscardLogSink ignores task-log records for non-persistent agent operations.
 type DiscardLogSink struct{}
 
-// AppendNative discards one native physical record.
-func (DiscardLogSink) AppendNative([]byte) error { return nil }
+// AppendRecord discards encoded physical records.
+func (DiscardLogSink) AppendRecord(PhysicalRecord) error { return nil }
 
 // AppendMessage discards one caic control record.
 func (DiscardLogSink) AppendMessage(Message) error { return nil }
@@ -1187,7 +1212,7 @@ func appendNativeRecord(log LogSink, token logRecordType, data []byte) error {
 	if err != nil {
 		return err
 	}
-	return log.AppendNative(append(data, '\n'))
+	return log.AppendRecord(PhysicalRecord{Encoded: append(data, '\n')})
 }
 
 // WriteMetaSession appends a caic_session control record for init metadata.

@@ -46,8 +46,8 @@ func (*FakeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) 
 	return agent.PlainTextWritePrompt(w, p, log)
 }
 
-// ParseMessage decodes a single flat NDJSON line from the fake agent.
-func (*FakeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
+// ParseOutput decodes a single flat NDJSON line from the fake agent.
+func (*FakeBackend) ParseOutput(line []byte) ([]agent.Message, error) {
 	return parseMessage(line)
 }
 
@@ -121,3 +121,8 @@ func VisualModelInventory(h harness.Name) agent.ModelInventory {
 }
 
 var _ agent.Backend = (*FakeBackend)(nil)
+
+// ParseInput decodes the fake agent's recorded plain-text prompts.
+func (*FakeBackend) ParseInput(line []byte) ([]agent.Message, error) {
+	return parsePlainTextInput(line)
+}

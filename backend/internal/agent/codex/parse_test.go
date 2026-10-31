@@ -1052,7 +1052,7 @@ func TestWireFormat(t *testing.T) {
 		var messages []agent.Message
 		workers.Go(func() {
 			var err error
-			messages, err = w.ParseMessage([]byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"working"}}`))
+			messages, err = w.ParseOutput([]byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"working"}}`))
 			parsed <- err
 		})
 		select {
@@ -1081,27 +1081,27 @@ func TestWireFormat(t *testing.T) {
 			t.Run(metadata, func(t *testing.T) {
 				t.Parallel()
 				w := New("", nil).NewWire()
-				if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child",` + metadata + `}}}`)); err != nil {
+				if _, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"child",` + metadata + `}}}`)); err != nil {
 					t.Fatal(err)
 				}
-				msgs, err := w.ParseMessage([]byte(`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failed before root metadata"}}}`))
+				msgs, err := w.ParseOutput([]byte(`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failed before root metadata"}}}`))
 				if err != nil || len(msgs) != 1 {
 					t.Fatalf("child error: %v %v", msgs, err)
 				}
 				if m, ok := msgs[0].(*agent.SystemMessage); !ok || m.Detail != "child failed before root metadata" || !m.Source.IsChild() || m.Source.AgentID != "codex:thread:child" {
 					t.Errorf("explicit child error escaped to root: %+v", msgs[0])
 				}
-				if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"parent","threadSource":"user"}}}`)); err != nil {
+				if _, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"parent","threadSource":"user"}}}`)); err != nil {
 					t.Fatal(err)
 				}
-				msgs, err = w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
+				msgs, err = w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
 				if err != nil || len(msgs) != 1 {
 					t.Fatalf("repeated child init: %v %v", msgs, err)
 				}
 				if s := msgs[0].Provenance(); !s.IsChild() || s.RootThreadID != "parent" {
 					t.Fatalf("metadata-free child replaced root: %+v", s)
 				}
-				msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"parent","turn":{"id":"turn","status":"completed"}}}`))
+				msgs, err = w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"parent","turn":{"id":"turn","status":"completed"}}}`))
 				if err != nil || len(msgs) != 1 {
 					t.Fatalf("parent result suppressed: %v %v", msgs, err)
 				}
@@ -1116,17 +1116,17 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := New("", nil).NewWire()
 		for _, id := range []string{"original-root", "restarted-root"} {
-			if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + id + `","threadSource":"user"}}}`)); err != nil {
+			if _, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + id + `","threadSource":"user"}}}`)); err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := w.ParseMessage([]byte(`{"method":"item/started","params":{"threadId":"` + id + `","turnId":"turn","item":{"type":"commandExecution","id":"local","command":"printf root","status":"inProgress"}}}`))
+			msgs, err := w.ParseOutput([]byte(`{"method":"item/started","params":{"threadId":"` + id + `","turnId":"turn","item":{"type":"commandExecution","id":"local","command":"printf root","status":"inProgress"}}}`))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("root tool: %v %v", msgs, err)
 			}
 			if source := msgs[0].Provenance(); source.IsChild() || source.RootThreadID != id {
 				t.Fatalf("new authoritative root treated as child: %+v", source)
 			}
-			msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"` + id + `","turn":{"id":"turn","status":"completed"}}}`))
+			msgs, err = w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"` + id + `","turn":{"id":"turn","status":"completed"}}}`))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("new root completion suppressed: %v %v", msgs, err)
 			}
@@ -1145,7 +1145,7 @@ func TestWireFormat(t *testing.T) {
 			`{"method":"thread/tokenUsage/updated","params":{"threadId":"root","turnId":"turn","tokenUsage":{"last":{"inputTokens":7,"totalTokens":7},"total":{"inputTokens":7,"totalTokens":7}}}}`,
 		}
 		for i, line := range lines {
-			msgs, err := w.ParseMessage([]byte(line))
+			msgs, err := w.ParseOutput([]byte(line))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("line %d: %v %v", i, msgs, err)
 			}
@@ -1169,7 +1169,7 @@ func TestWireFormat(t *testing.T) {
 				}
 			}
 		}
-		msgs, err := w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}`))
+		msgs, err := w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}`))
 		if err != nil || len(msgs) != 1 {
 			t.Fatalf("parent result: %v %v", msgs, err)
 		}
@@ -1180,34 +1180,34 @@ func TestWireFormat(t *testing.T) {
 	t.Run("ParseMessage/known child before root metadata", func(t *testing.T) {
 		t.Parallel()
 		w := New("", nil).NewWire()
-		if _, err := w.ParseMessage([]byte(`{"method":"item/started","params":{"threadId":"parent","turnId":"turn","item":{"type":"subAgentActivity","id":"spawn","agentThreadId":"child","agentPath":"/root/child","kind":"started","model":"reported-child-model"}}}`)); err != nil {
+		if _, err := w.ParseOutput([]byte(`{"method":"item/started","params":{"threadId":"parent","turnId":"turn","item":{"type":"subAgentActivity","id":"spawn","agentThreadId":"child","agentPath":"/root/child","kind":"started","model":"reported-child-model"}}}`)); err != nil {
 			t.Fatal(err)
 		}
-		msgs, err := w.ParseMessage([]byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"turn","tokenUsage":{"total":{"inputTokens":1,"totalTokens":1},"last":{"inputTokens":1,"totalTokens":1}}}}`))
+		msgs, err := w.ParseOutput([]byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"turn","tokenUsage":{"total":{"inputTokens":1,"totalTokens":1},"last":{"inputTokens":1,"totalTokens":1}}}}`))
 		if err != nil || len(msgs) != 1 {
 			t.Fatalf("usage: %v %v", msgs, err)
 		}
 		if m, ok := msgs[0].(*agent.UsageMessage); !ok || !m.Source.IsChild() || m.ReportedModel != "reported-child-model" || m.Source.RootThreadID != "" {
 			t.Fatalf("reported ownership/model lost: %+v", m)
 		}
-		msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"turn","status":"completed"}}}`))
+		msgs, err = w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"turn","status":"completed"}}}`))
 		if err != nil || len(msgs) != 0 {
 			t.Fatalf("known child completed unknown root: %v %v", msgs, err)
 		}
 		for _, root := range []string{"first-root", "restarted-root"} {
-			if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + root + `","threadSource":"user"}}}`)); err != nil {
+			if _, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + root + `","threadSource":"user"}}}`)); err != nil {
 				t.Fatal(err)
 			}
 			// A child announced before session metadata stays a child when its
 			// own init omits optional delegation fields during warm replay.
-			msgs, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
+			msgs, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("child init: %v %v", msgs, err)
 			}
 			if s := msgs[0].Provenance(); !s.IsChild() || s.RootThreadID != root {
 				t.Fatalf("known child replaced root during replay: %+v", s)
 			}
-			msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"` + root + `","turn":{"id":"turn","status":"completed"}}}`))
+			msgs, err = w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"` + root + `","turn":{"id":"turn","status":"completed"}}}`))
 			if err != nil || len(msgs) != 1 {
 				t.Fatalf("root result lost after child init: %v %v", msgs, err)
 			}
@@ -1230,14 +1230,14 @@ func TestWireFormat(t *testing.T) {
 			t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 				t.Parallel()
 				w := &wireFormat{}
-				parser, err := agent.NewLogRecordParser(w.ParseMessage)
+				parser, err := agent.NewLogRecordParser(w)
 				if err != nil {
 					t.Fatal(err)
 				}
 				for i, line := range lines {
 					var msgs []agent.Message
 					if !physical {
-						msgs, err = w.ParseMessage([]byte(line))
+						msgs, err = w.ParseOutput([]byte(line))
 					} else {
 						record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + line + `}`))
 						err = e
@@ -1293,14 +1293,14 @@ func TestWireFormat(t *testing.T) {
 		// Observed shape (4DLLPGQ6C000): spawned child threads run the same
 		// skill read as the root thread on the root session's wire.
 		wire := New("", nil).NewWire()
-		if _, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
+		if _, err := wire.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
 			t.Fatal(err)
 		}
 		for _, line := range []struct {
 			thread string
 			loads  int
 		}{{"child", 0}, {"root", 1}} {
-			msgs, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_` + line.thread + `","type":"commandExecution","command":"cat /home/user/.agents/skills/code-quality/SKILL.md","cwd":"/repo","status":"inProgress"},"threadId":"` + line.thread + `","turnId":"turn_1"}}`))
+			msgs, err := wire.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_` + line.thread + `","type":"commandExecution","command":"cat /home/user/.agents/skills/code-quality/SKILL.md","cwd":"/repo","status":"inProgress"},"threadId":"` + line.thread + `","turnId":"turn_1"}}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1392,7 +1392,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{suppressUserInput: true}
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt"}]},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseOutput([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1404,7 +1404,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"captured-id","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
-		msgs, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseOutput([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1436,7 +1436,7 @@ func TestWireFormat(t *testing.T) {
 			{`{"totalTokens":330,"inputTokens":300,"cachedInputTokens":50,"outputTokens":30}`, `{"inputTokens":100,"cachedInputTokens":20,"outputTokens":10}`, false},
 		} {
 			line := fmt.Sprintf(`{"method":"thread/tokenUsage/updated","params":{"threadId":"root","tokenUsage":{"total":%s,"last":%s}}}`, tc.total, tc.last)
-			msgs, err := w.ParseMessage([]byte(line))
+			msgs, err := w.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1458,7 +1458,7 @@ func TestWireFormat(t *testing.T) {
 		w.reportedModel = "gpt-5.6"
 		w.threadID = "t1"
 		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"cacheWriteInputTokens":100,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"cacheWriteInputTokens":12,"outputTokens":20,"reasoningOutputTokens":5}}}}`
-		msgs, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseOutput([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1509,11 +1509,11 @@ func TestWireFormat(t *testing.T) {
 		w := &wireFormat{}
 		w.reportedModel = "gpt-5.6"
 		reroute := []byte(`{"jsonrpc":"2.0","method":"model/rerouted","params":{"threadId":"t1","turnId":"turn_1","fromModel":"gpt-5.6","toModel":"gpt-5.6-codex"}}`)
-		if _, err := w.ParseMessage(reroute); err != nil {
+		if _, err := w.ParseOutput(reroute); err != nil {
 			t.Fatal(err)
 		}
 		usage := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{},"last":{"totalTokens":10,"inputTokens":10,"outputTokens":0,"reasoningOutputTokens":0}}}}`)
-		msgs, err := w.ParseMessage(usage)
+		msgs, err := w.ParseOutput(usage)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1534,7 +1534,7 @@ func TestWireFormat(t *testing.T) {
 		usage1 := `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":0,"outputTokens":20,"reasoningOutputTokens":0}}}}`
 		usage2 := `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{},"last":{"totalTokens":50,"inputTokens":30,"cachedInputTokens":10,"outputTokens":20,"reasoningOutputTokens":0}}}}`
 		for _, line := range []string{usage1, usage2} {
-			if _, err := w.ParseMessage([]byte(line)); err != nil {
+			if _, err := w.ParseOutput([]byte(line)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1561,7 +1561,7 @@ func TestWireFormat(t *testing.T) {
 		}
 		want := []agent.Usage{{InputTokens: 80, OutputTokens: 20}, {}, {InputTokens: 50, OutputTokens: 10}}
 		for i, line := range lines {
-			msgs, err := w.ParseMessage([]byte(line))
+			msgs, err := w.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1585,17 +1585,17 @@ func TestWireFormat(t *testing.T) {
 		for _, live := range []bool{false, true} {
 			w := &wireFormat{threadID: "t1", suppressUserInput: live}
 			if !live {
-				if _, err := w.ParseMessage(prior); err != nil {
+				if _, err := w.ParseOutput(prior); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := w.ParseMessage(turnComplete); err != nil {
+				if _, err := w.ParseOutput(turnComplete); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := w.ParseMessage(response); err != nil {
+			if _, err := w.ParseOutput(response); err != nil {
 				t.Fatal(err)
 			}
-			msgs, err := w.ParseMessage(prior)
+			msgs, err := w.ParseOutput(prior)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1603,10 +1603,10 @@ func TestWireFormat(t *testing.T) {
 			if !ok || !usage.Usage.Equal(agent.Usage{}) {
 				t.Fatalf("live=%v snapshot = %#v, want zero usage", live, msgs[0])
 			}
-			if _, err := w.ParseMessage(turnStarted); err != nil {
+			if _, err := w.ParseOutput(turnStarted); err != nil {
 				t.Fatal(err)
 			}
-			msgs, err = w.ParseMessage(newCall)
+			msgs, err = w.ParseOutput(newCall)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1614,7 +1614,7 @@ func TestWireFormat(t *testing.T) {
 			if !ok || usage.Usage.InputTokens != 100 || usage.Usage.OutputTokens != 20 {
 				t.Errorf("live=%v new call = %#v, want 100 input and 20 output", live, msgs[0])
 			}
-			msgs, err = w.ParseMessage(turnComplete)
+			msgs, err = w.ParseOutput(turnComplete)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1631,11 +1631,11 @@ func TestWireFormat(t *testing.T) {
 			`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"t1"}}}`,
 			`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`,
 		} {
-			if _, err := w.ParseMessage([]byte(line)); err != nil {
+			if _, err := w.ParseOutput([]byte(line)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		msgs, err := w.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`))
+		msgs, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1648,10 +1648,10 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		usageLine := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"outputTokens":200},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`)
-		if _, err := w.ParseMessage(usageLine); err != nil {
+		if _, err := w.ParseOutput(usageLine); err != nil {
 			t.Fatal(err)
 		}
-		msgs, err := w.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`))
+		msgs, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1664,7 +1664,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{totalUsage: agent.Usage{InputTokens: 42, OutputTokens: 7}}
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`
-		msgs, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseOutput([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1694,7 +1694,7 @@ func TestWireFormat(t *testing.T) {
 func TestReadEditBashFixtureFileChangeHasDetail(t *testing.T) {
 	t.Parallel()
 
-	msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire().ParseMessage)
+	msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire())
 	for _, msg := range msgs {
 		use, ok := msg.(*agent.ToolUseMessage)
 		if !ok || use.Name != "Edit" {
@@ -1741,7 +1741,7 @@ func TestReplayBufferOwnership(t *testing.T) {
 	t.Parallel()
 	wire := New("", nil).NewWire()
 	line := []byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"hello"}}`)
-	msgs, err := wire.ParseMessage(line)
+	msgs, err := wire.ParseOutput(line)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1766,7 +1766,7 @@ func TestCodexChildEventOwnership(t *testing.T) {
 		`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failed"}}}`,
 	}
 	for i, line := range lines {
-		msgs, err := wire.ParseMessage([]byte(line))
+		msgs, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatalf("line %d: %v", i, err)
 		}

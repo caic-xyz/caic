@@ -1,4 +1,4 @@
-// Benchmarks for replaying retained relay history through a session wire.
+// Benchmarks for streaming authoritative recorded history into a reconnecting wire.
 
 package agent
 
@@ -6,36 +6,30 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// BenchmarkWarmHistoryReplay measures the per-adoption cost that WarmHistory adds
-// on the host: the transfer retains the warm payload so a failed attempt cannot
-// reach the wire, and the replay then parses it through the session wire. The
-// benchmark copies the synthetic stream into a fresh payload per iteration, the
-// way a transfer does, so the allocation and dispatch costs are both reported.
-// The SSH round trips the transfer also needs are not measurable here.
+// BenchmarkWarmHistoryReplay measures the per-reconnect host cost of replaying
+// the authoritative recorded task history. Files are opened and streamed through
+// the production warm path on each iteration; the wire is deliberately cheap to
+// isolate record dispatch and I/O. The 128 MiB case captures long-task latency
+// beyond the relay adoption snapshot bound without retaining the whole file.
 func BenchmarkWarmHistoryReplay(b *testing.B) {
-	for _, size := range []int64{1 << 20, 10 << 20} {
+	for _, size := range []int64{1 << 20, 10 << 20, 128 << 20} {
 		b.Run(fmt.Sprintf("%dMiB", size>>20), func(b *testing.B) {
 			stream := warmHistoryStream(b, size)
+			path := filepath.Join(b.TempDir(), "history.jsonl")
+			header := []byte(`{"t":"caic_meta","version":3,"prompt":"benchmark","harness":"claude"}` + "\n")
+			if err := os.WriteFile(path, append(header, stream...), 0o600); err != nil {
+				b.Fatal(err)
+			}
 			b.SetBytes(size)
 			b.ReportAllocs()
 			b.ResetTimer()
-			bound := int64(len(stream))
 			for range b.N {
-				// Retain the payload through the same helper the transfer uses,
-				// with the stream filling the bound exactly as a live transfer does.
-				payload, err := retainRelayPayload(bytes.NewReader(stream), bound)
-				if err != nil {
-					b.Fatal(err)
-				}
-				wire := &warmHistoryWire{}
-				parser, err := NewLogRecordParser(wire.ParseMessage)
-				if err != nil {
-					b.Fatal(err)
-				}
-				if _, err := scanRelayTailRecords(bytes.NewReader(payload), parser, 0, false, "bench", "gen", nil); err != nil {
+				if err := warmRecordedHistory(b.Context(), path, &warmHistoryWire{}); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -44,8 +38,7 @@ func BenchmarkWarmHistoryReplay(b *testing.B) {
 }
 
 // warmHistoryStream builds a canonical v3 agent-record stream of at most size
-// bytes, ending on a whole record so a transfer bound of len(stream) is filled
-// exactly.
+// bytes, ending on a whole record.
 func warmHistoryStream(b *testing.B, size int64) []byte {
 	b.Helper()
 	var buf bytes.Buffer
@@ -61,8 +54,8 @@ func warmHistoryStream(b *testing.B, size int64) []byte {
 // particular harness parser.
 type warmHistoryWire struct{}
 
-func (*warmHistoryWire) ParseMessage(line []byte) ([]Message, error) { return nil, nil }
+func (*warmHistoryWire) ParseOutput(line []byte) ([]Message, error) { return nil, nil }
 
 func (*warmHistoryWire) WritePrompt(io.Writer, Prompt, LogSink) error { return nil }
 
-func (*warmHistoryWire) WriteCompact(io.Writer, string, LogSink) error { return nil }
+func (*warmHistoryWire) ParseInput([]byte) ([]Message, error) { return nil, nil }

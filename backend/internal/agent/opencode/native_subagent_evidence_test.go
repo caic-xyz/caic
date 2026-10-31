@@ -126,7 +126,7 @@ func liveSubagents(t *testing.T, payloads [][]byte) (observations, cards []agent
 	t.Helper()
 	wire := New("", nil).NewWire()
 	for index, payload := range payloads {
-		messages, err := wire.ParseMessage(payload)
+		messages, err := wire.ParseOutput(payload)
 		if err != nil {
 			t.Fatalf("payload %d: %v", index, err)
 		}
@@ -174,7 +174,7 @@ func TestNativeSubagentRequiresDelegationEvidence(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
 			for _, line := range test.lines {
-				msgs, err := wire.ParseMessage([]byte(line))
+				msgs, err := wire.ParseOutput([]byte(line))
 				if err != nil {
 					t.Fatalf("ParseMessage(%s): %v", line, err)
 				}
@@ -198,7 +198,7 @@ func TestDelegationTransportOwnership(t *testing.T) {
 		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +206,7 @@ func TestDelegationTransportOwnership(t *testing.T) {
 			for _, line := range evidence.Payloads {
 				var messages []agent.Message
 				if !physical {
-					messages, err = wire.ParseMessage(line)
+					messages, err = wire.ParseOutput(line)
 				} else {
 					record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + string(line) + `}`))
 					err = e

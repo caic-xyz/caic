@@ -35,7 +35,7 @@ func BenchmarkV3AgentRecord(b *testing.B) {
 	}
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
-			p, err := NewLogRecordParser(benchmarkNativeParser)
+			p, err := NewLogRecordParser(&testMessageParser{output: benchmarkNativeParser})
 			if err != nil {
 				b.Fatal(err)
 			}

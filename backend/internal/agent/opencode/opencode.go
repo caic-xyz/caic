@@ -227,50 +227,60 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 	return w.WritePrompt(wr, agent.Prompt{Text: "/compact"}, log)
 }
 
-// ParseMessage wraps the package-level parseMessage with interceptions:
+// ParseInput restores prompt response correlation and decodes recorded client prompts.
+func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal input: %w", err)
+	}
+	if probe.ID != nil && string(probe.ID) != "null" && probe.Method != "" {
+		var id int64
+		if err := json.Unmarshal(probe.ID, &id); err != nil {
+			return nil, fmt.Errorf("unmarshal request ID: %w", err)
+		}
+		if opencode.Method(probe.Method) == opencode.MethodSessionPrompt {
+			w.notePromptRequest(id)
+			var prompt opencode.SessionPromptParams
+			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
+				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
+			}
+			input := &agent.UserInputMessage{}
+			for i := range prompt.Prompt {
+				content := &prompt.Prompt[i]
+				switch content.Type {
+				case opencode.ContentText:
+					input.Text += content.Text
+				case opencode.ContentImage:
+					input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
+				case opencode.ContentAudio, opencode.ContentResource, opencode.ContentResourceLink:
+					// UserInputMessage currently has no representation for these ACP content types.
+				}
+			}
+			return []agent.Message{
+				input,
+				&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)},
+			}, nil
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
+	}
+	return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
+}
+
+// ParseOutput wraps the package-level parseMessage with interceptions:
 //
-//   - logged session/prompt requests → restores prompt response correlation.
 //   - session/request_permission → auto-approves with "allow_once".
 //   - prompt responses → emits final Text/Thinking messages and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
-func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
+func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
-	// JSON-RPC requests can appear in replay logs when stdin was logged. Capture
-	// session/prompt IDs so the later response is still recognized.
-	if probe.ID != nil {
+	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
 		var id int64
 		if json.Unmarshal(probe.ID, &id) == nil {
-			if probe.Method != "" {
-				if opencode.Method(probe.Method) == opencode.MethodSessionPrompt {
-					w.notePromptRequest(id)
-					var prompt opencode.SessionPromptParams
-					if err := json.Unmarshal(probe.Params, &prompt); err != nil {
-						return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
-					}
-					input := &agent.UserInputMessage{}
-					for i := range prompt.Prompt {
-						content := &prompt.Prompt[i]
-						switch content.Type {
-						case opencode.ContentText:
-							input.Text += content.Text
-						case opencode.ContentImage:
-							input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
-						case opencode.ContentAudio, opencode.ContentResource, opencode.ContentResourceLink:
-							// UserInputMessage currently has no representation for these ACP content types.
-						}
-					}
-					return []agent.Message{
-						input,
-						&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)},
-					}, nil
-				}
-				return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
-			}
 			w.mu.Lock()
 			isPromptResp := id == w.promptReqID && w.promptReqID != 0
 			w.mu.Unlock()

@@ -115,7 +115,7 @@ func TestParseMessage(t *testing.T) {
 			name  string
 			parse func([]byte) ([]agent.Message, error)
 		}{
-			{"live", wire.ParseMessage},
+			{"live", wire.ParseOutput},
 			{"inventory", inventory.Parse},
 		} {
 			t.Run(parser.name, func(t *testing.T) {
@@ -747,12 +747,12 @@ func TestParseMessage(t *testing.T) {
 			`{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":3,"output_tokens":200,"cache_read_input_tokens":500000,"output_tokens_details":{"thinking_tokens":51}}},"uuid":"u2","session_id":"s1","parent_tool_use_id":null}`,
 		}
 		for _, line := range lines {
-			if _, err := b.ParseMessage([]byte(line)); err != nil {
+			if _, err := b.ParseOutput([]byte(line)); err != nil {
 				t.Fatal(err)
 			}
 		}
 		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}`
-		msgs, err := b.ParseMessage([]byte(resultLine))
+		msgs, err := b.ParseOutput([]byte(resultLine))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -775,12 +775,12 @@ func TestParseMessage(t *testing.T) {
 			`{"type":"system","subtype":"thinking_tokens","estimated_tokens":150,"estimated_tokens_delta":100,"uuid":"u2","session_id":"s1"}`,
 		}
 		for _, line := range lines {
-			if _, err := b.ParseMessage([]byte(line)); err != nil {
+			if _, err := b.ParseOutput([]byte(line)); err != nil {
 				t.Fatal(err)
 			}
 		}
 		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":1,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":10,"output_tokens":20}}`
-		msgs, err := b.ParseMessage([]byte(resultLine))
+		msgs, err := b.ParseOutput([]byte(resultLine))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -834,10 +834,10 @@ func TestParseMessage(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				w := newWireFormat()
-				if _, err := w.ParseMessage([]byte(initLine)); err != nil {
+				if _, err := w.ParseOutput([]byte(initLine)); err != nil {
 					t.Fatal(err)
 				}
-				msgs, err := w.ParseMessage([]byte(tc.line))
+				msgs, err := w.ParseOutput([]byte(tc.line))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1445,7 +1445,7 @@ func TestNew(t *testing.T) {
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
 		t.Parallel()
 
-		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New().NewWire().ParseMessage)
+		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New().NewWire())
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)

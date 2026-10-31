@@ -33,6 +33,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -80,7 +81,7 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger)
+	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger)
 	<-s.Done()
 	return s, nil
 }
@@ -369,6 +370,174 @@ func (b *resultFetchBackend) TurnSnapshot(ctx context.Context, id runtime.ID, pr
 		b.onDiff()
 	}
 	return b.FakeBackend.TurnSnapshot(ctx, id, previous)
+}
+
+func TestAgentRuntime(t *testing.T) {
+	t.Run("Reconnect", func(t *testing.T) {
+		dir := t.TempDir()
+		// Remote snapshot commands are supported to reproduce the output-only warm
+		// source as well as attach. No client command is present in the relay file.
+		script := `#!/usr/bin/python3
+import os, subprocess, sys
+args = sys.argv[1:]
+while args[0] == "-o":
+    args = args[2:]
+args = args[1:]
+path = os.environ["CAIC_TEST_RELAY_OUTPUT"]
+if args[:3] == ["python3", "/tmp/caic-relay/relay.py", "attach"]:
+    offset = int(args[args.index("--offset") + 1])
+    with open(path, "rb") as stream:
+        stream.seek(offset)
+        sys.stdout.buffer.write(stream.read())
+else:
+    command = " ".join(args).replace("/tmp/caic-relay/output.jsonl", path)
+    sys.exit(subprocess.run(command, shell=True).returncode)
+`
+		// Use the production relay locations without duplicating their spellings in
+		// the subprocess fixture.
+		script = strings.ReplaceAll(script, "/tmp/caic-relay/relay.py", agent.RelayScriptPath)
+		script = strings.ReplaceAll(script, "/tmp/caic-relay/output.jsonl", agent.RelayOutputPath)
+		if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o700); err != nil { //nolint:gosec // Executable test SSH boundary.
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		for _, name := range []string{"zero_offset", "current_generation", "repeated_reconnect"} {
+			t.Run(name, func(t *testing.T) {
+				r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), agent.Backends{harness.OpenCode: opencode.New("", nil)})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
+				tk.SetSessionMetadata("session", "", "", "", 0)
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
+				log, err := r.openLog(tk)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input := `{"t":"input","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"session","prompt":[{"type":"text","text":"next"}]}}}` + "\n"
+				chunk := func(text string) string {
+					return `{"t":"agent","ts":3.000,"msg":{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + text + `"}}}}}` + "\n"
+				}
+				var prefix, local string
+				if name != "zero_offset" {
+					local = `{"t":"relay_generation","generation":"previous"}` + "\n" + chunk("old turn")
+					prefix = `{"t":"relay_generation","generation":"current"}` + "\n"
+					local += prefix + input + chunk("retained ")
+					prefix += chunk("retained ")
+				} else {
+					local = input
+				}
+				if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(local)}); err != nil {
+					t.Fatal(err)
+				}
+				if err := log.AppendMessage(&agent.LogMessage{MessageType: "log", Line: "host observation"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := log.Close(); err != nil {
+					t.Fatal(err)
+				}
+				before, err := os.ReadFile(r.LogPath.Get())
+				if err != nil {
+					t.Fatal(err)
+				}
+				live := chunk("live") + `{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":17,"error":{"code":-32603,"message":"interrupted"}}}` + "\n"
+				firstLive := live
+				if name == "repeated_reconnect" {
+					firstLive = chunk("live")
+				}
+				relayPath := filepath.Join(t.TempDir(), "output.jsonl")
+				if err := os.WriteFile(relayPath, []byte(prefix+firstLive), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("CAIC_TEST_RELAY_OUTPUT", relayPath)
+				tk.SetRelayOffset(int64(len(prefix)))
+				tk.SetState(taskslog.StateRunning)
+				h, err := r.Reconnect(t.Context(), tk)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := h.Drain(); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.Log.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if name == "repeated_reconnect" {
+					// Model transport loss before the terminal response. The live
+					// prefix is now in local history beyond the import-time offset.
+					tk.DetachSession()
+					if err := os.WriteFile(relayPath, []byte(prefix+live), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					h, err = r.Reconnect(t.Context(), tk)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := h.Drain(); err != nil {
+						t.Fatal(err)
+					}
+					if err := h.Log.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var texts []string
+				var results []*agent.ResultMessage
+				for _, msg := range tk.Messages() {
+					switch msg := msg.(type) {
+					case *agent.TextMessage:
+						texts = append(texts, msg.Text)
+					case *agent.ResultMessage:
+						results = append(results, msg)
+					case *agent.UserInputMessage, *agent.LogMessage:
+						t.Fatalf("warm history was delivered again: %#v", msg)
+					}
+				}
+				wantText := "live"
+				if name != "zero_offset" {
+					wantText = "retained live"
+				}
+				if !slices.Equal(texts, []string{wantText}) || len(results) != 1 || !results[0].IsError || results[0].Result != "interrupted" {
+					t.Fatalf("completion texts=%q results=%+v, want %q and one correlated error", texts, results, wantText)
+				}
+				if tk.GetState() == taskslog.StateRunning {
+					t.Fatal("in-flight prompt error left task running")
+				}
+				if got := tk.RelayOffsetValue(); got != int64(len(prefix+live)) {
+					t.Fatalf("committed relay offset = %d, want %d", got, len(prefix+live))
+				}
+				after, err := os.ReadFile(r.LogPath.Get())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(after, append(before, live...)) {
+					t.Fatalf("reconnect changed retained bytes or duplicated output:\n%s", after)
+				}
+			})
+		}
+	})
+}
+
+// BenchmarkAgentRuntimeRelayAppend measures the live physical append boundary
+// whose successful writes must advance the task's reconnect cursor. It uses a
+// real append-only task file without fsync, matching the production contract.
+func BenchmarkAgentRuntimeRelayAppend(b *testing.B) {
+	r := newTestAgentRuntime(b, nil, b.TempDir(), nil)
+	tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.OpenCode, "", "")
+	log, err := r.openLog(tk)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		if err := log.Close(); err != nil {
+			b.Error(err)
+		}
+	})
+	record := []byte(`{"t":"agent","ts":1.000,"msg":{"text":"` + strings.Repeat("x", 1000) + `"}}` + "\n")
+	b.SetBytes(int64(len(record)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := log.AppendRecord(agent.PhysicalRecord{Encoded: record, Provenance: agent.RecordProvenance{Source: agent.RecordSourceRelay}}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestRunner(t *testing.T) {
@@ -1838,6 +2007,57 @@ func testRunnerSessions(t *testing.T) {
 
 	t.Run("LogStore", func(t *testing.T) {
 		t.Parallel()
+		t.Run("relay_cursor", func(t *testing.T) {
+			t.Parallel()
+			r := newTestAgentRuntime(t, nil, t.TempDir(), nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
+			log, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tk.SetRelayOffset(1000) // Verified remote position may exceed retained local bytes.
+			if err := agent.AppendInputNativeRecord(log, []byte(`{"id":17,"method":"session/prompt","params":{"prompt":[]}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.AppendMessage(&agent.LogMessage{Line: "host observation"}); err != nil {
+				t.Fatal(err)
+			}
+			record := `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"result":{}}}` + "\n"
+			// Reconciled batches establish their verified anchor separately, even
+			// though their bytes contain relay output.
+			if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(record + record)}); err != nil {
+				t.Fatal(err)
+			}
+			if got := tk.RelayOffsetValue(); got != 1000 {
+				t.Fatalf("local appends moved cursor to %d", got)
+			}
+			read := func(data string) error {
+				return agent.DefaultReadMessages(t.Context(), r.Log, strings.NewReader(data), func(agent.TimedMessage) error { return nil }, log, opencode.New("", nil).NewWire(), nil)
+			}
+			if err := read(record); err != nil {
+				t.Fatal(err)
+			}
+			if got := tk.RelayOffsetValue(); got != 1000+int64(len(record)) {
+				t.Fatalf("successful append cursor = %d", got)
+			}
+			generation := `{"t":"relay_generation","generation":"replacement"}` + "\n"
+			if err := read(generation + record); err != nil {
+				t.Fatal(err)
+			}
+			want := int64(len(generation + record))
+			if got := tk.RelayOffsetValue(); got != want {
+				t.Fatalf("replacement generation cursor = %d, want %d", got, want)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := read(generation + record); !errors.Is(err, os.ErrClosed) {
+				t.Fatalf("closed append = %v, want os.ErrClosed", err)
+			}
+			if got := tk.RelayOffsetValue(); got != want {
+				t.Fatalf("failed append moved cursor to %d, want %d", got, want)
+			}
+		})
 		t.Run("CreatesFile", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -1851,7 +2071,7 @@ func testRunnerSessions(t *testing.T) {
 			}
 			defer func() { _ = w.Close() }()
 			// Write something and close.
-			_ = w.AppendNative([]byte("test\n"))
+			_ = w.AppendRecord(agent.PhysicalRecord{Encoded: []byte("test\n")})
 			_ = w.Close()
 
 			entries, err := os.ReadDir(logDir)

@@ -107,7 +107,7 @@ func historyObservations(t *testing.T, payloads [][]byte) []agent.NativeSubagent
 	wire := New().NewWire()
 	var out []agent.NativeSubagent
 	for index, payload := range payloads {
-		messages, err := wire.ParseMessage(payload)
+		messages, err := wire.ParseOutput(payload)
 		if err != nil {
 			t.Fatalf("history record %d: %v", index, err)
 		}
@@ -163,7 +163,7 @@ func TestNativeSubagentBackground(t *testing.T) {
 		wire := New().NewWire()
 		var out []agent.NativeSubagent
 		for _, line := range lines {
-			msgs, err := wire.ParseMessage([]byte(line))
+			msgs, err := wire.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatalf("ParseMessage(%s): %v", line, err)
 			}
@@ -203,7 +203,7 @@ func TestNativeSubagentChildStreamCannotSettle(t *testing.T) {
 	t.Parallel()
 	wire := New().NewWire()
 	feed := func(line string) []agent.Message {
-		msgs, err := wire.ParseMessage([]byte(line))
+		msgs, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatalf("ParseMessage(%s): %v", line, err)
 		}
@@ -267,7 +267,7 @@ func feedBackgroundLines(t *testing.T, lines ...string) []agent.BackgroundComman
 	wire := newWireFormat()
 	var cards []agent.BackgroundCommand
 	for _, line := range lines {
-		msgs, err := wire.ParseMessage([]byte(line))
+		msgs, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatalf("line %s: %v", line, err)
 		}
@@ -347,7 +347,7 @@ func TestBackgroundCommandLifecycle(t *testing.T) {
 		t.Parallel()
 		for _, line := range []string{backgroundSnapshotOne, backgroundSnapshotTwo} {
 			wire := newWireFormat()
-			msgs, err := wire.ParseMessage([]byte(line))
+			msgs, err := wire.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatalf("line %s: %v", line, err)
 			}

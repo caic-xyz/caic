@@ -1,4 +1,4 @@
-// Package taskmgr owns task state, lifecycle, task-owned pending prompts and attachments, and runtime import.
+// Package taskmgr owns task state, lifecycle, pending prompts and attachments, and ordered runtime history import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -39,7 +39,7 @@ import (
 
 type relayReader interface {
 	Status(ctx context.Context, target runtime.ConnectionTarget) (bool, string, error)
-	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (agent.ParsedTimeline, int64, error)
+	ReadTail(ctx context.Context, target runtime.ConnectionTarget, maxBytes int64) (agent.RelaySnapshot, int64, error)
 	ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string
 }
 
@@ -54,11 +54,11 @@ func (agentRelayReader) Status(ctx context.Context, target runtime.ConnectionTar
 	return agent.RelayStatus(ctx, target.SSHHost)
 }
 
-func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (timeline agent.ParsedTimeline, size int64, err error) {
+func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, maxBytes int64) (timeline agent.RelaySnapshot, size int64, err error) {
 	if target.SSHHost == "" {
-		return agent.ParsedTimeline{}, 0, errors.New("agent connection target missing SSH host")
+		return agent.RelaySnapshot{}, 0, errors.New("agent connection target missing SSH host")
 	}
-	return agent.ReadRelayTail(ctx, target.SSHHost, parser, maxBytes)
+	return agent.ReadRelayTail(ctx, target.SSHHost, maxBytes)
 }
 
 func (agentRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
@@ -1995,7 +1995,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// Check relay liveness.
 	var relayAlive bool
 	relayConfirmedDead := isExited
-	var relayTimeline agent.ParsedTimeline
+	var relayTimeline agent.RelaySnapshot
 	var relaySize int64
 	var relayDiag string
 	var relaySnapshotRead bool
@@ -2007,12 +2007,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "check failed during import", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
-		parser, parserErr := agent.NewLogRecordParser(backend.NewWire().ParseMessage)
-		if parserErr != nil {
-			return nil, fmt.Errorf("construct relay parser: %w", parserErr)
-		}
 		readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-		relayTimeline, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, parser, 10<<20) // 10 MiB tail
+		relayTimeline, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, 10<<20) // 10 MiB tail
 		readCancel()
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr)
@@ -2034,12 +2030,6 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if stateUpdatedAt.IsZero() {
 		stateUpdatedAt = time.Now().UTC()
 	}
-	if lt.SessionID == "" || lt.AgentVersion == "" {
-		if err := lt.LoadSessionMetadataWithResolver(m); err != nil {
-			m.log.WarnContext(ctx, "load session metadata failed", "repo", relPath, "br", branch, "err", err)
-		}
-	}
-
 	var mounts []taskslog.RepoMount
 	if relPath != "" {
 		primaryBaseBranch := ""
@@ -2140,39 +2130,42 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.SetPR(checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, 0)
 	}
 
-	// Restore messages from both the local log and the relay tail. Unlike a
-	// completed-task restore, adoption needs the full timeline to resume live
-	// operation. The local log has the full pre-restart history; the relay tail
-	// has output produced while the server was down plus some overlap. Merge them
-	// so the UI does not collapse to the bounded relay tail after a server
-	// restart. Fail closed: malformed persistent history must not attach a live
-	// task with untrusted state.
-	if err := lt.LoadMessagesWithResolver(m); err != nil {
-		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
-	}
-	if len(relayTimeline.Messages) > 0 || len(relayTimeline.RelayRecords) > 0 {
-		logTimeline := agent.ParsedTimeline{Messages: lt.Timeline, RelayRecords: lt.RelayRecords}
-		merger := newLogRelayMessageMerger(logTimeline, lt.Harness)
-		merger.logGeneration = lt.RelayGeneration
-		timeline := merger.mergeOwned(relayTimeline)
-		if merger.err != nil {
-			return nil, fmt.Errorf("reconcile imported relay snapshot %s: %w", taskID, merger.err)
-		} else if encoded := merger.relayAppend(relayTimeline); len(encoded) > 0 {
-			log, path, err := m.logStore.Reopen(filepath.Base(lt.LogPath()), t.LogHeader())
-			if err != nil {
-				return nil, fmt.Errorf("reopen imported task log %s: %w", taskID, err)
-			}
-			importLogPath = path
-			if err := errors.Join(log.AppendNative(encoded), log.Close()); err != nil {
-				return nil, fmt.Errorf("persist imported relay snapshot %s: %w", taskID, err)
-			}
+	// Reconcile physical history before restoring Task. Relay-only projections
+	// lack locally recorded inputs and provider state from before the bounded
+	// snapshot. The final ordered log is the semantic authority, including for
+	// responses received while caic was offline. Scan only physical boundaries
+	// for reconciliation, then decode the final history once in provider order.
+	var encoded []byte
+	if len(relayTimeline.RelayRecords) > 0 {
+		records, generation, err := taskslog.LoadRelayBoundaries(importLogPath)
+		if err != nil {
+			return nil, fmt.Errorf("load imported relay boundaries %s: %w", taskID, err)
 		}
-		t.SeedTimelineParts(timeline.prefix, timeline.suffix)
-		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", timeline.Len(), "relayMsgs", len(relayTimeline.Messages))
-	} else if len(lt.Timeline) > 0 {
-		t.SeedTimelineParts(lt.Timeline, nil)
-		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Timeline))
+		encoded, err = relaySnapshotAppend(records, generation, relayTimeline)
+		if err != nil {
+			return nil, fmt.Errorf("reconcile imported relay snapshot %s: %w", taskID, err)
+		}
 	}
+	if len(encoded) > 0 {
+		log, path, err := m.logStore.Reopen(filepath.Base(lt.LogPath()), t.LogHeader())
+		if err != nil {
+			return nil, fmt.Errorf("reopen imported task log %s: %w", taskID, err)
+		}
+		importLogPath = path
+		if err := errors.Join(log.AppendRecord(agent.PhysicalRecord{Encoded: encoded}), log.Close()); err != nil {
+			return nil, fmt.Errorf("persist imported relay snapshot %s: %w", taskID, err)
+		}
+		lt, err = taskslog.LoadHistorySource(path)
+		if err != nil {
+			return nil, fmt.Errorf("open reconciled task history %s: %w", taskID, err)
+		}
+		lt.SetWireResolver(m)
+	}
+	if err := lt.LoadMessagesWithResolver(m); err != nil {
+		return nil, fmt.Errorf("load reconciled task history %s: %w", taskID, err)
+	}
+	t.SeedTimelineParts(lt.Timeline, nil)
+	m.log.DebugContext(ctx, "relay", "msg", "restored ordered history", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(lt.Timeline))
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)
 	}
@@ -2187,11 +2180,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			}
 		}
 	}
-	// The durable log only retains a sticky diff-created signal, and relay-tail
-	// overlap filtering omits diff-stat controls. Restore the authoritative full
-	// branch diff and compact per-repo states before publishing the adopted
-	// task, including for exited and mid-turn instances that do not run the
-	// post-reconnect refresh below. Without this restore an adopted task's card
+	// The durable summary only retains a sticky diff-created signal. Restore
+	// the authoritative full branch diff and compact per-repo states before
+	// publishing the adopted task, including exited and mid-turn instances that
+	// do not run the post-reconnect refresh below. Without this restore its card
 	// stays blank until its next mutating tool call.
 	if checkout != nil {
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.GitTarget())
@@ -2489,130 +2481,74 @@ func (m *Manager) deliverQueuedInput(ctx context.Context, e *Entry, id ksid.ID, 
 	m.NotifyTaskChange()
 }
 
-// logRelayMessageMerger owns the import-time overlap rules for disk-log
-// messages and relay-tail messages. The durable log contains the full
-// pre-restart history, while the relay tail contains output produced while caic
-// was down plus some overlapping history. Canonical physical positions or
-// record fingerprints establish the shared history independently of parsing.
-type logRelayMessageMerger struct {
-	logEntries      []agent.TimedMessage
-	logRecords      []agent.RelayRecordBoundary
-	logGeneration   string
-	ignoreRelayInit bool
-	relayByteStart  int
-	recordOverlap   bool
-	err             error
-}
-
-func newLogRelayMessageMerger(logTimeline agent.ParsedTimeline, h harness.Name) *logRelayMessageMerger {
-	logHasInit := false
-	if h == harness.Pi {
-		for _, entry := range logTimeline.Messages {
-			if _, ok := entry.Message.(*agent.InitMessage); ok {
-				logHasInit = true
-				break
-			}
-		}
+// relaySnapshotAppend returns only physically verified, unmatched relay bytes.
+// Provider projections never participate in overlap matching: a bounded relay
+// snapshot does not share the ordered local wire state. The caller appends these
+// bytes once, then derives Task from the complete persisted history.
+func relaySnapshotAppend(records []agent.RelayRecordBoundary, generation string, snapshot agent.RelaySnapshot) ([]byte, error) {
+	if len(snapshot.RelayRecords) == 0 {
+		return nil, nil
 	}
-	logGeneration := ""
-	if len(logTimeline.RelayRecords) > 0 {
-		logGeneration = logTimeline.RelayRecords[len(logTimeline.RelayRecords)-1].Generation
-	}
-	return &logRelayMessageMerger{
-		logEntries:      logTimeline.Messages,
-		logRecords:      logTimeline.RelayRecords,
-		logGeneration:   logGeneration,
-		ignoreRelayInit: logHasInit,
-	}
-}
-
-func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agent.TimedMessage {
-	return m.mergeOwned(relayTimeline).flatten()
-}
-
-// mergeOwned returns the durable log and unmatched relay suffix as separate
-// owned slices so adoption can transfer both to Task without cloning the full
-// durable timeline.
-func (m *logRelayMessageMerger) mergeOwned(relayTimeline agent.ParsedTimeline) mergedTimeline {
-	relayEntries := relayTimeline.Messages
-	if len(m.logRecords) == 0 {
-		if len(relayTimeline.RelayRecords) == 0 {
-			return mergedTimeline{prefix: m.logEntries}
-		}
-		first := relayTimeline.RelayRecords[0]
+	first := snapshot.RelayRecords[0]
+	if len(records) == 0 {
 		if first.RelayEnd != int64(first.ByteEnd) {
-			m.err = errors.New("marked empty relay generation has a truncated snapshot")
-			return mergedTimeline{prefix: m.logEntries}
+			return nil, errors.New("marked empty relay generation has a truncated snapshot")
 		}
-		m.recordOverlap = true
-		return mergedTimeline{prefix: m.logEntries, suffix: m.relaySuffix(relayEntries)}
+		return snapshot.Encoded, nil
 	}
-	if len(relayTimeline.RelayRecords) > 0 {
-		relayGeneration := relayTimeline.RelayRecords[0].Generation
-		if relayGeneration != "" && relayGeneration != m.logGeneration {
-			first := relayTimeline.RelayRecords[0]
-			if first.RelayEnd == int64(first.ByteEnd) {
-				m.recordOverlap = true
-				return mergedTimeline{prefix: m.logEntries, suffix: m.relaySuffix(relayEntries)}
-			}
-			if m.logGeneration != "" {
-				m.err = errors.New("new relay generation has a truncated snapshot")
-				return mergedTimeline{prefix: m.logEntries}
-			}
+	if first.Generation != "" && first.Generation != generation {
+		if first.RelayEnd == int64(first.ByteEnd) {
+			return snapshot.Encoded, nil
+		}
+		if generation != "" {
+			return nil, errors.New("new relay generation has a truncated snapshot")
 		}
 	}
-	if merged, ok := m.mergeByRelayPosition(relayTimeline); ok {
-		return merged
+	end, err := relayPositionOverlap(records, snapshot.RelayRecords)
+	if err != nil {
+		return nil, err
 	}
-	if m.err != nil {
-		return mergedTimeline{prefix: m.logEntries}
+	if end == 0 && records[len(records)-1].Generation != "" {
+		return nil, errors.New("marked relay generation has no physical position overlap")
 	}
-	if len(m.logRecords) > 0 && len(relayTimeline.RelayRecords) > 0 &&
-		m.logRecords[len(m.logRecords)-1].Generation != "" {
-		m.err = errors.New("marked relay generation has no physical position overlap")
-		return mergedTimeline{prefix: m.logEntries}
+	if end == 0 {
+		end, err = relayFingerprintOverlap(records, snapshot.RelayRecords)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if merged, ok := m.mergeByRelayFingerprint(relayTimeline); ok {
-		return merged
+	if end == 0 {
+		return nil, errors.New("relay snapshot has no physical overlap with durable task log")
 	}
-	if m.err != nil {
-		return mergedTimeline{prefix: m.logEntries}
+	byteEnd := snapshot.RelayRecords[end-1].ByteEnd
+	if byteEnd < 0 || byteEnd > len(snapshot.Encoded) {
+		return nil, errors.New("relay overlap byte boundary is outside the snapshot")
 	}
-	if len(relayEntries) != 0 {
-		m.err = errors.New("relay snapshot has no physical overlap with durable task log")
-	}
-	return mergedTimeline{prefix: m.logEntries}
+	return snapshot.Encoded[byteEnd:], nil
 }
 
-// mergeByRelayPosition matches physical relay records shared by the durable
-// log and relay snapshot. The snapshot can begin before the durable endpoint,
-// so the overlap may end anywhere within it. Absolute offsets remain stable
-// when stateful parsing produces different semantic fields or message counts
-// across the two scans.
-func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedTimeline) (mergedTimeline, bool) {
-	if len(m.logRecords) == 0 || len(relayTimeline.RelayRecords) == 0 {
-		return mergedTimeline{}, false
-	}
-	generation := m.logRecords[len(m.logRecords)-1].Generation
+// relayPositionOverlap matches generation-local offsets independently of
+// stateful semantic message counts. The durable endpoint can occur anywhere
+// within the bounded snapshot; all shared positions must agree.
+func relayPositionOverlap(records, snapshot []agent.RelayRecordBoundary) (int, error) {
+	generation := records[len(records)-1].Generation
 	if generation == "" {
-		return mergedTimeline{}, false
+		return 0, nil
 	}
-	logEnd := m.logRecords[len(m.logRecords)-1]
-	matchEnd := 0
-	matches := 0
-	for relayEnd := range relayTimeline.RelayRecords {
-		candidate := relayTimeline.RelayRecords[relayEnd]
-		if candidate.Generation != generation || candidate.RelayEnd != logEnd.RelayEnd {
+	logEnd := records[len(records)-1].RelayEnd
+	matchEnd, matches := 0, 0
+	for relayEnd := range snapshot {
+		candidate := snapshot[relayEnd]
+		if candidate.Generation != generation || candidate.RelayEnd != logEnd {
 			continue
 		}
-		overlap := min(len(m.logRecords), relayEnd+1)
-		logStart := len(m.logRecords) - overlap
+		overlap := min(len(records), relayEnd+1)
+		logStart := len(records) - overlap
 		relayStart := relayEnd + 1 - overlap
 		matched := true
 		for i := range overlap {
-			if m.logRecords[logStart+i].Generation != generation ||
-				relayTimeline.RelayRecords[relayStart+i].Generation != generation ||
-				m.logRecords[logStart+i].RelayEnd != relayTimeline.RelayRecords[relayStart+i].RelayEnd {
+			if records[logStart+i].Generation != generation || snapshot[relayStart+i].Generation != generation ||
+				records[logStart+i].RelayEnd != snapshot[relayStart+i].RelayEnd {
 				matched = false
 				break
 			}
@@ -2622,128 +2558,49 @@ func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedT
 			matches++
 		}
 	}
-	if matches == 1 {
-		return m.finishPhysicalMerge(relayTimeline, matchEnd)
-	}
 	if matches > 1 {
-		m.err = errors.New("marked relay generation has ambiguous physical position overlap")
+		return 0, errors.New("marked relay generation has ambiguous physical position overlap")
 	}
-	return mergedTimeline{}, false
+	return matchEnd, nil
 }
 
-// mergeByRelayFingerprint upgrades logs written before relay-generation
-// markers existed. The relay snapshot can contain records before the durable
-// endpoint, and old adoption runs may have left discontinuities earlier in the
-// log. A unique endpoint with two adjacent exact records is still authoritative;
-// a shorter match is accepted only when it reaches the start of either input.
-// Future launches use generation-local offsets instead.
-func (m *logRelayMessageMerger) mergeByRelayFingerprint(relayTimeline agent.ParsedTimeline) (mergedTimeline, bool) {
-	if len(m.logRecords) == 0 || len(relayTimeline.RelayRecords) == 0 {
-		return mergedTimeline{}, false
-	}
-	for _, record := range m.logRecords {
+// relayFingerprintOverlap recognizes unmarked log history by exact physical
+// records. A unique endpoint needs two adjacent records, unless the match
+// reaches the beginning of either source. This also tolerates a discontinuity
+// earlier than that endpoint without trusting an ambiguous repeated record.
+func relayFingerprintOverlap(records, snapshot []agent.RelayRecordBoundary) (int, error) {
+	for _, record := range records {
 		if record.Fingerprint == ([32]byte{}) {
-			return mergedTimeline{}, false
+			return 0, nil
 		}
 	}
-	for _, record := range relayTimeline.RelayRecords {
+	for _, record := range snapshot {
 		if record.Fingerprint == ([32]byte{}) {
-			return mergedTimeline{}, false
+			return 0, nil
 		}
 	}
-	logEnd := m.logRecords[len(m.logRecords)-1].Fingerprint
-	matchEnd := 0
-	matches := 0
-	for relayEnd := range relayTimeline.RelayRecords {
-		if relayTimeline.RelayRecords[relayEnd].Fingerprint != logEnd {
+	logEnd := records[len(records)-1].Fingerprint
+	matchEnd, matches := 0, 0
+	for relayEnd := range snapshot {
+		if snapshot[relayEnd].Fingerprint != logEnd {
 			continue
 		}
 		overlap := 0
-		for overlap < len(m.logRecords) && overlap <= relayEnd &&
-			m.logRecords[len(m.logRecords)-1-overlap].Fingerprint == relayTimeline.RelayRecords[relayEnd-overlap].Fingerprint {
+		for overlap < len(records) && overlap <= relayEnd &&
+			records[len(records)-1-overlap].Fingerprint == snapshot[relayEnd-overlap].Fingerprint {
 			overlap++
 		}
-		if overlap < 2 && overlap != len(m.logRecords) && overlap != relayEnd+1 {
+		if overlap < 2 && overlap != len(records) && overlap != relayEnd+1 {
 			continue
 		}
 		matchEnd = relayEnd + 1
 		matches++
 	}
-	if matches == 1 {
-		return m.finishPhysicalMerge(relayTimeline, matchEnd)
-	}
 	if matches == 0 {
-		m.err = errors.New("unmarked relay history has no exact physical overlap")
-	} else {
-		m.err = errors.New("unmarked relay history has ambiguous repeated physical overlap")
+		return 0, errors.New("unmarked relay history has no exact physical overlap")
 	}
-	return mergedTimeline{}, false
-}
-
-func (m *logRelayMessageMerger) finishPhysicalMerge(relayTimeline agent.ParsedTimeline, relayRecordEnd int) (mergedTimeline, bool) {
-	messageEnd := relayTimeline.RelayRecords[relayRecordEnd-1].MessageEnd
-	if messageEnd < 0 || messageEnd > len(relayTimeline.Messages) {
-		return mergedTimeline{}, false
+	if matches > 1 {
+		return 0, errors.New("unmarked relay history has ambiguous repeated physical overlap")
 	}
-	byteEnd := relayTimeline.RelayRecords[relayRecordEnd-1].ByteEnd
-	if byteEnd < 0 || byteEnd > len(relayTimeline.Encoded) {
-		return mergedTimeline{}, false
-	}
-	m.relayByteStart = byteEnd
-	m.recordOverlap = true
-	relaySuffix := slices.Clone(m.relaySuffix(relayTimeline.Messages[messageEnd:]))
-	return mergedTimeline{prefix: m.logEntries, suffix: relaySuffix}, true
-}
-
-func (m *logRelayMessageMerger) relayAppend(relayTimeline agent.ParsedTimeline) []byte {
-	if !m.recordOverlap || m.relayByteStart >= len(relayTimeline.Encoded) {
-		return nil
-	}
-	return relayTimeline.Encoded[m.relayByteStart:]
-}
-
-// relaySuffix filters metadata already represented by the durable prefix from
-// the unmatched relay messages. Physical records determine overlap separately.
-func (m *logRelayMessageMerger) relaySuffix(relayEntries []agent.TimedMessage) []agent.TimedMessage {
-	for i, entry := range relayEntries {
-		if m.relayMessageRetained(entry.Message) {
-			continue
-		}
-		entries := slices.Clone(relayEntries[:i])
-		for _, entry := range relayEntries[i+1:] {
-			if m.relayMessageRetained(entry.Message) {
-				entries = append(entries, entry)
-			}
-		}
-		return entries
-	}
-	return relayEntries
-}
-
-func (m *logRelayMessageMerger) relayMessageRetained(msg agent.Message) bool {
-	switch msg.(type) {
-	case *agent.DiffStatMessage:
-		// The durable log owns diff metadata; relay-tail parsing can synthesize
-		// another copy that must not be appended to the conversation suffix.
-		return false
-	case *agent.InitMessage:
-		// Pi can synthesize an init from message_start during relay-tail parsing. If
-		// the durable log already has an init, keep the log's session boundary and
-		// omit the synthesized duplicate from the unmatched suffix. Other
-		// harnesses retain their native session boundaries.
-		return !m.ignoreRelayInit
-	default:
-		return true
-	}
-}
-
-type mergedTimeline struct {
-	prefix []agent.TimedMessage
-	suffix []agent.TimedMessage
-}
-
-func (m mergedTimeline) Len() int { return len(m.prefix) + len(m.suffix) }
-
-func (m mergedTimeline) flatten() []agent.TimedMessage {
-	return append(slices.Clone(m.prefix), m.suffix...)
+	return matchEnd, nil
 }

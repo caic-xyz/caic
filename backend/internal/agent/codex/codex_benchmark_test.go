@@ -10,7 +10,7 @@ func BenchmarkWireFormatTokenUsageUpdated(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := w.ParseMessage(line); err != nil {
+		if _, err := w.ParseOutput(line); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -439,7 +439,7 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 		_ = stdoutPipe.Close()
 		_ = group.Wait()
 	}()
-	agentDone := watchAgent(group, stdout, stdin, wire.ParseMessage, askAnswer)
+	agentDone := watchAgent(group, stdout, stdin, wire.ParseOutput, askAnswer)
 
 	slog.InfoContext(ctx, "Waiting for agent to finish")
 	select {
@@ -657,7 +657,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 // recording to hold at least one native observation, so a scenario that asks the
 // harness to delegate cannot publish evidence that proves nothing.
 func validateGoldenRecording(path, sanitized string, b agent.Backend, wantNative bool) error {
-	parser, err := agent.NewLogRecordParser(b.NewWire().ParseMessage)
+	parser, err := agent.NewLogRecordParser(b.NewWire())
 	if err != nil {
 		return err
 	}

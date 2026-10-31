@@ -81,7 +81,7 @@ func TestConcurrentChildToolsEvidence(t *testing.T) {
 		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +94,7 @@ func TestConcurrentChildToolsEvidence(t *testing.T) {
 					if err := json.Unmarshal(line, &raw); err != nil {
 						t.Fatal(err)
 					}
-					msgs, err := wire.ParseMessage(raw.Message)
+					msgs, err := wire.ParseOutput(raw.Message)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -146,7 +146,7 @@ func TestConcurrentChildToolsEvidence(t *testing.T) {
 			}
 			// Reusing this warmed wire proves child completion did not consume
 			// accumulated usage while the parent is still in flight.
-			msgs, err := wire.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"root-turn","status":"completed"}}}`))
+			msgs, err := wire.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"root-turn","status":"completed"}}}`))
 			if err != nil {
 				t.Fatal(err)
 			}

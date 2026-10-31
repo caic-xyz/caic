@@ -23,7 +23,8 @@ type Backend interface {
 
 	// AttachRelay connects to an already-running relay daemon in the
 	// configured target. opts.RelayOffset specifies the byte offset into
-	// output.jsonl to replay from (use 0 for full replay).
+	// output.jsonl to replay from. opts.HistoryPath supplies the authoritative
+	// task history preceding that offset, including recorded client commands.
 	// opts.ResumeSessionID is the known agent session ID, used by stateful
 	// wire formats (e.g. codex) that need it before the first replay message.
 	// opts.PendingUserActions contains user-facing actions restored before

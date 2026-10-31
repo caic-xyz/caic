@@ -94,7 +94,7 @@ func collectNative(t *testing.T, wire agent.WireFormat, lines ...[]byte) []agent
 	t.Helper()
 	var got []agent.NativeSubagent
 	for _, line := range lines {
-		msgs, err := wire.ParseMessage(line)
+		msgs, err := wire.ParseOutput(line)
 		if err != nil {
 			t.Fatalf("parse %s: %v", line, err)
 		}
@@ -329,11 +329,11 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 	t.Run("child turn result never ends the parent turn", func(t *testing.T) {
 		t.Parallel()
 		wire := New("", nil).NewWire()
-		if _, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"parent"}}}`)); err != nil {
+		if _, err := wire.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"parent"}}}`)); err != nil {
 			t.Fatal(err)
 		}
 		// A child thread's completion is not the parent turn.
-		msgs, err := wire.ParseMessage(turnCompletedItem("th1", "completed"))
+		msgs, err := wire.ParseOutput(turnCompletedItem("th1", "completed"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -343,7 +343,7 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 			}
 		}
 		// The root thread's own completion still ends the parent turn.
-		msgs, err = wire.ParseMessage(turnCompletedItem("parent", "completed"))
+		msgs, err = wire.ParseOutput(turnCompletedItem("parent", "completed"))
 		if err != nil {
 			t.Fatal(err)
 		}

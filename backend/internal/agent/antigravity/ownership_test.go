@@ -17,13 +17,13 @@ func TestConversationProvenance(t *testing.T) {
 		t.Run("physical="+strconv.FormatBool(physical), func(t *testing.T) {
 			t.Parallel()
 			wire := New("", nil).NewWire()
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				t.Fatal(err)
 			}
 			feed := func(line string) []agent.Message {
 				if !physical {
-					messages, err := wire.ParseMessage([]byte(line))
+					messages, err := wire.ParseOutput([]byte(line))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -112,7 +112,7 @@ func BenchmarkParseConversationSteps(b *testing.B) {
 	for range b.N {
 		w := New("", nil).NewWire()
 		for _, line := range lines {
-			if _, err := w.ParseMessage(line); err != nil {
+			if _, err := w.ParseOutput(line); err != nil {
 				b.Fatal(err)
 			}
 		}

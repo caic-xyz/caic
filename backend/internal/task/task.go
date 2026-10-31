@@ -153,7 +153,7 @@ type Task struct {
 	Repos            []taskslog.RepoMount // index 0 = primary; empty = no-repo
 	TailscaleFQDN    string               // Tailscale FQDN assigned to the instance (empty if not available).
 	TailscaleAuthURL string               // Tailscale browser auth URL when no pre-auth key was available.
-	RelayOffset      int64                // Bytes received from relay output.jsonl, for reconnect.
+	RelayOffset      int64                // Committed relay output bytes in the current generation, for reconnect.
 	SudoPassword     string               // Random sudo password; empty if sudo is not enabled.
 	VNCPort          int                  // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
 	GitHubToken      bool                 // Inject GitHub token into the instance's environment.
@@ -365,7 +365,8 @@ func (t *Task) RelayOffsetValue() int64 {
 	return t.RelayOffset
 }
 
-// SetRelayOffset records the byte offset used when reconnecting to the relay.
+// SetRelayOffset anchors reconnect to a verified relay snapshot after import.
+// Successful live relay appends subsequently advance this same cursor.
 func (t *Task) SetRelayOffset(offset int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

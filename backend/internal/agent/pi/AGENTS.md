@@ -91,11 +91,7 @@ shape, never merely a tool name that resembles delegation:
 One card is keyed by the extension's run ID whenever a record reports one, and
 by the tool call ID only for a synchronous or legacy run without one; the start
 record carries no run ID, so it stores the delegation metadata and the end record
-that reports the run creates the card. A restart or relay adoption also replays
-the relay history that precedes the attach offset through the same wire
-(`agent.Options.WarmHistory`), which keeps that metadata available for the end
-record and lets the other adapters resolve records that continue after the
-restart.
+that reports the run creates the card.
 
 A completion can report the structured `error` and the artifact paths where the
 extension wrote the run's output; it never carries the output text, because the

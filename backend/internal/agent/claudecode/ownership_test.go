@@ -75,13 +75,13 @@ func TestClaudeOwnership(t *testing.T) {
 }
 
 func ownershipParser(t *testing.T, physical bool, wire agent.WireFormat) func(string) []agent.Message {
-	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return func(line string) []agent.Message {
 		if !physical {
-			messages, err := wire.ParseMessage([]byte(line))
+			messages, err := wire.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatal(err)
 			}

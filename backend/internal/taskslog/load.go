@@ -653,9 +653,7 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if discriminator != "caic_meta" {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("wrong %s discriminator %q", key, discriminator)
 	}
-	parser, err := agent.NewLogRecordParser(func([]byte) ([]agent.Message, error) {
-		return nil, errors.New("unexpected native metadata header")
-	})
+	parser, err := agent.NewLogRecordParser(&inventoryParser{})
 	if err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
@@ -779,8 +777,6 @@ type LoadedTask struct {
 	DiffCreated           bool    // True if any non-empty diff was recorded in the log; sticky across the run.
 	LastTrailer           *Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
 	Timeline              []agent.TimedMessage
-	RelayRecords          []agent.RelayRecordBoundary
-	RelayGeneration       string
 
 	path           string       // Absolute path for lazy message loading via LoadMessages.
 	resolver       WireResolver // Fresh wire factory supplied by the task owner.
@@ -790,31 +786,13 @@ type LoadedTask struct {
 func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
 	loaded := &LoadedTask{}
 	var projection taskMetadataProjection
-	var relayEnd int64
-	var generation string
-	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, encoded []byte) {
-		if record.RelayGeneration != "" {
-			generation = record.RelayGeneration
-			relayEnd = int64(len(encoded) + 1)
-			loaded.RelayRecords = nil
-			loaded.RelayGeneration = generation
-		} else if record.RelayRecord {
-			relayEnd += int64(len(encoded) + 1)
-		}
+	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord) {
 		projection.apply(loaded, record.Messages)
 		for _, parsed := range record.Messages {
 			if record.Control && isInventoryMetadataMessage(parsed.Message) {
 				continue
 			}
 			loaded.Timeline = append(loaded.Timeline, parsed)
-		}
-		if record.RelayRecord {
-			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
-				Generation:  generation,
-				RelayEnd:    relayEnd,
-				MessageEnd:  len(loaded.Timeline),
-				Fingerprint: sha256.Sum256(encoded),
-			})
 		}
 	})
 	if err != nil {
@@ -833,7 +811,7 @@ func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *Lo
 		if err != nil {
 			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
@@ -1057,7 +1035,7 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedM
 			if err != nil {
 				return err
 			}
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				return err
 			}
@@ -1124,7 +1102,7 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 				yield(agent.TimedMessage{}, err)
 				return
 			}
-			parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+			parser, err := agent.NewLogRecordParser(wire)
 			if err != nil {
 				yield(agent.TimedMessage{}, err)
 				return
@@ -1215,10 +1193,58 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	}
 }
 
+// LoadRelayBoundaries validates a complete task log and returns only physical
+// relay positions for import reconciliation. Native payloads are validated as
+// JSON envelopes; provider decoding follows once the final history is persisted.
+func LoadRelayBoundaries(path string) (records []agent.RelayRecordBoundary, generation string, retErr error) {
+	var relay relayBoundaries
+	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		parser := agent.NewPhysicalLogRecordParser()
+		if _, err := parser.ParseRecord(scanner.headerRaw); err != nil {
+			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
+		}
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err != nil {
+				return fmt.Errorf("parse task log %s: %w", path, err)
+			}
+			relay.observe(record, scanner.Bytes())
+		}
+		return scanner.Err()
+	})
+	if retErr != nil {
+		return nil, "", retErr
+	}
+	return relay.records, relay.generation, nil
+}
+
+// relayBoundaries owns generation-local byte positions for physical import
+// reconciliation. Host controls and client input add no bytes.
+type relayBoundaries struct {
+	records    []agent.RelayRecordBoundary
+	generation string
+	end        int64
+}
+
+func (r *relayBoundaries) observe(record agent.ParsedRecord, encoded []byte) {
+	if record.Provenance.Generation != "" {
+		r.generation = record.Provenance.Generation
+		r.end = int64(len(encoded) + 1)
+		r.records = nil
+	} else if record.Provenance.Source == agent.RecordSourceRelay {
+		r.end += int64(len(encoded) + 1)
+	}
+	if record.Provenance.Source == agent.RecordSourceRelay {
+		r.records = append(r.records, agent.RelayRecordBoundary{
+			Generation: r.generation, RelayEnd: r.end, Fingerprint: sha256.Sum256(encoded),
+		})
+	}
+}
+
 // scanSemanticLog parses a complete task log with a fresh header-authorized
 // parser and folds each physical record before reusing the scanner buffer.
 // It retains no intermediate message or physical-record arrays.
-func scanSemanticLog(path string, resolver WireResolver, visit func(agent.ParsedRecord, []byte)) (retErr error) {
+func scanSemanticLog(path string, resolver WireResolver, visit func(agent.ParsedRecord)) (retErr error) {
 	if resolver == nil {
 		return errors.New("wire resolver is nil")
 	}
@@ -1227,7 +1253,7 @@ func scanSemanticLog(path string, resolver WireResolver, visit func(agent.Parsed
 		if err != nil {
 			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
@@ -1235,13 +1261,13 @@ func scanSemanticLog(path string, resolver WireResolver, visit func(agent.Parsed
 		if err != nil {
 			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 		}
-		visit(record, scanner.headerRaw)
+		visit(record)
 		for scanner.Scan() {
 			record, err := parser.ParseRecord(scanner.Bytes())
 			if err != nil {
 				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
-			visit(record, scanner.Bytes())
+			visit(record)
 		}
 		return scanner.Err()
 	})
@@ -1255,7 +1281,7 @@ func ExportDiscussion(path string, resolver WireResolver) (string, error) {
 	var result *agent.MetaResultMessage
 	var pr *agent.MetaPRMessage
 	var messages []agent.Message
-	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, _ []byte) {
+	err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord) {
 		for _, parsed := range record.Messages {
 			switch message := parsed.Message.(type) {
 			case *agent.MetaMessage:
@@ -1359,8 +1385,6 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 	}
 	if messages {
 		lt.Timeline = loaded.Timeline
-		lt.RelayRecords = loaded.RelayRecords
-		lt.RelayGeneration = loaded.RelayGeneration
 		lt.messagesLoaded = true
 	}
 }
@@ -1665,20 +1689,25 @@ func isHistoryStreamControlMessage(msg agent.Message) bool {
 	}
 }
 
+// inventoryParser applies output metadata only, retaining no transcript.
+type inventoryParser struct {
+	harness harness.Name
+	native  metadata.Parser
+}
+
+func (*inventoryParser) ParseInput([]byte) ([]agent.Message, error) { return nil, nil }
+func (p *inventoryParser) ParseOutput(raw []byte) ([]agent.Message, error) {
+	if p.harness == harness.Claude {
+		return p.native.Parse(raw)
+	}
+	return nil, nil
+}
+
 // scanInventoryRecords projects canonical controls and provider-owned native
 // metadata without retaining conversation history. Claude reports session and
 // completed-run accounting in its native init/result records.
 func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTask) error {
-	var native metadata.Parser
-	parser, err := agent.NewLogRecordParser(func(raw []byte) ([]agent.Message, error) {
-		if !json.Valid(raw) {
-			return nil, errors.New("invalid native JSON value")
-		}
-		if lt.Harness == harness.Claude {
-			return native.Parse(raw)
-		}
-		return nil, nil
-	})
+	parser, err := agent.NewLogRecordParser(&inventoryParser{harness: lt.Harness})
 	if err != nil {
 		return err
 	}

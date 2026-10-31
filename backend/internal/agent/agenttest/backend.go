@@ -14,21 +14,30 @@ import (
 
 // Wire is a configurable agent.WireFormat test double.
 //
-// Its zero value ignores prompts and parses no messages. Set Parse to model
-// the normalized messages a test needs from one native log line.
+// Its zero value ignores prompts and parses no messages. Input handles recorded
+// client commands; Output handles native output.
 type Wire struct {
-	Parse func([]byte) ([]agent.Message, error)
+	Output func([]byte) ([]agent.Message, error)
+	Input  func([]byte) ([]agent.Message, error)
+}
+
+// ParseInput implements agent.WireFormat.
+func (w *Wire) ParseInput(line []byte) ([]agent.Message, error) {
+	if w.Input == nil {
+		return nil, nil
+	}
+	return w.Input(line)
 }
 
 // WritePrompt implements agent.WireFormat.
 func (*Wire) WritePrompt(io.Writer, agent.Prompt, agent.LogSink) error { return nil }
 
-// ParseMessage implements agent.WireFormat.
-func (w *Wire) ParseMessage(line []byte) ([]agent.Message, error) {
-	if w.Parse == nil {
+// ParseOutput implements agent.WireFormat.
+func (w *Wire) ParseOutput(line []byte) ([]agent.Message, error) {
+	if w.Output == nil {
 		return nil, nil
 	}
-	return w.Parse(line)
+	return w.Output(line)
 }
 
 // FakeBackend is a configurable agent.Backend for tests. The zero value is

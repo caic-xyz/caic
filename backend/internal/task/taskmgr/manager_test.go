@@ -271,7 +271,7 @@ func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeIn
 
 type fakeRelayReader struct {
 	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
-	readTailFn func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error)
+	readTailFn func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error)
 	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
 }
 
@@ -279,8 +279,8 @@ type fakeRelayReader struct {
 func deadRelayFixture() fakeRelayReader {
 	return fakeRelayReader{
 		statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return false, "dead", nil },
-		readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-			return agent.ParsedTimeline{}, 0, nil
+		readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+			return agent.RelaySnapshot{}, 0, nil
 		},
 		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 	}
@@ -290,20 +290,36 @@ func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTa
 	return f.statusFn(ctx, target)
 }
 
-func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parser *agent.LogRecordParser, maxBytes int64) (timeline agent.ParsedTimeline, size int64, err error) {
-	return f.readTailFn(ctx, target, parser, maxBytes)
+func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, maxBytes int64) (timeline agent.RelaySnapshot, size int64, err error) {
+	return f.readTailFn(ctx, target, maxBytes)
 }
 
 func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
 	return f.readLogFn(ctx, target, maxBytes)
 }
 
-func relayParsed(msgs ...agent.Message) []agent.TimedMessage {
-	parsed := make([]agent.TimedMessage, len(msgs))
-	for i, msg := range msgs {
-		parsed[i] = agent.TimedMessage{Message: msg}
+func parsedRelayFixture(records ...string) (agent.RelaySnapshot, int64, error) {
+	parser := agent.NewPhysicalLogRecordParser()
+	var timeline agent.RelaySnapshot
+	var generation string
+	for _, line := range records {
+		parsed, err := parser.ParseRecord([]byte(line))
+		if err != nil {
+			return agent.RelaySnapshot{}, 0, err
+		}
+		if parsed.Provenance.Generation != "" {
+			generation = parsed.Provenance.Generation
+		}
+		timeline.Encoded = append(timeline.Encoded, line...)
+		timeline.Encoded = append(timeline.Encoded, '\n')
+		if parsed.Provenance.Source == agent.RecordSourceRelay {
+			timeline.RelayRecords = append(timeline.RelayRecords, agent.RelayRecordBoundary{
+				Generation: generation, RelayEnd: int64(len(timeline.Encoded)), ByteEnd: len(timeline.Encoded),
+				Fingerprint: sha256.Sum256([]byte(line)),
+			})
+		}
 	}
-	return parsed
+	return timeline, int64(len(timeline.Encoded)), nil
 }
 
 // waitingLaunchBackend holds startup until the test releases it.
@@ -492,96 +508,89 @@ func textMessages(msgs []agent.Message) []string {
 	return texts
 }
 
-func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
-	const logCount = 4_000
-	const overlap = 1_000
-	logEntries := make([]agent.TimedMessage, logCount)
-	for i := range logEntries {
-		logEntries[i] = agent.TimedMessage{
-			Message:      &agent.TextMessage{Text: fmt.Sprintf("message-%d", i)},
-			ProducerTime: time.UnixMilli(int64(i + 1)),
-		}
+// BenchmarkManagerOfflineImport measures startup inventory, physical reconciliation,
+// persistence and task projection for a long session with an offline relay suffix.
+// SSH reads a local relay fixture through a subprocess shim; log I/O remains real.
+func BenchmarkManagerOfflineImport(b *testing.B) {
+	shimDir := b.TempDir()
+	shim := `#!/usr/bin/python3
+import os, shlex, subprocess, sys
+args = sys.argv[1:]
+while args[0] == "-o":
+    args = args[2:]
+command = " ".join(args[1:]).replace("RELAY_OUTPUT_PATH", shlex.quote(os.environ["CAIC_BENCH_RELAY_OUTPUT"]))
+sys.exit(subprocess.run(command, shell=True).returncode)
+`
+	shim = strings.ReplaceAll(shim, "RELAY_OUTPUT_PATH", agent.RelayOutputPath)
+	if err := os.WriteFile(filepath.Join(shimDir, "ssh"), []byte(shim), 0o700); err != nil { //nolint:gosec // Executable benchmark SSH boundary.
+		b.Fatal(err)
 	}
-	relayEntries := make([]agent.TimedMessage, overlap+1)
-	for i := range overlap {
-		logEntry := logEntries[logCount-overlap+i]
-		relayEntries[i] = agent.TimedMessage{
-			Message:      &agent.TextMessage{Text: fmt.Sprintf("message-%d", logCount-overlap+i)},
-			ProducerTime: logEntry.ProducerTime,
-		}
-	}
-	relayEntries[overlap] = agent.TimedMessage{
-		Message:      &agent.TextMessage{Text: "new-message"},
-		ProducerTime: time.UnixMilli(logCount + 1),
-	}
-	logRecords := make([]agent.RelayRecordBoundary, len(logEntries))
-	for i := range logRecords {
-		logRecords[i] = agent.RelayRecordBoundary{Generation: "benchmark", RelayEnd: int64(i + 1), MessageEnd: i + 1}
-	}
-	relayRecords := make([]agent.RelayRecordBoundary, len(relayEntries))
-	for i := range overlap {
-		relayRecords[i] = agent.RelayRecordBoundary{Generation: "benchmark", RelayEnd: int64(logCount - overlap + i + 1), MessageEnd: i + 1}
-	}
-	relayRecords[overlap] = agent.RelayRecordBoundary{Generation: "benchmark", RelayEnd: logCount + 1, MessageEnd: overlap + 1}
-	b.ReportAllocs()
-
-	for b.Loop() {
-		logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
-		relayTimeline := agent.ParsedTimeline{Messages: relayEntries, RelayRecords: relayRecords}
-		if got := newLogRelayMessageMerger(logTimeline, harness.Codex).mergeOwned(relayTimeline); got.Len() != logCount+1 {
-			b.Fatalf("merged %d entries, want %d", got.Len(), logCount+1)
-		}
-	}
-}
-
-func BenchmarkMergeUnmarkedLogAndSeededRelayTimeline(b *testing.B) {
-	const logCount = 4_000
-	const overlap = 1_000
-	logEntries := make([]agent.TimedMessage, logCount)
-	logRecords := make([]agent.RelayRecordBoundary, logCount)
-	for i := range logEntries {
-		text := fmt.Sprintf("message-%d", i)
-		logEntries[i] = agent.TimedMessage{Message: &agent.TextMessage{Text: text}}
-		logRecords[i] = agent.RelayRecordBoundary{
-			RelayEnd:    int64(i + 1),
-			MessageEnd:  i + 1,
-			Fingerprint: sha256.Sum256([]byte(text)),
-		}
-	}
-	relayEntries := make([]agent.TimedMessage, overlap+1)
-	relayRecords := make([]agent.RelayRecordBoundary, overlap+1)
-	for i := range overlap {
-		text := fmt.Sprintf("message-%d", logCount-overlap+i)
-		relayEntries[i] = agent.TimedMessage{Message: &agent.TextMessage{Text: text}}
-		relayRecords[i] = agent.RelayRecordBoundary{
-			Generation:  "seeded",
-			RelayEnd:    int64(logCount - overlap + i + 1),
-			MessageEnd:  i + 1,
-			ByteEnd:     i + 1,
-			Fingerprint: sha256.Sum256([]byte(text)),
-		}
-	}
-	relayEntries[overlap] = agent.TimedMessage{Message: &agent.TextMessage{Text: "new-message"}}
-	relayRecords[overlap] = agent.RelayRecordBoundary{
-		Generation:  "seeded",
-		RelayEnd:    logCount + 1,
-		MessageEnd:  overlap + 1,
-		ByteEnd:     overlap + 1,
-		Fingerprint: sha256.Sum256([]byte("new-message")),
-	}
-	relayTimeline := agent.ParsedTimeline{
-		Messages:     relayEntries,
-		RelayRecords: relayRecords,
-		Encoded:      make([]byte, overlap+1),
-	}
-	b.ReportAllocs()
-
-	for b.Loop() {
-		logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		if got := merger.mergeOwned(relayTimeline); merger.err != nil || got.Len() != logCount+1 {
-			b.Fatalf("merged %d entries with error %v, want %d", got.Len(), merger.err, logCount+1)
-		}
+	b.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, size := range []int{1 << 20, 10 << 20} {
+		b.Run(fmt.Sprintf("MiB%d", size>>20), func(b *testing.B) {
+			id := ksid.NewID()
+			store := taskslog.NewStore(testLogger(), b.TempDir())
+			tk := mustNewTask(b, id, agent.Prompt{Text: "initial"}, harness.OpenCode, "")
+			meta := tk.LogHeader()
+			meta.Version = int(agent.LogVersionV3)
+			header, err := agent.MarshalLogMessage(meta)
+			if err != nil {
+				b.Fatal(err)
+			}
+			generation := `{"t":"relay_generation","generation":"benchmark"}`
+			chunk := `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + strings.Repeat("x", 2048) + `"}}}}}`
+			result := `{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":9,"result":{"stopReason":"end_turn"}}}`
+			request := `{"t":"input","ts":3.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"initial"}]}}}`
+			failure := `{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":17,"error":{"code":-32000,"message":"offline prompt rejected"}}}`
+			var fixture, remote bytes.Buffer
+			fixture.Write(header)
+			fmt.Fprintf(&fixture, "\n%s\n", generation)
+			fmt.Fprintf(&remote, "%s\n", generation)
+			for fixture.Len() < size {
+				fmt.Fprintf(&fixture, "%s\n%s\n", chunk, result)
+				fmt.Fprintf(&remote, "%s\n%s\n", chunk, result)
+			}
+			fmt.Fprintf(&fixture, "%s\n", request)
+			fmt.Fprintf(&remote, "%s\n", failure)
+			remotePath := filepath.Join(b.TempDir(), "output.jsonl")
+			if err := os.WriteFile(remotePath, remote.Bytes(), 0o600); err != nil {
+				b.Fatal(err)
+			}
+			b.Setenv("CAIC_BENCH_RELAY_OUTPUT", remotePath)
+			path := filepath.Join(store.LogDir, tk.LogFilename())
+			b.ReportAllocs()
+			b.SetBytes(int64(fixture.Len()))
+			b.ResetTimer()
+			for range b.N {
+				b.StopTimer()
+				if err := os.WriteFile(path, fixture.Bytes(), 0o600); err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+				m := newTestManager(b, Config{ServerCtx: b.Context(), LogStore: store,
+					Runtimes: newTestRuntime(b, &runtimetest.FakeBackend{}, &runtimetest.FakeInfo{Meta: map[string]string{
+						"md-agent-benchmark\x00caic.id": id.String(), "md-agent-benchmark\x00caic.harness": string(harness.OpenCode),
+					}}), Backends: map[harness.Name]agent.Backend{harness.OpenCode: opencode.New("", nil)}})
+				m.relay = fakeRelayReader{
+					statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return false, "dead", nil },
+					readTailFn: func(ctx context.Context, _ runtime.ConnectionTarget, maxBytes int64) (agent.RelaySnapshot, int64, error) {
+						return agent.ReadRelayTail(ctx, "benchmark", maxBytes)
+					},
+					readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+				}
+				logs, err := store.LoadForTaskIDs([]string{id.String()})
+				if err != nil {
+					b.Fatal(err)
+				}
+				entries, err := m.ImportInstances(b.Context(), []runtime.Instance{{ID: runtime.NewID("test-runtime", "md-agent-benchmark"), State: "running"}}, logs)
+				if err != nil || len(entries) != 1 {
+					b.Fatalf("import = %v, %v", entries, err)
+				}
+				if err := m.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -616,567 +625,79 @@ func TestUnionRuntimeIDs(t *testing.T) {
 	}
 }
 
-func TestMergeLogAndRelayMessages(t *testing.T) {
+func TestRelaySnapshotAppend(t *testing.T) {
 	t.Parallel()
-
-	t.Run("valid_source_record_overlap_across_harness_state", func(t *testing.T) {
+	fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
+	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
-			name        string
-			harness     harness.Name
-			logRecord   []agent.Message
-			relayRecord []agent.Message
+			name       string
+			generation string
+			log        []agent.RelayRecordBoundary
+			snapshot   agent.RelaySnapshot
+			want       string
 		}{
-			{
-				name:    "claude_reasoning_total",
-				harness: harness.Claude,
-				logRecord: []agent.Message{&agent.ResultMessage{
-					MessageType: "result",
-					Subtype:     "success",
-					Usage:       agent.Usage{ReasoningOutputTokens: 100},
-				}},
-				relayRecord: []agent.Message{&agent.ResultMessage{
-					MessageType: "result",
-					Subtype:     "success",
-					Usage:       agent.Usage{ReasoningOutputTokens: 40},
-				}},
-			},
-			{
-				name:    "codex_turn_usage",
-				harness: harness.Codex,
-				logRecord: []agent.Message{&agent.ResultMessage{
-					MessageType: "result",
-					Subtype:     "result",
-					Usage:       agent.Usage{InputTokens: 100},
-				}},
-				relayRecord: []agent.Message{&agent.ResultMessage{
-					MessageType: "result",
-					Subtype:     "result",
-					Usage:       agent.Usage{InputTokens: 40},
-				}},
-			},
-			{
-				name:    "opencode_synthetic_final",
-				harness: harness.OpenCode,
-				logRecord: []agent.Message{
-					&agent.TextMessage{Text: "complete response"},
-					&agent.ResultMessage{MessageType: "result", Subtype: "result"},
-				},
-				relayRecord: []agent.Message{
-					&agent.TextMessage{Text: "response"},
-					&agent.ResultMessage{MessageType: "result", Subtype: "result"},
-				},
-			},
-			{
-				name:    "pi_incremental_tool_output",
-				harness: harness.Pi,
-				logRecord: []agent.Message{&agent.ToolOutputDeltaMessage{
-					ToolUseID: "tool",
-					Delta:     "new output",
-				}},
-				relayRecord: []agent.Message{&agent.ToolOutputDeltaMessage{
-					ToolUseID: "tool",
-					Delta:     "old and new output",
-				}},
-			},
+			{name: "empty_snapshot", log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20}}},
+			{name: "first_output", snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{RelayEnd: 6, ByteEnd: 6}}, Encoded: []byte("first\n")}, want: "first\n"},
+			{name: "snapshot_starts_before_overlap", generation: "g",
+				log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20}, {Generation: "g", RelayEnd: 30}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{
+					{Generation: "g", RelayEnd: 10, ByteEnd: 6}, {Generation: "g", RelayEnd: 20, ByteEnd: 13},
+					{Generation: "g", RelayEnd: 30, ByteEnd: 21}, {Generation: "g", RelayEnd: 40, ByteEnd: 27},
+				}, Encoded: []byte("older\nbefore\noverlap\nafter\n")}, want: "after\n"},
+			{name: "adjacent_identical_records_have_distinct_offsets", generation: "g",
+				log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 10}, {Generation: "g", RelayEnd: 20}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{
+					{Generation: "g", RelayEnd: 20, ByteEnd: 7}, {Generation: "g", RelayEnd: 30, ByteEnd: 14},
+				}, Encoded: bytes.Repeat([]byte("repeat\n"), 2)}, want: "repeat\n"},
+			{name: "generation_reset", generation: "old", log: []agent.RelayRecordBoundary{{Generation: "old", RelayEnd: 100}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "new", RelayEnd: 4, ByteEnd: 4}, {Generation: "new", RelayEnd: 10, ByteEnd: 10}}, Encoded: []byte("new\nafter\n")}, want: "new\nafter\n"},
+			{name: "unmarked_generation_reset", log: []agent.RelayRecordBoundary{{RelayEnd: 100, Fingerprint: fingerprint("old")}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "new", RelayEnd: 4, ByteEnd: 4}}, Encoded: []byte("new\n")}, want: "new\n"},
+			{name: "unmarked_exact_bytes", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("before")}, {Fingerprint: fingerprint("overlap")}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 6, Fingerprint: fingerprint("older")}, {ByteEnd: 13, Fingerprint: fingerprint("before")}, {ByteEnd: 21, Fingerprint: fingerprint("overlap")}, {ByteEnd: 27, Fingerprint: fingerprint("after")}}, Encoded: []byte("older\nbefore\noverlap\nafter\n")}, want: "after\n"},
+			{name: "unmarked_discontinuous_prefix", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("unmatched")}, {Fingerprint: fingerprint("before")}, {Fingerprint: fingerprint("overlap")}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 6, Fingerprint: fingerprint("older")}, {ByteEnd: 13, Fingerprint: fingerprint("before")}, {ByteEnd: 21, Fingerprint: fingerprint("overlap")}, {ByteEnd: 27, Fingerprint: fingerprint("after")}}, Encoded: []byte("older\nbefore\noverlap\nafter\n")}, want: "after\n"},
+			{name: "unmarked_single_record_at_source_start", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("overlap")}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 8, Fingerprint: fingerprint("overlap")}, {ByteEnd: 14, Fingerprint: fingerprint("after")}}, Encoded: []byte("overlap\nafter\n")}, want: "after\n"},
+			{name: "unmarked_to_seeded_offsets", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("before")}, {Fingerprint: fingerprint("overlap")}},
+				snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20, ByteEnd: 7, Fingerprint: fingerprint("before")}, {Generation: "g", RelayEnd: 30, ByteEnd: 15, Fingerprint: fingerprint("overlap")}, {Generation: "g", RelayEnd: 40, ByteEnd: 21, Fingerprint: fingerprint("after")}}, Encoded: []byte("before\noverlap\nafter\n")}, want: "after\n"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				before := &agent.TextMessage{Text: "before"}
-				after := &agent.TextMessage{Text: "after"}
-				logEntries := make([]agent.TimedMessage, 0, 1+len(tc.logRecord))
-				logEntries = append(logEntries, agent.TimedMessage{Message: before})
-				for _, message := range tc.logRecord {
-					logEntries = append(logEntries, agent.TimedMessage{Message: message})
-				}
-				relayEntries := make([]agent.TimedMessage, 0, len(tc.relayRecord)+1)
-				for _, message := range tc.relayRecord {
-					relayEntries = append(relayEntries, agent.TimedMessage{Message: message})
-				}
-				relayEntries = append(relayEntries, agent.TimedMessage{Message: after})
-				logRecords := []agent.RelayRecordBoundary{
-					{RelayEnd: 1, MessageEnd: 1, Fingerprint: sha256.Sum256([]byte("before"))},
-					{RelayEnd: 2, MessageEnd: len(logEntries), Fingerprint: sha256.Sum256([]byte("overlap"))},
-				}
-				relayRecords := []agent.RelayRecordBoundary{
-					{RelayEnd: 2, MessageEnd: len(tc.relayRecord), Fingerprint: sha256.Sum256([]byte("overlap"))},
-					{RelayEnd: 3, MessageEnd: len(relayEntries), Fingerprint: sha256.Sum256([]byte("after"))},
-				}
-
-				logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
-				relayTimeline := agent.ParsedTimeline{Messages: relayEntries, RelayRecords: relayRecords}
-				merged := newLogRelayMessageMerger(logTimeline, tc.harness).merge(relayTimeline)
-				if len(merged) != len(logEntries)+1 {
-					t.Fatalf("merged %d messages, want %d: %#v", len(merged), len(logEntries)+1, merged)
-				}
-				for i := range logEntries {
-					if merged[i].Message != logEntries[i].Message {
-						t.Fatalf("merged[%d] = %#v, want durable log message %#v", i, merged[i].Message, logEntries[i].Message)
-					}
-				}
-				if merged[len(merged)-1].Message != after {
-					t.Fatalf("last merged message = %#v, want %#v", merged[len(merged)-1].Message, after)
-				}
-			})
-		}
-	})
-	t.Run("valid_adjacent_identical_source_records", func(t *testing.T) {
-		t.Parallel()
-		logEntries := []agent.TimedMessage{
-			{Message: &agent.TextMessage{Text: "before"}},
-			{Message: &agent.TextMessage{Text: "repeat"}},
-		}
-		relayEntries := []agent.TimedMessage{
-			{Message: &agent.TextMessage{Text: "repeat"}},
-			{Message: &agent.TextMessage{Text: "repeat"}},
-			{Message: &agent.TextMessage{Text: "after"}},
-		}
-		logTimeline := agent.ParsedTimeline{
-			Messages: logEntries,
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "test", RelayEnd: 1, MessageEnd: 1}, {Generation: "test", RelayEnd: 2, MessageEnd: 2},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayEntries,
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "test", RelayEnd: 2, MessageEnd: 1, ByteEnd: 8},
-				{Generation: "test", RelayEnd: 3, MessageEnd: 2, ByteEnd: 19},
-				{Generation: "test", RelayEnd: 4, MessageEnd: 3, ByteEnd: 25},
-			},
-			Encoded: []byte("overlap\nnew-repeat\nafter\n"),
-		}
-
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		texts := make([]string, 0, len(merged))
-		for _, entry := range merged {
-			if message, ok := entry.Message.(*agent.TextMessage); ok {
-				texts = append(texts, message.Text)
-			}
-		}
-		want := []string{"before", "repeat", "repeat", "after"}
-		if !slices.Equal(texts, want) {
-			t.Fatalf("merged texts = %#v, want %#v", texts, want)
-		}
-		if got, want := string(merger.relayAppend(relayTimeline)), "new-repeat\nafter\n"; got != want {
-			t.Fatalf("relay append = %q, want %q", got, want)
-		}
-	})
-	t.Run("valid_snapshot_starts_before_durable_overlap", func(t *testing.T) {
-		t.Parallel()
-		for _, generation := range []string{"", "current"} {
-			name := "unmarked"
-			if generation != "" {
-				name = "marked"
-			}
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-				fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
-				logTimeline := agent.ParsedTimeline{
-					Messages: relayParsed(
-						&agent.TextMessage{Text: "before"},
-						&agent.TextMessage{Text: "overlap"},
-					),
-					RelayRecords: []agent.RelayRecordBoundary{
-						{Generation: generation, RelayEnd: 30, MessageEnd: 1, Fingerprint: fingerprint("before")},
-						{Generation: generation, RelayEnd: 40, MessageEnd: 2, Fingerprint: fingerprint("overlap")},
-					},
-				}
-				relayTimeline := agent.ParsedTimeline{
-					Messages: relayParsed(
-						&agent.TextMessage{Text: "older snapshot prefix"},
-						&agent.TextMessage{Text: "before"},
-						&agent.TextMessage{Text: "overlap"},
-						&agent.TextMessage{Text: "after"},
-					),
-					RelayRecords: []agent.RelayRecordBoundary{
-						{Generation: generation, RelayEnd: 20, MessageEnd: 1, ByteEnd: 6, Fingerprint: fingerprint("older")},
-						{Generation: generation, RelayEnd: 30, MessageEnd: 2, ByteEnd: 13, Fingerprint: fingerprint("before")},
-						{Generation: generation, RelayEnd: 40, MessageEnd: 3, ByteEnd: 21, Fingerprint: fingerprint("overlap")},
-						{Generation: generation, RelayEnd: 50, MessageEnd: 4, ByteEnd: 27, Fingerprint: fingerprint("after")},
-					},
-					Encoded: []byte("older\nbefore\noverlap\nafter\n"),
-				}
-
-				merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-				merged := merger.merge(relayTimeline)
-				if merger.err != nil {
-					t.Fatalf("merge: %v", merger.err)
-				}
-				messages := make([]agent.Message, len(merged))
-				for i, entry := range merged {
-					messages[i] = entry.Message
-				}
-				if got, want := textMessages(messages), []string{"before", "overlap", "after"}; !slices.Equal(got, want) {
-					t.Fatalf("merged texts = %#v, want %#v", got, want)
-				}
-				if got, want := string(merger.relayAppend(relayTimeline)), "after\n"; got != want {
-					t.Fatalf("relay append = %q, want %q", got, want)
-				}
-			})
-		}
-	})
-	t.Run("valid_unmarked_v3_uses_fingerprint_overlap_with_seeded_generation", func(t *testing.T) {
-		t.Parallel()
-		fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "before"},
-				&agent.TextMessage{Text: "overlap"},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 30, MessageEnd: 1, Fingerprint: fingerprint("before")},
-				{RelayEnd: 40, MessageEnd: 2, Fingerprint: fingerprint("overlap")},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "before"},
-				&agent.TextMessage{Text: "overlap"},
-				&agent.TextMessage{Text: "after"},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "seeded", RelayEnd: 30, MessageEnd: 1, ByteEnd: 7, Fingerprint: fingerprint("before")},
-				{Generation: "seeded", RelayEnd: 40, MessageEnd: 2, ByteEnd: 15, Fingerprint: fingerprint("overlap")},
-				{Generation: "seeded", RelayEnd: 46, MessageEnd: 3, ByteEnd: 21, Fingerprint: fingerprint("after")},
-			},
-			Encoded: []byte("before\noverlap\nafter\n"),
-		}
-
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil {
-			t.Fatalf("merge: %v", merger.err)
-		}
-		messages := make([]agent.Message, len(merged))
-		for i, entry := range merged {
-			messages[i] = entry.Message
-		}
-		if got, want := textMessages(messages), []string{"before", "overlap", "after"}; !slices.Equal(got, want) {
-			t.Fatalf("merged texts = %#v, want %#v", got, want)
-		}
-		if got, want := string(merger.relayAppend(relayTimeline)), "after\n"; got != want {
-			t.Fatalf("relay append = %q, want %q", got, want)
-		}
-	})
-	t.Run("valid_unmarked_prior_discontinuity_uses_exact_endpoint", func(t *testing.T) {
-		t.Parallel()
-		fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "durable history"},
-				&agent.TextMessage{Text: "before"},
-				&agent.TextMessage{Text: "overlap"},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint("discontinuity")},
-				{RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint("before")},
-				{RelayEnd: 30, MessageEnd: 3, Fingerprint: fingerprint("overlap")},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "older snapshot prefix"},
-				&agent.TextMessage{Text: "before"},
-				&agent.TextMessage{Text: "overlap"},
-				&agent.TextMessage{Text: "after"},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, ByteEnd: 6, Fingerprint: fingerprint("older")},
-				{RelayEnd: 20, MessageEnd: 2, ByteEnd: 13, Fingerprint: fingerprint("before")},
-				{RelayEnd: 30, MessageEnd: 3, ByteEnd: 21, Fingerprint: fingerprint("overlap")},
-				{RelayEnd: 40, MessageEnd: 4, ByteEnd: 27, Fingerprint: fingerprint("after")},
-			},
-			Encoded: []byte("older\nbefore\noverlap\nafter\n"),
-		}
-
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil {
-			t.Fatalf("merge: %v", merger.err)
-		}
-		messages := make([]agent.Message, len(merged))
-		for i, entry := range merged {
-			messages[i] = entry.Message
-		}
-		if got, want := textMessages(messages), []string{"durable history", "before", "overlap", "after"}; !slices.Equal(got, want) {
-			t.Fatalf("merged texts = %#v, want %#v", got, want)
-		}
-		if got, want := string(merger.relayAppend(relayTimeline)), "after\n"; got != want {
-			t.Fatalf("relay append = %q, want %q", got, want)
-		}
-	})
-	t.Run("invalid_unmarked_repeated_overlap_is_ambiguous", func(t *testing.T) {
-		t.Parallel()
-		fingerprint := sha256.Sum256([]byte("identical"))
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "first"}, &agent.TextMessage{Text: "second"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint},
-				{RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "first"}, &agent.TextMessage{Text: "new identical"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint},
-				{RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint},
-			},
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err == nil || !slices.EqualFunc(merged, logTimeline.Messages, func(a, b agent.TimedMessage) bool {
-			return a.Message == b.Message
-		}) {
-			t.Fatalf("ambiguous merge = %#v, err = %v; want unchanged durable timeline and error", merged, merger.err)
-		}
-	})
-	t.Run("invalid_unmarked_gapped_history_has_no_overlap", func(t *testing.T) {
-		t.Parallel()
-		fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "A"}, &agent.TextMessage{Text: "C"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint("A")},
-				{RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint("C")},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "A"},
-				&agent.TextMessage{Text: "B"},
-				&agent.TextMessage{Text: "C"},
-				&agent.TextMessage{Text: "D"},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "seeded", RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint("A")},
-				{Generation: "seeded", RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint("B")},
-				{Generation: "seeded", RelayEnd: 30, MessageEnd: 3, Fingerprint: fingerprint("C")},
-				{Generation: "seeded", RelayEnd: 40, MessageEnd: 4, Fingerprint: fingerprint("D")},
-			},
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err == nil || len(merged) != len(logTimeline.Messages) {
-			t.Fatalf("gapped merge = %#v, err = %v; want unchanged durable timeline and error", merged, merger.err)
-		}
-	})
-	t.Run("valid_marked_empty_generation_appends_complete_snapshot", func(t *testing.T) {
-		t.Parallel()
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.SystemMessage{Subtype: "context_cleared"}),
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "first offline output"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 7, MessageEnd: 1, ByteEnd: 7},
-			},
-			Encoded: []byte("first\n"),
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merger.logGeneration = "current"
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil || len(merged) != 2 || string(merger.relayAppend(relayTimeline)) != "first\n" {
-			t.Fatalf("marked empty merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
-		}
-	})
-	t.Run("invalid_marked_empty_generation_rejects_truncated_snapshot", func(t *testing.T) {
-		t.Parallel()
-		logTimeline := agent.ParsedTimeline{}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "tail"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 1007, MessageEnd: 1, ByteEnd: 7},
-			},
-			Encoded: []byte("tail--\n"),
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merger.logGeneration = "current"
-		merged := merger.merge(relayTimeline)
-		if merger.err == nil || len(merged) != 0 || len(merger.relayAppend(relayTimeline)) != 0 {
-			t.Fatalf("truncated marked merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
-		}
-	})
-	t.Run("valid_unmarked_header_only_v3_appends_complete_snapshot", func(t *testing.T) {
-		t.Parallel()
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "first output"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 7, MessageEnd: 1, ByteEnd: 7},
-			},
-			Encoded: []byte("first\n"),
-		}
-		merger := newLogRelayMessageMerger(agent.ParsedTimeline{}, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil || len(merged) != 1 || string(merger.relayAppend(relayTimeline)) != "first\n" {
-			t.Fatalf("header-only v3 merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
-		}
-	})
-	t.Run("valid_complete_new_generation_supersedes_durable_generation", func(t *testing.T) {
-		t.Parallel()
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "old generation"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "old", RelayEnd: 10, MessageEnd: 1},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "new generation"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "new", RelayEnd: 7, MessageEnd: 0, ByteEnd: 7},
-				{Generation: "new", RelayEnd: 14, MessageEnd: 1, ByteEnd: 14},
-			},
-			Encoded: []byte("marker\noutput\n"),
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merger.logGeneration = "old"
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil || len(merged) != 2 || string(merger.relayAppend(relayTimeline)) != "marker\noutput\n" {
-			t.Fatalf("new generation merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
-		}
-	})
-	t.Run("valid_complete_marked_generation_supersedes_unmarked_history", func(t *testing.T) {
-		t.Parallel()
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "unmarked old output"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: sha256.Sum256([]byte("old"))},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(&agent.TextMessage{Text: "marked new output"}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "new", RelayEnd: 7, MessageEnd: 0, ByteEnd: 7},
-				{Generation: "new", RelayEnd: 14, MessageEnd: 1, ByteEnd: 14},
-			},
-			Encoded: []byte("marker\noutput\n"),
-		}
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if merger.err != nil || len(merged) != 2 || string(merger.relayAppend(relayTimeline)) != "marker\noutput\n" {
-			t.Fatalf("unmarked-to-marked merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
-		}
-	})
-	t.Run("valid_pi_empty_record_overlap", func(t *testing.T) {
-		t.Parallel()
-		parse := func(t *testing.T, start int64, records ...string) agent.ParsedTimeline {
-			t.Helper()
-			previousOutput := ""
-			parser, err := agent.NewLogRecordParser(func(line []byte) ([]agent.Message, error) {
-				var update struct {
-					PartialResult struct {
-						Content []struct {
-							Text string `json:"text"`
-						} `json:"content"`
-					} `json:"partialResult"`
-				}
-				if err := json.Unmarshal(line, &update); err != nil {
-					return nil, err
-				}
-				if len(update.PartialResult.Content) == 0 {
-					return nil, nil
-				}
-				output := update.PartialResult.Content[0].Text
-				if !strings.HasPrefix(output, previousOutput) {
-					return nil, fmt.Errorf("Pi output %q does not extend %q", output, previousOutput)
-				}
-				delta := strings.TrimPrefix(output, previousOutput)
-				previousOutput = output
-				if delta == "" {
-					return nil, nil
-				}
-				return []agent.Message{&agent.ToolOutputDeltaMessage{Delta: delta}}, nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var timeline agent.ParsedTimeline
-			relayEnd := start
-			for _, line := range records {
-				parsed, err := parser.ParseRecord([]byte(line))
+				got, err := relaySnapshotAppend(tc.log, tc.generation, tc.snapshot)
 				if err != nil {
 					t.Fatal(err)
 				}
-				timeline.Encoded = append(timeline.Encoded, line...)
-				timeline.Encoded = append(timeline.Encoded, '\n')
-				relayEnd += int64(len(line) + 1)
-				timeline.Messages = append(timeline.Messages, parsed.Messages...)
-				if parsed.RelayRecord {
-					timeline.RelayRecords = append(timeline.RelayRecords, agent.RelayRecordBoundary{
-						RelayEnd:    relayEnd,
-						MessageEnd:  len(timeline.Messages),
-						ByteEnd:     len(timeline.Encoded),
-						Fingerprint: sha256.Sum256([]byte(line)),
-					})
+				if string(got) != tc.want {
+					t.Fatalf("append = %q, want %q", got, tc.want)
 				}
-			}
-			return timeline
-		}
-		update := func(output string) string {
-			return fmt.Sprintf(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":%q}]}}`, output)
-		}
-		record := func(timestamp int, native string) string {
-			return fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`, timestamp, native)
-		}
-		first := record(1, update("hello"))
-		second := record(2, update("hello world"))
-		overlap := record(3, update("hello world"))
-		logTimeline := parse(t, 0, first, second, overlap)
-		relayStart := int64(len(first) + 1 + len(second) + 1)
-		relayTimeline := parse(t, relayStart, overlap, record(4, update("hello world!")))
-		if got := len(logTimeline.RelayRecords); got != 3 {
-			t.Fatalf("durable relay records = %d, want 3 including empty update", got)
-		}
-		if got := len(logTimeline.Messages); got != 2 {
-			t.Fatalf("durable messages = %d, want 2", got)
-		}
-
-		merged := newLogRelayMessageMerger(logTimeline, harness.Pi).merge(relayTimeline)
-		var deltas []string
-		for _, entry := range merged {
-			if message, ok := entry.Message.(*agent.ToolOutputDeltaMessage); ok {
-				deltas = append(deltas, message.Delta)
-			}
-		}
-		want := []string{"hello", " world", "!"}
-		if !slices.Equal(deltas, want) {
-			t.Fatalf("merged tool output deltas = %#v, want %#v", deltas, want)
+			})
 		}
 	})
-	t.Run("valid_overlap_includes_trailing_relay_control", func(t *testing.T) {
+	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		logTimeline := agent.ParsedTimeline{
-			Messages: relayParsed(
-				&agent.TextMessage{Text: "native"},
-				&agent.StrippedEnvMessage{Variables: map[string]string{"TOKEN": ""}},
-			),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "test", RelayEnd: 10, MessageEnd: 1},
-				{Generation: "test", RelayEnd: 20, MessageEnd: 2},
-			},
-		}
-		relayTimeline := agent.ParsedTimeline{
-			Messages: append(slices.Clone(logTimeline.Messages), agent.TimedMessage{Message: &agent.TextMessage{Text: "after"}}),
-			RelayRecords: []agent.RelayRecordBoundary{
-				{Generation: "test", RelayEnd: 10, MessageEnd: 1, ByteEnd: 7},
-				{Generation: "test", RelayEnd: 20, MessageEnd: 2, ByteEnd: 15},
-				{Generation: "test", RelayEnd: 30, MessageEnd: 3, ByteEnd: 21},
-			},
-			Encoded: []byte("native\ncontrol\nafter\n"),
-		}
-
-		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merged := merger.merge(relayTimeline)
-		if len(merged) != 3 {
-			t.Fatalf("merged timeline = %#v, want durable control once plus new message", merged)
-		}
-		after, ok := merged[2].Message.(*agent.TextMessage)
-		if !ok || after.Text != "after" {
-			t.Fatalf("merged final message = %#v, want after text", merged[2].Message)
-		}
-		if got, want := string(merger.relayAppend(relayTimeline)), "after\n"; got != want {
-			t.Fatalf("relay append = %q, want %q", got, want)
+		for _, tc := range []struct {
+			name       string
+			generation string
+			log        []agent.RelayRecordBoundary
+			snapshot   agent.RelaySnapshot
+		}{
+			{name: "empty_log_truncated_snapshot", snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{RelayEnd: 100, ByteEnd: 6}}, Encoded: []byte("after\n")}},
+			{name: "new_generation_truncated_snapshot", generation: "old", log: []agent.RelayRecordBoundary{{Generation: "old", RelayEnd: 20}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "new", RelayEnd: 100, ByteEnd: 6}}, Encoded: []byte("after\n")}},
+			{name: "marked_no_overlap", generation: "g", log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 100, ByteEnd: 6}}, Encoded: []byte("after\n")}},
+			{name: "marked_ambiguous_overlap", generation: "g", log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20, ByteEnd: 1}, {Generation: "g", RelayEnd: 20, ByteEnd: 2}}, Encoded: []byte("xx")}},
+			{name: "unmarked_no_exact_overlap", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("before")}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 6, Fingerprint: fingerprint("after")}}, Encoded: []byte("after\n")}},
+			{name: "unmarked_ambiguous_repeated_overlap", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("repeat")}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 7, Fingerprint: fingerprint("repeat")}, {ByteEnd: 14, Fingerprint: fingerprint("repeat")}}, Encoded: bytes.Repeat([]byte("repeat\n"), 2)}},
+			{name: "unmarked_short_match_inside_both_sources", log: []agent.RelayRecordBoundary{{Fingerprint: fingerprint("before")}, {Fingerprint: fingerprint("overlap")}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{ByteEnd: 6, Fingerprint: fingerprint("older")}, {ByteEnd: 14, Fingerprint: fingerprint("overlap")}}, Encoded: []byte("older\noverlap\n")}},
+			{name: "invalid_byte_boundary", generation: "g", log: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20}}, snapshot: agent.RelaySnapshot{RelayRecords: []agent.RelayRecordBoundary{{Generation: "g", RelayEnd: 20, ByteEnd: 100}}, Encoded: []byte("after\n")}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got, err := relaySnapshotAppend(tc.log, tc.generation, tc.snapshot); err == nil || got != nil {
+					t.Fatalf("append = %q, err = %v; want reconciliation error", got, err)
+				}
+			})
 		}
 	})
 }
@@ -4681,8 +4202,8 @@ func TestManager(t *testing.T) {
 					t.Cleanup(backend.stop)
 					m.relay = fakeRelayReader{
 						statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
-						readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-							return agent.ParsedTimeline{}, 0, nil
+						readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+							return agent.RelaySnapshot{}, 0, nil
 						},
 						readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 					}
@@ -4820,7 +4341,7 @@ func TestManager(t *testing.T) {
 			var peak atomic.Int32
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
 					current := active.Add(1)
 					for {
 						previous := peak.Load()
@@ -4831,7 +4352,7 @@ func TestManager(t *testing.T) {
 					started <- struct{}{}
 					<-release
 					active.Add(-1)
-					return agent.ParsedTimeline{}, 0, nil
+					return agent.RelaySnapshot{}, 0, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -4884,8 +4405,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{}, 0, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+					return agent.RelaySnapshot{}, 0, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -4922,6 +4443,171 @@ func TestManager(t *testing.T) {
 			}
 			if entry.Task().HasSession() {
 				t.Error("incomplete startup attached a live relay session")
+			}
+		})
+		t.Run("offline_opencode_error_uses_recorded_input", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("compressed_%v", compressed), func(t *testing.T) {
+					t.Parallel()
+					id := ksid.NewID()
+					instance := runtime.Instance{ID: runtime.NewID("test-runtime", "md-agent-offline-error"), State: "running", AgentTarget: runtime.ConnectionTarget{SSHHost: "offline-error"}}
+					store := taskslog.NewStore(testLogger(), t.TempDir())
+					tk := mustNewTask(t, id, agent.Prompt{Text: "initial"}, harness.OpenCode, "")
+					log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
+					if err != nil {
+						t.Fatal(err)
+					}
+					generation := `{"t":"relay_generation","generation":"offline"}`
+					before := `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"before offline"}}}}}`
+					request := []byte(`{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"initial"}]}}` + "\n")
+					failure := `{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"error":{"code":-32000,"message":"offline prompt rejected"}}}`
+					if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(generation + "\n" + before + "\n")}); err != nil {
+						t.Fatal(err)
+					}
+					if err := agent.AppendInputNativeRecord(log, request); err != nil {
+						t.Fatal(err)
+					}
+					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s", AutoCompactTokenLimit: 244800}); err != nil {
+						t.Fatal(err)
+					}
+					if compressed {
+						if _, err := store.Compress(path, log, taskslog.StateWaiting); err != nil {
+							t.Fatal(err)
+						}
+					} else if err := log.Close(); err != nil {
+						t.Fatal(err)
+					}
+					pending := taskslog.QueuedPrompt{ID: ksid.NewID(), TaskID: id, Prompt: agent.Prompt{Text: "queued follow-up"}}
+					if err := store.SaveInputQueue([]taskslog.QueuedPrompt{pending}); err != nil {
+						t.Fatal(err)
+					}
+					// Repeat startup against the same relay snapshot. It includes no
+					// stdin: request identity is available only in the local log.
+					for startup := range 2 {
+						t.Run(fmt.Sprintf("startup_%d", startup), func(t *testing.T) { //nolint:paralleltest // Successive startups own the same log and runtime exclusively.
+							backend := &importedRecoveryBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.OpenCode}}
+							m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store,
+								Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, &runtimetest.FakeInfo{Meta: map[string]string{
+									"md-agent-offline-error\x00caic.id": id.String(), "md-agent-offline-error\x00caic.harness": string(harness.OpenCode),
+								}}), Backends: map[harness.Name]agent.Backend{harness.OpenCode: backend}})
+							t.Cleanup(func() {
+								if err := m.Close(); err != nil {
+									t.Error(err)
+								}
+								backend.stop()
+							})
+							m.relay = fakeRelayReader{
+								statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+								readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, _ int64) (agent.RelaySnapshot, int64, error) {
+									return parsedRelayFixture(generation, before, failure)
+								},
+								readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+							}
+							logs, err := store.LoadForTaskIDs([]string{id.String()})
+							if err != nil {
+								t.Fatal(err)
+							}
+							entries, err := m.ImportInstances(t.Context(), []runtime.Instance{instance}, logs)
+							if err != nil || len(entries) != 1 {
+								t.Fatalf("import = %v, %v", entries, err)
+							}
+							entry := entries[0]
+							results := 0
+							for _, message := range entry.Task().Messages() {
+								if result, ok := message.(*agent.ResultMessage); ok {
+									results++
+									if !result.IsError || result.Result != "offline prompt rejected" {
+										t.Fatalf("result = %+v", result)
+									}
+								}
+							}
+							if results != 1 || entry.Task().GetState() != taskslog.StateWaiting {
+								t.Fatalf("results = %d, state = %s; want one terminal error and waiting", results, entry.Task().GetState())
+							}
+							if got := entry.Task().Snapshot().AutoCompactTokenLimit; got != 244800 {
+								t.Fatalf("auto-compact threshold = %d, want 244800", got)
+							}
+							if q := entry.PendingInput(); q == nil || q.ID != pending.ID || q.Prompt.Text != pending.Prompt.Text {
+								t.Fatalf("pending input = %+v", q)
+							}
+							if got := entry.Task().RelayOffsetValue(); got != int64(len(generation)+len(before)+len(failure)+3) {
+								t.Fatalf("relay offset = %d", got)
+							}
+							persisted, err := os.ReadFile(entry.LogPath.Get())
+							if err != nil {
+								t.Fatal(err)
+							}
+							if bytes.Count(persisted, []byte(failure+"\n")) != 1 || bytes.Count(persisted, []byte(before+"\n")) != 1 {
+								t.Fatalf("relay records not persisted once: %s", persisted)
+							}
+						})
+					}
+				})
+			}
+		})
+		t.Run("reconciled_semantic_error_aborts_before_registration", func(t *testing.T) {
+			t.Parallel()
+			id := ksid.NewID()
+			parseErr := errors.New("invalid response in recorded request context")
+			backend := &agenttest.FakeBackend{HarnessName: harness.Codex, WireFactory: func() agent.WireFormat {
+				inputSeen := false
+				return &agenttest.Wire{
+					Input: func([]byte) ([]agent.Message, error) { inputSeen = true; return nil, nil },
+					Output: func(line []byte) ([]agent.Message, error) {
+						if inputSeen && bytes.Equal(line, []byte(`{"type":"after"}`)) {
+							return nil, parseErr
+						}
+						return nil, nil
+					},
+				}
+			}}
+			m := newTestManager(t, Config{ServerCtx: t.Context(),
+				Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, &runtimetest.FakeInfo{Meta: map[string]string{
+					"md-agent-import-error\x00caic.id": id.String(), "md-agent-import-error\x00caic.harness": string(harness.Codex),
+				}}), Backends: map[harness.Name]agent.Backend{harness.Codex: backend}})
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			tk := mustNewTask(t, id, agent.Prompt{Text: "recorded prompt"}, harness.Codex, "")
+			log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := `{"t":"agent","ts":1.000,"msg":{"type":"before"}}`
+			after := `{"t":"agent","ts":2.000,"msg":{"type":"after"}}`
+			if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(before + "\n")}); err != nil {
+				t.Fatal(err)
+			}
+			if err := agent.AppendInputNativeRecord(log, []byte("{\"type\":\"request\"}\n")); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, _ int64) (agent.RelaySnapshot, int64, error) {
+					return parsedRelayFixture(before, after)
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			loaded, err := taskslog.LoadHistorySource(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: runtime.NewID("test-runtime", "md-agent-import-error"), State: "running"}}, []*taskslog.LoadedTask{loaded})
+			if err == nil || !strings.Contains(err.Error(), parseErr.Error()) || len(entries) != 0 || m.Len() != 0 {
+				t.Fatalf("import = %v, %v; registered = %d", entries, err, m.Len())
+			}
+			persisted, err := os.ReadFile(path) //nolint:gosec // Store returned this task's path in the test-owned directory.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Count(persisted, []byte(after+"\n")) != 1 {
+				t.Fatalf("verified suffix not persisted exactly once: %s", persisted)
 			}
 		})
 		t.Run("restores_accepted_opencode_prompt_from_durable_input", func(t *testing.T) {
@@ -5219,8 +4905,8 @@ func TestManager(t *testing.T) {
 			})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{}, 0, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+					return agent.RelaySnapshot{}, 0, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -5258,7 +4944,7 @@ func TestManager(t *testing.T) {
 				State: "running",
 			}}, []*taskslog.LoadedTask{loaded})
 
-			if err == nil || !strings.Contains(err.Error(), "decode result") || !strings.Contains(err.Error(), "load messages for imported task "+taskID.String()) {
+			if err == nil || !strings.Contains(err.Error(), "decode result") || !strings.Contains(err.Error(), "load reconciled task history "+taskID.String()) {
 				t.Fatalf("AdoptInstances error = %v, want malformed-control log rejection", err)
 			}
 			if adopted != nil || m.Len() != 0 {
@@ -5551,24 +5237,24 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, parser *agent.LogRecordParser, _ int64) (agent.ParsedTimeline, int64, error) {
-					var timeline agent.ParsedTimeline
+				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, _ int64) (agent.RelaySnapshot, int64, error) {
+					parser := agent.NewPhysicalLogRecordParser()
+					var timeline agent.RelaySnapshot
 					var relayEnd int64
 					for _, line := range []string{beforeRecord, duringRecord} {
 						parsed, err := parser.ParseRecord([]byte(line))
 						if err != nil {
-							return agent.ParsedTimeline{}, 0, err
+							return agent.RelaySnapshot{}, 0, err
 						}
 						timeline.Encoded = append(timeline.Encoded, line...)
 						timeline.Encoded = append(timeline.Encoded, '\n')
 						relayEnd += int64(len(line) + 1)
-						timeline.Messages = append(timeline.Messages, parsed.Messages...)
-						if !parsed.RelayRecord {
-							return agent.ParsedTimeline{}, 0, errors.New("v3 agent record is not relay-owned")
+						if parsed.Provenance.Source != agent.RecordSourceRelay {
+							return agent.RelaySnapshot{}, 0, errors.New("v3 agent record is not relay-owned")
 						}
 						timeline.RelayRecords = append(timeline.RelayRecords, agent.RelayRecordBoundary{
-							RelayEnd:    relayEnd,
-							MessageEnd:  len(timeline.Messages),
+							RelayEnd: relayEnd,
+
 							ByteEnd:     len(timeline.Encoded),
 							Fingerprint: sha256.Sum256([]byte(line)),
 						})
@@ -5672,12 +5358,11 @@ func TestManager(t *testing.T) {
 						statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 							return tc.relayAlive, "relay state", nil
 						},
-						readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-							return agent.ParsedTimeline{
-								Messages: relayParsed(&agent.TextMessage{Text: "unverified offline output"}),
+						readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+							return agent.RelaySnapshot{
 								RelayRecords: []agent.RelayRecordBoundary{{
-									RelayEnd:    123,
-									MessageEnd:  1,
+									RelayEnd: 123,
+
 									ByteEnd:     len(relayRecord) + 1,
 									Fingerprint: sha256.Sum256([]byte(relayRecord)),
 								}},
@@ -5735,25 +5420,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return true, "alive", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{Messages: relayParsed(
-						&agent.AskMessage{
-							ToolUseID: "toolu-1",
-							Questions: []logdata.AskQuestion{{Question: "Which?"}},
-						},
-						&agent.PendingUserActionMessage{
-							MessageType: agent.PendingUserActionMessageType,
-							Action: logdata.PendingUserAction{
-								Kind:      agent.PendingUserActionAskUserQuestion,
-								RequestID: "req-1",
-								ToolUseID: "toolu-1",
-								Ask: logdata.PendingAskAction{
-									Questions: []logdata.AskQuestion{{Question: "Which?"}},
-								},
-							},
-						},
-						&agent.ResultMessage{MessageType: "result"},
-					)}, 599440, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+					return agent.RelaySnapshot{}, 599440, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
@@ -5900,14 +5568,15 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, parser *agent.LogRecordParser, _ int64) (agent.ParsedTimeline, int64, error) {
+				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, _ int64) (agent.RelaySnapshot, int64, error) {
 					const record = `{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}`
-					parsed, err := parser.ParseRecord([]byte(record))
+					parser := agent.NewPhysicalLogRecordParser()
+					_, err := parser.ParseRecord([]byte(record))
 					if err != nil {
-						return agent.ParsedTimeline{}, 0, err
+						return agent.RelaySnapshot{}, 0, err
 					}
 					encoded := []byte(record + "\n")
-					return agent.ParsedTimeline{Messages: parsed.Messages, Encoded: encoded, RelayRecords: []agent.RelayRecordBoundary{{RelayEnd: int64(len(encoded)), MessageEnd: len(parsed.Messages), ByteEnd: len(encoded), Fingerprint: sha256.Sum256([]byte(record))}}}, int64(len(encoded)), nil
+					return agent.RelaySnapshot{Encoded: encoded, RelayRecords: []agent.RelayRecordBoundary{{RelayEnd: int64(len(encoded)), ByteEnd: len(encoded), Fingerprint: sha256.Sum256([]byte(record))}}}, int64(len(encoded)), nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
@@ -5952,12 +5621,8 @@ func TestManager(t *testing.T) {
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{Messages: relayParsed(
-						&agent.InitMessage{SessionID: "new-session"},
-						&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
-						&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
-					)}, 256, nil
+				readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+					return agent.RelaySnapshot{}, 256, nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
@@ -7107,8 +6772,8 @@ func setupImportedRecovery(t *testing.T, s *importedRecoverySetup) *importedReco
 		statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 			return s.alive, "probe", s.statusErr
 		},
-		readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-			return agent.ParsedTimeline{}, 0, errors.New("relay output lost")
+		readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+			return agent.RelaySnapshot{}, 0, errors.New("relay output lost")
 		},
 		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 	}

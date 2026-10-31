@@ -13,9 +13,9 @@ type LogSink struct {
 	bytes.Buffer
 }
 
-// AppendNative records one complete native physical record.
-func (s *LogSink) AppendNative(data []byte) error {
-	_, err := s.Write(data)
+// AppendRecord records complete encoded physical records.
+func (s *LogSink) AppendRecord(record agent.PhysicalRecord) error {
+	_, err := s.Write(record.Encoded)
 	return err
 }
 
@@ -25,7 +25,7 @@ func (s *LogSink) AppendMessage(m agent.Message) error {
 	if err != nil {
 		return err
 	}
-	return s.AppendNative(append(data, '\n'))
+	return s.AppendRecord(agent.PhysicalRecord{Encoded: append(data, '\n')})
 }
 
 // Close releases no resources.

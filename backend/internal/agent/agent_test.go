@@ -191,7 +191,9 @@ func testParseFn(line []byte) ([]Message, error) {
 	}
 }
 
-func (testWire) ParseMessage(line []byte) ([]Message, error) {
+func (testWire) ParseInput([]byte) ([]Message, error) { return nil, nil }
+
+func (testWire) ParseOutput(line []byte) ([]Message, error) {
 	return testParseFn(line)
 }
 
@@ -212,8 +214,8 @@ type testLogSink struct {
 	bytes.Buffer
 }
 
-func (s *testLogSink) AppendNative(data []byte) error {
-	_, err := s.Write(data)
+func (s *testLogSink) AppendRecord(record PhysicalRecord) error {
+	_, err := s.Write(record.Encoded)
 	return err
 }
 
@@ -222,7 +224,7 @@ func (s *testLogSink) AppendMessage(m Message) error {
 	if err != nil {
 		return err
 	}
-	return s.AppendNative(append(data, '\n'))
+	return s.AppendRecord(PhysicalRecord{Encoded: append(data, '\n')})
 }
 
 func (*testLogSink) Close() error { return nil }
@@ -708,7 +710,7 @@ func TestSession(t *testing.T) {
 			if err := s.SendPrompt(Prompt{Text: "too late"}); err == nil {
 				t.Fatal("send after Wait succeeded")
 			}
-			parser, err := NewLogRecordParser(testParseFn)
+			parser, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -745,7 +747,7 @@ func TestSession(t *testing.T) {
 		if got := stdin.String(); got != "hello\n" {
 			t.Errorf("stdin = %q, want hello\\n", got)
 		}
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -848,24 +850,46 @@ func TestDirectionalNativeRecords(t *testing.T) {
 	if len(lines) != 2 || !bytes.HasPrefix(lines[0], []byte(`{"t":"input","ts":`)) || !bytes.HasPrefix(lines[1], []byte(`{"t":"agent","ts":`)) {
 		t.Fatalf("directional records = %q", log.Bytes())
 	}
-	var parsedInput []byte
-	parser, err := NewLogRecordParser(func(data []byte) ([]Message, error) {
-		parsedInput = bytes.Clone(data)
-		return nil, nil
-	})
+	var parsedInput, parsedOutput []byte
+	native := &testMessageParser{
+		input: func(data []byte) ([]Message, error) {
+			parsedInput = bytes.Clone(data)
+			return []Message{&UserInputMessage{Text: "input"}}, nil
+		},
+		output: func(data []byte) ([]Message, error) {
+			parsedOutput = bytes.Clone(data)
+			return []Message{&TextMessage{Text: "output"}}, nil
+		},
+	}
+	parser, err := NewLogRecordParser(native)
 	if err != nil {
 		t.Fatal(err)
 	}
 	input, err := parser.ParseRecord(lines[0])
-	if err != nil || input.RelayRecord {
+	if err != nil || input.Provenance.Source == RecordSourceRelay {
 		t.Fatalf("input = %#v, %v; want non-relay record", input, err)
 	}
 	if got, want := string(parsedInput), `{"method":"set_model"}`; got != want {
 		t.Fatalf("input payload = %q, want %q", got, want)
 	}
 	relay, err := parser.ParseRecord(lines[1])
-	if err != nil || !relay.RelayRecord {
+	if err != nil || relay.Provenance.Source != RecordSourceRelay {
 		t.Fatalf("relay = %#v, %v; want relay record", relay, err)
+	}
+	if string(parsedOutput) != `{"type":"message"}` || string(parsedInput) != `{"method":"set_model"}` {
+		t.Fatalf("input = %s, output = %s", parsedInput, parsedOutput)
+	}
+	var live []TimedMessage
+	sink := &testLogSink{}
+	if err := DefaultReadMessages(t.Context(), testLogger(), bytes.NewReader(log.Bytes()), func(message TimedMessage) error {
+		live = append(live, message)
+		return nil
+	}, sink, native, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Concat(input.Messages, relay.Messages)
+	if !reflect.DeepEqual(live, want) || !bytes.Equal(sink.Bytes(), log.Bytes()) {
+		t.Fatalf("live = %#v, want %#v; persisted = %q", live, want, sink.Bytes())
 	}
 }
 
@@ -878,7 +902,7 @@ func TestWriteMetaSession(t *testing.T) {
 		if err := WriteMetaSession(buf, &InitMessage{SessionID: "session", AutoCompactTokenLimit: 244800}); err != nil {
 			t.Fatal(err)
 		}
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -899,7 +923,7 @@ func TestWriteMetaSession(t *testing.T) {
 		if err := WriteMetaSession(buf, &InitMessage{Source: source, SessionID: "session"}); err != nil {
 			t.Fatal(err)
 		}
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -990,7 +1014,7 @@ func TestMarshalLogMessage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+			parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1014,7 +1038,7 @@ func TestMarshalLogMessage(t *testing.T) {
 		if string(encoded) != withoutSource {
 			t.Errorf("absent source encoding = %s", encoded)
 		}
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1042,7 +1066,7 @@ func TestMarshalLogMessage(t *testing.T) {
 			if !bytes.Contains(encoded, []byte(`"source":`)) {
 				t.Errorf("v3 text lost source: %s", encoded)
 			}
-			parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+			parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1063,7 +1087,7 @@ func TestMarshalLogMessage(t *testing.T) {
 	t.Run("TextSourceValidation", func(t *testing.T) {
 		t.Parallel()
 		const sourced = `{"t":"text","text":"visible","source":{"threadID":"thread","rootThreadID":"root"}}`
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1096,7 +1120,7 @@ func TestMarshalLogMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1104,7 +1128,7 @@ func TestMarshalLogMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !record.Control || !record.RelayRecord || record.RelayGeneration != "generation-1" || len(record.Messages) != 0 {
+		if !record.Control || record.Provenance.Source != RecordSourceRelay || record.Provenance.Generation != "generation-1" || len(record.Messages) != 0 {
 			t.Fatalf("parsed relay generation = %#v", record)
 		}
 	})
@@ -1151,9 +1175,9 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) error {
 		messages = append(messages, parsed.Message)
 		return nil
-	}, DiscardLogSink{}, func([]byte) ([]Message, error) {
+	}, DiscardLogSink{}, &testMessageParser{output: func([]byte) ([]Message, error) {
 		return nil, nil
-	}, nil)
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1216,7 +1240,7 @@ func TestReadMessages(t *testing.T) {
 		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
 			ch <- m.Message
 			return nil
-		}, DiscardLogSink{}, testParseFn, nil); err != nil {
+		}, DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1248,7 +1272,7 @@ func TestReadMessages(t *testing.T) {
 		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
 			ch <- m.Message
 			return nil
-		}, DiscardLogSink{}, testParseFn, nil); err != nil {
+		}, DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1302,9 +1326,9 @@ func TestReadMessages(t *testing.T) {
 		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) error {
 			got = append(got, msg)
 			return nil
-		}, log, func([]byte) ([]Message, error) {
+		}, log, &testMessageParser{output: func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
-		}, nil)
+		}}, nil)
 		if err == nil || log.Len() != 0 || len(got) != 0 {
 			t.Fatalf("err=%v persisted=%d dispatched=%d", err, log.Len(), len(got))
 		}
@@ -1333,22 +1357,12 @@ func TestReadRelayTailRecords(t *testing.T) {
 	full := "old\npartial" + "\n" + complete + "\n"
 	tail := "rtial\n" + complete + "\n"
 	start := int64(len(full) - len(tail))
-	parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
-		return []Message{&TextMessage{Text: "tail"}}, nil
-	})
+	timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), start, true, "ctr", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, start, true, "ctr", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(timeline.Messages) != 1 || len(timeline.RelayRecords) != 1 {
+	if len(timeline.RelayRecords) != 1 {
 		t.Fatalf("timeline = %#v", timeline)
-	}
-	msg, ok := timeline.Messages[0].Message.(*TextMessage)
-	if !ok || msg.Text != "tail" {
-		t.Fatalf("messages = %#v", timeline.Messages)
 	}
 	if offset != int64(len(full)) {
 		t.Fatalf("offset = %d, want snapshot boundary %d", offset, len(full))
@@ -1365,79 +1379,74 @@ func TestReadRelayTailRecords(t *testing.T) {
 	}
 	t.Run("leading empty record is not a partial fragment", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
-			return []Message{&TextMessage{Text: "complete"}}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		timeline, offset, err := readRelayTailRecords(strings.NewReader("\n"+complete+"\n"), parser, 10, false, "ctr", "")
-		if err != nil || len(timeline.Messages) != 1 || offset != 10+int64(len("\n"+complete+"\n")) {
+		timeline, offset, err := readRelayTailRecords(strings.NewReader("\n"+complete+"\n"), 10, false, "ctr", "")
+		if err != nil || len(timeline.RelayRecords) != 1 || offset != 10+int64(len("\n"+complete+"\n")) {
 			t.Fatalf("leading empty tail = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
 	t.Run("start at prior record LF retains following complete record", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
-			return []Message{&TextMessage{Text: "complete"}}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
 		tail := "\n" + complete + "\n"
-		timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, 10, true, "ctr", "")
-		if err != nil || len(timeline.Messages) != 1 || offset != 10+int64(len(tail)) {
+		timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), 10, true, "ctr", "")
+		if err != nil || len(timeline.RelayRecords) != 1 || offset != 10+int64(len(tail)) {
 			t.Fatalf("LF-boundary tail = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
 	t.Run("trailing fragment remains for attach", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
-			return []Message{&TextMessage{Text: "complete"}}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
 		completeRecord := complete + "\n"
-		timeline, offset, err := readRelayTailRecords(strings.NewReader(completeRecord+`{"partial":true}`), parser, 0, false, "ctr", "")
-		if err != nil || len(timeline.Messages) != 1 || offset != int64(len(completeRecord)) {
+		timeline, offset, err := readRelayTailRecords(strings.NewReader(completeRecord+`{"partial":true}`), 0, false, "ctr", "")
+		if err != nil || len(timeline.RelayRecords) != 1 || offset != int64(len(completeRecord)) {
 			t.Fatalf("trailing fragment = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
-	t.Run("empty native record retains boundary", func(t *testing.T) {
+	t.Run("native payload interpretation is deferred", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) {
-			return nil, nil
-		})
+		// Valid JSON is transferable before a provider can interpret it in its
+		// complete request context. Preserve even a non-object native payload;
+		// the final ordered history owns provider schema validation.
+		input := `{"t":"agent","ts":1.000,"msg":["provider payload"]}` + "\n"
+		timeline, _, err := readRelayTailRecords(strings.NewReader(input), 0, false, "ctr", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		input := `{"t":"agent","ts":1.000,"msg":{"type":"ignored"}}` + "\n"
-		timeline, _, err := readRelayTailRecords(strings.NewReader(input), parser, 0, false, "ctr", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(timeline.Messages) != 0 || len(timeline.RelayRecords) != 1 {
+		if len(timeline.RelayRecords) != 1 {
 			t.Fatalf("timeline = %#v, want one empty native boundary", timeline)
 		}
-		if boundary := timeline.RelayRecords[0]; boundary.RelayEnd != int64(len(input)) || boundary.MessageEnd != 0 {
-			t.Fatalf("boundary = %#v, want relay end %d at message end 0", boundary, len(input))
+		if boundary := timeline.RelayRecords[0]; boundary.RelayEnd != int64(len(input)) {
+			t.Fatalf("boundary = %#v, want relay end %d", boundary, len(input))
+		}
+		if string(timeline.Encoded) != input {
+			t.Fatalf("snapshot = %q, want original bytes %q", timeline.Encoded, input)
+		}
+	})
+	t.Run("invalid physical records are rejected", func(t *testing.T) {
+		t.Parallel()
+		for _, line := range []string{
+			`{"t":"agent","ts":1.000,"msg":{"invalid":}}`,
+			`{"t":"agent","ts":1,"msg":{}}`,
+			`{"t":"relay_generation","generation":""}`,
+			`{"t":"result","state":123}`,
+		} {
+			t.Run(line, func(t *testing.T) {
+				t.Parallel()
+				timeline, _, err := readRelayTailRecords(strings.NewReader(line+"\n"), 0, false, "ctr", "")
+				if err == nil || len(timeline.Encoded) != 0 || len(timeline.RelayRecords) != 0 {
+					t.Fatalf("snapshot = %+v, error = %v; want rejection before retention", timeline, err)
+				}
+			})
 		}
 	})
 	t.Run("generation propagates to following boundaries", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
-		if err != nil {
-			t.Fatal(err)
-		}
 		marker := `{"t":"relay_generation","generation":"generation-1"}` + "\n"
 		native := `{"t":"agent","ts":1.000,"msg":{"type":"ignored"}}` + "\n"
-		timeline, _, err := readRelayTailRecords(strings.NewReader(marker+native), parser, 0, false, "ctr", "")
+		timeline, _, err := readRelayTailRecords(strings.NewReader(marker+native), 0, false, "ctr", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(timeline.Messages) != 0 || len(timeline.RelayRecords) != 2 {
-			t.Fatalf("timeline = %#v, want marker and native boundaries without semantic messages", timeline)
+		if len(timeline.RelayRecords) != 2 {
+			t.Fatalf("timeline = %#v, want marker and native boundaries ", timeline)
 		}
 		for i, boundary := range timeline.RelayRecords {
 			if boundary.Generation != "generation-1" {
@@ -1470,11 +1479,7 @@ func TestReadRelayTailRecords(t *testing.T) {
 		// newline: hashing the encoded record instead silently broke overlap
 		// detection while leaving every synthetic test consistent with itself.
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"text","text":"hi"}}`
-		parser, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
-		if err != nil {
-			t.Fatal(err)
-		}
-		timeline, _, err := readRelayTailRecords(strings.NewReader(line+"\n"), parser, 0, false, "ctr", "")
+		timeline, _, err := readRelayTailRecords(strings.NewReader(line+"\n"), 0, false, "ctr", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1503,7 +1508,7 @@ func TestRelayGenerationCommand(t *testing.T) {
 func TestLogRecordParser(t *testing.T) {
 	t.Run("ResultCacheLifetimePartition", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(testParseFn)
+		parser, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1536,9 +1541,9 @@ func TestLogRecordParser(t *testing.T) {
 	})
 	t.Run("ChildContextDoesNotInheritRootSnapshot", func(t *testing.T) {
 		t.Parallel()
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			return []Message{&UsageMessage{Source: MessageSource{AgentID: "child"}}}, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1575,7 +1580,7 @@ func TestLogRecordParser(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				p, err := NewLogRecordParser(testParseFn)
+				p, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1589,12 +1594,12 @@ func TestLogRecordParser(t *testing.T) {
 
 	t.Run("ContextCleared", func(t *testing.T) {
 		t.Parallel()
-		parser, err := NewLogRecordParser(testParseFn)
+		parser, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 		if err != nil {
 			t.Fatal(err)
 		}
 		record, err := parser.ParseRecord([]byte(`{"t":"context_cleared"}`))
-		if err != nil || !record.Control || record.RelayRecord || len(record.Messages) != 1 {
+		if err != nil || !record.Control || record.Provenance.Source == RecordSourceRelay || len(record.Messages) != 1 {
 			t.Fatalf("context-cleared = %#v, %v", record, err)
 		}
 		if msg, ok := record.Messages[0].Message.(*SystemMessage); !ok || msg.Subtype != "context_cleared" {
@@ -1605,10 +1610,10 @@ func TestLogRecordParser(t *testing.T) {
 	t.Run("V3AgentPayloads", func(t *testing.T) {
 		t.Parallel()
 		var got [][]byte
-		p, err := NewLogRecordParser(func(line []byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func(line []byte) ([]Message, error) {
 			got = append(got, append([]byte(nil), line...))
 			return []Message{&RawMessage{MessageType: "native", Raw: append([]byte(nil), line...)}}, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1656,7 +1661,7 @@ func TestLogRecordParser(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				p, err := NewLogRecordParser(testParseFn)
+				p, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1685,10 +1690,10 @@ func TestLogRecordParser(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				called := false
-				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 					called = true
 					return nil, nil
-				})
+				}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1705,7 +1710,7 @@ func TestLogRecordParser(t *testing.T) {
 	t.Run("ModelContextSnapshot", func(t *testing.T) {
 		t.Parallel()
 
-		p, err := NewLogRecordParser(func(line []byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func(line []byte) ([]Message, error) {
 			var wire struct {
 				ContextWindow int `json:"context_window"`
 			}
@@ -1713,7 +1718,7 @@ func TestLogRecordParser(t *testing.T) {
 				return nil, err
 			}
 			return []Message{&UsageMessage{ContextWindow: wire.ContextWindow}}, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1781,9 +1786,9 @@ func TestLogRecordParser(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				batch := []Message{action, tc.invalid}
-				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 					return batch, nil
-				})
+				}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1805,9 +1810,9 @@ func TestLogRecordParser(t *testing.T) {
 			t.Parallel()
 			usage := &UsageMessage{}
 			batch := []Message{usage, (*UsageMessage)(nil)}
-			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 				return batch, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1857,7 +1862,7 @@ func TestLogRecordParser(t *testing.T) {
 			}
 		}
 
-		parser, err := NewLogRecordParser(parseNative)
+		parser, err := NewLogRecordParser(&testMessageParser{output: parseNative})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1875,10 +1880,10 @@ func TestLogRecordParser(t *testing.T) {
 		if mixed.Control || len(mixed.Messages) != len(wantTypes) {
 			t.Fatalf("mixed record = %#v", mixed)
 		}
-		if !mixed.RelayRecord {
+		if mixed.Provenance.Source != RecordSourceRelay {
 			t.Fatal("native v3 record is not classified as relay-owned")
 		}
-		fresh, err := NewLogRecordParser(parseNative)
+		fresh, err := NewLogRecordParser(&testMessageParser{output: parseNative})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1886,14 +1891,14 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reparsed.RelayRecord {
+		if reparsed.Provenance.Source != RecordSourceRelay {
 			t.Fatal("reparsed native v3 record is not relay-owned")
 		}
 		nextRecord, err := fresh.ParseRecord([]byte(`{"t":"agent","ts":123.251,"msg":{"kind":"mixed"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !nextRecord.RelayRecord {
+		if nextRecord.Provenance.Source != RecordSourceRelay {
 			t.Fatal("next native v3 record is not relay-owned")
 		}
 		wantTime := time.Unix(123, 250_000_000).UTC()
@@ -1915,7 +1920,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if empty.Control || len(empty.Messages) != 0 || !empty.RelayRecord {
+		if empty.Control || len(empty.Messages) != 0 || empty.Provenance.Source != RecordSourceRelay {
 			t.Fatalf("empty native record = %#v", empty)
 		}
 
@@ -1929,170 +1934,56 @@ func TestLogRecordParser(t *testing.T) {
 	})
 }
 
-// TestWarmRelayHistory covers the history an adopted session warms from and the
-// failure that must abort the attach: the read ends exactly at the attach offset,
-// because records in the gap would otherwise be parsed twice, a fresh session
-// reads nothing, and an unreadable relay is reported rather than attaching with
-// empty correlation state.
-func TestWarmRelayHistory(t *testing.T) {
-	t.Parallel()
-	// This container cannot be resolved, so every relay read fails fast.
-	const unreachable = "caic-warm-history-test-unreachable"
-
-	t.Run("fresh session reads no history", func(t *testing.T) {
-		t.Parallel()
-		// A zero offset must return before any relay read, so the container is
-		// never reached.
-		if err := WarmRelayHistory(t.Context(), unreachable, &testWire{}, 0, maxWarmHistoryBytes); err != nil {
-			t.Fatalf("zero offset warm = %v, want no read", err)
-		}
-	})
-
-	t.Run("reads the window ending at the attach offset", func(t *testing.T) {
-		t.Parallel()
-		cmd, start := relaySnapshotCommand(t.Context(), "container", maxWarmHistoryBytes, 1000)
-		if start != 0 {
-			t.Fatalf("start = %d, want 0 for a file smaller than the bound", start)
-		}
-		command := strings.Join(cmd.Args, " ")
-		if !strings.Contains(command, "head -c 1000") {
-			t.Fatalf("warm command = %q, want a read bounded by the attach offset", command)
-		}
-		if strings.Contains(command, "tail -c") {
-			t.Fatalf("warm command = %q, want no tail for a file smaller than the bound", command)
-		}
-		cmd, start = relaySnapshotCommand(t.Context(), "container", maxWarmHistoryBytes, 3*maxWarmHistoryBytes)
-		if start != 2*maxWarmHistoryBytes {
-			t.Fatalf("start = %d, want the bounded window start", start)
-		}
-		command = strings.Join(cmd.Args, " ")
-		if !strings.Contains(command, "head -c 31457280") || !strings.Contains(command, "tail -c 10485760") {
-			t.Fatalf("warm command = %q, want the bounded window", command)
-		}
-	})
-
-	t.Run("reports an unreadable relay", func(t *testing.T) {
-		t.Parallel()
-		if err := WarmRelayHistory(t.Context(), unreachable, &testWire{}, 1024, maxWarmHistoryBytes); err == nil {
-			t.Fatal("warm read of an unreachable container succeeded")
-		}
-	})
-}
-
-// TestAttachRelaySession covers the warm-history precondition: attaching with a
-// stateful wire that could not be warmed would leave the completions its restored
-// history implies uncorrelated, so the attach fails instead of continuing.
+// TestAttachRelaySession rejects unavailable or corrupt recorded history before
+// starting SSH, including at relay offset zero.
 func TestAttachRelaySession(t *testing.T) {
 	t.Parallel()
-
-	t.Run("fails instead of attaching unwarmed", func(t *testing.T) {
-		t.Parallel()
-		// This container cannot be resolved, so the warm read fails fast.
-		const unreachable = "caic-warm-history-test-unreachable"
-		opts := &Options{
-			Logger:      testLogger(),
-			Target:      runtime.ConnectionTarget{SSHHost: unreachable},
-			RelayOffset: 1024,
-			WarmHistory: true,
-			Log:         &testLogSink{},
-		}
-		session, err := AttachRelaySession(t.Context(), opts, &testWire{}, nil)
-		if err == nil {
+	for _, name := range []string{"required", "missing", "empty", "not_metadata", "malformed", "partial", "canceled"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "history.jsonl")
+			header := `{"t":"caic_meta","version":3,"prompt":"test","harness":"claude"}` + "\n"
+			data := header
+			switch name {
+			case "required":
+				path = ""
+			case "empty":
+				data = ""
+			case "not_metadata":
+				data = `{"t":"agent","ts":1.000,"msg":{}}` + "\n"
+			case "malformed":
+				data += "invalid\n"
+			case "partial":
+				data += `{"t":"agent","ts":1.000,"msg":{}}`
+			}
+			if name != "required" && name != "missing" {
+				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			if name == "canceled" {
+				cancel()
+			}
+			opts := &Options{
+				Logger: testLogger(), Target: runtime.ConnectionTarget{SSHHost: "unreachable"},
+				HistoryPath: path, Log: &testLogSink{},
+			}
+			session, err := AttachRelaySession(ctx, opts, &testWire{}, nil)
 			if session != nil {
 				session.Cancel()
+				t.Fatal("attach returned a session despite invalid history")
 			}
-			t.Fatal("attach succeeded despite an unwarmed relay history")
-		}
-		if session != nil {
-			t.Fatal("attach returned a session for a failed warm read")
-		}
-		if !strings.Contains(err.Error(), "warm relay history") {
-			t.Fatalf("error = %v, want the warm history failure", err)
-		}
-	})
-}
-
-// TestReadWarmHistoryPayload covers the retry that keeps a failed transfer out of
-// the caller's parser state: a transfer that fails after transferring a prefix
-// must not contribute records to a wire whose usage and output accumulators are
-// not all idempotent, and a transfer that never succeeds must be reported.
-func TestReadWarmHistoryPayload(t *testing.T) {
-	t.Parallel()
-
-	t.Run("keeps only the successful attempt", func(t *testing.T) {
-		t.Parallel()
-		record := func(id string) string {
-			return `{"t":"agent","ts":1.000,"msg":{"type":"native_subagent","subagent":{"id":"` + id + `","status":"running"}}}` + "\n"
-		}
-		partial := []byte(record("from-the-failed-attempt"))
-		complete := []byte(record("from-the-successful-attempt"))
-
-		attempts := 0
-		payload, err := readWarmHistoryPayload(t.Context(), func() ([]byte, error) {
-			attempts++
-			if attempts == 1 {
-				// A transfer that produced bytes and then failed, exactly the case a
-				// naive retry would have parsed twice.
-				return partial, errors.New("relay read interrupted")
+			if err == nil || !strings.Contains(err.Error(), "warm recorded history") {
+				t.Fatalf("attach error = %v, want recorded history failure before SSH", err)
 			}
-			return complete, nil
+			if name == "canceled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context cancellation", err)
+			}
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if attempts != warmHistoryAttempts {
-			t.Fatalf("attempts = %d, want %d", attempts, warmHistoryAttempts)
-		}
-		if !bytes.Equal(payload, complete) {
-			t.Fatalf("payload = %q, want only the successful attempt's records", payload)
-		}
-
-		// Parsing the returned payload must feed the wire once, with the successful
-		// records only.
-		wire := &countingWire{}
-		warmParser, err := NewLogRecordParser(wire.ParseMessage)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := scanRelayTailRecords(bytes.NewReader(payload), warmParser, 0, false, "ctr", "", nil); err != nil {
-			t.Fatal(err)
-		}
-		if wire.lines != 1 || !strings.Contains(wire.last, "from-the-successful-attempt") {
-			t.Fatalf("wire saw %d records (last %q), want exactly the successful attempt", wire.lines, wire.last)
-		}
-	})
-
-	t.Run("reports a persistent failure", func(t *testing.T) {
-		t.Parallel()
-		calls := 0
-		payload, err := readWarmHistoryPayload(t.Context(), func() ([]byte, error) {
-			calls++
-			return []byte("partial\n"), errors.New("relay unavailable")
-		})
-		if err == nil || payload != nil {
-			t.Fatalf("payload = %q err = %v, want a reported failure", payload, err)
-		}
-		if calls != warmHistoryAttempts {
-			t.Fatalf("calls = %d, want %d", calls, warmHistoryAttempts)
-		}
-	})
+	}
 }
-
-// countingWire records how many lines reached the wire.
-type countingWire struct {
-	lines int
-	last  string
-}
-
-func (w *countingWire) ParseMessage(line []byte) ([]Message, error) {
-	w.lines++
-	w.last = string(line)
-	return nil, nil
-}
-
-func (*countingWire) WritePrompt(io.Writer, Prompt, LogSink) error { return nil }
-
-func (*countingWire) WriteCompact(io.Writer, string, LogSink) error { return nil }
 
 func TestUsage(t *testing.T) {
 	t.Parallel()
@@ -2110,4 +2001,23 @@ func TestUsage(t *testing.T) {
 			t.Fatalf("write buckets = %d/%d, want 80/50", five, hour)
 		}
 	})
+}
+
+// testMessageParser supplies independently controlled protocol directions.
+type testMessageParser struct {
+	input  func([]byte) ([]Message, error)
+	output func([]byte) ([]Message, error)
+}
+
+func (p *testMessageParser) ParseInput(line []byte) ([]Message, error) {
+	if p.input == nil {
+		return nil, nil
+	}
+	return p.input(line)
+}
+func (p *testMessageParser) ParseOutput(line []byte) ([]Message, error) {
+	if p.output == nil {
+		return nil, nil
+	}
+	return p.output(line)
 }

@@ -796,8 +796,8 @@ func TestStore(t *testing.T) {
 			if closeErr := file.Close(); writeErr != nil || closeErr != nil {
 				t.Fatalf("append task log = %v, %v", writeErr, closeErr)
 			}
-			if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				return claudecode.New().NewWire().ParseMessage, nil
+			if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				return claudecode.New().NewWire(), nil
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -837,8 +837,8 @@ func TestStore(t *testing.T) {
 					if _, err := loadLogHeader(testLogger(), path, true); err != nil {
 						t.Fatalf("loadLogHeader: %v", err)
 					}
-					if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return claudecode.New().NewWire().ParseMessage, nil
+					if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return claudecode.New().NewWire(), nil
 					})); err != nil {
 						t.Fatalf("loadLogFile: %v", err)
 					}
@@ -864,8 +864,8 @@ func TestStore(t *testing.T) {
 						if _, err := loadLogHeader(testLogger(), path, true); err == nil || !strings.Contains(err.Error(), mismatch.errorText) {
 							t.Fatalf("loadLogHeader error = %v, want %s", err, mismatch.errorText)
 						}
-						if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-							return claudecode.New().NewWire().ParseMessage, nil
+						if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+							return claudecode.New().NewWire(), nil
 						})); err == nil || !strings.Contains(err.Error(), mismatch.errorText) {
 							t.Fatalf("loadLogFile error = %v, want %s", err, mismatch.errorText)
 						}
@@ -898,6 +898,35 @@ func TestStore(t *testing.T) {
 			}
 			if tasks[0].State != StatePurged {
 				t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
+			}
+		})
+		t.Run("NativeInputDoesNotProjectOutputMetadata", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+					t.Parallel()
+					path := writePhysicalTestLog(t, compressed,
+						`{"t":"caic_meta","version":3,"prompt":"task","repos":[],"harness":"claude"}`,
+						`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","session_id":"session","model":"model"}}`,
+						`{"t":"input","ts":2.000,"msg":{"type":"system","subtype":"init","session_id":"wrong-session","model":"wrong-model"}}`,
+						`{"t":"agent","ts":3.000,"msg":{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":7}}`,
+						`{"t":"input","ts":4.000,"msg":{"type":"system","subtype":"thinking_tokens","estimated_tokens_delta":100}}`,
+						`{"t":"input","ts":5.000,"msg":{"type":"result","total_cost_usd":99,"usage":{}}}`,
+						`{"t":"agent","ts":6.000,"msg":{"type":"result","total_cost_usd":0.25,"duration_ms":1000,"num_turns":1,"usage":{}}}`,
+						`{"t":"result","state":"purged"}`,
+					)
+					loaded, err := loadLogHeader(testLogger(), path, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if loaded.SessionID != "session" || loaded.ReportedModel != "model" {
+						t.Fatalf("session metadata = %#v", loaded)
+					}
+					trailer := loaded.LastTrailer
+					if trailer == nil || trailer.CostUSD != 0.25 || trailer.Duration != time.Second || trailer.NumTurns != 1 || trailer.Usage.ReasoningOutputTokens != 7 {
+						t.Fatalf("output accounting = %#v", trailer)
+					}
+				})
 			}
 		})
 		t.Run("ControlsRestoreHeaderAndMessages", func(t *testing.T) {
@@ -934,14 +963,14 @@ func TestStore(t *testing.T) {
 						t.Fatalf("inventory eagerly retained messages=%#v", loaded.Timeline)
 					}
 					calls := 0
-					if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return func(raw []byte) ([]agent.Message, error) {
+					if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return &agenttest.Wire{Output: func(raw []byte) ([]agent.Message, error) {
 							calls++
 							if string(raw) != `{"type":"assistant","text":"conversation"}` {
 								return nil, fmt.Errorf("unexpected native payload: %s", raw)
 							}
 							return []agent.Message{&agent.TextMessage{Text: "conversation"}}, nil
-						}, nil
+						}}, nil
 					})); err != nil {
 						t.Fatal(err)
 					}
@@ -1398,8 +1427,8 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			lt := tasks[0]
-			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				return codex.New("", nil).NewWire().ParseMessage, nil
+			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				return codex.New("", nil).NewWire(), nil
 			}))
 
 			if lt.SessionID != "thread-old" {
@@ -1429,8 +1458,8 @@ func TestStore(t *testing.T) {
 				t.Run(format+" missing header", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, session)
-					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					})); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
 						t.Fatalf("error = %v, want invalid first header", err)
 					}
@@ -1438,8 +1467,8 @@ func TestStore(t *testing.T) {
 				t.Run(format+" mixed authority after metadata", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
-					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					})); err == nil || !strings.Contains(err.Error(), "unsupported log version") {
 						t.Fatalf("error = %v, want wrong t discriminator", err)
 					}
@@ -1447,8 +1476,8 @@ func TestStore(t *testing.T) {
 				t.Run(format+" leading empty lines", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, "", "  ", meta, session)
-					lt, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+					lt, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 					}))
 
 					if err != nil {

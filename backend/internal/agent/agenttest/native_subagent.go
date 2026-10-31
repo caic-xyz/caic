@@ -87,10 +87,10 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 		}
 	})
 	var payloads [][]byte
-	parser, err := agent.NewLogRecordParser(func(line []byte) ([]agent.Message, error) {
+	parser, err := agent.NewLogRecordParser(&Wire{Output: func(line []byte) ([]agent.Message, error) {
 		payloads = append(payloads, append([]byte(nil), line...))
 		return nil, nil
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
-		if !record.Control && !record.RelayRecord {
+		if !record.Control && record.Provenance.Source != agent.RecordSourceRelay {
 			// Only relay-owned agent records carry native harness output. A v3
 			// input record is a client command and is not fixture evidence.
 			t.Fatalf("%s contains a non-relay record; native-subagent fixtures must hold only agent records", path)
@@ -125,7 +125,7 @@ func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perP
 	t.Helper()
 	perPayload = make([][]agent.NativeSubagent, 0, len(payloads))
 	for index, payload := range payloads {
-		messages, err := wire.ParseMessage(payload)
+		messages, err := wire.ParseOutput(payload)
 		if err != nil {
 			t.Fatalf("live parse of native record %d: %v", index, err)
 		}
@@ -140,7 +140,7 @@ func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perP
 // which is the restart and settled-history path.
 func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
 	t.Helper()
-	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,12 +161,12 @@ func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []a
 
 // RestartNativeSubagents models a restart or relay adoption: history is
 // replayed through the wire with its messages discarded, exactly like
-// agent.WarmRelayHistory, and the live tail then continues on that same wire.
+// session reconnect, and the live tail then continues on that same wire.
 // The returned observations are the tail's, and they must settle the same
 // canonical identities the history produced.
 func RestartNativeSubagents(t testing.TB, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
 	t.Helper()
-	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func NativeSubagentEvidencePrompt(t testing.TB, path string) string {
 			t.Error(err)
 		}
 	})
-	parser, err := agent.NewLogRecordParser(func([]byte) ([]agent.Message, error) { return nil, nil })
+	parser, err := agent.NewLogRecordParser(&Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

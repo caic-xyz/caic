@@ -13,7 +13,7 @@ import (
 
 // JSONRPCEnvelope contains the fields used to dispatch native JSON-RPC records.
 // ID and Params borrow the input buffer: callers must copy anything retained
-// beyond the current ParseMessage call. Native decoding validates consumed
+// beyond the current ParseOutput call. Native decoding validates consumed
 // fields; this probe does not run an additional whole-document validation pass.
 type JSONRPCEnvelope struct {
 	Method string

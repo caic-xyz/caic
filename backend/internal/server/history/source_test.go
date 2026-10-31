@@ -39,13 +39,13 @@ type parsingSpy struct {
 	spy *resolverSpy
 }
 
-func (s *parsingSpy) ParseMessage(data []byte) ([]agent.Message, error) {
+func (s *parsingSpy) ParseOutput(data []byte) ([]agent.Message, error) {
 	call := s.spy.calls.Add(1)
 	if block := s.spy.block; block != nil && call == block.at {
 		close(block.started)
 		<-block.release
 	}
-	return s.WireFormat.ParseMessage(data)
+	return s.WireFormat.ParseOutput(data)
 }
 
 type resolverSpy struct {
@@ -738,7 +738,7 @@ func TestSourceStickyFailure(t *testing.T) {
 		lines := append([]string{claudeHeader}, slices.Repeat([]string{noOutput}, 255)...)
 		path := writeFixture(t, lines...)
 		resolver := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
-			return &agenttest.Wire{Parse: func(data []byte) ([]agent.Message, error) {
+			return &agenttest.Wire{Output: func(data []byte) ([]agent.Message, error) {
 				if bytes.Contains(data, []byte("invalid_cost")) {
 					return []agent.Message{&agent.ResultMessage{TotalCostUSD: math.NaN()}}, nil
 				}

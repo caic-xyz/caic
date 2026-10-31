@@ -48,7 +48,7 @@ func TestHostGitSummaryDoesNotAdvanceRelayPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parser, err := NewLogRecordParser(testParseFn)
+	parser, err := NewLogRecordParser(&testMessageParser{output: testParseFn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestHostGitSummaryDoesNotAdvanceRelayPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.RelayRecord || !record.Control || len(record.Messages) != 1 {
+	if record.Provenance.Source == RecordSourceRelay || !record.Control || len(record.Messages) != 1 {
 		t.Fatalf("host summary = %+v, want one control outside relay history", record)
 	}
 	summary, ok := record.Messages[0].Message.(*DiffStatMessage)
@@ -94,13 +94,13 @@ func assertV3FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	}
 
 	calls := 0
-	p, err := NewLogRecordParser(func(msg []byte) ([]Message, error) {
+	p, err := NewLogRecordParser(&testMessageParser{output: func(msg []byte) ([]Message, error) {
 		calls++
 		if string(msg) != nativeBytes {
 			return nil, fmt.Errorf("native payload = %q, want %q", msg, nativeBytes)
 		}
 		return []Message{&TextMessage{Text: name}}, nil
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +138,14 @@ func TestV3AgentRecord(t *testing.T) {
 				var aliased bool
 				record := []byte(`{"t":"agent","ts":1700000000.123,"msg":` + tc.payload + `}`)
 				payloadStart := len(record) - 1 - len(tc.payload)
-				p, err := NewLogRecordParser(func(msg []byte) ([]Message, error) {
+				p, err := NewLogRecordParser(&testMessageParser{output: func(msg []byte) ([]Message, error) {
 					calls++
 					aliased = len(msg) != 0 && &msg[0] == &record[payloadStart]
 					if string(msg) != tc.payload {
 						return nil, fmt.Errorf("native payload = %q, want %q", msg, tc.payload)
 					}
 					return []Message{&RawMessage{MessageType: "native"}}, nil
-				})
+				}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -252,9 +252,9 @@ func TestV3AgentRecord(t *testing.T) {
 
 	t.Run("control_discriminators", func(t *testing.T) {
 		t.Parallel()
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			return []Message{&UsageMessage{}}, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -309,13 +309,13 @@ func TestV3AgentRecord(t *testing.T) {
 		t.Parallel()
 		t.Run("one_to_many", func(t *testing.T) {
 			t.Parallel()
-			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 				return []Message{
 					&TextMessage{Text: "one"},
 					&ToolUseMessage{ToolUseID: "tool"},
 					&ToolResultMessage{ToolUseID: "tool"},
 				}, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -336,10 +336,10 @@ func TestV3AgentRecord(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			t.Parallel()
 			calls := 0
-			p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+			p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 				calls++
 				return nil, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -411,10 +411,10 @@ func TestV3AgentRecord(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				calls := 0
-				p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+				p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 					calls++
 					return nil, nil
-				})
+				}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -431,10 +431,10 @@ func TestV3AgentRecord(t *testing.T) {
 	t.Run("permissive_callback_cannot_accept_malformed_msg", func(t *testing.T) {
 		t.Parallel()
 		calls := 0
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			calls++
 			return nil, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,10 +456,10 @@ func TestV3AgentRecord(t *testing.T) {
 		line = append(line, bytes.Repeat([]byte{'a'}, payloadLen)...)
 		line = append(line, suffix...)
 		calls := 0
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			calls++
 			return nil, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,9 +488,9 @@ func TestV3AgentRecord(t *testing.T) {
 			},
 		}
 		batch := []Message{action, nil}
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			return batch, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -512,10 +512,10 @@ func TestV3AgentRecord(t *testing.T) {
 		t.Parallel()
 		wantErr := errors.New("native failure")
 		calls := 0
-		p, err := NewLogRecordParser(func([]byte) ([]Message, error) {
+		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
 			calls++
 			return nil, wantErr
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -535,7 +535,7 @@ func TestHistoricalContextClearedRecord(t *testing.T) {
 	if err != nil || string(encoded) != historical {
 		t.Fatalf("historical writer = %s, %v", encoded, err)
 	}
-	p, err := NewLogRecordParser(func([]byte) ([]Message, error) { return nil, nil })
+	p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

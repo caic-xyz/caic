@@ -346,7 +346,7 @@ func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat)
 			t.Errorf("close %s: %v", path, err)
 		}
 	}()
-	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
 	}

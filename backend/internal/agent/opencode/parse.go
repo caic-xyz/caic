@@ -34,7 +34,7 @@ import (
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
 	// JSON-RPC response (has "id").
-	if probe.ID != nil {
+	if probe.ID != nil && probe.Method == "" {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 

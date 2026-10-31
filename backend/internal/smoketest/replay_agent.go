@@ -203,8 +203,8 @@ func (replayWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) er
 	return agent.PlainTextWritePrompt(w, p, log)
 }
 
-// ParseMessage delegates to the harness wire and ends the turn on the marker.
-func (w replayWire) ParseMessage(line []byte) ([]agent.Message, error) {
+// ParseOutput delegates to the harness wire and ends the turn on the marker.
+func (w replayWire) ParseOutput(line []byte) ([]agent.Message, error) {
 	if bytes.Equal(bytes.TrimSpace(line), replayEndMarker) {
 		return []agent.Message{&agent.ResultMessage{
 			MessageType: "result",
@@ -213,7 +213,7 @@ func (w replayWire) ParseMessage(line []byte) ([]agent.Message, error) {
 			Result:      "replayed native subagent recording",
 		}}, nil
 	}
-	return w.inner.ParseMessage(line)
+	return w.inner.ParseOutput(line)
 }
 
 // deployReplayRecording writes the replay agent and one recording into the
@@ -247,3 +247,6 @@ func writeContainerFile(ctx context.Context, host, path string, content []byte) 
 func replaySessionID() string {
 	return "replay-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }
+
+// ParseInput delegates client records to the same harness wire.
+func (w replayWire) ParseInput(line []byte) ([]agent.Message, error) { return w.inner.ParseInput(line) }

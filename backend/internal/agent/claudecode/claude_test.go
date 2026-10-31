@@ -198,7 +198,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		b := newWireFormat()
 		out := make([][]agent.Message, len(lines))
 		for i, line := range lines {
-			msgs, err := b.ParseMessage([]byte(line))
+			msgs, err := b.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -219,6 +219,35 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		return out
 	}
 
+	t.Run("ClientInputDoesNotConsumePendingSkillLoad", func(t *testing.T) {
+		t.Parallel()
+		wire := newWireFormat()
+		parser, err := agent.NewLogRecordParser(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []string{mainUse, mainResult} {
+			if _, err := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + line + `}`)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		input, err := parser.ParseRecord([]byte(`{"t":"input","ts":2.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"continue"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}}}`))
+		if err != nil || len(input.Messages) != 1 {
+			t.Fatalf("client prompt = %#v, %v", input, err)
+		}
+		user, ok := input.Messages[0].Message.(*agent.UserInputMessage)
+		if !ok || user.Text != "continue" || len(user.Images) != 1 || user.Images[0].MediaType != "image/png" || user.Images[0].Data != "aW1hZ2U=" {
+			t.Fatalf("client prompt = %#v", input.Messages[0].Message)
+		}
+		messages, err := wire.ParseOutput([]byte(injection))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := loads([][]agent.Message{messages})
+		if len(got) != 1 || got[0].Skill != "code-quality" || got[0].Path != "/home/user/.claude/skills/code-quality/SKILL.md" {
+			t.Fatalf("pending skill load = %#v", got)
+		}
+	})
 	t.Run("ReadsStayAtInvocation", func(t *testing.T) {
 		t.Parallel()
 		// The messages other than loads match the wire output at c8791f8d,
@@ -333,17 +362,17 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 	t.Run("SkillPendingUsesClearedAtResult", func(t *testing.T) {
 		t.Parallel()
 		b := newWireFormat()
-		if _, err := b.ParseMessage([]byte(mainUse)); err != nil {
+		if _, err := b.ParseOutput([]byte(mainUse)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.ParseMessage([]byte(turnResult)); err != nil {
+		if _, err := b.ParseOutput([]byte(turnResult)); err != nil {
 			t.Fatal(err)
 		}
 		if len(b.pendingSkillUses) != 0 {
 			t.Errorf("pendingSkillUses = %v, want empty after turn result", b.pendingSkillUses)
 		}
 		// The result no longer suppresses an unrelated result with the same ID.
-		msgs, err := b.ParseMessage([]byte(mainResult))
+		msgs, err := b.ParseOutput([]byte(mainResult))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +387,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		b.widgetTracker = newWidgetTracker()
 		b.pendingSkillUses = make(map[agent.ToolKey]string)
 		assistant := []byte(`{"type":"assistant","message":{"model":"claude-opus","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}}`)
-		msgs, err := b.ParseMessage(assistant)
+		msgs, err := b.ParseOutput(assistant)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -373,7 +402,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 			}
 		}
 		delta := []byte(`{"type":"stream_event","event":{"type":"message_delta","delta":{},"usage":{"input_tokens":10,"output_tokens":5}}}`)
-		msgs, err = b.ParseMessage(delta)
+		msgs, err = b.ParseOutput(delta)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +430,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		b.widgetTracker = newWidgetTracker()
 		b.pendingSkillUses = make(map[agent.ToolKey]string)
 		toolUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_9","name":"Skill","input":{}}],"usage":{}}}`)
-		msgs, err := b.ParseMessage(toolUse)
+		msgs, err := b.ParseOutput(toolUse)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +440,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 			}
 		}
 		result := []byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"sk_9"}]}}`)
-		msgs, err = b.ParseMessage(result)
+		msgs, err = b.ParseOutput(result)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -515,11 +544,11 @@ func TestBackend(t *testing.T) {
 		w1 := b.NewWire()
 		w2 := b.NewWire()
 		// Feed a thinking-tokens estimate into w1's session only.
-		if _, err := w1.ParseMessage([]byte(`{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"uuid":"u1","session_id":"s1"}`)); err != nil {
+		if _, err := w1.ParseOutput([]byte(`{"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"uuid":"u1","session_id":"s1"}`)); err != nil {
 			t.Fatal(err)
 		}
 		resultLine := []byte(`{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"num_turns":1,"result":"done","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1}}`)
-		msgs, err := w2.ParseMessage(resultLine)
+		msgs, err := w2.ParseOutput(resultLine)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -907,10 +936,10 @@ func TestControlConn(t *testing.T) {
 			t.Fatal(err)
 		}
 		var payload []byte
-		parser, err := agent.NewLogRecordParser(func(data []byte) ([]agent.Message, error) {
+		parser, err := agent.NewLogRecordParser(&agenttest.Wire{Input: func(data []byte) ([]agent.Message, error) {
 			payload = bytes.Clone(data)
 			return nil, nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -918,10 +947,10 @@ func TestControlConn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if record.RelayRecord || !bytes.Equal(payload, bytes.TrimSpace(inner.sent[0])) {
+		if record.Provenance.Source == agent.RecordSourceRelay || !bytes.Equal(payload, bytes.TrimSpace(inner.sent[0])) {
 			t.Fatalf("AskUserQuestion input provenance = %#v, payload = %s", record, payload)
 		}
-		replayed, err := newWireFormat().ParseMessage(payload)
+		replayed, err := newWireFormat().ParseInput(payload)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -971,7 +1000,7 @@ func TestControlConn(t *testing.T) {
 		if updated.FilePath != "README.md" {
 			t.Errorf("updatedInput file_path = %q, want README.md", updated.FilePath)
 		}
-		replayed, err := newWireFormat().ParseMessage(inner.sent[0])
+		replayed, err := newWireFormat().ParseInput(inner.sent[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1200,7 +1229,7 @@ func TestReplayBufferOwnership(t *testing.T) {
 	t.Parallel()
 	wire := New().NewWire()
 	line := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}`)
-	msgs, err := wire.ParseMessage(line)
+	msgs, err := wire.ParseOutput(line)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Pi event parser. Converts Pi's type-dispatched JSONL events into normalized
+// Pi output parser. Converts type-dispatched JSONL events into normalized
 // agent.Message types.
 
 package pi
@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/buger/jsonparser"
 	"github.com/maruel/genai/providers/pi"
@@ -88,7 +86,6 @@ func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
 // The line is one of:
 //   - A Pi event dispatched by the "type" field (message_update, tool_execution_end, etc.)
 //   - A Pi response envelope (type:"response")
-//   - A Pi command sent on stdin (prompt, compact, etc.) — recorded by caic
 //
 // Emitted agent.Message types:
 //   - TextDeltaMessage     — message_update (text_delta)
@@ -96,31 +93,10 @@ func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
 //   - ToolUseMessage       — tool_execution_start
 //   - ToolResultMessage    — tool_execution_end
 //   - ToolOutputDeltaMessage — tool_execution_update
-//   - UserInputMessage     — prompt command (recorded stdin)
 //   - SystemMessage        — compaction start/boundary/error
 //   - RawMessage           — unrecognised event types
 func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedRecord, error) {
-	// Persisted stdin commands.
 	switch typ {
-	case pi.CmdPrompt:
-		// Persisted stdin prompt command; convert to UserInputMessage.
-		var cmd pi.PromptCmd
-		if err := json.Unmarshal(line, &cmd); err != nil {
-			return nil, decodedRecord{}, fmt.Errorf("unmarshal prompt cmd: %w", err)
-		}
-		ui := &agent.UserInputMessage{Text: cmd.Message}
-		for _, img := range cmd.Images {
-			ui.Images = append(ui.Images, v3.ImageData{
-				MediaType: img.MimeType,
-				Data:      img.Data,
-			})
-		}
-		return []agent.Message{ui}, decodedRecord{}, nil
-
-	case pi.CmdCompact:
-		// Stdin compact command logged by relay; skip during replay.
-		return nil, decodedRecord{}, nil
-
 	case pi.EventMessageUpdate:
 		msgs, err := parseMessageUpdate(line)
 		return msgs, decodedRecord{}, err
@@ -260,7 +236,7 @@ func messagesFromAssistantMessageEvent(delta *pi.AssistantMessageEvent, line []b
 		return nil, nil
 
 	case pi.DeltaDone, pi.DeltaError:
-		// Handled by wireFormat.ParseMessage; in stateless mode, pass through.
+		// Handled by wireFormat.ParseOutput; in stateless mode, pass through.
 		return []agent.Message{&agent.RawMessage{
 			MessageType: "message_update:" + string(delta.Type),
 			Raw:         append([]byte(nil), line...),

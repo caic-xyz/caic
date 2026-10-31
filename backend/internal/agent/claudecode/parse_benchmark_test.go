@@ -39,7 +39,7 @@ func BenchmarkParseNativeSubagentLines(b *testing.B) {
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
 			for range b.N {
-				if _, err := wire.ParseMessage(line); err != nil {
+				if _, err := wire.ParseOutput(line); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -80,7 +80,7 @@ func BenchmarkParseBackgroundCommandLines(b *testing.B) {
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
 			for range b.N {
-				if _, err := wire.ParseMessage(line); err != nil {
+				if _, err := wire.ParseOutput(line); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -102,7 +102,7 @@ func BenchmarkParseStreamingDelta(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				msgs, err := wire.ParseMessage(line)
+				msgs, err := wire.ParseOutput(line)
 				if err != nil {
 					b.Fatal(err)
 				}

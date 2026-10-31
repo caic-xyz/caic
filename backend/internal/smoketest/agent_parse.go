@@ -1,4 +1,4 @@
-// Parser for flat fake-agent messages preserving content, tool, and usage ownership in task-log envelopes.
+// Parsers for fake-agent prompts and output preserving content, tool, and usage ownership in task-log envelopes.
 // Each message is a JSON object whose "type" field maps directly to an
 // agent.Message type.
 
@@ -16,6 +16,14 @@ import (
 // envelope is the minimal probe to determine the message type.
 type envelope struct {
 	Type string `json:"type"`
+}
+
+func parsePlainTextInput(line []byte) ([]agent.Message, error) {
+	var text string
+	if err := json.Unmarshal(line, &text); err != nil {
+		return nil, err
+	}
+	return []agent.Message{&agent.UserInputMessage{Text: text}}, nil
 }
 
 // parseMessage decodes a single flat NDJSON line into agent.Messages.

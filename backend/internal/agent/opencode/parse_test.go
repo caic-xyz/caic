@@ -619,7 +619,7 @@ func TestWireFormatSkillReadOncePerToolCall(t *testing.T) {
 	})
 	reads := 0
 	for range 3 {
-		msgs, err := w.ParseMessage(line)
+		msgs, err := w.ParseOutput(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -676,6 +676,39 @@ func TestNormalizeToolName(t *testing.T) {
 
 func TestWireFormatPromptResponse(t *testing.T) {
 	t.Parallel()
+	t.Run("ReconnectDirectionalState", func(t *testing.T) {
+		t.Parallel()
+		w := New("", nil).NewWire()
+		parser, err := agent.NewLogRecordParser(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []string{
+			`{"t":"agent","ts":1.000,"msg":{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"previous turn"}}}}}`,
+			`{"t":"input","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"session","prompt":[{"type":"text","text":"next"}]}}}`,
+			`{"t":"agent","ts":3.000,"msg":{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"current turn"}}}}}`,
+			// An output permission request must not reset accumulated prompt text.
+			`{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":18,"method":"session/request_permission","params":{}}}`,
+		} {
+			if _, err := parser.ParseRecord([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Continue on the same provider after reconnect. An error response has no
+		// stopReason fallback, so only the recorded input ID identifies this turn.
+		messages, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","id":17,"error":{"code":-32603,"message":"interrupted"}}`))
+		if err != nil || len(messages) != 2 {
+			t.Fatalf("continued response = %#v, %v", messages, err)
+		}
+		text, ok := messages[0].(*agent.TextMessage)
+		if !ok || text.Text != "current turn" {
+			t.Fatalf("accumulated response = %#v", messages[0])
+		}
+		result, ok := messages[1].(*agent.ResultMessage)
+		if !ok || !result.IsError || result.Result != "interrupted" {
+			t.Fatalf("continued result = %#v", messages[1])
+		}
+	})
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
@@ -692,7 +725,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -731,7 +764,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				"stopReason": "cancelled",
 			},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -765,7 +798,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -793,7 +826,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				"message": "internal error",
 			},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -823,7 +856,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				"stopReason": "end_turn",
 			},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -845,7 +878,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			"id":      99, // Different ID.
 			"result":  map[string]any{},
 		})
-		msgs, err := w.ParseMessage(input)
+		msgs, err := w.ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -872,7 +905,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 					},
 				},
 			})
-			if _, err := w.ParseMessage(chunk); err != nil {
+			if _, err := w.ParseOutput(chunk); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -881,7 +914,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			"id":      42,
 			"result":  map[string]any{"stopReason": "end_turn"},
 		})
-		msgs, err := w.ParseMessage(resp)
+		msgs, err := w.ParseOutput(resp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -909,7 +942,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			"method":  "session/prompt",
 			"params":  map[string]any{"sessionId": "ses_1"},
 		})
-		if _, err := w.ParseMessage(req); err != nil {
+		if _, err := w.ParseInput(req); err != nil {
 			t.Fatal(err)
 		}
 		resp := mustJSON(t, map[string]any{
@@ -920,7 +953,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				"message": "prompt failed",
 			},
 		})
-		msgs, err := w.ParseMessage(resp)
+		msgs, err := w.ParseOutput(resp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -936,7 +969,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("RecordedPromptRestoresAcceptedUserInput", func(t *testing.T) {
+	t.Run("RecordedPromptRestoresUserInput", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		req := mustJSON(t, map[string]any{
@@ -951,19 +984,19 @@ func TestWireFormatPromptResponse(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := w.ParseMessage(req)
+		msgs, err := w.ParseInput(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(msgs) != 2 {
-			t.Fatalf("messages = %d, want accepted input and raw request", len(msgs))
+			t.Fatalf("messages = %d, want input and raw request", len(msgs))
 		}
 		input, ok := msgs[0].(*agent.UserInputMessage)
 		if !ok {
 			t.Fatalf("messages[0] = %T, want *agent.UserInputMessage", msgs[0])
 		}
 		if input.Text != "fix the bug" || len(input.Images) != 1 || input.Images[0].MediaType != "image/png" || input.Images[0].Data != "aW1hZ2U=" {
-			t.Errorf("accepted input = %#v", input)
+			t.Errorf("input = %#v", input)
 		}
 		if _, ok := msgs[1].(*agent.RawMessage); !ok {
 			t.Fatalf("messages[1] = %T, want *agent.RawMessage", msgs[1])
@@ -988,7 +1021,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 					},
 				},
 			})
-			if _, err := w.ParseMessage(chunk); err != nil {
+			if _, err := w.ParseOutput(chunk); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1004,7 +1037,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 					},
 				},
 			})
-			if _, err := w.ParseMessage(chunk); err != nil {
+			if _, err := w.ParseOutput(chunk); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1015,7 +1048,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			"id":      10,
 			"result":  map[string]any{"stopReason": "end_turn"},
 		})
-		msgs, err := w.ParseMessage(resp)
+		msgs, err := w.ParseOutput(resp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1059,7 +1092,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			})
 		}
 		for _, text := range []string{strings.Repeat("x", maxAccumulatedOutputBytes), "y"} {
-			msgs, err := w.ParseMessage(chunk(text))
+			msgs, err := w.ParseOutput(chunk(text))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1072,7 +1105,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 			"id":      10,
 			"result":  map[string]any{"stopReason": "end_turn"},
 		})
-		msgs, err := w.ParseMessage(response)
+		msgs, err := w.ParseOutput(response)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1121,7 +1154,7 @@ func TestAddEditInputView(t *testing.T) {
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
 		t.Parallel()
 
-		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire().ParseMessage)
+		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire())
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)
@@ -1162,7 +1195,7 @@ func TestReplayBufferOwnership(t *testing.T) {
 	t.Parallel()
 	wire := New("", nil).NewWire()
 	line := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call","title":"read","kind":"read","rawInput":{"filePath":"hello.txt"}}}}`)
-	msgs, err := wire.ParseMessage(line)
+	msgs, err := wire.ParseOutput(line)
 	if err != nil {
 		t.Fatal(err)
 	}

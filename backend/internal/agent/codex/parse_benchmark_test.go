@@ -40,7 +40,7 @@ func BenchmarkParseNativeSubagentLines(b *testing.B) {
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
 			for range b.N {
-				if _, err := wire.ParseMessage(line); err != nil {
+				if _, err := wire.ParseOutput(line); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -62,7 +62,7 @@ func BenchmarkParseStreamingDelta(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				msgs, err := wire.ParseMessage(line)
+				msgs, err := wire.ParseOutput(line)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -85,14 +85,14 @@ func BenchmarkParseToolLifecycle(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			line := []byte(tc.line)
 			wire := New("", nil).NewWire()
-			if _, err := wire.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
+			if _, err := wire.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
 				b.Fatal(err)
 			}
 			b.SetBytes(int64(len(line)))
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if _, err := wire.ParseMessage(line); err != nil {
+				if _, err := wire.ParseOutput(line); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -113,7 +113,7 @@ func BenchmarkReplayConcurrentChildTools(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		wire := New("", nil).NewWire()
-		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -195,6 +195,5 @@ func BenchmarkRealTaskLogReplay(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.ReportMetric(float64(len(loaded.Timeline)), "messages/op")
-		b.ReportMetric(float64(len(loaded.RelayRecords)), "records/op")
 	}
 }

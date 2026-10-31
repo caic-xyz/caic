@@ -1,4 +1,4 @@
-// AgentRuntime owns task sessions, ordered Git summaries, and consolidated turn measurements.
+// AgentRuntime owns task sessions, recorded reconnect history and cursors, Git summaries, and turn measurements.
 
 package task
 
@@ -96,7 +96,6 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		Logger:             r.Log,
 		Target:             t.RuntimeConnectionTarget(),
 		RelayOffset:        t.RelayOffsetValue(),
-		WarmHistory:        true,
 		ResumeSessionID:    sessionID,
 		Effort:             t.RequestedEffort,
 		PendingUserActions: t.PendingUserActions(),
@@ -129,6 +128,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	}
 	opts.MsgCh = msgCh
 	opts.Log = log
+	opts.HistoryPath = r.LogPath.Get()
 	session, err := r.Backends[t.Harness].AttachRelay(ctx, opts)
 	if err != nil {
 		close(msgCh)
@@ -816,7 +816,7 @@ func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
 		return nil, err
 	}
 	r.LogPath.Set(path)
-	return log, nil
+	return &relayLog{LogSink: log, task: t}, nil
 }
 
 func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
@@ -835,7 +835,7 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 		return nil, err
 	}
 	r.LogPath.Set(path)
-	return log, nil
+	return &relayLog{LogSink: log, task: t}, nil
 }
 
 func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *taskslog.Result) error {
@@ -1356,6 +1356,34 @@ func (r *AgentRuntime) runtimeDir(t *Task) string {
 		return "/home/user"
 	}
 	return "/home/user/src/" + filepath.Base(r.Checkout.Dir)
+}
+
+// relayLog advances the task's verified reconnect cursor only after the
+// physical writer accepts a relay record. Inputs and host controls use the
+// same authority without affecting the cursor. Import sets the initial
+// verified offset; live appends extend it even after an earlier attach.
+type relayLog struct {
+	agent.LogSink
+
+	task *Task
+}
+
+func (l *relayLog) AppendRecord(record agent.PhysicalRecord) error {
+	if err := l.LogSink.AppendRecord(record); err != nil {
+		return err
+	}
+	if record.Provenance.Source != agent.RecordSourceRelay {
+		return nil
+	}
+	// The writer has released its lock before taking the task lock. Host
+	// operations may hold the task lock while appending their own controls.
+	l.task.mu.Lock()
+	if record.Provenance.Generation != "" {
+		l.task.RelayOffset = 0
+	}
+	l.task.RelayOffset += int64(len(record.Encoded))
+	l.task.mu.Unlock()
+	return nil
 }
 
 // StartupError identifies a task startup failure without discarding its cause.

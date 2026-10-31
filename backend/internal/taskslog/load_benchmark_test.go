@@ -140,8 +140,8 @@ func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 		LogSize: f.size,
 		path:    f.path,
 	}
-	lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-		return claudecode.New().NewWire().ParseMessage, nil
+	lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+		return claudecode.New().NewWire(), nil
 	}))
 
 	return lt
@@ -286,8 +286,8 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 						return fmt.Errorf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 					}
 					lt := logs[0]
-					lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-						return claudecode.New().NewWire().ParseMessage, nil
+					lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+						return claudecode.New().NewWire(), nil
 					}))
 
 					if lt.SessionID == "" || lt.AgentVersion == "" {

@@ -182,7 +182,7 @@ func costFixture(t testing.TB, h harness.Name, groups ...[]agent.Message) (*Sour
 	path := writeFixture(t, lines...)
 	calls := &atomic.Int64{}
 	resolver := agent.Backends{h: &agenttest.FakeBackend{HarnessName: h, WireFactory: func() agent.WireFormat {
-		return &agenttest.Wire{Parse: func(data []byte) ([]agent.Message, error) {
+		return &agenttest.Wire{Output: func(data []byte) ([]agent.Message, error) {
 			calls.Add(1)
 			var index int
 			if err := json.Unmarshal(data, &index); err != nil {

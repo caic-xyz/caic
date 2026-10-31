@@ -238,7 +238,7 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 		`{"event":"result","result":{"conversation_id":"root","status":"ERROR","error":"root failure"}}`,
 		`{"event":"result","result":{"conversation_id":"foreign","status":"SUCCESS","response":"FOREIGN_PRIVATE_ANSWER"}}`,
 	} {
-		out, err := wire.ParseMessage([]byte(line))
+		out, err := wire.ParseOutput([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}

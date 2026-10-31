@@ -35,7 +35,7 @@ func TestNew(t *testing.T) {
 	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
 		t.Parallel()
 
-		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire().ParseMessage)
+		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire())
 		var use *agent.ToolUseMessage
 		for _, msg := range msgs {
 			candidate, ok := msg.(*agent.ToolUseMessage)
@@ -275,7 +275,7 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 		wire := New("", nil).NewWire()
 		feed := func(line string) []agent.Message {
-			msgs, err := wire.ParseMessage([]byte(line))
+			msgs, err := wire.ParseOutput([]byte(line))
 			if err != nil {
 				t.Fatalf("ParseMessage(%s): %v", line, err)
 			}
@@ -347,7 +347,7 @@ func TestHandleDone(t *testing.T) {
 		w := &piWireFormat{}
 
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"end_turn"}}`)
-		msgs, err := w.ParseMessage(doneLine)
+		msgs, err := w.ParseOutput(doneLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
@@ -368,7 +368,7 @@ func TestHandleDone(t *testing.T) {
 		w := &piWireFormat{}
 
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"error"}}`)
-		msgs, err := w.ParseMessage(doneLine)
+		msgs, err := w.ParseOutput(doneLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
@@ -388,7 +388,7 @@ func TestHandleDone(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"end_turn","message":{"role":"assistant","content":[{"type":"text","text":"Non-streamed result"}]}}}`)
-		msgs, err := w.ParseMessage(doneLine)
+		msgs, err := w.ParseOutput(doneLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
@@ -412,7 +412,7 @@ func TestHandleAgentEnd(t *testing.T) {
 		w := &piWireFormat{}
 
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheRead":40,"cacheWrite":20,"cacheWrite1h":20,"reasoning":15,"cost":{"input":0.001,"output":0.002,"cacheRead":0.0004,"cacheWrite":0.0002,"total":0.0036}}}]}`)
-		msgs, err := w.ParseMessage(agentEndLine)
+		msgs, err := w.ParseOutput(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
 		}
@@ -443,7 +443,7 @@ func TestHandleAgentEnd(t *testing.T) {
 	t.Run("sums assistant costs and retains last call usage", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		msgs, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":100,"cost":{"total":0.25}}},{"role":"toolResult","content":[]},{"role":"assistant","usage":{"input":20,"cost":{"total":0.125}}}]}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":100,"cost":{"total":0.25}}},{"role":"toolResult","content":[]},{"role":"assistant","usage":{"input":20,"cost":{"total":0.125}}}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,7 +460,7 @@ func TestHandleAgentEnd(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{startTime: time.Now().Add(-time.Second), numTurns: 2}
 
-		retry, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[],"willRetry":true}`))
+		retry, err := w.ParseOutput([]byte(`{"type":"agent_end","messages":[],"willRetry":true}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -468,7 +468,7 @@ func TestHandleAgentEnd(t *testing.T) {
 			t.Fatalf("retrying agent_end messages = %#v, want none", retry)
 		}
 
-		final, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":10,"output":5}}]}`))
+		final, err := w.ParseOutput([]byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":10,"output":5}}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +487,7 @@ func TestHandleAgentEnd(t *testing.T) {
 	t.Run("cache write without duration remains unknown", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		msgs, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"cacheWrite":20}}]}`))
+		msgs, err := w.ParseOutput([]byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"cacheWrite":20}}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -504,7 +504,7 @@ func TestHandleAgentEnd(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Fallback text"}],"usage":{"input":10,"output":5}}]}`)
-		msgs, err := w.ParseMessage(agentEndLine)
+		msgs, err := w.ParseOutput(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
 		}
@@ -521,7 +521,7 @@ func TestHandleAgentEnd(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
-		msgs, err := w.ParseMessage(agentEndLine)
+		msgs, err := w.ParseOutput(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
 		}
@@ -545,12 +545,12 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		w.mu.Unlock()
 
 		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
-		if _, err := w.ParseMessage(turnEndLine); err != nil {
+		if _, err := w.ParseOutput(turnEndLine); err != nil {
 			t.Fatalf("ParseMessage(turn_end): %v", err)
 		}
 
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50}}]}`)
-		endMsgs, err := w.ParseMessage(agentEndLine)
+		endMsgs, err := w.ParseOutput(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
 		}
@@ -576,7 +576,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
-		endMsgs, err := w.ParseMessage(agentEndLine)
+		endMsgs, err := w.ParseOutput(agentEndLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(agent_end): %v", err)
 		}
@@ -597,11 +597,11 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		w.startTime = time.Now().Add(-200 * time.Millisecond)
 		w.mu.Unlock()
 		turnEnd := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":10,"output":5,"totalTokens":15}}}`)
-		if _, err := w.ParseMessage(turnEnd); err != nil {
+		if _, err := w.ParseOutput(turnEnd); err != nil {
 			t.Fatal(err)
 		}
 		agentEnd := []byte(`{"type":"agent_end","messages":[]}`)
-		if _, err := w.ParseMessage(agentEnd); err != nil {
+		if _, err := w.ParseOutput(agentEnd); err != nil {
 			t.Fatal(err)
 		}
 
@@ -609,14 +609,14 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		w.startTime = time.Now().Add(-300 * time.Millisecond)
 		w.numTurns = 0
 		w.mu.Unlock()
-		if _, err := w.ParseMessage(turnEnd); err != nil {
+		if _, err := w.ParseOutput(turnEnd); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := w.ParseMessage(turnEnd); err != nil {
+		if _, err := w.ParseOutput(turnEnd); err != nil {
 			t.Fatal(err)
 		}
 
-		endMsgs, err := w.ParseMessage(agentEnd)
+		endMsgs, err := w.ParseOutput(agentEnd)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -634,7 +634,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 }
 
 // parseMessage decodes the event type and dispatches on it, mirroring what
-// production callers (piWireFormat.ParseMessage) do with the type they've
+// production callers (piWireFormat.ParseOutput) do with the type they've
 // already extracted. Kept test-local since production has no need for a
 // decode-then-dispatch entry point of its own.
 func parseMessage(line []byte) ([]agent.Message, error) {
@@ -760,7 +760,7 @@ func TestPiWireRejectsMalformedJSONBeforeEarlyReturns(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if msgs, err := New("", nil).NewWire().ParseMessage([]byte(tc.line)); err == nil {
+			if msgs, err := New("", nil).NewWire().ParseOutput([]byte(tc.line)); err == nil {
 				t.Fatalf("ParseMessage(%q) = %#v, want error", tc.line, msgs)
 			}
 		})
@@ -773,7 +773,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("text prompt", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"prompt","message":"fix the bug"}`)
-		msgs, err := parseMessage(line)
+		msgs, err := New("", nil).NewWire().ParseInput(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -792,7 +792,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("prompt with images", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"prompt","message":"describe this","images":[{"type":"image","mimeType":"image/png","data":"abc123"}]}`)
-		msgs, err := parseMessage(line)
+		msgs, err := New("", nil).NewWire().ParseInput(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -820,7 +820,7 @@ func TestParsePromptCmd(t *testing.T) {
 	t.Run("compact command is skipped", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"compact","customInstructions":"summarize"}`)
-		msgs, err := parseMessage(line)
+		msgs, err := New("", nil).NewWire().ParseInput(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -989,7 +989,7 @@ func TestPiWireMessageUpdateFields(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				msgs, err := New("", nil).NewWire().ParseMessage([]byte(tc.line))
+				msgs, err := New("", nil).NewWire().ParseOutput([]byte(tc.line))
 				if err != nil || len(msgs) != tc.want {
 					t.Fatalf("messages = %v, err = %v, want %d", msgs, err, tc.want)
 				}
@@ -1007,7 +1007,7 @@ func TestPiWireMessageUpdateFields(t *testing.T) {
 		for _, field := range []string{`false`, `1`, `"value"`, `[]`, `{"type":"toolcall_delta","delta":1}`} {
 			t.Run(field, func(t *testing.T) {
 				t.Parallel()
-				if _, err := New("", nil).NewWire().ParseMessage([]byte(`{"type":"message_update","assistantMessageEvent":` + field + `}`)); err == nil {
+				if _, err := New("", nil).NewWire().ParseOutput([]byte(`{"type":"message_update","assistantMessageEvent":` + field + `}`)); err == nil {
 					t.Fatal("expected error")
 				}
 			})

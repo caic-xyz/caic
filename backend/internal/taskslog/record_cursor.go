@@ -63,7 +63,7 @@ func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retE
 		if err != nil {
 			return nil, errors.Join(err, r.Close())
 		}
-		parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(wire)
 		if err != nil {
 			return nil, errors.Join(err, r.Close())
 		}
@@ -91,7 +91,7 @@ func OpenRecordCursor(path string, resolver WireResolver) (_ *RecordCursor, retE
 	if err != nil {
 		return nil, err
 	}
-	parser, err := agent.NewLogRecordParser(wire.ParseMessage)
+	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		return nil, err
 	}

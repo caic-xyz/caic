@@ -305,7 +305,7 @@ func TestWireFormat(t *testing.T) {
 		var messages []agent.Message
 		workers.Go(func() {
 			var err error
-			messages, err = w.ParseMessage([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}`))
+			messages, err = w.ParseOutput([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}`))
 			parsed <- err
 		})
 		select {
@@ -400,7 +400,8 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 
 type failingLogSink struct{}
 
-func (failingLogSink) AppendNative([]byte) error { return nil }
+func (failingLogSink) AppendRecord(agent.PhysicalRecord) error { return nil }
+
 func (failingLogSink) AppendMessage(agent.Message) error {
 	return errors.New("persist session metadata")
 }

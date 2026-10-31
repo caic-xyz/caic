@@ -12,7 +12,7 @@ import (
 
 func BenchmarkParseMessageUpdateWithAccumulatedMessage(b *testing.B) {
 	line := benchmarkMessageUpdateLine(b, 256<<10)
-	parser := New("", nil).NewWire().ParseMessage
+	parser := New("", nil).NewWire().ParseOutput
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(line)))
@@ -34,7 +34,7 @@ func BenchmarkParseMessageUpdateWithAccumulatedMessage(b *testing.B) {
 // the largest, most frequent lines on this path (full tool output).
 func BenchmarkParseMessageToolExecEnd(b *testing.B) {
 	line := benchmarkToolExecEndLine(b, 64<<10)
-	parser := New("", nil).NewWire().ParseMessage
+	parser := New("", nil).NewWire().ParseOutput
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(line)))
@@ -52,7 +52,7 @@ func BenchmarkParseMessageToolExecEnd(b *testing.B) {
 
 func BenchmarkParseTurnEndUsage(b *testing.B) {
 	line := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheRead":2000,"cacheWrite":300,"cacheWrite1h":200,"reasoning":20,"totalTokens":2470}}}`)
-	parser := New("", nil).NewWire().ParseMessage
+	parser := New("", nil).NewWire().ParseOutput
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(line)))
@@ -70,7 +70,7 @@ func BenchmarkParseTurnEndUsage(b *testing.B) {
 
 func BenchmarkParseCompactionUsage(b *testing.B) {
 	line := []byte(`{"type":"compaction_end","reason":"threshold","result":{"summary":"summary","tokensBefore":450350,"estimatedTokensAfter":25283,"usage":{"input":349745,"output":5812,"cacheRead":0,"cacheWrite":0,"totalTokens":355557,"cost":{"input":0.1049235,"output":0.0069744,"total":0.1118979}}},"aborted":false,"willRetry":false}`)
-	parser := New("", nil).NewWire().ParseMessage
+	parser := New("", nil).NewWire().ParseOutput
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(line)))
@@ -161,7 +161,7 @@ func BenchmarkParseSubagentToolExecStart(b *testing.B) {
 	} {
 		b.Run(test.name, func(b *testing.B) {
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"call_1","toolName":"subagent","args":` + test.args + `}`)
-			parser := New("", nil).NewWire().ParseMessage
+			parser := New("", nil).NewWire().ParseOutput
 			b.ReportAllocs()
 			b.SetBytes(int64(len(line)))
 			b.ResetTimer()
@@ -178,7 +178,7 @@ func BenchmarkParseSubagentToolExecStart(b *testing.B) {
 // extension's completion list.
 func BenchmarkParseSubagentWaitEnd(b *testing.B) {
 	line := []byte(`{"type":"tool_execution_end","toolCallId":"call_2","toolName":"subagent_wait","result":{"content":[{"type":"text","text":"Waited for run test-run; done. Outcome: 1 complete."}],"isError":false,"details":{"mode":"management","results":[],"completions":[{"runId":"test-run","agent":"delegate","mode":"single","state":"complete","success":true,"results":[{"agent":"delegate","success":true,"outputState":"present","model":"openai-codex/gpt-5.6-terra"}]}]}}}`)
-	parser := New("", nil).NewWire().ParseMessage
+	parser := New("", nil).NewWire().ParseOutput
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(line)))
@@ -203,7 +203,7 @@ func BenchmarkParseMessageUpdateDelta(b *testing.B) {
 	} {
 		b.Run(tc.typ, func(b *testing.B) {
 			line := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"` + tc.typ + `","contentIndex":0,"delta":"a short streaming fragment"}}`)
-			parser := New("", nil).NewWire().ParseMessage
+			parser := New("", nil).NewWire().ParseOutput
 			b.SetBytes(int64(len(line)))
 			b.ReportAllocs()
 			b.ResetTimer()

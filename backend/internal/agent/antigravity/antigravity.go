@@ -262,21 +262,16 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 	return nil
 }
 
-// ParseMessage converts agy stdout and recorded stdin into neutral messages.
-// Unknown fields are accepted here; check-agent-logs owns strict DTO checks.
-func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	var ev antigravity.StreamEvent
+// ParseInput decodes client prompts without updating output conversation state.
+func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+	var ev antigravity.StreamInputMessage
 	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("antigravity event: %w", err)
+		return nil, fmt.Errorf("antigravity input: %w", err)
 	}
 	switch ev.Event {
 	case antigravity.EventUser:
-		var in antigravity.StreamInputMessage
-		if err := json.Unmarshal(line, &in); err != nil {
-			return nil, fmt.Errorf("antigravity input: %w", err)
-		}
 		m := &agent.UserInputMessage{}
-		for _, c := range in.Message.Content {
+		for _, c := range ev.Message.Content {
 			if c.Type != "text" {
 				return nil, fmt.Errorf("antigravity: unsupported input content %q", c.Type)
 			}
@@ -287,6 +282,20 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			}
 		}
 		return []agent.Message{m}, nil
+
+	default:
+		return []agent.Message{&agent.RawMessage{MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
+	}
+}
+
+// ParseOutput converts agy stdout into neutral messages.
+// Unknown fields are accepted here; check-agent-logs owns strict DTO checks.
+func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
+	var ev antigravity.StreamEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return nil, fmt.Errorf("antigravity event: %w", err)
+	}
+	switch ev.Event {
 	case antigravity.EventInit:
 		w.model = ev.Init.Model
 		w.rootConversationID = ev.ConversationID

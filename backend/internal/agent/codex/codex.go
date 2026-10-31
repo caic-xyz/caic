@@ -446,7 +446,20 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 	return writeJSONInput(wr, req, log)
 }
 
-// ParseMessage wraps the package-level parseMessage with three interceptions:
+// ParseInput preserves client requests without interpreting them as output notifications.
+func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal input: %w", err)
+	}
+	typ := "jsonrpc_request"
+	if probe.ID == nil || string(probe.ID) == "null" {
+		typ = probe.Method
+	}
+	return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
+}
+
+// ParseOutput wraps the package-level parseMessage with three interceptions:
 //
 //   - thread/tokenUsage/updated → emits UsageMessage (delta of cumulative
 //     thread totals) attributed to the session's active model; values are also
@@ -458,7 +471,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 //     attribution.
 //
 // It also captures the thread ID from InitMessage (thread/started).
-func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
+func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)

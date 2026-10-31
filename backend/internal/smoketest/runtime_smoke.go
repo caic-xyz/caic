@@ -119,8 +119,8 @@ func (*SmokeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink)
 	return agent.PlainTextWritePrompt(w, p, log)
 }
 
-// ParseMessage decodes one smoke-agent NDJSON line.
-func (*SmokeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
+// ParseOutput decodes one smoke-agent NDJSON line.
+func (*SmokeBackend) ParseOutput(line []byte) ([]agent.Message, error) {
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -236,4 +236,9 @@ func WaitForRuntimeGone(ctx context.Context, runtimeName string, id runtime.ID) 
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// ParseInput decodes the smoke agent's recorded plain-text prompt.
+func (*SmokeBackend) ParseInput(line []byte) ([]agent.Message, error) {
+	return parsePlainTextInput(line)
 }

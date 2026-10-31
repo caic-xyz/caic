@@ -1,4 +1,4 @@
-// Command check-agent-logs deletes obsolete task logs and validates recent v3 harness records against genai wire DTOs.
+// Command check-agent-logs deletes obsolete task logs and validates recent v3 harness records against direction-specific genai wire DTOs.
 package main
 
 import (
@@ -64,7 +64,7 @@ type finding struct {
 	hint    string
 }
 
-func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[string]opencodedto.Method) *finding {
+func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[openCodeRequestKey]opencodedto.Method) *finding {
 	if len(message) != 0 && message[0] == '"' {
 		var reason string
 		if err := json.Unmarshal(message, &reason); err == nil {
@@ -102,9 +102,13 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 			dto, err = checkCodex(message)
 		}
 	case "pi":
-		dto, err = checkPi(message)
+		if input {
+			dto, err = checkPiInput(message)
+		} else {
+			dto, err = checkPi(message)
+		}
 	case "opencode":
-		dto, err = checkOpenCode(message, openCodeMethods)
+		dto, err = checkOpenCode(message, input, openCodeMethods)
 	default:
 		return &finding{
 			path:    path,
@@ -311,36 +315,51 @@ func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 		}
 	}
 
-	var findings []finding
-	openCodeMethods := make(map[string]opencodedto.Method)
-	line := 1
-	input := false
-	parser, err := agent.NewLogRecordParser(func(message []byte) ([]agent.Message, error) {
-		if f := checkMessage(path, line, harness, message, input, openCodeMethods); f != nil {
-			findings = append(findings, *f)
-		}
-		return nil, nil
-	})
+	checker := &messageChecker{path: path, harness: harness, line: 1, openCodeMethods: make(map[openCodeRequestKey]opencodedto.Method)}
+	parser, err := agent.NewLogRecordParser(checker)
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
 	}
 	if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
 		return fileCheck{}, fmt.Errorf("validate %s:1: %w", path, err)
 	}
-	for line++; sc.Scan(); line++ {
-		token, err := agent.JSONString(sc.Bytes(), "t")
-		if err != nil {
-			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, line, err)
-		}
-		input = token == "input"
+	for checker.line++; sc.Scan(); checker.line++ {
 		if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
-			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, line, err)
+			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, checker.line, err)
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return fileCheck{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	return fileCheck{findings: findings, version: version, checked: true}, nil
+	return fileCheck{findings: checker.findings, version: version, checked: true}, nil
+}
+
+// messageChecker validates native DTOs in the direction selected by the log parser.
+type messageChecker struct {
+	path            string
+	harness         string
+	line            int
+	openCodeMethods map[openCodeRequestKey]opencodedto.Method
+	findings        []finding
+}
+
+func (c *messageChecker) ParseInput(message []byte) ([]agent.Message, error) {
+	return c.check(message, true)
+}
+func (c *messageChecker) ParseOutput(message []byte) ([]agent.Message, error) {
+	return c.check(message, false)
+}
+func (c *messageChecker) check(message []byte, input bool) ([]agent.Message, error) {
+	if f := checkMessage(c.path, c.line, c.harness, message, input, c.openCodeMethods); f != nil {
+		c.findings = append(c.findings, *f)
+	}
+	return nil, nil
+}
+
+// openCodeRequestKey keeps client and server request IDs in separate namespaces.
+type openCodeRequestKey struct {
+	input bool
+	id    string
 }
 
 // inspectHeader proves the format identity before a log can be deleted.
@@ -670,9 +689,7 @@ func checkCodex(data []byte) (string, error) {
 }
 
 func checkPi(data []byte) (string, error) {
-	var probe struct {
-		Type pidto.EventType `json:"type"`
-	}
+	var probe pidto.LineProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "LineProbe", err
 	}
@@ -726,6 +743,23 @@ func checkPi(data []byte) (string, error) {
 		dst = &pidto.ExtensionErrorEvent{}
 	case pidto.EventResponse:
 		dst = &pidto.Response{}
+	default:
+		return "LineProbe", fmt.Errorf("unrecognized Pi output event type %q; add its DTO and checker dispatch", probe.Type)
+	}
+	dto := fmt.Sprintf("%T", dst)
+	if err := strictDecode(data, dst); err != nil {
+		return dto, err
+	}
+	return dto, validatePiStrictContentBlocks(probe.Type, data)
+}
+
+func checkPiInput(data []byte) (string, error) {
+	var probe pidto.LineProbe
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return "LineProbe", err
+	}
+	var dst any
+	switch probe.Type {
 	case pidto.CmdPrompt:
 		dst = &pidto.PromptCmd{}
 	case pidto.CmdSetModel:
@@ -737,16 +771,12 @@ func checkPi(data []byte) (string, error) {
 	case pidto.CmdCompact:
 		dst = &pidto.CompactCmd{}
 	default:
-		return "LineProbe", fmt.Errorf("unrecognized Pi event or command type %q; add its DTO and checker dispatch", probe.Type)
+		return "LineProbe", fmt.Errorf("unrecognized Pi input command type %q; add its DTO and checker dispatch", probe.Type)
 	}
-	dto := fmt.Sprintf("%T", dst)
-	if err := strictDecode(data, dst); err != nil {
-		return dto, err
-	}
-	return dto, validatePiStrictContentBlocks(probe.Type, data)
+	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
 
-func checkOpenCode(data []byte, methods map[string]opencodedto.Method) (string, error) {
+func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]opencodedto.Method) (string, error) {
 	var probe opencodedto.MessageProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "MessageProbe", err
@@ -764,14 +794,17 @@ func checkOpenCode(data []byte, methods map[string]opencodedto.Method) (string, 
 			return "JSONRPCMessage", fmt.Errorf("OpenCode request or notification %q is missing params", msg.Method)
 		}
 		if msg.ID == nil {
+			if input {
+				return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode input notification method %q", msg.Method)
+			}
 			return checkOpenCodeNotification(msg.Method, msg.Params)
 		}
-		dto, err := checkOpenCodeRequest(msg.Method, msg.Params)
+		dto, err := checkOpenCodeRequest(msg.Method, msg.Params, input)
 		if err != nil {
 			return dto, err
 		}
 		if methods != nil {
-			methods[string(msg.ID)] = msg.Method
+			methods[openCodeRequestKey{input: input, id: string(msg.ID)}] = msg.Method
 		}
 		return dto, nil
 	}
@@ -781,8 +814,9 @@ func checkOpenCode(data []byte, methods map[string]opencodedto.Method) (string, 
 	if methods == nil {
 		return "JSONRPCMessage", fmt.Errorf("unmatched OpenCode response id %s", msg.ID)
 	}
-	method, ok := methods[string(msg.ID)]
-	delete(methods, string(msg.ID))
+	key := openCodeRequestKey{input: !input, id: string(msg.ID)}
+	method, ok := methods[key]
+	delete(methods, key)
 	if !ok {
 		return "JSONRPCMessage", fmt.Errorf("unmatched OpenCode response id %s", msg.ID)
 	}
@@ -795,7 +829,13 @@ func checkOpenCode(data []byte, methods map[string]opencodedto.Method) (string, 
 	return checkOpenCodeResponse(method, msg.Result)
 }
 
-func checkOpenCodeRequest(method opencodedto.Method, params json.RawMessage) (string, error) {
+func checkOpenCodeRequest(method opencodedto.Method, params json.RawMessage, input bool) (string, error) {
+	if !input {
+		if method != opencodedto.MethodSessionRequestPermission {
+			return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode output request method %q; add its DTO and checker dispatch", method)
+		}
+		return "*opencode.PermissionRequestParams", strictDecode(params, &opencodedto.PermissionRequestParams{})
+	}
 	var dst any
 	switch method {
 	case opencodedto.MethodInitialize:
@@ -810,8 +850,6 @@ func checkOpenCodeRequest(method opencodedto.Method, params json.RawMessage) (st
 		dst = &opencodedto.SetSessionModelParams{}
 	case opencodedto.MethodSessionSetConfigOption:
 		dst = &opencodedto.SetSessionConfigOptionParams{}
-	case opencodedto.MethodSessionRequestPermission:
-		dst = &opencodedto.PermissionRequestParams{}
 	case opencodedto.MethodSessionCancel, opencodedto.MethodSessionSetMode:
 		return "JSONRPCMessage", fmt.Errorf("OpenCode request %q has no genai DTO; add its DTO and checker strict decode", method)
 	default:

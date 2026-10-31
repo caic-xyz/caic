@@ -20,6 +20,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/mcp/mcptest"
 )
@@ -68,9 +69,10 @@ func TestLiveRelay(t *testing.T) {
 		t.Fatalf("unexpected workspace path %q", dir)
 	}
 	ch := make(chan agent.TimedMessage, 256)
+	log, historyPath := liveTaskLog(t)
 	opts := agent.Options{
 		Target: target, Dir: dir, Model: model, MsgCh: ch,
-		Logger: slog.Default(), Log: agent.DiscardLogSink{},
+		Logger: slog.Default(), Log: log, HistoryPath: historyPath,
 	}
 	var session *agent.Session
 	t.Cleanup(func() {
@@ -122,9 +124,7 @@ func TestLiveRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Close(); err != nil {
-		t.Fatal(err)
-	}
+	session.Cancel()
 	if err := session.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,6 @@ func TestLiveRelay(t *testing.T) {
 	}
 	opts.InitialPrompt = agent.Prompt{}
 	opts.RelayOffset = offset
-	opts.WarmHistory = true
 	session, err = b.AttachRelay(ctx, &opts)
 	if err != nil {
 		t.Fatal(err)
@@ -232,9 +231,10 @@ func TestLiveTaskMCP(t *testing.T) {
 		t.Run(task, func(t *testing.T) {
 			registry := &liveTaskRegistry{task: task}
 			ch := make(chan agent.TimedMessage, 256)
+			log, historyPath := liveTaskLog(t)
 			opts := agent.Options{
 				Target: runtime.ConnectionTarget{SSHHost: host}, Dir: dir, Model: model, MsgCh: ch,
-				Logger: slog.Default(), Log: agent.DiscardLogSink{}, MCP: registry,
+				Logger: slog.Default(), Log: log, HistoryPath: historyPath, MCP: registry,
 			}
 			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once with empty arguments. Reply with its returned result only. Do not use shell or write files."
 			registry.setToken()
@@ -250,16 +250,13 @@ func TestLiveTaskMCP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := session.Close(); err != nil {
-				t.Fatal(err)
-			}
+			session.Cancel()
 			if err := session.Wait(); err != nil {
 				t.Fatal(err)
 			}
 			session = nil
 			opts.InitialPrompt = agent.Prompt{}
 			opts.RelayOffset = offset
-			opts.WarmHistory = true
 			session, err = b.AttachRelay(ctx, &opts)
 			if err != nil {
 				t.Fatal(err)
@@ -286,7 +283,6 @@ func TestLiveTaskMCP(t *testing.T) {
 			ch = make(chan agent.TimedMessage, 256)
 			opts.MsgCh = ch
 			opts.RelayOffset = 0
-			opts.WarmHistory = false
 			opts.ResumeSessionID = first.SessionID
 			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once, with empty arguments. Discover the current server namespace rather than using obsolete names. Return its fresh result only; do not use shell or write files."
 			registry.setToken()
@@ -406,4 +402,22 @@ func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan a
 			}
 		}
 	}
+}
+
+// liveTaskLog retains the same ordered physical history reconnect uses in
+// production, including client commands absent from the relay output file.
+func liveTaskLog(t *testing.T) (agent.LogSink, string) {
+	store := taskslog.NewStore(slog.Default(), t.TempDir())
+	log, path, err := store.Open("live.jsonl", &agent.MetaMessage{
+		MessageType: "caic_meta", Version: 3, Prompt: "live relay", Harness: "antigravity",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := log.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return log, path
 }

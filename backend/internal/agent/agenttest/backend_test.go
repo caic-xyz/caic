@@ -14,7 +14,7 @@ func TestWire(t *testing.T) {
 
 	t.Run("zero_value", func(t *testing.T) {
 		t.Parallel()
-		messages, err := (&Wire{}).ParseMessage([]byte("native message"))
+		messages, err := (&Wire{}).ParseOutput([]byte("native message"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -25,8 +25,8 @@ func TestWire(t *testing.T) {
 	t.Run("parse", func(t *testing.T) {
 		t.Parallel()
 		want := errors.New("parse failed")
-		wire := Wire{Parse: func([]byte) ([]agent.Message, error) { return nil, want }}
-		if _, err := wire.ParseMessage([]byte("native message")); !errors.Is(err, want) {
+		wire := Wire{Output: func([]byte) ([]agent.Message, error) { return nil, want }}
+		if _, err := wire.ParseOutput([]byte("native message")); !errors.Is(err, want) {
 			t.Fatalf("ParseMessage error = %v, want %v", err, want)
 		}
 	})

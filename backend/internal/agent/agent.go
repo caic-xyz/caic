@@ -1,4 +1,4 @@
-// Package agent owns coding-agent sessions, ordered inputs, and bounded protocol replies.
+// Package agent owns coding-agent sessions, directional history, ordered inputs, and bounded protocol replies.
 // Backend implementations live in sub-packages (e.g. agent/claudecode).
 //
 // # Message dispatch
@@ -33,8 +33,9 @@
 //
 //	SSH connections are severed → attach_client sees stdin EOF and disconnects
 //	(no \x00 sent) → relay daemon + agent keep running → on restart, server
-//	discovers the container during task import, reads output.jsonl to restore
-//	conversation state, and calls relay.py attach --offset N to reconnect.
+//	discovers the container during task import, reconciles output.jsonl into
+//	the task log, restores the fresh wire from recorded directional history,
+//	and calls relay.py attach --offset N to reconnect.
 package agent
 
 import (
@@ -51,6 +52,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -81,18 +83,19 @@ type Options struct {
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
 	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
-	// WarmHistory replays the retained relay tail through the wire before the
-	// live stream starts. Stateful wire formats (native-subagent adapters)
-	// otherwise begin with empty correlation state after a restart or relay
-	// adoption, which would duplicate cards and leave settled work running.
-	WarmHistory bool
+	// HistoryPath is the authoritative plain task log returned by Reopen and
+	// required by AttachRelay. It contains recorded client input interleaved with
+	// relay output preceding RelayOffset, including imported offline output.
+	// Attach replays it through the fresh wire without publishing messages, even
+	// at offset zero, before resuming relay output at exactly RelayOffset.
+	HistoryPath string
 	// PendingUserActions is the restored user-facing work that still needs
 	// input after AttachRelay reconnects. It must not contain backend-only
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []v3.PendingUserAction
 	MsgCh              chan<- TimedMessage // Receives parsed physical records from the agent.
-	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{Version: version} when persistence is unnecessary.
+	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{} when persistence is unnecessary.
 	StripEnv           []string            // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 	MCP                mcp.Registry        // Optional task-scoped CAIC MCP registry.
 }
@@ -137,16 +140,24 @@ type mcpRelayEnvelope struct {
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
-// communication. Implementations must pair WritePrompt and ParseMessage
+// communication. Implementations must pair WritePrompt and MessageParser
 // for the same protocol.
 type WireFormat interface {
-	// WritePrompt writes a user prompt to the agent's stdin in the
-	// backend's wire format. logW receives a copy.
-	WritePrompt(w io.Writer, p Prompt, log LogSink) error
+	MessageParser
 
-	// ParseMessage decodes a single NDJSON line into one or more typed
-	// Messages. A single wire line may produce multiple semantic messages.
-	ParseMessage(line []byte) ([]Message, error)
+	// WritePrompt writes a user prompt to the agent's stdin in the
+	// backend's wire format. log records the input before delivery.
+	WritePrompt(w io.Writer, p Prompt, log LogSink) error
+}
+
+// MessageParser decodes both directions of one ordered provider protocol.
+// Methods run synchronously; their input may alias scanner-owned memory and
+// must not be retained after returning. One line can yield multiple messages.
+type MessageParser interface {
+	// ParseInput decodes a recorded command sent to the provider.
+	ParseInput(line []byte) ([]Message, error)
+	// ParseOutput decodes a line received from the provider.
+	ParseOutput(line []byte) ([]Message, error)
 }
 
 // CompactCommand is an optional interface for WireFormat implementations that
@@ -312,7 +323,7 @@ func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercep
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-		}, c.log, c.wire.ParseMessage, func(req MCPRequest) error {
+		}, c.log, c.wire, func(req MCPRequest) error {
 			return requests.enqueue(responseWork{request: &req})
 		})
 	})
@@ -381,8 +392,8 @@ type inputAttemptLog struct {
 	written bool
 }
 
-func (l *inputAttemptLog) AppendNative(data []byte) error {
-	if err := l.LogSink.AppendNative(data); err != nil {
+func (l *inputAttemptLog) AppendRecord(record PhysicalRecord) error {
+	if err := l.LogSink.AppendRecord(record); err != nil {
 		return err
 	}
 	l.written = true
@@ -417,10 +428,10 @@ func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest
 	return nil, fmt.Errorf("unsupported MCP method: %s", req.Method)
 }
 
-// NewConn creates a connection using the task log's physical record version.
+// NewConn creates a connection using the task-owned physical log authority.
 //
 // Closing stdin must unblock a pending write so session shutdown can finish.
-// log and sink must be non-nil; use DiscardLogSink{Version: version} when
+// log and sink must be non-nil; use DiscardLogSink{} when
 // persistence is unnecessary.
 func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
 	return NewMCPConn(ctx, log, stdin, sink, wire, nil)
@@ -581,16 +592,21 @@ func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) 
 	return s, nil
 }
 
-// AttachRelaySession connects to an already-running relay in the container
-// and returns a new Session. It waits briefly for the attach process to
-// confirm connectivity; if the process exits immediately (e.g. relay socket
-// is stale), an error is returned so the caller can fall back to --resume.
+// AttachRelaySession restores a fresh wire from authoritative recorded history,
+// then starts an attachment at the verified relay offset and returns a Session.
+// The caller verifies connectivity through the session lifecycle.
 // Backends may pass wrap to intercept the default Conn before message reading
 // starts.
 func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wrap func(Conn) (Conn, error)) (*Session, error) {
 	sshHost := opts.Target.SSHHost
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	if err := warmRecordedHistory(ctx, opts.HistoryPath, wire); err != nil {
+		return nil, fmt.Errorf("warm recorded history: %w", err)
 	}
 	sshArgs := []string{
 		sshHost, "python3", RelayScriptPath, "attach",
@@ -603,29 +619,21 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	if opts.WarmHistory {
-		// A session that attaches with an empty stateful wire cannot correlate
-		// the completions its restored history implies, which is the defect the
-		// warm-up exists to prevent, so a failure here aborts the attach instead
-		// of continuing in that state. The caller's recovery path retries.
-		if err := WarmRelayHistory(ctx, sshHost, wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
-			return nil, fmt.Errorf("warm relay history: %w", err)
-		}
+		return nil, errors.Join(fmt.Errorf("stdout pipe: %w", err), stdin.Close())
 	}
 	c := NewMCPConn(ctx, opts.Logger, stdin, opts.Log, wire, opts.MCP)
 	if wrap != nil {
-		c, err = wrap(c)
+		wrapped, err := wrap(c)
 		if err != nil {
-			return nil, err
+			c.Cancel()
+			return nil, errors.Join(err, stdin.Close(), stdout.Close())
 		}
-	}
-	if opts.Logger == nil {
-		return nil, errors.New("opts.Logger is required")
+		c = wrapped
 	}
 	cmd.Stderr = &SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
+		c.Cancel()
+		// exec.Cmd closes the pipes it created when Start fails.
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
@@ -741,25 +749,30 @@ func (s *Session) Wait() error {
 	return s.err
 }
 
-// LogRecordParser decodes v3 physical task-log records around one
-// harness-native parser. A parser holds ordered log state and is not safe for
+// LogRecordParser validates v3 physical task-log records and optionally decodes
+// harness-native messages. A parser holds ordered log state and is not safe for
 // concurrent use.
 type LogRecordParser struct {
-	parseNative   func([]byte) ([]Message, error)
+	native        MessageParser
 	contextWindow int
 }
 
 // NewLogRecordParser constructs a v3 task-log parser.
-// parseNative is called synchronously and must parse and validate the
-// supplied harness-native JSON before returning.
-//
-// The callback input may alias scanner-owned record memory. parseNative must not
-// retain or use the input after it returns.
-func NewLogRecordParser(parseNative func([]byte) ([]Message, error)) (*LogRecordParser, error) {
-	if parseNative == nil {
+// native owns ordered input/output protocol state for the complete stream.
+func NewLogRecordParser(native MessageParser) (*LogRecordParser, error) {
+	if native == nil {
 		return nil, errors.New("native message parser is nil")
 	}
-	return &LogRecordParser{parseNative: parseNative}, nil
+	return &LogRecordParser{native: native}, nil
+}
+
+// NewPhysicalLogRecordParser validates framing, native JSON and host controls
+// without interpreting provider payloads.
+//
+// Reconciliation uses it before the complete ordered history is available for
+// semantic decoding.
+func NewPhysicalLogRecordParser() *LogRecordParser {
+	return &LogRecordParser{native: physicalMessageParser{}}
 }
 
 // ParseRecord decodes one v3 physical task-log record.
@@ -768,29 +781,6 @@ func NewLogRecordParser(parseNative func([]byte) ([]Message, error)) (*LogRecord
 func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
 	return parseV3Record(p, line)
 }
-
-type logControlKind int
-
-const (
-	logControlMeta logControlKind = iota
-	logControlDiffStat
-	logControlExit
-	logControlStrippedEnv
-	logControlSession
-	logControlModelInfo
-	logControlPR
-	logControlResult
-	logControlTurnCommitSnapshot
-	logControlPendingUserAction
-	logControlProvisioningLog
-	logControlContextCleared
-	logControlInputDeliveryFailed
-	logControlInputDelivery
-	logControlText
-	logControlUserInput
-	logControlMCPRequest
-	logControlRelayGeneration
-)
 
 func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
 	switch kind {
@@ -944,8 +934,14 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 	}
 }
 
-func (p *LogRecordParser) parseAndApplyNative(line []byte) ([]Message, error) {
-	msgs, err := p.parseNative(line)
+func (p *LogRecordParser) parseAndApplyNative(line []byte, input bool) ([]Message, error) {
+	var msgs []Message
+	var err error
+	if input {
+		msgs, err = p.native.ParseInput(line)
+	} else {
+		msgs, err = p.native.ParseOutput(line)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -982,19 +978,46 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 	return out, nil
 }
 
+type physicalMessageParser struct{}
+
+func (physicalMessageParser) ParseInput([]byte) ([]Message, error)  { return nil, nil }
+func (physicalMessageParser) ParseOutput([]byte) ([]Message, error) { return nil, nil }
+
+type logControlKind int
+
+const (
+	logControlMeta logControlKind = iota
+	logControlDiffStat
+	logControlExit
+	logControlStrippedEnv
+	logControlSession
+	logControlModelInfo
+	logControlPR
+	logControlResult
+	logControlTurnCommitSnapshot
+	logControlPendingUserAction
+	logControlProvisioningLog
+	logControlContextCleared
+	logControlInputDeliveryFailed
+	logControlInputDelivery
+	logControlText
+	logControlUserInput
+	logControlMCPRequest
+	logControlRelayGeneration
+)
+
 // ParsedRecord is a parser-owned semantic task-log record. Control reports
 // whether the physical discriminator identifies a caic-owned control.
 type ParsedRecord struct {
-	Messages        []TimedMessage
-	RelayRecord     bool
-	Control         bool
-	RelayGeneration string
+	Messages   []TimedMessage
+	Provenance RecordProvenance
+	Control    bool
 }
 
 // RelayRecordReader reads one physical relay record at a time. Agent payloads
 // are returned as their unchanged native JSON; caic controls are returned only
-// as parsed controls and never presented as native handshake data. logW is the
-// caller's explicit persistence policy: use io.Discard for unpersisted reads.
+// as parsed controls and never presented as native handshake data. log is the
+// caller's explicit persistence policy: use DiscardLogSink{} for unpersisted reads.
 type RelayRecordReader struct {
 	r      *bufio.Reader
 	parser *LogRecordParser
@@ -1010,11 +1033,17 @@ func NewRelayRecordReader(r io.Reader, log LogSink) *RelayRecordReader {
 		br = bufio.NewReaderSize(r, 1<<20)
 	}
 	reader := &RelayRecordReader{r: br, log: log}
-	reader.parser = &LogRecordParser{parseNative: func(line []byte) ([]Message, error) {
-		reader.native = append(reader.native[:0], line...)
-		return nil, nil
-	}}
+	reader.parser = &LogRecordParser{native: reader}
 	return reader
+}
+
+// ParseInput ignores client commands in the relay output stream.
+func (*RelayRecordReader) ParseInput([]byte) ([]Message, error) { return nil, nil }
+
+// ParseOutput retains the next native output for the provider handshake.
+func (r *RelayRecordReader) ParseOutput(line []byte) ([]Message, error) {
+	r.native = append(r.native[:0], line...)
+	return nil, nil
 }
 
 // Reader returns the buffered source positioned after records consumed by ReadRecord.
@@ -1043,8 +1072,8 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage
 		if parseErr != nil {
 			return nil, nil, parseErr
 		}
-		if writeErr := r.log.AppendNative(encoded); writeErr != nil {
-			return nil, nil, fmt.Errorf("write log: %w", writeErr)
+		if err := r.log.AppendRecord(PhysicalRecord{Encoded: encoded, Provenance: parsed.Provenance}); err != nil {
+			return nil, nil, fmt.Errorf("write log: %w", err)
 		}
 		if len(r.native) > 0 {
 			return slices.Clone(r.native), nil, nil
@@ -1071,11 +1100,11 @@ func messageIsNil(msg Message) bool {
 // DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original TimedMessage wrappers.
 // Dispatch and MCP handling failures end the read loop.
-func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage) error, sink LogSink, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
+func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage) error, sink LogSink, native MessageParser, handleMCP func(MCPRequest) error) error {
 	if log == nil {
 		return errors.New("logger is required")
 	}
-	parser, err := NewLogRecordParser(parseNative)
+	parser, err := NewLogRecordParser(native)
 	if err != nil {
 		return fmt.Errorf("construct relay record parser: %w", err)
 	}
@@ -1099,8 +1128,8 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 		if err != nil {
 			return fmt.Errorf("parse relay record: %w", err)
 		}
-		if writeErr := sink.AppendNative(record); writeErr != nil {
-			return fmt.Errorf("write log: %w", writeErr)
+		if err := sink.AppendRecord(PhysicalRecord{Encoded: record, Provenance: parsed.Provenance}); err != nil {
+			return fmt.Errorf("write log: %w", err)
 		}
 		for _, msg := range parsed.Messages {
 			if request, ok := msg.Message.(*MCPRequestMessage); ok {
@@ -1402,19 +1431,20 @@ func RelayOutputSize(ctx context.Context, container string) (int64, error) {
 }
 
 // ReadRelayTail reads only the tail of the relay output.jsonl from the
-// container and returns the parsed messages plus the total file size (for
+// container and returns validated physical records plus the total file size (for
 // RelayOffset). Memory and transfer are bounded by maxBytes; validated v3
 // records are retained so adoption can persist output produced while offline.
-func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (timeline ParsedTimeline, size int64, err error) {
+// Provider interpretation follows physical reconciliation with local history.
+func ReadRelayTail(ctx context.Context, container string, maxBytes int64) (timeline RelaySnapshot, size int64, err error) {
 	generation, err := relayOutputGeneration(ctx, container)
 	if err != nil {
-		return ParsedTimeline{}, 0, err
+		return RelaySnapshot{}, 0, err
 	}
 	size, err = RelayOutputSize(ctx, container)
 	if err != nil {
-		return ParsedTimeline{}, 0, err
+		return RelaySnapshot{}, 0, err
 	}
-	timeline, offset, err := readRelaySnapshot(ctx, container, parser, maxBytes, size, generation)
+	timeline, offset, err := readRelaySnapshot(ctx, container, maxBytes, size, generation)
 	if err != nil {
 		return timeline, offset, err
 	}
@@ -1423,109 +1453,30 @@ func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParse
 		return timeline, offset, err
 	}
 	if currentGeneration != generation {
-		return ParsedTimeline{}, 0, errors.New("relay output generation changed during snapshot")
+		return RelaySnapshot{}, 0, errors.New("relay output generation changed during snapshot")
 	}
 	return timeline, offset, nil
 }
 
-// retainRelayPayload reads one relay range of at most bound bytes into a single
-// exactly sized allocation, so retention neither grows by doubling nor
-// over-allocates for a short read. The relay snapshot command bounds its output by
-// the range end, so the reader is never expected to hold more than bound. It is
-// the same code the warm-history benchmark measures.
-func retainRelayPayload(r io.Reader, bound int64) ([]byte, error) {
-	if bound < 0 {
-		bound = 0
-	}
-	payload := make([]byte, bound)
-	n, err := io.ReadFull(r, payload)
-	switch {
-	case err == nil:
-		return payload, nil
-	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-		// The retained file was shorter than the requested range.
-		return payload[:n], nil
-	default:
-		return nil, err
-	}
-}
-
-// FetchRelayRange returns the retained relay bytes in
-// [max(0, end-maxBytes), end), never reading bytes the relay wrote after end, so
-// a caller can resume at end. A leading partial record is dropped. It transfers
-// bytes without parsing them, which lets a caller retry a failed read without
-// touching its parser state.
-func FetchRelayRange(ctx context.Context, container string, maxBytes, end int64) ([]byte, error) {
-	if end < 0 {
-		return nil, errors.New("relay range end must not be negative")
-	}
-	if maxBytes < 0 {
-		return nil, errors.New("relay range size must not be negative")
-	}
-	generation, err := relayOutputGeneration(ctx, container)
-	if err != nil {
-		return nil, err
-	}
-	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, end)
-	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
-	if err != nil {
-		return nil, err
-	}
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("relay stdout pipe: %w", err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start relay read: %w", err)
-	}
-	// The command transfers at most end-start bytes, so the retained payload is
-	// sized once instead of growing by doubling.
-	payload, readErr := retainRelayPayload(pipe, end-start)
-	if waitErr := cmd.Wait(); readErr == nil && waitErr != nil {
-		readErr = fmt.Errorf("relay read: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
-	}
-	if readErr != nil {
-		return nil, readErr
-	}
-	currentGeneration, err := relayOutputGeneration(ctx, container)
-	if err != nil {
-		return nil, err
-	}
-	if currentGeneration != generation {
-		return nil, errors.New("relay output generation changed during snapshot")
-	}
-	data := payload
-	if skipFirst {
-		newline := bytes.IndexByte(data, '\n')
-		if newline < 0 {
-			return nil, nil
-		}
-		data = data[newline+1:]
-	}
-	return data, nil
-}
-
-// readRelaySnapshot reads and parses the relay byte range that
-// relaySnapshotCommand transfers for size bytes and returns the parsed timeline
+// readRelaySnapshot validates the relay byte range that
+// relaySnapshotCommand transfers for size bytes and returns the physical snapshot
 // plus the physical offset the read stopped at. generation is the relay output
 // generation observed before the read; the caller owns that round trip so it can
 // also verify the generation did not change.
-func readRelaySnapshot(ctx context.Context, container string, parser *LogRecordParser, maxBytes, size int64, generation string) (timeline ParsedTimeline, offset int64, err error) {
+func readRelaySnapshot(ctx context.Context, container string, maxBytes, size int64, generation string) (timeline RelaySnapshot, offset int64, err error) {
 	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, size)
 	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
 	if err != nil {
-		return ParsedTimeline{}, start, err
+		return RelaySnapshot{}, start, err
 	}
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return ParsedTimeline{}, start, fmt.Errorf("relay stdout pipe: %w", err)
+		return RelaySnapshot{}, start, fmt.Errorf("relay stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return ParsedTimeline{}, start, fmt.Errorf("start relay read: %w", err)
+		return RelaySnapshot{}, start, fmt.Errorf("start relay read: %w", err)
 	}
-	timeline, offset, readErr := readRelayTailRecords(pipe, parser, start, skipFirst, container, generation)
+	timeline, offset, readErr := readRelayTailRecords(pipe, start, skipFirst, container, generation)
 	if readErr != nil {
 		_ = cmd.Wait()
 		return timeline, offset, readErr
@@ -1571,33 +1522,8 @@ func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
 
 // readRelayTailRecords parses one stat-bounded relay snapshot and returns the
 // exact physical offset consumed, including a skipped partial tail record.
-func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string) (timeline ParsedTimeline, offset int64, err error) {
-	offset, err = scanRelayTailRecords(r, parser, start, skipFirst, src, generation, func(parsed ParsedRecord, line, encoded []byte, byteEnd int64, currentGeneration string) {
-		timeline.Encoded = append(timeline.Encoded, encoded...)
-		timeline.Messages = append(timeline.Messages, parsed.Messages...)
-		if parsed.RelayRecord {
-			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
-				Generation: currentGeneration,
-				RelayEnd:   byteEnd,
-				MessageEnd: len(timeline.Messages),
-				ByteEnd:    len(timeline.Encoded),
-				// Fingerprint the record without its trailing newline: the
-				// adoption overlap filter compares these values against
-				// fingerprints stored in the task log, so the basis must not
-				// change.
-				Fingerprint: sha256.Sum256(line),
-			})
-		}
-	})
-	return timeline, offset, err
-}
-
-// scanRelayTailRecords is the shared relay record loop. visit may be nil to
-// discard parsed records; it receives the parsed record, the record line without
-// its trailing newline (the fingerprint basis), the encoded record with the
-// newline, the physical offset after the record, and the relay generation in
-// effect. currentGeneration is seeded from the caller's pre-read observation.
-func scanRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string, visit func(ParsedRecord, []byte, []byte, int64, string)) (offset int64, err error) {
+func readRelayTailRecords(r io.Reader, start int64, skipFirst bool, src, generation string) (timeline RelaySnapshot, offset int64, err error) {
+	parser := NewPhysicalLogRecordParser()
 	reader := bufio.NewReaderSize(r, 1<<20)
 	offset = start
 	currentGeneration := generation
@@ -1605,13 +1531,13 @@ func scanRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		record, readErr := readNDJSONRecord(reader)
 		offset += int64(len(record))
 		if errors.Is(readErr, io.EOF) {
-			return offset, nil
+			return timeline, offset, nil
 		}
 		if errors.Is(readErr, io.ErrUnexpectedEOF) {
-			return offset - int64(len(record)), nil
+			return timeline, offset - int64(len(record)), nil
 		}
 		if readErr != nil {
-			return offset, fmt.Errorf("read relay record: %w", readErr)
+			return timeline, offset, fmt.Errorf("read relay record: %w", readErr)
 		}
 		line := record[:len(record)-1]
 		if skipFirst {
@@ -1623,13 +1549,19 @@ func scanRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		}
 		parsed, parseErr := parser.ParseRecord(line)
 		if parseErr != nil {
-			return offset, fmt.Errorf("parse relay record from %s: %w", src, parseErr)
+			return timeline, offset, fmt.Errorf("parse relay record from %s: %w", src, parseErr)
 		}
-		if parsed.RelayGeneration != "" {
-			currentGeneration = parsed.RelayGeneration
+		if parsed.Provenance.Generation != "" {
+			currentGeneration = parsed.Provenance.Generation
 		}
-		if visit != nil {
-			visit(parsed, line, record, offset, currentGeneration)
+		timeline.Encoded = append(timeline.Encoded, record...)
+		if parsed.Provenance.Source == RecordSourceRelay {
+			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
+				Generation:  currentGeneration,
+				RelayEnd:    offset,
+				ByteEnd:     len(timeline.Encoded),
+				Fingerprint: sha256.Sum256(line),
+			})
 		}
 	}
 }
@@ -1694,68 +1626,63 @@ func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
 	}
 }
 
-// maxWarmHistoryBytes bounds the relay history replayed through a wire before
-// attach, matching the adoption snapshot bound.
-const maxWarmHistoryBytes = 10 << 20
-
-// warmHistoryAttempts is how many times a warm read is tried before the attach
-// gives up. The second attempt absorbs a transient relay read failure.
-const warmHistoryAttempts = 2
-
-// WarmRelayHistory replays the relay records that precede the attach offset
-// through wire, discarding the resulting messages, so a stateful wire format
-// keeps the correlation state its history implies after a restart or relay
-// adoption. endOffset must be the offset the live attach will resume from:
-// reading further would send those records through the wire twice, and the
-// second copy would be idempotent and never reach the task timeline. A failure is
-// returned, after one retry to absorb a transient relay read, because attaching
-// with empty correlation state is the defect this exists to prevent.
-func WarmRelayHistory(ctx context.Context, container string, wire WireFormat, endOffset, maxBytes int64) error {
-	if endOffset <= 0 {
-		// A fresh session: the live attach already replays everything from the
-		// start, so there is no history to warm and nothing to double-process.
-		return nil
+// warmRecordedHistory reconstructs a fresh wire from the local authority, not
+// from output.jsonl: relay stdin logging is disabled, so only the task log can
+// restore recorded client request identities. The caller supplies history whose
+// output was reconciled through RelayOffset before reconnect. Host controls and
+// prior relay generations do not alter the live relay offset. Never-recorded
+// input cannot be recovered, and attempted input does not prove delivery.
+//
+// Replay streams a fixed file snapshot with bounded record memory and discards
+// semantic messages. An error aborts attach and discards this fresh wire; partial
+// replay is never retried on the same stateful parser.
+func warmRecordedHistory(ctx context.Context, path string, wire WireFormat) (retErr error) {
+	if path == "" {
+		return errors.New("task history path is required")
 	}
-	// Fetch first, then replay once: a failed transfer must not leave partial
-	// state in the caller's wire, whose accumulators (usage, output, reasoning)
-	// are not all idempotent.
-	payload, err := readWarmHistoryPayload(ctx, func() ([]byte, error) {
-		return FetchRelayRange(ctx, container, maxBytes, endOffset)
-	})
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
-	parser, err := NewLogRecordParser(wire.ParseMessage)
+	defer func() { retErr = errors.Join(retErr, f.Close()) }()
+	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	// The parsed timeline is intentionally discarded: the task timeline is
-	// restored from the task log, not re-appended here, so the nil visitor keeps
-	// the parser's side effects and nothing else.
-	_, err = scanRelayTailRecords(bytes.NewReader(payload), parser, 0, false, container, "", nil)
-	return err
-}
-
-// readWarmHistoryPayload fetches the warm payload, retrying once. Only a
-// successful fetch is returned, so a failed attempt cannot contribute partial
-// records to the caller's parser state.
-func readWarmHistoryPayload(ctx context.Context, fetch func() ([]byte, error)) ([]byte, error) {
-	var lastErr error
-	for attempt := range warmHistoryAttempts {
-		payload, err := fetch()
-		if err == nil {
-			return payload, nil
-		}
-		lastErr = err
+	parser, err := NewLogRecordParser(wire)
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReaderSize(io.NewSectionReader(f, 0, info.Size()), 1<<20)
+	header := false
+	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
-		if attempt+1 < warmHistoryAttempts {
-			slog.Warn("relay", "msg", "warming relay history failed, retrying", "attempt", attempt+1, "err", err)
+		line, err := readNDJSONRecord(reader)
+		if errors.Is(err, io.EOF) && header {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read recorded history %s: %w", path, err)
+		}
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		record, err := parser.ParseRecord(line[:len(line)-1])
+		if err != nil {
+			return fmt.Errorf("parse recorded history %s: %w", path, err)
+		}
+		if !header {
+			if len(record.Messages) != 1 {
+				return errors.New("recorded history must begin with a task metadata header")
+			}
+			if _, ok := record.Messages[0].Message.(*MetaMessage); !ok {
+				return errors.New("recorded history must begin with a task metadata header")
+			}
+			header = true
 		}
 	}
-	// The caller reports the exhausted failure; do not claim another attempt here.
-	return nil, lastErr
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin

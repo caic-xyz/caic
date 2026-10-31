@@ -703,7 +703,7 @@ func TestCheckOpenCode(t *testing.T) {
 	t.Run("valid session update", func(t *testing.T) {
 		t.Parallel()
 		data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}}`)
-		if _, err := checkOpenCode(data, nil); err != nil {
+		if _, err := checkOpenCode(data, false, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -711,53 +711,53 @@ func TestCheckOpenCode(t *testing.T) {
 	t.Run("missing notification params", func(t *testing.T) {
 		t.Parallel()
 		data := []byte(`{"method":"session/update"}`)
-		if _, err := checkOpenCode(data, nil); err == nil || !strings.Contains(err.Error(), "missing params") {
+		if _, err := checkOpenCode(data, false, nil); err == nil || !strings.Contains(err.Error(), "missing params") {
 			t.Fatalf("checkOpenCode error = %v, want missing params", err)
 		}
 	})
 
 	t.Run("requests", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[string]opencodedto.Method)
+		methods := make(map[openCodeRequestKey]opencodedto.Method)
 		valid := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
-		if _, err := checkOpenCode(valid, methods); err != nil {
+		if _, err := checkOpenCode(valid, true, methods); err != nil {
 			t.Fatal(err)
 		}
 		permission := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/request_permission","params":{"sessionId":"session","toolCall":{"toolCallId":"call","status":"pending","title":"title","kind":"other","locations":[]},"options":[]}}`)
-		if _, err := checkOpenCode(permission, methods); err != nil {
+		if _, err := checkOpenCode(permission, false, methods); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":3,"method":"future/request","params":{}}`), methods); err == nil || !strings.Contains(err.Error(), "unrecognized OpenCode request method") {
+		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":3,"method":"future/request","params":{}}`), true, methods); err == nil || !strings.Contains(err.Error(), "unrecognized OpenCode request method") {
 			t.Fatalf("unknown request error = %v", err)
 		}
-		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"session","prompt":[],"unexpected":true}}`), methods); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
+		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"session","prompt":[],"unexpected":true}}`), true, methods); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
 			t.Fatalf("malformed request error = %v", err)
 		}
 	})
 
 	t.Run("unmatched response", func(t *testing.T) {
 		t.Parallel()
-		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), make(map[string]opencodedto.Method)); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
+		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), false, make(map[openCodeRequestKey]opencodedto.Method)); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
 			t.Fatalf("checkOpenCode error = %v, want unmatched response", err)
 		}
 	})
 
 	t.Run("strict response result", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[string]opencodedto.Method)
+		methods := make(map[openCodeRequestKey]opencodedto.Method)
 		request := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
-		if _, err := checkOpenCode(request, methods); err != nil {
+		if _, err := checkOpenCode(request, true, methods); err != nil {
 			t.Fatal(err)
 		}
 		response := []byte(`{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}`)
-		if _, err := checkOpenCode(response, methods); err != nil {
+		if _, err := checkOpenCode(response, false, methods); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := checkOpenCode(request, methods); err != nil {
+		if _, err := checkOpenCode(request, true, methods); err != nil {
 			t.Fatal(err)
 		}
 		invalidResponse := []byte(`{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn","unexpected":true}}`)
-		if _, err := checkOpenCode(invalidResponse, methods); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
+		if _, err := checkOpenCode(invalidResponse, false, methods); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
 			t.Fatalf("checkOpenCode error = %v, want strict PromptResult error", err)
 		}
 	})
@@ -766,7 +766,7 @@ func TestCheckOpenCode(t *testing.T) {
 		t.Parallel()
 		for _, update := range []string{"session_info_update", "config_option_update"} {
 			data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"` + update + `"}}}`)
-			if _, err := checkOpenCode(data, nil); err == nil || !strings.Contains(err.Error(), "has no genai DTO") {
+			if _, err := checkOpenCode(data, false, nil); err == nil || !strings.Contains(err.Error(), "has no genai DTO") {
 				t.Fatalf("checkOpenCode(%s) error = %v, want missing DTO error", update, err)
 			}
 		}
@@ -792,6 +792,95 @@ func TestCheckOpenCode(t *testing.T) {
 
 func TestCheckFile(t *testing.T) {
 	t.Parallel()
+	t.Run("valid directional Pi and OpenCode records", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			harness string
+			records []string
+		}{
+			{"Pi commands and events", "pi", []string{
+				`{"t":"input","ts":1.000,"msg":{"type":"prompt","message":"hello","images":[{"type":"image","mimeType":"image/png","data":"aW1hZ2U="}]}}`,
+				`{"t":"agent","ts":2.000,"msg":{"type":"agent_start"}}`,
+				`{"t":"agent","ts":3.000,"msg":{"type":"response","command":"prompt","success":true}}`,
+			}},
+			{"OpenCode requests in both directions sharing an ID", "opencode", []string{
+				`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}}`,
+				`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/request_permission","params":{"sessionId":"session","toolCall":{"toolCallId":"call","status":"pending","title":"title","kind":"other","locations":[]},"options":[]}}}`,
+				`{"t":"input","ts":3.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}}`,
+				`{"t":"agent","ts":4.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}}`,
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), append([]string{taskMeta(tc.harness)}, tc.records...), false)
+				result, err := checkFile(path, time.Time{})
+				if err != nil || !result.checked || len(result.findings) != 0 {
+					t.Fatalf("directional records = %#v, %v", result, err)
+				}
+			})
+		}
+	})
+	t.Run("error wrong-direction Pi and OpenCode records", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			harness string
+			record  string
+		}{
+			{"Pi event as input", "pi", `{"t":"input","ts":1.000,"msg":{"type":"agent_start"}}`},
+			{"Pi command as output", "pi", `{"t":"agent","ts":1.000,"msg":{"type":"prompt","message":"hello"}}`},
+			{"Pi response as input", "pi", `{"t":"input","ts":1.000,"msg":{"type":"response","command":"prompt","success":true}}`},
+			{"OpenCode update as input", "opencode", `{"t":"input","ts":1.000,"msg":{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}}}`},
+			{"OpenCode permission request as input", "opencode", `{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/request_permission","params":{"sessionId":"session","toolCall":{"toolCallId":"call"},"options":[]}}}`},
+			{"OpenCode client request as output", "opencode", `{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{taskMeta(tc.harness), tc.record}, false)
+				result, err := checkFile(path, time.Time{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result.findings) != 1 || result.findings[0].line != 2 || result.findings[0].harness != tc.harness {
+					t.Fatalf("direction violation findings = %#v", result.findings)
+				}
+			})
+		}
+	})
+	t.Run("error response direction and input schema drift", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			harness string
+			records []string
+			want    string
+		}{
+			{"Pi input image drift", "pi", []string{
+				`{"t":"input","ts":1.000,"msg":{"type":"prompt","message":"hello","images":[{"type":"image","mimeType":"image/png","data":"aW1hZ2U=","future":true}]}}`,
+			}, `unknown field "future"`},
+			{"OpenCode prompt response as input", "opencode", []string{
+				`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}}`,
+				`{"t":"input","ts":2.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}}`,
+			}, "unmatched OpenCode response"},
+			{"OpenCode permission response as output", "opencode", []string{
+				`{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"method":"session/request_permission","params":{"sessionId":"session","toolCall":{"toolCallId":"call"},"options":[]}}}`,
+				`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}}`,
+			}, "unmatched OpenCode response"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), append([]string{taskMeta(tc.harness)}, tc.records...), false)
+				result, err := checkFile(path, time.Time{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result.findings) != 1 || result.findings[0].line != len(tc.records)+1 || !strings.Contains(result.findings[0].err.Error(), tc.want) {
+					t.Fatalf("direction or schema findings = %#v", result.findings)
+				}
+			})
+		}
+	})
 	t.Run("rejects noncanonical v3 record", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{

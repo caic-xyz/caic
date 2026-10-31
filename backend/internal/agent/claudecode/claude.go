@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/anthropic"
 	"github.com/maruel/genai/providers/claudecode"
 
@@ -167,7 +169,7 @@ func newWireFormat() *wireFormat {
 	}
 }
 
-// ParseMessage wraps the package-level parser with per-session state: widget
+// ParseOutput wraps the package-level parser with per-session state: widget
 // tracking for streaming deltas, session-model attribution for model-less
 // usage records, Skill tool-result suppression, and skill loads.
 //
@@ -177,7 +179,7 @@ func newWireFormat() *wireFormat {
 // synthetic injection, and another record leaves the load without a path. A
 // subagent record carries parent_tool_use_id; its loads are not in the main
 // context, so the wire layer drops them.
-func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
+func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	msgs, record, err := parseMessageWithTracker(line, w.widgetTracker)
 	if err != nil {
 		return nil, err
@@ -408,6 +410,71 @@ func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.L
 		text = "/compact " + instructions
 	}
 	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
+}
+
+// ParseInput decodes client prompts and control responses without applying output state.
+func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+	typ, source, err := parseRecordHeader(line)
+	if err != nil {
+		return nil, err
+	}
+	switch claudecode.InputType(typ) {
+	case claudecode.InputUser:
+		raw, err := agent.JSONField(line, "message")
+		if err != nil {
+			return nil, err
+		}
+		if source.ThreadID == "" {
+			source.ThreadID = w.sessionID
+		}
+		input := &agent.UserInputMessage{Source: source}
+		var text claudecode.OutputUserText
+		if err := json.Unmarshal(raw, &text); err == nil && text.Role == "user" {
+			input.Text = text.Content
+			return []agent.Message{input}, nil
+		}
+		var prompt claudecode.InputUserMsg
+		if err := json.Unmarshal(line, &prompt); err != nil {
+			return nil, err
+		}
+		for i := range prompt.Message.Content {
+			content := &prompt.Message.Content[i]
+			switch content.Type {
+			case "text":
+				input.Text = content.Text
+			case "image":
+				if content.Source.Type != "" {
+					input.Images = append(input.Images, v3.ImageData{MediaType: content.Source.MediaType, Data: content.Source.Data})
+				}
+			}
+		}
+		return []agent.Message{input}, nil
+	case claudecode.InputControlResponse:
+		var response claudecode.InputControlResponseMsg
+		if err := json.Unmarshal(line, &response); err != nil {
+			return nil, err
+		}
+		if response.Response.Subtype == claudecode.ControlResponseSuccess && response.Response.Response.Behavior == claudecode.ControlCanUseToolBehaviorAllow {
+			var input claudecode.AskUserQuestionUpdatedInput
+			if err := json.Unmarshal(response.Response.Response.UpdatedInput, &input); err == nil && len(input.Questions) > 0 && len(input.Answers) == len(input.Questions) {
+				answer, answered := input.Answers[input.Questions[0].Question]
+				for _, question := range input.Questions {
+					text, ok := input.Answers[question.Question]
+					if question.Question == "" || !ok || text != answer {
+						answered = false
+						break
+					}
+				}
+				if answered {
+					return []agent.Message{&agent.UserInputMessage{Text: answer}}, nil
+				}
+			}
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
+
+	default:
+		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
+	}
 }
 
 var _ agent.WireFormat = (*wireFormat)(nil)

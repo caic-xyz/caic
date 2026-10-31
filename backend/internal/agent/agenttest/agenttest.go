@@ -11,11 +11,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// Parser parses one harness log line into normalized agent messages.
-type Parser func([]byte) ([]agent.Message, error)
-
 // ParseJSONL parses every non-empty physical v3 fixture record with parser.
-func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
+func ParseJSONL(t testing.TB, path string, parser agent.MessageParser) []agent.Message {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)
@@ -56,8 +53,7 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 type DiscussionExporter func(string, agent.Backends) (string, error)
 
 // RunExportDiscussionGolden runs golden-file tests for task-owned physical
-// export loading against all .jsonl files in testdata/. newParser typically
-// returns b.NewWire().ParseMessage from the harness backend.
+// export loading against all .jsonl files in testdata/.
 func RunExportDiscussionGolden(t *testing.T, export DiscussionExporter, backend agent.Backend) {
 	files, err := filepath.Glob("testdata/*.jsonl")
 	if err != nil {

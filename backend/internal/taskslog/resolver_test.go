@@ -6,15 +6,14 @@ import (
 	"errors"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 type testWireResolver struct {
-	resolve func(harness.Name) (func([]byte) ([]agent.Message, error), error)
+	resolve func(harness.Name) (agent.WireFormat, error)
 }
 
-func newTestWireResolver(resolve func(harness.Name) (func([]byte) ([]agent.Message, error), error)) testWireResolver {
+func newTestWireResolver(resolve func(harness.Name) (agent.WireFormat, error)) testWireResolver {
 	return testWireResolver{resolve: resolve}
 }
 
@@ -26,5 +25,5 @@ func (r testWireResolver) ResolveWire(h harness.Name) (agent.WireFormat, error) 
 	if parse == nil {
 		return nil, errors.New("native message parser is nil")
 	}
-	return &agenttest.Wire{Parse: parse}, nil
+	return parse, nil
 }

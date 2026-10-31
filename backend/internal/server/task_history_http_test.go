@@ -659,7 +659,7 @@ func TestHistorySharedRecovery(t *testing.T) {
 	s, tk, p := historyHTTPFixture(t)
 	var calls atomic.Int64
 	backend := &agenttest.FakeBackend{HarnessName: harness.Claude, WireFactory: func() agent.WireFormat {
-		return &agenttest.Wire{Parse: func([]byte) ([]agent.Message, error) {
+		return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
 			calls.Add(1)
 			return []agent.Message{&agent.TextMessage{Text: "configured fake wire"}}, nil
 		}}
@@ -865,7 +865,7 @@ func TestHistoryAttachAppend(t *testing.T) {
 	s, tk, p := historyHTTPFixture(t)
 	var calls atomic.Int64
 	s.taskMgr.Backends[harness.Claude] = &agenttest.FakeBackend{HarnessName: harness.Claude, WireFactory: func() agent.WireFormat {
-		return &agenttest.Wire{Parse: func([]byte) ([]agent.Message, error) {
+		return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
 			if calls.Add(1) == 2 {
 				appendHistory(t, p, historyTextRecord)
 			}
@@ -902,7 +902,7 @@ func TestHistoryRecoveryCancellation(t *testing.T) {
 	release := make(chan struct{})
 	var calls atomic.Int64
 	s.taskMgr.Backends[harness.Claude] = &agenttest.FakeBackend{HarnessName: harness.Claude, WireFactory: func() agent.WireFormat {
-		return &agenttest.Wire{Parse: func([]byte) ([]agent.Message, error) {
+		return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
 			if calls.Add(1) == 1 {
 				close(started)
 				<-release

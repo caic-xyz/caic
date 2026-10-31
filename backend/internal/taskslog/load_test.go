@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/klauspost/compress/zstd"
@@ -33,8 +35,8 @@ func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return claudecode.New().NewWire().ParseMessage, nil
+		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return claudecode.New().NewWire(), nil
 		}))
 	}
 }
@@ -771,6 +773,72 @@ func TestLoadLogHeader(t *testing.T) {
 	})
 }
 
+func TestLoadRelayBoundaries(t *testing.T) {
+	t.Parallel()
+	meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "boundary scan", Harness: string(harness.OpenCode)})
+	t.Run("unmarked repeated native records", func(t *testing.T) {
+		t.Parallel()
+		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
+		path := writePhysicalTestLog(t, false, meta, native, native)
+		records, generation, err := LoadRelayBoundaries(path)
+		if err != nil || generation != "" || len(records) != 2 {
+			t.Fatalf("boundaries = %+v, generation = %q, error = %v", records, generation, err)
+		}
+		for i, record := range records {
+			if want := int64((i + 1) * (len(native) + 1)); record.RelayEnd != want {
+				t.Fatalf("boundary %d = %+v, want offset %d", i, record, want)
+			}
+		}
+	})
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("compressed_%v", compressed), func(t *testing.T) {
+				t.Parallel()
+				old := `{"t":"relay_generation","generation":"old"}`
+				current := `{"t":"relay_generation","generation":"current"}`
+				native := `{"t":"agent","ts":1.000,"msg":{"untyped":true}}`
+				input := `{"t":"input","ts":2.000,"msg":{"client":"request"}}`
+				host := mustJSON(t, &agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "host"})
+				path := writePhysicalTestLog(t, compressed, meta, old, native, current, native, input, host, native)
+				records, generation, err := LoadRelayBoundaries(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if generation != "current" || len(records) != 3 {
+					t.Fatalf("generation = %q, records = %+v", generation, records)
+				}
+				want := []int64{int64(len(current) + 1), int64(len(current) + len(native) + 2), int64(len(current) + 2*len(native) + 3)}
+				for i, record := range records {
+					if record.Generation != "current" || record.RelayEnd != want[i] {
+						t.Fatalf("record %d = %+v, want current generation offset %d", i, record, want[i])
+					}
+				}
+				if records[1].Fingerprint == ([32]byte{}) || records[2].Fingerprint != records[1].Fingerprint {
+					t.Fatalf("native fingerprints = %x, %x", records[1].Fingerprint, records[2].Fingerprint)
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, line := range []string{
+			`{"t":"agent","ts":1.000,"msg":{"invalid":}}`,
+			`{"t":"input","ts":1,"msg":{"client":"request"}}`,
+			`{"t":"relay_generation","generation":""}`,
+			`{"t":"result","state":123}`,
+		} {
+			t.Run(line, func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, true, meta, line)
+				if records, generation, err := LoadRelayBoundaries(path); err == nil || records != nil || generation != "" {
+					t.Fatalf("boundaries = %+v, generation = %q, err = %v", records, generation, err)
+				}
+			})
+		}
+	})
+}
+
 func TestTsToTime(t *testing.T) {
 	t.Parallel()
 	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).
@@ -810,13 +878,22 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 		t.Fatalf("loaded tasks = %d, want 1", len(tasks))
 	}
 	var native [][]byte
-	if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+	var directions []string
+	if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(h harness.Name) (agent.WireFormat, error) {
 		if h != harness.Claude {
 			return nil, fmt.Errorf("harness = %q, want %q", h, harness.Claude)
 		}
-		return func(data []byte) ([]agent.Message, error) {
-			native = append(native, bytes.Clone(data))
-			return nil, nil
+		return &agenttest.Wire{
+			Input: func(data []byte) ([]agent.Message, error) {
+				directions = append(directions, "input")
+				native = append(native, bytes.Clone(data))
+				return nil, nil
+			},
+			Output: func(data []byte) ([]agent.Message, error) {
+				directions = append(directions, "output")
+				native = append(native, bytes.Clone(data))
+				return nil, nil
+			},
 		}, nil
 	})); err != nil {
 		t.Fatal(err)
@@ -824,8 +901,8 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 	if len(native) != 2 || string(native[0]) != input || string(native[1]) != output {
 		t.Fatalf("native timeline = %q, want input then output", native)
 	}
-	if len(tasks[0].RelayRecords) != 1 {
-		t.Fatalf("relay records = %#v, want only relay output", tasks[0].RelayRecords)
+	if !slices.Equal(directions, []string{"input", "output"}) {
+		t.Fatalf("parser directions = %v", directions)
 	}
 }
 
@@ -918,11 +995,11 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
 				calls++
 				return []agent.Message{&agent.TextMessage{Text: "message"}}, nil
-			}, nil
+			}}, nil
 		}))
 
 		for _, err := range tasks[0].StreamMessages(t.Context()) {
@@ -990,8 +1067,8 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
-		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		}))
 
 		var replayed []string
@@ -1098,8 +1175,8 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func(line []byte) ([]agent.Message, error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
 					Text string `json:"text"`
@@ -1118,7 +1195,7 @@ func TestLoadedTask(t *testing.T) {
 				default:
 					return nil, nil
 				}
-			}, nil
+			}}, nil
 		}))
 
 		var got []string
@@ -1171,8 +1248,8 @@ func TestLoadedTask(t *testing.T) {
 		if len(tasks) != 1 {
 			t.Fatalf("loaded tasks = %d, want 1", len(tasks))
 		}
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func(line []byte) ([]agent.Message, error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
 					Text string `json:"text"`
@@ -1188,7 +1265,7 @@ func TestLoadedTask(t *testing.T) {
 				default:
 					return nil, nil
 				}
-			}, nil
+			}}, nil
 		}))
 
 		var got []string
@@ -1231,8 +1308,8 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func(line []byte) ([]agent.Message, error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
 					Text string `json:"text"`
@@ -1248,7 +1325,7 @@ func TestLoadedTask(t *testing.T) {
 					return []agent.Message{&agent.TextMessage{Text: record.Text}}, nil
 				}
 				return nil, nil
-			}, nil
+			}}, nil
 		}))
 
 		var got string
@@ -1287,8 +1364,8 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					return claudecode.New().NewWire().ParseMessage, nil
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+					return claudecode.New().NewWire(), nil
 				}))
 
 				var gotErr error
@@ -1303,8 +1380,8 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, message, mismatch)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					return claudecode.New().NewWire().ParseMessage, nil
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+					return claudecode.New().NewWire(), nil
 				}))
 
 				var gotErr error
@@ -1326,8 +1403,8 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, "", "  ", meta, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-					return claudecode.New().NewWire().ParseMessage, nil
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+					return claudecode.New().NewWire(), nil
 				}))
 
 				var messages int
@@ -1358,8 +1435,8 @@ func TestLoadedTask(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return []agent.Message{message}, nil }, nil
+		if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return []agent.Message{message}, nil }}, nil
 		})); err != nil {
 			t.Fatal(err)
 		}
@@ -1369,7 +1446,7 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
-	t.Run("SemanticLoadPreservesEmptyNativeRecords", func(t *testing.T) {
+	t.Run("SemanticLoadAllowsEmptyProjection", func(t *testing.T) {
 		t.Parallel()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta",
@@ -1380,64 +1457,15 @@ func TestLoadedTask(t *testing.T) {
 		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
 		path := writePhysicalTestLog(t, false, meta, native, native)
 		loaded := &LoadedTask{path: path}
-		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+			return &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) { return nil, nil }}, nil
 		}))
 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(loaded.Timeline) != 0 || len(loaded.RelayRecords) != 2 {
-			t.Fatalf("loaded timeline = %#v, relay records = %#v", loaded.Timeline, loaded.RelayRecords)
-		}
-		for i, boundary := range loaded.RelayRecords {
-			wantEnd := int64((i + 1) * (len(native) + 1))
-			if boundary.RelayEnd != wantEnd || boundary.MessageEnd != 0 {
-				t.Fatalf("relay boundary %d = %#v, want offset %d at message end 0", i, boundary, wantEnd)
-			}
-		}
-		if loaded.RelayRecords[0].RelayEnd >= loaded.RelayRecords[1].RelayEnd {
-			t.Fatalf("identical physical record offsets = %d, %d; want increasing", loaded.RelayRecords[0].RelayEnd, loaded.RelayRecords[1].RelayEnd)
-		}
-	})
-
-	t.Run("SemanticLoadRetainsOnlyMarkedActiveRelayGeneration", func(t *testing.T) {
-		t.Parallel()
-		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta",
-			Version:     int(agent.LogVersionV3),
-			Prompt:      "generation boundaries",
-			Harness:     string(harness.Codex),
-		})
-		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
-		path := writePhysicalTestLog(t, false, meta,
-			`{"t":"relay_generation","generation":"old"}`,
-			native,
-			`{"t":"context_cleared"}`,
-			`{"t":"relay_generation","generation":"current"}`,
-			native,
-			native,
-		)
-		loaded := &LoadedTask{path: path}
-		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		}))
-
-		if err != nil {
-			t.Fatal(err)
-		}
-		if loaded.RelayGeneration != "current" || len(loaded.RelayRecords) != 3 {
-			t.Fatalf("active relay records = %#v, want generation marker plus 2 native records", loaded.RelayRecords)
-		}
-		markerLen := len(`{"t":"relay_generation","generation":"current"}`) + 1
-		for i, boundary := range loaded.RelayRecords {
-			wantEnd := int64(markerLen)
-			if i > 0 {
-				wantEnd += int64(i * (len(native) + 1))
-			}
-			if boundary.Generation != "current" || boundary.RelayEnd != wantEnd || boundary.Fingerprint == ([32]byte{}) {
-				t.Fatalf("active relay boundary %d = %#v, want generation current at %d", i, boundary, wantEnd)
-			}
+		if len(loaded.Timeline) != 0 {
+			t.Fatalf("loaded timeline = %#v, want no semantic messages", loaded.Timeline)
 		}
 	})
 
@@ -1474,8 +1502,8 @@ func TestLoadedTask(t *testing.T) {
 		t.Run("NoPath", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{}
-			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				return claudecode.New().NewWire().ParseMessage, nil
+			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (agent.WireFormat, error) {
+				return claudecode.New().NewWire(), nil
 			}))
 
 			if err := lt.LoadMessages(); err != nil {
@@ -1552,11 +1580,11 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			t.Parallel()
 			path := writePhysicalTestLog(t, compressed, meta, nativeLogLine(`{"type":"text","text":"visible"}`))
-			markdown, err := ExportDiscussion(path, newTestWireResolver(func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			markdown, err := ExportDiscussion(path, newTestWireResolver(func(got harness.Name) (agent.WireFormat, error) {
 				if got != harness.Claude {
 					t.Fatalf("resolver harness = %q, want claude", got)
 				}
-				return func(line []byte) ([]agent.Message, error) {
+				return &agenttest.Wire{Output: func(line []byte) ([]agent.Message, error) {
 					var raw struct {
 						Text string `json:"text"`
 					}
@@ -1564,7 +1592,7 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 						return nil, err
 					}
 					return []agent.Message{&agent.TextMessage{Text: raw.Text}}, nil
-				}, nil
+				}}, nil
 			}))
 
 			if err != nil {

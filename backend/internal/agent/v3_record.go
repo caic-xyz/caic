@@ -160,7 +160,7 @@ func parseV3Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	}
 	if bytes.HasPrefix(line, []byte(v3AgentRecordPrefix)) {
 		msgs, err := parseV3NativeRecord(p, line, v3AgentRecordPrefix)
-		return ParsedRecord{Messages: msgs, RelayRecord: true}, err
+		return ParsedRecord{Messages: msgs, Provenance: RecordProvenance{Source: RecordSourceRelay}}, err
 	}
 	if bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
 		msgs, err := parseV3NativeRecord(p, line, v3InputRecordPrefix)
@@ -186,7 +186,10 @@ func parseV3Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	if !ok {
 		return ParsedRecord{}, fmt.Errorf("corrupt v3 log record: unknown top-level t %q", token)
 	}
-	record := ParsedRecord{RelayRecord: token.relayOwned(), Control: true}
+	record := ParsedRecord{Control: true}
+	if token.relayOwned() {
+		record.Provenance.Source = RecordSourceRelay
+	}
 	if err := validateV3ControlFields(kind, token, fields); err != nil {
 		return record, err
 	}
@@ -215,7 +218,7 @@ func parseV3Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		if !ok {
 			return record, errors.New("corrupt v3 relay generation: unexpected message type")
 		}
-		record.RelayGeneration = generation.Generation
+		record.Provenance.Generation = generation.Generation
 		record.Messages = nil
 	}
 	return record, err
@@ -352,7 +355,7 @@ func parseV3NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]Time
 	}
 	// msg aliases the scanner-owned record and is valid only for this
 	// synchronous callback. The native parser must not retain it.
-	msgs, err := p.parseAndApplyNative(msg)
+	msgs, err := p.parseAndApplyNative(msg, prefix == v3InputRecordPrefix)
 	if err != nil {
 		return nil, err
 	}

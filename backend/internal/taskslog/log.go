@@ -33,7 +33,7 @@ func IsLogName(name string) bool {
 }
 
 // taskLogWriter owns serialized physical appends to one task log. Callers
-// provide either complete native records or semantic caic controls; raw file
+// provide complete encoded records, batches or semantic caic controls; raw file
 // writes never escape this type.
 type taskLogWriter struct {
 	mu     sync.Mutex
@@ -50,21 +50,22 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	return &taskLogWriter{file: f}, nil
 }
 
-// AppendNative appends one complete encoded native physical record.
-func (w *taskLogWriter) AppendNative(data []byte) error {
+// AppendRecord appends complete encoded physical records without interpreting
+// provenance. The task owner advances its live relay cursor after success.
+func (w *taskLogWriter) AppendRecord(record agent.PhysicalRecord) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
 		return os.ErrClosed
 	}
-	if len(data) == 0 || data[len(data)-1] != '\n' {
-		return errors.New("task log native record is not LF-terminated")
+	if len(record.Encoded) == 0 || record.Encoded[len(record.Encoded)-1] != '\n' {
+		return errors.New("task log record is not LF-terminated")
 	}
-	n, err := w.file.Write(data)
+	n, err := w.file.Write(record.Encoded)
 	if err != nil {
 		return err
 	}
-	if n != len(data) {
+	if n != len(record.Encoded) {
 		return io.ErrShortWrite
 	}
 	return nil
@@ -76,7 +77,7 @@ func (w *taskLogWriter) AppendMessage(m agent.Message) error {
 	if err != nil {
 		return err
 	}
-	return w.AppendNative(append(data, '\n'))
+	return w.AppendRecord(agent.PhysicalRecord{Encoded: append(data, '\n')})
 }
 
 // Close closes the underlying task log file once.
