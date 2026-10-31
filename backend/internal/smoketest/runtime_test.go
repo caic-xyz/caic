@@ -3,6 +3,7 @@
 package smoketest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -191,7 +192,11 @@ func TestFakeAgentNaturalPromptMatching(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cmd := exec.CommandContext(t.Context(), "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
-			cmd.Stdin = strings.NewReader(tc.prompt + "\n")
+			input, err := NewFakeBackend().NewWire().EncodePrompt(agent.Prompt{Text: tc.prompt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd.Stdin = bytes.NewReader(input)
 			out, err := cmd.Output()
 			if err != nil {
 				t.Fatal(err)
@@ -207,7 +212,11 @@ func TestFakeAgentDemoIncludesCredibleTiming(t *testing.T) {
 	t.Parallel()
 
 	cmd := exec.CommandContext(t.Context(), "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
-	cmd.Stdin = strings.NewReader("FAKE_DEMO timing\n")
+	input, err := NewFakeBackend().NewWire().EncodePrompt(agent.Prompt{Text: "FAKE_DEMO timing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdin = bytes.NewReader(input)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"maps"
 	"path/filepath"
 	"runtime/trace"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,72 +79,30 @@ type AgentRuntime struct {
 // A dead relay returns an error; startup recovery separately revives eligible
 // retained instances rather than replacing an unverified live relay.
 func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
-	ctx, span := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
-	defer span.End()
-
 	if t.HasSession() {
 		return nil, errors.New("session already active")
 	}
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
+	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance to reconnect to")
 	}
 	sessionID := t.GetSessionID()
 	if harness.RequiresResumeSessionID(t.Harness) && sessionID == "" {
 		return nil, fmt.Errorf("%s session ID missing; cannot reconnect", t.Harness)
 	}
-	// Remember the state inferred from restored messages so we don't
-	// blindly override it to StateRunning for an idle relay.
-	prevState := t.GetState()
-	opts := &agent.Options{
-		Logger:             r.Log,
-		Target:             t.RuntimeConnectionTarget(),
-		RelayOffset:        t.RelayOffsetValue(),
-		ResumeSessionID:    sessionID,
-		Effort:             t.RequestedEffort,
-		PendingUserActions: t.PendingUserActions(),
-	}
-	if err := r.configureTaskMCP(t, opts); err != nil {
-		return nil, fmt.Errorf("reconnect: %w", err)
-	}
-
-	// Reconnect resumes an existing session, so append only after Reopen
-	// validates the existing file's authoritative header. A missing or corrupt
-	// log must not be replaced because the running relay's format is unknown.
-	log, err := r.reopenLog(t)
+	run, err := r.beginRun(ctx, t, true, true)
 	if err != nil {
 		return nil, err
 	}
-
-	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
-
-	// Attach to the live relay. If the relay is dead, the session is lost.
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
+	defer close(run.startupDone)
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), RelayOffset: t.RelayOffsetValue(), ResumeSessionID: sessionID, Effort: t.RequestedEffort, PendingUserActions: t.PendingUserActions(), Records: run.records}
+	if err = r.configureTaskMCP(t, opts); err != nil {
+		return nil, errors.Join(err, r.closeRun(t, run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	}
-	// Only transition to StateRunning if the restored messages indicate
-	// the agent was still producing output (no trailing ResultMessage).
-	// If the agent had already completed its turn, keep the inferred
-	// idle state so the UI shows the correct status.
-	if prevState != task.StateWaiting && prevState != task.StateAsking && prevState != task.StateHasPlan {
-		t.SetState(task.StateRunning)
-	}
-	opts.MsgCh = msgCh
-	opts.Log = log
-	opts.HistoryPath = r.LogPath.Get()
-	session, err := r.Backends[t.Harness].AttachRelay(ctx, opts)
+	session, err := r.Backends[t.Harness].AttachRelay(run.ctx, opts) //nolint:contextcheck // The execution owns this transport lifetime.
 	if err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		_ = log.Close()
-		// An attachment failure cannot resolve a pending question or plan.
-		t.SetStateIf(task.StateRunning, task.StateWaiting)
-		r.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
-		return nil, fmt.Errorf("reconnect: %w", err)
+		return nil, errors.Join(fmt.Errorf("reconnect: %w", err), r.closeRun(t, run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
+	h := &SessionHandle{Session: session, Run: run}
 	t.AttachSession(h)
 	return h, nil
 }
@@ -164,7 +123,10 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		// Session exited immediately (agent was already done).
 		t.DetachSession()
 		err := h.Drain()
-		_ = h.Log.Close()
+		closeErr := r.closeRun(t, h.Run) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+		if closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
 		if t.GetSessionID() != "" {
 			return nil, errors.Join(errors.New("agent session exited before becoming ready"), err)
 		}
@@ -179,7 +141,7 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		return h, nil
 	case <-ctx.Done():
 		t.DetachSession()
-		return nil, errors.Join(ctx.Err(), h.Drain(), h.Log.Close())
+		return nil, errors.Join(ctx.Err(), h.Drain(), r.closeRun(t, h.Run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	}
 }
 
@@ -191,13 +153,14 @@ func (r *AgentRuntime) StartSession(ctx context.Context, t *Task, prompt agent.P
 	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	log, err := r.openLog(t)
+	run, err := r.beginRun(ctx, t, false, false)
 	if err != nil {
 		return nil, err
 	}
-	h, err := r.startSessionWithLog(ctx, t, prompt, log)
+	defer close(run.startupDone)
+	h, err := r.startSessionWithRun(t, prompt, run)
 	if err != nil {
-		return nil, errors.Join(err, log.Close())
+		return nil, errors.Join(err, r.closeRun(t, run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	}
 	return h, nil
 }
@@ -229,6 +192,8 @@ func (r *AgentRuntime) ClearContextSession(ctx context.Context, t *Task) (*Sessi
 //  4. Send the initial prompt to the agent.
 //
 // The session is left open for follow-up messages via SendInput.
+//
+//nolint:contextcheck // Run owns setup and transport cancellation independently of its caller.
 func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken string) (*SessionHandle, error) {
 	ctx, span := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer span.End()
@@ -236,12 +201,16 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	// The Manager has already assigned every repo's branch name. The branch is
 	// created during setup, so the log can open with the durable, branch-derived
 	// filename and persist output from its first line.
-	log, err := r.openLog(t)
+	run, err := r.beginRun(ctx, t, false, false)
 	if err != nil {
 		startupErr := &StartupError{Harness: t.Harness, Phase: "task log setup", Err: err}
-		t.recordStartupFailure(ctx, startupErr)
+		t.SetState(task.StateFailed)
 		return nil, startupErr
 	}
+
+	defer close(run.startupDone)
+	ctx = run.ctx
+	records := run.records
 
 	if r.Checkout != nil {
 		t.SetState(task.StateBranching)
@@ -255,13 +224,15 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 		metadata = runtime.Metadata{}
 	}
 	maps.Copy(metadata, MakeMetadata(t))
-	sr, err := r.setup(ctx, t, metadata, resolvedGitHubToken, log)
+	sr, err := r.setup(ctx, t, metadata, resolvedGitHubToken, records)
 	region.End()
 	if err != nil {
-		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "runtime setup", Err: err})
+		return nil, r.finishStartupFailure(ctx, t, run, &StartupError{Harness: t.Harness, Phase: "runtime setup", Err: err})
 	}
 	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtimes.VNCPort(ctx, sr.InstanceID))
-	r.recordCommitBaseline(ctx, t, log, sr.InstanceID)
+	if err := r.recordCommitBaseline(ctx, records, sr.InstanceID); err != nil {
+		return nil, r.finishStartupFailure(ctx, t, run, err)
+	}
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -270,14 +241,6 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 
 	// 2. Start the agent session.
 	t.SetState(task.StateStarting)
-	var msgCh chan agent.TimedMessage
-	var dispatchDone <-chan struct{}
-	var dispatchWork *sync.WaitGroup
-	{
-		region := trace.StartRegion(ctx, "dispatch-init")
-		msgCh, dispatchDone, dispatchWork = r.startMessageDispatch(ctx, t, log)
-		region.End()
-	}
 
 	tSession := time.Now()
 	tlog := r.Log.With("br", primaryBranch, "instance", sr.InstanceID)
@@ -292,30 +255,24 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 		Effort:          t.RequestedEffort,
 		InitialPrompt:   t.InitialPrompt,
 		ResumeSessionID: t.GetSessionID(),
-		MsgCh:           msgCh,
-		Log:             log,
+		Records:         records,
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "task-scoped MCP setup", Err: err})
+		return nil, r.finishStartupFailure(ctx, t, run, &StartupError{Harness: t.Harness, Phase: "task-scoped MCP setup", Err: err})
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	region.End()
 	if err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
 		tlog.Error("session start failed", "err", err)
-		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "agent startup", Err: err})
+		return nil, r.finishStartupFailure(ctx, t, run, &StartupError{Harness: t.Harness, Phase: "agent startup", Err: err})
 	}
 
 	// Store handle so SendInput can reach it.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
+	h := &SessionHandle{Session: session, Run: run}
 	t.AttachSession(h)
 
-	// Use SetStateIf so that a fast agent subprocess that already
-	// produced a result (and was processed by the dispatch goroutine
-	// via addMessage) isn't overwritten back to Running.
+	// Keep a result already applied by the recording owner during startup
+	// from being overwritten back to Running.
 	t.SetStateIf(task.StateStarting, task.StateRunning)
 	tlog.Info("agent running", "session_dur", time.Since(tSession), "total_startup_dur", time.Since(tStart))
 	return h, nil
@@ -351,7 +308,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
-	// Stats come from live accumulators updated by startMessageDispatch.
+	// Stats come from the committed-message fold.
 	gStart := time.Now()
 	h, gsErr := t.GracefulStopSession(ctx, 20*time.Second)
 	if h != nil {
@@ -370,19 +327,18 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	// authorize deletion: unsynced work lives only in the container's branch, and
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
+	var summaryErr error
 	if reason == task.StatePurged && !t.DiffCreated() && name != "" && r.Checkout != nil {
 		snapshot, err := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, t.GitTarget())
 		switch {
 		case err != nil:
 			tlog.WarnContext(ctx, "verify empty task branch failed", "err", err)
 		case len(snapshot.DiffStat) > 0:
-			t.SetLiveRepositorySummary(&snapshot)
+			_, summaryErr = r.RecordRepositorySummary(ctx, t, &snapshot)
 		default:
 			branchConfirmedEmpty = true
 		}
 	}
-
-	t.SetState(reason)
 
 	runtimeRemovedOrAbsent := name == ""
 	if name != "" {
@@ -416,6 +372,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	}
 
 	res := task.Result{
+		Err:         summaryErr,
 		State:       reason,
 		AgentResult: t.LastAgentResult(),
 	}
@@ -433,35 +390,17 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 			r.Checkout.DeleteUnmodifiedTaskBranches(ctx, r.Log, t)
 		}
 	}
-	var log agent.LogSink
+	var recordErr error
 	if h != nil {
-		log = h.Log
+		recordErr = r.finalizeRun(ctx, t, h.Run, &res)
 	} else {
-		// Task was stopped before purge: the session handle (and its Log) was
-		// released by StopTask. Reopen the log for appending so we can write
-		// the caic_result trailer; without it the task would load as "failed"
-		// on the next server restart instead of "purged".
-		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
-		var reopenErr error
-		log, reopenErr = r.reopenLog(t)
-		if reopenErr != nil {
-			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
-		}
+		recordErr = r.CommitSettledResult(ctx, t, &res)
 	}
-	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
-	if trailerErr != nil {
-		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
-	}
-	if log != nil {
-		if trailerErr != nil {
-			if err := log.Close(); err != nil {
-				tlog.WarnContext(ctx, "close log failed", "err", err)
-			}
-		} else if err := r.compressLog(log, t, &res); err != nil {
-			tlog.WarnContext(ctx, "compress task log failed", "err", err)
-		} else {
-			tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
-		}
+	if recordErr != nil {
+		res.Err = errors.Join(res.Err, recordErr)
+	} else {
+		t.SetState(reason)
+		res.Err = errors.Join(res.Err, r.compressLog(nil, t, &res))
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)
@@ -526,9 +465,8 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 	}
 
 	if _, changed := t.SetStateUnless(task.StateStopped, task.StatePurging, task.StatePurged, task.StateCrashed, task.StateFailed); !changed {
-		if h != nil && h.Log != nil {
-			_ = h.Log.Close()
-		}
+		// A purge or a crash already settled this incarnation and owns its record
+		// owner, so a stop must not record a result over it.
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
 		return nil
 	}
@@ -551,144 +489,77 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
-	var log agent.LogSink
+	var recordErr error
 	if h != nil {
-		log = h.Log
-	} else if r.LogPath.Get() != "" {
-		// A failed revive has no attached session. Reopen its preserved log
-		// so stopping the instance also persists the retryable task state.
-		var err error
-		log, err = r.reopenLog(t)
-		if err != nil {
-			tlog.WarnContext(ctx, "reopen stopped task log failed", "err", err)
-		}
+		recordErr = r.finalizeRun(ctx, t, h.Run, &res)
+	} else {
+		recordErr = r.CommitSettledResult(ctx, t, &res)
 	}
-	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
-	if trailerErr != nil {
-		tlog.WarnContext(ctx, "write log trailer failed", "err", trailerErr)
-	}
-	var closeErr error
-	if log != nil {
-		closeErr = log.Close()
-		if closeErr != nil {
-			tlog.WarnContext(ctx, "close log failed", "err", closeErr)
-		}
-	}
+
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
-	res.Err = errors.Join(trailerErr, closeErr)
+	res.Err = recordErr
 	return &res
 }
 
 // ReviveTask restarts a stopped or crashed instance and resumes the agent session.
 // The instance's filesystem is preserved from the previous run.
 func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
-	ctx, span := trace.NewTask(ctx, "task.revive:"+t.ID.String())
-	defer span.End()
-
 	if (t.InitialPrompt.Text != "" || len(t.InitialPrompt.Images) > 0) && !t.HasAcceptedInputEvidence() {
 		return nil, ErrInitialPromptNotAccepted
 	}
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
+	id := t.RuntimeInstanceID()
+	if id == "" {
 		return nil, errors.New("no instance to revive")
 	}
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
-
-	// Reject read-only history before changing task state or the instance.
-	intentLog, err := r.reopenLog(t)
+	_, accepted, err := r.RecordLifecycleIntent(ctx, t, task.StateProvisioning, task.StateProvisioning, task.StateStopped, task.StateCrashed)
 	if err != nil {
 		return nil, err
 	}
-	if state, changed := t.SetStateIfAny(task.StateProvisioning, task.StateStopped, task.StateCrashed, task.StateProvisioning); !changed {
-		return nil, errors.Join(fmt.Errorf("cannot revive in state %s", state), intentLog.Close())
+	if !accepted {
+		return nil, fmt.Errorf("cannot revive in state %s", t.GetState())
 	}
-	// Accepting revival clears a prior stop/purge intent before any runtime
-	// side effects. Interrupted revival remains recoverable on restart.
-	if err := errors.Join(r.LogStore.WriteResultTrailer(intentLog, t.Title(), &task.Result{State: task.StateProvisioning}), intentLog.Close()); err != nil {
+	run, err := r.beginRun(ctx, t, true, false)
+	if err != nil {
+		t.SetState(task.StateCrashed)
+		r.NotifyTaskChange()
 		return nil, err
 	}
+	defer close(run.startupDone)
+	return r.reviveRun(t, run)
+}
 
-	// 1. Revive the instance.
-	tlog.Info("reviving instance")
-	tlog.Debug("checkout", "msg", "calling instance.Revive")
-	if err := r.Runtimes.Revive(ctx, instanceID); err != nil {
-		tlog.Error("checkout", "msg", "Revive failed", "err", err)
-		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("revive instance: %w", err), nil)
-	}
-	tlog.Debug("checkout", "msg", "Revive succeeded", "instance", instanceID)
-	t.SetVNCPort(r.Runtimes.VNCPort(ctx, instanceID))
-
-	// 2. Start a new relay with --resume to continue the previous session.
-	// Resuming restores harness context inside a fresh relay. Its output is
-	// live activity, so keep tool and turn measurements enabled.
-	t.SetState(task.StateStarting)
-	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
-
-	// Restore archived history rather than creating a replacement segment.
-	log, err := r.reopenLog(t)
+// RecoverRetainedSession records recovery intent before stopping an unverified
+// retained runtime, then resumes it through the same newly owned execution.
+func (r *AgentRuntime) RecoverRetainedSession(ctx context.Context, t *Task, expectedState task.State) (*SessionHandle, error) {
+	_, accepted, err := r.RecordLifecycleIntent(ctx, t, task.StateProvisioning, task.StateProvisioning, expectedState)
 	if err != nil {
-		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
+		return nil, err
 	}
-
-	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
-
-	target := t.RuntimeConnectionTarget()
-	opts := &agent.Options{
-		Logger:          r.Log,
-		Target:          target,
-		Dir:             r.runtimeDir(t),
-		Model:           t.RequestedModel,
-		Effort:          t.RequestedEffort,
-		ResumeSessionID: t.GetSessionID(),
-		MsgCh:           msgCh,
-		Log:             log,
+	if !accepted {
+		return nil, fmt.Errorf("cannot recover in state %s", t.GetState())
 	}
-	if err := r.configureTaskMCP(t, opts); err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		return nil, r.finishReviveFailure(ctx, t, err, log)
-	}
-	session, err := r.Backends[t.Harness].Start(ctx, opts)
+	run, err := r.beginRun(ctx, t, true, false)
 	if err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("resume session after revive: %w", err), log)
+		t.SetState(task.StateCrashed)
+		r.NotifyTaskChange()
+		return nil, err
 	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
-	// Resume has no prompt. Publish idle before exposing the handle, so
-	// input during the readiness wait owns the next Running transition.
-	t.SetStateIf(task.StateStarting, task.StateWaiting)
-	t.AttachSession(h)
-
-	// 3. An immediately exiting resumed agent fails without discarding context.
-	// Tasks without a saved session may start a fresh idle relay.
-	h, err = r.EnsureSession(ctx, tlog, t, h)
-	if err != nil {
-		return nil, r.finishReviveFailure(ctx, t, err, nil)
+	defer close(run.startupDone)
+	if err := r.Runtimes.Stop(run.ctx, t.RuntimeInstanceID()); err != nil { //nolint:contextcheck // Retained recovery belongs to the independently cancelable execution.
+		failure := fmt.Errorf("stop retained instance before recovery: %w", err)
+		t.SetState(task.StateCrashed)
+		return nil, errors.Join(failure, r.finalizeRun(context.WithoutCancel(ctx), t, run, &task.Result{State: task.StateCrashed, Err: failure}))
 	}
-
-	// 4. Restore diff stat and per-repo states before returning. Subsequent
-	// mutating tool results refresh them through normal message dispatch.
-	if r.Checkout != nil {
-		snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, t.GitTarget())
-		if snapshot.Read.NewerThan(repo.GitRead{}) {
-			t.SetLiveRepositorySummary(&snapshot)
-		}
-	}
-	tlog.Info("agent ready after revive", "state", t.GetState())
-	return h, nil
+	return r.reviveRun(t, run)
 }
 
 // ForkTask snapshots the source task's instance and starts an idle agent
 // session in the forked instance. The new task must already have its ID,
 // Harness, Model, and other immutable fields set. The method fills in
 // Runtime, Repos[*].Branch, and starts the session.
+//
+//nolint:contextcheck // The new execution owns fork setup and transport cancellation independently of its caller.
 func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpts *runtime.ForkOptions, resolvedGitHubToken string) (*SessionHandle, error) {
 	ctx, span := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
 	defer span.End()
@@ -741,18 +612,21 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	maps.Copy(metadata, MakeMetadata(fork))
 	forkOpts.Metadata = metadata
 
-	log, err := r.openLog(fork)
+	run, err := r.beginRun(ctx, fork, false, false)
 	if err != nil {
-		fork.recordStartupFailure(ctx, err)
+		fork.SetState(task.StateFailed)
 		return nil, err
 	}
+
+	defer close(run.startupDone)
+	ctx = run.ctx
 
 	// 2. Fork the runtime instance. The runtime creates exactly the branch we
 	// reserved (it owns uniqueness otherwise); provisioning output streams
 	// straight to the already-open log.
 	tlog.Info("forking instance", "br", forkBranch)
 	tlog.Debug("checkout", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
-	provisioningLog := &provisioningWriter{ctx: ctx, t: fork, log: log}
+	provisioningLog := &provisioningWriter{ctx: ctx, records: run.records}
 	forkOpts.LogWriter = provisioningLog
 	forkName, forkConn, err := r.Runtimes.Fork(ctx, sourceInstanceID, forkOpts)
 	if flushErr := provisioningLog.Flush(); flushErr != nil {
@@ -760,7 +634,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	}
 	if err != nil {
 		tlog.Error("checkout", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
-		return nil, r.finishStartupFailure(ctx, fork, log, fmt.Errorf("fork instance: %w", err))
+		return nil, r.finishStartupFailure(ctx, fork, run, fmt.Errorf("fork instance: %w", err))
 	}
 	tlog.Debug("checkout", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
 	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Runtimes.VNCPort(ctx, forkName))
@@ -782,12 +656,169 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	// 3. Start a fresh agent session with the fork prompt.
 	// No --resume: the fork gets its own session ID and clean message history.
 	fork.SetState(task.StateStarting)
-	h, err := r.startSessionWithLog(ctx, fork, fork.InitialPrompt, log)
+	h, err := r.startSessionWithRun(fork, fork.InitialPrompt, run)
 	if err != nil {
 		startupErr := fmt.Errorf("start session on fork: %w", err)
-		return nil, r.finishStartupFailure(ctx, fork, log, startupErr)
+		return nil, r.finishStartupFailure(ctx, fork, run, startupErr)
 	}
 	tlog.Info("fork session running", "instance", forkName)
+	return h, nil
+}
+
+// RecordHost records an intentional mutation through the active owner, or an
+// exclusive short-lived owner when the execution has settled.
+func (r *AgentRuntime) RecordHost(ctx context.Context, t *Task, m agent.Message) error {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if err := t.recordingAdmissionErrorLocked(); err != nil {
+		return err
+	}
+	if t.run.Load() != nil {
+		return t.run.Load().records.AppendMessage(ctx, m)
+	}
+	return r.recordSettled(ctx, t, []agent.Message{m}, nil)
+}
+
+// RecordRepositorySummary admits a completed Git read in physical stream order.
+func (r *AgentRuntime) RecordRepositorySummary(ctx context.Context, t *Task, read *repo.GitSnapshot) (bool, error) {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if err := t.recordingAdmissionErrorLocked(); err != nil {
+		return false, err
+	}
+	intent := &repositoryIntent{task: t, read: read}
+	var err error
+	if t.run.Load() != nil {
+		err = t.run.Load().records.CommitIntent(ctx, intent)
+	} else {
+		err = r.recordSettled(ctx, t, nil, intent)
+	}
+	return intent.changed, err
+}
+
+// RecordLifecycleIntent persists an accepted state intent before publishing its
+// runtime transition. Rejected intents publish neither records nor transitions.
+func (r *AgentRuntime) RecordLifecycleIntent(ctx context.Context, t *Task, persistedState, runtimeState task.State, allowedStates ...task.State) (task.State, bool, error) {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if err := t.recordingAdmissionErrorLocked(); err != nil {
+		return t.GetState(), false, err
+	}
+	intent := &lifecycleIntent{runtime: r, task: t, persisted: persistedState, state: runtimeState, allowed: allowedStates}
+	if t.run.Load() == nil {
+		intent.previous = t.GetState()
+		if !slices.Contains(allowedStates, intent.previous) {
+			return intent.previous, false, nil
+		}
+	}
+	var err error
+	if t.run.Load() != nil {
+		err = t.run.Load().records.CommitIntent(ctx, intent)
+	} else {
+		err = r.recordSettled(ctx, t, nil, intent)
+	}
+	return intent.previous, intent.accepted && err == nil, err
+}
+
+// CommitSettledResult records a result only when no execution owns the journal.
+func (r *AgentRuntime) CommitSettledResult(ctx context.Context, t *Task, res *task.Result) error {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.run.Load() != nil {
+		return errors.New("cannot finalize a settled task with an active execution")
+	}
+	return r.recordSettled(ctx, t, []agent.Message{taskhistory.ResultMessage(t.Title(), res)}, nil)
+}
+
+// Shutdown cancels and joins local producers without stopping a retained remote
+// relay. It also joins startup before claiming and closing the record owner.
+func (r *AgentRuntime) Shutdown(ctx context.Context, t *Task) error {
+	r.Cancel(t)
+	t.recordingMu.Lock()
+	run := t.run.Load()
+	t.recordingMu.Unlock()
+	if run == nil {
+		return nil
+	}
+	<-run.startupDone
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.run.Load() != run {
+		return nil
+	}
+	var transportErr error
+	if h := t.DetachSession(); h != nil {
+		transportErr = h.Drain()
+	}
+	t.run.Store(nil)
+	_ = ctx
+	return localShutdownError(errors.Join(transportErr, run.close())) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+}
+
+// Cancel stops future execution admission and interrupts existing local
+// producers without waiting or closing recording. Cancellation is repeatable;
+// Shutdown is the single joining and physical-close operation.
+func (r *AgentRuntime) Cancel(t *Task) {
+	t.shuttingDown.Store(true)
+	if run := t.run.Load(); run != nil {
+		run.cancel(context.Canceled)
+	}
+}
+
+// FinishSession claims the expected execution after its transport has joined.
+// Operational failures affect runtime health without inventing agent messages.
+func (r *AgentRuntime) FinishSession(ctx context.Context, t *Task, h *SessionHandle, sessionErr error) (bool, error) {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.run.Load() != h.Run {
+		return false, nil
+	}
+	t.DetachSession()
+	joinErr := h.Run.joinTitles() //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+	if sessionErr != nil {
+		if !t.MarkSessionFailed() {
+			t.MarkSessionCrashed()
+		}
+	}
+	var appendErr error
+	state := t.GetState()
+	if state == task.StateFailed || state == task.StateCrashed {
+		appendErr = h.Run.records.AppendMessage(ctx, taskhistory.ResultMessage(t.Title(), &task.Result{State: state, Err: sessionErr, AgentResult: t.LastAgentResult()}))
+	}
+	t.run.Store(nil)
+	closeErr := h.Run.close() //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+	return true, errors.Join(joinErr, appendErr, closeErr)
+}
+
+func (r *AgentRuntime) reviveRun(t *Task, run *Run) (*SessionHandle, error) {
+	ctx := run.ctx
+	id := t.RuntimeInstanceID()
+	if err := r.Runtimes.Revive(ctx, id); err != nil {
+		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("revive instance: %w", err), run)
+	}
+	t.SetVNCPort(r.Runtimes.VNCPort(ctx, id))
+	t.SetState(task.StateStarting)
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, ResumeSessionID: t.GetSessionID(), Records: run.records}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		return nil, r.finishReviveFailure(ctx, t, err, run)
+	}
+	session, err := r.Backends[t.Harness].Start(ctx, opts)
+	if err != nil {
+		return nil, r.finishReviveFailure(ctx, t, err, run)
+	}
+	h := &SessionHandle{Session: session, Run: run}
+	t.SetStateIf(task.StateStarting, task.StateWaiting)
+	t.AttachSession(h)
+	h, err = r.EnsureSession(run.parent, r.Log, t, h)
+	if err != nil {
+		return nil, r.finishReviveFailure(ctx, t, err, nil)
+	}
+	if r.Checkout != nil {
+		snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, t.GitTarget())
+		if _, err := r.RecordRepositorySummary(ctx, t, &snapshot); err != nil {
+			return nil, err
+		}
+	}
 	return h, nil
 }
 
@@ -822,7 +853,7 @@ func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
 		return nil, err
 	}
 	r.LogPath.Set(path)
-	return &relayLog{LogSink: log, task: t}, nil
+	return log, nil
 }
 
 func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
@@ -841,7 +872,7 @@ func (r *AgentRuntime) reopenLog(t *Task) (agent.LogSink, error) {
 		return nil, err
 	}
 	r.LogPath.Set(path)
-	return &relayLog{LogSink: log, task: t}, nil
+	return log, nil
 }
 
 func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *task.Result) error {
@@ -856,9 +887,9 @@ func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *task.Result)
 // setup creates the reserved task branch before launching the runtime, then
 // connects to the instance. The ordering ensures runtimes never receive a
 // mapped branch that does not exist yet.
-func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, log agent.LogSink) (setupResult, error) {
+func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, records *agent.Records) (setupResult, error) {
 	t.SetState(task.StateProvisioning)
-	detached := context.WithoutCancel(ctx)
+	detached := ctx
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -872,7 +903,7 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 	if runtimeName == "" {
 		runtimeName = r.Runtimes.Runtimes[0].Name()
 	}
-	provisioningLog := &provisioningWriter{ctx: ctx, t: t, log: log}
+	provisioningLog := &provisioningWriter{ctx: ctx, records: records}
 	opts := &runtime.StartOptions{
 		RuntimeName:       runtimeName,
 		Metadata:          metadata,
@@ -951,56 +982,37 @@ func (r *AgentRuntime) configureTaskMCP(t *Task, opts *agent.Options) error {
 // finishReviveFailure stops a partially revived instance and records a
 // retryable crash. The preserved instance and uncompressed log permit another
 // revive after the cause is repaired.
-func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveErr error, log agent.LogSink) error {
-	// Keep revive in progress until cleanup and log closure finish, so another
-	// revive cannot race with stopping this instance or writing its trailer.
-	defer t.SetStateUnless(task.StateCrashed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
-	if h := t.CloseAndDetachSession(context.WithoutCancel(ctx)); h != nil {
-		h.CloseMsgCh()
-		h.WaitDispatch()
-		if log == nil {
-			log = h.Log
-		}
-	}
-	// Revive can start the instance before returning an error. Stop even when
-	// the caller was cancelled so the task does not strand a running instance.
+func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveErr error, run *Run) error {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	stopErr := r.Runtimes.Stop(stopCtx, t.RuntimeInstanceID())
 	cancel()
-	if stopErr != nil {
-		reviveErr = errors.Join(reviveErr, fmt.Errorf("stop partially revived instance: %w", stopErr))
+	t.SetStateUnless(task.StateCrashed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
+	res := &task.Result{State: task.StateCrashed, Err: reviveErr}
+	if run == nil {
+		return errors.Join(reviveErr, stopErr, r.CommitSettledResult(context.WithoutCancel(ctx), t, res))
 	}
-	var reopenErr error
-	if log == nil {
-		log, reopenErr = r.reopenLog(t)
-	}
-	if log == nil {
-		return errors.Join(reviveErr, reopenErr)
-	}
-	res := task.Result{State: task.StateCrashed, Err: reviveErr}
-	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
-	return errors.Join(reviveErr, trailerErr, log.Close())
+	_, drainErr := t.CloseAndDetachSession(context.WithoutCancel(ctx))
+	err := run.records.AppendMessage(context.WithoutCancel(ctx), taskhistory.ResultMessage(t.Title(), res))
+	return errors.Join(reviveErr, stopErr, drainErr, err, r.closeRun(t, run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 }
 
-// finishStartupFailure removes a started instance and records the startup
-// error in the task log so the failure survives a server restart.
-func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log agent.LogSink, startupErr error) error {
-	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
-	writeErr := log.AppendMessage(failure)
-	t.SetState(task.StateFailed)
-	t.addMessage(ctx, failure)
-	purgeErr := r.purgeFailedStartupInstance(ctx, t)
-
-	res := task.Result{State: task.StateFailed, Err: startupErr}
+// finishStartupFailure publishes operational health even when recording fails,
+// but only accepted controls enter the task timeline.
+func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, run *Run, startupErr error) error {
+	res := &task.Result{State: task.StateFailed, Err: startupErr}
 	if failure, ok := errors.AsType[*StartupError](startupErr); ok {
 		details := failure.Details()
 		res.StartupFailure = &details
 	}
-	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
-	if writeErr != nil || trailerErr != nil {
-		return errors.Join(startupErr, purgeErr, writeErr, trailerErr, log.Close())
+	writeErr := run.records.AppendMessages(context.WithoutCancel(ctx), []agent.Message{&agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}, taskhistory.ResultMessage(t.Title(), res)})
+	t.SetState(task.StateFailed)
+	purgeErr := r.purgeFailedStartupInstance(ctx, t)
+	closeErr := r.closeRun(t, run) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+	var compressErr error
+	if writeErr == nil && closeErr == nil {
+		compressErr = r.compressLog(nil, t, res)
 	}
-	return errors.Join(startupErr, purgeErr, r.compressLog(log, t, &res))
+	return errors.Join(startupErr, writeErr, purgeErr, closeErr, compressErr)
 }
 
 // purgeFailedStartupInstance removes an instance created for a task that
@@ -1042,37 +1054,16 @@ func (r *AgentRuntime) logRelayDiag(ctx context.Context, tlog *slog.Logger, targ
 	tlog.Warn("relay.log tail on shutdown timeout", "log", tail)
 }
 
-func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt agent.Prompt, log agent.LogSink) (*SessionHandle, error) {
-	ctx, span := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
-	defer span.End()
-
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
+func (r *AgentRuntime) startSessionWithRun(t *Task, prompt agent.Prompt, run *Run) (*SessionHandle, error) {
+	ctx := run.ctx
+	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
 	}
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
+	if err := r.recordCommitBaseline(ctx, run.records, t.RuntimeInstanceID()); err != nil {
+		return nil, err
 	}
-	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
-
-	r.recordCommitBaseline(ctx, t, log, instanceID)
-	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
-	tlog.Info("starting session", "hns", t.Harness)
-	target := t.RuntimeConnectionTarget()
-	opts := &agent.Options{
-		Logger:        r.Log,
-		Target:        target,
-		Dir:           r.runtimeDir(t),
-		Model:         t.RequestedModel,
-		Effort:        t.RequestedEffort,
-		InitialPrompt: prompt,
-		MsgCh:         msgCh,
-		Log:           log,
-	}
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, InitialPrompt: prompt, Records: run.records}
 	if err := r.configureTaskMCP(t, opts); err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
 		return nil, err
 	}
 	if prompt.Text != "" || len(prompt.Images) > 0 {
@@ -1080,192 +1071,50 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		tlog.Error("session start failed", "err", err)
 		return nil, err
 	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
+	h := &SessionHandle{Session: session, Run: run}
 	t.AttachSession(h)
-	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.SetStateIf(task.StateStarting, task.StateRunning)
-	}
 	return h, nil
 }
 
 func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent.Prompt, mode replaceSessionMode) (*SessionHandle, error) {
-	traceName := "task.clear-context:"
-	if mode == replaceSessionRestart {
-		traceName = "task.restart:"
-	}
-	ctx, span := trace.NewTask(ctx, traceName+t.ID.String())
-	defer span.End()
-
 	state := t.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateStarting {
 		return nil, fmt.Errorf("cannot %s in state %s", mode, state)
 	}
-
-	// Validate the retained log before closing the session or clearing history.
-	log, err := r.openLog(t)
-	if err != nil {
-		t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
-		return nil, fmt.Errorf("open log: %w", err)
-	}
-
-	// Close current session and persist a context_cleared marker. The marker
-	// must be written before closing the old log so SeedTimeline can reset
-	// plan state on server restart.
-	oldH := t.CloseAndDetachSession(ctx)
-	if oldH != nil {
-		oldH.CloseMsgCh()
-		oldH.WaitDispatch()
-		if oldH.Log != nil {
-			err := r.LogStore.WriteContextCleared(oldH.Log)
-			err = errors.Join(err, oldH.Log.Close())
-			if err != nil {
-				t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
-				return nil, errors.Join(fmt.Errorf("write context cleared: %w", err), log.Close())
-			}
+	old, drainErr := t.CloseAndDetachSession(ctx)
+	if old != nil {
+		if drainErr != nil {
+			return nil, errors.Join(drainErr, r.closeRun(t, old.Run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+		}
+		if err := old.Run.joinTitles(); err != nil { //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+			return nil, errors.Join(err, r.closeRun(t, old.Run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+		}
+		if err := old.Run.records.AppendMessage(ctx, agent.ContextCleared()); err != nil {
+			return nil, errors.Join(err, r.closeRun(t, old.Run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+		}
+		if err := r.closeRun(t, old.Run); err != nil { //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+			return nil, err
+		}
+	} else {
+		if err := r.RecordHost(ctx, t, agent.ContextCleared()); err != nil {
+			return nil, err
 		}
 	}
-
-	// Clear in-memory messages.
-	t.ClearMessages(ctx)
 	r.NotifyTaskChange()
-
-	// Start new session.
-	t.SetState(task.StateStarting)
-	msgCh, dispatchDone, dispatchWork := r.startMessageDispatch(ctx, t, log)
-
-	var branch string
-	if p := t.Primary(); p != nil {
-		branch = p.Branch
+	if mode == replaceSessionClearContext {
+		prompt = agent.Prompt{}
 	}
-	instanceID := t.RuntimeInstanceID()
-	tlog := r.Log.With("br", branch, "instance", instanceID)
-	tlog.Info(mode.logMessage(), "hns", t.Harness)
-	r.recordCommitBaseline(ctx, t, log, instanceID)
-	target := t.RuntimeConnectionTarget()
-	opts := &agent.Options{
-		Logger: r.Log,
-		Target: target,
-		Dir:    r.runtimeDir(t),
-		Model:  t.RequestedModel,
-		Effort: t.RequestedEffort,
-		MsgCh:  msgCh,
-		Log:    log,
-	}
-	if mode == replaceSessionRestart {
-		opts.InitialPrompt = prompt
-	}
-	if err := r.configureTaskMCP(t, opts); err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		_ = log.Close()
+	h, err := r.StartSession(ctx, t, prompt)
+	if err != nil {
 		t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
 		return nil, err
 	}
-	backend := r.Backends[t.Harness]
-	if backend == nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		_ = log.Close()
-		t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
-		return nil, fmt.Errorf("unknown harness %q", t.Harness)
-	}
-	session, err := backend.Start(ctx, opts)
-	if err != nil {
-		close(msgCh)
-		dispatchWork.Wait()
-		_ = log.Close()
-		t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
-		return nil, fmt.Errorf("start session: %w", err)
-	}
-
-	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log, dispatchWork: dispatchWork}
-	t.AttachSession(h)
-	if mode == replaceSessionRestart {
-		t.SetStateIf(task.StateStarting, task.StateRunning)
-		tlog.Info("session restarted")
-	} else {
-		t.SetState(task.StateWaiting)
-		tlog.Info("context cleared")
+	if mode == replaceSessionClearContext {
+		t.SetStateIf(task.StateStarting, task.StateWaiting)
 	}
 	return h, nil
-}
-
-// startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
-// t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}, work *sync.WaitGroup) {
-	// Capture all repos outside the goroutine to avoid races.
-	target := t.GitTarget()
-	allRepos := target.Repos
-	instanceID := target.InstanceID
-	msgCh = make(chan agent.TimedMessage, 256)
-	done := make(chan struct{})
-	dispatchDone = done
-	work = &sync.WaitGroup{}
-	work.Go(func() {
-		defer close(done)
-		var titleWork sync.WaitGroup
-		defer titleWork.Wait()
-		// Track tool_use IDs from ToolUseMessage that may mutate files.
-		pendingMutating := make(map[agent.ToolKey]struct{})
-		for parsed := range msgCh {
-			m := parsed.Message
-			emitToolDiff := false
-			var commitSnapshot *agent.TurnCommitSnapshotMessage
-			var resultRead *repo.GitSnapshot
-			switch msg := m.(type) {
-			case *agent.ToolUseMessage:
-				if _, ok := mutatingTools[msg.Name]; ok {
-					pendingMutating[agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID)] = struct{}{}
-				}
-			case *agent.ToolResultMessage:
-				if _, ok := pendingMutating[agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID)]; ok {
-					delete(pendingMutating, agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID))
-					emitToolDiff = r.Runtimes != nil && r.Checkout != nil
-				}
-			case *agent.ResultMessage:
-				if msg.Source.IsChild() {
-					break
-				}
-				if r.Runtimes != nil && r.Checkout != nil {
-					previous := t.latestCommitSnapshot()
-					var baseline []v3.RepositoryCommit
-					if previous != nil {
-						baseline = previous.RepositoryCommits
-					}
-					snapshot, commits, change, _ := r.Checkout.TurnSnapshot(ctx, r.Log, r.Runtimes, target, baseline)
-					resultRead = &snapshot
-					msg.DiffStat = snapshot.DiffStat
-					if len(commits) > 0 {
-						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits, false, change)
-					}
-				}
-			}
-			stateChanged, persistErr := t.addParsedMessageWithGitSnapshot(parsed, resultRead, log)
-			if persistErr != nil {
-				r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
-			}
-			if commitSnapshot != nil {
-				r.persistCommitSnapshot(ctx, log, commitSnapshot, instanceID)
-				t.addMessage(ctx, commitSnapshot)
-			}
-			if stateChanged {
-				r.NotifyTaskChange()
-			}
-			if _, result := parsed.Message.(*agent.ResultMessage); result && !parsed.Message.Provenance().IsChild() && t.titleRefreshDue() {
-				titleWork.Go(func() { t.GenerateTitle(ctx, r.Log) })
-			}
-			if emitToolDiff {
-				r.emitDiffStatBranch(ctx, t, instanceID, allRepos, log)
-			}
-		}
-	})
-	return msgCh, dispatchDone, work
 }
 
 // fetchTurnCommits makes the finished turn's committed work durable on the
@@ -1297,54 +1146,15 @@ func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []v3
 // recordCommitBaseline records the branch tips from immediately before a new
 // agent session, making the first completed turn comparable to the task state
 // it inherited.
-func (r *AgentRuntime) recordCommitBaseline(ctx context.Context, t *Task, log agent.LogSink, id runtime.ID) {
-	if r.Checkout == nil || r.Runtimes == nil || log == nil {
-		return
+func (r *AgentRuntime) recordCommitBaseline(ctx context.Context, records *agent.Records, id runtime.ID) error {
+	if r.Checkout == nil || r.Runtimes == nil {
+		return nil
 	}
 	commits := r.fetchTurnCommits(ctx, id)
 	if len(commits) == 0 {
-		return
+		return nil
 	}
-	snapshot := agent.NewTurnCommitSnapshotMessage(commits, true, nil)
-	if err := log.AppendMessage(snapshot); err != nil {
-		r.Log.WarnContext(ctx, "persisting commit baseline failed", "id", id, "err", err)
-		return
-	}
-	t.addMessage(ctx, snapshot)
-}
-
-// persistCommitSnapshot writes a completed-turn commit snapshot without
-// preventing the turn from completing when persistence is unavailable.
-func (r *AgentRuntime) persistCommitSnapshot(ctx context.Context, log agent.LogSink, snapshot *agent.TurnCommitSnapshotMessage, id runtime.ID) {
-	if log == nil {
-		r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", id, "err", taskslog.ErrNoLog)
-		return
-	}
-	if err := log.AppendMessage(snapshot); err != nil {
-		r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", id, "err", err)
-	}
-}
-
-// emitDiffStatBranch emits a DiffStatMessage from the current in-container
-// diff. This keeps live UI diff stats and repository states fresh during a
-// running turn.
-func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo, log agent.LogSink) {
-	if r.Checkout == nil {
-		return
-	}
-	snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, repo.GitTarget{InstanceID: id, Repos: repos})
-	if len(snapshot.DiffStat) == 0 && len(snapshot.RepoStates) == 0 && len(snapshot.FailedRepos) == 0 {
-		return
-	}
-	changed, persistErr := t.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
-		MessageType: "caic_diff_stat", DiffStat: snapshot.DiffStat, Repos: snapshot.RepoStates,
-	}}, &snapshot, log)
-	if persistErr != nil {
-		r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
-	}
-	if changed {
-		r.NotifyTaskChange()
-	}
+	return records.AppendMessage(ctx, agent.NewTurnCommitSnapshotMessage(commits, true, nil))
 }
 
 // runtimeDir returns the working directory path inside a runtime instance.
@@ -1364,32 +1174,96 @@ func (r *AgentRuntime) runtimeDir(t *Task) string {
 	return "/home/user/src/" + filepath.Base(r.Checkout.Dir)
 }
 
-// relayLog advances the task's verified reconnect cursor only after the
-// physical writer accepts a relay record. Inputs and host controls use the
-// same authority without affecting the cursor. Import sets the initial
-// verified offset; live appends extend it even after an earlier attach.
-type relayLog struct {
-	agent.LogSink
+func (r *AgentRuntime) beginRun(ctx context.Context, t *Task, reopen, warm bool) (*Run, error) {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.shuttingDown.Load() {
+		return nil, errors.New("task runtime is shutting down")
+	}
+	if t.run.Load() != nil {
+		return nil, errors.New("execution already active")
+	}
+	var sink agent.LogSink
+	var err error
+	if reopen {
+		sink, err = r.reopenLog(t)
+	} else {
+		sink, err = r.openLog(t)
+	}
+	if err != nil {
+		return nil, err
+	}
+	lifetime, cancel := context.WithCancelCause(ctx)
+	run := &Run{parent: ctx, ctx: lifetime, cancel: cancel, runtime: r, task: t, startupDone: make(chan struct{}), pendingMutating: make(map[agent.ToolKey]struct{})}
+	run.records, err = agent.NewRecords(context.WithoutCancel(ctx), agent.ApplyRequestedEffort(r.Backends[t.Harness].NewWire(), t.RequestedEffort), sink, run)
+	if err != nil {
+		cancel(err)
+		return nil, errors.Join(err, sink.Close())
+	}
+	t.run.Store(run)
+	if t.shuttingDown.Load() {
+		run.cancel(context.Canceled)
+	}
+	if warm {
+		err = run.records.Replay(run.ctx, r.LogPath.Get()) //nolint:contextcheck // Reconstruction is interrupted by execution shutdown before attachment.
+	}
+	if err == nil {
+		err = run.ctx.Err()
+	}
+	if err != nil {
+		run.cancel(err)
+		close(run.startupDone)
+		t.run.Store(nil)
+		return nil, errors.Join(err, run.close()) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+	}
 
-	task *Task
+	return run, nil
 }
 
-func (l *relayLog) AppendRecord(record agent.PhysicalRecord) error {
-	if err := l.LogSink.AppendRecord(record); err != nil {
+// recordSettled requires recordingMu. It never installs a live execution and
+// cannot compete with a live writer or a concurrent execution installation.
+func (r *AgentRuntime) recordSettled(ctx context.Context, t *Task, messages []agent.Message, intent agent.RecordIntent) error {
+	sink, err := r.reopenLog(t)
+	if err != nil {
 		return err
 	}
-	if record.Provenance.Source != agent.RecordSourceRelay {
-		return nil
+	lifetime, cancel := context.WithCancelCause(ctx)
+	run := &Run{parent: ctx, ctx: lifetime, cancel: cancel, runtime: r, task: t, pendingMutating: make(map[agent.ToolKey]struct{})}
+	run.records, err = agent.NewRecords(ctx, agent.ApplyRequestedEffort(r.Backends[t.Harness].NewWire(), t.RequestedEffort), sink, run)
+	if err != nil {
+		cancel(err)
+		return errors.Join(err, sink.Close())
 	}
-	// The writer has released its lock before taking the task lock. Host
-	// operations may hold the task lock while appending their own controls.
-	l.task.mu.Lock()
-	if record.Provenance.Generation != "" {
-		l.task.RelayOffset = 0
+	if err = run.records.Replay(ctx, r.LogPath.Get()); err == nil {
+		if intent != nil {
+			err = run.records.CommitIntent(ctx, intent)
+		} else {
+			err = run.records.AppendMessages(ctx, messages)
+		}
 	}
-	l.task.RelayOffset += int64(len(record.Encoded))
-	l.task.mu.Unlock()
-	return nil
+	return errors.Join(err, run.close()) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+}
+
+func (r *AgentRuntime) closeRun(t *Task, run *Run) error {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.run.Load() != run {
+		return errors.New("execution ownership changed")
+	}
+	t.run.Store(nil)
+	return run.close()
+}
+
+func (r *AgentRuntime) finalizeRun(ctx context.Context, t *Task, run *Run, res *task.Result) error {
+	t.recordingMu.Lock()
+	defer t.recordingMu.Unlock()
+	if t.run.Load() != run {
+		return errors.New("execution ownership changed")
+	}
+	joinErr := run.joinTitles() //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
+	err := run.records.AppendMessage(ctx, taskhistory.ResultMessage(t.Title(), res))
+	t.run.Store(nil)
+	return errors.Join(joinErr, err, run.close()) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 }
 
 // StartupError identifies a task startup failure without discarding its cause.
@@ -1426,13 +1300,6 @@ func (m replaceSessionMode) String() string {
 	}
 }
 
-func (m replaceSessionMode) logMessage() string {
-	if m == replaceSessionRestart {
-		return "restarting session"
-	}
-	return "clearing context"
-}
-
 const (
 	replaceSessionRestart replaceSessionMode = iota
 	replaceSessionClearContext
@@ -1450,9 +1317,8 @@ type setupResult struct {
 // provisioningWriter is an io.Writer that converts line-by-line output from the
 // instance backend into LogMessage events stored on the task for SSE streaming.
 type provisioningWriter struct {
-	ctx context.Context
-	t   *Task
-	log agent.LogSink
+	ctx     context.Context
+	records *agent.Records
 
 	mu  sync.Mutex
 	buf []byte
@@ -1491,12 +1357,44 @@ func (w *provisioningWriter) Flush() error {
 }
 
 func (w *provisioningWriter) emitLineLocked(line string) error {
-	m := &agent.LogMessage{MessageType: "caic_log", Line: line}
-	if w.log != nil {
-		if err := w.log.AppendMessage(m); err != nil {
-			return err
+	return w.records.AppendMessage(w.ctx, &agent.LogMessage{MessageType: "caic_log", Line: line})
+}
+
+// localShutdownError removes expected cancellation leaves after local shutdown,
+// preserving independent transport and cleanup failures in joined error trees.
+func localShutdownError(err error) error {
+	if !errors.Is(err, context.Canceled) {
+		return err
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var failures []error
+		for _, child := range joined.Unwrap() {
+			if failure := localShutdownError(child); failure != nil {
+				failures = append(failures, failure)
+			}
+		}
+		return errors.Join(failures...)
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		if child := wrapped.Unwrap(); child != nil {
+			failure := localShutdownError(child)
+			if failure == nil {
+				return nil
+			}
+			// Keep the operation's diagnostic context while exposing only the
+			// independent failures in the filtered error tree.
+			return &shutdownError{message: err.Error(), cause: failure}
 		}
 	}
-	w.t.addMessage(w.ctx, m)
 	return nil
 }
+
+// shutdownError retains a wrapping operation's diagnostic after cancellation
+// leaves have been removed from its underlying failure tree.
+type shutdownError struct {
+	message string
+	cause   error
+}
+
+func (e *shutdownError) Error() string { return e.message }
+func (e *shutdownError) Unwrap() error { return e.cause }

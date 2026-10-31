@@ -1,11 +1,14 @@
-// Entry owns a registered task, its pending prompt, and lifecycle results.
+// Entry owns a registered task, journal commands, pending prompts, and lifecycle results.
 
 package taskmgr
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -59,6 +62,16 @@ type Entry struct {
 // Task returns the underlying task. The returned *taskrun.Task is itself
 // concurrency-safe via its own internal locking.
 func (e *Entry) Task() *taskrun.Task { return e.task }
+
+// RecordHost commits a backend control through the entry's journal owner.
+func (e *Entry) RecordHost(ctx context.Context, m agent.Message) error {
+	return e.Lifecycle.agentRuntime.RecordHost(ctx, e.task, m)
+}
+
+// RecordRepositorySummary commits a fresh repository observation before publishing it.
+func (e *Entry) RecordRepositorySummary(ctx context.Context, read *repo.GitSnapshot) (bool, error) {
+	return e.Lifecycle.agentRuntime.RecordRepositorySummary(ctx, e.task, read)
+}
 
 // PendingInput returns this task's immutable pending prompt, or nil.
 func (e *Entry) PendingInput() *PendingInput {

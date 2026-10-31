@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	"github.com/caic-xyz/caic/backend/internal/task"
 
@@ -57,11 +59,15 @@ func TestMCPRegistry(t *testing.T) {
 			// These local tools deliberately outlive request cancellation. The
 			// task-scoped capability denies them, but executor ownership must
 			// also preserve accepted work for registries that expose them.
-			conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
+			records, err := agent.NewRecords(ctx, claudecode.New().NewWire(), agent.DiscardLogSink{}, &agenttest.RecordHandler{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn := agent.NewConn(ctx, testLogger(), input, records, executor.Wrap(s.mcpHandlers.protocol.Registry))
 			read := make(chan error, 1)
 			response := make(chan string, 1)
 			var workers sync.WaitGroup
-			workers.Go(func() { read <- conn.ReadMessages(stdout, make(chan agent.TimedMessage, 4), nil) })
+			workers.Go(func() { read <- conn.ReadMessages(stdout, nil) })
 			workers.Go(func() { line, _ := bufio.NewReader(stdin).ReadString('\n'); response <- line })
 			t.Cleanup(func() {
 				cancel()
@@ -71,6 +77,9 @@ func TestMCPRegistry(t *testing.T) {
 				close(gate.release)
 				executor.Close()
 				workers.Wait()
+				if err := records.Close(); err != nil && !errors.Is(err, context.Canceled) {
+					t.Error(err)
+				}
 			})
 			field := "message"
 			if name == "task_answer_question" {
@@ -123,29 +132,25 @@ func TestMCPRegistry(t *testing.T) {
 		s.taskMgr.Insert(tk.ID, entry)
 		ctx, cancel := context.WithCancel(t.Context())
 		executor := agent.NewMCPExecutor(t.Context())
-		cmd := exec.CommandContext(ctx, "cat")
-		input, err := cmd.StdinPipe()
+		stdout, output := io.Pipe()
+		backend := &mcpSourceBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, stdout: stdout, registry: executor.Wrap(s.mcpHandlers.protocol.Registry)}
+		r := &taskrun.AgentRuntime{Backends: agent.Backends{harness.Claude: backend}, LogStore: s.logStore,
+			LogPath: &entry.LogPath, Runtimes: s.serverHandlers.runtimes, Log: testLogger(), NotifyTaskChange: s.taskMgr.NotifyTaskChange}
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "self-stop"), runtime.ConnectionTarget{SSHHost: "self-stop"}, "", "", 0)
+		h, err := r.StartSession(ctx, tk, agent.Prompt{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		stdout, output := io.Pipe()
-		conn := agent.NewMCPConn(ctx, testLogger(), input, agent.DiscardLogSink{}, claudecode.New().NewWire(), executor.Wrap(s.mcpHandlers.protocol.Registry))
-		messages := make(chan agent.TimedMessage, 4)
-		session := agent.NewSession(ctx, cmd, conn, stdout, messages, testLogger())
-		dispatchDone := make(chan struct{})
-		close(dispatchDone)
-		h := &taskrun.SessionHandle{Session: session, MsgCh: messages, DispatchDone: dispatchDone, Log: agent.DiscardLogSink{}}
-		tk.AttachSession(h)
+		session := h.Session
 		t.Cleanup(func() {
 			cancel()
 			_ = output.Close()
-			conn.Cancel()
-			_ = h.Drain()
 			executor.Close()
+			if err := r.Shutdown(context.WithoutCancel(ctx), tk); err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
 		})
+
 		request := fmt.Sprintf(`{"t":"mcp_request","id":"self-stop","method":"tools/call","name":"task_stop","arguments":{"task_number":%q}}`+"\n", tk.ID.String())
 		if _, err := io.WriteString(output, request); err != nil {
 			t.Fatal(err)
@@ -242,4 +247,25 @@ func TestMCPRegistry(t *testing.T) {
 			}
 		})
 	})
+}
+
+// mcpSourceBackend attaches a real task-owned session to a controlled local MCP stream.
+type mcpSourceBackend struct {
+	*agenttest.FakeBackend
+
+	stdout   io.ReadCloser
+	registry mcp.Registry
+}
+
+func (b *mcpSourceBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "cat")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, errors.Join(err, stdin.Close())
+	}
+	conn := agent.NewConn(ctx, opts.Logger, stdin, opts.Records, b.registry)
+	return agent.NewSession(ctx, cmd, conn, b.stdout, opts.Logger), nil
 }

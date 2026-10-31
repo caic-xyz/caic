@@ -89,8 +89,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 		return 0, err
 	}
 	svc.log.InfoContext(ctx, "PR created", "task", t.ID, "forge", f.Name(), "owner", info.ForgeOwner, "repo", info.ForgeRepo, "pr", pr.Number)
-	t.SetPR(info.ForgeOwner, info.ForgeRepo, pr.Number)
-	if err := t.WriteToLog(&agent.MetaPRMessage{
+	if err := entry.RecordHost(ctx, &agent.MetaPRMessage{
 		MessageType: "caic_pr",
 		ForgeOwner:  info.ForgeOwner,
 		ForgeRepo:   info.ForgeRepo,
@@ -425,10 +424,11 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 	if err == nil {
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, svc.log, svc.backend.RuntimeRouter(), target)
-		if t.SetLiveRepositorySummary(&snapshot) {
+		changed, recordErr := entry.RecordRepositorySummary(ctx, &snapshot)
+		if changed {
 			svc.backend.NotifyTaskChange()
 		}
-		if err != nil {
+		if err := errors.Join(err, recordErr); err != nil {
 			svc.log.WarnContext(ctx, "push completed but refreshing task repository summary failed", "task", t.ID, "err", err)
 		}
 	}

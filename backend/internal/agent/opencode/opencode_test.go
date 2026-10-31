@@ -10,21 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	genaiopencode "github.com/maruel/genai/providers/opencode"
 	"github.com/maruel/gomode/mcp/mcptest"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 func TestBackend(t *testing.T) {
@@ -37,7 +31,8 @@ func TestBackend(t *testing.T) {
 			t.Cleanup(func() { _ = w.Close() })
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "")
+			_, owner := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			_, err := New("", nil).RecordHandshake(ctx, io.Discard, r, &agent.Options{Dir: "/workspace", Records: owner})
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("handshake error = %v, want cancellation", err)
 			}
@@ -119,7 +114,8 @@ func TestHandshake(t *testing.T) {
 				stdout := bufio.NewReader(strings.NewReader(v3Records(
 					`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n" +
 						`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}`)))
-				opts := &agent.Options{Dir: "/workspace", ResumeSessionID: resume, Log: &agenttest.LogSink{}}
+				_, owner := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+				opts := &agent.Options{Dir: "/workspace", ResumeSessionID: resume, Records: owner}
 				if enabled {
 					opts.MCP = &mcptest.FakeRegistry{}
 				}
@@ -176,7 +172,9 @@ func TestHandshake(t *testing.T) {
 		}, "\n")+"\n")))
 
 		log := &agenttest.LogSink{}
-		hs, _, err := handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
+		observer := &agenttest.RecordHandler{}
+		wire, owner := protocolRecords(t, t.Context(), log, observer)
+		hs, _, err := handshake(t.Context(), &stdin, stdout, io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Records: owner})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -233,7 +231,17 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("persisted handshake records = inputs:%d agent:%d generations:%d", inputs, agentRecords, generations)
 		}
 		want := agent.SessionMetadata{SessionID: "session-1", ReportedModel: selectedModel, ReportedEffort: "high", AgentVersion: "1.18.31"}
-		live := agent.SessionMetadata{SessionID: hs.wire.session.SessionID, ReportedModel: hs.currentModel, ReportedEffort: hs.currentEffort, AgentVersion: hs.agentVersion}
+		var live agent.SessionMetadata
+		starts := 0
+		for _, event := range observer.Events() {
+			live.Apply(event.Message)
+			if _, ok := event.Message.(*agent.InitMessage); ok {
+				starts++
+			}
+		}
+		if starts != 1 || !wire.supportsImage {
+			t.Fatalf("native starts = %d, supportsImage = %t", starts, wire.supportsImage)
+		}
 		if live != want {
 			t.Fatalf("live metadata = %+v, want %+v", live, want)
 		}
@@ -280,7 +288,8 @@ func TestHandshake(t *testing.T) {
 			`{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n" +
 			v3Records(sessionResponse)
 		var stdin bytes.Buffer
-		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{}})
+		_, owner := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Records: owner})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,73 +307,28 @@ func TestHandshake(t *testing.T) {
 	})
 }
 
-func TestWritePromptInputPersistence(t *testing.T) {
+func TestEncodePromptCommittedCorrelation(t *testing.T) {
 	t.Parallel()
-
-	var stdin bytes.Buffer
-	log := &agenttest.LogSink{}
-	wire := &wireFormat{session: agent.SessionMetadata{SessionID: "session-1"}}
-	if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
+	wire := &wireFormat{}
+	wire.session.SessionID = "session-1"
+	wire.textAccum.WriteString("prior text")
+	data, err := wire.EncodePrompt(agent.Prompt{Text: "hello"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
-		t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
+	if len(wire.requests) != 0 || wire.textAccum.String() != "prior text" {
+		t.Fatal("encoding changed decoder state")
 	}
-}
-
-func TestWireFormat(t *testing.T) {
-	t.Parallel()
-	t.Run("WritePrompt/OutputWhileInputBlocked", func(t *testing.T) {
-		t.Parallel()
-		w, ok := New("", nil).NewWire().(*wireFormat)
-		if !ok {
-			t.Fatal("backend returned an unexpected wire format")
-		}
-		w.session.SessionID = "session"
-		release := make(chan struct{})
-		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
-		var workers sync.WaitGroup
-		var writeErr error
-		t.Cleanup(func() {
-			close(release)
-			workers.Wait()
-			if writeErr != nil {
-				t.Errorf("input failed after release: %v", writeErr)
-			}
-		})
-		written := make(chan error, 1)
-		workers.Go(func() {
-			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{})
-			written <- writeErr
-		})
-		<-writer.Started
-		parsed := make(chan error, 1)
-		var messages []agent.Message
-		workers.Go(func() {
-			var err error
-			messages, err = w.ParseOutput([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}`))
-			parsed <- err
-		})
-		select {
-		case err := <-parsed:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("stdout parser blocked behind stdin delivery")
-		}
-		if len(messages) != 1 {
-			t.Fatalf("messages = %v, want streaming output", messages)
-		}
-		if m, ok := messages[0].(*agent.TextDeltaMessage); !ok || m.Text != "working" {
-			t.Fatalf("output = %#v", messages[0])
-		}
-		select {
-		case err := <-written:
-			t.Fatalf("input unexpectedly finished: %v", err)
-		default:
-		}
-	})
+	messages, err := wire.ParseInput(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || len(wire.requests) != 1 || wire.textAccum.Len() != 0 {
+		t.Fatalf("committed prompt = %#v, requests = %#v, prior text = %q", messages, wire.requests, wire.textAccum.String())
+	}
+	if input, ok := messages[0].(*agent.UserInputMessage); !ok || input.Text != "hello" {
+		t.Fatalf("attempted input = %#v", messages)
+	}
 }
 
 func TestHandshakeContinuation(t *testing.T) {
@@ -385,7 +349,8 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{}})
+			_, owner := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/workspace", Records: owner})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -435,76 +400,21 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	}
 }
 
-type failingLogSink struct{}
-
-func (failingLogSink) AppendRecord(agent.PhysicalRecord) error { return nil }
-
-func (failingLogSink) AppendMessage(agent.Message) error {
-	return errors.New("persist session metadata")
-}
-func (failingLogSink) Close() error { return nil }
-
-func TestStartReapsRelayOnMetadataFailure(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "relay.pid")
-	sshPath := filepath.Join(dir, "ssh")
-	script := `#!/bin/sh
-case "$2" in
-  mkdir*) cat >/dev/null ; exit 0 ;;
-esac
-for arg in "$@"; do
-  case "$arg" in
-  "'serve-attach'")
-    /bin/sleep 600 </dev/null >/dev/null 2>&1 &
-    relay=$!
-    echo "$relay" > "$CAIC_OPENCODE_RELAY_PID"
-    IFS= read -r _
-    printf '%s\n' '{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"1.0"}}}}'
-    IFS= read -r _
-    printf '%s\n' '{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}}'
-    while IFS= read -r _; do :; done
-    kill "$relay" 2>/dev/null
-    wait "$relay" 2>/dev/null
-    echo reaped > "$CAIC_OPENCODE_RELAY_PID.reaped"
-    exit 0
-    ;;
-  attach)
-    IFS= read -r _
-    kill "$(cat "$CAIC_OPENCODE_RELAY_PID")"
-    exit 0
-    ;;
-  esac
-done
-exit 1
-`
-	if err := os.WriteFile(sshPath, []byte(script), 0o700); err != nil { //nolint:gosec // test helper must be executable.
+// protocolRecords keeps the actual startup decoder and its ordered observer in
+// the same fixture; the caller joins every transport before cleanup closes it.
+func protocolRecords(t testing.TB, ctx context.Context, sink agent.LogSink, handler *agenttest.RecordHandler) (*wireFormat, *agent.Records) {
+	wire, ok := New("", nil).NewWire().(*wireFormat)
+	if !ok {
+		t.Fatal("unexpected protocol wire")
+	}
+	records, err := agent.NewRecords(ctx, wire, sink, handler)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir)
-	t.Setenv("CAIC_OPENCODE_RELAY_PID", pidPath)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	t.Cleanup(cancel)
-	backend := New("", nil)
-	_, err := backend.Start(ctx, &agent.Options{
-		Logger: slog.New(slog.DiscardHandler),
-		Target: runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:    "/workspace",
-		MsgCh:  make(chan agent.TimedMessage, 1),
-		Log:    failingLogSink{},
+	t.Cleanup(func() {
+		if err := records.Close(); err != nil {
+			t.Error(err)
+		}
 	})
-	if err == nil || !strings.Contains(err.Error(), "write session metadata") {
-		t.Fatalf("Start error = %v, want metadata failure", err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		data, err := os.ReadFile(pidPath + ".reaped") //nolint:gosec // test-controlled helper path.
-		if err == nil && strings.TrimSpace(string(data)) == "reaped" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("relay daemon was not reaped after metadata failure: %v", err)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	return wire, records
 }

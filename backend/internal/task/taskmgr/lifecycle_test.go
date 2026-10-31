@@ -1,4 +1,4 @@
-// Tests queued input, reconnect shutdown, restored session state, and waiting-input delivery latency.
+// Tests accepted lifecycle intents, durable prompts, producer shutdown, and waiting-input delivery latency.
 
 package taskmgr
 
@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,22 +25,149 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
-	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 )
 
 func TestLifecycle(t *testing.T) {
 	t.Parallel()
+	t.Run("Close", func(t *testing.T) {
+		t.Parallel()
+		for _, completed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("initial_title_after_session_complete=%t", completed), func(t *testing.T) {
+				t.Parallel()
+				provider := &lifecycleTitleProvider{started: make(chan struct{}), release: make(chan struct{}, 1)}
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
+				tk.Provider = provider
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "title-drain"), runtime.ConnectionTarget{SSHHost: "title-drain"}, "", "", 0)
+				tk.SetState(task.StateRunning)
+				entry := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, entry)
+				command := "read line"
+				if completed {
+					command = "exit 17"
+				}
+				h := startManagedSession(t, entry, &localProcessBackend{
+					FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+					command:     []string{"sh", "-c", command},
+				})
+				var workers sync.WaitGroup
+				t.Cleanup(func() {
+					close(provider.release)
+					workers.Wait()
+				})
+				entry.Lifecycle.generateTitle()
+				select {
+				case <-provider.started:
+				case <-time.After(time.Second):
+					t.Fatal("initial title generation did not start")
+				}
+				if completed {
+					entry.Lifecycle.watchSession(h)
+					select {
+					case <-entry.Done():
+					case <-time.After(time.Second):
+						t.Fatal("session watcher did not finalize while title generation was blocked")
+					}
+					loaded, err := m.logStore.LoadSource(entry.LogPath.Get())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := loaded.LoadMessages(); err != nil {
+						t.Fatal(err)
+					}
+					if loaded.LastTrailer == nil || loaded.LastTrailer.State != task.StateCrashed || loaded.LastTrailer.Err == nil {
+						t.Fatalf("persisted finalization = %+v, want crashed result", loaded.LastTrailer)
+					}
+				}
+				closed := make(chan error, 1)
+				workers.Go(func() { closed <- entry.Lifecycle.Close() })
+				if !completed {
+					select {
+					case <-h.Done():
+					case <-time.After(time.Second):
+						t.Fatal("Close did not cancel the local transport")
+					}
+					// Admission takes the same recording lock as physical shutdown.
+					// It must reject cancellation while the pending title still owns its producer lease.
+					err := entry.Lifecycle.agentRuntime.RecordHost(context.WithoutCancel(t.Context()), tk, &agent.LogMessage{Line: "after cancellation"})
+					if !errors.Is(err, context.Canceled) {
+						t.Errorf("shutdown admission = %v, want cancellation", err)
+					}
+					if tk.SessionDone() == nil {
+						t.Error("Close detached the execution before the initial title producer joined")
+					}
+				}
+				provider.release <- struct{}{}
+				select {
+				case err := <-closed:
+					if err != nil {
+						t.Error(err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("Close did not join title completion and session finalization")
+				}
+				if got := tk.Title(); got != "Joined title" {
+					t.Errorf("title = %q, want completed initial generation", got)
+				}
+			})
+		}
+	})
+	for _, method := range []string{"Stop", "Purge"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			t.Run("error", func(t *testing.T) {
+				t.Parallel()
+				t.Run("missing journal preserves published state", func(t *testing.T) {
+					t.Parallel()
+					backend := &runtimetest.FakeBackend{}
+					m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil), Backends: backends.Default("", nil)})
+					t.Cleanup(func() {
+						if err := m.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					id, err := backend.Launch(t.Context(), nil, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Claude, "")
+					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)
+					tk.SetState(task.StateWaiting)
+					entry := m.NewEntry(tk, nil)
+					m.Insert(tk.ID, entry)
+					_, before, _ := tk.SnapshotWithStateHistory(0)
+					if method == "Stop" {
+						err = entry.Lifecycle.Stop(t.Context())
+					} else {
+						err = entry.Lifecycle.Purge(t.Context(), 0)
+					}
+					if err == nil {
+						t.Fatal("lifecycle operation accepted missing journal")
+					}
+					_, after, transitions := tk.SnapshotWithStateHistory(before)
+					if tk.GetState() != task.StateWaiting || after != before || len(transitions) != 0 {
+						t.Fatalf("failed intent published state=%s transitions=%+v", tk.GetState(), transitions)
+					}
+					if entry.Result() != nil || len(tk.Messages()) != 0 || backend.Status(id) != runtimetest.StatusRunning {
+						t.Fatalf("failed intent changed result, transcript, or runtime: result=%+v messages=%d runtime=%v", entry.Result(), len(tk.Messages()), backend.Status(id))
+					}
+				})
+			})
+		})
+	}
 	t.Run("QueueInput", func(t *testing.T) {
 		t.Run("append_is_immutable_durable_and_rejects_stale_edits", func(t *testing.T) {
 			t.Parallel()
-			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			store := taskslog.NewStore(t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), store, backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
@@ -66,7 +194,7 @@ func TestLifecycle(t *testing.T) {
 			if err := e.Lifecycle.CancelQueuedInput(old.ID); err == nil {
 				t.Fatal("stale edit removed appended content")
 			}
-			loaded, err := store.Journal.LoadInputQueue()
+			loaded, err := store.LoadInputQueue()
 			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID.String() || loaded[0].Text != want.Text || !reflect.DeepEqual(loaded[0].Images, []inputqueue.Image{
 				{MediaType: "image/png", Data: "Zmlyc3Q="},
 				{MediaType: "image/jpeg", Data: "c2Vjb25k"},
@@ -324,6 +452,24 @@ func TestLifecycle(t *testing.T) {
 	})
 }
 
+// lifecycleTitleProvider gates the actual initial title request across transport settlement.
+type lifecycleTitleProvider struct {
+	genai.Provider
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *lifecycleTitleProvider) GenSync(ctx context.Context, _ genai.Messages, _ ...genai.GenOption) (genai.Result, error) {
+	close(p.started)
+	select {
+	case <-p.release:
+		return genai.Result{Replies: []genai.Reply{{Text: "Joined title"}}}, nil
+	case <-ctx.Done():
+		return genai.Result{}, ctx.Err()
+	}
+}
+
 // blockedReconnectBackend models an SSH setup call that ends only on cancellation.
 type blockedReconnectBackend struct {
 	*reconnectInputBackend
@@ -347,22 +493,12 @@ func BenchmarkLifecycleInputDelivery(b *testing.B) {
 			for _, deferred := range []bool{false, true} {
 				b.Run(fmt.Sprintf("deferred=%t", deferred), func(b *testing.B) {
 					m := newTestManager(b, Config{ServerCtx: b.Context()})
-					backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}}
-					messages := make(chan agent.TimedMessage, 8)
-					var receiver sync.WaitGroup
-					receiver.Go(func() {
-						for range messages {
-						}
-					})
-					b.Cleanup(func() { backend.stop(); close(messages); receiver.Wait() })
-					tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+					backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude}}
+					b.Cleanup(backend.stop)
+					tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 					e := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, e)
-					session, err := backend.AttachRelay(b.Context(), &agent.Options{Logger: testLogger(), MsgCh: messages})
-					if err != nil {
-						b.Fatal(err)
-					}
-					tk.AttachSession(&taskrun.SessionHandle{Session: session})
+					startQueueSession(b, e, backend)
 					if attached {
 						for range 4 {
 							other := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")

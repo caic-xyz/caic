@@ -142,6 +142,9 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.Rollup == nil {
 		cfg.Rollup = task.DiscardRollup{}
 	}
+	if cfg.Backends == nil {
+		cfg.Backends = agentbackends.Default("", nil)
+	}
 	if cfg.LogStore == nil {
 		cfg.LogStore = taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), agentbackends.Default("", nil))
 	}
@@ -879,15 +882,18 @@ func TestHandlePurge(t *testing.T) {
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
-		ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(testHTTPContext(t))
 		cancel()
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req = req.WithContext(ctx)
 		req.SetPathValue("id", tk.ID.String())
 		w := httptest.NewRecorder()
 		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+		}
+		if tk.GetState() != task.StateRunning {
+			t.Fatal("cancelled intent changed state")
 		}
 	})
 }

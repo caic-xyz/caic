@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
@@ -50,70 +50,33 @@ type statsSub struct {
 
 func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 
-// SessionHandle bundles the resources associated with an active agent session:
-// the SSH session, the message dispatch channel, and the log writer.
-// DispatchDone is closed after MsgCh is drained and title refresh workers finish.
+// SessionHandle associates a transport with its owning execution lifetime.
 type SessionHandle struct {
-	Session      *agent.Session
-	MsgCh        chan agent.TimedMessage
-	DispatchDone <-chan struct{}
-	Log          agent.LogSink
-	closeMsgCh   sync.Once
-	dispatchWork *sync.WaitGroup
+	Session *agent.Session
+	Run     *Run
 }
 
-// CloseMsgCh closes MsgCh exactly once. Safe to call concurrently; subsequent
-// calls are no-ops. Use this instead of close(h.MsgCh) to prevent double-close
-// panics when StopTask and EnsureSession race on the same handle.
-func (h *SessionHandle) CloseMsgCh() {
-	h.closeMsgCh.Do(func() { close(h.MsgCh) })
-}
+// Done closes after the local transport process exits.
+func (h *SessionHandle) Done() <-chan struct{} { return h.Session.Done() }
 
-// Done returns the channel that closes when the session's underlying process
-// exits. Exposed so callers outside this file can watch for session death
-// without reaching into Session directly.
-func (h *SessionHandle) Done() <-chan struct{} {
-	return h.Session.Done()
-}
-
-// GracefulStop sends the shutdown sentinel and waits for the agent to exit
-// (up to timeout). Returns nil on success or the context error on timeout.
-//
-// The relay consumes the sentinel and sends SIGINT to the subprocess, so the
-// agent never produces a ResultMessage in this path — callers should use
-// live stats from the Task instead.
-//
-// On timeout, the caller should kill the instance/SSH, then call Drain to
-// unblock the read loop.
+// GracefulStop stops the retained remote agent and waits up to timeout.
 func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration) error {
-	stopCtx, stopCancel := context.WithTimeout(ctx, timeout)
-	err := h.Session.Stop(stopCtx)
-	stopCancel()
-	return err
+	stopCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return h.Session.Stop(stopCtx)
 }
 
-// Drain waits for the session read loop to finish (useful after a timeout
-// where the instance was killed externally), then closes the message channel
-// and waits for the dispatch goroutine to complete. Returns the session's
-// exit error, if any.
-func (h *SessionHandle) Drain() error {
-	err := h.Session.Wait()
-	h.CloseMsgCh()
-	h.WaitDispatch()
-	return err
-}
-
-// WaitDispatch waits until message dispatch has stopped.
-func (h *SessionHandle) WaitDispatch() {
-	if h.dispatchWork != nil {
-		h.dispatchWork.Wait()
-	} else {
-		<-h.DispatchDone
-	}
-}
+// Drain joins the transport's reader, input, and protocol workers.
+func (h *SessionHandle) Drain() error { return h.Session.Wait() }
 
 // Task represents a single unit of work.
 type Task struct {
+	// recordingMu serializes active lifetime installation/claim and exclusive
+	// settled host writes. Never hold mu while submitting to the record owner.
+	recordingMu  sync.Mutex
+	run          atomic.Pointer[Run]
+	shuttingDown atomic.Bool
+
 	// Immutable fields — set at creation, never modified.
 	ID                ksid.ID
 	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
@@ -153,7 +116,7 @@ type Task struct {
 	VNCPort          int          // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
 	GitHubToken      bool         // Inject GitHub token into the instance's environment.
 
-	inputMu sync.Mutex // Serializes follow-up delivery and its state rollback.
+	inputMu sync.Mutex // Serializes follow-up delivery attempts.
 
 	// mu protects mutable task metadata above and all fields below.
 	mu                     sync.Mutex
@@ -174,7 +137,7 @@ type Task struct {
 	planFile               string                          // Path to plan file inside instance, captured from Write tool_use.
 	planContent            string                          // Content of the plan file, captured from Write tool_use input.
 	planExitID             string                          // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
-	planDismissed          bool                            // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
+	planDismissed          bool                            // True after a context boundary; suppresses plan tracking until the next ResultMessage.
 	inPlanMode             bool                            // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	completedRootTurns     int                             // Completed root turns; reconstructed from history for title refresh cadence.
 	titleGeneration        uint64                          // Orders concurrent title requests so stale responses cannot replace newer titles.
@@ -187,22 +150,23 @@ type Task struct {
 	backgroundCommands     agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 	skillReads             agent.SkillReadTracker
 
-	subs           []*sub          // active sequenced message subscribers
-	rateLimitSubs  []*rateLimitSub // active lossless quota subscribers
-	handle         *SessionHandle  // current active session; nil when no session is attached
-	priorNumTurns  int             // accumulated turns from all cleared sessions
-	priorDuration  time.Duration   // accumulated duration from all cleared sessions
-	turnStartedAt  time.Time       // when the current running turn started; zero when not running
-	costTracker    task.CostTracker
-	liveNumTurns   int
-	liveDuration   time.Duration
-	liveUsage      agent.Usage
-	lastUsage      agent.Usage  // Most recent ResultMessage usage (active context).
-	lastAPIUsage   agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
-	cacheExpiresAt time.Time    // When the prompt cache from the last API call expires.
-	liveDiffStat   v3.DiffStat  // Updated by DiffStatMessage from relay.
-	lastGitRead    repo.GitRead // Rejects deferred snapshots older than the applied Git state.
-	liveRepoStates []v3.RepoState
+	subs            []*sub          // active sequenced message subscribers
+	rateLimitSubs   []*rateLimitSub // active lossless quota subscribers
+	handle          *SessionHandle  // current active session; nil when no session is attached
+	priorNumTurns   int             // accumulated turns from all cleared sessions
+	priorDuration   time.Duration   // accumulated duration from all cleared sessions
+	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
+	turnStartedAt   time.Time       // when the current running turn started; zero when not running
+	costTracker     task.CostTracker
+	liveNumTurns    int
+	liveDuration    time.Duration
+	liveUsage       agent.Usage
+	lastUsage       agent.Usage  // Most recent ResultMessage usage (active context).
+	lastAPIUsage    agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt  time.Time    // When the prompt cache from the last API call expires.
+	liveDiffStat    v3.DiffStat  // Updated by DiffStatMessage from relay.
+	lastGitRead     repo.GitRead // Rejects deferred snapshots older than the applied Git state.
+	liveRepoStates  []v3.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
 	diffCreated  bool // True after any non-empty diff was reported for the task.
 	exitStatus   task.ExitStatus
@@ -612,10 +576,10 @@ func (t *Task) MarkDiffCreated() {
 	t.diffCreated = true
 }
 
-// SetLiveRepositorySummary applies a completed host Git snapshot atomically.
-// It rejects replaced-instance and out-of-order reads, including delayed
-// identical reads, and reports whether task-list subscribers need an update.
-func (t *Task) SetLiveRepositorySummary(snapshot *repo.GitSnapshot) bool {
+// RestoreRepositorySummary installs a validated snapshot before task
+// registration. Live and settled host observations use RecordRepositorySummary
+// through their recording owner. It rejects stale or replaced-instance reads.
+func (t *Task) RestoreRepositorySummary(snapshot *repo.GitSnapshot) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.acceptGitReadLocked(snapshot.Read) {
@@ -654,20 +618,6 @@ func (t *Task) GetPR() int {
 	return t.forgePR
 }
 
-// WriteToLog appends one backend-owned control through the active task log.
-func (t *Task) WriteToLog(m agent.Message) error {
-	t.mu.Lock()
-	var log agent.LogSink
-	if t.handle != nil {
-		log = t.handle.Log
-	}
-	t.mu.Unlock()
-	if log == nil {
-		return taskslog.ErrNoLog
-	}
-	return log.AppendMessage(m)
-}
-
 // SetCIStatus updates the ciStatus and ciChecks fields under the mutex.
 func (t *Task) SetCIStatus(status forge.CIStatus, checks []forge.Check) {
 	t.mu.Lock()
@@ -694,7 +644,7 @@ type StateTransition struct {
 
 // Snapshot holds volatile task fields read under the mutex. Used by the
 // server to build API responses without data races on fields that
-// addMessage/SeedTimeline modify concurrently.
+// ordered ingestion and SeedTimelineParts modify concurrently.
 type Snapshot struct {
 	agent.SessionMetadata
 
@@ -934,7 +884,7 @@ func (t *Task) PendingUserActions() []v3.PendingUserAction {
 	return pendingUserActionsFromMessages(t.timelineViewLocked())
 }
 
-// SeedTimeline fills an empty task with the message history from previously
+// SeedTimelineParts fills an empty task with the message history from previously
 // saved logs, then derives session metadata, plan state, live stats and task
 // state from it.
 //
@@ -958,17 +908,8 @@ func (t *Task) PendingUserActions() []v3.PendingUserAction {
 // NativeSubagentMessage, RawMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
-func (t *Task) SeedTimeline(messages []agent.Message) {
-	entries := make([]agent.TimedMessage, len(messages))
-	for i, message := range messages {
-		entries[i].Message = message
-	}
-	t.SeedTimelineParts(nil, entries)
-}
-
-// SeedTimelineParts restores an adopted task without concatenating the owned
-// durable history and the usually small relay suffix. Both slices transfer to
-// the task and remain logically contiguous.
+// The owned durable prefix and live suffix remain logically contiguous without
+// concatenation. Both slices transfer to the task.
 func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -985,10 +926,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// Later entries (model_rerouted) override earlier ones. The fold only reads
 	// msgs; the current plan is projected through the task snapshot.
 	//
-	// Plan state: a context_cleared marker resets it — it means ClearMessages
-	// was called (e.g. "Clear and execute plan"), so plan data before the
-	// marker is stale and plan tracking is suppressed until the next
-	// ResultMessage. planExitID holds the ToolUseID of the ExitPlanMode that
+	// Plan state: a context_cleared marker makes previous plan data stale
+	// and suppresses plan tracking until the next ResultMessage. planExitID
+	// holds the ToolUseID of the ExitPlanMode that
 	// carries the current plan; a new ExitPlanMode or context_cleared
 	// supersedes it so only the latest plan is visible.
 	//
@@ -1211,15 +1151,13 @@ func (t *Task) SessionDone() <-chan struct{} {
 // CloseAndDetachSession gracefully shuts down the current agent session and
 // returns the detached handle. Returns nil if no session was attached. Used by
 // RestartSession which needs the graceful drain before starting a new session.
-func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
+func (t *Task) CloseAndDetachSession(ctx context.Context) (*SessionHandle, error) {
 	h := t.DetachSession()
 	if h == nil {
-		return nil
+		return nil, nil //nolint:nilnil // No attached transport requires no shutdown.
 	}
-	_ = h.GracefulStop(ctx, 10*time.Second)
-	// Wait for ReadMessages to finish so callers can safely close MsgCh.
-	_ = h.Session.Wait()
-	return h
+	stopErr := h.GracefulStop(ctx, 10*time.Second)
+	return h, errors.Join(stopErr, h.Drain())
 }
 
 // GracefulStopSession detaches the currently attached session (if any) and
@@ -1227,7 +1165,7 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 // exit gracefully. Returns the detached handle (nil if no session was
 // attached) and any error from the graceful stop, e.g. a timeout. Used by
 // callers (Cleanup, StopTask) that need the handle afterward to reuse its
-// Log for a trailer, or to Drain it once other teardown steps complete.
+// Run for terminal recording after transport producers have joined.
 func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (*SessionHandle, error) {
 	h := t.DetachSession()
 	if h == nil {
@@ -1235,13 +1173,6 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 	}
 	err := h.GracefulStop(ctx, timeout)
 	return h, err
-}
-
-// ClearMessages injects a context_cleared boundary marker into the message
-// stream and resets live stats. Message history is preserved so that SSE
-// subscribers (including reconnecting clients) can see the full timeline.
-func (t *Task) ClearMessages(ctx context.Context) {
-	t.addMessage(ctx, agent.ContextCleared())
 }
 
 // Subscribe returns a snapshot of all past messages plus a live channel for
@@ -1320,7 +1251,7 @@ func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
 // of future quota messages. The caller must call unsubFn at most once when
 // done; context cancellation automatically unsubscribes.
 func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLimitMessage, live <-chan *agent.RateLimitMessage, unsubFn func()) {
-	s := &rateLimitSub{ch: make(chan *agent.RateLimitMessage, 16)}
+	s := &rateLimitSub{ctx: ctx, ch: make(chan *agent.RateLimitMessage, 16)}
 
 	t.mu.Lock()
 	view := t.timelineViewLocked()
@@ -1495,37 +1426,11 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		}
 	}
 	state := t.state
-	started := h != nil && (state == task.StateWaiting || state == task.StateAsking || state == task.StateHasPlan)
-	if started {
-		// An agent can finish before SendPrompt returns. Establish the running
-		// state before delivery so its completion remains authoritative.
-		t.setState(task.StateRunning)
-	}
-	seq := t.stateSeq
-	inputStart := t.timelineLenLocked()
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("%w (state=%s session=%s)", ErrNoActiveSession, state, sessionStatus)
 	}
-	if err := h.Session.SendPrompt(p); err != nil {
-		t.mu.Lock()
-		if started && t.stateSeq == seq {
-			active := false
-			view := t.timelineViewLocked()
-			for i := inputStart; i < view.Len(); i++ {
-				if task.AcceptedInputOutput(view.At(i).Message) {
-					active = true
-					break
-				}
-			}
-			if !active {
-				t.setState(state)
-			}
-		}
-		t.mu.Unlock()
-		return err
-	}
-	return nil
+	return h.Session.SendPrompt(p)
 }
 
 // SendCompact sends a compact command to the running agent without changing
@@ -1570,6 +1475,56 @@ func (t *Task) SetTitle(title string) {
 // character limit and logging through the task-scoped log. No-op when the
 // provider is unconfigured.
 func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
+	// Initial title generation belongs to the task, rather than whichever
+	// execution happens to be active during the provider request.
+	t.generateTitle(ctx, log, nil)
+}
+
+// MarkSessionCrashed records operational health when a recoverable session ends.
+// The execution owner separately reports its error through the lifecycle result.
+func (t *Task) MarkSessionCrashed() bool {
+	if _, changed := t.SetStateIfAny(task.StateCrashed, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
+		return false
+	}
+
+	return true
+}
+
+// MarkSessionFailed records operational health when startup transport fails.
+// The execution owner separately reports its error through the lifecycle result.
+func (t *Task) MarkSessionFailed() bool {
+	if _, changed := t.SetStateIfAny(task.StateFailed, task.StateStarting); !changed {
+		return false
+	}
+
+	return true
+}
+
+// DiscardRollup stops forwarding this task's events and tells its previous
+// sink to forget unflushed usage and replay state. It is called once a purge
+// begins, before cleanup can receive late agent messages.
+func (t *Task) DiscardRollup() {
+	t.mu.Lock()
+	meta := t.rollupMetaLocked()
+	sink := t.Rollup
+	t.Rollup = task.DiscardRollup{}
+	t.mu.Unlock()
+	sink.Discard(meta)
+}
+
+// recordingAdmissionErrorLocked rejects new host work after local shutdown.
+// Accepted finalization records use the owning Run directly and remain drainable.
+func (t *Task) recordingAdmissionErrorLocked() error {
+	if t.shuttingDown.Load() {
+		return context.Canceled
+	}
+	if run := t.run.Load(); run != nil {
+		return context.Cause(run.ctx)
+	}
+	return nil
+}
+
+func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run) {
 	if t.Provider == nil {
 		return
 	}
@@ -1608,67 +1563,36 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 		log.WarnContext(ctx, "title empty", "dur", dur)
 		return
 	}
-	t.mu.Lock()
-	if generation != t.titleGeneration {
-		t.mu.Unlock()
+	if ctx.Err() != nil {
 		return
 	}
-	t.setTitleLocked(title)
-	title = t.title
-	t.mu.Unlock()
+	intent := &titleIntent{task: t, generation: generation, title: title}
+	if run == nil {
+		// Resolve the current owner only when the task-wide title is ready,
+		// and keep its lifetime claim through admission. A completed execution
+		// cannot leave a delayed initial title holding stale Records.
+		t.recordingMu.Lock()
+		run = t.run.Load()
+		if run == nil {
+			_, _ = intent.PrepareRecords(ctx)
+			err = intent.ApplyRecords(ctx)
+		} else {
+			err = run.records.CommitIntent(ctx, intent)
+		}
+		t.recordingMu.Unlock()
+	} else {
+		// Turn-derived titles are bound to their Run and joined by Run.work.
+		err = run.records.CommitIntent(ctx, intent)
+	}
+	if err != nil {
+		log.WarnContext(ctx, "applying generated title failed", "err", err)
+		return
+	}
+	if !intent.accepted {
+		return
+	}
+	title = t.Title()
 	log.InfoContext(ctx, "title generated", "title", title, "dur", dur)
-}
-
-// RecordSessionCrash marks an agent session as crashed and emits a
-// user-visible error result. It returns false if the task is no longer in a
-// state owned by a recoverable agent session.
-func (t *Task) RecordSessionCrash(ctx context.Context, err error) bool {
-	if _, changed := t.SetStateIfAny(task.StateCrashed, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
-		return false
-	}
-	msg := "Agent session crashed: " + err.Error()
-	if exitErr := t.LastExitError(); exitErr != "" {
-		msg = "Agent session crashed: " + exitErr
-	}
-	t.addMessage(ctx, &agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "error",
-		IsError:     true,
-		Result:      msg,
-	})
-	return true
-}
-
-// RecordSessionFailure marks an active startup session as failed and emits a
-// user-visible error result. It returns false if the task is no longer in a
-// startup state.
-func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
-	if _, changed := t.SetStateIfAny(task.StateFailed, task.StateStarting); !changed {
-		return false
-	}
-	msg := "Agent session failed: " + err.Error()
-	if exitErr := t.LastExitError(); exitErr != "" {
-		msg = "Agent session failed: " + exitErr
-	}
-	t.addMessage(ctx, &agent.ResultMessage{
-		MessageType: "result",
-		Subtype:     "error",
-		IsError:     true,
-		Result:      msg,
-	})
-	return true
-}
-
-// DiscardRollup stops forwarding this task's events and tells its previous
-// sink to forget unflushed usage and replay state. It is called once a purge
-// begins, before cleanup can receive late agent messages.
-func (t *Task) DiscardRollup() {
-	t.mu.Lock()
-	meta := t.rollupMetaLocked()
-	sink := t.Rollup
-	t.Rollup = task.DiscardRollup{}
-	t.mu.Unlock()
-	sink.Discard(meta)
 }
 
 // clearContextLocked resets turn and plan state when a root context boundary
@@ -1845,39 +1769,26 @@ func (t *Task) settledTurnStateLocked() task.State {
 	}
 }
 
-func (t *Task) recordStartupFailure(ctx context.Context, err error) {
-	t.SetState(task.StateFailed)
-	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()})
-}
-
-// addMessage records a synthetic server message with an explicit zero producer time.
-func (t *Task) addMessage(_ context.Context, m agent.Message) {
-	t.addParsedMessage(agent.TimedMessage{Message: m})
-}
-
-// addParsedMessage records one physical relay record while task state and
-// subscribers consume its Message.
+// addParsedMessage folds an accepted semantic message into task state and
+// the subscriber timeline.
 func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
-	changed, _ := t.addParsedMessageWithGitSnapshot(parsed, nil, nil)
-	return changed
-}
-
-// addParsedMessageWithGitSnapshot applies host statistics only when their snapshot
-// is newer. Stale compact controls are dropped; result payloads and lifecycle
-// remain recorded even when their live statistics have been superseded.
-func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *repo.GitSnapshot, log agent.LogSink) (stateChanged bool, persistErr error) {
 	m := parsed.Message
 	child := m.Provenance().IsChild()
 	t.mu.Lock()
-	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(read.Read) {
+	if pr, ok := m.(*agent.MetaPRMessage); ok {
+		changed := t.forgeOwner != pr.ForgeOwner || t.forgeRepo != pr.ForgeRepo || t.forgePR != pr.ForgePR
+		t.forgeOwner = pr.ForgeOwner
+		t.forgeRepo = pr.ForgeRepo
+		t.forgePR = pr.ForgePR
+		t.forgePRState = forge.PRStateOpen
 		t.mu.Unlock()
-		return false, nil
+		return changed
 	}
-	if ds, ok := m.(*agent.DiffStatMessage); ok && read != nil {
-		ds.DiffStat, ds.Repos = read.Summary(t.liveDiffStat, t.liveRepoStates)
-		persistErr = appendGitSummary(log, ds)
+	switch m.(type) {
+	case *agent.MetaMessage, *agent.MetaResultMessage:
+		t.mu.Unlock()
+		return false
 	}
-
 	initialState := t.state
 	initialPlanMode, initialPlanID, initialPlanContent := t.inPlanMode, t.planExitID, t.planContent
 	// A compaction boundary rewrites the summary's live context fill, so the
@@ -1892,7 +1803,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	if agent.IsSessionMetadataUpdate(m) {
 		summaryChanged = t.sessionMetadata != priorMetadata
 		t.costTracker.Observe(m, parsed.ProducerTime, t.Pricer)
-		return stateChanged, persistErr
+		return stateChanged
 	}
 	producerAt := parsed.ProducerTime
 	at := producerAt
@@ -1902,8 +1813,24 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	parsed.ProducerTime = at
 	t.timeline = append(t.timeline, parsed)
 	visible := t.exitStatus.Observe(m)
+	if sm, ok := m.(*agent.SystemMessage); ok && !child {
+		switch sm.Subtype {
+		case agent.SystemSubtypeInputDeliveryStarted:
+			t.inputPriorState = t.state
+		case agent.SystemSubtypeInputDeliveryCompleted:
+			t.inputPriorState = ""
+		case agent.SystemSubtypeInputDeliveryFailed:
+			if t.inputPriorState != "" && t.state == task.StateRunning {
+				t.setState(t.inputPriorState)
+			}
+			t.inputPriorState = ""
+		}
+	} else if task.AcceptedInputOutput(m) {
+		t.inputPriorState = ""
+	}
+
 	if agent.IsInputDeliveryControl(m) {
-		return stateChanged, persistErr
+		return stateChanged
 	}
 	if isDeltaFinal(m) {
 		if t.timelineReaders == 0 {
@@ -1916,7 +1843,10 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
 		t.recordRateLimitLocked(rateLimit)
 		for _, sub := range t.rateLimitSubs {
-			sub.ch <- rateLimit
+			select {
+			case sub.ch <- rateLimit:
+			case <-sub.ctx.Done():
+			}
 		}
 	}
 
@@ -1937,7 +1867,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	// Transition to running when the agent starts producing output.
 	// Handles three cases:
 	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
-	//   - Server restart: SeedTimeline inferred a waiting state,
+	//   - Server restart: history restoration inferred a waiting state,
 	//     but the relay already started a new turn before reattach.
 	//   - First turn: the agent may produce output before Checkout.Start
 	//     sets StateRunning (race between backend subprocess and
@@ -1947,6 +1877,10 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		case *agent.AskMessage:
 			if t.state == task.StateStarting || t.state == task.StateRunning || t.state == task.StateWaiting || t.state == task.StateHasPlan {
 				t.setState(task.StateAsking)
+			}
+		case *agent.UserInputMessage:
+			if t.state == task.StateStarting || t.state == task.StateWaiting || t.state == task.StateAsking || t.state == task.StateHasPlan {
+				t.setState(task.StateRunning)
 			}
 		case *agent.TextMessage, *agent.TextDeltaMessage,
 			*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
@@ -1985,9 +1919,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
-		if read == nil {
-			t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
-		}
+		t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
 		t.setLiveDiffStatLocked(ds.DiffStat)
 		t.setLiveRepoStatesLocked(ds.Repos)
 		// Diff data refreshes without a state change, but the task-list stream
@@ -2011,19 +1943,8 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
 		t.completedRootTurns++
-		current := read == nil || t.acceptGitReadLocked(read.Read)
-		if current && (len(rm.DiffStat) > 0 || read != nil && (len(read.RepoStates) > 0 || len(read.FailedRepos) > 0)) {
-			if read == nil {
-				t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
-			}
-			if read != nil {
-				stats, states := read.Summary(t.liveDiffStat, t.liveRepoStates)
-				summaryChanged = summaryChanged || !slices.Equal(stats, t.liveDiffStat) || len(states) > 0 && !slices.Equal(states, t.liveRepoStates)
-				t.setLiveDiffStatLocked(stats)
-				t.setLiveRepoStatesLocked(states)
-			} else {
-				t.setLiveDiffStatLocked(rm.DiffStat)
-			}
+		if len(rm.DiffStat) > 0 {
+			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
 		t.lastUsage = rm.Usage
 		t.liveNumTurns += rm.NumTurns
@@ -2056,26 +1977,10 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if !visible {
-		return stateChanged, persistErr
+		return stateChanged
 	}
 	t.broadcastTimelineMessageLocked(m, at)
-	if _, result := m.(*agent.ResultMessage); result && read != nil {
-		summary := &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: t.liveDiffStat, Repos: t.liveRepoStates}
-		persistErr = appendGitSummary(log, summary)
-		t.timeline = append(t.timeline, agent.TimedMessage{Message: summary, ProducerTime: at})
-		t.broadcastTimelineMessageLocked(summary, at)
-	}
-
-	return stateChanged, persistErr
-}
-
-// appendGitSummary writes backend controls to the dispatch-owned log.
-// Native records are logged by the connection; only host-owned summaries use it.
-func appendGitSummary(log agent.LogSink, summary *agent.DiffStatMessage) error {
-	if log == nil {
-		return taskslog.ErrNoLog
-	}
-	return log.AppendMessage(summary)
+	return stateChanged
 }
 
 func (t *Task) broadcastTimelineMessageLocked(m agent.Message, at time.Time) {
@@ -2759,7 +2664,8 @@ func (s *sub) close() {
 }
 
 type rateLimitSub struct {
-	ch chan *agent.RateLimitMessage
+	ctx context.Context
+	ch  chan *agent.RateLimitMessage
 }
 
 const maxTitleChars = 80

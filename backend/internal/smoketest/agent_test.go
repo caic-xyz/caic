@@ -1,4 +1,4 @@
-// Tests selected fake session metadata and capture work that remains active until shutdown.
+// Tests fake session metadata and active capture work through the ordered record owner.
 
 package smoketest
 
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -38,12 +39,20 @@ func TestFakeBackend(t *testing.T) {
 					b := NewFakeBackend()
 					b.HarnessID = tc.harness
 					ch := make(chan agent.TimedMessage, 8)
+					records, err := agent.NewRecords(context.WithoutCancel(t.Context()), b.NewWire(), agent.DiscardLogSink{}, &agenttest.RecordHandler{Messages: ch})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := records.Close(); err != nil {
+							t.Error(err)
+						}
+					})
 					s, err := b.Start(t.Context(), &agent.Options{
-						Logger: slog.New(slog.DiscardHandler),
-						Log:    agent.DiscardLogSink{},
-						MsgCh:  ch,
-						Model:  model,
-						Effort: tc.effort,
+						Logger:  slog.New(slog.DiscardHandler),
+						Records: records,
+						Model:   model,
+						Effort:  tc.effort,
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -81,17 +90,28 @@ func TestFakeBackend(t *testing.T) {
 				b := NewFakeBackend()
 				b.HarnessID = harness.Antigravity
 				ch := make(chan agent.TimedMessage, 32)
+				records, err := agent.NewRecords(context.WithoutCancel(ctx), b.NewWire(), agent.DiscardLogSink{}, &agenttest.RecordHandler{Messages: ch})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := records.Close(); err != nil {
+						t.Error(err)
+					}
+				})
 				s, err := b.Start(ctx, &agent.Options{
 					Logger:        slog.New(slog.DiscardHandler),
-					Log:           agent.DiscardLogSink{},
-					MsgCh:         ch,
+					Records:       records,
 					InitialPrompt: agent.Prompt{Text: "Implement rate limiting for API endpoints"},
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				// Stop/EOF below closes the pipe; cleanup also covers failed assertions.
-				t.Cleanup(func() { s.Cancel() })
+				t.Cleanup(func() {
+					s.Cancel()
+					_ = s.Wait()
+				})
 				var pending string
 				check := func(msg agent.Message) {
 					switch m := msg.(type) {

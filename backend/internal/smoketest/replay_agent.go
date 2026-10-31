@@ -5,9 +5,9 @@ package smoketest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"strconv"
 	"time"
@@ -136,7 +136,7 @@ func (b *ReplayBackend) Start(ctx context.Context, opts *agent.Options) (*agent.
 		"python3", "-u", replayAgentPath, replayPayloadPath,
 		strconv.Itoa(rec.HoldAfter), strconv.FormatInt(rec.Hold.Milliseconds(), 10),
 	}
-	session, err := agent.StartRelay(ctx, opts, args, b.NewWire())
+	session, err := agent.StartRelay(ctx, opts, args)
 	if err != nil {
 		return nil, err
 	}
@@ -144,18 +144,17 @@ func (b *ReplayBackend) Start(ctx context.Context, opts *agent.Options) (*agent.
 	// does the same because a minimized recording holds native subagent records
 	// only, and codex and opencode need the persisted session ID to reconnect to
 	// their live relay after a caic restart.
-	init := &agent.InitMessage{SessionID: replaySessionID(), ReportedModel: "replay-model"}
-	opts.MsgCh <- agent.TimedMessage{Message: init}
-	if err := agent.WriteMetaSession(opts.Log, init); err != nil {
+	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{SessionID: replaySessionID(), ReportedModel: "replay-model"}); err != nil {
 		session.Cancel()
-		return nil, fmt.Errorf("write replay session metadata: %w", errors.Join(err, session.Wait()))
+		return nil, errors.Join(err, session.Wait())
 	}
+
 	return session, nil
 }
 
 // AttachRelay implements agent.Backend.
 func (b *ReplayBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, b.NewWire(), nil)
+	return agent.AttachRelaySession(ctx, opts, nil)
 }
 
 // AgentArgs implements agent.Backend.
@@ -163,7 +162,9 @@ func (*ReplayBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
 
 // NewWire implements agent.Backend. Each call returns an independent wire, so a
 // replayed task log never reuses the session's adapter state.
-func (b *ReplayBackend) NewWire() agent.WireFormat { return NewReplayWire(b.backend.NewWire()) }
+func (b *ReplayBackend) NewWire() agent.WireFormat {
+	return NewReplayWire(b.backend.NewWire())
+}
 
 // NewMetadataParser reconstructs metadata with the same replay turn marker.
 func (b *ReplayBackend) NewMetadataParser() agent.MessageParser {
@@ -201,10 +202,13 @@ var _ agent.Backend = (*ReplayBackend)(nil)
 // and turns the replay agent's end marker into a completed turn.
 type replayWire struct{ replayParser }
 
-// WritePrompt writes the prompt as plain text: the replay agent only needs to
-// know that a turn started.
-func (replayWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	return agent.PlainTextWritePrompt(w, p, log)
+// EncodePrompt returns the replay process's complete JSON prompt command.
+func (replayWire) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 type replayParser struct{ inner agent.MessageParser }

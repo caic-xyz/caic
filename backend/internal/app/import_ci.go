@@ -6,13 +6,13 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
 // importedTaskWiring connects restored tasks back to forge and CI automation.
@@ -44,7 +44,7 @@ func (w *importedTaskWiring) WireCIMonitoring(ctx context.Context, entry *taskmg
 	}
 	pr := t.Snapshot().ForgePR
 	if pr > 0 {
-		sha, err := importedHeadSHA(ctx, f, t, checkout.Repository, primary.Branch)
+		sha, err := importedHeadSHA(ctx, f, entry, checkout.Repository, primary.Branch)
 		if err != nil {
 			log.InfoContext(ctx, "skipping CI monitor; PR head SHA unavailable", "branch", primary.Branch, "repo", primary.Name, "err", err)
 			return
@@ -77,7 +77,10 @@ func (w *importedTaskWiring) LookupExternalPRForTask(ctx context.Context, entry 
 		return
 	}
 	log.InfoContext(ctx, "found external PR", "repo", primary.Name, "br", primary.Branch, "pr", pr.Number)
-	t.SetPR(checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, pr.Number)
+	if err := entry.RecordHost(ctx, &agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: checkout.Repository.ForgeOwner, ForgeRepo: checkout.Repository.ForgeRepo, ForgePR: pr.Number}); err != nil {
+		log.ErrorContext(ctx, "associate external PR failed", "err", err)
+		return
+	}
 	w.taskMgr.NotifyTaskChange()
 	sha := pr.HeadSHA
 	if sha == "" {
@@ -93,11 +96,13 @@ func (w *importedTaskWiring) LookupExternalPRForTask(ctx context.Context, entry 
 	w.ciService.MonitorCI(ctx, entry, f, checkout.Repository.ForgeOwner, checkout.Repository.ForgeRepo, sha)
 }
 
-func importedHeadSHA(ctx context.Context, f forge.Forge, t *taskrun.Task, repository *repo.Repository, branch string) (string, error) {
+func importedHeadSHA(ctx context.Context, f forge.Forge, entry *taskmgr.Entry, repository *repo.Repository, branch string) (string, error) {
 	pr, err := f.FindPRByBranch(ctx, repository.ForgeOwner, repository.ForgeRepo, branch)
 	if err == nil && pr.HeadSHA != "" {
 		if pr.Number > 0 {
-			t.SetPR(repository.ForgeOwner, repository.ForgeRepo, pr.Number)
+			if err := entry.RecordHost(ctx, &agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: repository.ForgeOwner, ForgeRepo: repository.ForgeRepo, ForgePR: pr.Number}); err != nil {
+				return "", err
+			}
 		}
 		return pr.HeadSHA, nil
 	}

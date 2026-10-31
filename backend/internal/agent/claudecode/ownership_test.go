@@ -433,7 +433,8 @@ func TestControlConnOwnership(t *testing.T) {
 					inner.messages = append(inner.messages, control...)
 					conn := &controlConn{Conn: inner}
 					messages := make(chan agent.TimedMessage, len(inner.messages))
-					if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), messages, conn); err != nil {
+					inner.output = messages
+					if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), conn); err != nil {
 						t.Fatal(err)
 					}
 					close(messages)

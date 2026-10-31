@@ -300,9 +300,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, fmt.Errorf("task manager: %w", err)
 	}
 	keepTaskMgr := false
-	defer func() {
+	defer func() { //nolint:contextcheck // Manager shutdown joins producers using its app-owned lifetime after cancellation.
 		if !keepTaskMgr {
-			_ = taskMgr.Close()
+			retErr = errors.Join(retErr, taskMgr.Close())
 		}
 	}()
 	repoStatus := ci.NewRepoStatusStore()
@@ -340,6 +340,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	keepAutomation := false
 	defer func() {
 		if !keepAutomation {
+			taskMgr.Cancel()
 			botService.Close()
 			ciService.Close()
 		}
@@ -608,7 +609,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
-	defer func() {
+	defer func() { //nolint:contextcheck // Manager shutdown must finish after the serving context is canceled.
+		a.taskMgr.Cancel()
 		a.botService.Close()
 		a.ciService.Close()
 		err = errors.Join(err, a.taskMgr.Close(), a.metricsLog.Close())

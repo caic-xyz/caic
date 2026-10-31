@@ -1,11 +1,11 @@
-// Benchmarks for streaming authoritative recorded history into a reconnecting wire.
+// Benchmarks complete owning-record replay of authoritative reconnect history.
 
 package agent
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,8 +29,18 @@ func BenchmarkWarmHistoryReplay(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if err := warmRecordedHistory(b.Context(), path, &warmHistoryWire{}); err != nil {
+				handler := &warmHistoryObserver{}
+				owner, err := NewRecords(b.Context(), &warmHistoryWire{}, DiscardLogSink{}, handler)
+				if err != nil {
 					b.Fatal(err)
+				}
+				replayErr := owner.Replay(b.Context(), path)
+				closeErr := owner.Close()
+				if replayErr != nil || closeErr != nil {
+					b.Fatalf("replay: %v; close: %v", replayErr, closeErr)
+				}
+				if handler.calls != 0 {
+					b.Fatalf("replay invoked %d live callbacks", handler.calls)
 				}
 			}
 		})
@@ -56,6 +66,19 @@ type warmHistoryWire struct{}
 
 func (*warmHistoryWire) ParseOutput(line []byte) ([]Message, error) { return nil, nil }
 
-func (*warmHistoryWire) WritePrompt(io.Writer, Prompt, LogSink) error { return nil }
+func (*warmHistoryWire) EncodePrompt(Prompt) ([]byte, error) { return []byte("{}\n"), nil }
 
 func (*warmHistoryWire) ParseInput([]byte) ([]Message, error) { return nil, nil }
+
+// warmHistoryObserver counts every live callback; historical replay must invoke none.
+type warmHistoryObserver struct{ calls int }
+
+func (h *warmHistoryObserver) RecordAppended(PhysicalRecord) { h.calls++ }
+func (h *warmHistoryObserver) PrepareRecords(context.Context, []TimedMessage) ([]Message, error) {
+	h.calls++
+	return nil, nil
+}
+func (h *warmHistoryObserver) ApplyRecords(context.Context, []TimedMessage) error {
+	h.calls++
+	return nil
+}

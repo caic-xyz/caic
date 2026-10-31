@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -359,7 +361,11 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 		if snap.ForgePR == 0 {
 			// Task has no PR yet — set the PR info.
 			h.log.InfoContext(ctx, "associating external PR", "task", entry.Task().ID, "repo", owner+"/"+repoName, "br", branch, "pr", prNumber)
-			entry.Task().SetPR(owner, repoName, prNumber)
+			if err := entry.RecordHost(ctx, &agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: owner, ForgeRepo: repoName, ForgePR: prNumber}); err != nil {
+				h.log.ErrorContext(ctx, "associate external PR failed", "task", entry.Task().ID, "err", err)
+				continue
+			}
+			h.taskMgr.NotifyTaskChange()
 			// Start CI monitoring.
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
 				f := h.forgeMgr.ForgeFor(ctx, ri.ForgeKind)

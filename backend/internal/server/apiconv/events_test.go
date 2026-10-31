@@ -13,6 +13,7 @@ import (
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -70,6 +71,70 @@ func TestToolTimingTracker(t *testing.T) {
 			tracker.ConvertMessage(2, 0, agent.ContextCleared(), time.Time{})
 			if events := tracker.ConvertMessage(2, 0, restored, time.Time{}); len(events) != 1 || events[0].Init == nil {
 				t.Fatalf("cleared context lost restoration card: %+v", events)
+			}
+		})
+		t.Run("CodexConfigurationPreservesSessionPresentation", func(t *testing.T) {
+			t.Parallel()
+			parser, err := agent.NewLogRecordParser(codex.New("", nil).NewWire())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracker := NewToolTimingTracker("task", harness.Codex, "", conversionPricer{})
+			var metadata agent.SessionMetadata
+			var events []v1.EventMessage
+			for i, line := range []string{
+				`{"t":"input","ts":1.000,"msg":{"id":1,"method":"thread/start","params":{}}}`,
+				`{"t":"agent","ts":2.000,"msg":{"id":1,"result":{"thread":{"id":"root","cliVersion":"0.154.0"},"model":"gpt-6-sol","reasoningEffort":"high"}}}`,
+				// Codex Start appends this configured threshold after its native handshake.
+				`{"auto_compact_token_limit":244800,"t":"session"}`,
+				`{"session_id":"root","model":"stale","t":"session"}`,
+				`{"t":"user_input","text":"look","images":[{"media_type":"image/png","data":"aW1hZ2U="}]}`,
+				`{"t":"agent","ts":3.000,"msg":{"method":"turn/started","params":{"threadId":"root","turn":{"id":"turn"}}}}`,
+				`{"t":"agent","ts":4.000,"msg":{"method":"item/agentMessage/delta","params":{"threadId":"root","turnId":"turn","itemId":"answer","delta":"Answer"}}}`,
+				`{"t":"agent","ts":5.000,"msg":{"method":"thread/tokenUsage/updated","params":{"threadId":"root","turnId":"turn","tokenUsage":{"total":{"totalTokens":1000000,"inputTokens":1000000},"last":{"totalTokens":1000000,"inputTokens":1000000}}}}}`,
+				`{"auto_compact_token_limit":244800,"t":"session"}`,
+				`{"session_id":"root","model":"stale","t":"session"}`,
+				`{"t":"agent","ts":6.000,"msg":{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}}`,
+			} {
+				record, err := parser.ParseRecord([]byte(line))
+				if err != nil {
+					t.Fatalf("record %d: %v", i+2, err)
+				}
+				for j, message := range record.Messages {
+					metadata.Apply(message.Message)
+					projected := tracker.ConvertMessage(uint64(i+2), j, message.Message, time.Unix(10, 0))
+					if _, ok := message.Message.(*agent.MetaSessionMessage); ok && len(projected) != 0 {
+						t.Errorf("record %d added a session card: %+v", i+2, projected)
+					}
+					events = append(events, projected...)
+				}
+			}
+			wantMetadata := agent.SessionMetadata{SessionID: "root", ReportedModel: "gpt-6-sol", ReportedEffort: "high", AgentVersion: "0.154.0", AutoCompactTokenLimit: 244800}
+			if metadata != wantMetadata {
+				t.Errorf("metadata = %+v, want %+v", metadata, wantMetadata)
+			}
+			var sessions []string
+			var results []*v1.EventResult
+			var images []v1.InputImage
+			for _, event := range events {
+				if event.Init != nil {
+					sessions = append(sessions, event.Init.SessionID)
+				}
+				if event.Result != nil {
+					results = append(results, event.Result)
+				}
+				if event.UserInput != nil {
+					images = append(images, event.UserInput.Images...)
+				}
+			}
+			if !reflect.DeepEqual(sessions, []string{"root"}) {
+				t.Errorf("session cards = %q, want only native root", sessions)
+			}
+			if len(results) != 1 || results[0].Result != "Answer" || results[0].Cost.USD != 2 || results[0].Cost.Source != "estimated" || results[0].Usage.InputTokens != 1_000_000 {
+				t.Errorf("results = %+v, want one Answer with 1000000 input tokens priced once at $2", results)
+			}
+			if len(images) != 1 || images[0].URL != "/api/caic/v1/tasks/task/attachments/6/0/0" {
+				t.Errorf("images = %+v, want original physical coordinates", images)
 			}
 		})
 		t.Run("PrivateDeliveryControlsAreNotEvents", func(t *testing.T) {
@@ -612,14 +677,14 @@ func TestToolTimingTracker(t *testing.T) {
 		t.Run("cost projection preserves raw reports", func(t *testing.T) {
 			t.Parallel()
 			at := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
-			codex := NewToolTimingTracker("", harness.Codex, "gpt-6-sol", conversionPricer{})
+			tracker := NewToolTimingTracker("", harness.Codex, "gpt-6-sol", conversionPricer{})
 			raw := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}
-			first := codex.ConvertMessage(2, 0, raw, at)[0].Result
+			first := tracker.ConvertMessage(2, 0, raw, at)[0].Result
 			if first == nil || first.Cost.USD != 2 || first.Cost.Source != "estimated" || raw.TotalCostUSD != 0 {
 				t.Fatalf("Codex result = %+v; raw cost = %v", first, raw.TotalCostUSD)
 			}
-			codex.ConvertMessage(2, 0, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, at)
-			second := codex.ConvertMessage(2, 0, &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}, at)[0].Result
+			tracker.ConvertMessage(2, 0, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, at)
+			second := tracker.ConvertMessage(2, 0, &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}, at)[0].Result
 			if second == nil || second.Cost.USD != 2 {
 				t.Fatalf("Codex result after compaction = %+v", second)
 			}

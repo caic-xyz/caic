@@ -1,19 +1,17 @@
 // Package agent owns coding-agent sessions, directional history, ordered inputs, and bounded protocol replies.
 // Backend implementations live in sub-packages (e.g. agent/claudecode).
 //
-// # Message dispatch
+// # Ordered recording
 //
-// Conn.ReadMessages reads agent stdout and forwards parsed messages to
-// Options.MsgCh. Session.SendPrompt uses the same FIFO to publish the user
-// attempt before its response, with explicit delivery outcomes. The task checkout drains this channel in a separate
-// goroutine (startMessageDispatch) that performs blocking side-effects: git
-// fetch, diff stat, branch locking. The channel decouples the fast reader
-// from these slow operations — without it, a blocked git fetch would
-// backpressure the agent's stdout pipe and risk deadlock.
+// Each execution creates Records before provisioning. Its bounded worker owns
+// the wire, journal, ordered interpretation, and publication. Transport readers
+// commit exact physical records before the provider sees them. Input delivery
+// commits the attempted command before a separate bounded worker writes stdin.
+// Runtime handlers return derived controls before publishing a completed turn;
+// they never write through a competing journal or reenter the owner.
 //
-// Backends wrap Conn with MessageInterceptor to interpret provider controls.
-// The shared reader delivers automatic replies with bounded pending work, so
-// controls never make stdout wait for a blocked stdin write.
+// Conn owns transport readers, input delivery, and bounded automatic replies.
+// Provider interceptors return response bytes without writing transport.
 //
 // # Relay shutdown protocol
 //
@@ -52,9 +50,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,21 +81,14 @@ type Options struct {
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
 	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
-	// HistoryPath is the authoritative plain task log returned by Reopen and
-	// required by AttachRelay. It contains recorded client input interleaved with
-	// relay output preceding RelayOffset, including imported offline output.
-	// Attach replays it through the fresh wire without publishing messages, even
-	// at offset zero, before resuming relay output at exactly RelayOffset.
-	HistoryPath string
 	// PendingUserActions is the restored user-facing work that still needs
 	// input after AttachRelay reconnects. It must not contain backend-only
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []v3.PendingUserAction
-	MsgCh              chan<- TimedMessage // Receives parsed physical records from the agent.
-	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{} when persistence is unnecessary.
-	StripEnv           []string            // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
-	MCP                mcp.Registry        // Optional task-scoped CAIC MCP registry.
+	Records            *Records     // Required ordered record owner; created before any startup output.
+	StripEnv           []string     // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	MCP                mcp.Registry // Optional task-scoped CAIC MCP registry.
 }
 
 // MCPRequest is one task-local MCP bridge request.
@@ -142,14 +131,13 @@ type mcpRelayEnvelope struct {
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
-// communication. Implementations must pair WritePrompt and MessageParser
+// communication. Implementations must pair prompt encoding and MessageParser
 // for the same protocol.
 type WireFormat interface {
 	MessageParser
 
-	// WritePrompt writes a user prompt to the agent's stdin in the
-	// backend's wire format. log records the input before delivery.
-	WritePrompt(w io.Writer, p Prompt, log LogSink) error
+	// EncodePrompt returns one complete LF-terminated provider command.
+	EncodePrompt(p Prompt) ([]byte, error)
 }
 
 // MessageParser decodes both directions of one ordered provider protocol.
@@ -162,11 +150,26 @@ type MessageParser interface {
 	ParseOutput(line []byte) ([]Message, error)
 }
 
+// RequestedEffort is an optional interface for WireFormat implementations that
+// encode the requested reasoning effort into their outgoing requests.
+type RequestedEffort interface {
+	SetRequestedEffort(effort string)
+}
+
+// ApplyRequestedEffort records effort on wire when its backend encodes one and
+// returns wire unchanged otherwise.
+func ApplyRequestedEffort(wire WireFormat, effort string) WireFormat {
+	if effortWire, ok := wire.(RequestedEffort); ok {
+		effortWire.SetRequestedEffort(effort)
+	}
+	return wire
+}
+
 // CompactCommand is an optional interface for WireFormat implementations that
 // support context compaction. The server checks for this capability to
 // conditionally enable the compact button in the UI.
 type CompactCommand interface {
-	WriteCompact(w io.Writer, instructions string, log LogSink) error
+	EncodeCompact(instructions string) ([]byte, error)
 }
 
 // MessageInterceptor handles provider controls on the stdout reader. It must
@@ -191,11 +194,11 @@ type Conn interface {
 	// SendCompact sends a compact/context-reduction command.
 	SendCompact(instructions string) error
 	// ReadMessages runs the message read loop: reads NDJSON lines from r,
-	// parses them, writes raw lines to the log, and forwards parsed messages
-	// to msgCh. It owns r and closes both pipes before joining its workers.
+	// commits them through Records, and publishes the resulting messages.
+	// It owns r and closes both pipes before joining its workers.
 	// It must run exactly once per connection.
 	// A nil interceptor leaves provider messages unchanged.
-	ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercept MessageInterceptor) error
+	ReadMessages(r io.ReadCloser, intercept MessageInterceptor) error
 	// SendStop sends the null-byte sentinel to trigger graceful agent shutdown.
 	// Cancel interrupts a blocked SendStop through the message reader.
 	SendStop(ctx context.Context)
@@ -209,91 +212,38 @@ type conn struct {
 	ctx         context.Context
 	logger      *slog.Logger
 	stdin       io.WriteCloser
-	log         LogSink
-	wire        WireFormat
+	records     *Records
 	mcp         mcp.Registry
 	interrupted <-chan struct{}
 	cancelRead  context.CancelFunc
-
-	mu sync.Mutex // serializes stdin writes
+	inputs      chan *inputWork
+	inputDone   chan struct{}
+	workers     sync.WaitGroup
 }
 
 func (c *conn) SendPrompt(p Prompt, data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.log.AppendMessage(InputDeliveryStarted()); err != nil {
-		return &inputDeliveryError{Err: fmt.Errorf("record input attempt: %w", err)}
-	}
-	log := c.log
-	var attempt *inputAttemptLog
-	if _, discard := log.(DiscardLogSink); !discard {
-		attempt = &inputAttemptLog{LogSink: log}
-		log = attempt
-	}
-	var err error
-	if data == nil {
-		err = c.wire.WritePrompt(c.stdin, p, log)
-	} else if err = AppendInputNativeRecord(log, data); err == nil {
-		var n int
-		n, err = c.stdin.Write(data)
-		if err == nil && n != len(data) {
-			err = io.ErrShortWrite
-		}
-	}
-	if err != nil {
-		var inputErr error
-		if attempt == nil || !attempt.written {
-			inputErr = c.log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000})
-		}
-		return &inputDeliveryError{Err: errors.Join(err, inputErr, c.log.AppendMessage(InputDeliveryFailed(err)))}
-	}
-	if err := c.log.AppendMessage(InputDeliveryCompleted()); err != nil {
-		return &inputDeliveryError{Err: fmt.Errorf("record input delivery: %w", err)}
-	}
-	return nil
+	return c.sendInput(c.ctx, &inputWork{op: inputPrompt, prompt: p, data: data})
 }
 
 func (c *conn) RecordInputFailure(p Prompt, err error) error {
 	if _, ok := errors.AsType[*inputDeliveryError](err); ok {
 		return err
 	}
-	startErr := c.log.AppendMessage(InputDeliveryStarted())
-	inputErr := c.log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000})
-	failureErr := c.log.AppendMessage(InputDeliveryFailed(err))
-	return &inputDeliveryError{Err: errors.Join(err, startErr, inputErr, failureErr)}
+	recordErr := c.records.AppendMessages(c.ctx, []Message{InputDeliveryStarted(), &UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}, InputDeliveryFailed(err)})
+	return &inputDeliveryError{Err: errors.Join(err, recordErr)}
 }
 
 func (c *conn) SendRaw(data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !isMCPResponse(data) {
-		if err := AppendInputNativeRecord(c.log, data); err != nil {
-			return err
-		}
-	}
-	if _, err := c.stdin.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return c.sendInput(c.ctx, &inputWork{op: inputRaw, data: bytes.Clone(data)})
 }
 
 func (c *conn) SendCompact(instructions string) error {
-	cc, ok := c.wire.(CompactCommand)
-	if !ok {
-		return errors.New("compact not supported by this backend")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return cc.WriteCompact(c.stdin, instructions, c.log)
+	return c.sendInput(c.ctx, &inputWork{op: inputCompact, text: instructions})
 }
 
-// ReadMessages owns both the stdout reader and automatic-response writer.
-// Neither protocol controls nor MCP replies wait for stdin on the reader.
-// EOF, a failed/overloaded reply, or cancellation ends all workers:
-// interrupt both pipes before joining, and report any undelivered replies.
-// The reader takes ownership of r, including its Close operation. An optional
-// interceptor handles provider controls without doing I/O itself.
-func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercept MessageInterceptor) error {
+// ReadMessages owns the transport pipes and joins bounded input/reply workers.
+// The record owner outlives this transport and is closed by its runtime owner.
+func (c *conn) ReadMessages(r io.ReadCloser, intercept MessageInterceptor) error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	q := responseQueue{items: make(chan responseWork, maxPendingResponses)}
 	requests := responseQueue{items: make(chan responseWork, maxPendingResponses)}
@@ -304,30 +254,42 @@ func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercep
 	workers.Go(func() { replies <- q.run(ctx, c) })
 	workers.Go(func() { mcpDone <- requests.runMCP(ctx, c, &q) })
 	workers.Go(func() {
-		reads <- DefaultReadMessages(ctx, c.logger, r, func(parsed TimedMessage) error {
-			if intercept != nil {
+		reader := bufio.NewReaderSize(r, 1<<20)
+		for {
+			data, err := readNDJSONRecord(reader)
+			if errors.Is(err, io.EOF) {
+				reads <- nil
+				return
+			}
+			if err != nil {
+				reads <- err
+				return
+			}
+			if len(data) == 1 {
+				continue
+			}
+			result := c.records.submit(ctx, &recordWork{op: recordRelay, data: data, disposition: func(parsed TimedMessage) (bool, error) {
+				if request, ok := parsed.Message.(*MCPRequestMessage); ok {
+					err := requests.enqueue(responseWork{request: &MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}})
+					return true, err
+				}
+				if intercept == nil {
+					return false, nil
+				}
 				response, handled, err := intercept.HandleMessage(parsed.Message)
 				if err != nil {
-					return err
+					return false, err
 				}
 				if len(response) > 0 {
-					if err := q.enqueue(responseWork{data: response}); err != nil {
-						return err
-					}
+					err = q.enqueue(responseWork{data: response})
 				}
-				if handled {
-					return nil
-				}
+				return handled, err
+			}})
+			if result.err != nil {
+				reads <- result.err
+				return
 			}
-			select {
-			case msgCh <- parsed:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}, c.log, c.wire, func(req MCPRequest) error {
-			return requests.enqueue(responseWork{request: &req})
-		})
+		}
 	})
 	var readErr, replyErr, mcpErr error
 	readEnded, replyEnded, mcpEnded := false, false, false
@@ -339,6 +301,8 @@ func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercep
 	case mcpErr = <-mcpDone:
 		mcpEnded = true
 	case <-c.interrupted:
+	case <-c.records.Done():
+		readErr = context.Cause(c.records.ctx)
 	}
 	q.mu.Lock()
 	q.stopped = true
@@ -351,64 +315,127 @@ func (c *conn) ReadMessages(r io.ReadCloser, msgCh chan<- TimedMessage, intercep
 	closeErr := c.stdin.Close()
 	readCloseErr := r.Close()
 	workers.Wait()
+	c.workers.Wait()
 	if !readEnded {
-		readErr = <-reads
-		if errors.Is(readErr, os.ErrClosed) || errors.Is(readErr, io.ErrClosedPipe) || errors.Is(readErr, context.Canceled) {
-			readErr = nil
+		err := <-reads
+		if !expectedStreamEnd(err) {
+			readErr = errors.Join(readErr, err)
 		}
 	}
 	if !replyEnded {
 		replyErr = <-replies
 	}
-	if errors.Is(readCloseErr, os.ErrClosed) || errors.Is(readCloseErr, io.ErrClosedPipe) {
-		readCloseErr = nil
-	}
 	if !mcpEnded {
 		mcpErr = <-mcpDone
+	}
+	if expectedStreamEnd(readCloseErr) {
+		readCloseErr = nil
 	}
 	return errors.Join(readErr, replyErr, mcpErr, c.ctx.Err(), closeErr, readCloseErr)
 }
 
-func (c *conn) SendStop(_ context.Context) {
-	_, _ = c.stdin.Write([]byte{0, '\n'})
-}
+func (c *conn) SendStop(ctx context.Context) { _ = c.sendInput(ctx, &inputWork{op: inputStop}) }
 
 func (c *conn) Cancel() { c.cancelRead() }
 
-// inputDeliveryError includes a failed prompt's transport and persistence errors.
-// Its delivery outcome has already been recorded, or its persistence failure
-// is included in Err and the retained attempt remains unresolved.
-type inputDeliveryError struct {
-	Err error
+func (c *conn) sendInput(ctx context.Context, w *inputWork) error {
+	w.ack = make(chan error, 1)
+	select {
+	case c.inputs <- w:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.interrupted:
+		return errors.New("agent input stopped")
+	}
+	select {
+	case err := <-w.ack:
+		return err
+	case <-c.inputDone:
+		return errors.New("agent input stopped")
+	}
 }
+
+func (c *conn) writeInputs() {
+	defer close(c.inputDone)
+	for {
+		select {
+		case <-c.interrupted:
+			return
+		case w := <-c.inputs:
+			var result recordResult
+			switch w.op {
+			case inputPrompt:
+				result = c.records.submit(c.ctx, &recordWork{op: recordPrompt, prompt: w.prompt, data: w.data})
+			case inputRaw:
+				result.data = w.data
+				if !isMCPResponse(w.data) {
+					result = c.records.submit(c.ctx, &recordWork{op: recordInput, data: w.data})
+					result.data = w.data
+				}
+			case inputCompact:
+				result = c.records.submit(c.ctx, &recordWork{op: recordCompact, text: w.text})
+			case inputStop:
+				result.data = []byte{0, '\n'}
+			}
+			err := result.err
+			if err == nil {
+				var n int
+				n, err = c.stdin.Write(result.data)
+				if err == nil && n != len(result.data) {
+					err = io.ErrShortWrite
+				}
+				if w.op == inputPrompt {
+					outcome := InputDeliveryCompleted()
+					if err != nil {
+						outcome = InputDeliveryFailed(err)
+					}
+					err = errors.Join(err, c.records.AppendMessage(context.WithoutCancel(c.ctx), outcome))
+				}
+			}
+			if w.op == inputPrompt && err != nil {
+				err = &inputDeliveryError{Err: err}
+			}
+			w.ack <- err
+		}
+	}
+}
+
+// NewConn creates a transport over the task-owned physical log authority.
+//
+// Closing stdin must unblock a pending write so session shutdown can finish.
+// log and records must be non-nil. Records owns the persistence policy. A nil
+// registry serves no task-scoped MCP requests.
+func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, records *Records, registry mcp.Registry) Conn {
+	if log == nil || records == nil {
+		panic("logger and records are required")
+	}
+	interruption, cancel := context.WithCancel(ctx)
+	c := &conn{ctx: ctx, logger: log, stdin: stdin, records: records, mcp: registry, interrupted: interruption.Done(), cancelRead: cancel, inputs: make(chan *inputWork, 64), inputDone: make(chan struct{})}
+	c.workers.Go(c.writeInputs)
+	return c
+}
+
+type inputOperation uint8
+
+const (
+	inputPrompt inputOperation = iota
+	inputRaw
+	inputCompact
+	inputStop
+)
+
+type inputWork struct {
+	op     inputOperation
+	prompt Prompt
+	data   []byte
+	text   string
+	ack    chan error
+}
+
+type inputDeliveryError struct{ Err error }
 
 func (e *inputDeliveryError) Error() string { return e.Err.Error() }
-
 func (e *inputDeliveryError) Unwrap() error { return e.Err }
-
-// inputAttemptLog observes the input-side writes of one prompt; output drainage
-// keeps using the connection's original sink and never waits for stdin delivery.
-type inputAttemptLog struct {
-	LogSink
-
-	written bool
-}
-
-func (l *inputAttemptLog) AppendRecord(record PhysicalRecord) error {
-	if err := l.LogSink.AppendRecord(record); err != nil {
-		return err
-	}
-	l.written = true
-	return nil
-}
-
-func (l *inputAttemptLog) AppendMessage(m Message) error {
-	if err := l.LogSink.AppendMessage(m); err != nil {
-		return err
-	}
-	l.written = true
-	return nil
-}
 
 // MCPRequestResult handles one task-scoped MCP request and returns its bridge
 // response payload. Callers must encode and send that payload to the relay.
@@ -428,26 +455,6 @@ func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest
 		return MCPToolResultResponse(result)
 	}
 	return nil, fmt.Errorf("unsupported MCP method: %s", req.Method)
-}
-
-// NewConn creates a connection using the task-owned physical log authority.
-//
-// Closing stdin must unblock a pending write so session shutdown can finish.
-// log and sink must be non-nil; use DiscardLogSink{} when
-// persistence is unnecessary.
-func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
-	return NewMCPConn(ctx, log, stdin, sink, wire, nil)
-}
-
-// NewMCPConn creates a connection that services a task-scoped MCP registry.
-// Closing stdin must unblock a pending write. A nil registry leaves task-local
-// MCP requests unavailable. The connection owns its stdin and reader lifetime.
-func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat, registry mcp.Registry) Conn {
-	if log == nil {
-		panic("logger is required")
-	}
-	interruption, cancel := context.WithCancel(ctx)
-	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, wire: wire, mcp: registry, interrupted: interruption.Done(), cancelRead: cancel}
 }
 
 // MCPToolResultResponse translates a registry result to the standard MCP tool
@@ -496,8 +503,7 @@ func isMCPResponse(data []byte) bool {
 type Session struct {
 	Conn
 
-	ctx   context.Context
-	msgCh chan<- TimedMessage
+	ctx context.Context
 
 	cmd     *exec.Cmd
 	log     *slog.Logger
@@ -505,7 +511,7 @@ type Session struct {
 	err     error
 	workers sync.WaitGroup
 
-	inputMu     sync.Mutex // Serializes prompt events and joins sends before MsgCh closes.
+	inputMu     sync.Mutex // Serializes prompt attempts and joins sends before session completion.
 	inputClosed bool       // Protected by inputMu; Wait prevents any later publications.
 }
 
@@ -517,37 +523,46 @@ type Session struct {
 // exit. The done channel is closed when both are complete. Callers should use
 // Done() to detect session end and Wait() to retrieve the error.
 //
-// Error priority: parse errors take precedence over wait errors, since a
-// parse error indicates corrupted output while the process may still exit 0.
-func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.ReadCloser, msgCh chan<- TimedMessage, log *slog.Logger) *Session {
+// Parse and process failures are joined. A signal exit caused by local
+// cancellation or cleanup after a parse failure is an expected shutdown effect.
+func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.ReadCloser, log *slog.Logger) *Session {
 	if log == nil {
 		panic("logger is required")
 	}
 	s := &Session{
-		Conn:  c,
-		ctx:   ctx,
-		msgCh: msgCh,
-		cmd:   cmd,
-		log:   log,
-		done:  make(chan struct{}),
+		Conn: c,
+		ctx:  ctx,
+		cmd:  cmd,
+		log:  log,
+		done: make(chan struct{}),
 	}
 
 	s.workers.Go(func() {
 		defer close(s.done)
 		intercept, _ := c.(MessageInterceptor)
-		parseErr := s.ReadMessages(stdout, msgCh, intercept)
+		parseErr := s.ReadMessages(stdout, intercept)
 		if parseErr != nil {
 			// A failed automatic response ends the session, including when the
 			// harness keeps running after its input/output transport is closed.
 			_ = cmd.Process.Kill()
 		}
 		waitErr := cmd.Wait()
+		if waitErr != nil && (ctx.Err() != nil || parseErr != nil) {
+			// The session owner closed the transport. A signal, or the nonzero
+			// status a child reports because its input closed, describes that
+			// teardown rather than an agent failure.
+			waitErr = nil
+		}
+		if parseErr != nil {
+			s.err = fmt.Errorf("parse: %w", parseErr)
+		}
+		if waitErr != nil {
+			s.err = errors.Join(s.err, fmt.Errorf("agent exited: %w", waitErr))
+		}
 		switch {
 		case parseErr != nil:
-			s.err = fmt.Errorf("parse: %w", parseErr)
 			log.ErrorContext(ctx, "session parse error", "err", parseErr)
 		case waitErr != nil:
-			s.err = fmt.Errorf("agent exited: %w", waitErr)
 			// Signal-based exits (SIGKILL, SIGTERM) are expected when
 			// containers are purged. Log at Info, not Error.
 			if isSignalExit(waitErr) {
@@ -565,12 +580,12 @@ func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.ReadCloser
 
 // StartRelay is a convenience that calls PrepareRelay, creates a default Conn,
 // and sends the initial prompt.
-func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string) (*Session, error) {
 	rp, err := PrepareRelay(ctx, opts, nil, agentArgs)
 	if err != nil {
 		return nil, err
 	}
-	return StartSession(ctx, rp, NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire), opts)
+	return StartSession(ctx, rp, NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, nil), opts)
 }
 
 // StartSession creates a Session from a RelayProcess and Conn, sends the
@@ -584,7 +599,7 @@ func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) 
 		return nil, errors.New("opts.Logger is required")
 	}
 	log := opts.Logger.With("target", sshHost)
-	s := NewSession(ctx, rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
+	s := NewSession(ctx, rp.Cmd, c, rp.Stdout, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			s.Cancel()
@@ -594,21 +609,18 @@ func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) 
 	return s, nil
 }
 
-// AttachRelaySession restores a fresh wire from authoritative recorded history,
-// then starts an attachment at the verified relay offset and returns a Session.
+// AttachRelaySession attaches at the verified relay offset. The caller must
+// finish authoritative history replay into opts.Records before attachment.
 // The caller verifies connectivity through the session lifecycle.
 // Backends may pass wrap to intercept the default Conn before message reading
 // starts.
-func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wrap func(Conn) (Conn, error)) (*Session, error) {
+func AttachRelaySession(ctx context.Context, opts *Options, wrap func(Conn) (Conn, error)) (*Session, error) {
 	sshHost := opts.Target.SSHHost
 	if sshHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
 	if opts.Logger == nil {
 		return nil, errors.New("opts.Logger is required")
-	}
-	if err := warmRecordedHistory(ctx, opts.HistoryPath, wire); err != nil {
-		return nil, fmt.Errorf("warm recorded history: %w", err)
 	}
 	sshArgs := []string{
 		sshHost, "python3", RelayScriptPath, "attach",
@@ -623,7 +635,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("stdout pipe: %w", err), stdin.Close())
 	}
-	c := NewMCPConn(ctx, opts.Logger, stdin, opts.Log, wire, opts.MCP)
+	c := NewConn(ctx, opts.Logger, stdin, opts.Records, opts.MCP)
 	if wrap != nil {
 		wrapped, err := wrap(c)
 		if err != nil {
@@ -640,7 +652,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	}
 
 	log := opts.Logger.With("target", sshHost)
-	return NewSession(ctx, cmd, c, stdout, opts.MsgCh, log), nil
+	return NewSession(ctx, cmd, c, stdout, log), nil
 }
 
 // SendPrompt publishes a user attempt before a harness can respond, then
@@ -653,7 +665,7 @@ func (s *Session) SendPrompt(p Prompt) error {
 		return errors.New("agent session exited")
 	}
 	// A completed session must never select a ready send over done: callers
-	// may already have closed MsgCh after Wait.
+	// may already have joined the record producer after Wait.
 	select {
 	case <-s.done:
 		return errors.New("agent session exited")
@@ -661,36 +673,8 @@ func (s *Session) SendPrompt(p Prompt) error {
 		return s.ctx.Err()
 	default:
 	}
-	input := &UserInputMessage{Text: p.Text, Images: slices.Clone(p.Images)}
-	select {
-	case <-s.done:
-		return errors.New("agent session exited")
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	case s.msgCh <- TimedMessage{Message: InputDeliveryStarted(), ProducerTime: time.Now()}:
-	}
-	select {
-	case <-s.done:
-		return errors.New("agent session exited")
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	case s.msgCh <- TimedMessage{Message: input, ProducerTime: time.Now()}:
-	}
 	if err := s.Conn.SendPrompt(p, nil); err != nil {
-		err = s.RecordInputFailure(p, err)
-		// During shutdown the receiver may have stopped. The durable failure
-		// and returned error still describe the attempt if live delivery ends.
-		select {
-		case s.msgCh <- TimedMessage{Message: InputDeliveryFailed(err), ProducerTime: time.Now()}:
-		case <-s.done:
-		case <-s.ctx.Done():
-		}
-		return err
-	}
-	select {
-	case s.msgCh <- TimedMessage{Message: InputDeliveryCompleted(), ProducerTime: time.Now()}:
-	case <-s.done:
-	case <-s.ctx.Done():
+		return s.RecordInputFailure(p, err)
 	}
 	return nil
 }
@@ -743,7 +727,7 @@ func (s *Session) Done() <-chan struct{} {
 func (s *Session) Wait() error {
 	<-s.done
 	s.workers.Wait()
-	// Callers close MsgCh after Wait. Join the final failure event of a send
+	// Join the final failure record of a send
 	// interrupted by closing stdin before allowing that closure.
 	s.inputMu.Lock()
 	s.inputClosed = true
@@ -753,71 +737,38 @@ func (s *Session) Wait() error {
 
 // RelayRecordReader reads one physical relay record at a time. Agent payloads
 // are returned as their unchanged native JSON; caic controls are returned only
-// as parsed controls and never presented as native handshake data. log is the
-// caller's explicit persistence policy: use DiscardLogSink{} for unpersisted reads.
+// as parsed controls and never presented as native handshake data. Startup
+// and continued reads share the same required record owner.
 type RelayRecordReader struct {
-	r      *bufio.Reader
-	parser *LogRecordParser
-	log    LogSink
-	native []byte
+	ctx     context.Context
+	r       *bufio.Reader
+	records *Records
 }
 
-// NewRelayRecordReader creates a canonical physical relay reader.
-// log must be non-nil; use DiscardLogSink{} when persistence is unnecessary.
-func NewRelayRecordReader(r io.Reader, log LogSink) *RelayRecordReader {
+// NewRelayRecordReader reads through the same owner used by the continued session.
+func NewRelayRecordReader(ctx context.Context, r io.Reader, records *Records) *RelayRecordReader {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReaderSize(r, 1<<20)
 	}
-	reader := &RelayRecordReader{r: br, log: log}
-	reader.parser = &LogRecordParser{native: reader}
-	return reader
+	return &RelayRecordReader{ctx: ctx, r: br, records: records}
 }
 
-// ParseInput ignores client commands in the relay output stream.
-func (*RelayRecordReader) ParseInput([]byte) ([]Message, error) { return nil, nil }
+// Reader returns the buffered continuation after the committed startup records.
+func (r *RelayRecordReader) Reader() *bufio.Reader { return r.r }
 
-// ParseOutput retains the next native output for the provider handshake.
-func (r *RelayRecordReader) ParseOutput(line []byte) ([]Message, error) {
-	r.native = append(r.native[:0], line...)
-	return nil, nil
-}
-
-// Reader returns the buffered source positioned after records consumed by ReadRecord.
-func (r *RelayRecordReader) Reader() *bufio.Reader {
-	return r.r
-}
-
-// ReadRecord reads the next non-empty physical relay record. It persists the
-// original encoded bytes once according to the reader's policy before strict
-// parsing. Native is non-nil only for an agent payload; controls are separate.
-func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage, err error) {
+// ReadRecord commits exact bytes before returning native envelopes and messages.
+func (r *RelayRecordReader) ReadRecord() ([]byte, []TimedMessage, error) {
 	for {
-		encoded, readErr := readNDJSONRecord(r.r)
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return nil, nil, readErr
-			}
-			return nil, nil, fmt.Errorf("read relay record: %w", readErr)
+		data, err := readNDJSONRecord(r.r)
+		if err != nil {
+			return nil, nil, err
 		}
-		line := encoded[:len(encoded)-1]
-		if len(line) == 0 {
+		if len(data) == 1 {
 			continue
 		}
-		r.native = r.native[:0]
-		parsed, parseErr := r.parser.ParseRecord(line)
-		if parseErr != nil {
-			return nil, nil, parseErr
-		}
-		if err := r.log.AppendRecord(PhysicalRecord{Encoded: encoded, Provenance: parsed.Provenance}); err != nil {
-			return nil, nil, fmt.Errorf("write log: %w", err)
-		}
-		if len(r.native) > 0 {
-			return slices.Clone(r.native), nil, nil
-		}
-		if parsed.Control {
-			return nil, parsed.Messages, nil
-		}
+		result := r.records.submit(r.ctx, &recordWork{op: recordRelay, data: data})
+		return result.data, result.messages, result.err
 	}
 }
 
@@ -832,61 +783,6 @@ func messageIsNil(msg Message) bool {
 	default:
 		return false
 	}
-}
-
-// DefaultReadMessages reads physical relay records, persists each
-// exactly once, and forwards the parser's original TimedMessage wrappers.
-// Dispatch and MCP handling failures end the read loop.
-func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage) error, sink LogSink, native MessageParser, handleMCP func(MCPRequest) error) error {
-	if log == nil {
-		return errors.New("logger is required")
-	}
-	parser, err := NewLogRecordParser(native)
-	if err != nil {
-		return fmt.Errorf("construct relay record parser: %w", err)
-	}
-	reader := bufio.NewReaderSize(r, 1<<20)
-	log.DebugContext(ctx, "reading agent stdout")
-	var n int
-	for {
-		record, readErr := readNDJSONRecord(reader)
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			return fmt.Errorf("read agent record: %w", readErr)
-		}
-		line := record[:len(record)-1]
-		if len(line) == 0 {
-			continue
-		}
-		n++
-		parsed, err := parser.ParseRecord(line)
-		if err != nil {
-			return fmt.Errorf("parse relay record: %w", err)
-		}
-		if err := sink.AppendRecord(PhysicalRecord{Encoded: record, Provenance: parsed.Provenance}); err != nil {
-			return fmt.Errorf("write log: %w", err)
-		}
-		for _, msg := range parsed.Messages {
-			if request, ok := msg.Message.(*MCPRequestMessage); ok {
-				if handleMCP != nil {
-					if err := handleMCP(MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}); err != nil {
-						return fmt.Errorf("respond task-scoped MCP: %w", err)
-					}
-				}
-				continue
-			}
-			if n <= 3 {
-				log.DebugContext(ctx, "parsed message", "n", n, "type", fmt.Sprintf("%T", msg.Message))
-			}
-			if err := dispatch(msg); err != nil {
-				return err
-			}
-		}
-	}
-	log.DebugContext(ctx, "read loop done", "n", n)
-	return nil
 }
 
 // Relay paths inside the container.
@@ -1363,81 +1259,6 @@ func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
 	}
 }
 
-// warmRecordedHistory reconstructs a fresh wire from the local authority, not
-// from output.jsonl: relay stdin logging is disabled, so only the task log can
-// restore recorded client request identities. The caller supplies history whose
-// output was reconciled through RelayOffset before reconnect. Host controls and
-// prior relay generations do not alter the live relay offset. Never-recorded
-// input cannot be recovered, and attempted input does not prove delivery.
-//
-// Replay streams a fixed file snapshot with bounded record memory and discards
-// semantic messages. An error aborts attach and discards this fresh wire; partial
-// replay is never retried on the same stateful parser.
-func warmRecordedHistory(ctx context.Context, path string, wire WireFormat) (retErr error) {
-	if path == "" {
-		return errors.New("task history path is required")
-	}
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, f.Close()) }()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	parser, err := NewLogRecordParser(wire)
-	if err != nil {
-		return err
-	}
-	reader := bufio.NewReaderSize(io.NewSectionReader(f, 0, info.Size()), 1<<20)
-	header := false
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		line, err := readNDJSONRecord(reader)
-		if errors.Is(err, io.EOF) && header {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read recorded history %s: %w", path, err)
-		}
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		record, err := parser.ParseRecord(line[:len(line)-1])
-		if err != nil {
-			return fmt.Errorf("parse recorded history %s: %w", path, err)
-		}
-		if !header {
-			if len(record.Messages) != 1 {
-				return errors.New("recorded history must begin with a task metadata header")
-			}
-			if _, ok := record.Messages[0].Message.(*MetaMessage); !ok {
-				return errors.New("recorded history must begin with a task metadata header")
-			}
-			header = true
-		}
-	}
-}
-
-// PlainTextWritePrompt writes a user prompt as a plain text line on stdin
-// and logs it as NDJSON. The images travel out of band here, so the recorded
-// user input keeps them for history replay.
-// Input is logged before delivery so an immediate response cannot precede it.
-// A delivery error leaves the attempted input in the log.
-func PlainTextWritePrompt(w io.Writer, p Prompt, log LogSink) error {
-	if err := log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}); err != nil {
-		return err
-	}
-	data := []byte(p.Text + "\n")
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
-}
-
 // isSignalExit reports whether err indicates the process was killed by a
 // signal (e.g. SIGKILL from container purge).
 func isSignalExit(err error) bool {
@@ -1457,4 +1278,29 @@ func isSignalExit(err error) bool {
 		}
 	}
 	return false
+}
+
+// expectedStreamEnd recognizes only shutdown leaves. A joined independent read
+// or close failure must remain visible even when another branch was canceled.
+func expectedStreamEnd(err error) bool {
+	if err == nil {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !expectedStreamEnd(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		child := wrapped.Unwrap()
+		return child != nil && expectedStreamEnd(child)
+	}
+	return errors.Is(err, os.ErrClosed) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, context.Canceled)
 }

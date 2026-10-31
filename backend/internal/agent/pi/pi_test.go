@@ -12,7 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -187,7 +186,8 @@ func TestWaitForResponse(t *testing.T) {
 
 	t.Run("caic_exit surfaces relay stderr", func(t *testing.T) {
 		t.Parallel()
-		r := agent.NewRelayRecordReader(bytes.NewBufferString(`{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), agent.DiscardLogSink{})
+		owner := piProtocolRecords(t, t.Context(), agent.DiscardLogSink{}, &agenttest.RecordHandler{})
+		r := agent.NewRelayRecordReader(t.Context(), bytes.NewBufferString(`{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}`+"\n"), owner)
 
 		_, err := waitForResponse(r, "set_model")
 		if err == nil {
@@ -204,7 +204,8 @@ func TestWaitForResponse(t *testing.T) {
 		t.Parallel()
 		line := `{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`
 		log := agenttest.LogSink{}
-		records := agent.NewRelayRecordReader(strings.NewReader(line+"\n"), &log)
+		owner := piProtocolRecords(t, t.Context(), &log, &agenttest.RecordHandler{})
+		records := agent.NewRelayRecordReader(t.Context(), strings.NewReader(line+"\n"), owner)
 
 		resp, err := waitForResponse(records, "set_model")
 		if err != nil {
@@ -228,19 +229,16 @@ func TestPiConn(t *testing.T) {
 				t.Parallel()
 				stdin := agenttest.NewStdinPipe()
 				stdout, output := io.Pipe()
-				wire, ok := New("", nil).NewWire().(*piWireFormat)
-				if !ok {
-					t.Fatal("unexpected Pi wire")
-				}
-				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, wire, &agent.Options{MCP: mcptest.FakeRegistry{}})
+				messages := make(chan agent.TimedMessage, 16)
+				owner := piProtocolRecords(t, t.Context(), agent.DiscardLogSink{}, &agenttest.RecordHandler{Messages: messages})
+				conn := newPiConn(t.Context(), slog.New(slog.DiscardHandler), stdin, &agent.Options{MCP: mcptest.FakeRegistry{}, Records: owner})
 				var workers sync.WaitGroup
 				t.Cleanup(func() { conn.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
 				workers.Go(func() { sent <- conn.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
 				<-stdin.Started
-				messages := make(chan agent.TimedMessage, 8)
 				read := make(chan error, 1)
-				workers.Go(func() { read <- conn.ReadMessages(stdout, messages, conn) })
+				workers.Go(func() { read <- conn.ReadMessages(stdout, conn) })
 				request := `{"t":"agent","ts":1.000,"msg":{"type":"extension_ui_request","id":"confirm","method":"confirm","title":"Allow?"}}`
 				if kind == "TaskMCP" {
 					request = `{"t":"mcp_request","id":"tools","method":"tools/list"}`
@@ -250,15 +248,18 @@ func TestPiConn(t *testing.T) {
 						t.Errorf("feed output: %v", err)
 					}
 				})
-				select {
-				case parsed := <-messages:
-					if m, ok := parsed.Message.(*agent.TextDeltaMessage); !ok || m.Text != "working" {
-						t.Fatalf("output = %#v", parsed.Message)
+			awaitOutput:
+				for {
+					select {
+					case parsed := <-messages:
+						if m, ok := parsed.Message.(*agent.TextDeltaMessage); ok && m.Text == "working" {
+							break awaitOutput
+						}
+					case err := <-read:
+						t.Fatalf("reader ended: %v", err)
+					case <-time.After(time.Second):
+						t.Fatal("stdout blocked behind automatic reply")
 					}
-				case err := <-read:
-					t.Fatalf("reader ended: %v", err)
-				case <-time.After(time.Second):
-					t.Fatal("stdout blocked behind automatic reply")
 				}
 				input := bufio.NewReader(stdin.Reader)
 				if _, err := input.ReadBytes('\n'); err != nil {
@@ -306,46 +307,6 @@ func TestPiConn(t *testing.T) {
 	})
 }
 
-func TestReapPiProcessExit(t *testing.T) {
-	t.Parallel()
-
-	cmd := exec.CommandContext(t.Context(), "bash", "-c", "printf '%s\\n' '{\"type\":\"caic_exit\",\"exit_code\":1,\"error\":\"extension load failure\"}'; cat >/dev/null")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = stdin.Close()
-	})
-
-	records := agent.NewRelayRecordReader(stdout, agent.DiscardLogSink{})
-
-	_, err = waitForResponse(records, "set_model")
-	if err == nil {
-		t.Fatal("waitForResponse returned nil error")
-	}
-	rp := &agent.RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}
-	done := make(chan error, 1)
-	var workers sync.WaitGroup
-	t.Cleanup(func() { _ = stdin.Close(); workers.Wait() })
-	workers.Go(func() { done <- reapPiProcessExit(rp, err) })
-	select {
-	case got := <-done:
-		if !errors.Is(got, err) {
-			t.Errorf("reapPiProcessExit error = %v, want wrapped %v", got, err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("reapPiProcessExit did not close the relay stdin")
-	}
-}
-
 func TestBackend(t *testing.T) {
 	t.Run("Start", func(t *testing.T) {
 		exe, err := os.Executable()
@@ -360,16 +321,16 @@ func TestBackend(t *testing.T) {
 		t.Setenv("PATH", dir)
 		t.Setenv("PI_SSH_HELPER_DIR", dir)
 
-		msgs := make(chan agent.TimedMessage, 1)
+		msgs := make(chan agent.TimedMessage, 64)
 		log := &agenttest.LogSink{}
+		owner := piProtocolRecords(t, t.Context(), log, &agenttest.RecordHandler{Messages: msgs})
 		sess, err := New("", nil).Start(t.Context(), &agent.Options{
 			ResumeSessionID: "ses-1",
 			Logger:          slog.New(slog.DiscardHandler),
 			Target:          runtime.ConnectionTarget{SSHHost: "task"},
 			Dir:             "/workspace",
 			Model:           "openai-codex/gpt-5.6-terra",
-			MsgCh:           msgs,
-			Log:             log,
+			Records:         owner,
 		})
 		if err != nil {
 			t.Fatalf("Start: %v", err)
@@ -410,10 +371,14 @@ func TestBackend(t *testing.T) {
 		if string(count) != "11" {
 			t.Errorf("Pi relay launches = %d, want 2", len(count))
 		}
-		msg := <-msgs
-		meta, ok := msg.Message.(*agent.InitMessage)
-		if !ok {
-			t.Fatalf("startup message = %T, want *agent.InitMessage", msg.Message)
+		var meta *agent.InitMessage
+		for len(msgs) > 0 {
+			if init, ok := (<-msgs).Message.(*agent.InitMessage); ok {
+				meta = init
+			}
+		}
+		if meta == nil {
+			t.Fatal("startup emitted no native session initialization")
 		}
 		if meta.ReportedModel != "openai-codex/gpt-5.6-terra" || meta.ReportedEffort != "high" {
 			t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
@@ -454,9 +419,10 @@ func TestBackend(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				msgs := make(chan agent.TimedMessage, 8)
+				msgs := make(chan agent.TimedMessage, 64)
 				log := &agenttest.LogSink{}
-				sess, err := New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", Model: "requested/model", ResumeSessionID: tc.want.SessionID, MsgCh: msgs, Log: log})
+				owner := piProtocolRecords(t, t.Context(), log, &agenttest.RecordHandler{Messages: msgs})
+				sess, err := New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", Model: "requested/model", ResumeSessionID: tc.want.SessionID, Records: owner})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -538,7 +504,8 @@ func TestBackend(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{}})
+		owner := piProtocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+		_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", Records: owner})
 		if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
 			t.Fatalf("resume mismatch error=%v", err)
 		}
@@ -563,7 +530,7 @@ func TestBackend(t *testing.T) {
 	t.Run("NewWire", func(t *testing.T) {
 		msgUpdateWithAccumulatedMessage := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"message":{"role":"assistant","content":[{"type":"text","text":"ignored accumulated text"}]}}`
 		// Regression: replay (relay output during adoption, and on-disk logs) uses
-		// NewWire().ParseOutput. It must use the stateful wire format so agent_end
+		// NewWire("").ParseOutput. It must use the stateful wire format so agent_end
 		// produces a terminal ResultMessage; without it SeedTimeline cannot infer
 		// the waiting state and adopted pi tasks stay stuck as "running".
 		t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
@@ -579,7 +546,7 @@ func TestBackend(t *testing.T) {
 				}
 			}
 			if !hasResult {
-				t.Fatalf("NewWire().ParseOutput produced no ResultMessage for agent_end: %#v", msgs)
+				t.Fatalf("NewWire.ParseOutput produced no ResultMessage for agent_end: %#v", msgs)
 			}
 		})
 
@@ -901,4 +868,18 @@ func TestWireUsageAccounting(t *testing.T) {
 			t.Fatalf("snapshot markers = %v, want both results covered", snapshots)
 		}
 	})
+}
+
+// piProtocolRecords organizes the concrete committed Pi decoder and observer.
+func piProtocolRecords(t testing.TB, ctx context.Context, sink agent.LogSink, handler *agenttest.RecordHandler) *agent.Records {
+	records, err := agent.NewRecords(ctx, New("", nil).NewWire(), sink, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := records.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return records
 }

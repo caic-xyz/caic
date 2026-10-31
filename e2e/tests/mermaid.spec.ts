@@ -28,14 +28,11 @@ for (const width of [390, 1280]) {
       "flowchart LR\nIncomplete[",
     ];
     const prompt = `${uniquePrompt("Diagrams:")}\n\n${diagrams.map((source) => `\`\`\`mermaid\n${source}\n\`\`\`\n`).join("\n")}`;
-    const id = await createTaskAPI(api, prompt);
+    const id = await createTaskAPI(api, uniquePrompt("Diagram preparation:"));
     await waitForTaskState(api, id, "waiting");
     await page.goto(`/task/@${id}`);
     expect(assets.filter((url) => /\/(lazy|flowchart|sequence|architecture)-/.test(url))).toEqual([]);
-    await page
-      .getByRole("button", { name: /1 message/ })
-      .first()
-      .click();
+    await api.sendInput(id, { prompt: { text: prompt } });
     const blocks = page.locator("[data-mermaid-block]");
     await expect(blocks.locator("[data-mermaid-diagram] > svg")).toHaveCount(6);
     await expect(blocks.last().locator("pre > code")).toBeVisible();
@@ -137,10 +134,6 @@ test("benchmark cold diagram loading", async ({ page, api, uniquePrompt }) => {
     observer.observe(document, { childList: true, subtree: true });
   });
   await page.goto(`/task/@${id}`);
-  await page
-    .getByRole("button", { name: /1 message/ })
-    .first()
-    .click();
   await expect(page.getByRole("img", { name: "Mermaid diagram" }).locator("svg")).toBeVisible();
   const result = await page.evaluate(() => {
     const assets = performance

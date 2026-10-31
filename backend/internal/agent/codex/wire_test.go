@@ -83,7 +83,14 @@ func TestFetchModels(t *testing.T) {
 		var stdin bytes.Buffer
 		records := &appServerReader{scanner: bufio.NewScanner(strings.NewReader(responses))}
 		var nextID atomic.Int64
-		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID, agent.DiscardLogSink{})
+		models, err := fetchModelsFromAppServer(t.Context(), records, &nextID, func(v any) error {
+			data, err := marshalInput(v)
+			if err != nil {
+				return err
+			}
+			_, err = stdin.Write(data)
+			return err
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +123,14 @@ func TestFetchModels(t *testing.T) {
 		var stdin bytes.Buffer
 		records := &appServerReader{scanner: bufio.NewScanner(strings.NewReader(responses))}
 		var nextID atomic.Int64
-		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID, agent.DiscardLogSink{})
+		models, err := fetchModelsFromAppServer(t.Context(), records, &nextID, func(v any) error {
+			data, err := marshalInput(v)
+			if err != nil {
+				return err
+			}
+			_, err = stdin.Write(data)
+			return err
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -147,7 +161,7 @@ func TestFetchModels(t *testing.T) {
 `
 		records := &appServerReader{scanner: bufio.NewScanner(strings.NewReader(responses))}
 		var nextID atomic.Int64
-		if _, err := fetchModelsFromAppServer(t.Context(), io.Discard, records, &nextID, agent.DiscardLogSink{}); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
+		if _, err := fetchModelsFromAppServer(t.Context(), records, &nextID, func(any) error { return nil }); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
 			t.Fatalf("fetchModelsFromAppServer error = %v, want repeated cursor", err)
 		}
 	})
@@ -174,8 +188,9 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"saved-session"},"model":"gpt-5.4"}}
 `
 		var stdin bytes.Buffer
-		wire, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{
-			Dir: "/repo", Model: "gpt-5.4", ResumeSessionID: "saved-session", Log: &agenttest.LogSink{},
+		wire, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{
+			Dir: "/repo", Model: "gpt-5.4", ResumeSessionID: "saved-session", Records: records,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -202,7 +217,8 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{}})
+		w, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+		models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Records: records})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +271,8 @@ func TestHandshake(t *testing.T) {
 `
 		var stdin bytes.Buffer
 		log := &agenttest.LogSink{}
-		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(generation+v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
+		_, records := protocolRecords(t, t.Context(), log, &agenttest.RecordHandler{})
+		if _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(generation+v3Records(responses))), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Records: records}); err != nil {
 			t.Fatal(err)
 		}
 		lines := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
@@ -287,13 +304,13 @@ func TestWireFormatCompactCommand(t *testing.T) {
 	t.Parallel()
 
 	wire := &wireFormat{threadID: "thread-1"}
-	var stdin bytes.Buffer
 	var compact agent.CompactCommand = wire
-	if err := compact.WriteCompact(&stdin, "", agent.DiscardLogSink{}); err != nil {
+	data, err := compact.EncodeCompact("")
+	if err != nil {
 		t.Fatal(err)
 	}
 	var request codex.JSONRPCRequest
-	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &request); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(data), &request); err != nil {
 		t.Fatal(err)
 	}
 	if request.Method != "thread/compact/start" {
@@ -301,17 +318,25 @@ func TestWireFormatCompactCommand(t *testing.T) {
 	}
 }
 
-func TestWritePromptInputPersistence(t *testing.T) {
+func TestEncodePromptCommittedCorrelation(t *testing.T) {
 	t.Parallel()
-
-	var stdin bytes.Buffer
-	log := &agenttest.LogSink{}
 	wire := &wireFormat{threadID: "thread-1"}
-	if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
+	data, err := wire.EncodePrompt(agent.Prompt{Text: "hello"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
-		t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
+	if len(wire.requests) != 0 || len(wire.inputTurns) != 0 {
+		t.Fatal("encoding changed input correlation")
+	}
+	messages, err := wire.ParseInput(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || len(wire.requests) != 1 {
+		t.Fatalf("committed prompt = %#v, requests = %#v", messages, wire.requests)
+	}
+	if input, ok := messages[0].(*agent.UserInputMessage); !ok || input.Text != "hello" {
+		t.Fatalf("attempted input = %#v", messages)
 	}
 }
 
@@ -334,7 +359,8 @@ func TestHandshakeContinuation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var stdin bytes.Buffer
-			_, _, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{}})
+			_, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			_, continuation, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(tc.input)), io.NopCloser(strings.NewReader("")), &agent.Options{Dir: "/repo", Records: records})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -196,8 +196,8 @@ short writes yield the first expiry of 300 seconds. A cache write without
   settles, and an aborted or failed attempt becomes `compact_error`.
 - **Steering**: `steer` and `follow_up` exist in the protocol but caic does not
   send them (see Not Yet Exposed).
-- **Duration tracking**: `piWireFormat` records `startTime` when `WritePrompt`
-  is called; `handleAgentEnd` computes duration from `startTime` and emits it in
+- **Duration tracking**: `piMetadata` records `startTime` when committed prompt input
+  reaches `ParseInput`; `handleAgentEnd` computes duration from `startTime` and emits it in
   the final `ResultMessage`. Pi does not emit `message_update:done` — the stream
   ends with `message_end → turn_end → agent_end`.
 - **Turn counting**: `handleTurnEnd` increments `numTurns`; `handleAgentEnd`

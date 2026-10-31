@@ -1,4 +1,4 @@
-// Records and validates agent session traces through relay.py for golden-file tests.
+// Records complete ordered agent journals through relay.py and validates golden evidence.
 //
 // Usage:
 //
@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
@@ -34,8 +35,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -145,7 +144,7 @@ func mainImpl() error {
 	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *modelFlag, *localFlag)
 }
 
-func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool) error {
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool) (retErr error) {
 	workDir, err := setupCheckout()
 	if err != nil {
 		return err
@@ -200,29 +199,62 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 			return fmt.Errorf("detect tool paths: %w", err)
 		}
 	}
+	// Keep the actual committed journal, including the outbound protocol records
+	// needed to reconstruct request ownership and session metadata.
+	journalDir, err := os.MkdirTemp("", "caic-record-journal-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(journalDir) }()
+	writer, journalPath, err := taskslog.NewStore(journalDir).Open("recording.jsonl", &v3.MetaMessage{
+		MessageType: "caic_meta", Version: agent.LogVersionV3,
+		Harness: string(b.Harness()), Prompt: sc.prompt, Repos: []v3.MetaRepo{}, StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	observer := &recordObserver{done: make(chan struct{}, 1), askAnswer: sc.askAnswer}
+	records, err := agent.NewRecords(ctx, b.NewWire(), agent.NewRecordedLog(writer), observer)
+	if err != nil {
+		return errors.Join(err, writer.Close())
+	}
+	ownerOpen := true
+	defer func() {
+		if ownerOpen {
+			retErr = errors.Join(retErr, records.Close())
+		}
+	}()
 	cmd, stdin, stdoutPipe, err := startRelayAgent(ctx, ctr, workDir, relayDir, b, model, binDirs, local)
 	if err != nil {
 		return err
 	}
-	var stdout io.Reader = stdoutPipe
-	var wire agent.WireFormat
-	if hs, ok := b.(agent.RecordHandshaker); ok {
-		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, harnessWorkDir(local, workDir), model)
-		if err != nil {
+	bootstrap := true
+	defer func() {
+		if bootstrap {
+			closeErr := errors.Join(stdin.Close(), stdoutPipe.Close())
 			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
+			retErr = errors.Join(retErr, closeErr, cmd.Wait())
+		}
+	}()
+	var stdout io.Reader = stdoutPipe
+	if hs, ok := b.(agent.RecordHandshaker); ok {
+		stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, &agent.Options{
+			Dir: harnessWorkDir(local, workDir), Model: model, Records: records,
+		})
+		if err != nil {
 			return err
 		}
 	}
-	if err := sendCommands(stdin, b, model, sc.prompt, wire); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+	bootstrap = false
+	conn := agent.NewConn(ctx, slog.Default(), stdin, records, nil)
+	if err := waitAndShutdown(ctx, cmd, conn, agent.ContinuedReader{Reader: stdout, Closer: stdoutPipe}, observer, ctr, localOutputPath(relayDir, local), sc.prompt); err != nil {
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, stdoutPipe, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer); err != nil {
+	ownerOpen = false
+	if err := records.Close(); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc, outputPath)
+	return writeGoldenFile(ctx, journalPath, b, sc, outputPath)
 }
 
 // localOutputPath returns the host path of the recording's output.jsonl.
@@ -412,60 +444,110 @@ func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent
 	return cmd, stdin, stdout, nil
 }
 
-// sendCommands sends any pre-prompt harness setup and then the prompt.
-// When wire is non-nil (from a RecordHandshake), it is used instead of
-// NewWire() and PrePromptWriter is skipped (handshake already set up).
-func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string, wire agent.WireFormat) error {
-	if wire == nil {
-		if pp, ok := b.(agent.PrePromptWriter); ok {
-			if err := pp.WritePrePrompt(stdin, model, agent.DiscardLogSink{}); err != nil {
-				return err
-			}
-		}
-		wire = b.NewWire()
-	}
-	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", promptText))
-	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, agent.DiscardLogSink{})
-}
-
-// waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, stdoutPipe io.Closer, b agent.Backend, ctr, localOutput string, wire agent.WireFormat, askAnswer string) error {
-	if wire == nil {
-		wire = b.NewWire()
-	}
+// waitAndShutdown runs the regular transport owner, delivers the prompt, and
+// shuts down both transport producers before its caller closes the journal.
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout io.ReadCloser, observer *recordObserver, ctr, localOutput, prompt string) error {
 	watchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	stop := context.AfterFunc(watchCtx, func() { _ = cmd.Process.Kill() })
+	stop := context.AfterFunc(watchCtx, conn.Cancel)
 	defer stop()
-	group, watchCtx := errgroup.WithContext(watchCtx)
-	defer func() {
-		_ = stdoutPipe.Close()
-		_ = group.Wait()
-	}()
-	agentDone := watchAgent(group, stdout, stdin, wire.ParseOutput, askAnswer)
-
-	slog.InfoContext(ctx, "Waiting for agent to finish")
-	select {
-	case err := <-agentDone:
-		if err != nil {
+	readDone := make(chan error, 1)
+	var workers sync.WaitGroup
+	workers.Go(func() { readDone <- conn.ReadMessages(stdout, observer) })
+	var failure error
+	slog.InfoContext(ctx, "Sending prompt", "text", fmt.Sprintf("%.60s...", prompt))
+	if err := conn.SendPrompt(agent.Prompt{Text: prompt}, nil); err != nil {
+		failure = err
+	} else {
+		slog.InfoContext(ctx, "Waiting for agent to finish")
+		select {
+		case <-observer.done:
+			conn.SendStop(watchCtx)
+		case failure = <-readDone:
+			if failure == nil {
+				failure = errors.New("agent stream ended without a result")
+			}
+			conn.Cancel()
+			workers.Wait()
 			_ = cmd.Process.Kill()
-			return err
+			return errors.Join(failure, cmd.Wait())
+		case <-watchCtx.Done():
+			failure = watchCtx.Err()
 		}
-		slog.InfoContext(ctx, "Agent completed, stopping relay")
-	case <-watchCtx.Done():
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return watchCtx.Err()
 	}
-
-	_, _ = stdin.Write([]byte("\x00\n"))
-	_ = stdin.Close()
-	_ = cmd.Wait()
-
+	conn.Cancel()
+	readErr := <-readDone
+	workers.Wait()
+	if failure != nil {
+		_ = cmd.Process.Kill()
+	}
+	waitErr := cmd.Wait()
+	if failure != nil {
+		return errors.Join(failure, readErr, waitErr)
+	}
+	if readErr != nil && !errors.Is(readErr, context.Canceled) {
+		return errors.Join(readErr, waitErr)
+	}
+	if waitErr != nil {
+		return waitErr
+	}
 	if localOutput != "" {
 		return waitForLocalFile(ctx, localOutput, 20*time.Second)
 	}
 	return waitForFile(ctx, ctr, agent.RelayOutputPath, 20*time.Second)
+}
+
+// recordObserver detects committed completion and encodes recorder-specific
+// Claude question answers; the transport queues and commits the returned bytes.
+type recordObserver struct {
+	done      chan struct{}
+	askAnswer string
+}
+
+func (*recordObserver) RecordAppended(agent.PhysicalRecord) {}
+func (*recordObserver) PrepareRecords(context.Context, []agent.TimedMessage) ([]agent.Message, error) {
+	return nil, nil
+}
+func (o *recordObserver) ApplyRecords(_ context.Context, messages []agent.TimedMessage) error {
+	for _, event := range messages {
+		if _, ok := event.Message.(*agent.ResultMessage); ok {
+			select {
+			case o.done <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return nil
+}
+func (o *recordObserver) HandleMessage(m agent.Message) (response []byte, handled bool, err error) {
+	if provenance := m.Provenance(); provenance != nil && provenance.IsChild() {
+		return nil, false, nil
+	}
+	if pending, ok := m.(*agent.PendingUserActionMessage); ok && pending.Action.Kind == agent.PendingUserActionAskUserQuestion {
+		if o.askAnswer == "" {
+			return nil, false, errors.New("AskUserQuestion control request needs a scenario ask answer")
+		}
+		input, err := json.Marshal(pending.Action.Ask)
+		if err != nil {
+			return nil, false, err
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(input, &raw); err != nil {
+			return nil, false, err
+		}
+		updated, err := askUserQuestionUpdatedInput(raw, o.askAnswer)
+		if err != nil {
+			return nil, false, err
+		}
+		data, err := claudeResponseBytes(pending.Action.RequestID, updated)
+		return data, false, err
+	}
+	raw, ok := m.(*agent.RawMessage)
+	if !ok || !isClaudeControlRequest(raw.Raw) {
+		return nil, false, nil
+	}
+	data, err := claudeControlResponse(raw.Raw, o.askAnswer)
+	return data, true, err
 }
 
 // waitForLocalFile polls a local path until it appears or the timeout elapses.
@@ -485,88 +567,49 @@ func waitForLocalFile(ctx context.Context, path string, timeout time.Duration) e
 	}
 }
 
-// watchAgent reads physical relay records, answers Claude control requests, and
-// signals when a ResultMessage is parsed, reading the trace like a live task session.
-func watchAgent(group *errgroup.Group, stdout io.Reader, stdin io.Writer, parse func([]byte) ([]agent.Message, error), askAnswer string) <-chan error {
-	done := make(chan error, 1)
-	reader := agent.NewRelayRecordReader(stdout, agent.DiscardLogSink{})
-
-	group.Go(func() error {
-		defer close(done)
-		for {
-			native, _, err := reader.ReadRecord()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return nil
-				}
-				done <- err
-				return nil
-			}
-			if native == nil {
-				continue
-			}
-			line := append([]byte(nil), native...)
-			if err := answerClaudeControlRequest(stdin, line, askAnswer); err != nil {
-				done <- err
-				return nil
-			}
-			msgs, err := parse(line)
-			if err != nil {
-				continue
-			}
-			for _, m := range msgs {
-				if _, ok := m.(*agent.ResultMessage); ok {
-					done <- nil
-					return nil
-				}
-			}
-		}
-	})
-	return done
-}
-
-func answerClaudeControlRequest(w io.Writer, line []byte, askAnswer string) error {
+func claudeControlResponse(line []byte, askAnswer string) ([]byte, error) {
 	if !isClaudeControlRequest(line) {
-		return nil
+		return nil, nil
 	}
 	var msg claudedto.OutputControlRequestMsg
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return fmt.Errorf("unmarshal control request: %w", err)
+		return nil, fmt.Errorf("unmarshal control request: %w", err)
 	}
 	can, err := msg.DecodeCanUseTool()
 	if err != nil {
-		return fmt.Errorf("decode can_use_tool request: %w", err)
+		return nil, fmt.Errorf("decode can_use_tool request: %w", err)
 	}
 	if can.Subtype != claudedto.ControlCanUseTool {
-		return fmt.Errorf("unsupported control request subtype %q", can.Subtype)
+		return nil, fmt.Errorf("unsupported control request subtype %q", can.Subtype)
 	}
 
+	var updatedInput json.RawMessage
+	if can.ToolName == "AskUserQuestion" {
+		if askAnswer == "" {
+			return nil, errors.New("AskUserQuestion control request needs a scenario ask answer")
+		}
+		var err error
+		updatedInput, err = askUserQuestionUpdatedInput(can.Input, askAnswer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return claudeResponseBytes(msg.RequestID, updatedInput)
+}
+
+func claudeResponseBytes(requestID string, updatedInput json.RawMessage) ([]byte, error) {
 	res := claudedto.InputControlResponseMsg{
 		Type: claudedto.InputControlResponse,
 		Response: claudedto.ControlResponse{
-			Subtype:   claudedto.ControlResponseSuccess,
-			RequestID: msg.RequestID,
-			Response: claudedto.ControlResponsePayload{
-				Behavior: claudedto.ControlCanUseToolBehaviorAllow,
-			},
+			Subtype: claudedto.ControlResponseSuccess, RequestID: requestID,
+			Response: claudedto.ControlResponsePayload{Behavior: claudedto.ControlCanUseToolBehaviorAllow, UpdatedInput: updatedInput},
 		},
-	}
-	if can.ToolName == "AskUserQuestion" {
-		if askAnswer == "" {
-			return errors.New("AskUserQuestion control request needs a scenario ask answer")
-		}
-		updatedInput, err := askUserQuestionUpdatedInput(can.Input, askAnswer)
-		if err != nil {
-			return err
-		}
-		res.Response.Response.UpdatedInput = updatedInput
 	}
 	data, err := json.Marshal(res)
 	if err != nil {
-		return fmt.Errorf("marshal control response: %w", err)
+		return nil, fmt.Errorf("marshal control response: %w", err)
 	}
-	_, err = fmt.Fprintf(w, "%s\n", data)
-	return err
+	return append(data, '\n'), nil
 }
 
 func isClaudeControlRequest(line []byte) bool {
@@ -602,23 +645,18 @@ func askUserQuestionUpdatedInput(raw map[string]json.RawMessage, answer string) 
 	return updatedInput, nil
 }
 
-// writeGoldenFile copies output.jsonl from the container, sanitizes it,
-// writes the JSONL trace, validates the evidence it records, and generates the
-// .golden.md markdown file.
-func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local bool, b agent.Backend, sc scenario, outputPath string) error {
-	localOutput := filepath.Join(workDir, "output.jsonl")
-	if local {
-		localOutput = filepath.Join(relayDir, "output.jsonl")
-	} else {
-		slog.InfoContext(ctx, "Copying output.jsonl")
-		if err := runPodman(ctx, "cp", ctr+":"+agent.RelayOutputPath, localOutput); err != nil {
-			return fmt.Errorf("copy output: %w", err)
-		}
-	}
-
-	raw, err := os.ReadFile(localOutput) //nolint:gosec // temp dir is safe
+// writeGoldenFile publishes the complete closed recording journal as sanitized
+// JSONL evidence and renders its golden discussion.
+func writeGoldenFile(ctx context.Context, journalPath string, b agent.Backend, sc scenario, outputPath string) error {
+	raw, err := os.ReadFile(filepath.Clean(journalPath))
 	if err != nil {
-		return fmt.Errorf("read output: %w", err)
+		return fmt.Errorf("read recording: %w", err)
+	}
+	// The store initialized the header; buildGoldenContent writes the sanitized
+	// fixture header and completion footer around the original ordered records.
+	_, raw, ok := bytes.Cut(raw, []byte{'\n'})
+	if !ok {
+		return errors.New("recording has no metadata header")
 	}
 
 	sanitized, err := buildGoldenContent(raw, b.Harness(), sc.prompt)

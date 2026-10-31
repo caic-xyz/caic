@@ -49,6 +49,8 @@ type WarningDetail struct {
 // TaskEntry is an abstract task handle for CI monitoring.
 type TaskEntry interface {
 	Task() *taskrun.Task
+	RecordHost(ctx context.Context, m agent.Message) error
+	RecordRepositorySummary(ctx context.Context, read *repo.GitSnapshot) (bool, error)
 	MonitorBranch() string
 	SetMonitorBranch(branch string)
 	Result() *task.Result

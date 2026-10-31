@@ -25,8 +25,11 @@ type piMetadata struct {
 	modelProvider  string
 }
 
-func (*piMetadata) ParseInput(line []byte) ([]agent.Message, error) {
-	_, err := decodeEventType(line)
+func (w *piMetadata) ParseInput(line []byte) ([]agent.Message, error) {
+	typ, err := decodeEventType(line)
+	if err == nil && typ == pi.CmdPrompt {
+		w.beginPrompt()
+	}
 	return nil, err
 }
 
@@ -92,6 +95,14 @@ func (w *piMetadata) ParseOutput(line []byte) ([]agent.Message, error) {
 	w.applyMetadata(msgs)
 	w.markAccounting(typ, msgs)
 	return msgs, nil
+}
+
+// beginPrompt applies the committed input boundary in both native projections.
+func (w *piMetadata) beginPrompt() {
+	w.mu.Lock()
+	w.startTime = time.Now()
+	w.numTurns = 0
+	w.mu.Unlock()
 }
 
 func (w *piMetadata) applyMetadata(msgs []agent.Message) {

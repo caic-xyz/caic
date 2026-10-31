@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -1188,43 +1187,6 @@ func (DiscardLogSink) AppendMessage(Message) error { return nil }
 func (DiscardLogSink) Close() error { return nil }
 
 var _ LogSink = DiscardLogSink{}
-
-// AppendInputNativeRecord records bytes caic attempts to send before writing
-// the harness's stdin. V3 persists them separately from relay
-// output so protocol commands remain durable without becoming relay offsets.
-func AppendInputNativeRecord(log LogSink, data []byte) error {
-	return appendNativeRecord(log, taskslog.KindInput, data)
-}
-
-func appendNativeRecord(log LogSink, token taskslog.Kind, data []byte) error {
-	data = bytes.TrimSuffix(data, []byte{'\n'})
-	if len(data) == 0 {
-		return nil
-	}
-	ts := time.Now().UTC()
-	var err error
-	data, err = (&v3.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
-	if err != nil {
-		return err
-	}
-	return log.AppendRecord(PhysicalRecord{Encoded: append(data, '\n')})
-}
-
-// WriteMetaSession appends a caic_session control record for init metadata.
-func WriteMetaSession(log LogSink, init *InitMessage) error {
-	if init.SessionID == "" && init.ReportedModel == "" && init.ReportedEffort == "" && init.Version == "" && init.AutoCompactTokenLimit == 0 {
-		return nil
-	}
-	return log.AppendMessage(&MetaSessionMessage{
-		MessageProvenance:     init.MessageProvenance,
-		MessageType:           messageTypeSession,
-		SessionID:             init.SessionID,
-		ReportedModel:         init.ReportedModel,
-		ReportedEffort:        init.ReportedEffort,
-		AgentVersion:          init.Version,
-		AutoCompactTokenLimit: init.AutoCompactTokenLimit,
-	})
-}
 
 // ModelInfoMessage records a harness-reported context window for replay.
 type ModelInfoMessage v3.ModelInfoMessage

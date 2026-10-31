@@ -88,18 +88,20 @@ func TestDefault(t *testing.T) {
 				if err != nil || input.Provenance.Source == agent.RecordSourceRelay {
 					t.Fatalf("input = %#v, %v", input, err)
 				}
+				if len(input.Messages) == 0 {
+					t.Fatal("prompt produced no input")
+				}
+				if user, ok := input.Messages[0].Message.(*agent.UserInputMessage); !ok || user.Text != "hello" {
+					t.Fatalf("prompt = %#v", input.Messages[0].Message)
+				}
 				if tc.harness == harness.Codex {
-					if len(input.Messages) != 1 {
+					if len(input.Messages) != 2 {
 						t.Fatalf("client request = %#v", input.Messages)
 					}
-					raw, ok := input.Messages[0].Message.(*agent.RawMessage)
+					raw, ok := input.Messages[1].Message.(*agent.RawMessage)
 					if !ok || raw.MessageType != "jsonrpc_request" || !bytes.Equal(raw.Raw, []byte(tc.input)) {
-						t.Fatalf("client request = %#v", input.Messages[0].Message)
+						t.Fatalf("client request = %#v", input.Messages[1].Message)
 					}
-				} else if len(input.Messages) == 0 {
-					t.Fatal("prompt produced no input")
-				} else if user, ok := input.Messages[0].Message.(*agent.UserInputMessage); !ok || user.Text != "hello" {
-					t.Fatalf("prompt = %#v", input.Messages[0].Message)
 				}
 				// A native output record arriving under an input envelope must remain
 				// raw and cannot establish session identity, models or output usage.

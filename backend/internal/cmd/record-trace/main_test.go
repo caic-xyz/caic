@@ -3,16 +3,23 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
 
@@ -123,13 +130,13 @@ func TestAnswerClaudeControlRequest(t *testing.T) {
 	t.Run("AskUserQuestion", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which greeting should main.go print?","header":"Greeting","options":[{"label":"Hello"},{"label":"Hi"}],"multiSelect":false}]},"tool_use_id":"toolu-1"}}`)
-		var out bytes.Buffer
-		if err := answerClaudeControlRequest(&out, line, "Hi"); err != nil {
+		out, err := claudeControlResponse(line, "Hi")
+		if err != nil {
 			t.Fatal(err)
 		}
 
 		var got claudedto.InputControlResponseMsg
-		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatal(err)
 		}
 		if got.Type != claudedto.InputControlResponse {
@@ -157,13 +164,13 @@ func TestAnswerClaudeControlRequest(t *testing.T) {
 	t.Run("OtherTool", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"type":"control_request","request_id":"req-2","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"main.go"},"tool_use_id":"toolu-2"}}`)
-		var out bytes.Buffer
-		if err := answerClaudeControlRequest(&out, line, ""); err != nil {
+		out, err := claudeControlResponse(line, "")
+		if err != nil {
 			t.Fatal(err)
 		}
 
 		var got claudedto.InputControlResponseMsg
-		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatal(err)
 		}
 		if got.Response.RequestID != "req-2" {
@@ -220,4 +227,123 @@ func TestValidateGoldenRecording(t *testing.T) {
 			t.Fatal("validateGoldenRecording accepted an unparseable recording")
 		}
 	})
+}
+
+func TestRecordingRetainsNativeCorrelation(t *testing.T) {
+	t.Parallel()
+	backend := codex.New("", nil)
+	writer, journalPath, err := taskslog.NewStore(t.TempDir()).Open("recording.jsonl", &v3.MetaMessage{
+		MessageType: "caic_meta", Version: agent.LogVersionV3, Harness: string(harness.Codex), Prompt: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := &recordObserver{done: make(chan struct{}, 1)}
+	records, err := agent.NewRecords(t.Context(), agent.ApplyRequestedEffort(backend.NewWire(), "high"), agent.NewRecordedLog(writer), observer)
+	if err != nil {
+		t.Fatal(errors.Join(err, writer.Close()))
+	}
+	ownerOpen := true
+	t.Cleanup(func() {
+		if ownerOpen {
+			_ = records.Close()
+		}
+	})
+	var encoded strings.Builder
+	for _, line := range []string{
+		`{"id":1,"result":{"userAgent":"caic/0.1"}}`,
+		`{"id":2,"result":{"data":[]}}`,
+		`{"id":3,"result":{"thread":{"id":"recorded-thread","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}`,
+		`{"id":4,"result":{"turn":{"id":"turn-1"}}}`,
+		`{"method":"item/started","params":{"threadId":"recorded-thread","turnId":"turn-1","item":{"id":"echo-1","type":"userMessage","content":[{"type":"text","text":"hello"}]}}}`,
+		`{"method":"turn/completed","params":{"threadId":"recorded-thread","turn":{"id":"turn-1","status":"completed"}}}`,
+	} {
+		fmt.Fprintf(&encoded, "{\"t\":\"agent\",\"ts\":1.000,\"msg\":%s}\n", line)
+	}
+	stdout := io.NopCloser(strings.NewReader(encoded.String()))
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation, err := backend.RecordHandshake(t.Context(), stdin, stdout, &agent.Options{Dir: "/workspace", Records: records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, records, nil)
+	if err := conn.SendPrompt(agent.Prompt{Text: "hello"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadMessages(agent.ContinuedReader{Reader: continuation, Closer: stdout}, observer); err != nil {
+		t.Fatal(err)
+	}
+	ownerOpen = false
+	if err := records.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-observer.done:
+	default:
+		t.Fatal("the committed result did not finish the recorder")
+	}
+	raw, err := os.ReadFile(filepath.Clean(journalPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parser, err := agent.NewLogRecordParser(backend.NewWire())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata agent.SessionMetadata
+	inputs := 0
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		record, err := parser.ParseRecord([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range record.Messages {
+			metadata.Apply(event.Message)
+			if input, ok := event.Message.(*agent.UserInputMessage); ok {
+				inputs++
+				if input.Text != "hello" {
+					t.Fatalf("recorded input = %q", input.Text)
+				}
+			}
+		}
+	}
+	want := agent.SessionMetadata{SessionID: "recorded-thread", ReportedModel: "gpt-5.6", ReportedEffort: "medium", AgentVersion: "0.133.0"}
+	if metadata != want || inputs != 1 || strings.Count(string(raw), `"t":"input"`) != 5 {
+		t.Fatalf("recording metadata = %+v, canonical inputs = %d; want %+v, 1 and 5 native inputs\n%s", metadata, inputs, want, raw)
+	}
+}
+
+func TestRecorderAnswersNormalizedQuestion(t *testing.T) {
+	t.Parallel()
+	wire := claudecode.New().NewWire()
+	for _, line := range []string{
+		`{"type":"system","subtype":"init","session_id":"session-1"}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ask-1","name":"AskUserQuestion","input":{"questions":[{"question":"Which greeting?","options":[{"label":"Hello"},{"label":"Hi"}]}]}}]}}`,
+	} {
+		if _, err := wire.ParseOutput([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, err := wire.ParseOutput([]byte(`{"type":"control_request","request_id":"question-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"ask-1","input":{"questions":[{"question":"Which greeting?","options":[{"label":"Hello"},{"label":"Hi"}]}]}}}`))
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("question = %#v, %v", messages, err)
+	}
+	observer := &recordObserver{askAnswer: "Hi"}
+	data, hidden, err := observer.HandleMessage(messages[0])
+	if err != nil || hidden {
+		t.Fatalf("answer hidden = %t, error = %v", hidden, err)
+	}
+	inputs, err := wire.ParseInput(data)
+	if err != nil || len(inputs) != 1 {
+		t.Fatalf("recorded answer = %#v, %v", inputs, err)
+	}
+	if input, ok := inputs[0].(*agent.UserInputMessage); !ok || input.Text != "Hi" {
+		t.Fatalf("recorded answer = %#v", inputs[0])
+	}
 }

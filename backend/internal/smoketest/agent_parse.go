@@ -18,12 +18,12 @@ type envelope struct {
 	Type string `json:"type"`
 }
 
-func parsePlainTextInput(line []byte) ([]agent.Message, error) {
-	var text string
-	if err := json.Unmarshal(line, &text); err != nil {
+func parsePromptInput(line []byte) ([]agent.Message, error) {
+	var p agent.Prompt
+	if err := json.Unmarshal(line, &p); err != nil {
 		return nil, err
 	}
-	return []agent.Message{&agent.UserInputMessage{Text: text}}, nil
+	return []agent.Message{&agent.UserInputMessage{Text: p.Text, Images: p.Images}}, nil
 }
 
 // parseMessage decodes a single flat NDJSON line into agent.Messages.

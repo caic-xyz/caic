@@ -16,6 +16,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -108,11 +109,11 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 	id := ksid.NewID()
 	tk := mustNewTask(t, id, agent.Prompt{Text: "history"}, harness.Claude)
-	tk.SeedTimeline([]agent.Message{
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 		&agent.ToolUseMessage{ToolUseID: "enter", Name: "EnterPlanMode"},
 		&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 		&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
-	})
+	}))
 	tk.SetState(task.StateRunning)
 	if snap := tk.Snapshot(); snap.PlanExitID != "exit" || snap.PlanContent != "first plan" {
 		t.Fatal("fixture has no mutable visible-plan state")
@@ -125,7 +126,7 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	if !ok {
 		t.Fatal("missing test task")
 	}
-	path := filepath.Join(t.TempDir(), "task.jsonl")
+	path := filepath.Join(s.logStore.Journal.LogDir, tk.LogFilename())
 	data := `{"t":"caic_meta","version":3,"harness":"claude","model":"priced-model","prompt":"history"}` + "\n" +
 		`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"model":"priced-model","content":[{"type":"tool_use","id":"write","name":"Write","input":{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}}],"usage":{"input_tokens":1000000}}}}` + "\n" +
 		`{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"exit","name":"ExitPlanMode","input":{}}]}}}` + "\n" +
@@ -167,7 +168,9 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 		t.Fatalf("native plan=%v reported cost=%v live price calls=%d", plan, reported, price.calls.Load())
 	}
 	price.rate.Store(200)
-	tk.ClearMessages(t.Context())
+	if err := entry.RecordHost(t.Context(), agent.ContextCleared()); err != nil {
+		t.Fatal(err)
+	}
 	if snap := tk.Snapshot(); snap.PlanExitID != "" || snap.PlanContent != "" {
 		t.Fatal("fixture did not clear plan visibility")
 	}

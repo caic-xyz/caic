@@ -19,7 +19,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
+// mustNewTask uses Claude for fixtures that do not select another configured harness.
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model string) *taskrun.Task {
+	if h == "" {
+		h = harness.Claude
+	}
 	tk, err := taskrun.NewTask(id, prompt, h, model, "", "", "", "")
 	if err != nil {
 		t.Fatal(err)

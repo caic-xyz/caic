@@ -5,8 +5,6 @@ package taskrun
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,8 +25,11 @@ import (
 
 // mustNewTask calls NewTask and fails t if it returns an error. baseImage,
 // containerPlatform, and title are hardcoded empty: no test in this package
-// needs a non-default value.
+// needs a non-default value. An empty harness selects the fixture's configured Claude backend.
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort string) *Task {
+	if h == "" {
+		h = harness.Claude
+	}
 	tk, err := NewTask(id, prompt, h, model, effort, "", "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,14 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger), nil
+	session := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), stdout, opts.Logger)
+	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
+		if err := session.SendPrompt(opts.InitialPrompt); err != nil {
+			session.Cancel()
+			return nil, err
+		}
+	}
+	return session, nil
 }
 
 // NewWire matches the Claude parser used by testBackend's live connection.
@@ -88,44 +96,7 @@ func (b *attachCaptureBackend) AttachRelay(ctx context.Context, opts *agent.Opti
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseOutput}), stdout, opts.MsgCh, opts.Logger), nil
-}
-
-// testWire implements agent.WireFormat for testing.
-type testWire struct {
-	parse func([]byte) ([]agent.Message, error)
-}
-
-func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	msg := struct {
-		Type    string `json:"type"`
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
-	}{Type: "user"}
-	msg.Message.Role = "user"
-	msg.Message.Content = p.Text
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, data); err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *testWire) ParseOutput(line []byte) ([]agent.Message, error) {
-	return w.parse(line)
-}
-
-func (*testWire) ParseInput(line []byte) ([]agent.Message, error) {
-	return claudecode.New().NewWire().ParseInput(line)
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), stdout, opts.Logger), nil
 }
 
 // testContainer returns a fake runtime whose Diff and compact status probe

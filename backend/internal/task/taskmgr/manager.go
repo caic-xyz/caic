@@ -279,24 +279,39 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	return m, nil
 }
 
-// Close stops background work and waits for task lifecycles and all Manager watchers to finish.
-func (m *Manager) Close() error {
+// Cancel stops admission and signals local producers without closing their journals.
+// App calls Cancel before joining automation; Close then joins all producers and
+// seals the accepted task tails. Repeated cancellation is safe.
+func (m *Manager) Cancel() {
 	m.quotaWatchMu.Lock()
 	m.quotaWatchClosed = true
 	m.cancelServerCtx()
 	m.quotaWatchMu.Unlock()
 	m.Range(func(_ ksid.ID, e *Entry) bool {
 		if e.Lifecycle != nil {
-			_ = e.Lifecycle.Close()
+			e.Lifecycle.Cancel()
 		}
 		return true
 	})
-	m.quotaWatchers.Wait()
+}
+
+// Close stops background work and waits for task lifecycles and all Manager watchers to finish.
+func (m *Manager) Close() error {
+	m.Cancel()
+	// Stop shared producers before sealing per-task journals. Accepted MCP
+	// work and queued deliveries may still submit records while draining.
 	m.background.Wait()
+	m.quotaWatchers.Wait()
 	m.mcpExecutor.Close()
-	// After all task activity has settled, flush the usage rollup's pending
-	// deltas so a graceful shutdown never loses them.
-	return m.rollup.Close()
+	var closeErr error
+	m.Range(func(_ ksid.ID, e *Entry) bool {
+		if e.Lifecycle != nil {
+			closeErr = errors.Join(closeErr, e.Lifecycle.Close())
+		}
+		return true
+	})
+	// Flush usage only after every task owner has applied its accepted tail.
+	return errors.Join(closeErr, m.rollup.Close())
 }
 
 // Start activates m with its task-scoped MCP authority and starts its runtime
@@ -1132,22 +1147,6 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 	return loaded, nil
 }
 
-func (m *Manager) writeTaskResultTrailer(entry *Entry, res *task.Result) error {
-	t := entry.Task()
-	// A tracked path preserves the filename actually on disk; only recompute
-	// it from the task when no log has been opened yet in this process.
-	name := t.LogFilename()
-	if path := entry.LogPath.Get(); path != "" {
-		name = filepath.Base(path)
-	}
-	log, path, err := m.logStore.Reopen(name, t.LogHeader())
-	if err != nil {
-		return err
-	}
-	entry.LogPath.Set(path)
-	return errors.Join(m.logStore.WriteResultTrailer(log, t.Title(), res), log.Close())
-}
-
 // resolveImportTaskIDs selects instances for configured checkouts, reads
 // their task IDs, and rejects candidates with unavailable or duplicate IDs.
 func (m *Manager) resolveImportTaskIDs(ctx context.Context, instances []runtime.Instance) (resolved map[runtime.ID]string, rejected map[runtime.ID]bool, retErr error) {
@@ -1288,6 +1287,10 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 	}
 	entry.LogPath.Set(log.Path)
 	m.mu.Lock()
+	if err := m.serverCtx.Err(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	if t.ParentTaskID != 0 {
 		// TODO: Replace this temporary cap with configurable, time-based delegation quotas.
 		children := 0
@@ -1807,7 +1810,7 @@ func (m *Manager) handleRuntimeOOM(ctx context.Context, instanceID runtime.ID) {
 		return
 	}
 	t := entry.Task()
-	if !t.RecordSessionCrash(ctx, errors.New("runtime instance ran out of memory")) {
+	if !t.MarkSessionCrashed() {
 		return
 	}
 	m.log.WarnContext(ctx, "runtime instance ran out of memory", "instance", instanceID, "task", t.ID)
@@ -1841,6 +1844,11 @@ func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 // replaceEntryLocked preserves task-owned input during startup adoption.
 // The caller holds both inputMu and mu.
 func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
+	// Import may finish after Cancel snapshots registered entries. Fence its
+	// execution admission before publication, even with a retained lifecycle context.
+	if m.serverCtx.Err() != nil {
+		entry.Lifecycle.Cancel()
+	}
 	pending := entry.PendingInput()
 	if previous := m.tasks[id]; previous != nil && previous != entry {
 		pending = previous.PendingInput()
@@ -2217,14 +2225,14 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if checkout != nil {
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.GitTarget())
 		if snapshot.Read.NewerThan(repo.GitRead{}) {
-			t.SetLiveRepositorySummary(&snapshot)
+			t.RestoreRepositorySummary(&snapshot)
 		}
 		if err != nil {
 			m.log.WarnContext(ctx, "adopt", "msg", "restore diff stat failed", "task", t.ID, "err", err)
 		}
 	}
 	applyLoadedSessionMetadata(t, lt)
-	// Restore the persisted diff signal. SeedTimeline recomputes diffCreated
+	// Restore the persisted diff signal. SeedTimelineParts recomputes diffCreated
 	// from replayed history, but that replay is skipped when neither the relay
 	// tail nor the log messages load; the summary flag (scanned from the log)
 	// carries it through regardless. Sticky: only ever set, never cleared.
@@ -2253,7 +2261,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if isExited {
 		if importFailure == nil && t.GetState() != task.StateCrashed {
 			if t.LastExitError() != "" {
-				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before import"))
+				t.MarkSessionCrashed()
 			} else {
 				t.SetState(task.StateStopped)
 			}
@@ -2265,7 +2273,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 		trace.Logf(ctx, "import", "%s: relay-dead", c.ID)
 		if t.LastExitError() != "" {
-			t.RecordSessionCrash(ctx, errors.New("relay exited before import"))
+			t.MarkSessionCrashed()
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
 				m.log.ErrorContext(ctx, "stop failed after imported relay crash", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 			}
@@ -2319,7 +2327,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 		entry.Finish(result)
 		if !recoverImported {
-			if err := m.writeTaskResultTrailer(entry, result); err != nil {
+			if err := entry.Lifecycle.agentRuntime.CommitSettledResult(ctx, t, result); err != nil {
 				m.log.WarnContext(ctx, "write imported result trailer failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 			}
 		}
@@ -2426,7 +2434,7 @@ func (m *Manager) watchInputQueue(ctx context.Context) {
 
 // drainInputQueue reserves at most one prompt per task and starts independent
 // deliveries. A stalled transport must not block another task or queue editing.
-// Once a send begins it runs to completion; a stuck write may delay shutdown.
+// Shutdown cancels transport writes before joining these delivery workers.
 func (m *Manager) drainInputQueue(ctx context.Context) {
 	m.inputMu.Lock()
 	defer m.inputMu.Unlock()

@@ -27,8 +27,7 @@ func (p *metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.wire.rememberRequest(&probe)
-	return nil, nil
+	return nil, p.wire.rememberRequest(&probe)
 }
 
 func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
@@ -36,8 +35,16 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 }
 
 type recordedRequest struct {
-	id     string
-	method string
+	id       string
+	method   string
+	threadID string
+}
+
+// recordedInputTurn binds a committed start request to its native echo identity.
+type recordedInputTurn struct {
+	threadID string
+	turnID   string
+	itemID   string
 }
 
 // threadResponseMetadata is shared by the live handshake and both history

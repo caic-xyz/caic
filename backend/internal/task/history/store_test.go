@@ -276,37 +276,6 @@ func TestStore(t *testing.T) {
 			})
 		}
 	})
-	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {
-		t.Parallel()
-		b := &agenttest.LogSink{}
-		res := &task.Result{
-			State:         task.StateWaiting,
-			DiskUsedBytes: new(int64(456)),
-			Usage: agent.Usage{
-				ReasoningOutputTokens:    123,
-				CacheCreationInputTokens: 110,
-				CacheWrites:              tokens.CacheWrites{{TTL: 0, Tokens: 10}, {TTL: time.Hour, Tokens: 100}},
-			},
-		}
-		if err := (&Store{}).WriteResultTrailer(b, "title", res); err != nil {
-			t.Fatal(err)
-		}
-		var got agent.MetaResultMessage
-		if err := json.Unmarshal(b.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got.ReasoningOutputTokens != 123 {
-			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
-		}
-		var loaded LoadedTask
-		applyMetaResult(&loaded, &got)
-		if !loaded.LastTrailer.Usage.Equal(res.Usage) {
-			t.Fatalf("trailer usage = %+v, want %+v", loaded.LastTrailer.Usage, res.Usage)
-		}
-		if got.DiskUsedBytes == nil || *got.DiskUsedBytes != 456 {
-			t.Errorf("DiskUsedBytes = %v, want 456", got.DiskUsedBytes)
-		}
-	})
 	t.Run("CompressClosesWriterBeforeCompression", func(t *testing.T) {
 		t.Parallel()
 		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
@@ -1881,4 +1850,36 @@ func TestStore(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestResultMessage(t *testing.T) {
+	t.Parallel()
+	b := &agenttest.LogSink{}
+	res := &task.Result{
+		State:         task.StateWaiting,
+		DiskUsedBytes: new(int64(456)),
+		Usage: agent.Usage{
+			ReasoningOutputTokens:    123,
+			CacheCreationInputTokens: 110,
+			CacheWrites:              tokens.CacheWrites{{TTL: 0, Tokens: 10}, {TTL: time.Hour, Tokens: 100}},
+		},
+	}
+	if err := b.AppendMessage(ResultMessage("title", res)); err != nil {
+		t.Fatal(err)
+	}
+	var got agent.MetaResultMessage
+	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ReasoningOutputTokens != 123 {
+		t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
+	}
+	var loaded LoadedTask
+	applyMetaResult(&loaded, &got)
+	if !loaded.LastTrailer.Usage.Equal(res.Usage) {
+		t.Fatalf("trailer usage = %+v, want %+v", loaded.LastTrailer.Usage, res.Usage)
+	}
+	if got.DiskUsedBytes == nil || *got.DiskUsedBytes != 456 {
+		t.Errorf("DiskUsedBytes = %v, want 456", got.DiskUsedBytes)
+	}
 }

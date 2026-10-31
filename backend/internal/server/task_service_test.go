@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"path/filepath"
@@ -18,7 +20,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -237,7 +238,7 @@ func (c *gatedInputConn) SendPrompt(p agent.Prompt, data []byte) error {
 func newGatedInputSession(t *testing.T, tk *taskrun.Task) (*agent.Session, *gatedInputConn) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{}}
+	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}}
 	r := &taskrun.AgentRuntime{
 		Backends:         agent.Backends{harness.Claude: backend},
 		LogStore:         taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
@@ -252,8 +253,9 @@ func newGatedInputSession(t *testing.T, tk *taskrun.Task) (*agent.Session, *gate
 	}
 	t.Cleanup(func() {
 		cancel()
-		_ = h.Drain()
-		_ = h.Log.Close()
+		if err := r.Shutdown(context.WithoutCancel(ctx), tk); err != nil && !errors.Is(err, context.Canceled) {
+			t.Error(err)
+		}
 	})
 	return h.Session, backend.conn
 }
@@ -278,6 +280,6 @@ func (b *gatedInputBackend) Start(ctx context.Context, opts *agent.Options) (*ag
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	b.conn = &gatedInputConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Log, claudecode.New().NewWire()), started: make(chan struct{}), release: make(chan struct{})}
-	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.MsgCh, opts.Logger), nil
+	b.conn = &gatedInputConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), started: make(chan struct{}), release: make(chan struct{})}
+	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.Logger), nil
 }

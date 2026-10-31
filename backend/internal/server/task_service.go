@@ -973,9 +973,13 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 }
 
 // repositoryStatuses keeps task-list cards coherent with successful Git reads.
-func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, t *taskrun.Task, target repo.GitTarget) ([]runtime.RepositoryStatus, error) {
+func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, entry *taskmgr.Entry, target repo.GitTarget) ([]runtime.RepositoryStatus, error) {
 	snapshot, err := checkout.RepositoryStatuses(ctx, s.runtimes, target)
-	if err == nil && t.SetLiveRepositorySummary(&snapshot) {
+	if err != nil {
+		return snapshot.Statuses, err
+	}
+	changed, err := entry.RecordRepositorySummary(ctx, &snapshot)
+	if changed {
 		s.taskMgr.NotifyTaskChange()
 	}
 	return snapshot.Statuses, err
@@ -996,7 +1000,7 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
+	statuses, err := s.repositoryStatuses(ctx, checkout, entry, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -1104,7 +1108,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 		}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
+	statuses, err := s.repositoryStatuses(ctx, checkout, entry, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -1186,7 +1190,7 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
+	statuses, err := s.repositoryStatuses(ctx, checkout, entry, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}

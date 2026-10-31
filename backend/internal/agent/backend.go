@@ -18,15 +18,13 @@ import (
 // remains agent-agnostic.
 type Backend interface {
 	// Start launches the agent at the configured target. Parsed messages are
-	// forwarded to opts.MsgCh; opts.Log owns persisted task-log records.
+	// committed and forwarded through opts.Records.
 	Start(ctx context.Context, opts *Options) (*Session, error)
 
 	// AttachRelay connects to an already-running relay daemon in the
 	// configured target. opts.RelayOffset specifies the byte offset into
-	// output.jsonl to replay from. opts.HistoryPath supplies the authoritative
-	// task history preceding that offset, including recorded client commands.
-	// opts.ResumeSessionID is the known agent session ID, used by stateful
-	// wire formats (e.g. codex) that need it before the first replay message.
+	// output.jsonl to replay from. The caller has reconstructed opts.Records
+	// from authoritative task history, including client commands, before attach.
 	// opts.PendingUserActions contains user-facing actions restored before
 	// reconnect, such as unanswered AskUserQuestion requests. It excludes
 	// backend-only control protocol state.
@@ -164,12 +162,6 @@ type HarnessArgs struct {
 	ResumeSessionID string // Agent session ID to resume; empty starts a new session.
 }
 
-// PrePromptWriter is implemented by backends that send initialization
-// commands to stdin before the first user prompt (e.g. Pi's set_model).
-type PrePromptWriter interface {
-	WritePrePrompt(w io.Writer, model string, log LogSink) error
-}
-
 // RecordHandshaker is implemented by backends that perform a bidirectional
 // handshake over stdin/stdout before writing prompts (e.g. ACP-based agents
 // like OpenCode). dir is the working directory the recorded harness must run
@@ -178,7 +170,7 @@ type PrePromptWriter interface {
 // io.Reader replaces the original stdout for subsequent reads (it may be a
 // buffered reader that consumed bytes beyond the handshake response).
 type RecordHandshaker interface {
-	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string) (WireFormat, io.Reader, error)
+	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, opts *Options) (io.Reader, error)
 }
 
 // InterruptReadOnCancel closes the stream when ctx ends. The returned function

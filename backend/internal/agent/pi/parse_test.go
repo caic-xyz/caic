@@ -572,7 +572,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		}
 	})
 
-	t.Run("no WritePrompt before agent_end", func(t *testing.T) {
+	t.Run("no recorded prompt before agent_end", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
@@ -589,7 +589,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		}
 	})
 
-	t.Run("WritePrompt resets state between turns", func(t *testing.T) {
+	t.Run("committed prompt resets state between turns", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 
@@ -605,9 +605,11 @@ func TestWireFormatDurationTracking(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		if _, err := w.ParseInput([]byte(`{"type":"prompt","message":"next turn"}`)); err != nil {
+			t.Fatal(err)
+		}
 		w.mu.Lock()
 		w.startTime = time.Now().Add(-300 * time.Millisecond)
-		w.numTurns = 0
 		w.mu.Unlock()
 		if _, err := w.ParseOutput(turnEnd); err != nil {
 			t.Fatal(err)
@@ -1013,4 +1015,50 @@ func TestPiWireMessageUpdateFields(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestCommittedPromptBoundary(t *testing.T) {
+	t.Parallel()
+	for _, projection := range []string{"full", "metadata"} {
+		t.Run(projection, func(t *testing.T) {
+			t.Parallel()
+			wire := &piWireFormat{}
+			metadata := &wire.piMetadata
+			var parser agent.MessageParser = wire
+			if projection == "metadata" {
+				metadata = &piMetadata{}
+				parser = metadata
+			}
+			metadata.numTurns = 7
+			metadata.startTime = time.Unix(1, 0)
+			wire.toolOutputLen = map[string]int{"prior-tool": 100}
+			encoded, err := wire.EncodePrompt(agent.Prompt{Text: "next turn"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.numTurns != 7 || metadata.startTime != time.Unix(1, 0) || wire.toolOutputLen["prior-tool"] != 100 {
+				t.Fatal("encoding advanced the observed prompt boundary")
+			}
+			if _, err := parser.ParseInput(encoded); err != nil {
+				t.Fatal(err)
+			}
+			if metadata.numTurns != 0 || !metadata.startTime.After(time.Unix(1, 0)) || (projection == "full" && wire.toolOutputLen != nil) {
+				t.Fatal("committed prompt did not reset its owned turn state")
+			}
+			for _, line := range []string{
+				`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":10,"output":5,"totalTokens":15}}}`,
+				`{"type":"agent_end","messages":[]}`,
+			} {
+				messages, err := parser.ParseOutput([]byte(line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, message := range messages {
+					if result, ok := message.(*agent.ResultMessage); ok && result.NumTurns != 1 {
+						t.Fatalf("result turns = %d, want 1", result.NumTurns)
+					}
+				}
+			}
+		})
+	}
 }

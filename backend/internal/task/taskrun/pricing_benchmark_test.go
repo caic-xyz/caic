@@ -8,6 +8,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -25,7 +26,7 @@ func BenchmarkCodexResultPricing(b *testing.B) {
 	for b.Loop() {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Codex, model, "")
 		tk.Pricer = prices
-		tk.SeedTimeline(messages)
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
 	}
 }
 
@@ -46,6 +47,6 @@ func BenchmarkCodexRequestPricing(b *testing.B) {
 	for b.Loop() {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Codex, model, "")
 		tk.Pricer = prices
-		tk.SeedTimeline(messages)
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
 	}
 }

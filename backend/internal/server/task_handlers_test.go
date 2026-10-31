@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -81,6 +82,7 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid
 	tk.Repos = []repo.Mount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 	insertTestTask(s, tk.ID, tk)
+	recordRouterTaskLog(t, s, tk)
 	return s, backend, tk.ID
 }
 
@@ -291,10 +293,10 @@ func TestTaskHandlersHandoff(t *testing.T) {
 
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "finish the feature"}, "")
-	tk.SeedTimeline([]agent.Message{
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 		&agent.UserInputMessage{Text: "finish the feature"},
 		&agent.TextMessage{Text: "The API remains to be connected."},
-	})
+	}))
 	insertTestTask(s, tk.ID, tk)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+tk.ID.String()+"/handoff", nil)
@@ -323,7 +325,7 @@ func TestGitReadsRefreshTaskSummary(t *testing.T) {
 			mgr := testTaskHandlers(s).taskSvc.taskMgr
 			entry, _ := mgr.GetEntry(taskID)
 			tk := entry.Task()
-			tk.SetLiveRepositorySummary(&repo.GitSnapshot{
+			tk.RestoreRepositorySummary(&repo.GitSnapshot{
 				Read:       repo.NewGitRead(tk.RuntimeInstanceID()),
 				DiffStat:   logv3.DiffStat{{Path: "stale.go", LinesAdded: 273, LinesDeleted: 108}},
 				RepoStates: []logv3.RepoState{{Branch: "caic-1", Ahead: 1, ChangedFiles: 20}},

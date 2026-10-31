@@ -47,10 +47,10 @@ func TestPrepareRelay(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	id := "session with spaces'; printf INJECTED; $(printf SUBSTITUTED)"
 	opts := &Options{
-		Logger: slog.New(slog.DiscardHandler),
-		Target: runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:    "/workspace with spaces",
-		Log:    &testLogSink{},
+		Logger:  slog.New(slog.DiscardHandler),
+		Target:  runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:     "/workspace with spaces",
+		Records: newTestRecords(t, t.Context(), &testLogSink{}, nil),
 	}
 	rp, err := PrepareRelay(t.Context(), opts, nil, []string{"claude", "--resume", id})
 	if err != nil {
@@ -75,28 +75,23 @@ func TestPrepareRelay(t *testing.T) {
 // testWire implements WireFormat for testing.
 type testWire struct{}
 
-func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
+func (testWire) EncodePrompt(p Prompt) ([]byte, error) {
 	msg := struct {
 		Type    string `json:"type"`
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role    string         `json:"role"`
+			Content string         `json:"content"`
+			Images  []v3.ImageData `json:"images,omitzero"`
 		} `json:"message"`
 	}{Type: "user"}
 	msg.Message.Role = "user"
 	msg.Message.Content = p.Text
+	msg.Message.Images = p.Images
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	data = append(data, '\n')
-	if err := AppendInputNativeRecord(log, data); err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return append(data, '\n'), nil
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -164,13 +159,14 @@ func testParseFn(line []byte) ([]Message, error) {
 	case "user":
 		var m struct {
 			Message struct {
-				Content string `json:"content"`
+				Content string         `json:"content"`
+				Images  []v3.ImageData `json:"images,omitzero"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return []Message{&UserInputMessage{Text: m.Message.Content}}, nil
+		return []Message{&UserInputMessage{Text: m.Message.Content, Images: m.Message.Images}}, nil
 	case "stream_event":
 		var w struct {
 			Event struct {
@@ -193,21 +189,10 @@ func testParseFn(line []byte) ([]Message, error) {
 	}
 }
 
-func (testWire) ParseInput([]byte) ([]Message, error) { return nil, nil }
+func (testWire) ParseInput(line []byte) ([]Message, error) { return testParseFn(line) }
 
 func (testWire) ParseOutput(line []byte) ([]Message, error) {
 	return testParseFn(line)
-}
-
-type promptOrderWriter struct {
-	log *testLogSink
-}
-
-func (w *promptOrderWriter) Write(p []byte) (int, error) {
-	if w.log.Len() == 0 {
-		return 0, errors.New("input was delivered before being logged")
-	}
-	return len(p), nil
 }
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -234,7 +219,11 @@ func (*testLogSink) Close() error { return nil }
 // appendRelayNativeRecord appends bytes received from a relay in the exact
 // physical task-log format, matching what a live relay writes.
 func appendRelayNativeRecord(log LogSink, data []byte) error {
-	return appendNativeRecord(log, taskslog.KindAgent, data)
+	record, err := (&v3.NativeRecord{Type: string(taskslog.KindAgent), Time: time.Now().UTC(), Message: bytes.TrimSuffix(data, []byte{'\n'})}).MarshalJSON()
+	if err != nil {
+		return err
+	}
+	return log.AppendRecord(PhysicalRecord{Encoded: append(record, '\n')})
 }
 
 // canceledRegistry models an MCP operation that waits on another transport.
@@ -258,6 +247,14 @@ type closeErrorWriter struct {
 
 func (w *closeErrorWriter) Close() error { return w.err }
 
+type closeErrorReader struct {
+	io.Reader
+
+	err error
+}
+
+func (r *closeErrorReader) Close() error { return r.err }
+
 func TestNewConn(t *testing.T) {
 	t.Parallel()
 	t.Run("SendRaw", func(t *testing.T) {
@@ -266,7 +263,7 @@ func TestNewConn(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			logBuf := &testLogSink{}
-			c := NewConn(t.Context(), testLogger(), stdinW, logBuf, testWire{})
+			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
 
 			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
 			got := make([]byte, len(payload))
@@ -282,6 +279,9 @@ func TestNewConn(t *testing.T) {
 				t.Fatal(err)
 			}
 			workers.Wait()
+			if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(got, payload) {
 				t.Errorf("stdin = %q, want %q", got, payload)
 			}
@@ -300,23 +300,34 @@ func TestNewConn(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
-			c := NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{}, testWire{})
-			if err := c.SendRaw([]byte("data\n")); err == nil {
-				t.Error("expected error writing to closed pipe")
+			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), DiscardLogSink{}, nil), nil)
+			if err := c.SendRaw([]byte(`{"type":"test"}` + "\n")); !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("SendRaw = %v, want closed pipe", err)
+			}
+			if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil {
+				t.Fatal(err)
 			}
 		})
 	})
-}
 
-func TestNewMCPConn(t *testing.T) {
-	t.Parallel()
+	// A nil registry serves no task-scoped MCP requests.
 	request := `{"t":"mcp_request","id":"same-id","method":"tools/call","name":"echo","arguments":{}}` + "\n"
 	t.Run("ReadMessages/error_closing_stdin", func(t *testing.T) {
 		t.Parallel()
 		closeErr := errors.New("close stdin")
-		c := NewMCPConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, DiscardLogSink{}, testWire{}, nil)
-		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), make(chan TimedMessage), nil); !errors.Is(err, closeErr) {
+		c := NewConn(t.Context(), testLogger(), &closeErrorWriter{err: closeErr}, newTestRecords(t, t.Context(), DiscardLogSink{}, nil), nil)
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), nil); !errors.Is(err, closeErr) {
 			t.Fatalf("ReadMessages = %v, want close error", err)
+		}
+	})
+	t.Run("ReadMessages/error_independent_stdout_close_failure", func(t *testing.T) {
+		t.Parallel()
+		failure := errors.New("stdout close failed")
+		records := newTestRecords(t, t.Context(), DiscardLogSink{}, nil)
+		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, records, nil)
+		stdout := &closeErrorReader{Reader: strings.NewReader(""), err: errors.Join(os.ErrClosed, failure)}
+		if err := conn.ReadMessages(stdout, nil); !errors.Is(err, failure) {
+			t.Fatalf("ReadMessages = %v, want independent close failure", err)
 		}
 	})
 	t.Run("error_MCP_request_queue_overload", func(t *testing.T) {
@@ -325,10 +336,10 @@ func TestNewMCPConn(t *testing.T) {
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, registry)
+		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), registry)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
-		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
+		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
 		workers.Go(func() { _, _ = io.WriteString(output, strings.Repeat(request, 100)) })
 		t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
 		select {
@@ -346,11 +357,11 @@ func TestNewMCPConn(t *testing.T) {
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
 		registry := &canceledRegistry{started: make(chan struct{})}
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, registry)
 		messages := make(chan TimedMessage, 1)
+		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, messages), registry)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
-		workers.Go(func() { read <- c.ReadMessages(stdout, messages, nil) })
+		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
 		t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
 		workers.Go(func() {
 			if _, err := io.WriteString(output, request+`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}}`+"\n"); err != nil {
@@ -384,11 +395,11 @@ func TestNewMCPConn(t *testing.T) {
 			stdin, input := io.Pipe()
 			stdout, output := io.Pipe()
 			sink := &testLogSink{}
-			c := NewMCPConn(t.Context(), testLogger(), input, sink, testWire{}, registry)
 			messages := make(chan TimedMessage, 1)
+			c := NewConn(t.Context(), testLogger(), input, newTestRecords(t, t.Context(), sink, messages), registry)
 			read := make(chan error, 1)
 			var workers sync.WaitGroup
-			workers.Go(func() { read <- c.ReadMessages(stdout, messages, nil) })
+			workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
 			t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
 			decoder := json.NewDecoder(stdin)
 			if _, err := io.WriteString(output, request); err != nil {
@@ -428,10 +439,10 @@ func TestNewMCPConn(t *testing.T) {
 		t.Parallel()
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewMCPConn(t.Context(), testLogger(), input, &testLogSink{}, testWire{}, nil)
+		c := NewConn(t.Context(), testLogger(), input, newTestRecords(t, t.Context(), &testLogSink{}, nil), nil)
 		read := make(chan error, 1)
 		var workers sync.WaitGroup
-		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan TimedMessage, 1), nil) })
+		workers.Go(func() { read <- c.ReadMessages(stdout, nil) })
 		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Close(); workers.Wait() })
 		if _, err := io.WriteString(output, request); err != nil {
 			t.Fatal(err)
@@ -505,8 +516,8 @@ func TestSession(t *testing.T) {
 		}
 		stdin, input := io.Pipe()
 		stdout, output := io.Pipe()
-		c := NewMCPConn(ctx, testLogger(), input, DiscardLogSink{}, testWire{}, nil)
-		s := NewSession(ctx, cmd, c, stdout, make(chan TimedMessage, 1), testLogger())
+		c := NewConn(ctx, testLogger(), input, newTestRecords(t, ctx, DiscardLogSink{}, nil), nil)
+		s := NewSession(ctx, cmd, c, stdout, testLogger())
 		var workers sync.WaitGroup
 		t.Cleanup(func() { cancel(); s.Cancel(); _ = output.Close(); _ = s.Wait(); workers.Wait() })
 		if err := stdin.CloseWithError(io.ErrUnexpectedEOF); err != nil {
@@ -528,6 +539,61 @@ func TestSession(t *testing.T) {
 	})
 
 	t.Parallel()
+	t.Run("Wait", func(t *testing.T) {
+		t.Parallel()
+		// A harness usually leaves without dying by signal when its transport
+		// closes. Only the session owner's own shutdown explains that status.
+		start := func(t *testing.T) (*Session, context.CancelFunc, io.Closer) {
+			// The process outlives the session's own shutdown request, so the
+			// child reports the status it chooses instead of a signal.
+			processCtx, stopProcess := context.WithCancel(context.WithoutCancel(t.Context()))
+			t.Cleanup(stopProcess)
+			cmd := exec.CommandContext(processCtx, "sh", "-c", "read line || exit 3")
+			childStdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			connStdin, connStdinW := io.Pipe()
+			t.Cleanup(func() { _ = connStdin.Close(); _ = connStdinW.Close() })
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), connStdinW, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
+			t.Cleanup(func() { cancel(); s.Cancel(); _ = s.Wait() })
+			return s, cancel, childStdin
+		}
+		t.Run("error/live session reports the exit status", func(t *testing.T) {
+			t.Parallel()
+			s, _, childStdin := start(t)
+			if err := childStdin.Close(); err != nil {
+				t.Fatal(err)
+			}
+			<-s.Done()
+			if err := s.Wait(); err == nil || !strings.Contains(err.Error(), "exit status 3") {
+				t.Fatalf("session failure = %v, want the child's exit status", err)
+			}
+		})
+		t.Run("valid/teardown does not report the exit status", func(t *testing.T) {
+			t.Parallel()
+			s, cancel, childStdin := start(t)
+			cancel()
+			if err := childStdin.Close(); err != nil {
+				t.Fatal(err)
+			}
+			<-s.Done()
+			// Cancellation is the shutdown's own doing and the runtime filters it;
+			// the child's status must not be attributed to the agent.
+			if err := s.Wait(); err != nil && strings.Contains(err.Error(), "agent exited") {
+				t.Fatalf("teardown reported the child's exit status: %v", err)
+			}
+		})
+	})
 	t.Run("Stop", func(t *testing.T) {
 		t.Parallel()
 		t.Run("sentinel before EOF", func(t *testing.T) {
@@ -538,7 +604,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, DiscardLogSink{}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), w, newTestRecords(t, t.Context(), DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
 			t.Cleanup(func() { s.Cancel(); _ = output.Close(); _ = s.Wait() })
 			got := make(chan []byte, 1)
 			var reader sync.WaitGroup
@@ -563,7 +629,7 @@ func TestSession(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, DiscardLogSink{}, testWire{}), stdout, make(chan TimedMessage), testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, newTestRecords(t, ctx, DiscardLogSink{}, make(chan TimedMessage)), nil), stdout, testLogger())
 			t.Cleanup(func() { cancel(); _ = output.Close(); _ = s.Wait() })
 			result := make(chan error, 1)
 			var stopper sync.WaitGroup
@@ -586,7 +652,7 @@ func TestSession(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, DiscardLogSink{}, testWire{}), stdoutR, msgCh, testLogger())
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), DiscardLogSink{}, msgCh), nil), stdoutR, testLogger())
 
 		var workers sync.WaitGroup
 		t.Cleanup(func() { s.Cancel(); _ = s.Wait(); workers.Wait() })
@@ -663,6 +729,31 @@ func TestSession(t *testing.T) {
 	})
 	t.Run("SendPrompt", func(t *testing.T) {
 		t.Parallel()
+		t.Run("error_failed_append_preserves_publication", func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(ctx, "sleep", "60")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			messages := make(chan TimedMessage, 8)
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), stdin, newTestRecords(t, ctx, rejectedLog{}, messages), nil), stdout, testLogger())
+			t.Cleanup(func() { cancel(); s.Cancel(); _ = s.Wait() })
+			if err := s.SendPrompt(Prompt{Text: "unrecorded"}); err == nil {
+				t.Fatal("expected append failure")
+			}
+			if len(messages) != 0 {
+				t.Fatalf("failed append published %d messages", len(messages))
+			}
+		})
 		t.Run("error_interrupted_delivery_does_not_block_shutdown", func(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithCancel(t.Context())
@@ -679,7 +770,7 @@ func TestSession(t *testing.T) {
 			writer := &stopTestWriter{PipeWriter: pipe, started: started}
 			log := &testLogSink{}
 			msgCh := make(chan TimedMessage, 2)
-			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, log, testWire{}), stdout, msgCh, testLogger())
+			s := NewSession(ctx, cmd, NewConn(ctx, testLogger(), writer, newTestRecords(t, ctx, log, msgCh), nil), stdout, testLogger())
 			result := make(chan error, 1)
 			var sends sync.WaitGroup
 			sends.Go(func() { result <- s.SendPrompt(Prompt{Text: "follow up"}) })
@@ -731,43 +822,6 @@ func TestSession(t *testing.T) {
 			}
 		})
 	})
-	t.Run("PlainTextWritePrompt", func(t *testing.T) {
-		t.Parallel()
-		t.Run("input_precedes_immediate_response", func(t *testing.T) {
-			t.Parallel()
-			log := &testLogSink{}
-			if err := PlainTextWritePrompt(&promptOrderWriter{log: log}, Prompt{Text: "hello"}, log); err != nil {
-				t.Fatal(err)
-			}
-		})
-		var stdin bytes.Buffer
-		log := &testLogSink{}
-		before := time.Now().Truncate(time.Millisecond)
-		if err := PlainTextWritePrompt(&stdin, Prompt{Text: "hello"}, log); err != nil {
-			t.Fatal(err)
-		}
-		if got := stdin.String(); got != "hello\n" {
-			t.Errorf("stdin = %q, want hello\\n", got)
-		}
-		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		record, err := parser.ParseRecord(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(record.Messages) != 1 {
-			t.Fatalf("messages = %d, want 1", len(record.Messages))
-		}
-		input, ok := record.Messages[0].Message.(*UserInputMessage)
-		if record.Messages[0].ProducerTime.Before(before) || record.Messages[0].ProducerTime.After(time.Now()) {
-			t.Fatalf("persisted input observation = %v", record.Messages[0].ProducerTime)
-		}
-		if !ok || input.Text != "hello" {
-			t.Errorf("message = %#v, want user input hello", record.Messages[0].Message)
-		}
-	})
 
 	t.Run("SignalKillNotError", func(t *testing.T) {
 		t.Parallel()
@@ -788,7 +842,7 @@ func TestSession(t *testing.T) {
 		log := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		msgCh := make(chan TimedMessage, 16)
-		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, DiscardLogSink{}, testWire{}), stdout, msgCh, log)
+		s := NewSession(t.Context(), cmd, NewConn(t.Context(), log, stdin, newTestRecords(t, t.Context(), DiscardLogSink{}, msgCh), nil), stdout, log)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -842,7 +896,11 @@ func TestRelayNativeRecordEncoding(t *testing.T) {
 func TestDirectionalNativeRecords(t *testing.T) {
 	t.Parallel()
 	log := &testLogSink{}
-	if err := AppendInputNativeRecord(log, []byte(`{"method":"set_model"}`)); err != nil {
+	encodedInput, err := (&v3.NativeRecord{Type: string(taskslog.KindInput), Time: time.Now().UTC(), Message: []byte(`{"method":"set_model"}`)}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.AppendRecord(PhysicalRecord{Encoded: append(encodedInput, '\n')}); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendRelayNativeRecord(log, []byte(`{"type":"message"}`)); err != nil {
@@ -883,85 +941,17 @@ func TestDirectionalNativeRecords(t *testing.T) {
 	}
 	var live []TimedMessage
 	sink := &testLogSink{}
-	if err := DefaultReadMessages(t.Context(), testLogger(), bytes.NewReader(log.Bytes()), func(message TimedMessage) error {
+	owner := newTestRecordsWithHandler(t, t.Context(), sink, native, &testRecordHandler{publish: func(message TimedMessage) error {
 		live = append(live, message)
 		return nil
-	}, sink, native, nil); err != nil {
+	}})
+	if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(bytes.NewReader(log.Bytes())), nil); err != nil {
 		t.Fatal(err)
 	}
 	want := slices.Concat(input.Messages, relay.Messages)
 	if !reflect.DeepEqual(live, want) || !bytes.Equal(sink.Bytes(), log.Bytes()) {
 		t.Fatalf("live = %#v, want %#v; persisted = %q", live, want, sink.Bytes())
 	}
-}
-
-func TestWriteMetaSession(t *testing.T) {
-	t.Parallel()
-
-	t.Run("CompactThreshold", func(t *testing.T) {
-		t.Parallel()
-		buf := &testLogSink{}
-		if err := WriteMetaSession(buf, &InitMessage{SessionID: "session", AutoCompactTokenLimit: 244800}); err != nil {
-			t.Fatal(err)
-		}
-		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		init, ok := record.Messages[0].Message.(*MetaSessionMessage)
-		if !ok || init.AutoCompactTokenLimit != 244800 {
-			t.Fatalf("restored message = %#v", record.Messages[0].Message)
-		}
-	})
-
-	t.Run("V3PreservesProvenance", func(t *testing.T) {
-		t.Parallel()
-		buf := &testLogSink{}
-		source := MessageSource{AgentID: "native:child", DelegationToolUseID: "delegate"}
-		if err := WriteMetaSession(buf, &InitMessage{Source: source, SessionID: "session"}); err != nil {
-			t.Fatal(err)
-		}
-		parser, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) { return nil, nil }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(record.Messages) != 1 || *record.Messages[0].Message.Provenance() != source {
-			t.Errorf("session provenance lost: %s", buf.Bytes())
-		}
-	})
-	t.Run("V3PreservesDurableSettings", func(t *testing.T) {
-		t.Parallel()
-		buf := &testLogSink{}
-		if err := WriteMetaSession(buf, &InitMessage{ReportedModel: "m", ReportedEffort: "medium", Version: "1.2.3"}); err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
-			t.Fatal(err)
-		}
-		if raw["model"] != "m" || raw["reported_effort"] != "medium" || raw["reported_model"] != nil {
-			t.Fatalf("v3 session settings = %#v", raw)
-		}
-	})
-
-	t.Run("EmptyIgnored", func(t *testing.T) {
-		t.Parallel()
-		buf := &testLogSink{}
-		if err := WriteMetaSession(buf, &InitMessage{}); err != nil {
-			t.Fatal(err)
-		}
-		if buf.Len() != 0 {
-			t.Fatalf("buffer length = %d, want 0", buf.Len())
-		}
-	})
 }
 
 func TestMarshalLogMessage(t *testing.T) {
@@ -1163,12 +1153,13 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	}
 
 	var messages []Message
-	err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) error {
+	owner := newTestRecordsWithHandler(t, t.Context(), DiscardLogSink{}, &testMessageParser{output: func([]byte) ([]Message, error) {
+		return nil, nil
+	}}, &testRecordHandler{publish: func(parsed TimedMessage) error {
 		messages = append(messages, parsed.Message)
 		return nil
-	}, DiscardLogSink{}, &testMessageParser{output: func([]byte) ([]Message, error) {
-		return nil, nil
-	}}, nil)
+	}})
+	err = NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(string(snapshot)+"\n")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1228,10 +1219,11 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
+		owner := newTestRecordsWithHandler(t, t.Context(), DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, &testRecordHandler{publish: func(m TimedMessage) error {
 			ch <- m.Message
 			return nil
-		}, DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, nil); err != nil {
+		}})
+		if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1260,10 +1252,11 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) error {
+		owner := newTestRecordsWithHandler(t, t.Context(), DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, &testRecordHandler{publish: func(m TimedMessage) error {
 			ch <- m.Message
 			return nil
-		}, DiscardLogSink{}, &testMessageParser{input: testParseFn, output: testParseFn}, nil); err != nil {
+		}})
+		if err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -1299,8 +1292,8 @@ func TestReadMessages(t *testing.T) {
 				t.Cleanup(func() { _ = stdinR.Close() })
 				log := &testLogSink{}
 				got := make(chan TimedMessage, 1)
-				conn := NewConn(t.Context(), testLogger(), stdinW, log, testWire{})
-				err := conn.ReadMessages(io.NopCloser(strings.NewReader(tc.input)), got, nil)
+				conn := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), log, got), nil)
+				err := conn.ReadMessages(io.NopCloser(strings.NewReader(tc.input)), nil)
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("ReadMessages error = %v, want unexpected EOF", err)
 				}
@@ -1314,12 +1307,13 @@ func TestReadMessages(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{}
 		var got []TimedMessage
-		err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n"), func(msg TimedMessage) error {
+		owner := newTestRecordsWithHandler(t, t.Context(), log, &testMessageParser{output: func([]byte) ([]Message, error) {
+			return []Message{&TextMessage{}}, nil
+		}}, &testRecordHandler{publish: func(msg TimedMessage) error {
 			got = append(got, msg)
 			return nil
-		}, log, &testMessageParser{output: func([]byte) ([]Message, error) {
-			return []Message{&TextMessage{}}, nil
-		}}, nil)
+		}})
+		err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(`{"t":"agent","time":1.000,"msg":{}}`+"\n")), nil)
 		if err == nil || log.Len() != 0 || len(got) != 0 {
 			t.Fatalf("err=%v persisted=%d dispatched=%d", err, log.Len(), len(got))
 		}
@@ -1331,7 +1325,8 @@ func TestRelayRecordReader(t *testing.T) {
 	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{}
-		reader := NewRelayRecordReader(strings.NewReader(`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`), log)
+		owner := newTestRecords(t, t.Context(), log, nil)
+		reader := NewRelayRecordReader(t.Context(), strings.NewReader(`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`), owner)
 
 		if _, _, err := reader.ReadRecord(); !errors.Is(err, io.ErrUnexpectedEOF) {
 			t.Fatalf("ReadRecord error = %v, want unexpected EOF", err)
@@ -1452,7 +1447,8 @@ func TestReadRelayTailRecords(t *testing.T) {
 			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
 		} {
 			log := &testLogSink{}
-			reader := NewRelayRecordReader(strings.NewReader(input), log)
+			owner := newTestRecords(t, t.Context(), log, nil)
+			reader := NewRelayRecordReader(t.Context(), strings.NewReader(input), owner)
 
 			if _, _, err := reader.ReadRecord(); err == nil {
 				t.Fatal("ReadRecord error = nil")
@@ -1927,7 +1923,7 @@ func TestLogRecordParser(t *testing.T) {
 
 // TestAttachRelaySession rejects unavailable or corrupt recorded history before
 // starting SSH, including at relay offset zero.
-func TestAttachRelaySession(t *testing.T) {
+func TestRecordsReplayRequiresAuthoritativeHistory(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"required", "missing", "empty", "not_metadata", "malformed", "partial", "canceled"} {
 		t.Run(name, func(t *testing.T) {
@@ -1957,18 +1953,12 @@ func TestAttachRelaySession(t *testing.T) {
 			if name == "canceled" {
 				cancel()
 			}
-			opts := &Options{
-				Logger: testLogger(), Target: runtime.ConnectionTarget{SSHHost: "unreachable"},
-				HistoryPath: path, Log: &testLogSink{},
+			owner := newTestRecords(t, ctx, &testLogSink{}, nil)
+			err := owner.Replay(ctx, path)
+			if err == nil {
+				t.Fatal("invalid history was accepted")
 			}
-			session, err := AttachRelaySession(ctx, opts, &testWire{}, nil)
-			if session != nil {
-				session.Cancel()
-				t.Fatal("attach returned a session despite invalid history")
-			}
-			if err == nil || !strings.Contains(err.Error(), "warm recorded history") {
-				t.Fatalf("attach error = %v, want recorded history failure before SSH", err)
-			}
+
 			if name == "canceled" && !errors.Is(err, context.Canceled) {
 				t.Fatalf("error = %v, want context cancellation", err)
 			}
@@ -2000,6 +1990,8 @@ type testMessageParser struct {
 	output func([]byte) ([]Message, error)
 }
 
+func (*testMessageParser) EncodePrompt(Prompt) ([]byte, error) { return []byte("{}\n"), nil }
+
 func (p *testMessageParser) ParseInput(line []byte) ([]Message, error) {
 	if p.input == nil {
 		return nil, nil
@@ -2011,4 +2003,54 @@ func (p *testMessageParser) ParseOutput(line []byte) ([]Message, error) {
 		return nil, nil
 	}
 	return p.output(line)
+}
+
+// rejectedLog models a journal that cannot accept the attempted record.
+type rejectedLog struct{ DiscardLogSink }
+
+func (rejectedLog) AppendRecord(PhysicalRecord) error { return errors.New("journal unavailable") }
+func (rejectedLog) AppendMessage(Message) error       { return errors.New("journal unavailable") }
+
+// testRecordHandler models a non-writing task fold or an explicit test observer.
+type testRecordHandler struct {
+	consumer context.Context
+	messages chan<- TimedMessage
+	publish  func(TimedMessage) error
+}
+
+func (*testRecordHandler) RecordAppended(PhysicalRecord) {}
+func (*testRecordHandler) PrepareRecords(context.Context, []TimedMessage) ([]Message, error) {
+	return nil, nil
+}
+func (h *testRecordHandler) ApplyRecords(ctx context.Context, messages []TimedMessage) error {
+	for _, event := range messages {
+		if h.publish != nil {
+			if err := h.publish(event); err != nil {
+				return err
+			}
+		}
+		if h.messages != nil {
+			select {
+			case h.messages <- event:
+			case <-h.consumer.Done():
+				return h.consumer.Err()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
+}
+
+func newTestRecords(t testing.TB, ctx context.Context, sink LogSink, messages chan<- TimedMessage) *Records {
+	return newTestRecordsWithHandler(t, ctx, sink, testWire{}, &testRecordHandler{consumer: ctx, messages: messages})
+}
+func newTestRecordsWithHandler(t testing.TB, ctx context.Context, sink LogSink, wire WireFormat, handler RecordHandler) *Records {
+	owner, err := NewRecords(context.WithoutCancel(ctx), wire, sink, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each operation asserts its terminal error; Close can repeat that failure.
+	t.Cleanup(func() { _ = owner.Close() })
+	return owner
 }

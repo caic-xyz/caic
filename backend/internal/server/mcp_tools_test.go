@@ -1838,13 +1838,13 @@ func TestMCPTools(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex)
 			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
 			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
-			tk.SeedTimeline([]agent.Message{
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
 				&agent.TextMessage{Source: root, Text: "root answer"},
 				&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
 				&agent.TextMessage{Source: child, Text: "child answer"},
 				&agent.UserInputMessage{Source: child, Text: "child prompt"},
-			})
+			}))
 			entry := s.taskMgr.NewEntry(tk, nil)
 			s.taskMgr.Insert(tk.ID, entry)
 			svc := testTaskHandlers(s).taskSvc
@@ -1941,10 +1941,10 @@ func TestMCPTools(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
-			tk.SeedTimeline([]agent.Message{
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ToolUseMessage{ToolUseID: "tool-1", Input: json.RawMessage(`{"command":"make check"}`)},
 				&agent.TextMessage{Text: "live result"},
-			})
+			}))
 			entry := s.taskMgr.NewEntry(tk, nil)
 			s.taskMgr.Insert(tk.ID, entry)
 

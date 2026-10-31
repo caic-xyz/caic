@@ -4,6 +4,7 @@ package agenttest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -29,8 +30,14 @@ func (w *Wire) ParseInput(line []byte) ([]agent.Message, error) {
 	return w.Input(line)
 }
 
-// WritePrompt implements agent.WireFormat.
-func (*Wire) WritePrompt(io.Writer, agent.Prompt, agent.LogSink) error { return nil }
+// EncodePrompt implements agent.WireFormat with complete JSON input.
+func (*Wire) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
 
 // ParseOutput implements agent.WireFormat.
 func (w *Wire) ParseOutput(line []byte) ([]agent.Message, error) {

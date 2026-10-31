@@ -29,7 +29,8 @@ func TestBackend(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 {"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
 `
-			_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, io.NopCloser(strings.NewReader(v3Records(responses))), "/workspace", "")
+			_, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, io.NopCloser(strings.NewReader(v3Records(responses))), &agent.Options{Dir: "/workspace", Records: records})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -46,7 +47,8 @@ func TestBackend(t *testing.T) {
 			t.Cleanup(func() { _ = w.Close() })
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			_, _, err := New("", nil).RecordHandshake(ctx, io.Discard, r, "/workspace", "")
+			_, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
+			_, err := New("", nil).RecordHandshake(ctx, io.Discard, r, &agent.Options{Dir: "/workspace", Records: records})
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("handshake error = %v, want cancellation", err)
 			}
@@ -70,13 +72,13 @@ exit 0
 		path := filepath.Join(dir, "argv")
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		t.Setenv("CAIC_CODEX_ARGV", path)
+		_, records := protocolRecords(t, t.Context(), &agenttest.LogSink{}, &agenttest.RecordHandler{})
 		_, err := New("", nil).Start(t.Context(), &agent.Options{
-			Logger: slog.New(slog.DiscardHandler),
-			Target: runtime.ConnectionTarget{SSHHost: "task"},
-			Dir:    "/workspace",
-			Log:    &agenttest.LogSink{},
-			MsgCh:  make(chan agent.TimedMessage, 1),
-			MCP:    mcptest.FakeRegistry{},
+			Logger:  slog.New(slog.DiscardHandler),
+			Target:  runtime.ConnectionTarget{SSHHost: "task"},
+			Dir:     "/workspace",
+			Records: records,
+			MCP:     mcptest.FakeRegistry{},
 		})
 		if err == nil || !strings.Contains(err.Error(), "codex handshake:") {
 			t.Fatalf("Start error = %v, want handshake failure from capture-only fixture", err)
@@ -141,4 +143,23 @@ exit 0
 			t.Fatal("NewWire returned nil")
 		}
 	})
+}
+
+// protocolRecords keeps the actual startup decoder and its ordered observer in
+// the same fixture; the caller joins every transport before cleanup closes it.
+func protocolRecords(t testing.TB, ctx context.Context, sink agent.LogSink, handler *agenttest.RecordHandler) (*wireFormat, *agent.Records) {
+	wire, ok := New("", nil).NewWire().(*wireFormat)
+	if !ok {
+		t.Fatal("unexpected protocol wire")
+	}
+	records, err := agent.NewRecords(ctx, wire, sink, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := records.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return wire, records
 }

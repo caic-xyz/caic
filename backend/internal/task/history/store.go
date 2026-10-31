@@ -143,15 +143,8 @@ func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 	return tasks, loadErr
 }
 
-// WriteResultTrailer appends a MetaResultMessage to an active task log.
-func (*Store) WriteResultTrailer(log agent.LogSink, title string, res *task.Result) error {
-	if log == nil {
-		return taskslog.ErrNoLog
-	}
-	return log.AppendMessage(resultTrailer(title, res))
-}
-
-func resultTrailer(title string, res *task.Result) *agent.MetaResultMessage {
+// ResultMessage projects terminal task accounting into its persisted control.
+func ResultMessage(title string, res *task.Result) *agent.MetaResultMessage {
 	mr := &agent.MetaResultMessage{
 		MessageType:    "caic_result",
 		State:          res.State.String(),
@@ -169,14 +162,6 @@ func resultTrailer(title string, res *task.Result) *agent.MetaResultMessage {
 		mr.Error = res.Err.Error()
 	}
 	return mr
-}
-
-// WriteContextCleared appends a context_cleared system message to the task log.
-func (*Store) WriteContextCleared(log agent.LogSink) error {
-	if log == nil {
-		return taskslog.ErrNoLog
-	}
-	return log.AppendMessage(agent.ContextCleared())
 }
 
 // Compress closes log and compresses path only when state is non-revivable.

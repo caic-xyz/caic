@@ -747,7 +747,7 @@ def gate(command: str) -> bool:
     line = sys.stdin.readline()
     if not line or "\x00" in line:
         return False
-    if line.rstrip("\n") != command:
+    if json.loads(line)["text"] != command:
         raise ValueError(f"Expected fake-agent command {command!r}, got {line!r}")
     return True
 
@@ -914,7 +914,7 @@ def main() -> None:
         # arrives on our stdin directly — exit cleanly.
         if "\x00" in line:
             break
-        line = line.rstrip("\n")
+        line = json.loads(line)["text"]
         if not line:
             continue
         turns += 1

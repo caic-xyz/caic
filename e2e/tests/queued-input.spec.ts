@@ -1,5 +1,5 @@
 // Browser coverage for queued prompt appending, keyboard recall, attachment restoration, steering, and delivery.
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, recentHistoryPage } from "../helpers";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 
 for (const mobile of [false, true]) {
@@ -142,7 +142,7 @@ for (const mobile of [false, true]) {
     await prompt.press("Shift+Enter");
     await prompt.pressSequentially("immediately");
     expect(await prompt.innerText()).toBe("answer\nimmediately");
-    // The fake agent treats each input line as a separate invocation.
+    // Release the current turn so the combined pending prompt can follow it.
     await prompt.fill("FAKE_DEMO_FINISH");
     const sent = page.waitForRequest(
       (request) => request.method() === "POST" && request.url().endsWith(`/tasks/${id}/input`),
@@ -155,12 +155,33 @@ for (const mobile of [false, true]) {
     } else await prompt.press("Control+Enter");
     expect((await sent).postDataJSON()).toMatchObject({ queue: false });
     await expect(queue).toHaveCount(0);
-    // Fake results report cumulative turns: 1 + 2 + 3 for the initial
-    // request and the two lines of the combined queued prompt.
-    await expect.poll(async () => (await api.getTask(id)).numTurns).toBe(6);
+    // Each whole prompt produces one result; the fake reports cumulative 1 + 2.
+    await expect.poll(async () => (await api.getTask(id)).numTurns).toBe(3);
     await waitForTaskState(api, id, "waiting");
     const task = await api.getTask(id);
     expect(task.pendingInput).toBeNull();
+    const bootstrap = (await api.getHistoryManifest(id)).bootstrap;
+    const recent = recentHistoryPage(bootstrap);
+    const events = await api.getHistorySlice(
+      id,
+      bootstrap.scope,
+      bootstrap.projectionVersion,
+      bootstrap.generation,
+      String(recent.first),
+      "0",
+      String(recent.last),
+      "end",
+    );
+    const inputs = events.filter((event) => event.message.kind === "userInput").map((event) => event.message.userInput);
+    expect(inputs.map((input) => input?.text)).toEqual([
+      "FAKE_DEMO_GATED queue journey",
+      "FAKE_DEMO_FINISH",
+      "edited pending prompt\nsecond pending prompt",
+    ]);
+    expect(inputs.at(-1)?.images).toHaveLength(3);
+    expect(
+      events.filter((event) => event.message.kind === "result").map((event) => event.message.result?.numTurns),
+    ).toEqual([1, 2]);
     expect(pageErrors).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });

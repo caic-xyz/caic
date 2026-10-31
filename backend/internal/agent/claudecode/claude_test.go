@@ -31,19 +31,18 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
-func TestWritePrompt(t *testing.T) {
+func TestEncodePrompt(t *testing.T) {
 	t.Parallel()
 	t.Run("TextOnly", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		logBuf := &agenttest.LogSink{}
 		var b wireFormat
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "hello"}, logBuf); err != nil {
+		data, err := b.EncodePrompt(agent.Prompt{Text: "hello"})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(logBuf.String(), `"t":"input"`) || !strings.Contains(logBuf.String(), `"msg":{"type":"user"`) {
-			t.Errorf("log = %q, want canonical v3 input record", logBuf.String())
-		}
+		buf.Write(data)
+
 		if !strings.Contains(buf.String(), `"content":[{"type":"text","text":"hello"}]`) {
 			t.Errorf("unexpected output: %s", buf.String())
 		}
@@ -56,9 +55,11 @@ func TestWritePrompt(t *testing.T) {
 		images := []v3.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, agent.DiscardLogSink{}); err != nil {
+		data, err := b.EncodePrompt(agent.Prompt{Text: "describe this", Images: images})
+		if err != nil {
 			t.Fatal(err)
 		}
+		buf.Write(data)
 		// Content must be an array of content blocks, not a string.
 		var msg struct {
 			Type    string `json:"type"`
@@ -102,9 +103,11 @@ func TestWritePrompt(t *testing.T) {
 		images := []v3.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, agent.DiscardLogSink{}); err != nil {
+		data, err := b.EncodePrompt(agent.Prompt{Images: images})
+		if err != nil {
 			t.Fatal(err)
 		}
+		buf.Write(data)
 		var msg struct {
 			Message struct {
 				Content json.RawMessage `json:"content"`
@@ -135,6 +138,7 @@ type fakeConn struct {
 	agent.Conn // embed to satisfy interface; unused methods will panic
 
 	messages []agent.Message
+	output   chan<- agent.TimedMessage
 	prompts  []agent.Prompt
 	sent     [][]byte
 }
@@ -152,7 +156,7 @@ func (f *fakeConn) SendRaw(data []byte) error {
 	return nil
 }
 
-func (f *fakeConn) ReadMessages(_ io.ReadCloser, msgCh chan<- agent.TimedMessage, intercept agent.MessageInterceptor) error {
+func (f *fakeConn) ReadMessages(_ io.ReadCloser, intercept agent.MessageInterceptor) error {
 	for _, m := range f.messages {
 		if intercept != nil {
 			data, handled, err := intercept.HandleMessage(m)
@@ -168,7 +172,7 @@ func (f *fakeConn) ReadMessages(_ io.ReadCloser, msgCh chan<- agent.TimedMessage
 				continue
 			}
 		}
-		msgCh <- agent.TimedMessage{Message: m}
+		f.output <- agent.TimedMessage{Message: m}
 	}
 	return nil
 }
@@ -577,15 +581,16 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		stdin := agenttest.NewStdinPipe()
 		stdout, output := io.Pipe()
-		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat())}
+		messages := make(chan agent.TimedMessage, 16)
+		owner := claudeProtocolRecords(t, t.Context(), &agenttest.RecordHandler{Messages: messages})
+		c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, owner, nil)}
 		var workers sync.WaitGroup
 		t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 		sent := make(chan error, 1)
 		workers.Go(func() { sent <- c.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
 		<-stdin.Started
-		messages := make(chan agent.TimedMessage, 8)
 		read := make(chan error, 1)
-		workers.Go(func() { read <- c.ReadMessages(stdout, messages, c) })
+		workers.Go(func() { read <- c.ReadMessages(stdout, c) })
 		workers.Go(func() {
 			request := `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}` + "\n"
 			var requestSb563 strings.Builder
@@ -597,9 +602,12 @@ func TestControlConn(t *testing.T) {
 				t.Errorf("feed output: %v", err)
 			}
 		})
-		for range 3 {
+		for received := 0; received < 3; {
 			select {
-			case <-messages:
+			case event := <-messages:
+				if _, ok := event.Message.(*agent.TextMessage); ok {
+					received++
+				}
 			case err := <-read:
 				t.Fatalf("reader ended before output: %v", err)
 			case <-time.After(time.Second):
@@ -636,7 +644,8 @@ func TestControlConn(t *testing.T) {
 		executor := agent.NewMCPExecutor(t.Context())
 		stdin := agenttest.NewStdinPipe()
 		stdout, output := io.Pipe()
-		c := &controlConn{Conn: agent.NewMCPConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat(), executor.Wrap(registry))}
+		owner := claudeProtocolRecords(t, ctx, &agenttest.RecordHandler{})
+		c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, owner, executor.Wrap(registry))}
 		var workers sync.WaitGroup
 		t.Cleanup(func() {
 			cancel()
@@ -648,7 +657,7 @@ func TestControlConn(t *testing.T) {
 			workers.Wait()
 		})
 		read := make(chan error, 1)
-		workers.Go(func() { read <- c.ReadMessages(stdout, make(chan agent.TimedMessage, 1), c) })
+		workers.Go(func() { read <- c.ReadMessages(stdout, c) })
 		if _, err := io.WriteString(output, `{"t":"mcp_request","id":"slow","method":"tools/call","name":"echo","arguments":{}}`+"\n"); err != nil {
 			t.Fatal(err)
 		}
@@ -691,7 +700,15 @@ func TestControlConn(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				stdin := agenttest.NewStdinPipe()
 				stdout, output := io.Pipe()
-				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, agent.DiscardLogSink{}, newWireFormat())}
+				messages := make(chan agent.TimedMessage, 16)
+				if end == "blocked_dispatch" {
+					messages = make(chan agent.TimedMessage)
+				}
+				dispatchStarted := make(chan struct{}, 1)
+				observer := &dispatchObserver{started: dispatchStarted}
+				observer.Messages = messages
+				owner := claudeProtocolRecords(t, ctx, observer)
+				c := &controlConn{Conn: agent.NewConn(ctx, slog.New(slog.DiscardHandler), stdin, owner, nil)}
 				var workers sync.WaitGroup
 				t.Cleanup(func() { cancel(); c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
 				sent := make(chan error, 1)
@@ -700,12 +717,8 @@ func TestControlConn(t *testing.T) {
 					workers.Go(func() { sent <- c.SendPrompt(agent.Prompt{Text: "prompt"}, nil) })
 					<-stdin.Started
 				}
-				messages := make(chan agent.TimedMessage, 1)
-				if end == "blocked_dispatch" {
-					messages = make(chan agent.TimedMessage)
-				}
 				read := make(chan error, 1)
-				workers.Go(func() { read <- c.ReadMessages(stdout, messages, c) })
+				workers.Go(func() { read <- c.ReadMessages(stdout, c) })
 				input := `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}` + "\n"
 				if end == "overload_count" {
 					input = strings.Repeat(input, 100)
@@ -720,20 +733,25 @@ func TestControlConn(t *testing.T) {
 					}
 				})
 				switch end {
-				case "write_failure", "blocked_dispatch":
+				case "write_failure":
 					<-stdin.Started
-					if end == "write_failure" {
-						_ = stdin.Reader.CloseWithError(io.ErrUnexpectedEOF)
-					} else {
-						cancel()
-					}
+					_ = stdin.Reader.CloseWithError(io.ErrUnexpectedEOF)
+				case "blocked_dispatch":
+					<-dispatchStarted
+					cancel()
 				case "cancel", "interrupt", "eof":
-					select {
-					case <-messages:
-					case err := <-read:
-						t.Fatalf("reader ended before queued reply: %v", err)
-					case <-time.After(time.Second):
-						t.Fatal("reader blocked behind pending reply")
+				awaitQueuedOutput:
+					for {
+						select {
+						case event := <-messages:
+							if _, ok := event.Message.(*agent.TextMessage); ok {
+								break awaitQueuedOutput
+							}
+						case err := <-read:
+							t.Fatalf("reader ended before queued reply: %v", err)
+						case <-time.After(time.Second):
+							t.Fatal("reader blocked behind pending reply")
+						}
 					}
 					switch end {
 					case "cancel":
@@ -781,11 +799,11 @@ func TestControlConn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.AskMessage{ToolUseID: "ask", Questions: []v3.AskQuestion{{Question: "Which?"}}},
 			&agent.PendingUserActionMessage{Action: v3.PendingUserAction{Kind: agent.PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "ask", Ask: v3.PendingAskAction{Questions: []v3.AskQuestion{{Question: "Which?"}}}}},
 			agent.InputDeliveryStarted(), &agent.UserInputMessage{Text: "answer"}, agent.InputDeliveryCompleted(),
-		})
+		}))
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
 		if err := c.restorePendingActions(tk.PendingUserActions()); err != nil {
@@ -802,16 +820,25 @@ func TestControlConn(t *testing.T) {
 	t.Run("SendPrompt/CancellationWhileInputBlocked", func(t *testing.T) {
 		t.Parallel()
 		release := make(chan struct{})
+		released := false
 		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
 		log := slog.New(slog.DiscardHandler)
-		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, agent.DiscardLogSink{}, newWireFormat())}
+		owner := claudeProtocolRecords(t, t.Context(), &agenttest.RecordHandler{})
+		c := &controlConn{Conn: agent.NewConn(t.Context(), log, writer, owner, nil)}
+		stdout, output := io.Pipe()
+		readDone := make(chan error, 1)
+		var transport sync.WaitGroup
+		transport.Go(func() { readDone <- c.ReadMessages(stdout, c) })
+		t.Cleanup(func() { c.Cancel(); _ = output.Close(); <-readDone; transport.Wait() })
 		if err := c.setPendingAsk(pendingControlAsk{requestID: "first", questions: []v3.AskQuestion{{Question: "Choice?"}}}); err != nil {
 			t.Fatal(err)
 		}
 		var workers sync.WaitGroup
 		var writeErr error
 		t.Cleanup(func() {
-			close(release)
+			if !released {
+				close(release)
+			}
 			workers.Wait()
 			if writeErr != nil {
 				t.Errorf("input failed after release: %v", writeErr)
@@ -847,6 +874,12 @@ func TestControlConn(t *testing.T) {
 			t.Fatalf("input unexpectedly finished: %v", err)
 		default:
 		}
+		close(release)
+		released = true
+		if err := <-written; err != nil {
+			t.Fatal(err)
+		}
+		workers.Wait()
 	})
 	t.Run("AnswersPendingAskUserQuestion", func(t *testing.T) {
 		t.Parallel()
@@ -876,7 +909,8 @@ func TestControlConn(t *testing.T) {
 		c := &controlConn{Conn: inner}
 
 		msgCh := make(chan agent.TimedMessage, 10)
-		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), msgCh, c); err != nil {
+		inner.output = msgCh
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), c); err != nil {
 			t.Fatal(err)
 		}
 		close(msgCh)
@@ -932,7 +966,7 @@ func TestControlConn(t *testing.T) {
 		}
 
 		log := &agenttest.LogSink{}
-		if err := agent.AppendInputNativeRecord(log, inner.sent[0]); err != nil {
+		if err := agenttest.AppendInputNativeRecord(log, inner.sent[0]); err != nil {
 			t.Fatal(err)
 		}
 		var payload []byte
@@ -980,7 +1014,8 @@ func TestControlConn(t *testing.T) {
 		c := &controlConn{Conn: inner}
 
 		msgCh := make(chan agent.TimedMessage, 10)
-		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), msgCh, c); err != nil {
+		inner.output = msgCh
+		if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), c); err != nil {
 			t.Fatal(err)
 		}
 		close(msgCh)
@@ -1244,4 +1279,34 @@ func TestReplayBufferOwnership(t *testing.T) {
 	if !ok || msg.Text != "hello" {
 		t.Fatalf("message = %#v", msgs)
 	}
+}
+
+// claudeProtocolRecords binds the real Claude input/output decoder to the
+// observer used by transport ownership and cancellation tests.
+func claudeProtocolRecords(t testing.TB, ctx context.Context, handler agent.RecordHandler) *agent.Records {
+	records, err := agent.NewRecords(ctx, newWireFormat(), agent.DiscardLogSink{}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Transport tests assert their terminal error; Close may repeat that error.
+	t.Cleanup(func() { _ = records.Close() })
+	return records
+}
+
+// dispatchObserver signals entry into committed publication, whose ordering may
+// precede an automatic reply's actual stdin write.
+type dispatchObserver struct {
+	agenttest.RecordHandler
+
+	started chan<- struct{}
+}
+
+func (o *dispatchObserver) ApplyRecords(ctx context.Context, messages []agent.TimedMessage) error {
+	if len(messages) > 0 {
+		select {
+		case o.started <- struct{}{}:
+		default:
+		}
+	}
+	return o.RecordHandler.ApplyRecords(ctx, messages)
 }

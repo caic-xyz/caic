@@ -10,6 +10,7 @@ import (
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -356,12 +357,15 @@ func TestTask(t *testing.T) {
 	t.Run("CurrentPlanUsesCapturedSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SeedTimeline([]agent.Message{
+		messages := []agent.Message{
 			&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: []byte(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 			&agent.ToolUseMessage{ToolUseID: "root-exit", Name: "ExitPlanMode"},
-		})
+			agent.ContextCleared(),
+		}
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages[:2]))
 		snapshot := tk.Snapshot()
-		tk.ClearMessages(t.Context())
+		tk = mustNewTask(t, tk.ID, tk.InitialPrompt)
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
 		captured, err := Task(&TaskInput{Task: tk, Snapshot: snapshot})
 		if err != nil {
 			t.Fatal(err)
@@ -381,12 +385,12 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(task.StatePending)
-		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
 			ResetsAt:       time.Now().Add(time.Hour),
 			RateLimitType:  "five_hour",
 			IsUsingOverage: true,
-		}})
+		}}))
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -402,7 +406,7 @@ func TestTask(t *testing.T) {
 		now := time.Now()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(task.StatePending)
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
 				ResetsAt:      now.Add(time.Hour),
@@ -415,7 +419,7 @@ func TestTask(t *testing.T) {
 				QuotaProvider: agent.QuotaProviderClaudeCode,
 				QuotaWindow:   "7d",
 			},
-		})
+		}))
 
 		gotTask, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -430,11 +434,11 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(task.StatePending)
-		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:      agent.RateLimitStatusRejected,
 			ResetsAt:    time.Now().Add(time.Hour),
 			QuotaWindow: "5h",
-		}})
+		}}))
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -448,12 +452,12 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.SetState(task.StatePending)
-		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:        agent.RateLimitStatusRejected,
 			ResetsAt:      time.Now().Add(time.Hour),
 			QuotaProvider: agent.QuotaProvider("other"),
 			QuotaWindow:   "5h",
-		}})
+		}}))
 
 		if _, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()}); err == nil {
 			t.Fatal("Task() error = nil, want unsupported quota provider error")

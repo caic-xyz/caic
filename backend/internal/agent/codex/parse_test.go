@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -1024,57 +1024,57 @@ func TestParseMessage(t *testing.T) {
 }
 
 func TestWireFormat(t *testing.T) {
-	t.Run("WritePrompt/OutputWhileInputBlocked", func(t *testing.T) {
+	t.Run("RecordedInputCorrelation", func(t *testing.T) {
 		t.Parallel()
-		w, ok := New("", nil).NewWire().(*wireFormat)
-		if !ok {
-			t.Fatal("backend returned an unexpected wire format")
+		w := New("", nil).NewWire()
+		if _, err := w.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
+			t.Fatal(err)
 		}
-		w.threadID = "thread"
-		release := make(chan struct{})
-		writer := &agenttest.GatedWriter{Started: make(chan struct{}), Release: release}
-		var workers sync.WaitGroup
-		var writeErr error
-		t.Cleanup(func() {
-			close(release)
-			workers.Wait()
-			if writeErr != nil {
-				t.Errorf("input failed after release: %v", writeErr)
+		item := func(thread, turn, id, text string) string {
+			return fmt.Sprintf(`{"method":"item/started","params":{"threadId":%q,"turnId":%q,"item":{"id":%q,"type":"userMessage","content":[{"type":"text","text":%q}]}}}`, thread, turn, id, text)
+		}
+		for _, record := range []struct {
+			input bool
+			line  string
+			want  []string
+		}{
+			{true, `{"id":4,"method":"turn/start","params":{"threadId":"root","input":[{"type":"text","text":"hello"}]}}`, []string{"hello"}},
+			{false, `{"id":4,"result":{"turn":{"id":"turn-1"}}}`, nil},
+			{false, item("root", "turn-1", "echo", "hello"), nil},
+			{false, item("root", "turn-1", "echo", "hello"), nil},
+			{false, item("root", "turn-1", "other", "extra input"), []string{"extra input"}},
+			{false, item("child", "turn-1", "echo", "child input"), []string{"child input"}},
+			{true, `{"id":5,"method":"turn/start","params":{"threadId":"root","input":[{"type":"text","text":"reused"}]}}`, []string{"reused"}},
+			{true, `{"id":5,"method":"thread/read","params":{"threadId":"root"}}`, nil},
+			{false, `{"id":5,"result":{"turn":{"id":"unrelated"}}}`, nil},
+			{false, item("root", "unrelated", "unrelated", "unmatched input"), []string{"unmatched input"}},
+			{true, `{"id":6,"method":"turn/start","params":{"threadId":"root","input":[{"type":"text","text":"rejected"}]}}`, []string{"rejected"}},
+			{false, `{"id":6,"error":{"code":-1,"message":"rejected"}}`, nil},
+			{false, `{"id":6,"result":{"turn":{"id":"failed"}}}`, nil},
+			{false, item("root", "failed", "failed", "unowned after failure"), []string{"unowned after failure"}},
+			{true, `{"id":1,"method":"initialize","params":{}}`, nil},
+			{false, item("root", "turn-1", "echo", "new process input"), []string{"new process input"}},
+		} {
+			parse := w.ParseOutput
+			if record.input {
+				parse = w.ParseInput
 			}
-		})
-		written := make(chan error, 1)
-		workers.Go(func() {
-			writeErr = w.WritePrompt(writer, agent.Prompt{Text: "prompt"}, agent.DiscardLogSink{})
-			written <- writeErr
-		})
-		<-writer.Started
-		parsed := make(chan error, 1)
-		var messages []agent.Message
-		workers.Go(func() {
-			var err error
-			messages, err = w.ParseOutput([]byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"working"}}`))
-			parsed <- err
-		})
-		select {
-		case err := <-parsed:
+			messages, err := parse([]byte(record.line))
 			if err != nil {
 				t.Fatal(err)
 			}
-		case <-time.After(time.Second):
-			t.Fatal("stdout parser blocked behind stdin delivery")
-		}
-		if len(messages) != 1 {
-			t.Fatalf("messages = %v, want streaming output", messages)
-		}
-		if m, ok := messages[0].(*agent.TextDeltaMessage); !ok || m.Text != "working" {
-			t.Fatalf("output = %#v", messages[0])
-		}
-		select {
-		case err := <-written:
-			t.Fatalf("input unexpectedly finished: %v", err)
-		default:
+			var inputs []string
+			for _, message := range messages {
+				if input, ok := message.(*agent.UserInputMessage); ok {
+					inputs = append(inputs, input.Text)
+				}
+			}
+			if !slices.Equal(inputs, record.want) {
+				t.Fatalf("record %s inputs = %v, want %v", record.line, inputs, record.want)
+			}
 		}
 	})
+
 	t.Run("ParseMessage/explicit child evidence without lifecycle cards", func(t *testing.T) {
 		t.Parallel()
 		for _, metadata := range []string{`"parentThreadId":"parent"`, `"threadSource":"subagent"`} {
@@ -1318,13 +1318,15 @@ func TestWireFormat(t *testing.T) {
 			}
 		}
 	})
-	t.Run("WritePromptBasic", func(t *testing.T) {
+	t.Run("EncodePromptBasic", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{}); err != nil {
+		data, err := w.EncodePrompt(agent.Prompt{Text: "fix the bug"})
+		if err != nil {
 			t.Fatal(err)
 		}
+		buf.Write(data)
 		var req map[string]any
 		if err := json.Unmarshal(buf.Bytes(), &req); err != nil {
 			t.Fatal(err)
@@ -1357,13 +1359,37 @@ func TestWireFormat(t *testing.T) {
 			t.Errorf("summary = %v, want auto", params["summary"])
 		}
 	})
-	t.Run("WritePromptEffort", func(t *testing.T) {
+	t.Run("SetRequestedEffort", func(t *testing.T) {
+		t.Parallel()
+		// The runtime learns the wire through the factory and applies the task's
+		// effort afterwards, so encoding must see what the setter recorded.
+		w := &wireFormat{threadID: "t1"}
+		agent.ApplyRequestedEffort(w, "max")
+		data, err := w.EncodePrompt(agent.Prompt{Text: "fix the bug"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req struct {
+			Params struct {
+				Effort string `json:"effort"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Params.Effort != "max" {
+			t.Errorf("effort = %q, want max", req.Params.Effort)
+		}
+	})
+	t.Run("EncodePromptEffort", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1", requestedEffort: "high"}
 		var buf bytes.Buffer
-		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{}); err != nil {
+		data, err := w.EncodePrompt(agent.Prompt{Text: "fix the bug"})
+		if err != nil {
 			t.Fatal(err)
 		}
+		buf.Write(data)
 		var req map[string]any
 		if err := json.Unmarshal(buf.Bytes(), &req); err != nil {
 			t.Fatal(err)
@@ -1379,27 +1405,15 @@ func TestWireFormat(t *testing.T) {
 			t.Errorf("effort = %v, want high", params["effort"])
 		}
 	})
-	t.Run("WritePromptNoThreadID", func(t *testing.T) {
+	t.Run("EncodePromptNoThreadID", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
-		var buf bytes.Buffer
-		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, agent.DiscardLogSink{})
+		_, err := w.EncodePrompt(agent.Prompt{Text: "hello"})
 		if err == nil {
 			t.Fatal("expected error for missing thread ID")
 		}
 	})
-	t.Run("SuppressUserInput", func(t *testing.T) {
-		t.Parallel()
-		w := &wireFormat{suppressUserInput: true}
-		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt"}]},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := w.ParseOutput([]byte(input))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 0 {
-			t.Fatalf("msgs = %d, want 0", len(msgs))
-		}
-	})
+
 	t.Run("ParseMessageCapturesThreadID", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
@@ -1583,7 +1597,7 @@ func TestWireFormat(t *testing.T) {
 		response := []byte(`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"t1"}}}`)
 		turnStarted := []byte(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_2","status":"inProgress"}}}`)
 		for _, live := range []bool{false, true} {
-			w := &wireFormat{threadID: "t1", suppressUserInput: live}
+			w := &wireFormat{threadID: "t1"}
 			if !live {
 				if _, err := w.ParseOutput(prior); err != nil {
 					t.Fatal(err)

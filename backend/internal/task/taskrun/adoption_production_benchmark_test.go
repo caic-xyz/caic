@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
@@ -115,7 +116,7 @@ func BenchmarkBackwardMessagesLatestMatch(b *testing.B) {
 	want := &agent.ToolUseMessage{ToolUseID: "target"}
 	msgs = append(msgs, want)
 	tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark lookup"})
-	tk.SeedTimeline(msgs)
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
 	b.ReportAllocs()
 
 	for b.Loop() {

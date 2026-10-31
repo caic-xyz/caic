@@ -5,9 +5,9 @@ package smoketest
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 
@@ -38,12 +38,13 @@ func NewFakeBackend() *FakeBackend {
 	return b
 }
 
-// WritePrompt writes the prompt as plain text.
-//
-// The fake Python agent reads lines from stdin and matches keywords; it does
-// not parse JSON input.
-func (*FakeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	return agent.PlainTextWritePrompt(w, p, log)
+// EncodePrompt returns the fixture's complete JSON prompt command.
+func (*FakeBackend) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 // ParseOutput decodes a single flat NDJSON line from the fake agent.
@@ -71,7 +72,7 @@ func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, b), stdout, opts.MsgCh, opts.Logger)
+	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), stdout, opts.Logger)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			s.Cancel()
@@ -127,5 +128,5 @@ var _ agent.Backend = (*FakeBackend)(nil)
 
 // ParseInput decodes the fake agent's recorded plain-text prompts.
 func (*FakeBackend) ParseInput(line []byte) ([]agent.Message, error) {
-	return parsePlainTextInput(line)
+	return parsePromptInput(line)
 }

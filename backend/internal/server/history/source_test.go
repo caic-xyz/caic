@@ -23,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
-
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/klauspost/compress/zstd"
@@ -35,6 +33,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 

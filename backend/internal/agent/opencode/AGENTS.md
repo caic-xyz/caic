@@ -27,7 +27,7 @@ Wire types are provided by `github.com/maruel/genai/providers/opencode` (importe
 | `current_mode_update`   | SystemMessage (with mode detail) |
 | `session_info_update`   | (skipped)            |
 | `available_commands_update` | (skipped)        |
-| `config_option_update`  | (skipped)            |
+| `config_option_update`  | SessionMetadataMessage (reported model and effort) |
 
 ## Upstream Source
 

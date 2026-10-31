@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -70,10 +72,19 @@ func TestLiveRelay(t *testing.T) {
 		t.Fatalf("unexpected workspace path %q", dir)
 	}
 	ch := make(chan agent.TimedMessage, 256)
-	log, historyPath := liveTaskLog(t)
+	log := liveTaskLog(t)
+	records, err := agent.NewRecords(ctx, b.NewWire(), log, &agenttest.RecordHandler{Messages: ch})
+	if err != nil {
+		t.Fatal(errors.Join(err, log.Close()))
+	}
+	t.Cleanup(func() {
+		if err := records.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	opts := agent.Options{
-		Target: target, Dir: dir, Model: model, MsgCh: ch,
-		Logger: slog.Default(), Log: log, HistoryPath: historyPath,
+		Target: target, Dir: dir, Model: model, Records: records,
+		Logger: slog.Default(),
 	}
 	var session *agent.Session
 	t.Cleanup(func() {
@@ -158,10 +169,11 @@ func TestLiveRelay(t *testing.T) {
 	if err := agent.CleanRelayState(ctx, host); err != nil {
 		t.Fatal(err)
 	}
-	// A stopped agy process can emit a final cancellation result. Give the
-	// resumed process its own channel so that result cannot satisfy this turn.
-	ch = make(chan agent.TimedMessage, 256)
-	opts.MsgCh = ch
+	// Stop joined every transport producer; discard its final cancellation
+	// events before reusing the continuous owner for a resumed process.
+	for len(ch) > 0 {
+		<-ch
+	}
 	opts.ResumeSessionID = first.SessionID
 	opts.InitialPrompt.Text = "What is the conversation-only token from the first turn? Reply with the token only. Do not use tools."
 	session, err = b.Start(ctx, &opts)
@@ -232,14 +244,30 @@ func TestLiveTaskMCP(t *testing.T) {
 		t.Run(task, func(t *testing.T) {
 			registry := &liveTaskRegistry{task: task}
 			ch := make(chan agent.TimedMessage, 256)
-			log, historyPath := liveTaskLog(t)
+			log := liveTaskLog(t)
+			records, err := agent.NewRecords(ctx, b.NewWire(), log, &agenttest.RecordHandler{Messages: ch})
+			if err != nil {
+				t.Fatal(errors.Join(err, log.Close()))
+			}
+			t.Cleanup(func() {
+				if session != nil {
+					stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+					defer cancel()
+					if err := session.Stop(stopCtx); err != nil {
+						t.Error(err)
+					}
+					session = nil
+				}
+				if err := records.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			opts := agent.Options{
-				Target: runtime.ConnectionTarget{SSHHost: host}, Dir: dir, Model: model, MsgCh: ch,
-				Logger: slog.Default(), Log: log, HistoryPath: historyPath, MCP: registry,
+				Target: runtime.ConnectionTarget{SSHHost: host}, Dir: dir, Model: model, Records: records,
+				Logger: slog.Default(), MCP: registry,
 			}
 			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once with empty arguments. Reply with its returned result only. Do not use shell or write files."
 			registry.setToken()
-			var err error
 			session, err = b.Start(ctx, &opts)
 			if err != nil {
 				t.Fatal(err)
@@ -281,8 +309,9 @@ func TestLiveTaskMCP(t *testing.T) {
 			if err := agent.CleanRelayState(ctx, host); err != nil {
 				t.Fatal(err)
 			}
-			ch = make(chan agent.TimedMessage, 256)
-			opts.MsgCh = ch
+			for len(ch) > 0 {
+				<-ch
+			}
 			opts.RelayOffset = 0
 			opts.ResumeSessionID = first.SessionID
 			opts.InitialPrompt.Text = "Call the current caic task MCP echo tool exactly once, with empty arguments. Discover the current server namespace rather than using obsolete names. Return its fresh result only; do not use shell or write files."
@@ -407,19 +436,13 @@ func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan a
 
 // liveTaskLog retains the same ordered physical history reconnect uses in
 // production, including client commands absent from the relay output file.
-func liveTaskLog(t *testing.T) (agent.LogSink, string) {
+func liveTaskLog(t *testing.T) agent.LogSink {
 	store := taskslog.NewStore(t.TempDir())
-	writer, path, err := store.Open("live.jsonl", &v3.MetaMessage{
+	writer, _, err := store.Open("live.jsonl", &v3.MetaMessage{
 		MessageType: "caic_meta", Version: 3, Prompt: "live relay", Harness: "antigravity",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := agent.NewRecordedLog(writer)
-	t.Cleanup(func() {
-		if err := log.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	return log, path
+	return agent.NewRecordedLog(writer)
 }

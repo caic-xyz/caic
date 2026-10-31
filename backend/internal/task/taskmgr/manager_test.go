@@ -144,12 +144,11 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.Rollup == nil {
 		cfg.Rollup = task.DiscardRollup{}
 	}
+	if cfg.Backends == nil {
+		cfg.Backends = backends.Default("", nil)
+	}
 	if cfg.LogStore == nil {
-		parsers := cfg.Backends
-		if parsers == nil {
-			parsers = backends.Default("", nil)
-		}
-		cfg.LogStore = taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), parsers)
+		cfg.LogStore = taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), cfg.Backends)
 	}
 	if cfg.Runtimes == nil {
 		cfg.Runtimes = newTestRuntime(t, &runtimetest.FakeBackend{}, nil)
@@ -444,9 +443,14 @@ type reconnectInputBackend struct {
 
 func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	cmdCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(cmdCtx, "sleep", "60")
+	cmd := exec.CommandContext(cmdCtx, "python3", "-c", "import sys; sys.stdin.buffer.read()")
 	if b.exitImmediately {
 		cmd = exec.CommandContext(cmdCtx, "true")
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -457,8 +461,8 @@ func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Opt
 		cancel()
 		return nil, err
 	}
-	c := &reconnectInputConn{backend: b, cancel: cancel}
-	session := agent.NewSession(ctx, cmd, c, stdout, opts.MsgCh, opts.Logger)
+	c := &reconnectInputConn{Conn: agent.NewConn(cmdCtx, opts.Logger, stdin, opts.Records, nil), backend: b, cancel: cancel}
+	session := agent.NewSession(ctx, cmd, c, stdout, opts.Logger)
 	b.mu.Lock()
 	b.attachCalls++
 	b.opts = opts
@@ -474,7 +478,15 @@ func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Opt
 	return session, nil
 }
 
-func (*reconnectInputBackend) NewWire() agent.WireFormat { return codex.New("", nil).NewWire() }
+func (b *reconnectInputBackend) NewWire() agent.WireFormat {
+	if b.HarnessName == harness.Claude {
+		return claudecode.New().NewWire()
+	}
+	return codex.New("", nil).NewWire()
+}
+func (b *reconnectInputBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return b.AttachRelay(ctx, opts)
+}
 
 func (b *reconnectInputBackend) stop() {
 	b.mu.Lock()
@@ -490,26 +502,17 @@ func (b *reconnectInputBackend) stop() {
 }
 
 type reconnectInputConn struct {
+	agent.Conn
+
 	backend *reconnectInputBackend
 	cancel  context.CancelFunc
 }
 
-func (c *reconnectInputConn) SendPrompt(p agent.Prompt, _ []byte) error {
+func (c *reconnectInputConn) SendPrompt(p agent.Prompt, raw []byte) error {
 	c.backend.mu.Lock()
 	c.backend.prompts = append(c.backend.prompts, p)
 	c.backend.mu.Unlock()
-	return nil
-}
-
-func (*reconnectInputConn) SendRaw([]byte) error { return nil }
-
-func (*reconnectInputConn) RecordInputFailure(_ agent.Prompt, err error) error { return err }
-
-func (*reconnectInputConn) SendCompact(string) error { return errors.New("compact not supported") }
-
-func (*reconnectInputConn) ReadMessages(r io.ReadCloser, _ chan<- agent.TimedMessage, _ agent.MessageInterceptor) error {
-	_, err := io.Copy(io.Discard, r)
-	return err
+	return c.Conn.SendPrompt(p, raw)
 }
 
 func (c *reconnectInputConn) SendStop(context.Context) {
@@ -809,7 +812,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -832,7 +835,7 @@ func TestManager(t *testing.T) {
 			}
 			// Reconstruct both the manager and task, preserving only their durable identities.
 			restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
-			rt := mustNewTask(t, tk.ID, agent.Prompt{Text: "initial"}, harness.Codex, "")
+			rt := mustNewTask(t, tk.ID, agent.Prompt{Text: "initial"}, harness.Claude, "")
 			rt.SetState(task.StateAsking)
 			re := restored.NewEntry(rt, nil)
 			restored.Insert(rt.ID, re)
@@ -855,10 +858,10 @@ func TestManager(t *testing.T) {
 					t.Fatalf("invalid attachment index %d found", index)
 				}
 			}
-			if _, ok := restored.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, ""), nil).PendingInputImage(queue.ID, 0); ok {
+			if _, ok := restored.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Claude, ""), nil).PendingInputImage(queue.ID, 0); ok {
 				t.Fatal("cross-task attachment lookup succeeded")
 			}
-			other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, "")
+			other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Claude, "")
 			if err := restored.NewEntry(other, nil).Lifecycle.CancelQueuedInput(queue.ID); err == nil {
 				t.Fatal("cross-task cancellation succeeded")
 			}
@@ -873,13 +876,9 @@ func TestManager(t *testing.T) {
 			if re.PendingInput() == nil {
 				t.Fatal("asking state drained the queue")
 			}
-			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex, Images: true}}
+			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, Images: true}}
 			t.Cleanup(b.stop)
-			session, err := b.AttachRelay(t.Context(), &agent.Options{Logger: testLogger(), MsgCh: make(chan agent.TimedMessage, 8)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			rt.AttachSession(&taskrun.SessionHandle{Session: session})
+			startQueueSession(t, re, b)
 			rt.SetState(task.StateWaiting)
 			restored.drainInputQueue(t.Context())
 			awaitQueueCondition(t, restored, func() bool { return re.PendingInput() == nil })
@@ -901,7 +900,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -915,6 +914,7 @@ func TestManager(t *testing.T) {
 			if err := e.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatal(err)
 			}
+			awaitQueueCondition(t, m, func() bool { return tk.GetState() == task.StatePurged })
 			if err := e.Lifecycle.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -932,7 +932,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 			ids := make([]ksid.ID, 0, 2)
 			for range 2 {
-				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 				tk.SetState(task.StateRunning)
 				e := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, e)
@@ -952,7 +952,7 @@ func TestManager(t *testing.T) {
 					t.Fatalf("%s restoration discarded unknown tasks: queue=%+v err=%v", stage, q, err)
 				}
 			}
-			tk := mustNewTask(t, ids[1], agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk := mustNewTask(t, ids[1], agent.Prompt{Text: "initial"}, harness.Claude, "")
 			tk.SetState(task.StateStopped)
 			restored.Insert(tk.ID, restored.NewEntry(tk, nil))
 			restored.CompleteRestoration(nil)
@@ -965,12 +965,11 @@ func TestManager(t *testing.T) {
 		t.Run("in_flight_send_isolated_from_other_tasks", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			blocked := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			blocked := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 			blocked.SetState(task.StateRunning)
 			e := m.NewEntry(blocked, nil)
 			m.Insert(blocked.ID, e)
-			session, conn := newGatedQueueSession(t)
-			blocked.AttachSession(&taskrun.SessionHandle{Session: session})
+			conn := newGatedQueueSession(t, e)
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "blocked prompt"}); err != nil {
 				t.Fatal(err)
 			}
@@ -995,17 +994,13 @@ func TestManager(t *testing.T) {
 			if err := e.Lifecycle.CancelQueuedInput(q.ID); err == nil {
 				t.Fatal("in-flight cancellation succeeded")
 			}
-			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}}
+			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude}}
 			t.Cleanup(b.stop)
-			healthy := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, "")
+			healthy := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Claude, "")
 			healthy.SetState(task.StateWaiting)
-			hs, err := b.AttachRelay(t.Context(), &agent.Options{Logger: testLogger(), MsgCh: make(chan agent.TimedMessage, 8)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			healthy.AttachSession(&taskrun.SessionHandle{Session: hs})
 			he := m.NewEntry(healthy, nil)
 			m.Insert(healthy.ID, he)
+			startQueueSession(t, he, b)
 			if _, err := he.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "healthy prompt"}); err != nil {
 				t.Fatal(err)
 			}
@@ -1028,7 +1023,7 @@ func TestManager(t *testing.T) {
 						t.Parallel()
 						store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 						original := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
-						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", "", 0)
 						tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 						tk.SetState(state)
@@ -1038,13 +1033,13 @@ func TestManager(t *testing.T) {
 						if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "deferred work"}); err != nil {
 							t.Fatal(err)
 						}
-						var backend agent.Backend = &agenttest.FakeBackend{HarnessName: harness.Codex}
+						var backend agent.Backend = &agenttest.FakeBackend{HarnessName: harness.Claude}
 						if stage == "readiness" {
-							b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}, exitImmediately: true}
+							b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude}, exitImmediately: true}
 							t.Cleanup(b.stop)
 							backend = b
 						}
-						restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Backends: agent.Backends{harness.Codex: backend}})
+						restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Backends: agent.Backends{harness.Claude: backend}})
 						re := restored.NewEntry(tk, nil)
 						restored.Insert(tk.ID, re)
 						re.Lifecycle.reconnectImportedSession()
@@ -1069,12 +1064,11 @@ func TestManager(t *testing.T) {
 		t.Run("accepted_prompt_with_failed_removal_is_not_replayed", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			session, conn := newGatedQueueSession(t)
-			tk.AttachSession(&taskrun.SessionHandle{Session: session})
+			conn := newGatedQueueSession(t, e)
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "deliver once"}); err != nil {
 				t.Fatal(err)
 			}
@@ -1110,7 +1104,7 @@ func TestManager(t *testing.T) {
 		t.Run("delivery_failure_remains_visible", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
@@ -1215,92 +1209,140 @@ func TestManager(t *testing.T) {
 
 	t.Run("Close", func(t *testing.T) {
 		t.Parallel()
-		m := newTestManager(t, Config{ServerCtx: t.Context()})
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
-			Status:        agent.RateLimitStatusRejected,
-			QuotaProvider: agent.QuotaProviderClaudeCode,
-			QuotaWindow:   "five_hour",
-			Utilization:   1,
-		}})
-		m.Insert(tk.ID, m.NewEntry(tk, nil))
-		_, live, unsubscribe := tk.Subscribe(m.serverCtx)
-		t.Cleanup(unsubscribe)
-		_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			t.Run("closes subscriptions", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
+					Status:        agent.RateLimitStatusRejected,
+					QuotaProvider: agent.QuotaProviderClaudeCode,
+					QuotaWindow:   "five_hour",
+					Utilization:   1,
+				}}))
+				m.Insert(tk.ID, m.NewEntry(tk, nil))
+				_, live, unsubscribe := tk.Subscribe(m.serverCtx)
+				t.Cleanup(unsubscribe)
+				_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
 
-		if err := m.Close(); err != nil {
-			t.Fatalf("Close() = %v, want nil", err)
-		}
+				if err := m.Close(); err != nil {
+					t.Fatalf("Close() = %v, want nil", err)
+				}
 
-		select {
-		case _, ok := <-live:
-			if ok {
-				t.Fatal("live task subscription remained open after Manager.Close")
-			}
-		case <-time.After(time.Second):
-			t.Fatal("live task subscription did not close after Manager.Close")
-		}
-		select {
-		case _, ok := <-rateLimitLive:
-			if ok {
-				t.Fatal("rate-limit subscription remained open after Manager.Close")
-			}
-		case <-time.After(time.Second):
-			t.Fatal("rate-limit subscription did not close after Manager.Close")
-		}
-	})
+				select {
+				case _, ok := <-live:
+					if ok {
+						t.Fatal("live task subscription remained open after Manager.Close")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("live task subscription did not close after Manager.Close")
+				}
+				select {
+				case _, ok := <-rateLimitLive:
+					if ok {
+						t.Fatal("rate-limit subscription remained open after Manager.Close")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("rate-limit subscription did not close after Manager.Close")
+				}
+			})
 
-	t.Run("Close waits for lifecycle", func(t *testing.T) {
-		t.Parallel()
-		backend := &blockedStopBackend{
-			FakeBackend: &runtimetest.FakeBackend{},
-			started:     make(chan struct{}),
-			release:     make(chan struct{}, 1),
-		}
-		m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "")
-		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-		tk.SetState(task.StateRunning)
-		entry := m.NewEntry(tk, nil)
-		m.Insert(tk.ID, entry)
-		recordTestTaskLog(t, m, entry)
-		if err := entry.Lifecycle.Stop(t.Context()); err != nil {
-			t.Fatalf("Stop() = %v", err)
-		}
-		select {
-		case <-backend.started:
-		case <-time.After(time.Second):
-			t.Fatal("Stop did not reach the runtime backend")
-		}
-		intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
-		if err != nil || len(intent) != 1 || intent[0].State != task.StateStopping {
-			t.Fatalf("stop intent=%v err=%v", intent, err)
-		}
+			t.Run("interrupts queued transport before joining producers", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
+				tk.SetState(task.StateRunning)
+				e := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, e)
+				reader, writer := io.Pipe()
+				b := &blockedInputBackend{
+					FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, WireFactory: claudecode.New().NewWire},
+					stdin:       &blockedQueueInput{PipeWriter: writer, started: make(chan struct{})},
+				}
+				startQueueSession(t, e, b)
+				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "blocked prompt"}); err != nil {
+					t.Fatal(err)
+				}
+				tk.SetState(task.StateWaiting)
+				m.drainInputQueue(t.Context())
+				select {
+				case <-b.stdin.started:
+				case <-time.After(5 * time.Second):
+					t.Fatal("queued delivery did not enter the transport writer")
+				}
+				closed := make(chan error, 1)
+				var workers sync.WaitGroup
+				workers.Go(func() { closed <- m.Close() })
+				t.Cleanup(func() {
+					if err := reader.Close(); err != nil {
+						t.Error(err)
+					}
+					workers.Wait()
+				})
+				select {
+				case err := <-closed:
+					if err != nil {
+						t.Fatalf("Close() = %v", err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("Close waited for queued delivery before interrupting its transport")
+				}
+			})
 
-		closed := make(chan error, 1)
-		var workers sync.WaitGroup
-		workers.Go(func() { closed <- m.Close() })
-		t.Cleanup(func() {
-			select {
-			case backend.release <- struct{}{}:
-			default:
-			}
-			workers.Wait()
+			t.Run("waits for lifecycle", func(t *testing.T) {
+				t.Parallel()
+				backend := &blockedStopBackend{
+					FakeBackend: &runtimetest.FakeBackend{},
+					started:     make(chan struct{}),
+					release:     make(chan struct{}, 1),
+				}
+				m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "")
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				tk.SetState(task.StateRunning)
+				entry := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, entry)
+				recordTestTaskLog(t, m, entry)
+				if err := entry.Lifecycle.Stop(t.Context()); err != nil {
+					t.Fatalf("Stop() = %v", err)
+				}
+				select {
+				case <-backend.started:
+				case <-time.After(time.Second):
+					t.Fatal("Stop did not reach the runtime backend")
+				}
+				intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
+				if err != nil || len(intent) != 1 || intent[0].State != task.StateStopping {
+					t.Fatalf("stop intent=%v err=%v", intent, err)
+				}
+
+				closed := make(chan error, 1)
+				var workers sync.WaitGroup
+				workers.Go(func() { closed <- m.Close() })
+				t.Cleanup(func() {
+					select {
+					case backend.release <- struct{}{}:
+					default:
+					}
+					workers.Wait()
+				})
+				select {
+				case err := <-closed:
+					t.Fatalf("Close() returned before lifecycle stopped: %v", err)
+				case <-time.After(50 * time.Millisecond):
+				}
+				backend.release <- struct{}{}
+				select {
+				case err := <-closed:
+					if err != nil {
+						t.Fatalf("Close() = %v", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("Close() did not wait for lifecycle completion")
+				}
+			})
 		})
-		select {
-		case err := <-closed:
-			t.Fatalf("Close() returned before lifecycle stopped: %v", err)
-		case <-time.After(50 * time.Millisecond):
-		}
-		backend.release <- struct{}{}
-		select {
-		case err := <-closed:
-			if err != nil {
-				t.Fatalf("Close() = %v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("Close() did not wait for lifecycle completion")
-		}
 	})
 
 	t.Run("CopiesBackends", func(t *testing.T) {
@@ -1330,7 +1372,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		now := time.Now().UTC()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
 				ResetsAt:      now.Add(time.Hour),
@@ -1345,7 +1387,7 @@ func TestManager(t *testing.T) {
 				QuotaWindow:   "7d",
 				Utilization:   0.91,
 			},
-		})
+		}))
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
@@ -1365,7 +1407,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		now := time.Now().UTC()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			// A status-only event must not replace the provider's real value with 0%.
 			// -1 marks an unreported utilization.
 			&agent.RateLimitMessage{
@@ -1383,7 +1425,7 @@ func TestManager(t *testing.T) {
 				QuotaWindow:   "7d",
 				Utilization:   -1,
 			},
-		})
+		}))
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
@@ -1852,7 +1894,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_preserves_live_session", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SeedTimeline([]agent.Message{&agent.InitMessage{SessionID: "live"}})
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.InitMessage{SessionID: "live"}}))
 			applyLoadedSessionMetadata(tk, &taskhistory.LoadedTask{SessionID: "persisted"})
 			if got := tk.GetSessionID(); got != "live" {
 				t.Errorf("SessionID = %q, want live", got)
@@ -2042,6 +2084,30 @@ func TestManager(t *testing.T) {
 			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: "/tmp/my-repo"})
 			return m
 		}
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("canceled manager rejects prepared publication", func(t *testing.T) {
+				t.Parallel()
+				m := newTestManager(t, Config{ServerCtx: t.Context()})
+				t.Cleanup(func() {
+					if err := m.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "late creation"}, harness.Claude, "")
+				e := m.NewEntry(tk, nil)
+				m.Cancel()
+				if err := m.publishEntry(t.Context(), e, 0, false); !errors.Is(err, context.Canceled) {
+					t.Fatalf("publishEntry() = %v, want cancellation", err)
+				}
+				for range m.Entries() {
+					t.Fatal("canceled manager published the task")
+				}
+				if _, err := os.Stat(e.LogPath.Get()); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("prepared journal was not rolled back: %v", err)
+				}
+			})
+		})
 		t.Run("log_initialized_before_publication", func(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
@@ -2613,7 +2679,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "reconnect", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			tk.SeedTimeline([]agent.Message{
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
 					Questions: []logdata.AskQuestion{{Question: "Which?"}},
@@ -2630,9 +2696,12 @@ func TestManager(t *testing.T) {
 					},
 				},
 				&agent.ResultMessage{MessageType: "result"},
-			})
+			}))
 			logW, path, err := (taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), backends.Default("", nil))).Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := logW.AppendRecord(agent.PhysicalRecord{Encoded: []byte(`{"t":"input","ts":1.000,"msg":{"id":7,"method":"thread/start","params":{}}}` + "\n" + `{"t":"agent","ts":1.001,"msg":{"id":7,"result":{"thread":{"id":"saved-thread"}}}}` + "\n")}); err != nil {
 				t.Fatal(err)
 			}
 			if err := logW.Close(); err != nil {
@@ -2707,30 +2776,11 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
 			tk.SetState(task.StateWaiting)
 
-			cmdCtx, cmdCancel := context.WithCancel(t.Context())
-			cmd := exec.CommandContext(cmdCtx, "sleep", "60")
-			stdin, err := cmd.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			log := slog.New(slog.DiscardHandler)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{}, codex.New("", nil).NewWire()), stdout, make(chan agent.TimedMessage, 256), log)
-			t.Cleanup(func() {
-				cmdCancel()
-				_ = s.Wait()
-			})
-			tk.AttachSession(&taskrun.SessionHandle{Session: s})
-
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			err = e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
+			backend := &localProcessBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: codex.New("", nil).NewWire}, command: []string{"sleep", "60"}}
+			startQueueSession(t, e, backend)
+			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
 			if err == nil {
 				t.Fatal("expected delivery error")
 			}
@@ -2747,8 +2797,16 @@ func TestManager(t *testing.T) {
 			if got := tk.GetState(); got != task.StateWaiting {
 				t.Errorf("state = %s, want %s", got, task.StateWaiting)
 			}
-			if msgs := tk.Messages(); len(msgs) != 0 {
-				t.Fatalf("messages = %d, want 0", len(msgs))
+			if tk.HasAcceptedInputEvidence() {
+				t.Fatal("rejected encoded prompt became accepted input")
+			}
+			msgs := tk.Messages()
+			if len(msgs) != 3 {
+				t.Fatalf("failure evidence=%#v", msgs)
+			}
+			failure, ok := msgs[2].(*agent.SystemMessage)
+			if !ok || failure.Subtype != agent.SystemSubtypeInputDeliveryFailed || !strings.Contains(failure.Detail, "no thread ID") {
+				t.Fatalf("failure evidence=%#v", msgs[2])
 			}
 		})
 	})
@@ -3048,7 +3106,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
 			want := &agent.TextMessage{Text: "live result"}
-			tk.SeedTimeline([]agent.Message{want})
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{want}))
 			entry := m.NewEntry(tk, nil)
 
 			var got agent.Message
@@ -3435,9 +3493,10 @@ func TestManager(t *testing.T) {
 			tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
 			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
 			tk.SetState(task.StateWaiting)
-			tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(tk.RuntimeInstanceID()), DiffStat: logdata.DiffStat{{Path: "committed.go", LinesAdded: 3}, {Path: "pending.go", LinesAdded: 1}}})
+			tk.RestoreRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(tk.RuntimeInstanceID()), DiffStat: logdata.DiffStat{{Path: "committed.go", LinesAdded: 3}, {Path: "pending.go", LinesAdded: 1}}})
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
+			recordTestTaskLog(t, m, e)
 			changed := m.Changed()
 			result, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			if err != nil {
@@ -3579,18 +3638,31 @@ func TestManager(t *testing.T) {
 		t.Run("revive_cancels_crashed_task_recovery_window", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
+			releaseWire := make(chan struct{})
+			wireStarted := make(chan struct{})
+			var blockWire atomic.Bool
+			backend := &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+				if blockWire.CompareAndSwap(true, false) {
+					close(wireStarted)
+					<-releaseWire
+				}
+				return claudecode.New().NewWire()
+			}}
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
+				Backends:  agent.Backends{harness.Claude: backend},
 			})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
 
 			t.Cleanup(func() {
+				close(releaseWire)
 				close(releaseRevive)
 				if err := entry.Lifecycle.Close(); err != nil {
 					t.Errorf("Close: %v", err)
@@ -3600,10 +3672,26 @@ func TestManager(t *testing.T) {
 			if err := entry.Lifecycle.Purge(t.Context(), 20*time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
+			blockWire.Store(true)
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
-			time.Sleep(40 * time.Millisecond)
+			select {
+			case <-wireStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("revival did not reach its recording constructor")
+			}
+			// The reservation is held before the durable revival intent can
+			// publish provisioning. Expiring the timer must not steal that task.
+			if state := tk.GetState(); state != task.StateStopped {
+				t.Fatalf("reserved revival state = %s, want stopped", state)
+			}
+			changed := m.Changed()
+			select {
+			case <-changed:
+				t.Fatalf("purge published state %s while revival owned the reservation", tk.GetState())
+			case <-time.After(100 * time.Millisecond):
+			}
 			if got := fake.Status("ctr-1"); got == runtimetest.StatusPurged {
 				t.Fatal("runtime was purged after revive")
 			}
@@ -3763,7 +3851,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &task.Result{State: task.StateFailed}); err != nil {
+			if err := log.AppendMessage(taskhistory.ResultMessage(tk.Title(), &task.Result{State: task.StateFailed})); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -3872,13 +3960,13 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
-			if got := tk.GetState(); got != task.StateProvisioning {
-				t.Fatalf("state = %v, want provisioning", got)
-			}
+			awaitQueueCondition(t, m, func() bool { return tk.GetState() == task.StateProvisioning })
 			close(releaseRevive)
 			select {
 			case <-entry.Done():
@@ -3904,7 +3992,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &task.Result{State: task.StateStopped}); err != nil {
+			if err := log.AppendMessage(taskhistory.ResultMessage(tk.Title(), &task.Result{State: task.StateStopped})); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -3914,7 +4002,7 @@ func TestManager(t *testing.T) {
 			entry.LogPath.Set(path)
 			m.Insert(tk.ID, entry)
 
-			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "x"}})
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
 			firstChanged := m.Changed()
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
@@ -3970,33 +4058,16 @@ func TestManager(t *testing.T) {
 	t.Run("watchSession", func(t *testing.T) {
 		t.Run("valid_session_error_crashes_and_stops_instance", func(t *testing.T) {
 			t.Parallel()
-			cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 255")
-			stdin, err := cmd.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			msgCh := make(chan agent.TimedMessage, 1)
-			dispatchDone := make(chan struct{})
-			close(dispatchDone)
-			log := slog.New(slog.DiscardHandler)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{}, codex.New("", nil).NewWire()), stdout, msgCh, log)
-			h := &taskrun.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ssh-failed"), runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			tk.AttachSession(h)
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			backend := &localProcessBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, command: []string{"sh", "-c", "exit 255"}}
+			h := startManagedSession(t, entry, backend)
 			entry.Lifecycle.watchSession(h)
 
 			select {
@@ -4015,40 +4086,22 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			serverCtx, cancelServer := context.WithCancel(t.Context())
 			t.Cleanup(cancelServer)
-			cmd := exec.CommandContext(t.Context(), "sh", "-c", "sleep 30")
-			stdin, err := cmd.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			msgCh := make(chan agent.TimedMessage, 1)
-			dispatchDone := make(chan struct{})
-			close(dispatchDone)
-			log := slog.New(slog.DiscardHandler)
-			s := agent.NewSession(t.Context(), cmd, agent.NewConn(t.Context(), log, stdin, agent.DiscardLogSink{}, codex.New("", nil).NewWire()), stdout, msgCh, log)
-			h := &taskrun.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			instanceID, err := runtimeBackend.Launch(t.Context(), nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: "ssh-restart"}, "", "", 0)
 			tk.SetState(task.StateRunning)
-			tk.AttachSession(h)
 			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			backend := &localProcessBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, command: []string{"sleep", "30"}}
+			h := startManagedSession(t, entry, backend)
 			entry.Lifecycle.watchSession(h)
-			cancelServer()
-			if err := cmd.Process.Kill(); err != nil {
+			if err := m.Close(); err != nil {
 				t.Fatal(err)
 			}
 			select {
@@ -4076,7 +4129,7 @@ func TestManager(t *testing.T) {
 		t.Run("missing_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			if _, err := m.ResolveParser("pi"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
+			if _, err := m.ResolveParser("unconfigured"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
 				t.Fatalf("ResolveParser error = %v, want unknown-harness error", err)
 			}
 		})
@@ -4311,7 +4364,7 @@ func TestManager(t *testing.T) {
 					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
 						t.Fatal(err)
 					}
-					if err := m.logStore.WriteResultTrailer(log, "", &task.Result{State: task.StateFailed, Err: errors.New("old failure")}); err != nil {
+					if err := log.AppendMessage(taskhistory.ResultMessage("", &task.Result{State: task.StateFailed, Err: errors.New("old failure")})); err != nil {
 						t.Fatal(err)
 					}
 					if err := log.Close(); err != nil {
@@ -4558,7 +4611,7 @@ func TestManager(t *testing.T) {
 					if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(generation + "\n" + before + "\n")}); err != nil {
 						t.Fatal(err)
 					}
-					if err := agent.AppendInputNativeRecord(log, request); err != nil {
+					if err := agenttest.AppendInputNativeRecord(log, request); err != nil {
 						t.Fatal(err)
 					}
 					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s", AutoCompactTokenLimit: 244800}); err != nil {
@@ -4674,7 +4727,7 @@ func TestManager(t *testing.T) {
 			if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(before + "\n")}); err != nil {
 				t.Fatal(err)
 			}
-			if err := agent.AppendInputNativeRecord(log, []byte("{\"type\":\"request\"}\n")); err != nil {
+			if err := agenttest.AppendInputNativeRecord(log, []byte("{\"type\":\"request\"}\n")); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -4727,7 +4780,7 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := []byte(`{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"accepted prompt"}]}}` + "\n")
-			if err := agent.AppendInputNativeRecord(log, request); err != nil {
+			if err := agenttest.AppendInputNativeRecord(log, request); err != nil {
 				t.Fatal(err)
 			}
 			if err := log.Close(); err != nil {
@@ -5148,7 +5201,10 @@ func TestManager(t *testing.T) {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
 
-			adopted[0].Task().ClearMessages(t.Context())
+			recordTestTaskLog(t, m, adopted[0])
+			if err := adopted[0].RecordHost(t.Context(), agent.ContextCleared()); err != nil {
+				t.Fatal(err)
+			}
 			if got := backing[1].Message; got != nil {
 				t.Fatalf("durable history spare slot = %T, want untouched", got)
 			}
@@ -6596,10 +6652,10 @@ func TestLastResultText(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", Result: "first"},
 			&agent.ResultMessage{MessageType: "result", Result: "last"},
-		})
+		}))
 		if got := lastResultText(tk); got != "last" {
 			t.Errorf("lastResultText = %q, want %q", got, "last")
 		}
@@ -6884,7 +6940,7 @@ func setupImportedRecovery(t *testing.T, s *importedRecoverySetup) *importedReco
 	if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteResultTrailer(log, "existing title", &task.Result{State: s.state, Err: errors.New(s.reason)}); err != nil {
+	if err := log.AppendMessage(taskhistory.ResultMessage("existing title", &task.Result{State: s.state, Err: errors.New(s.reason)})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Compress(path, log, s.state); err != nil {
@@ -7164,7 +7220,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 			if tc.exit {
 				messages = append(messages, &agent.ExitMessage{ExitCode: 1, Error: "agent failed"})
 			}
-			tk.SeedTimeline(messages)
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
 			lt := &taskhistory.LoadedTask{State: tc.state}
 			if tc.err != "" {
 				lt.LastTrailer = &task.Result{Err: errors.New(tc.err)}
@@ -7199,7 +7255,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	tk.SetState(task.StateFailed)
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
 	tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-	tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}))
 	tk.SetState(task.StateFailed)
 	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {
@@ -7342,37 +7398,111 @@ type gatedQueueConn struct {
 	release chan struct{}
 }
 
+func newGatedQueueSession(t *testing.T, e *Entry) *gatedQueueConn {
+	b := &gatedQueueBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, WireFactory: claudecode.New().NewWire}}
+	startQueueSession(t, e, b)
+	return b.conn
+}
+
 func (c *gatedQueueConn) SendPrompt(p agent.Prompt, raw []byte) error {
 	close(c.started)
 	<-c.release
 	return c.Conn.SendPrompt(p, raw)
 }
 
-func (*gatedQueueConn) ReadMessages(r io.ReadCloser, _ chan<- agent.TimedMessage, _ agent.MessageInterceptor) error {
-	_, err := io.Copy(io.Discard, r)
-	return err
+type gatedQueueBackend struct {
+	*agenttest.FakeBackend
+
+	conn *gatedQueueConn
 }
 
-func newGatedQueueSession(t *testing.T) (*agent.Session, *gatedQueueConn) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cmd := exec.CommandContext(ctx, "cat")
+func (b *gatedQueueBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "python3", "-c", "import sys; sys.stdin.buffer.read()")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		cancel()
-		t.Fatal(err)
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		cancel()
-		t.Fatal(err)
+		return nil, errors.Join(err, stdin.Close())
 	}
 	if err := cmd.Start(); err != nil {
-		cancel()
+		return nil, errors.Join(err, stdin.Close())
+	}
+	b.conn = &gatedQueueConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), started: make(chan struct{}), release: make(chan struct{})}
+	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.Logger), nil
+}
+func startQueueSession(t testing.TB, e *Entry, b agent.Backend) {
+	tk := e.Task()
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", runtime.InstanceID(tk.ID.String())), runtime.ConnectionTarget{SSHHost: "queue-fixture"}, "", "", 0)
+	startManagedSession(t, e, b)
+}
+func startManagedSession(t testing.TB, e *Entry, b agent.Backend) *taskrun.SessionHandle {
+	tk := e.Task()
+	r := e.Lifecycle.agentRuntime
+	r.Backends = agent.Backends{tk.Harness: b}
+	h, err := r.StartSession(e.Lifecycle.ctx, tk, agent.Prompt{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	log := testLogger()
-	conn := &gatedQueueConn{Conn: agent.NewConn(ctx, log, stdin, agent.DiscardLogSink{}, claudecode.New().NewWire()), started: make(chan struct{}), release: make(chan struct{})}
-	session := agent.NewSession(ctx, cmd, conn, stdout, make(chan agent.TimedMessage, 8), log)
-	t.Cleanup(func() { cancel(); _ = session.Wait() })
-	return session, conn
+	t.Cleanup(func() {
+		if err := r.Shutdown(context.WithoutCancel(t.Context()), tk); err != nil && !errors.Is(err, context.Canceled) {
+			t.Error(err)
+		}
+	})
+	return h
+}
+
+// localProcessBackend supplies a real joined transport for lifecycle exit tests.
+type localProcessBackend struct {
+	*agenttest.FakeBackend
+
+	command []string
+}
+
+func (b *localProcessBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, b.command[0], b.command[1:]...) //nolint:gosec // Fixed command supplied by this test fixture.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, errors.Join(err, stdin.Close())
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, errors.Join(err, stdin.Close())
+	}
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), stdout, opts.Logger), nil
+}
+
+// blockedQueueInput exercises cancellation of an actual Conn stdin write.
+type blockedQueueInput struct {
+	*io.PipeWriter
+
+	started chan struct{}
+}
+
+func (w *blockedQueueInput) Write(p []byte) (int, error) {
+	close(w.started)
+	return w.PipeWriter.Write(p)
+}
+
+// blockedInputBackend keeps stdout alive while its real input writer is stalled.
+type blockedInputBackend struct {
+	*agenttest.FakeBackend
+
+	stdin *blockedQueueInput
+}
+
+func (b *blockedInputBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "sleep", "300")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, b.stdin, opts.Records, nil), stdout, opts.Logger), nil
 }

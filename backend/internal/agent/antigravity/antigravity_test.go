@@ -5,8 +5,6 @@ package antigravity
 import (
 	"bufio"
 	"bytes"
-	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -18,7 +16,6 @@ import (
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/maruel/gomode/mcp/mcptest"
 )
@@ -65,17 +62,18 @@ func TestBackend(t *testing.T) {
 
 func TestWireFormat(t *testing.T) {
 	t.Parallel()
-	t.Run("WritePrompt", func(t *testing.T) {
+	t.Run("EncodePrompt", func(t *testing.T) {
 		t.Parallel()
 
 		t.Run(strconv.Itoa(agent.LogVersionV3), func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			var out bytes.Buffer
-			log := &agenttest.LogSink{}
-			if err := w.WritePrompt(&out, agent.Prompt{Text: "hello\nworld"}, log); err != nil {
+			data, err := w.EncodePrompt(agent.Prompt{Text: "hello\nworld"})
+			if err != nil {
 				t.Fatal(err)
 			}
+			out.Write(data)
 			want := `{"event":"user","message":{"content":[{"type":"text","text":"hello\nworld"}]}}` + "\n"
 			if out.String() != want {
 				t.Fatalf("input = %q", out.String())
@@ -87,31 +85,21 @@ func TestWireFormat(t *testing.T) {
 			if m, ok := msgs[0].(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
 				t.Fatalf("input = %+v", msgs[0])
 			}
-			parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
-			if err != nil {
-				t.Fatal(err)
-			}
-			record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
-			if err != nil || record.Provenance.Source == agent.RecordSourceRelay || len(record.Messages) != 1 {
-				t.Fatalf("input record = %#v, %v", record, err)
-			}
-			if m, ok := record.Messages[0].Message.(*agent.UserInputMessage); !ok || m.Text != "hello\nworld" {
-				t.Fatalf("persisted input = %#v", record.Messages[0].Message)
-			}
 		})
 
 		t.Run("images and text", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			var out bytes.Buffer
-			log := &agenttest.LogSink{}
 			prompt := agent.Prompt{
 				Text:   "describe this",
 				Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}},
 			}
-			if err := w.WritePrompt(&out, prompt, log); err != nil {
+			data, err := w.EncodePrompt(prompt)
+			if err != nil {
 				t.Fatal(err)
 			}
+			out.Write(data)
 			want := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}` + "\n"
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
@@ -129,13 +117,14 @@ func TestWireFormat(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			var out bytes.Buffer
-			log := &agenttest.LogSink{}
 			prompt := agent.Prompt{
 				Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "anBn"}},
 			}
-			if err := w.WritePrompt(&out, prompt, log); err != nil {
+			data, err := w.EncodePrompt(prompt)
+			if err != nil {
 				t.Fatal(err)
 			}
+			out.Write(data)
 			want := `{"event":"user","message":{"content":[{"type":"text","text":"data:image/jpeg;base64,anBn"}]}}` + "\n"
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
@@ -147,17 +136,6 @@ func TestWireFormat(t *testing.T) {
 			m, ok := msgs[0].(*agent.UserInputMessage)
 			if !ok || m.Text != "" || len(m.Images) != 1 || m.Images[0].MediaType != "image/jpeg" || m.Images[0].Data != "anBn" {
 				t.Fatalf("parsed input = %+v", msgs[0])
-			}
-		})
-		t.Run("errors", func(t *testing.T) {
-			t.Parallel()
-			w := New("", nil).NewWire()
-			log := &agenttest.LogSink{}
-			if err := w.WritePrompt(shortWriter{}, agent.Prompt{Text: "hello"}, log); !errors.Is(err, io.ErrShortWrite) {
-				t.Fatalf("short write = %v", err)
-			}
-			if log.Len() == 0 {
-				t.Fatal("attempted input must precede delivery, including a short write")
 			}
 		})
 	})
@@ -472,7 +450,3 @@ func TestShellCommand(t *testing.T) {
 		})
 	}
 }
-
-type shortWriter struct{}
-
-func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }

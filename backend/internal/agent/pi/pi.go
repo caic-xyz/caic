@@ -5,9 +5,8 @@
 // to accept commands after launch.
 //
 // Per-session state is managed by piWireFormat around the stateless event
-// decoders. A fresh piWireFormat is created for every Start,
-// AttachRelay, and NewWire call so that counters reset between sessions and
-// replays.
+// decoders. The owning record processor keeps one configured piWireFormat through
+// startup, attach replay, and live input/output.
 //
 // Extension UI auto-response is handled by piConn, which wraps the default
 // Conn to intercept extension_ui_request messages during ReadMessages and
@@ -24,7 +23,6 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -85,17 +83,17 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	opts.Logger.WarnContext(ctx, "pi: startup failed; updating and retrying", "err", err)
-	if logErr := writeStartupLog(opts.Log, "Pi startup failed; running pi update --all ..."); logErr != nil {
+	if logErr := writeStartupLog(ctx, opts.Records, "Pi startup failed; running pi update --all ..."); logErr != nil {
 		return nil, errors.Join(err, logErr)
 	}
 	out, updateErr := updatePi(ctx, opts.Target)
-	if logErr := writeStartupLogOutput(opts.Log, "pi update", out); logErr != nil {
+	if logErr := writeStartupLogOutput(ctx, opts.Records, "pi update", out); logErr != nil {
 		return nil, errors.Join(err, updateErr, logErr)
 	}
 	if updateErr != nil {
 		return nil, errors.Join(err, updateErr)
 	}
-	if logErr := writeStartupLog(opts.Log, "Pi update completed; retrying startup ..."); logErr != nil {
+	if logErr := writeStartupLog(ctx, opts.Records, "Pi update completed; retrying startup ..."); logErr != nil {
 		return nil, errors.Join(err, logErr)
 	}
 	return b.start(ctx, opts)
@@ -117,8 +115,7 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
-	return agent.AttachRelaySession(ctx, opts, wire, nil)
+	return agent.AttachRelaySession(ctx, opts, nil)
 }
 
 // NewWire implements agent.Backend.
@@ -132,15 +129,6 @@ func (*Backend) NewMetadataParser() agent.MessageParser {
 	return &piMetadata{}
 }
 
-// WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
-// when model is non-empty.
-func (*Backend) WritePrePrompt(w io.Writer, model string, log agent.LogSink) error {
-	if model != "" {
-		return writeSetModel(w, model, log)
-	}
-	return nil
-}
-
 // FetchModelInventory implements agent.ModelFetcher.
 func (*Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
 	models, err := fetchModels(ctx, target, extraEnv)
@@ -150,9 +138,54 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 	return agent.ModelInventory{Models: models}, nil
 }
 
-func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
+// RecordHandshake configures Pi and validates its observed session using the
+// same committed decoder that continues processing the running session.
+func (*Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, opts *agent.Options) (io.Reader, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	stopRead := agent.InterruptReadOnCancel(ctx, stdout)
+	defer stopRead()
+	records := agent.NewRelayRecordReader(ctx, stdout, opts.Records)
+	if opts.Model != "" {
+		if err := writeSetModel(ctx, stdin, opts.Model, opts.Records); err != nil {
+			return nil, err
+		}
+		if _, err := waitForResponse(records, pi.CmdSetModel); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Effort != "" {
+		if err := writeSetThinking(ctx, stdin, opts.Effort, opts.Records); err != nil {
+			return nil, err
+		}
+		if _, err := waitForResponse(records, pi.CmdSetThinking); err != nil {
+			return nil, err
+		}
+	}
+	if err := writeJSONLine(ctx, stdin, pi.GetStateCmd{Type: pi.CmdGetState}, opts.Records); err != nil {
+		return nil, err
+	}
+	state, err := waitForResponse(records, pi.CmdGetState)
+	if err != nil {
+		if _, reported := errors.AsType[*piCommandError](err); reported && opts.ResumeSessionID == "" {
+			if opts.Logger != nil {
+				opts.Logger.WarnContext(ctx, "pi: get_state failed", "err", err)
+			}
+			return records.Reader(), nil
+		}
+		return nil, err
+	}
+	metadata, err := stateMetadata(state.Data)
+	if err != nil {
+		return nil, err
+	}
+	if opts.ResumeSessionID != "" && metadata.SessionID != opts.ResumeSessionID {
+		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", metadata.SessionID, opts.ResumeSessionID)
+	}
+	return records.Reader(), nil
+}
 
+func (b *Backend) start(ctx context.Context, opts *agent.Options) (session *agent.Session, err error) {
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID})
 	relayArgs := []string{"--harness", "pi"}
 	if opts.MCP != nil {
@@ -163,96 +196,23 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-
-	records := agent.NewRelayRecordReader(rp.Stdout, opts.Log)
-
-	// Pre-prompt commands: set_model and set_thinking_level. We must wait
-	// for each response before sending the next.
-	if opts.Model != "" {
-		if err := writeSetModel(rp.Stdin, opts.Model, opts.Log); err != nil {
-			return nil, fmt.Errorf("pi: write set_model: %w", err)
-		}
-		resp, err := waitForResponse(records, pi.CmdSetModel)
-		if err != nil {
-			err = reapPiProcessExit(rp, err)
-			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
-		}
-		metadata, err := wire.responseMessages(&resp)
-		if err != nil {
-			return nil, fmt.Errorf("pi: set_model metadata: %w", err)
-		}
-		wire.applyMetadata(metadata)
-		for _, msg := range metadata {
-			switch m := msg.(type) {
-			case *agent.SessionMetadataMessage:
-				opts.MsgCh <- agent.TimedMessage{Message: m}
-			case *agent.ModelInfoMessage:
-				if err := opts.Log.AppendMessage(m); err != nil {
-					return nil, fmt.Errorf("write caic_model_info: %w", err)
-				}
-			}
-		}
-	}
-	if opts.Effort != "" {
-		if err := writeSetThinking(rp.Stdin, opts.Effort, opts.Log); err != nil {
-			return nil, fmt.Errorf("pi: write set_thinking_level: %w", err)
-		}
-		if _, err := waitForResponse(records, pi.CmdSetThinking); err != nil {
-			err = reapPiProcessExit(rp, err)
-			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
-		}
-	}
-
-	var state []agent.Message
-	var metadata agent.SessionMetadata
-	if err := writeGetState(rp.Stdin, opts.Log); err != nil {
-		opts.Logger.WarnContext(ctx, "pi: write get_state failed", "err", err)
-	} else {
-		stateCtx, stateCancel := context.WithTimeout(ctx, 10*time.Second)
-		resp, err := waitForResponseContext(stateCtx, records, pi.CmdGetState, func() {
+	bootstrap := true
+	defer func() {
+		if bootstrap {
+			closeErr := errors.Join(rp.Stdin.Close(), rp.Stdout.Close())
 			_ = rp.Cmd.Process.Kill()
-		})
-		stateCancel()
-		if err != nil {
-			if errors.Is(err, errResponseTimeout) {
-				_ = rp.Cmd.Wait()
-				return nil, fmt.Errorf("pi: get_state: %w", err)
-			}
-			if _, ok := errors.AsType[*piProcessExitError](err); ok {
-				return nil, fmt.Errorf("pi: get_state: %w", reapPiProcessExit(rp, err))
-			}
-			opts.Logger.WarnContext(ctx, "pi: get_state failed", "err", err)
-		} else {
-			state, err = wire.responseMessages(&resp)
-			if err != nil {
-				opts.Logger.WarnContext(ctx, "pi: parse get_state failed", "err", err)
-			} else {
-				wire.applyMetadata(state)
-				for _, msg := range state {
-					metadata.Apply(msg)
-				}
-			}
+			err = errors.Join(err, closeErr, rp.Cmd.Wait())
 		}
-	}
-	if opts.ResumeSessionID != "" && metadata.SessionID != opts.ResumeSessionID {
-		_ = rp.Cmd.Process.Kill()
-		_ = rp.Cmd.Wait()
-		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", metadata.SessionID, opts.ResumeSessionID)
-	}
-	rp.Stdout = bufferedRelayOutput{Reader: records.Reader(), Closer: rp.Stdout}
-	for _, msg := range state {
-		opts.MsgCh <- agent.TimedMessage{Message: msg}
-	}
-	if metadata != (agent.SessionMetadata{}) {
-		initMsg := &agent.InitMessage{SessionID: metadata.SessionID, ReportedModel: metadata.ReportedModel, ReportedEffort: metadata.ReportedEffort}
-		if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
-			_ = rp.Cmd.Process.Kill()
-			_ = rp.Cmd.Wait()
-			return nil, fmt.Errorf("write session metadata: %w", err)
-		}
-	}
+	}()
 
-	c := newPiConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire, opts)
+	continuation, err := b.RecordHandshake(ctx, rp.Stdin, rp.Stdout, opts)
+	if err != nil {
+		return nil, err
+	}
+	rp.Stdout = bufferedRelayOutput{Reader: continuation, Closer: rp.Stdout}
+
+	bootstrap = false
+	c := newPiConn(ctx, opts.Logger, rp.Stdin, opts)
 	sess, err := agent.StartSession(ctx, rp, c, opts)
 	if err != nil {
 		return nil, err
@@ -296,21 +256,21 @@ func updatePi(ctx context.Context, target runtime.ConnectionTarget) (string, err
 }
 
 // writeStartupLog writes a task log line for Pi startup recovery.
-func writeStartupLog(log agent.LogSink, line string) error {
-	if err := log.AppendMessage(&agent.LogMessage{MessageType: "caic_log", Line: line}); err != nil {
+func writeStartupLog(ctx context.Context, records *agent.Records, line string) error {
+	if err := records.AppendMessage(ctx, &agent.LogMessage{MessageType: "caic_log", Line: line}); err != nil {
 		return fmt.Errorf("write Pi startup log: %w", err)
 	}
 	return nil
 }
 
 // writeStartupLogOutput writes each non-empty command-output line to the task log.
-func writeStartupLogOutput(log agent.LogSink, command, output string) error {
+func writeStartupLogOutput(ctx context.Context, records *agent.Records, command, output string) error {
 	for line := range strings.Lines(output) {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if err := writeStartupLog(log, command+": "+line); err != nil {
+		if err := writeStartupLog(ctx, records, command+": "+line); err != nil {
 			return err
 		}
 	}
@@ -322,8 +282,8 @@ func writeStartupLogOutput(log agent.LogSink, command, output string) error {
 type piConn struct{ agent.Conn }
 
 // newPiConn installs the provider interceptor around the shared response owner.
-func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat, opts *agent.Options) *piConn {
-	return &piConn{Conn: agent.NewMCPConn(ctx, logger, stdin, log, wire, opts.MCP)}
+func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, opts *agent.Options) *piConn {
+	return &piConn{Conn: agent.NewConn(ctx, logger, stdin, opts.Records, opts.MCP)}
 }
 
 // HandleMessage intercepts extension UI controls without writing stdin.
@@ -401,15 +361,8 @@ type piWireFormat struct {
 	toolOutputLen map[string]int
 }
 
-// WritePrompt sends a prompt command to Pi's stdin and records the start time
-// for duration tracking.
-func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
-	w.mu.Lock()
-	w.startTime = time.Now()
-	w.numTurns = 0
-	w.toolOutputLen = nil
-	w.mu.Unlock()
-
+// EncodePrompt encodes a complete Pi prompt without changing decoder state.
+func (*piWireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	cmd := pi.PromptCmd{
 		Type:              pi.CmdPrompt,
 		Message:           p.Text,
@@ -422,16 +375,16 @@ func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSi
 			MimeType: img.MediaType,
 		})
 	}
-	return writeJSONLine(wr, cmd, log)
+	return marshalInput(cmd)
 }
 
-// WriteCompact implements agent.CompactCommand.
-func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, log agent.LogSink) error {
+// EncodeCompact implements agent.CompactCommand.
+func (*piWireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	cmd := pi.CompactCmd{
 		Type:               pi.CmdCompact,
 		CustomInstructions: instructions,
 	}
-	return writeJSONLine(wr, cmd, log)
+	return marshalInput(cmd)
 }
 
 // ParseOutput adapts native Pi records and marks unique token contributions.
@@ -457,8 +410,8 @@ func (w *piWireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	return msgs, nil
 }
 
-// ParseInput decodes recorded Pi commands without changing output lifecycle or usage.
-func (*piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+// ParseInput applies prompt lifecycle changes only after the native input commits.
+func (w *piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	typ, err := decodeEventType(line)
 	if err != nil {
 		return nil, err
@@ -470,6 +423,8 @@ func (*piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(line, &cmd); err != nil {
 			return nil, fmt.Errorf("unmarshal prompt cmd: %w", err)
 		}
+		w.beginPrompt()
+		w.toolOutputLen = nil
 		ui := &agent.UserInputMessage{Text: cmd.Message}
 		for _, img := range cmd.Images {
 			ui.Images = append(ui.Images, v3.ImageData{
@@ -717,8 +672,6 @@ type agentEndEnvelope struct {
 	WillRetry bool `json:"willRetry"`
 }
 
-var errResponseTimeout = errors.New("pi response wait timed out")
-
 type piProcessExitError struct {
 	exit agent.ExitMessage
 }
@@ -727,21 +680,14 @@ func (e *piProcessExitError) Error() string {
 	return fmt.Sprintf("agent subprocess exited with code %d: %s", e.exit.ExitCode, e.exit.Error)
 }
 
-func reapPiProcessExit(rp *agent.RelayProcess, err error) error {
-	if _, ok := errors.AsType[*piProcessExitError](err); !ok {
-		return err
-	}
-	// The relay's attach process keeps reading stdin after its daemon reports
-	// a failed agent startup. Close the pipe before Wait so it can exit instead
-	// of leaving task startup stuck in StateStarting.
-	if closeErr := rp.Stdin.Close(); closeErr != nil {
-		err = errors.Join(err, fmt.Errorf("close failed Pi startup stdin: %w", closeErr))
-	}
-	if waitErr := rp.Cmd.Wait(); waitErr != nil {
-		return errors.Join(err, fmt.Errorf("wait for failed Pi startup: %w", waitErr))
-	}
-	return err
+// piCommandError is a valid native command rejection, distinct from corrupt
+// evidence, owner failure, or a transport ending before the reply.
+type piCommandError struct {
+	command pi.EventType
+	detail  string
 }
+
+func (e *piCommandError) Error() string { return fmt.Sprintf("pi %s: %s", e.command, e.detail) }
 
 // waitForResponse consumes physical records until it receives the requested
 // native Pi response. Relay controls bypass the native response parser.
@@ -767,39 +713,15 @@ func waitForResponse(r *agent.RelayRecordReader, cmd pi.EventType) (pi.Response,
 			continue
 		}
 		if !resp.Success {
-			return pi.Response{}, fmt.Errorf("pi %s: %s", cmd, resp.Error)
+			return pi.Response{}, &piCommandError{command: cmd, detail: resp.Error}
 		}
 		return resp, nil
 	}
 }
 
-func waitForResponseContext(ctx context.Context, r *agent.RelayRecordReader, cmd pi.EventType, onTimeout func()) (pi.Response, error) {
-	type result struct {
-		resp pi.Response
-		err  error
-	}
-	ch := make(chan result, 1)
-	var reader sync.WaitGroup
-	reader.Go(func() {
-		resp, err := waitForResponse(r, cmd)
-		ch <- result{resp: resp, err: err}
-	})
-	defer reader.Wait()
-	select {
-	case res := <-ch:
-		return res.resp, res.err
-	case <-ctx.Done():
-		if onTimeout != nil {
-			onTimeout()
-		}
-		res := <-ch
-		return pi.Response{}, errors.Join(fmt.Errorf("%w for %s: %w", errResponseTimeout, cmd, ctx.Err()), res.err)
-	}
-}
-
 // writeSetModel sends a set_model command to Pi. The model string is split on
 // "/" into provider + modelId (e.g. "cerebras/gpt-oss-120b").
-func writeSetModel(w io.Writer, model string, log agent.LogSink) error {
+func writeSetModel(ctx context.Context, w io.Writer, model string, records *agent.Records) error {
 	provider, modelID := "", model
 	if p, m, ok := strings.Cut(model, "/"); ok {
 		provider, modelID = p, m
@@ -809,20 +731,16 @@ func writeSetModel(w io.Writer, model string, log agent.LogSink) error {
 		Provider: provider,
 		ModelID:  modelID,
 	}
-	return writeJSONLine(w, cmd, log)
+	return writeJSONLine(ctx, w, cmd, records)
 }
 
 // writeSetThinking sends a set_thinking_level command to Pi.
-func writeSetThinking(w io.Writer, level string, log agent.LogSink) error {
+func writeSetThinking(ctx context.Context, w io.Writer, level string, records *agent.Records) error {
 	cmd := pi.SetThinkingCmd{
 		Type:  pi.CmdSetThinking,
 		Level: pi.ThinkingLevel(level),
 	}
-	return writeJSONLine(w, cmd, log)
-}
-
-func writeGetState(w io.Writer, log agent.LogSink) error {
-	return writeJSONLine(w, pi.GetStateCmd{Type: pi.CmdGetState}, log)
+	return writeJSONLine(ctx, w, cmd, records)
 }
 
 func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]agent.Model, error) {
@@ -943,18 +861,20 @@ func effortOptions(model *pi.Model) []string {
 	return efforts
 }
 
-// writeJSONLine marshals v as JSON, writes it followed by LF, and logs it.
-func writeJSONLine(w io.Writer, v any, log agent.LogSink) error {
-	data, err := json.Marshal(v)
+// writeJSONLine commits one complete command before writing it to Pi.
+func writeJSONLine(ctx context.Context, w io.Writer, v any, records *agent.Records) error {
+	data, err := marshalInput(v)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, data); err != nil {
-		return err
+	return records.WriteInput(ctx, w, data)
+}
+
+// marshalInput encodes a complete command without advancing session state.
+func marshalInput(v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return append(data, '\n'), nil
 }

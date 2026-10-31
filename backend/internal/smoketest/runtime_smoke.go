@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -91,17 +90,17 @@ func NewSmokeBackend(h harness.Name) *SmokeBackend {
 }
 
 // Start deploys the smoke agent into the container and starts it via a relay
-// that relies on WritePrompt to record its plain-text input.
+// that emits the same JSON prompt records as the fake harness.
 func (b *SmokeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if err := deploySmokeAgent(ctx, opts.Target); err != nil {
 		return nil, err
 	}
-	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{}), b)
+	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{}))
 }
 
 // AttachRelay implements agent.Backend.
 func (b *SmokeBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, b, nil)
+	return agent.AttachRelaySession(ctx, opts, nil)
 }
 
 // AgentArgs implements agent.Backend.
@@ -117,9 +116,13 @@ func (*SmokeBackend) NewWire() agent.WireFormat {
 	return &SmokeBackend{}
 }
 
-// WritePrompt writes the prompt as plain text.
-func (*SmokeBackend) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	return agent.PlainTextWritePrompt(w, p, log)
+// EncodePrompt returns the fixture's complete JSON prompt command.
+func (*SmokeBackend) EncodePrompt(p agent.Prompt) ([]byte, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 // ParseOutput decodes one smoke-agent NDJSON line.
@@ -172,7 +175,7 @@ print(json.dumps({
 for line in sys.stdin:
     if "\x00" in line:
         break
-    text = line.strip()
+    text = json.loads(line)["text"]
     if not text:
         continue
     result = "smoke agent received: " + text
@@ -243,5 +246,5 @@ func WaitForRuntimeGone(ctx context.Context, runtimeName string, id runtime.ID) 
 
 // ParseInput decodes the smoke agent's recorded plain-text prompt.
 func (*SmokeBackend) ParseInput(line []byte) ([]agent.Message, error) {
-	return parsePlainTextInput(line)
+	return parsePromptInput(line)
 }

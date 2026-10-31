@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -78,7 +77,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, newWireFormat(), opts.MCP)})
+	c := agent.Conn(&controlConn{Conn: agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP)})
 	return agent.StartSession(ctx, rp, c, opts)
 }
 
@@ -113,7 +112,7 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 
 // AttachRelay implements agent.Backend.
 func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, newWireFormat(), func(c agent.Conn) (agent.Conn, error) {
+	return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
 		cc := &controlConn{Conn: c}
 		if err := cc.restorePendingActions(opts.PendingUserActions); err != nil {
 			return nil, err
@@ -424,9 +423,9 @@ func resultContextWindow(line []byte, model string) int {
 	return 0
 }
 
-// WritePrompt writes a single user message in Claude Code's stdin format.
+// EncodePrompt encodes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
-func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
+func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	var blocks []claudecode.InputContentBlock
 	for _, img := range p.Images {
 		blocks = append(blocks, claudecode.InputContentBlock{
@@ -447,26 +446,19 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, data); err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return append(data, '\n'), nil
 }
 
-// WriteCompact implements agent.CompactCommand by sending /compact as a user
+// EncodeCompact implements agent.CompactCommand by sending /compact as a user
 // message. Claude Code recognizes this as a slash command in -p mode.
-func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.LogSink) error {
+func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	text := "/compact"
 	if instructions != "" {
 		text = "/compact " + instructions
 	}
-	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
+	return w.EncodePrompt(agent.Prompt{Text: text})
 }
 
 // ParseInput decodes client prompts and request-correlated question answers.

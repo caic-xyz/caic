@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -146,13 +145,13 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, b.NewWire(), opts.MCP)
+	c := agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP)
 	return agent.StartSession(ctx, rp, c, opts)
 }
 
 // AttachRelay reconnects to a running agy process through the shared relay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, b.NewWire(), nil)
+	return agent.AttachRelaySession(ctx, opts, nil)
 }
 
 // AgentArgs returns agy's persistent NDJSON print-mode command. A bare -p
@@ -229,8 +228,8 @@ type wireFormat struct {
 	textConversations map[string]struct{}
 }
 
-// WritePrompt sends text and image input and records native input provenance in v3 logs.
-func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
+// EncodePrompt encodes text and image input as one complete native record.
+func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	var blocks []antigravity.StreamInputContentBlock
 	if p.Text != "" {
 		blocks = append(blocks, antigravity.StreamInputContentBlock{Type: "text", Text: p.Text})
@@ -251,17 +250,9 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 		Message: antigravity.StreamInputUserMessage{Content: blocks},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, data); err != nil {
-		return err
-	} else if n, err := w.Write(data); err != nil {
-		return err
-	} else if n != len(data) {
-		return io.ErrShortWrite
-	}
-	return nil
+	return append(data, '\n'), nil
 }
 
 // ParseInput decodes client prompts without updating output conversation state.

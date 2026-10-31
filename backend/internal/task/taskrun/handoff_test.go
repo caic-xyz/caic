@@ -16,6 +16,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -31,7 +32,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Add quota-aware task recovery."}, harness.Codex, "gpt-5.2-codex", "high")
 		tk.SetTitle("Add quota-aware recovery")
 		tk.Repos = []repo.Mount{{Name: "caic", BaseBranch: "main", Branch: "caic-42"}}
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.UserInputMessage{Text: "Add quota-aware task recovery."},
 			&agent.TextMessage{Text: "I added normalized quota state and started the recovery flow."},
 			&agent.UserInputMessage{Text: "Please preserve the existing fork behavior."},
@@ -51,7 +52,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 				QuotaLabel:    "Codex",
 				QuotaWindow:   "5h",
 			},
-		})
+		}))
 
 		assertHandoffGolden(t, "normal.md", BuildHandoffPrompt(tk, 0))
 	})
@@ -61,7 +62,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Diagnose OPENAI_API_KEY=sk-original-secret without exposing it."}, harness.Claude, "claude-sonnet", "")
 		tk.SetTitle("Token ghp_title_secret investigation")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.UserInputMessage{Text: tk.InitialPrompt.Text},
 			&agent.ThinkingMessage{Text: "hidden-thought ghp_thinking_secret"},
 			&agent.ToolUseMessage{Name: "Shell", Input: json.RawMessage(`{"cmd":"echo ghp_tool_secret"}`)},
@@ -70,7 +71,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.UserInputMessage{Text: `Credentials: {"access_token":"oauthvalue123"}; AWS_SECRET_ACCESS_KEY: AbCd1234; Authorization: Basic dXNlcjpwYXNz`},
 			&agent.TextMessage{Text: "I used sk-assistant-secret while investigating. " + strings.Repeat("\u754c", 1200)},
 			&agent.ResultMessage{Result: "Stopped safely before printing github_pat_result_secret."},
-		})
+		}))
 
 		const maxBytes = 900
 		got := BuildHandoffPrompt(tk, maxBytes)
@@ -117,11 +118,11 @@ func TestBuildHandoffPrompt(t *testing.T) {
 		t.Parallel()
 
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Continue the task."}, harness.Codex, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.ResultMessage{IsError: true, Result: "stale failure"},
 			&agent.TextMessage{Text: "The newer turn completed successfully."},
 			&agent.ResultMessage{},
-		})
+		}))
 		got := BuildHandoffPrompt(tk, 0)
 		if !strings.Contains(got, "## Latest assistant result") || !strings.Contains(got, "The newer turn completed successfully.") {
 			t.Errorf("prompt does not use the current turn result:\n%s", got)
@@ -135,13 +136,13 @@ func TestBuildHandoffPrompt(t *testing.T) {
 		t.Parallel()
 
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Continue the task."}, harness.Codex, "", "")
-		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:        agent.RateLimitStatusRejected,
 			RateLimitType: "thread_goal",
 			QuotaProvider: agent.QuotaProviderCodex,
 			QuotaLabel:    "Codex",
 			QuotaWindow:   "thread_goal",
-		}})
+		}}))
 		got := BuildHandoffPrompt(tk, 0)
 		if !strings.Contains(got, "Quota block: Codex thread_goal window rejected the request") {
 			t.Errorf("prompt does not contain no-reset quota reason:\n%s", got)
@@ -153,12 +154,12 @@ func TestBuildHandoffPrompt(t *testing.T) {
 
 		prompt := "Start of request. " + strings.Repeat("\u754c", defaultHandoffPromptMaxBytes)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: prompt}, harness.Codex, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.UserInputMessage{Text: prompt},
 			&agent.TextMessage{Text: "most recent assistant context"},
 			&agent.ResultMessage{Result: "latest result marker"},
 			&agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "current-change.go", LinesAdded: 2}}},
-		})
+		}))
 		got := BuildHandoffPrompt(tk, 0)
 		if len(got) > defaultHandoffPromptMaxBytes {
 			t.Fatalf("prompt length = %d, want at most %d", len(got), defaultHandoffPromptMaxBytes)
@@ -178,12 +179,12 @@ func TestBuildHandoffPrompt(t *testing.T) {
 
 		prompt := "  indented request\n\tcode line\n"
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: prompt}, harness.Codex, "", "")
-		tk.SeedTimeline([]agent.Message{
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.UserInputMessage{Text: prompt},
 			&agent.UserInputMessage{Text: "  follow-up  \n"},
 			&agent.TextMessage{Text: "  assistant context  \n"},
 			&agent.ResultMessage{Result: "  exact result  \n"},
-		})
+		}))
 		got := BuildHandoffPrompt(tk, 0)
 		for _, preserved := range []string{
 			">   indented request\n> \tcode line\n> \n",
@@ -259,7 +260,7 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 		t.Fatalf("foreign activity replaced root answer: %q", window.Value())
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Research geometry"}, harness.Antigravity, "", "")
-	tk.SeedTimeline(messages)
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
 	result := lastAgentMessage(tk.timelineViewLocked())
 	if result == nil || !result.IsError || !strings.Contains(result.Result, "root failure") {
 		t.Fatalf("foreign activity replaced root result: %+v", result)

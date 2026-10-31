@@ -563,7 +563,7 @@ func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes 
 	if err != nil {
 		return GitSnapshot{}, nil, nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
@@ -629,7 +629,7 @@ func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, 
 	}
 
 	log = log.With("repo", w.RelPath)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()

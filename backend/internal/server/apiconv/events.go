@@ -76,10 +76,10 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		tt.window.Update(msg)
 	}
 	countable, confirmed := tt.skillReads.Confirm(msg)
-	// Session controls remain restoration events for runtime folds. History
-	// presents a missing native start using the established init event shape.
+	// Identity-bearing session controls restore a missing native start using
+	// the established init event shape. Configuration-only controls stay hidden.
 	if m, ok := msg.(*agent.MetaSessionMessage); ok {
-		if !m.Source.IsChild() && m.SessionID != "" && m.SessionID == tt.presentedSession {
+		if m.SessionID == "" || (!m.Source.IsChild() && m.SessionID == tt.presentedSession) {
 			return nil
 		}
 		msg = &agent.InitMessage{

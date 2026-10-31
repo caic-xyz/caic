@@ -63,20 +63,15 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
 // (initialize → initialized → thread/start) for golden-file trace recording.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, dir, model string) (agent.WireFormat, io.Reader, error) {
-	br := bufio.NewReaderSize(stdout, 1<<16)
-	log := agent.DiscardLogSink{}
-	wire, _, continuation, err := handshake(ctx, stdin, br, stdout, &agent.Options{Dir: dir, Model: model, Log: log})
-	if err != nil {
-		return nil, nil, err
-	}
-	return wire, continuation, nil
+func (*Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.ReadCloser, opts *agent.Options) (io.Reader, error) {
+	_, continuation, err := handshake(ctx, stdin, bufio.NewReaderSize(stdout, 1<<16), stdout, opts)
+	return continuation, err
 }
 
 // Start launches a Codex CLI app-server process via the relay daemon in the
 // given container. It performs the JSON-RPC handshake (initialize →
 // initialized → thread/start) before returning a Session.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agent.Session, err error) {
 	// TODO: re-enable once widget plugin is fixed for codex
 	// if err := deployWidgetMCP(ctx, opts.Target); err != nil {
 	// 	return nil, err
@@ -95,32 +90,34 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
+	bootstrap := true
+	defer func() {
+		if bootstrap {
+			closeErr := errors.Join(rp.Stdin.Close(), rp.Stdout.Close())
+			_ = rp.Cmd.Process.Kill()
+			err = errors.Join(err, closeErr, rp.Cmd.Wait())
+		}
+	}()
 
 	// Wrap stdout in a bufio.Reader so the handshake can read line-by-line
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(rp.Stdout, 1<<16)
 
-	wire, models, continuation, err := handshake(ctx, rp.Stdin, br, rp.Stdout, opts)
+	models, continuation, err := handshake(ctx, rp.Stdin, br, rp.Stdout, opts)
 	if err != nil {
-		// Kill the process on handshake failure.
-		_ = rp.Cmd.Process.Kill()
-		_ = rp.Cmd.Wait()
 		return nil, fmt.Errorf("codex handshake: %w", err)
 	}
 	if len(models) > 0 {
 		b.SetModelInventory(newModelInventory(models))
 	}
-	wire.suppressUserInput = true
-	initMsg := &agent.InitMessage{SessionID: wire.threadID, ReportedModel: wire.reportedModel, ReportedEffort: wire.reportedEffort, Version: wire.agentVersion, AutoCompactTokenLimit: autoCompactTokenLimit}
-	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
-	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
-		_ = rp.Cmd.Process.Kill()
-		_ = rp.Cmd.Wait()
-		return nil, fmt.Errorf("write session metadata: %w", err)
+	// The configured compaction threshold is independent of native reports.
+	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{AutoCompactTokenLimit: autoCompactTokenLimit}); err != nil {
+		return nil, fmt.Errorf("write compaction configuration: %w", err)
 	}
 
 	log := opts.Logger.With("target", opts.Target.SSHHost)
-	s := agent.NewSession(ctx, rp.Cmd, agent.NewMCPConn(ctx, log, rp.Stdin, opts.Log, wire, opts.MCP), agent.ContinuedReader{Reader: continuation, Closer: rp.Stdout}, opts.MsgCh, log)
+	bootstrap = false
+	s := agent.NewSession(ctx, rp.Cmd, agent.NewConn(ctx, log, rp.Stdin, opts.Records, opts.MCP), agent.ContinuedReader{Reader: continuation, Closer: rp.Stdout}, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			s.Cancel()
@@ -187,30 +184,26 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	nextID := atomic.Int64{}
 	records := &appServerReader{scanner: bufio.NewScanner(stdout)}
 	records.scanner.Buffer(make([]byte, 64<<10), 32<<20)
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID, agent.DiscardLogSink{})
+	models, err := fetchModelsFromAppServer(ctx, records, &nextID, func(v any) error {
+		data, err := marshalInput(v)
+		if err != nil {
+			return err
+		}
+		n, err := stdin.Write(data)
+		if err == nil && n != len(data) {
+			err = io.ErrShortWrite
+		}
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("codex model/list: %w", err)
 	}
 	return models, nil
 }
 
-// AttachRelay connects to an already-running relay in the container.
-// opts.ResumeSessionID is used to pre-populate the thread ID so that
-// WritePrompt works immediately without waiting for thread/started replay.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if opts.ResumeSessionID == "" {
-		return nil, errors.New("codex: missing thread ID for relay attach")
-	}
-	// Pre-populate thread ID from the known session so WritePrompt works
-	// immediately. wireFormat.process() will update it again if thread/started
-	// appears in the replayed output.
-	wire := &wireFormat{
-		threadID:          opts.ResumeSessionID,
-		requestedEffort:   opts.Effort,
-		suppressUserInput: true,
-		nativeSubagents:   nativeSubagents{spawns: make(map[string]agent.NativeSubagent)},
-	}
-	return agent.AttachRelaySession(ctx, opts, wire, nil)
+// AttachRelay connects after the owning record processor has replayed history.
+func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.AttachRelaySession(ctx, opts, nil)
 }
 
 // NewWire implements agent.Backend.
@@ -299,15 +292,84 @@ func modelsForModelInfo(models []string, modelInfo []codex.ModelInfo) []agent.Mo
 	return result
 }
 
+// handshake performs the JSON-RPC initialize → initialized → model/list →
+// thread/start (or thread/resume) sequence through the existing record owner.
+// It returns model inventory and the untouched buffered output continuation.
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, closer io.Closer, opts *agent.Options) ([]codex.ModelInfo, *bufio.Reader, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	stopRead := agent.InterruptReadOnCancel(ctx, closer)
+	defer stopRead()
+
+	var nextID atomic.Int64
+	records := agent.NewRelayRecordReader(ctx, stdout, opts.Records)
+
+	models, err := fetchModelsFromAppServer(ctx, records, &nextID, func(v any) error { return writeJSONInput(ctx, stdin, v, opts.Records) })
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 4. Send thread/start or thread/resume.
+	var threadReq codex.JSONRPCRequest
+	if opts.ResumeSessionID != "" {
+		// thread/resume loads persisted local thread history from CODEX_HOME
+		// (default ~/.codex). The ID alone cannot recover missing history.
+		// md mounts ~/.codex into new containers; a custom CODEX_HOME must
+		// also be accessible. This resumes the local app-server, not a cloud task.
+		// https://developers.openai.com/codex/app-server/
+		// https://developers.openai.com/codex/config-advanced/
+		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID, Model: opts.Model})
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
+		}
+		threadReq = codex.JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      nextID.Add(1),
+			Method:  "thread/resume",
+			Params:  params,
+		}
+	} else {
+		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
+		}
+		threadReq = codex.JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      nextID.Add(1),
+			Method:  "thread/start",
+			Params:  params,
+		}
+	}
+	if err := writeJSONInput(ctx, stdin, threadReq, opts.Records); err != nil {
+		return nil, nil, fmt.Errorf("write thread/start: %w", err)
+	}
+
+	// Read thread/start response — contains the thread info.
+	resp, err := readJSONRPCResponse(ctx, records, threadReq.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read thread/start response: %w", err)
+	}
+
+	// Extract thread ID from the response result.
+	result, err := threadResponseMetadata(resp.Result)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse thread/start result: %w", err)
+	}
+	if result.Thread.ID == "" {
+		return nil, nil, errors.New("thread/start response missing thread.id")
+	}
+	return models, records.Reader(), nil
+}
+
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
 // protocol. It holds per-session state: the thread ID and resolved settings, a
 // request ID counter, accumulated token usage from thread/tokenUsage/updated,
 // and the requested reasoning effort level.
 type wireFormat struct {
-	nativeSubagents   nativeSubagents
-	requests          []recordedRequest // Directional parsing owns request correlation.
-	suppressUserInput bool
-	nextID            atomic.Int64
+	nativeSubagents nativeSubagents
+	requests        []recordedRequest // Directional parsing owns request correlation.
+	inputTurns      []recordedInputTurn
+	nextID          atomic.Int64
 
 	mu                sync.Mutex
 	threadID          string
@@ -322,84 +384,21 @@ type wireFormat struct {
 	threadTurnStarted map[string]bool     // usage before a thread's first turn is its saved baseline
 }
 
-// handshake performs the JSON-RPC initialize → initialized → model/list →
-// thread/start (or thread/resume) sequence and returns a wireFormat with the
-// thread ID set, plus model metadata from model/list.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, closer io.Closer, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	stopRead := agent.InterruptReadOnCancel(ctx, closer)
-	defer stopRead()
-
-	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
-	records := agent.NewRelayRecordReader(stdout, opts.Log)
-
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID, opts.Log)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// 4. Send thread/start or thread/resume.
-	var threadReq codex.JSONRPCRequest
-	if opts.ResumeSessionID != "" {
-		// thread/resume loads persisted local thread history from CODEX_HOME
-		// (default ~/.codex). The ID alone cannot recover missing history.
-		// md mounts ~/.codex into new containers; a custom CODEX_HOME must
-		// also be accessible. This resumes the local app-server, not a cloud task.
-		// https://developers.openai.com/codex/app-server/
-		// https://developers.openai.com/codex/config-advanced/
-		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID, Model: opts.Model})
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
-		}
-		threadReq = codex.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      w.nextID.Add(1),
-			Method:  "thread/resume",
-			Params:  params,
-		}
-	} else {
-		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
-		}
-		threadReq = codex.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      w.nextID.Add(1),
-			Method:  "thread/start",
-			Params:  params,
-		}
-	}
-	if err := writeJSONInput(stdin, threadReq, opts.Log); err != nil {
-		return nil, nil, nil, fmt.Errorf("write thread/start: %w", err)
-	}
-
-	// Read thread/start response — contains the thread info.
-	resp, err := readJSONRPCResponse(ctx, records, threadReq.ID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read thread/start response: %w", err)
-	}
-
-	// Extract thread ID from the response result.
-	result, err := threadResponseMetadata(resp.Result)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
-	}
-	if result.Thread.ID == "" {
-		return nil, nil, nil, errors.New("thread/start response missing thread.id")
-	}
-	w.applyThreadResponse(&result)
-	return w, models, records.Reader(), nil
+// SetRequestedEffort implements agent.RequestedEffort.
+func (w *wireFormat) SetRequestedEffort(effort string) {
+	w.mu.Lock()
+	w.requestedEffort = effort
+	w.mu.Unlock()
 }
 
-// WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
+// EncodePrompt encodes a turn/start JSON-RPC request to begin a new turn with
 // the given user message. Images are sent as data URL items after the text item.
-func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink) error {
+func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	w.mu.Lock()
 	threadID, effort := w.threadID, w.requestedEffort
 	w.mu.Unlock()
 	if threadID == "" {
-		return errors.New("codex: no thread ID (handshake not completed)")
+		return nil, errors.New("codex: no thread ID (handshake not completed)")
 	}
 	id := w.nextID.Add(1)
 	input := make([]codex.TurnInput, 0, 1+len(p.Images))
@@ -417,7 +416,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		Effort:   codex.ReasoningEffort(effort),
 	})
 	if err != nil {
-		return fmt.Errorf("marshal turn/start params: %w", err)
+		return nil, fmt.Errorf("marshal turn/start params: %w", err)
 	}
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -425,21 +424,21 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		Method:  "turn/start",
 		Params:  params,
 	}
-	return writeJSONInput(wr, req, log)
+	return marshalInput(req)
 }
 
-// WriteCompact implements agent.CompactCommand by sending a thread/compact/start
+// EncodeCompact implements agent.CompactCommand by sending a thread/compact/start
 // JSON-RPC request. Codex compacts the context window for the current thread.
-func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) error {
+func (w *wireFormat) EncodeCompact(_ string) ([]byte, error) {
 	w.mu.Lock()
 	threadID := w.threadID
 	w.mu.Unlock()
 	if threadID == "" {
-		return errors.New("codex: no thread ID (handshake not completed)")
+		return nil, errors.New("codex: no thread ID (handshake not completed)")
 	}
 	params, err := marshalParams(codex.ThreadCompactStartParams{ThreadID: threadID})
 	if err != nil {
-		return fmt.Errorf("marshal thread/compact/start params: %w", err)
+		return nil, fmt.Errorf("marshal thread/compact/start params: %w", err)
 	}
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -447,7 +446,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 		Method:  "thread/compact/start",
 		Params:  params,
 	}
-	return writeJSONInput(wr, req, log)
+	return marshalInput(req)
 }
 
 // ParseInput preserves client requests without interpreting them as output notifications.
@@ -456,12 +455,37 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal input: %w", err)
 	}
-	w.rememberRequest(&probe)
+	if err := w.rememberRequest(&probe); err != nil {
+		return nil, err
+	}
+	var messages []agent.Message
+	if probe.Method == "turn/start" {
+		content, err := agent.JSONField(probe.Params, "input")
+		if err != nil {
+			return nil, err
+		}
+		var input []codex.TurnInput
+		if err := json.Unmarshal(content, &input); err != nil {
+			return nil, fmt.Errorf("unmarshal turn/start input: %w", err)
+		}
+		// Normalize supported request fields through the native echo policy.
+		echo := make([]codex.UserInput, len(input))
+		for i := range input {
+			echo[i] = codex.UserInput{Type: input[i].Type, Text: input[i].Text, URL: input[i].URL}
+		}
+		message := userInputFromContent(echo)
+		message.Source.ThreadID, err = agent.JSONString(probe.Params, "threadId")
+		if err != nil {
+			return nil, err
+		}
+		w.scopeSource(message.Provenance())
+		messages = append(messages, message)
+	}
 	typ := "jsonrpc_request"
 	if probe.ID == nil || string(probe.ID) == "null" {
 		typ = probe.Method
 	}
-	return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
+	return append(messages, &agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}), nil
 }
 
 // ParseOutput wraps the package-level parseMessage with three interceptions:
@@ -632,6 +656,11 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 	w.scopeSource(&record.source)
 	// A child completion cannot finish the parent turn. Its native lifecycle
 	// observation still settles the child's card below.
+	if record.turnCompleted != nil {
+		w.inputTurns = slices.DeleteFunc(w.inputTurns, func(turn recordedInputTurn) bool {
+			return turn.threadID == record.source.ThreadID && turn.turnID == record.source.TurnID
+		})
+	}
 	if record.turnCompleted != nil && record.source.IsChild() {
 		msgs = nil
 	}
@@ -660,8 +689,10 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 	}
 	out := msgs[:0]
 	for _, msg := range msgs {
-		if _, ok := msg.(*agent.UserInputMessage); ok && w.suppressUserInput && !msg.Provenance().IsChild() {
-			continue
+		if input, ok := msg.(*agent.UserInputMessage); ok && !input.Source.IsChild() {
+			if w.recordedInputEcho(&input.Source) {
+				continue
+			}
 		}
 		// Capture thread ID from InitMessage (produced by thread/started).
 		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" && !init.Source.IsChild() && (record.threadStarted == nil || init.SessionID == w.rootThreadID()) {
@@ -703,21 +734,53 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 	return out, nil
 }
 
-func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) {
+func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
 	if probe.Method == "initialize" {
 		w.requests = nil
+		w.inputTurns = nil
+	}
+	var numericID int64
+	if json.Unmarshal(probe.ID, &numericID) == nil {
+		for previous := w.nextID.Load(); numericID > previous; previous = w.nextID.Load() {
+			if w.nextID.CompareAndSwap(previous, numericID) {
+				break
+			}
+		}
 	}
 	if probe.ID == nil || string(probe.ID) == "null" {
-		return
+		return nil
 	}
 	id := string(probe.ID)
 	i := slices.IndexFunc(w.requests, func(r recordedRequest) bool { return r.id == id })
 	r := recordedRequest{id: id, method: probe.Method}
+	if probe.Method == "turn/start" {
+		var err error
+		r.threadID, err = agent.JSONString(probe.Params, "threadId")
+		if err != nil {
+			return err
+		}
+	}
 	if i < 0 {
 		w.requests = append(w.requests, r)
 	} else {
 		w.requests[i] = r
 	}
+	return nil
+}
+
+// recordedInputEcho suppresses only the native item proved by a recorded
+// turn/start request and its matching reply. Other root and child inputs remain.
+func (w *wireFormat) recordedInputEcho(source *agent.MessageSource) bool {
+	for i := range w.inputTurns {
+		t := &w.inputTurns[i]
+		if t.threadID == source.ThreadID && t.turnID == source.TurnID && source.ItemID != "" {
+			if t.itemID == "" {
+				t.itemID = source.ItemID
+			}
+			return t.itemID == source.ItemID
+		}
+	}
+	return false
 }
 
 func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, bool, error) {
@@ -725,9 +788,10 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	if i < 0 {
 		return nil, false, nil
 	}
-	method := w.requests[i].method
+	request := w.requests[i]
+	method := request.method
 	w.requests = slices.Delete(w.requests, i, i+1)
-	if method != "thread/start" && method != "thread/resume" {
+	if method != "thread/start" && method != "thread/resume" && method != "turn/start" {
 		return nil, false, nil
 	}
 	failure, err := agent.JSONField(line, "error")
@@ -743,6 +807,16 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, true, nil
+	}
+	if method == "turn/start" {
+		turnID, err := agent.JSONString(raw, "turn", "id")
+		if err != nil {
+			return nil, true, err
+		}
+		if request.threadID != "" && turnID != "" {
+			w.inputTurns = append(w.inputTurns, recordedInputTurn{threadID: request.threadID, turnID: turnID})
+		}
+		return nil, false, nil
 	}
 	r, err := threadResponseMetadata(raw)
 	if err != nil {
@@ -808,7 +882,7 @@ func (w *wireFormat) rootThreadID() string {
 	return w.threadID
 }
 
-func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records recordReader, nextID *atomic.Int64, log agent.LogSink) ([]codex.ModelInfo, error) {
+func fetchModelsFromAppServer(ctx context.Context, records recordReader, nextID *atomic.Int64, write func(any) error) ([]codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -849,7 +923,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records reco
 		Method:  "initialize",
 		Params:  initParams,
 	}
-	if err := writeJSONInput(stdin, initReq, log); err != nil {
+	if err := write(initReq); err != nil {
 		return nil, fmt.Errorf("write initialize: %w", err)
 	}
 
@@ -859,7 +933,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records reco
 	}
 
 	// 2. Send initialized notification.
-	if err := writeJSONInput(stdin, codex.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}, log); err != nil {
+	if err := write(codex.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
 		return nil, fmt.Errorf("write initialized: %w", err)
 	}
 
@@ -872,7 +946,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records reco
 			return nil, fmt.Errorf("marshal model/list params: %w", err)
 		}
 		request := codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}
-		if err := writeJSONInput(stdin, request, log); err != nil {
+		if err := write(request); err != nil {
 			return nil, fmt.Errorf("write model/list: %w", err)
 		}
 		mlResp, err := readJSONRPCResponse(ctx, records, request.ID)
@@ -911,21 +985,13 @@ func marshalParams(v any) (json.RawMessage, error) {
 	return json.RawMessage(b), nil
 }
 
-// writeJSONInput writes one harness command and preserves its exact NDJSON
-// payload as caic-to-harness input when the log format supports provenance.
-func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
-	data, err := json.Marshal(v)
+// writeJSONInput commits one complete command before writing it to the transport.
+func writeJSONInput(ctx context.Context, w io.Writer, v any, records *agent.Records) error {
+	data, err := marshalInput(v)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	if err := agent.AppendInputNativeRecord(log, data); err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
+	return records.WriteInput(ctx, w, data)
 }
 
 // recordReader reads either direct app-server output or relay-framed output.
@@ -1003,3 +1069,12 @@ func readJSONRPCResponse(ctx context.Context, r recordReader, expectedID int64) 
 // 	}
 // 	return nil
 // }
+
+// marshalInput encodes one complete native command without interpreting or delivering it.
+func marshalInput(v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}

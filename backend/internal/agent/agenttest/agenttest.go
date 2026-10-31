@@ -11,6 +11,15 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// TimedMessages supplies semantic fixture messages with zero producer timestamps.
+func TimedMessages(messages []agent.Message) []agent.TimedMessage {
+	entries := make([]agent.TimedMessage, len(messages))
+	for i, message := range messages {
+		entries[i].Message = message
+	}
+	return entries
+}
+
 // ParseJSONL parses every non-empty physical v3 fixture record with parser.
 func ParseJSONL(t testing.TB, path string, parser agent.MessageParser) []agent.Message {
 	file, err := os.Open(filepath.Clean(path))
