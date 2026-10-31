@@ -1,4 +1,4 @@
-// Correlates Claude Agent invocations with native task updates and folds detached shell commands, keeping shell tasks out of the subagent card set.
+// Resolves Claude native ownership, correlates Agent invocations with task updates, and folds detached shell commands outside subagent cards.
 
 package claudecode
 
@@ -14,6 +14,23 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+type delegationKey struct {
+	sessionID string
+	toolUseID string
+}
+
+// nativeOwnerResolution retains negative ownership evidence. Unknown means no
+// mapping was recorded; ambiguous means one delegation names multiple children;
+// invalid means explicit ownership is unknown or contradicts recorded metadata.
+type nativeOwnerResolution uint8
+
+const (
+	nativeOwnerUnknown nativeOwnerResolution = iota
+	nativeOwnerAmbiguous
+	nativeOwnerInvalid
+	nativeOwnerResolved
+)
+
 // nativeSubagents folds Claude's subagent evidence into canonical lifecycles.
 //
 // The canonical identity is the native task ID, which every task record carries.
@@ -23,11 +40,6 @@ import (
 // task record keyed by the task ID would look like a different agent.
 // Its correlation maps are allocated with the wire, created once per session,
 // instead of by the first record that uses them.
-type delegationKey struct {
-	sessionID string
-	toolUseID string
-}
-
 type nativeSubagents struct {
 	timeline agent.NativeSubagentTimeline
 	tasks    map[string]agent.NativeSubagent        // canonical task ID → card
@@ -144,6 +156,52 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 	s.Result = ev.Summary
 	n.tasks[canonicalID] = s
 	return n.timeline.Observe(&s), nil
+}
+
+// resolveOwner distinguishes missing delegation evidence from a recorded
+// collision. Explicit known native identity can resolve a shared delegation,
+// while contradictory known identities never enrich the source.
+func (n *nativeSubagents) resolveOwner(source *agent.MessageSource, reportedID string) nativeOwnerResolution {
+	resolved := *source
+	id := source.AgentID
+	if reportedID != "" {
+		id = "claude:task:" + reportedID
+		if source.AgentID != "" && source.AgentID != id {
+			return nativeOwnerInvalid
+		}
+	}
+	if id != "" {
+		card, known := n.tasks[id]
+		if !known || source.DelegationToolUseID != "" && card.ToolUseID != "" && source.DelegationToolUseID != card.ToolUseID {
+			return nativeOwnerInvalid
+		}
+		resolved.AgentID = id
+		if resolved.DelegationToolUseID == "" {
+			resolved.DelegationToolUseID = card.ToolUseID
+		}
+	}
+	if resolved.DelegationToolUseID != "" {
+		key := delegationKey{sessionID: resolved.ThreadID, toolUseID: resolved.DelegationToolUseID}
+		if nativeID, known := n.byTool[key]; known {
+			switch {
+			case nativeID == "" && resolved.AgentID == "":
+				return nativeOwnerAmbiguous
+			case nativeID != "" && resolved.AgentID != "" && nativeID != resolved.AgentID:
+				return nativeOwnerInvalid
+			case nativeID != "":
+				card, known := n.tasks[nativeID]
+				if !known || card.ToolUseID != "" && card.ToolUseID != resolved.DelegationToolUseID {
+					return nativeOwnerInvalid
+				}
+				resolved.AgentID = nativeID
+			}
+		}
+	}
+	*source = resolved
+	if resolved.AgentID != "" {
+		return nativeOwnerResolved
+	}
+	return nativeOwnerUnknown
 }
 
 // parseToolResult settles the card whose delegation this result belongs to.

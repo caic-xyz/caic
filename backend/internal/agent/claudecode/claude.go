@@ -1,4 +1,4 @@
-// Package claudecode implements Claude Code sessions with delegation-scoped content, tools, controls, and accounting.
+// Package claudecode implements Claude Code sessions with delegation-scoped content, request-correlated answers, controls, and accounting.
 package claudecode
 
 import (
@@ -10,6 +10,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+
+	"github.com/buger/jsonparser"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -126,8 +129,17 @@ func (*Backend) NewWire() agent.WireFormat {
 
 var _ agent.Backend = (*Backend)(nil)
 
+// recordedQuestion is input interpretation context, not a delivery outcome.
+// An observed request ID with no questions stays ineligible after conflicting
+// reuse, cancellation, or completion, until a new root session initializes.
+type recordedQuestion struct {
+	source    agent.MessageSource
+	toolUseID string
+	questions []v3.AskQuestion
+}
+
 // wireFormat holds per-session Claude Code parsing state: widget tracking,
-// reasoning-token accounting, native-subagent correlation, the active model
+// reasoning-token accounting, question requests, native-subagent correlation, the active model
 // reported by the assistant so result records can resolve the model's context
 // window and usage records without a model stay attributed, and the Skill
 // tool calls whose results must stay suppressed or confirm a load. A fresh
@@ -143,10 +155,11 @@ type wireFormat struct {
 	// loads into the main context, until the paired tool result arrives. The
 	// value is empty for a call naming no skill and for a subagent's call.
 	pendingSkillUses map[agent.ToolKey]string
-	// askSources retains actual Ask ownership until its matching control arrives.
-	askSources  map[agent.ToolKey]agent.MessageSource
-	sessionID   string
-	childModels map[agent.ToolKey]string
+	// askSources retains Ask ownership across controls and retries until completion.
+	askSources       map[agent.ToolKey]agent.MessageSource
+	questionRequests map[string]recordedQuestion
+	sessionID        string
+	childModels      map[agent.ToolKey]string
 	// loadedSkill is the skill whose Skill call succeeded. Its load waits one
 	// record for the synthetic injection that names the skill directory.
 	loadedSkill *agent.SkillLoadMessage
@@ -165,6 +178,7 @@ func newWireFormat() *wireFormat {
 		widgetTracker:      newWidgetTracker(),
 		pendingSkillUses:   make(map[agent.ToolKey]string),
 		askSources:         make(map[agent.ToolKey]agent.MessageSource),
+		questionRequests:   make(map[string]recordedQuestion),
 		childModels:        make(map[agent.ToolKey]string),
 	}
 }
@@ -188,18 +202,23 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	w.loadedSkill = nil
 	for _, message := range msgs {
 		if init, ok := message.(*agent.InitMessage); ok && init.SessionID != "" && !record.source.IsChild() {
+			if init.SessionID != w.sessionID {
+				clear(w.askSources)
+				clear(w.questionRequests)
+			}
 			w.sessionID = init.SessionID
 		}
 	}
 	if record.source.ThreadID == "" && record.harnessRecord && !record.askControl {
 		record.source.ThreadID = w.sessionID
 	}
-	if record.controlAgentID != "" {
-		if card, ok := w.nativeSubagents.tasks["claude:task:"+record.controlAgentID]; ok {
-			record.source.AgentID = card.ID
-			record.source.DelegationToolUseID = card.ToolUseID
-		}
+	reportedAgentID := record.controlAgentID
+	if record.user != nil && record.source.DelegationToolUseID != "" {
+		// On root Agent-tool results, agent_id describes the tool's target.
+		// Only a child stream can report it as the record's own native owner.
+		reportedAgentID = record.user.AgentID
 	}
+	recordOwner := w.nativeSubagents.resolveOwner(&record.source, reportedAgentID)
 	subagent := record.source.DelegationToolUseID != ""
 	native, err := w.nativeSubagents.parse(&record, msgs)
 	if err != nil {
@@ -212,53 +231,115 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 			*message.Provenance() = record.source
 		}
 		source := message.Provenance()
-		if source.AgentID == "" && source.DelegationToolUseID != "" {
-			key := delegationKey{sessionID: source.ThreadID, toolUseID: source.DelegationToolUseID}
-			if id := w.nativeSubagents.byTool[key]; id != "" {
-				source.AgentID = id
-			}
+		owner := recordOwner
+		if owner != nativeOwnerInvalid {
+			owner = w.nativeSubagents.resolveOwner(source, "")
 		}
 		switch m := message.(type) {
+		case *agent.NativeSubagentMessage:
+			// Native identity proves which existing requests gain newly
+			// reported delegation metadata. Retain known metadata so later
+			// contradictions cannot rewrite the canonical request owner.
+			if m.Subagent.ToolUseID != "" {
+				for id := range w.questionRequests {
+					question := w.questionRequests[id]
+					if len(question.questions) > 0 && w.nativeSubagents.resolveOwner(&question.source, "") == nativeOwnerResolved {
+						w.questionRequests[id] = question
+					}
+				}
+			}
 		case *agent.AskMessage:
+			// Keep unresolved Ask evidence too: it prevents a later source-free
+			// control from falling back to root after ambiguous child ownership.
 			w.askSources[agent.ToolKeyForSource(source, m.ToolUseID)] = *source
 		case *agent.PendingUserActionMessage:
 			requested := *source
 			var matched agent.MessageSource
-			var key agent.ToolKey
 			var found, ambiguous bool
-			for candidate, askSource := range w.askSources {
-				if candidate.ToolUseID != m.Action.ToolUseID ||
-					requested.ThreadID != "" && askSource.ThreadID != "" && requested.ThreadID != askSource.ThreadID ||
-					requested.DelegationToolUseID != "" && requested.DelegationToolUseID != askSource.DelegationToolUseID ||
-					requested.AgentID != "" && askSource.AgentID != "" && requested.AgentID != askSource.AgentID ||
-					requested.IsChild() && !askSource.IsChild() {
-					continue
+			if question, recorded := w.questionRequests[m.Action.RequestID]; recorded {
+				// Request identity owns duplicates even when other agents later
+				// use the same tool ID. Explicit conflicting provenance still
+				// invalidates reuse; rememberQuestion checks tool and questions.
+				matched = question.source
+				found = len(question.questions) > 0
+				ambiguous = !found ||
+					requested.ThreadID != "" && requested.ThreadID != matched.ThreadID ||
+					requested.DelegationToolUseID != "" && requested.DelegationToolUseID != matched.DelegationToolUseID ||
+					requested.AgentID != "" && matched.AgentID != "" && requested.AgentID != matched.AgentID ||
+					requested.IsChild() && !matched.IsChild()
+			} else if owner != nativeOwnerAmbiguous && owner != nativeOwnerInvalid {
+				for candidate, askSource := range w.askSources {
+					// Explicit scope excludes unrelated evidence before its
+					// ambiguous native resolution can affect this request.
+					if candidate.ToolUseID != m.Action.ToolUseID ||
+						requested.ThreadID != "" && askSource.ThreadID != "" && requested.ThreadID != askSource.ThreadID ||
+						requested.DelegationToolUseID != "" && requested.DelegationToolUseID != askSource.DelegationToolUseID ||
+						requested.AgentID != "" && askSource.AgentID != "" && requested.AgentID != askSource.AgentID ||
+						requested.IsChild() && !askSource.IsChild() {
+						continue
+					}
+					candidateOwner := w.nativeSubagents.resolveOwner(&askSource, "")
+					if candidateOwner == nativeOwnerAmbiguous || candidateOwner == nativeOwnerInvalid {
+						if requested.AgentID == "" {
+							ambiguous = true
+							break
+						}
+						continue
+					}
+					// Resolution can supply a previously missing native identity.
+					if requested.AgentID != "" && askSource.AgentID != "" && requested.AgentID != askSource.AgentID {
+						continue
+					}
+					if found {
+						ambiguous = true
+						break
+					}
+					found = true
+					matched = askSource
 				}
-				if found {
-					ambiguous = true
-					break
-				}
-				key, found = candidate, true
-				matched = askSource
 			}
 			if found && !ambiguous {
 				*source = matched
 				if source.AgentID == "" {
 					source.AgentID = requested.AgentID
 				}
-				delete(w.askSources, key)
+				if owner != nativeOwnerInvalid {
+					owner = w.nativeSubagents.resolveOwner(source, "")
+				}
 			}
-			if ambiguous {
+			if ambiguous || owner == nativeOwnerAmbiguous || owner == nativeOwnerInvalid {
 				// An unresolved control cannot be actionable: even an empty
 				// source can match a source-free root Ask. Keep the actual
-				// record informationally instead of assigning root ownership.
+				// record informationally instead of assigning root ownership,
+				// including unknown native IDs and contradictory delegations.
 				msgs[i] = &agent.RawMessage{Source: requested, MessageType: "control_request", Raw: append([]byte(nil), line...)}
 			} else if source.ThreadID == "" && record.askControl {
 				source.ThreadID = w.sessionID
 			}
 		case *agent.ToolResultMessage:
-			delete(w.askSources, agent.ToolKeyForSource(source, m.ToolUseID))
+			if m.Error == "" && owner != nativeOwnerAmbiguous && owner != nativeOwnerInvalid {
+				key := agent.ToolKeyForSource(source, m.ToolUseID)
+				if askSource, ok := w.askSources[key]; ok {
+					askOwner := w.nativeSubagents.resolveOwner(&askSource, "")
+					if askOwner != nativeOwnerAmbiguous && askOwner != nativeOwnerInvalid && sameQuestionOwner(&askSource, source) {
+						delete(w.askSources, key)
+					}
+				}
+				for id := range w.questionRequests {
+					question := w.questionRequests[id]
+					questionOwner := w.nativeSubagents.resolveOwner(&question.source, "")
+					if len(question.questions) > 0 && questionOwner != nativeOwnerAmbiguous && questionOwner != nativeOwnerInvalid && question.toolUseID == m.ToolUseID && sameQuestionOwner(&question.source, source) {
+						w.retireQuestion(id)
+					}
+				}
+			}
 		}
+	}
+	if record.controlRequest != nil {
+		w.rememberQuestion(record.controlRequest.RequestID, msgs, line)
+	}
+	if record.cancelRequestID != "" {
+		w.retireQuestion(record.cancelRequestID)
 	}
 	w.reasoning.Apply(&record.source, record.reasoningEstimate, msgs)
 	if loaded != nil && agent.ToolKeyForSource(loaded.Provenance(), "") == agent.ToolKeyForSource(&record.source, "") {
@@ -334,7 +415,6 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 			m.ContextWindow = resultContextWindow(line, w.reportedModel)
 			// A turn boundary drops skill reads whose result never arrived.
 			clear(w.pendingSkillUses)
-			clear(w.askSources)
 		}
 		if keep {
 			out = append(out, msg)
@@ -412,7 +492,8 @@ func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.L
 	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
 }
 
-// ParseInput decodes client prompts and control responses without applying output state.
+// ParseInput decodes client prompts and request-correlated question answers.
+// Attempts do not consume requests or imply successful delivery.
 func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	typ, source, err := parseRecordHeader(line)
 	if err != nil {
@@ -454,27 +535,153 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(line, &response); err != nil {
 			return nil, err
 		}
-		if response.Response.Subtype == claudecode.ControlResponseSuccess && response.Response.Response.Behavior == claudecode.ControlCanUseToolBehaviorAllow {
-			var input claudecode.AskUserQuestionUpdatedInput
-			if err := json.Unmarshal(response.Response.Response.UpdatedInput, &input); err == nil && len(input.Questions) > 0 && len(input.Answers) == len(input.Questions) {
-				answer, answered := input.Answers[input.Questions[0].Question]
-				for _, question := range input.Questions {
-					text, ok := input.Answers[question.Question]
-					if question.Question == "" || !ok || text != answer {
-						answered = false
-						break
-					}
-				}
-				if answered {
-					return []agent.Message{&agent.UserInputMessage{Text: answer}}, nil
-				}
-			}
+		if answer := w.questionAnswer(&response.Response, &source); answer != nil {
+			return []agent.Message{answer}, nil
 		}
 		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
 
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, nil
 	}
+}
+
+// rememberQuestion runs after control ownership has been resolved. Recording
+// non-question IDs too prevents a later colliding request from turning a
+// permission response into a user answer.
+func (w *wireFormat) rememberQuestion(id string, messages []agent.Message, line []byte) {
+	var next recordedQuestion
+	index := -1
+	for i, message := range messages {
+		if pending, ok := message.(*agent.PendingUserActionMessage); ok {
+			index = i
+			next.source = *pending.Provenance()
+			next.toolUseID = pending.Action.ToolUseID
+			next.questions = pending.Action.Ask.Questions
+		}
+	}
+	// Empty or repeated question names cannot be recovered from an answer map.
+	seen := make(map[string]struct{}, len(next.questions))
+	for _, q := range next.questions {
+		if _, duplicate := seen[q.Question]; q.Question == "" || duplicate {
+			next.questions = nil
+			break
+		}
+		seen[q.Question] = struct{}{}
+	}
+	if previous, exists := w.questionRequests[id]; exists {
+		if previous.toolUseID != next.toolUseID || !sameQuestionOwner(&previous.source, &next.source) ||
+			!reflect.DeepEqual(previous.questions, next.questions) {
+			next.questions = nil
+		} else if next.source.AgentID == "" {
+			next.source.AgentID = previous.source.AgentID
+		}
+	}
+	if id == "" || next.toolUseID == "" || len(next.questions) == 0 {
+		if id != "" {
+			w.questionRequests[id] = recordedQuestion{}
+		}
+		if index >= 0 {
+			messages[index] = &agent.RawMessage{Source: next.source, MessageType: string(claudecode.OutputControlRequest), Raw: append([]byte(nil), line...)}
+		}
+		return
+	}
+	w.questionRequests[id] = next
+}
+
+func (w *wireFormat) retireQuestion(id string) {
+	question, exists := w.questionRequests[id]
+	if !exists {
+		return
+	}
+	w.questionRequests[id] = recordedQuestion{}
+	if len(question.questions) == 0 {
+		return
+	}
+	owner := w.nativeSubagents.resolveOwner(&question.source, "")
+	if owner == nativeOwnerAmbiguous || owner == nativeOwnerInvalid {
+		return
+	}
+	key := agent.ToolKeyForSource(&question.source, question.toolUseID)
+	// Canceling one request must not discard ownership needed by a different
+	// outstanding request for the same tool, including its repeated controls.
+	for otherID := range w.questionRequests {
+		other := w.questionRequests[otherID]
+		if len(other.questions) > 0 && other.toolUseID == question.toolUseID && sameQuestionOwner(&other.source, &question.source) {
+			return
+		}
+	}
+	if askSource, ok := w.askSources[key]; ok {
+		askOwner := w.nativeSubagents.resolveOwner(&askSource, "")
+		if askOwner != nativeOwnerAmbiguous && askOwner != nativeOwnerInvalid && sameQuestionOwner(&askSource, &question.source) {
+			delete(w.askSources, key)
+		}
+	}
+}
+
+func (w *wireFormat) questionAnswer(response *claudecode.ControlResponse, source *agent.MessageSource) *agent.UserInputMessage {
+	question := w.questionRequests[response.RequestID]
+	if len(question.questions) == 0 || response.Subtype != claudecode.ControlResponseSuccess || response.Response.Behavior != claudecode.ControlCanUseToolBehaviorAllow {
+		return nil
+	}
+	owner := w.nativeSubagents.resolveOwner(&question.source, "")
+	if owner == nativeOwnerAmbiguous || owner == nativeOwnerInvalid {
+		return nil
+	}
+	if source.ThreadID != "" && source.ThreadID != question.source.ThreadID ||
+		source.DelegationToolUseID != "" && source.DelegationToolUseID != question.source.DelegationToolUseID ||
+		response.Response.ToolUseID != "" && response.Response.ToolUseID != question.toolUseID {
+		return nil
+	}
+	var input claudecode.AskUserQuestionUpdatedInput
+	if err := json.Unmarshal(response.Response.UpdatedInput, &input); err != nil || len(input.Answers) != len(question.questions) {
+		return nil
+	}
+	// The DTO's map[string]string accepts null as an empty string. Require
+	// actual string values on the wire so missing answers stay informational.
+	answers, err := agent.JSONField(response.Response.UpdatedInput, "answers")
+	if err != nil {
+		return nil
+	}
+	if err := jsonparser.ObjectEach(answers, func(_, _ []byte, kind jsonparser.ValueType, _ int) error {
+		if kind != jsonparser.String {
+			return errors.New("question answer is not a string")
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	// An echoed question list may confirm the request, never replace it.
+	if len(input.Questions) > 0 && !reflect.DeepEqual(askQuestionsFromClaude(input.Questions), question.questions) {
+		return nil
+	}
+	answer, ok := input.Answers[question.questions[0].Question]
+	if !ok {
+		return nil
+	}
+	for _, q := range question.questions {
+		if text, ok := input.Answers[q.Question]; !ok || text != answer {
+			return nil
+		}
+	}
+	message := &agent.UserInputMessage{Text: answer}
+	*message.Provenance() = question.source
+	return message
+}
+
+// sameQuestionOwner compares resolved owners. A ToolKey alone cannot distinguish
+// a root from a native child sharing its thread without delegation metadata.
+// Known identities must agree. Matching native IDs prove compatible missing
+// delegation metadata; matching delegation identity can gain a native ID later.
+func sameQuestionOwner(a, b *agent.MessageSource) bool {
+	if a.IsChild() != b.IsChild() ||
+		a.AgentID != "" && b.AgentID != "" && a.AgentID != b.AgentID ||
+		a.ThreadID != "" && b.ThreadID != "" && a.ThreadID != b.ThreadID ||
+		a.DelegationToolUseID != "" && b.DelegationToolUseID != "" && a.DelegationToolUseID != b.DelegationToolUseID ||
+		a.TurnID != b.TurnID {
+		return false
+	}
+	return agent.ToolKeyForSource(a, "") == agent.ToolKeyForSource(b, "") ||
+		a.AgentID != "" && a.AgentID == b.AgentID
 }
 
 var _ agent.WireFormat = (*wireFormat)(nil)

@@ -950,7 +950,11 @@ func TestControlConn(t *testing.T) {
 		if record.Provenance.Source == agent.RecordSourceRelay || !bytes.Equal(payload, bytes.TrimSpace(inner.sent[0])) {
 			t.Fatalf("AskUserQuestion input provenance = %#v, payload = %s", record, payload)
 		}
-		replayed, err := newWireFormat().ParseInput(payload)
+		wire := newWireFormat()
+		if _, err := wire.ParseOutput([]byte(`{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"toolu-1","input":{"questions":[{"question":"Which login boundary should Google use in caic?","header":"Login","options":[{"label":"Identity only"},{"label":"Forge-coupled"}]}]}}}`)); err != nil {
+			t.Fatal(err)
+		}
+		replayed, err := wire.ParseInput(payload)
 		if err != nil {
 			t.Fatal(err)
 		}

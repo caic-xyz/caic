@@ -143,13 +143,15 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 // a second decode of every user and task record would cost more than the
 // correlation itself.
 type decodedLine struct {
-	reasoningEstimate int                         // Nonnegative thinking-token estimate from a system record.
-	system            *claudecode.OutputSystemMsg // Set for a task lifecycle record.
-	user              *claudecode.OutputUserMsg   // Set for a decoded user record.
-	source            agent.MessageSource         // Actual session and delegating tool metadata of this record.
-	askControl        bool                        // Native Ask controls match actual Ask ownership before session fallback.
-	controlAgentID    string                      // Agent named by a can_use_tool request, when reported.
-	harnessRecord     bool                        // Native session records can inherit the known session context.
+	reasoningEstimate int                                 // Nonnegative thinking-token estimate from a system record.
+	system            *claudecode.OutputSystemMsg         // Set for a task lifecycle record.
+	user              *claudecode.OutputUserMsg           // Set for a decoded user record.
+	source            agent.MessageSource                 // Actual session and delegating tool metadata of this record.
+	askControl        bool                                // Native Ask controls match actual Ask ownership before session fallback.
+	controlAgentID    string                              // Agent named by a can_use_tool request, when reported.
+	controlRequest    *claudecode.OutputControlRequestMsg // Request identity is bound after resolving control ownership.
+	cancelRequestID   string                              // Cancellation retires only its recorded request context.
+	harnessRecord     bool                                // Native session records can inherit the known session context.
 }
 
 // parseRecordHeader reads dispatch and ownership together so streamed fragments
@@ -269,6 +271,13 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Messa
 	case claudecode.OutputControlRequest:
 		msgs, err := parseControlRequest(line, &record)
 		return msgs, record, err
+	case claudecode.OutputControlCancelRequest:
+		var cancel claudecode.OutputControlCancelRequestMsg
+		if err := json.Unmarshal(line, &cancel); err != nil {
+			return nil, record, err
+		}
+		record.cancelRequestID = cancel.RequestID
+		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, record, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, record, nil
 	}
@@ -326,6 +335,7 @@ func parseControlRequest(line []byte, record *decodedLine) ([]agent.Message, err
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
+	record.controlRequest = &w
 	can, ok := decodeCanUseTool(w)
 	if !ok || can.Subtype != claudecode.ControlCanUseTool || can.ToolName != "AskUserQuestion" {
 		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
