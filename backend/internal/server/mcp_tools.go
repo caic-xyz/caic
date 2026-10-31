@@ -762,37 +762,17 @@ func (m *mcpTools) handleAgentLastMessage(ctx context.Context, call *mcp.ToolReq
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	var message agent.Message
-	var historyErr error
-	for candidate, err := range m.taskSvc.taskMgr.BackwardMessages(ctx, entry) {
-		if err != nil {
-			historyErr = err
-			break
-		}
-		if candidate.Provenance().IsChild() {
-			continue
-		}
-
-		switch candidate := candidate.(type) {
-		case *agent.ResultMessage:
-			if candidate.Result != "" {
-				message = candidate
-			}
-		case *agent.AskMessage:
-			if len(candidate.Questions) > 0 {
-				message = candidate
-			}
-		case *agent.TextMessage:
-			if candidate.Text != "" {
-				message = candidate
-			}
-		}
-		if message != nil {
-			break
-		}
+	// A completed task cannot produce further output, so its recorded result is
+	// the latest message. Replaying a multi-gigabyte log to confirm that costs
+	// seconds per call, and callers poll every waiting task. A task stopped while
+	// it waits for an answer reports its earlier recorded result rather than
+	// repeating the question, which a stopped task can no longer act on.
+	if result := entry.Result(); result != nil && result.AgentResult != "" {
+		return boundedTextToolResult(fmt.Sprintf("Task #%d result: %s", num, result.AgentResult))
 	}
-	if historyErr != nil {
-		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("Task #%d history is unavailable: %v", num, historyErr)})
+	message, err := m.taskSvc.taskMgr.LastAgentMessage(ctx, entry)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("Task #%d history is unavailable: %v", num, err)})
 	}
 	if message == nil {
 		return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))

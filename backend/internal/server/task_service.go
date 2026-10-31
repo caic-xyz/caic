@@ -941,35 +941,16 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "toolUseID required"}
 	}
 	source := agent.MessageSource{AgentID: scope.AgentID, DelegationToolUseID: scope.DelegationToolUseID, ThreadID: scope.ThreadID, TurnID: scope.TurnID}
-	scoped := !source.IsZero()
-	wanted := agent.ToolKeyForSource(&source, toolUseID)
-	var found *agent.ToolUseMessage
-	var foundKey agent.ToolKey
-	for message, err := range s.taskMgr.BackwardMessages(ctx, entry) {
-		if err != nil {
-			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "task history unavailable: " + err.Error()}
-		}
-		toolUse, ok := message.(*agent.ToolUseMessage)
-		if !ok || toolUse.ToolUseID != toolUseID {
-			continue
-		}
-		key := agent.ToolKeyForSource(toolUse.Provenance(), toolUseID)
-		if scoped {
-			if key == wanted {
-				return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
-			}
-			continue
-		}
-		if found == nil {
-			found, foundKey = toolUse, key
-		} else if key != foundKey {
-			return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "tool use ID is ambiguous; specify its source"}
-		}
+	toolUse, err := s.taskMgr.ToolInput(ctx, entry, &taskmgr.ToolInputQuery{ToolUseID: toolUseID, Source: source})
+	switch {
+	case errors.Is(err, taskmgr.ErrToolUseAmbiguous):
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: err.Error()}
+	case errors.Is(err, taskmgr.ErrToolUseNotFound):
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: err.Error()}
+	case err != nil:
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "task history unavailable: " + err.Error()}
 	}
-	if found != nil {
-		return &v1.TaskToolInputResp{ToolUseID: found.ToolUseID, Input: found.Input}, nil
-	}
-	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "tool use" + " not found"}
+	return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
 }
 
 // repositoryStatuses keeps task-list cards coherent with successful Git reads.

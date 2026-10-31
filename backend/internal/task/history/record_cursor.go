@@ -1,4 +1,4 @@
-// Decodes incremental physical journal cursors with independent ordered provider state.
+// Decodes incremental physical journal cursors with ordered provider state and terminal semantic failures.
 
 package history
 
@@ -25,6 +25,7 @@ type RecordCursor struct {
 
 	raw    *taskslog.RawCursor
 	parser *agent.LogRecordParser
+	err    error
 }
 
 // OpenRecordCursor validates header authority before resolving its fresh parser.
@@ -45,8 +46,14 @@ func OpenRecordCursor(path string, resolver ParserResolver) (*RecordCursor, erro
 }
 
 // Read decodes each yielded physical record once; stopping retains ordered state.
+// A semantic decode failure is terminal and subsequent reads yield that error.
+// Cancellation and plain-log EOF polling leave the decoder resumable.
 func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[Record, error] {
 	return func(yield func(Record, error) bool) {
+		if c.err != nil {
+			yield(Record{}, c.err)
+			return
+		}
 		defer func() {
 			if c.raw.Exhausted() {
 				c.parser = nil
@@ -59,6 +66,8 @@ func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[Record, error] {
 			}
 			parsed, err := c.parser.DecodeFrame(&raw.Frame)
 			if err != nil {
+				c.err = err
+				c.parser = nil
 				yield(Record{}, err)
 				return
 			}

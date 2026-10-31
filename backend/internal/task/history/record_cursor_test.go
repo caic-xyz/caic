@@ -3,9 +3,14 @@
 package history
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,6 +94,117 @@ func TestRecordCursor(t *testing.T) {
 			}
 			for _, err := range cursor.Read(t.Context()) {
 				t.Fatalf("settled read produced another record: %v", err)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("terminal native decode compressed=%t", compressed), func(t *testing.T) {
+					t.Parallel()
+					path := writePhysicalTestLog(t, compressed,
+						`{"t":"caic_meta","version":3,"harness":"opencode","prompt":"test"}`,
+						`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`,
+						`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"result":{"stopReason":42}}}`,
+						`{"t":"text","text":"must not resume"}`)
+					cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := cursor.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					var failure error
+					var ids []uint64
+					for record, err := range cursor.Read(t.Context()) {
+						if err != nil {
+							failure = err
+							continue
+						}
+						ids = append(ids, record.ID)
+					}
+					if failure == nil || !slices.Equal(ids, []uint64{1, 2}) {
+						t.Fatalf("records=%v, error=%v", ids, failure)
+					}
+					for range 2 {
+						count := 0
+						for record, err := range cursor.Read(t.Context()) {
+							count++
+							if !errors.Is(err, failure) || record.ID != 0 || len(record.Messages) != 0 {
+								t.Fatalf("continued poisoned decoder: record=%+v, error=%v, want %v", record, err, failure)
+							}
+						}
+						if count != 1 {
+							t.Fatalf("terminal read yielded %d errors", count)
+						}
+					}
+				})
+			}
+		})
+		t.Run("valid/cancellation and plain EOF retain correlation", func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, false,
+				`{"t":"caic_meta","version":3,"harness":"opencode","prompt":"test"}`,
+				`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`)
+			cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := cursor.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			var cancellation error
+			for _, err := range cursor.Read(ctx) {
+				cancellation = err
+			}
+			if !errors.Is(cancellation, context.Canceled) {
+				t.Fatalf("canceled read = %v", cancellation)
+			}
+			var ids []uint64
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, record.ID)
+			}
+			if !slices.Equal(ids, []uint64{1, 2}) {
+				t.Fatalf("records after cancellation = %v", ids)
+			}
+			for _, err := range cursor.Read(t.Context()) {
+				t.Fatalf("EOF poll produced a record: %v", err)
+			}
+			writer, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := writer.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := writer.WriteString(`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"error":{"code":-32000,"message":"rejected"}}}` + "\n"); err != nil {
+				t.Fatal(err)
+			}
+			var results []string
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if record.ID != 3 {
+					t.Fatalf("appended physical ID = %d", record.ID)
+				}
+				for _, message := range record.Messages {
+					if result, ok := message.Message.(*agent.ResultMessage); ok {
+						results = append(results, result.Result)
+					}
+				}
+			}
+			if !slices.Equal(results, []string{"rejected"}) {
+				t.Fatalf("lost ordered input state across polling: %v", results)
 			}
 		})
 	})

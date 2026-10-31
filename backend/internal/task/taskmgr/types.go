@@ -113,3 +113,12 @@ type SyncResult struct {
 	DiffStat     v3.DiffStat
 	SafetyIssues []repo.SafetyIssue
 }
+
+// ToolInputQuery selects one recorded tool invocation.
+type ToolInputQuery struct {
+	// ToolUseID is the provider-reported tool ID.
+	ToolUseID string
+	// Source scopes the ID to one provider origin. Its zero value accepts any
+	// origin and reports ErrToolUseAmbiguous instead of guessing.
+	Source agent.MessageSource
+}

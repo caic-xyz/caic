@@ -34,14 +34,6 @@ func NewScanner(r io.Reader, src string) *Scanner {
 	return &Scanner{scanner: s, src: src}
 }
 
-// NewSegmentScanner reads a journal section under already validated authority.
-func NewSegmentScanner(r io.Reader, src, harness string) *Scanner {
-	s := NewScanner(r, src)
-	s.headerSet = true
-	s.Harness = harness
-	return s
-}
-
 // ReadHeader validates the first nonblank record as the immutable v3 authority.
 func (s *Scanner) ReadHeader() (v3.MetaMessage, error) {
 	if s.headerSet {

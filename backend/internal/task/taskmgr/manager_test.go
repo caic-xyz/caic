@@ -137,6 +137,48 @@ func (f *fakeTaskMCPScoper) ForTask(id ksid.ID) mcp.Registry {
 	return f.registry
 }
 
+// newColdQueryManager registers a cold entry over the task logs in dir. The
+// returned counter reports ordered log decodes, which each cold query performs
+// at most once per log identity.
+func newColdQueryManager(t *testing.T, dir string) (*Manager, *Entry, *int) {
+	scans := new(int)
+	agentBackends := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+		(*scans)++
+		return claudecode.New().NewWire()
+	}}}
+	store := taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), agentBackends)
+	logs, err := store.LoadUnsettled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("loaded %d task logs, want 1", len(logs))
+	}
+	m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: agentBackends, LogStore: store})
+	entry := m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", ""), logs[0])
+	return m, entry, scans
+}
+
+// writeColdQueryLog writes one plain task log with a Claude header and the given records.
+func writeColdQueryLog(t *testing.T, path string, lines ...string) {
+	data := `{"version":3,"prompt":"task","repos":[],"harness":"claude","t":"caic_meta"}` + "\n" + strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// appendColdQueryLog adds one record to a plain task log.
+func appendColdQueryLog(t *testing.T, path, line string) {
+	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := f.WriteString(line + "\n")
+	if err := errors.Join(writeErr, f.Close()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
@@ -3099,71 +3141,239 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
-	t.Run("BackwardMessages", func(t *testing.T) {
+	t.Run("LastAgentMessage", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error/canceled live snapshot", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.TextMessage{Text: "first"}, &agent.TextMessage{Text: "second"}}))
+			entry := m.NewEntry(tk, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			cancel()
+			if _, err := m.LastAgentMessage(ctx, entry); !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled query = %v", err)
+			}
+		})
+		t.Run("error/canceled while another query holds the gate", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			entry := m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", ""), nil)
+			entry.historyGate <- struct{}{}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if err := entry.acquireHistory(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("acquireHistory while the gate is held = %v", err)
+			}
+			<-entry.historyGate
+		})
+		t.Run("live_uses_memory_without_log", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
+			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+			last := &agent.TextMessage{Source: root, Text: "root answer"}
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+				&agent.TextMessage{Source: root, Text: "earlier"},
+				&agent.TextMessage{Source: child, Text: "child answer"},
+				last,
+				&agent.TextMessage{Source: root},
+				&agent.ResultMessage{Source: root},
+			}))
+			entry := m.NewEntry(tk, nil)
+			got, err := m.LastAgentMessage(t.Context(), entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != last {
+				t.Fatalf("LastAgentMessage = %#v", got)
+			}
+		})
+		t.Run("restored_scan_is_reused_until_the_log_changes", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "task.jsonl")
+			writeColdQueryLog(t, path,
+				`{"t":"agent","ts":0.500,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"earlier disk result"}]}}}`,
+				`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"disk result"}]}}}`,
+				`{"state":"purged","t":"result"}`)
+			m, entry, scans := newColdQueryManager(t, dir)
+			for range 3 {
+				got, err := m.LastAgentMessage(t.Context(), entry)
+				if err != nil {
+					t.Fatal(err)
+				}
+				text, ok := got.(*agent.TextMessage)
+				if !ok || text.Text != "disk result" {
+					t.Fatalf("LastAgentMessage = %#v", got)
+				}
+			}
+			if *scans != 1 {
+				t.Fatalf("identical queries decoded the log %d times, want 1", *scans)
+			}
+			appendColdQueryLog(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"appended result"}]}}}`)
+			got, err := m.LastAgentMessage(t.Context(), entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text, ok := got.(*agent.TextMessage); !ok || text.Text != "appended result" {
+				t.Fatalf("LastAgentMessage after append = %#v", got)
+			}
+			if *scans != 2 {
+				t.Fatalf("changed log was not decoded again: scans = %d", *scans)
+			}
+			if len(entry.Task().Messages()) != 0 {
+				t.Fatal("cold query retained the transcript on the task")
+			}
+		})
+	})
+	t.Run("ToolInput", func(t *testing.T) {
 		t.Parallel()
 		t.Run("live_uses_memory_without_log", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
-			want := &agent.TextMessage{Text: "live result"}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{want}))
+			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
+				&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
+			}))
 			entry := m.NewEntry(tk, nil)
-
-			var got agent.Message
-			for message, err := range m.BackwardMessages(t.Context(), entry) {
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, ok := message.(*agent.TextMessage); ok {
-					got = message
-					break
-				}
+			if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "local"}); !errors.Is(err, ErrToolUseAmbiguous) {
+				t.Fatalf("ambiguous query = %v", err)
 			}
-			if got != want {
-				t.Fatalf("BackwardMessages match = %#v, want %#v", got, want)
-			}
-		})
-
-		t.Run("restored_uses_disk_without_hydrating_task", func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			path := filepath.Join(dir, "task.jsonl")
-			if err := os.WriteFile(path, []byte(
-				`{"version":3,"prompt":"task","repos":[],"harness":"claude","t":"caic_meta"}`+"\n"+
-					`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"disk result"}]}}}`+"\n"+
-					`{"state":"purged","t":"result"}`+"\n",
-			), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			logs, err := taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+			got, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "local", Source: root})
 			if err != nil {
 				t.Fatal(err)
 			}
-			m := newTestManager(t, Config{
-				ServerCtx: t.Context(),
-				Backends: map[harness.Name]agent.Backend{
-					harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
-				},
-			})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "task"}, "", "")
-			entry := m.NewEntry(tk, logs[0])
-
-			var got agent.Message
-			for message, err := range m.BackwardMessages(t.Context(), entry) {
+			if string(got.Input) != `{"owner":"root"}` {
+				t.Fatalf("scoped input = %s", got.Input)
+			}
+			if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "absent"}); !errors.Is(err, ErrToolUseNotFound) {
+				t.Fatalf("absent query = %v", err)
+			}
+		})
+		t.Run("restored_scan_is_reused", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			records := make([]string, 0, historyMemoTools+2)
+			for i := range historyMemoTools + 2 {
+				records = append(records, fmt.Sprintf(`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-%d","name":"Bash","input":{"command":"c%d"}}]}}}`, i, i))
+			}
+			path := filepath.Join(dir, "task.jsonl")
+			writeColdQueryLog(t, path, append(records, `{"state":"purged","t":"result"}`)...)
+			m, entry, scans := newColdQueryManager(t, dir)
+			for range 3 {
+				got, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "tool-0"})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, ok := message.(*agent.TextMessage); ok {
-					got = message
-					break
+				if string(got.Input) != `{"command":"c0"}` {
+					t.Fatalf("input = %s", got.Input)
 				}
 			}
-			text, ok := got.(*agent.TextMessage)
-			if !ok || text.Text != "disk result" {
-				t.Fatalf("BackwardMessages match = %#v, want disk result", got)
+			if *scans != 1 {
+				t.Fatalf("identical queries decoded the log %d times, want 1", *scans)
 			}
-			if len(tk.Messages()) != 0 {
-				t.Fatalf("restored task retained %d messages", len(tk.Messages()))
+			for i := range historyMemoTools + 2 {
+				if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: fmt.Sprintf("tool-%d", i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := *scans
+			// Only the newest historyMemoTools answers survive the count bound.
+			for i := 2; i < historyMemoTools+2; i++ {
+				if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: fmt.Sprintf("tool-%d", i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if *scans != before {
+				t.Fatalf("retained answers were recomputed: scans = %d, want %d", *scans, before)
+			}
+			if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "tool-0"}); err != nil {
+				t.Fatal(err)
+			}
+			if *scans != before+1 {
+				t.Fatalf("evicted answer scans = %d, want %d", *scans, before+1)
+			}
+			appendColdQueryLog(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"later"}]}}}`)
+			last, err := m.LastAgentMessage(t.Context(), entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text, ok := last.(*agent.TextMessage); !ok || text.Text != "later" {
+				t.Fatalf("LastAgentMessage = %#v", last)
+			}
+		})
+		t.Run("oversized_input_is_not_retained", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			huge := fmt.Sprintf(`{"command":%q}`, strings.Repeat("x", historyMemoToolBytes+1))
+			writeColdQueryLog(t, filepath.Join(dir, "task.jsonl"),
+				fmt.Sprintf(`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Write","input":%s}]}}}`, huge),
+				`{"state":"purged","t":"result"}`)
+			m, entry, scans := newColdQueryManager(t, dir)
+			for range 2 {
+				got, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "tool-1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got.Input) != len(huge) {
+					t.Fatalf("input length = %d, want %d", len(got.Input), len(huge))
+				}
+			}
+			if len(entry.historyMemo.tools) != 0 {
+				t.Fatalf("retained %d oversized answers, want 0", len(entry.historyMemo.tools))
+			}
+			if *scans != 2 {
+				t.Fatalf("oversized answer scans = %d, want 2", *scans)
+			}
+		})
+		t.Run("retained_outcomes_are_bounded", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			records := make([]string, 0, historyMemoTools+2)
+			for i := range historyMemoTools + 2 {
+				records = append(records, fmt.Sprintf(`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-%d","name":"Bash","input":{"command":"%d%s"}}]}}}`, i, i, strings.Repeat("x", historyMemoToolBytes/3)))
+			}
+			writeColdQueryLog(t, filepath.Join(dir, "task.jsonl"), append(records, `{"state":"purged","t":"result"}`)...)
+			m, entry, _ := newColdQueryManager(t, dir)
+			for i := range historyMemoTools + 2 {
+				if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: fmt.Sprintf("tool-%d", i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			retained := 0
+			for _, tool := range entry.historyMemo.tools {
+				retained += len(tool.input.Input)
+			}
+			if retained > historyMemoToolBytes {
+				t.Fatalf("retained %d bytes, want at most %d", retained, historyMemoToolBytes)
+			}
+			if len(entry.historyMemo.tools) == 0 || len(entry.historyMemo.tools) == historyMemoTools+2 {
+				t.Fatalf("retained %d answers, want some but not all", len(entry.historyMemo.tools))
+			}
+			if newest := fmt.Sprintf("tool-%d", historyMemoTools+1); entry.historyMemo.tools[0].key.ToolUseID != newest {
+				t.Fatalf("newest retained answer = %q, want %q", entry.historyMemo.tools[0].key.ToolUseID, newest)
+			}
+		})
+		t.Run("absent_tool_verdict_is_retained", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeColdQueryLog(t, filepath.Join(dir, "task.jsonl"),
+				`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"c"}}]}}}`,
+				`{"state":"purged","t":"result"}`)
+			m, entry, scans := newColdQueryManager(t, dir)
+			for range 2 {
+				if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "absent"}); !errors.Is(err, ErrToolUseNotFound) {
+					t.Fatalf("absent query = %v", err)
+				}
+			}
+			if *scans != 1 {
+				t.Fatalf("repeated absent query scans = %d, want 1", *scans)
 			}
 		})
 	})

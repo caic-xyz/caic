@@ -347,6 +347,7 @@ func (m *Manager) NewEntry(t *taskrun.Task, lt *taskhistory.LoadedTask) *Entry {
 		task:            t,
 		loadedTask:      lt,
 		historyInMemory: lt == nil,
+		historyGate:     make(chan struct{}, 1),
 	}
 	e.term.Store(&entryTerminal{done: make(chan struct{})})
 	if lt != nil {
@@ -946,39 +947,83 @@ func (m *Manager) HistorySource(entry *Entry) (*taskhistory.LoadedTask, error) {
 	return loaded, nil
 }
 
-// BackwardMessages selects the task's authoritative history source and yields
-// messages newest first. Live and adopted tasks read their in-memory snapshot.
-// Restored cold tasks parse through EOF into a bounded-memory temporary spool
-// before yielding, because compressed semantic history cannot be decoded in
-// reverse directly.
-func (m *Manager) BackwardMessages(ctx context.Context, entry *Entry) iter.Seq2[agent.Message, error] {
-	return func(yield func(agent.Message, error) bool) {
-		if entry == nil {
-			yield(nil, errors.New("task history entry is nil"))
-			return
-		}
-		if entry.historyInMemory {
-			for message := range entry.Task().BackwardMessages() {
-				if !yield(message, nil) {
-					return
-				}
-			}
-			return
-		}
-		source, err := m.HistorySource(entry)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		for parsed, streamErr := range source.BackwardMessages(ctx) {
-			if !yield(parsed.Message, streamErr) {
-				return
-			}
-			if streamErr != nil {
-				return
-			}
-		}
+// LastAgentMessage returns the newest text, question, or result message the
+// task's agent produced outside a child source, or nil when it produced none.
+//
+// Live and adopted tasks read their in-memory timeline. Restored cold tasks
+// decode their log once and retain the answer until the log changes, because a
+// whole-log decode costs seconds on a large task.
+func (m *Manager) LastAgentMessage(ctx context.Context, entry *Entry) (agent.Message, error) {
+	if entry == nil {
+		return nil, errors.New("task history entry is nil")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if entry.historyInMemory {
+		return foldLastAgentMessage(ctx, inMemoryMessages(ctx, entry.Task()))
+	}
+	identity, err := historyIdentityOf(entry)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquireHistory(ctx); err != nil {
+		return nil, err
+	}
+	defer entry.releaseHistory()
+	memo := entry.coldHistoryLocked(identity)
+	if memo.haveLast {
+		return memo.last, nil
+	}
+	last, err := foldLastAgentMessage(ctx, m.coldMessages(ctx, entry))
+	if err != nil {
+		return nil, err
+	}
+	memo.last, memo.haveLast = last, true
+	return last, nil
+}
+
+// ToolInput resolves the recorded input of one tool invocation. A zero query
+// source accepts any owner but reports ErrToolUseAmbiguous instead of guessing,
+// and a cold task retains a bounded number of answers so revisiting a tool does
+// not decode its whole log again.
+func (m *Manager) ToolInput(ctx context.Context, entry *Entry, query *ToolInputQuery) (*agent.ToolUseMessage, error) {
+	if query == nil || query.ToolUseID == "" {
+		return nil, errors.New("tool use ID is required")
+	}
+	if entry == nil {
+		return nil, errors.New("task history entry is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lookup := agent.ToolKeyForSource(&query.Source, query.ToolUseID)
+	if entry.historyInMemory {
+		return foldToolInput(ctx, inMemoryMessages(ctx, entry.Task()), query)
+	}
+	identity, err := historyIdentityOf(entry)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquireHistory(ctx); err != nil {
+		return nil, err
+	}
+	defer entry.releaseHistory()
+	memo := entry.coldHistoryLocked(identity)
+	if retained, ok := memo.outcome(&lookup); ok {
+		return retained.input, retained.err
+	}
+	input, err := foldToolInput(ctx, m.coldMessages(ctx, entry), query)
+	if errors.Is(err, ErrToolUseAmbiguous) || errors.Is(err, ErrToolUseNotFound) {
+		// The verdict of a complete scan cannot change while the log does not.
+		memo.retainOutcome(&lookup, nil, err)
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	memo.retainOutcome(&lookup, input, nil)
+	return input, nil
 }
 
 // BranchAssociated reports whether a nonterminal task has claimed branch for repoName.
@@ -995,6 +1040,26 @@ func (m *Manager) BranchAssociated(repoName, branch string) bool {
 		}
 	}
 	return false
+}
+
+// coldMessages decodes the task's physical log in recorded order. The consumer
+// must range to EOF so that interpretation failures reach it.
+func (m *Manager) coldMessages(ctx context.Context, entry *Entry) iter.Seq2[agent.Message, error] {
+	return func(yield func(agent.Message, error) bool) {
+		source, err := m.HistorySource(entry)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for parsed, streamErr := range source.StreamMessages(ctx) {
+			if !yield(parsed.Message, streamErr) {
+				return
+			}
+			if streamErr != nil {
+				return
+			}
+		}
+	}
 }
 
 // updatePendingInputsLocked persists changes before publishing them on entries.

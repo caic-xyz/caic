@@ -243,23 +243,6 @@ func BenchmarkTaskAdoptionPrimitives(b *testing.B) {
 			},
 		},
 		{
-			name: "BackwardMessagesLatestMatch",
-			prepare: func() func() error {
-				lt := fixture.loadedTask()
-				return func() error {
-					for parsed, err := range lt.BackwardMessages(b.Context()) {
-						if err != nil {
-							return err
-						}
-						if _, ok := parsed.Message.(*agent.TextMessage); ok {
-							return nil
-						}
-					}
-					return errors.New("stream contained no text message")
-				}
-			},
-		},
-		{
 			name: "StoreReopen",
 			prepare: func() func() error {
 				return func() error {

@@ -34,7 +34,7 @@ type entryTerminal struct {
 // registration. LogPath manages its own synchronization. The terminal state is
 // an immutable snapshot published through term; see entryTerminal. pendingInput,
 // loadedTask, monitorBranch, and cleanupOnce are guarded by mu and must only be
-// accessed through methods.
+// accessed through methods. historyMemo is guarded by historyGate.
 type Entry struct {
 	// Immutable.
 	Lifecycle *Lifecycle
@@ -51,6 +51,12 @@ type Entry struct {
 	// Terminal state of the current incarnation, published as an immutable
 	// snapshot; see entryTerminal.
 	term atomic.Pointer[entryTerminal]
+
+	// historyGate holds one cold history query at a time for this entry and
+	// guards historyMemo. A cold query decodes the whole task log, so a concurrent
+	// query waits for one decode instead of repeating it.
+	historyGate chan struct{}
+	historyMemo *historyMemo
 
 	mu            sync.Mutex
 	pendingInput  *PendingInput
@@ -200,4 +206,27 @@ func (e *Entry) setPendingInput(q *PendingInput) {
 	e.mu.Lock()
 	e.pendingInput = q
 	e.mu.Unlock()
+}
+
+// acquireHistory claims the entry's cold history gate, waiting for a running
+// query to finish unless ctx ends first.
+func (e *Entry) acquireHistory(ctx context.Context) error {
+	select {
+	case e.historyGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// releaseHistory returns the entry's cold history gate.
+func (e *Entry) releaseHistory() { <-e.historyGate }
+
+// coldHistoryLocked returns the retained answers for the entry's current log,
+// discarding them when the log changed. The caller holds historyGate.
+func (e *Entry) coldHistoryLocked(identity historyIdentity) *historyMemo {
+	if e.historyMemo == nil || e.historyMemo.identity != identity {
+		e.historyMemo = &historyMemo{identity: identity}
+	}
+	return e.historyMemo
 }

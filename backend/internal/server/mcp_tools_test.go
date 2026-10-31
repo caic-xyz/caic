@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
@@ -29,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -1839,11 +1841,16 @@ func TestMCPTools(t *testing.T) {
 			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
 			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
-				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
+				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"old root"}`)},
+				&agent.TextMessage{Source: root, Text: "old root answer"},
 				&agent.TextMessage{Source: root, Text: "root answer"},
 				&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
 				&agent.TextMessage{Source: child, Text: "child answer"},
 				&agent.UserInputMessage{Source: child, Text: "child prompt"},
+				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
+				&agent.TextMessage{Source: root},
+				&agent.ResultMessage{Source: root},
+				&agent.AskMessage{Source: root},
 			}))
 			entry := s.taskMgr.NewEntry(tk, nil)
 			s.taskMgr.Insert(tk.ID, entry)
@@ -1936,12 +1943,189 @@ func TestMCPTools(t *testing.T) {
 				t.Fatalf("restored task retained %d history messages", len(history))
 			}
 		})
+		t.Run("valid_recorded_result_without_scanning_the_log", func(t *testing.T) {
+			t.Parallel()
+			logDir := t.TempDir()
+			restoredID := ksid.NewID()
+			meta := mustJSON(t, logdata.MetaMessage{
+				MessageType: "caic_meta", Version: 3, Prompt: "recorded result", Harness: string(harness.Claude),
+				StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			})
+			superseded := nativeJSON(t, map[string]any{
+				"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "superseded text"}}},
+			})
+			trailer := mustJSON(t, logdata.MetaResultMessage{MessageType: "result", State: "purged", AgentResult: "recorded final answer"})
+			name := restoredID.String() + ".jsonl"
+			writeLogFile(t, logDir, name, meta, superseded, trailer)
+
+			s := newTestRouter(t, map[harness.Name]agent.Backend{
+				harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
+			})
+			if err := loadPurgedTasksForTest(s, logDir); err != nil {
+				t.Fatal(err)
+			}
+			// A completed task's recorded result answers the query, so removing the
+			// log must not change the answer.
+			if err := os.Remove(filepath.Join(logDir, name)); err != nil {
+				t.Fatal(err)
+			}
+			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			output, ok := result.Structured.(mcp.TextOutput)
+			if result.IsError || !ok || output.Result != "Task #1 result: recorded final answer" {
+				t.Fatalf("agent_last_message = %#v", result.Structured)
+			}
+		})
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("native_provenance/compressed=%t", compressed), func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				id := ksid.NewID()
+				nativeRecords := []string{
+					`{"method":"thread/started","params":{"thread":{"id":"root","model":"root-model"}}}`,
+					`{"method":"thread/started","params":{"thread":{"id":"child","parentThreadId":"root","threadSource":"subagent","model":"child-model"}}}`,
+					`{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"local","type":"commandExecution","command":"old root command","cwd":"/repo","status":"inProgress"}}}`,
+					`{"method":"item/started","params":{"threadId":"child","turnId":"turn","item":{"id":"local","type":"commandExecution","command":"child command","cwd":"/repo","status":"inProgress"}}}`,
+					`{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"local","type":"commandExecution","command":"root command","cwd":"/repo","status":"inProgress"}}}`,
+					`{"method":"item/completed","params":{"threadId":"root","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"root answer"}}}`,
+					`{"method":"item/completed","params":{"threadId":"child","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"child answer"}}}`,
+				}
+				lines := make([]string, 0, len(nativeRecords)+1)
+				lines = append(lines, `{"t":"caic_meta","version":3,"harness":"codex","prompt":"test"}`)
+				for _, native := range nativeRecords {
+					lines = append(lines, mustJSON(t, &logdata.NativeRecord{Type: "agent", Time: time.Unix(1, 0), Message: json.RawMessage(native)}))
+				}
+				writeLogFile(t, dir, id.String()+".jsonl", lines...)
+				path := filepath.Join(dir, id.String()+".jsonl")
+				if compressed {
+					var err error
+					path, err = taskslog.NewStore(dir).Compress(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				s := newTestRouter(t, nil)
+				tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Codex)
+				entry := s.taskMgr.NewEntry(tk, &taskhistory.LoadedTask{State: task.StatePurged})
+				entry.LogPath.Set(path)
+				s.taskMgr.Insert(id, entry)
+				svc := testTaskHandlers(s).taskSvc
+				t.Run("error/ambiguous source", func(t *testing.T) {
+					t.Parallel()
+					_, err := svc.taskToolInput(t.Context(), entry, "local", v1.TaskToolInputQuery{})
+					apiErr, ok := errors.AsType[*api.Error](err)
+					if !ok || apiErr.Code != api.CodeConflict {
+						t.Fatalf("ambiguous source = %v", err)
+					}
+				})
+				for _, tc := range []struct{ thread, command string }{{"root", "root command"}, {"child", "child command"}} {
+					response, err := svc.taskToolInput(t.Context(), entry, "local", v1.TaskToolInputQuery{ThreadID: tc.thread, TurnID: "turn"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					var input struct {
+						Command string `json:"command"`
+					}
+					if err := json.Unmarshal(response.Input, &input); err != nil {
+						t.Fatal(err)
+					}
+					if input.Command != tc.command {
+						t.Fatalf("%s command = %q", tc.thread, input.Command)
+					}
+				}
+				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: svc}
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				output, ok := result.Structured.(mcp.TextOutput)
+				if result.IsError || !ok || output.Result != "Last message from task #1: root answer" {
+					t.Fatalf("native root message = %#v", result.Structured)
+				}
+			})
+			t.Run(fmt.Sprintf("valid_correlated_prompt_error/compressed=%t", compressed), func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				id := ksid.NewID()
+				writeLogFile(t, dir, id.String()+".jsonl",
+					mustJSON(t, logdata.MetaMessage{MessageType: "caic_meta", Version: 3, Harness: "opencode", Prompt: "test", StartedAt: time.Now()}),
+					`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`,
+					`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"error":{"code":-32000,"message":"offline prompt rejected"}}}`,
+					`{"t":"result","state":"purged"}`)
+				path := filepath.Join(dir, id.String()+".jsonl")
+				if compressed {
+					var err error
+					path, err = taskslog.NewStore(dir).Compress(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				s := newTestRouter(t, map[harness.Name]agent.Backend{
+					harness.OpenCode: &agenttest.FakeBackend{WireFactory: opencode.New("", nil).NewWire},
+				})
+				tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.OpenCode)
+				entry := s.taskMgr.NewEntry(tk, &taskhistory.LoadedTask{State: task.StatePurged})
+				entry.LogPath.Set(path)
+				s.taskMgr.Insert(id, entry)
+				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				output, ok := result.Structured.(mcp.TextOutput)
+				if result.IsError || !ok || output.Result != "Task #1 result: offline prompt rejected" {
+					t.Fatalf("correlated result = %#v", result.Structured)
+				}
+				history, _, unsubscribe := entry.Task().Subscribe(t.Context())
+				unsubscribe()
+				if len(history) != 0 {
+					t.Fatalf("query retained %d task messages", len(history))
+				}
+			})
+			t.Run(fmt.Sprintf("error_required_native_decode/compressed=%t", compressed), func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				id := ksid.NewID()
+				writeLogFile(t, dir, id.String()+".jsonl",
+					mustJSON(t, logdata.MetaMessage{MessageType: "caic_meta", Version: 3, Harness: "opencode", Prompt: "test", StartedAt: time.Now()}),
+					`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`,
+					`{"t":"text","text":"untrustworthy prefix"}`,
+					`{"t":"agent","ts":1.500,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Bash","kind":"execute","status":"pending","rawInput":{"command":"old command"}}}}}`,
+					`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"result":{"stopReason":42}}}`,
+					`{"t":"text","text":"untrustworthy suffix"}`,
+					`{"t":"agent","ts":3.000,"msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Bash","kind":"execute","status":"pending","rawInput":{"command":"make check"}}}}}`)
+				path := filepath.Join(dir, id.String()+".jsonl")
+				if compressed {
+					var err error
+					path, err = taskslog.NewStore(dir).Compress(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				s := newTestRouter(t, map[harness.Name]agent.Backend{
+					harness.OpenCode: &agenttest.FakeBackend{WireFactory: opencode.New("", nil).NewWire},
+				})
+				tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.OpenCode)
+				entry := s.taskMgr.NewEntry(tk, &taskhistory.LoadedTask{State: task.StatePurged})
+				entry.LogPath.Set(path)
+				s.taskMgr.Insert(id, entry)
+				svc := testTaskHandlers(s).taskSvc
+				for _, query := range []v1.TaskToolInputQuery{{}, {ThreadID: "missing"}} {
+					_, err := svc.taskToolInput(t.Context(), entry, "tool-1", query)
+					apiErr, ok := errors.AsType[*api.Error](err)
+					if !ok || apiErr.Code != api.CodeInternalError {
+						t.Fatalf("tool query accepted uninterpretable history: %v", err)
+					}
+				}
+				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: svc}
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				if !result.IsError {
+					t.Fatalf("last-message query accepted uninterpretable history: %#v", result.Structured)
+				}
+			})
+		}
 
 		t.Run("live_read_without_log", func(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+				&agent.ToolUseMessage{ToolUseID: "tool-1", Input: json.RawMessage(`{"command":"old command"}`)},
+				&agent.TextMessage{Text: "old result"},
 				&agent.ToolUseMessage{ToolUseID: "tool-1", Input: json.RawMessage(`{"command":"make check"}`)},
 				&agent.TextMessage{Text: "live result"},
 			}))

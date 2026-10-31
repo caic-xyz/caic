@@ -9,9 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
@@ -199,3 +202,186 @@ func BenchmarkRealTaskLogReplay(b *testing.B) {
 		b.ReportMetric(float64(len(loaded.Timeline)), "messages/op")
 	}
 }
+
+// TestRealTaskLogRecordedResultParity verifies the premise of answering a
+// completed task's latest message from its recorded result: for every staged
+// terminal log whose newest root message is a text or result, the result trailer
+// holds the same text. A task stopped while it waits for an answer legitimately
+// ends on a question and is skipped. It is disabled by default; run it with: go
+// test -tags=real_task_logs ./backend/internal/task/history -run
+// '^TestRealTaskLogRecordedResultParity$' -timeout=30m.
+func TestRealTaskLogRecordedResultParity(t *testing.T) {
+	checked := 0
+	for _, c := range realTaskLogColdQueryFixture(t, realTaskLogColdQueryLogs*4) {
+		lt, err := loadLogHeader(testLogger(), c.path, false, resolverForBenchmark())
+		if err != nil {
+			continue
+		}
+		last := lastAgentMessageOf(t, lt)
+		if last == nil {
+			continue
+		}
+		if _, ok := last.(*agent.AskMessage); ok {
+			continue
+		}
+		checked++
+		if got, want := agentMessageText(last), lt.LastTrailer.AgentResult; got != want {
+			t.Errorf("%s: ordered scan found %q, recorded result is %q", filepath.Base(c.path), clip(got), clip(want))
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no terminal log carried a comparable recorded result")
+	}
+	t.Logf("recorded result matched the ordered scan for %d logs", checked)
+}
+
+// BenchmarkRealTaskLogColdQuery compares the two ways to answer "what did this
+// task say last" for the largest terminal logs in the corpus: reading the
+// completion result already recorded in the log, or replaying the whole log in
+// recorded order. It stages links in a temporary directory so the header cache
+// it writes never lands beside the corpus. Run it with: go test
+// -tags=real_task_logs ./backend/internal/task/history -run '^$'
+// -bench '^BenchmarkRealTaskLogColdQuery$' -benchtime=1x -timeout=30m.
+func BenchmarkRealTaskLogColdQuery(b *testing.B) {
+	for _, c := range realTaskLogColdQueryFixture(b, realTaskLogColdQueryLogs) {
+		lt, err := loadLogHeader(testLogger(), c.path, true, resolverForBenchmark())
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(filepath.Base(c.path), func(b *testing.B) {
+			b.ReportMetric(float64(c.size), "log-bytes")
+			b.Run("header-read", func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					if _, err := loadLogHeader(testLogger(), c.path, true, resolverForBenchmark()); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("ordered-scan", func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					if last := lastAgentMessageOf(b, lt); last == nil {
+						b.Fatal("history holds no candidate message")
+					}
+				}
+			})
+		})
+	}
+}
+
+// realTaskLogColdQueryLogs bounds how many staged corpus logs the cold-query
+// benchmark and parity test keep, largest first.
+const realTaskLogColdQueryLogs = 6
+
+// realTaskLogColdQueryFixture stages the largest terminal corpus logs that carry
+// a recorded result, so the header cache these consumers write never lands beside
+// the corpus.
+func realTaskLogColdQueryFixture(t testing.TB, limit int) []realTaskLogCandidate {
+	dir := filepath.Join(t.TempDir(), "tasks")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var staged []realTaskLogCandidate
+	for _, c := range largestRealTaskLogs(t, limit*4) {
+		lt, err := loadLogHeader(testLogger(), c.path, false, resolverForBenchmark())
+		if err != nil || !lt.State.IsTerminal() || lt.LastTrailer == nil || lt.LastTrailer.AgentResult == "" {
+			// The corpus keeps retired log formats the loader rejects.
+			continue
+		}
+		if len(staged) == limit {
+			break
+		}
+		stagedPath := filepath.Join(dir, filepath.Base(c.path))
+		if err := linkOrCopyRealTaskLog(c.path, stagedPath); err != nil {
+			t.Fatal(err)
+		}
+		staged = append(staged, realTaskLogCandidate{stagedPath, c.size})
+	}
+	if len(staged) == 0 {
+		t.Fatal("task-log corpus holds no loadable terminal log with a recorded result")
+	}
+	return staged
+}
+
+// lastAgentMessageOf returns the newest root text, question, or result message
+// carrying a payload in recorded order.
+func lastAgentMessageOf(t testing.TB, lt *LoadedTask) agent.Message {
+	var last agent.Message
+	for parsed, err := range lt.StreamMessages(t.Context()) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate := parsed.Message
+		if candidate.Provenance().IsChild() {
+			continue
+		}
+		switch m := candidate.(type) {
+		case *agent.ResultMessage:
+			if m.Result != "" {
+				last = m
+			}
+		case *agent.AskMessage:
+			if len(m.Questions) > 0 {
+				last = m
+			}
+		case *agent.TextMessage:
+			if m.Text != "" {
+				last = m
+			}
+		}
+	}
+	return last
+}
+
+// agentMessageText returns the payload of a compared last-message candidate.
+func agentMessageText(m agent.Message) string {
+	switch m := m.(type) {
+	case *agent.ResultMessage:
+		return m.Result
+	case *agent.TextMessage:
+		return m.Text
+	default:
+		return ""
+	}
+}
+
+func clip(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > 60 {
+		return s[:60]
+	}
+	return s
+}
+
+type realTaskLogCandidate struct {
+	path string
+	size int64
+}
+
+// largestRealTaskLogs returns the biggest plain or compressed corpus logs.
+func largestRealTaskLogs(t testing.TB, limit int) []realTaskLogCandidate {
+	dir, err := realTaskLogSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cands []realTaskLogCandidate
+	for _, entry := range entries {
+		if entry.IsDir() || !taskslog.IsLogName(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cands = append(cands, realTaskLogCandidate{filepath.Join(dir, entry.Name()), info.Size()})
+	}
+	slices.SortFunc(cands, func(a, b realTaskLogCandidate) int { return int(b.size - a.size) })
+	return cands[:min(len(cands), limit)]
+}
+
+func resolverForBenchmark() ParserResolver { return backends.Default("", nil) }
