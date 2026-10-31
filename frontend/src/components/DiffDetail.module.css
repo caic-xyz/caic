@@ -203,6 +203,7 @@
 
 .fileChangeButton {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.5rem;
   align-items: baseline;
   width: 100%;
@@ -222,13 +223,19 @@
 }
 
 .fileChangePath {
+  display: flex;
   flex: 1;
+  align-items: baseline;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .pathValue {
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -247,6 +254,7 @@
 }
 
 .renameArrow {
+  flex-shrink: 0;
   margin: 0 0.35em;
 }
 
@@ -352,28 +360,6 @@
 
   .headerRepo {
     flex-basis: 100%;
-  }
-
-  .fileChangeButton {
-    flex-wrap: nowrap;
-  }
-
-  .fileChangePath {
-    display: flex;
-    align-items: baseline;
-    min-width: 0;
-    overflow: hidden;
-    overflow-wrap: normal;
-    white-space: nowrap;
-  }
-
-  .pathValue {
-    flex: 1 1 0;
-  }
-
-  .renameArrow {
-    flex-shrink: 0;
-    margin: 0;
   }
 
   .commitSubject {

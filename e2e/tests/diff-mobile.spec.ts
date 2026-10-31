@@ -1,4 +1,4 @@
-// End-to-end tests for repository-diff missing commits, mobile layout, and patch retry focus.
+// End-to-end tests for repository-diff missing commits, file-path containment at any pane width, and patch retry focus.
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
 
@@ -145,6 +145,60 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
       return Math.abs(additionBox.x + additionBox.width - (deletionBox.x + deletionBox.width));
     })
     .toBeLessThan(1);
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("long diff paths stay inside the row on a wide viewport", async ({ page, api }) => {
+  // The diff pane stays narrow inside the workspace at this viewport, so the
+  // path must elide against its own box, not against a media query.
+  await page.setViewportSize({ width: 1280, height: 844 });
+  const id = await createTaskAPI(api, "Check wide-viewport diff path containment");
+  const path = "android/gomode/src/androidTest/java/com/fghbuild/gomode/ModelDownloadServiceTest.java";
+  const filename = "ModelDownloadServiceTest.java";
+
+  await page.route(
+    (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/index`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          repositories: [
+            {
+              name: "gomode",
+              branch: "caic-1",
+              upstream: "origin/main",
+              ahead: 0,
+              behind: 0,
+              commits: [],
+              uncommitted: [{ path, worktreeStatus: "M", linesAdded: 2, linesDeleted: 1, oldSize: -1, newSize: -1 }],
+            },
+          ],
+        } satisfies TaskDiffIndexResp,
+      });
+    },
+  );
+
+  await page.goto(`/task/@${id}/diff`);
+
+  const row = page.getByTitle(path);
+  const displayedPath = row.getByTestId("diff-path-value");
+  await expect(displayedPath).toBeVisible();
+  await expect(displayedPath).toContainText("…");
+  await expect(displayedPath).toHaveText(new RegExp(`${filename.replace(/\./g, "\\.")}$`));
+
+  const geometry = await row.evaluate((button) => {
+    const pathEl = button.querySelector<HTMLElement>('[data-testid="diff-file-path"]');
+    const deletedEl = Array.from(button.querySelectorAll("span")).find((span) => span.textContent === "−1");
+    if (!pathEl || !deletedEl) return null;
+    return {
+      pathRight: pathEl.getBoundingClientRect().right,
+      countsLeft: deletedEl.getBoundingClientRect().left,
+      rowScrollWidth: button.scrollWidth,
+      rowClientWidth: button.clientWidth,
+    };
+  });
+  expect(geometry).not.toBeNull();
+  expect(geometry!.pathRight).toBeLessThanOrEqual(geometry!.countsLeft);
+  expect(geometry!.rowScrollWidth).toBeLessThanOrEqual(geometry!.rowClientWidth);
   await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

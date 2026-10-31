@@ -501,24 +501,40 @@ function FileDiffRow(props: FileDiffRowProps) {
   );
 }
 
+// The repository diff pane is often narrower than the viewport, so the path
+// elides against its own measured box instead of a viewport media query.
+let measureContext: CanvasRenderingContext2D | null | undefined;
+
+function getMeasureContext(): CanvasRenderingContext2D | null {
+  if (measureContext === undefined) {
+    measureContext = document.createElement("canvas").getContext("2d");
+  }
+  return measureContext;
+}
+
 function FilePath(props: { path: string; class?: string }) {
   let pathEl: HTMLSpanElement | undefined;
   const [displayPath, setDisplayPath] = createSignal("");
 
   const updateDisplayPath = (path: string) => {
-    if (!pathEl || typeof window.matchMedia !== "function" || !window.matchMedia("(max-width: 768px)").matches) {
+    const availableWidth = pathEl?.clientWidth ?? 0;
+    if (!pathEl || availableWidth <= 0) {
       setDisplayPath(path);
       return;
     }
 
-    const context = document.createElement("canvas").getContext("2d");
-    if (!context) return;
+    const context = getMeasureContext();
+    if (!context) {
+      setDisplayPath(path);
+      return;
+    }
+
     const style = getComputedStyle(pathEl);
     context.font = style.font;
     const letterSpacing = Number.parseFloat(style.letterSpacing);
     const measureText = (text: string) =>
       context.measureText(text).width + (Number.isFinite(letterSpacing) ? letterSpacing * (text.length - 1) : 0);
-    setDisplayPath(elidePathAtBoundary(path, pathEl.clientWidth, measureText));
+    setDisplayPath(elidePathAtBoundary(path, availableWidth, measureText));
   };
 
   createEffect(() => {
