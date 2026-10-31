@@ -24,12 +24,14 @@ import (
 	"time"
 
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -1010,7 +1012,7 @@ func TestManager(t *testing.T) {
 						original := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", "", 0)
-						tk.SetSessionMetadata("saved-session", "", "", "", 0)
+						tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 						tk.SetState(state)
 						e := original.NewEntry(tk, nil)
 						original.Insert(tk.ID, e)
@@ -1286,14 +1288,14 @@ func TestManager(t *testing.T) {
 	t.Run("CopiesBackends", func(t *testing.T) {
 		t.Parallel()
 		var firstCalls, replacementCalls int
-		backends := map[harness.Name]agent.Backend{
+		agents := map[harness.Name]agent.Backend{
 			harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
 				firstCalls++
 				return claudecode.New().NewWire()
 			}},
 		}
-		m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: backends})
-		backends[harness.Claude] = &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
+		m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: agents})
+		agents[harness.Claude] = &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
 			replacementCalls++
 			return codex.New("", nil).NewWire()
 		}}
@@ -1744,10 +1746,76 @@ func TestManager(t *testing.T) {
 
 	t.Run("applyLoadedSessionMetadata", func(t *testing.T) {
 		t.Parallel()
+		t.Run("persisted_order_and_context_boundary", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				for _, cleared := range []bool{false, true} {
+					t.Run(fmt.Sprintf("compressed=%t/cleared=%t", compressed, cleared), func(t *testing.T) {
+						t.Parallel()
+						id := ksid.NewID()
+						dir := t.TempDir()
+						path := filepath.Join(dir, id.String()+"-metadata.jsonl")
+						raw := []byte(`{"t":"caic_meta","version":3,"harness":"claude","model":"requested","prompt":"test"}
+{"t":"session","session_id":"initial","model":"initial","reported_effort":"low","agent_version":"1","auto_compact_token_limit":100}
+{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","session_id":"native","model":"active","effort":"high","claude_code_version":"2"}}
+{"t":"session","session_id":"restored","model":"stale","reported_effort":"low","agent_version":"3","auto_compact_token_limit":300}
+`)
+						want := agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "3", AutoCompactTokenLimit: 300}
+						if cleared {
+							raw = append(raw, []byte("{\"t\":\"context_cleared\"}\n")...)
+							want.SessionID = ""
+						}
+						raw = append(raw, []byte("{\"t\":\"result\",\"state\":\"purged\"}\n")...)
+						if compressed {
+							path += ".zst"
+							encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+							if err != nil {
+								t.Fatal(err)
+							}
+							raw = encoder.EncodeAll(raw, nil)
+							if err := encoder.Close(); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if err := os.WriteFile(path, raw, 0o600); err != nil {
+							t.Fatal(err)
+						}
+						store := taskslog.NewStore(testLogger(), dir)
+						for _, source := range []string{"scan", "cache"} {
+							var logs []*taskslog.LoadedTask
+							var err error
+							if compressed {
+								logs, err = store.LoadSettled()
+							} else {
+								logs, err = store.LoadUnsettled()
+							}
+							if err != nil || len(logs) != 1 {
+								t.Fatalf("%s inventory: %d tasks, %v", source, len(logs), err)
+							}
+							lt := logs[0]
+							retained := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "requested")
+							retained.SetSessionMetadata(lt.SessionMetadata)
+							if got := retained.Snapshot().SessionMetadata; got != want {
+								t.Fatalf("%s retained metadata = %+v, want %+v", source, got, want)
+							}
+							if err := lt.LoadMessagesWithResolver(backends.Default("", nil)); err != nil {
+								t.Fatal(err)
+							}
+							adopted := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "requested")
+							adopted.SeedTimelineParts(lt.Timeline, nil)
+							applyLoadedSessionMetadata(adopted, lt)
+							if snap := adopted.Snapshot(); snap.SessionMetadata != want || snap.RequestedModel != "requested" {
+								t.Fatalf("%s adopted metadata = %+v, requested model = %q, want %+v and requested", source, snap.SessionMetadata, snap.RequestedModel, want)
+							}
+						}
+					})
+				}
+			}
+		})
 		t.Run("valid_fills_missing_session", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested")
-			lt := &taskslog.LoadedTask{SessionID: "thread-1", RequestedModel: "requested", ReportedModel: "reported", AgentVersion: "1.2.3"}
+			lt := &taskslog.LoadedTask{SessionID: "thread-1", ReportedModel: "reported", AgentVersion: "1.2.3", RequestedModel: "requested"}
 			applyLoadedSessionMetadata(tk, lt)
 			if got := tk.GetSessionID(); got != "thread-1" {
 				t.Errorf("SessionID = %q, want thread-1", got)
@@ -2596,7 +2664,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{HarnessName: harness.Codex}}})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetSessionMetadata("saved-session", "", "", "", 0)
+			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			recordTestTaskLog(t, m, e)
@@ -4086,11 +4154,11 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
-			backends := map[harness.Name]agent.Backend{
+			agents := map[harness.Name]agent.Backend{
 				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
 				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}},
 			}
-			e := forkSetup(t, "fake", backends)
+			e := forkSetup(t, "fake", agents)
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -4102,11 +4170,11 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_inherited_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
-			backends := map[harness.Name]agent.Backend{
+			agents := map[harness.Name]agent.Backend{
 				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
 				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}},
 			}
-			e := forkSetup(t, "fake", backends)
+			e := forkSetup(t, "fake", agents)
 			e.Task().RequestedModel = "m1"
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			te, ok := errors.AsType[*Error](err)
@@ -4119,11 +4187,11 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("new_harness_preserves_inherited_model", func(t *testing.T) {
 			t.Parallel()
-			backends := map[harness.Name]agent.Backend{
+			agents := map[harness.Name]agent.Backend{
 				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
 				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
 			}
-			e := forkSetup(t, "fake", backends)
+			e := forkSetup(t, "fake", agents)
 			e.Task().RequestedModel = "m1"
 			id, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			if err != nil {
@@ -7063,7 +7131,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tk.SetSessionMetadata(tc.session, "", "", "", 0)
+			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: tc.session})
 			var messages []agent.Message
 			if tc.accepted {
 				messages = append(messages, &agent.UserInputMessage{Text: "prompt"})
@@ -7105,7 +7173,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	}
 	tk.SetState(taskslog.StateFailed)
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
-	tk.SetSessionMetadata("saved-session", "", "", "", 0)
+	tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 	tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
 	tk.SetState(taskslog.StateFailed)
 	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())

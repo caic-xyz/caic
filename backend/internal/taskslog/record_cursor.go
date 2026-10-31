@@ -148,12 +148,7 @@ func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[HistoryRecord, error]
 			if parsed.Control {
 				messages = nil
 				for _, message := range parsed.Messages {
-					// Whole-task loading folds session init into metadata. A
-					// raw-addressed history must expose that context at its
-					// original record while retaining the loader's other
-					// non-inventory conversation/control messages.
-					_, init := message.Message.(*agent.InitMessage)
-					if init || !isInventoryMetadataMessage(message.Message) {
+					if !isInventoryOnlyMessage(message.Message) {
 						messages = append(messages, message)
 					}
 				}

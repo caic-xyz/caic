@@ -57,7 +57,7 @@ type Parser struct {
 	reasoning Reasoning
 }
 
-// Parse returns initialization and normalized completed-result messages.
+// Parse returns session reports, assistant model reports and normalized results.
 // Other records only contribute their root-turn reasoning accounting.
 func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
 	typ, err := borrowedString(line, "type")
@@ -114,6 +114,7 @@ func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
 	}
 	source := agent.MessageSource{DelegationToolUseID: parent}
 	var actual int
+	var published bool
 	if len(usagePath) != 0 {
 		raw, err := agent.JSONField(line, usagePath...)
 		if err != nil {
@@ -122,12 +123,19 @@ func (p *Parser) Parse(line []byte) ([]agent.Message, error) {
 		if len(raw) == 0 {
 			return nil, nil
 		}
-		actual, err = reasoningUsage(raw, claudecode.OutputType(typ) == claudecode.OutputAssistant)
+		actual, published, err = reasoningUsage(raw, claudecode.OutputType(typ) == claudecode.OutputAssistant)
 		if err != nil {
 			return nil, err
 		}
 	}
 	p.reasoning.observe(&source, estimate, actual)
+	if published && claudecode.OutputType(typ) == claudecode.OutputAssistant {
+		model, err := agent.JSONString(line, "message", "model")
+		if err != nil {
+			return nil, err
+		}
+		return []agent.Message{&agent.UsageMessage{Source: source, ReportedModel: model}}, nil
+	}
 	return nil, nil
 }
 
@@ -149,13 +157,13 @@ func borrowedString(line []byte, keys ...string) ([]byte, error) {
 
 // reasoningUsage borrows only the scalar fields needed by the ordered fold.
 // Inventory has no consumer for cache buckets or per-iteration usage.
-func reasoningUsage(raw []byte, assistant bool) (int, error) {
+func reasoningUsage(raw []byte, assistant bool) (actual int, published bool, err error) {
 	if string(raw) == "null" {
-		return 0, nil
+		return 0, false, nil
 	}
 	var counts [4]int64
 	var thinking int64
-	err := jsonparser.ObjectEach(raw, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
+	err = jsonparser.ObjectEach(raw, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
 		if kind == jsonparser.Null {
 			return nil
 		}
@@ -197,9 +205,9 @@ func reasoningUsage(raw []byte, assistant bool) (int, error) {
 	// Assistant usage is published only when a token count is present.
 	// Stream deltas can carry reasoning alone.
 	if assistant && counts[0] <= 0 && counts[1] <= 0 && counts[2] <= 0 && counts[3] <= 0 {
-		return 0, err
+		return 0, false, err
 	}
-	return int(thinking), err
+	return int(thinking), true, err
 }
 
 // ReasoningEstimate decodes the incremental system/thinking_tokens estimate.

@@ -282,7 +282,7 @@ func TestV3AgentRecord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		init, ok := msgs.Messages[0].Message.(*InitMessage)
+		init, ok := msgs.Messages[0].Message.(*MetaSessionMessage)
 		if !ok || init.ReportedModel != "gpt-5.6" {
 			t.Fatalf("v3 session = %#v", msgs.Messages[0].Message)
 		}

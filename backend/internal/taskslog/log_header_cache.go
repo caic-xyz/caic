@@ -33,7 +33,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	v9 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v9"
+	v10 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v10"
 )
 
 const (
@@ -42,10 +42,9 @@ const (
 	// for a task log.
 	headerCacheExt = ".header.json"
 
-	// currentVersion guards the marshaled shape. Bump it whenever the
-	// persisted v9 schema changes, so entries written
-	// by older binaries fall back to a full scan instead of misreading.
-	currentVersion = 9
+	// currentVersion guards both the schema and its projection semantics.
+	// Bump it when either changes so older entries rebuild from the journal.
+	currentVersion = 10
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid
 	// entry is a few kilobytes; anything larger is treated as corrupt.
@@ -112,14 +111,14 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 	// preserves its rejection of explicit null/unknown states, while omitted
 	// states retain their historical zero value.
 	var entry struct {
-		v9.Entry
+		v10.Entry
 
 		Task *struct {
-			v9.Task
+			v10.Task
 
 			State  State `json:"state"`
 			Result *struct {
-				v9.Result
+				v10.Result
 
 				State State `json:"state"`
 			} `json:"result"`
@@ -154,7 +153,7 @@ func writeHeaderCache(path string, lt *LoadedTask) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(v9.Entry{
+	data, err := json.Marshal(v10.Entry{
 		Version:      currentVersion,
 		LogSize:      info.Size(),
 		LogMTimeNano: info.ModTime().UnixNano(),

@@ -13,14 +13,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	v9 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v9"
+	v10 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v10"
 )
 
-func headerTaskToData(t *LoadedTask) *v9.Task {
+func headerTaskToData(t *LoadedTask) *v10.Task {
 	if t == nil {
 		return nil
 	}
-	return &v9.Task{
+	return &v10.Task{
 		TaskID:                t.TaskID,
 		Prompt:                t.Prompt,
 		Title:                 t.Title,
@@ -61,11 +61,16 @@ func headerTaskToData(t *LoadedTask) *v9.Task {
 	}
 }
 
-func headerTaskFromData(t *v9.Task) *LoadedTask {
+func headerTaskFromData(t *v10.Task) *LoadedTask {
 	if t == nil {
 		return nil
 	}
 	return &LoadedTask{
+		ReportedModel:         t.ReportedModel,
+		ReportedEffort:        t.ReportedEffort,
+		SessionID:             t.SessionID,
+		AgentVersion:          t.AgentVersion,
+		AutoCompactTokenLimit: t.AutoCompactTokenLimit,
 		TaskID:                t.TaskID,
 		Prompt:                t.Prompt,
 		Title:                 t.Title,
@@ -95,29 +100,24 @@ func headerTaskFromData(t *v9.Task) *LoadedTask {
 		Mounts:                headerMountsFromData(t.Mounts),
 		RequestedModel:        t.RequestedModel,
 		RequestedEffort:       t.RequestedEffort,
-		ReportedModel:         t.ReportedModel,
-		ReportedEffort:        t.ReportedEffort,
-		SessionID:             t.SessionID,
-		AgentVersion:          t.AgentVersion,
-		AutoCompactTokenLimit: t.AutoCompactTokenLimit,
 		LogSize:               t.LogSize,
 		DiffCreated:           t.DiffCreated,
 		LastTrailer:           headerResultFromData(t.LastTrailer),
 	}
 }
 
-func headerReposToData(in []RepoMount) []v9.Repo {
+func headerReposToData(in []RepoMount) []v10.Repo {
 	if in == nil {
 		return nil
 	}
-	out := make([]v9.Repo, len(in))
+	out := make([]v10.Repo, len(in))
 	for i := range in {
-		out[i] = v9.Repo(in[i])
+		out[i] = v10.Repo(in[i])
 	}
 	return out
 }
 
-func headerReposFromData(in []v9.Repo) []RepoMount {
+func headerReposFromData(in []v10.Repo) []RepoMount {
 	if in == nil {
 		return nil
 	}
@@ -128,18 +128,18 @@ func headerReposFromData(in []v9.Repo) []RepoMount {
 	return out
 }
 
-func headerCacheMountsToData(in []runtime.CacheMount) []v9.CacheMount {
+func headerCacheMountsToData(in []runtime.CacheMount) []v10.CacheMount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v9.CacheMount, len(in))
+	out := make([]v10.CacheMount, len(in))
 	for i := range in {
-		out[i] = v9.CacheMount(in[i])
+		out[i] = v10.CacheMount(in[i])
 	}
 	return out
 }
 
-func headerCacheMountsFromData(in []v9.CacheMount) []runtime.CacheMount {
+func headerCacheMountsFromData(in []v10.CacheMount) []runtime.CacheMount {
 	if in == nil {
 		return nil
 	}
@@ -150,18 +150,18 @@ func headerCacheMountsFromData(in []v9.CacheMount) []runtime.CacheMount {
 	return out
 }
 
-func headerMountsToData(in []runtime.Mount) []v9.Mount {
+func headerMountsToData(in []runtime.Mount) []v10.Mount {
 	if in == nil {
 		return nil
 	}
-	out := make([]v9.Mount, len(in))
+	out := make([]v10.Mount, len(in))
 	for i := range in {
-		out[i] = v9.Mount(in[i])
+		out[i] = v10.Mount(in[i])
 	}
 	return out
 }
 
-func headerMountsFromData(in []v9.Mount) []runtime.Mount {
+func headerMountsFromData(in []v10.Mount) []runtime.Mount {
 	if in == nil {
 		return nil
 	}
@@ -172,18 +172,18 @@ func headerMountsFromData(in []v9.Mount) []runtime.Mount {
 	return out
 }
 
-func headerDiffStatToData(in []v3.DiffFileStat) []v9.DiffFileStat {
+func headerDiffStatToData(in []v3.DiffFileStat) []v10.DiffFileStat {
 	if in == nil {
 		return nil
 	}
-	out := make([]v9.DiffFileStat, len(in))
+	out := make([]v10.DiffFileStat, len(in))
 	for i := range in {
-		out[i] = v9.DiffFileStat(in[i])
+		out[i] = v10.DiffFileStat(in[i])
 	}
 	return out
 }
 
-func headerDiffStatFromData(in []v9.DiffFileStat) []v3.DiffFileStat {
+func headerDiffStatFromData(in []v10.DiffFileStat) []v3.DiffFileStat {
 	if in == nil {
 		return nil
 	}
@@ -194,7 +194,7 @@ func headerDiffStatFromData(in []v9.DiffFileStat) []v3.DiffFileStat {
 	return out
 }
 
-func headerResultToData(r *Result) *v9.Result {
+func headerResultToData(r *Result) *v10.Result {
 	if r == nil {
 		return nil
 	}
@@ -202,14 +202,14 @@ func headerResultToData(r *Result) *v9.Result {
 	if r.Err != nil {
 		text = r.Err.Error()
 	}
-	var failure *v9.StartupFailure
+	var failure *v10.StartupFailure
 	if r.StartupFailure != nil {
-		failure = new(v9.StartupFailure(*r.StartupFailure))
+		failure = new(v10.StartupFailure(*r.StartupFailure))
 	}
-	return &v9.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
+	return &v10.Result{State: string(r.State), DiffStat: headerDiffStatToData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageToData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Error: text}
 }
 
-func headerResultFromData(r *v9.Result) *Result {
+func headerResultFromData(r *v10.Result) *Result {
 	if r == nil {
 		return nil
 	}
@@ -224,18 +224,18 @@ func headerResultFromData(r *v9.Result) *Result {
 	return &Result{State: State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }
 
-func headerUsageToData(u agent.Usage) v9.Usage {
-	buckets := make([]v9.CacheWrite, 0, len(u.CacheWrites))
+func headerUsageToData(u agent.Usage) v10.Usage {
+	buckets := make([]v10.CacheWrite, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil
 	}
 	for _, b := range u.CacheWrites {
-		buckets = append(buckets, v9.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
+		buckets = append(buckets, v10.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens})
 	}
-	return v9.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
+	return v10.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens, CacheWrites: buckets, CacheReadInputTokens: u.CacheReadInputTokens, ReasoningOutputTokens: u.ReasoningOutputTokens, CacheTTLSeconds: u.CacheTTLSeconds}
 }
 
-func headerUsageFromData(u v9.Usage) agent.Usage {
+func headerUsageFromData(u v10.Usage) agent.Usage {
 	buckets := make(tokens.CacheWrites, 0, len(u.CacheWrites))
 	if u.CacheWrites == nil {
 		buckets = nil

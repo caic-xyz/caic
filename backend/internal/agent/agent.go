@@ -819,7 +819,8 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if err := decodeLogControl(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		return []Message{&InitMessage{MessageProvenance: m.MessageProvenance, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion, AutoCompactTokenLimit: m.AutoCompactTokenLimit}}, nil
+		m.MessageType = messageTypeSession
+		return []Message{&m}, nil
 	case logControlModelInfo:
 		var m ModelInfoMessage
 		if err := decodeLogControl(line, &m); err != nil {

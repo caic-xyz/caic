@@ -1,5 +1,5 @@
-// Package v9 defines the independent version 9 task-header cache schema.
-package v9
+// Package v10 defines the independent version 10 task-header cache schema.
+package v10
 
 import "time"
 

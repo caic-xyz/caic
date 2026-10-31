@@ -171,15 +171,11 @@ type Task struct {
 	diskUsed               int64
 	diskKnown              bool
 	state                  taskslog.State
-	stateUpdatedAt         time.Time                       // UTC timestamp of the last state transition.
-	stateSeq               uint64                          // Monotonic sequence of recorded state transitions.
-	stateTransitions       []StateTransition               // Bounded journal of recent state transitions.
-	sessionID              string                          // Agent session ID, captured from InitMessage.
-	reportedModel          string                          // Model reported by InitMessage (may differ from RequestedModel).
-	reportedEffort         string                          // Thinking effort reported by InitMessage (may differ from RequestedEffort).
-	agentVersion           string                          // Agent version, captured from InitMessage.
+	stateUpdatedAt         time.Time         // UTC timestamp of the last state transition.
+	stateSeq               uint64            // Monotonic sequence of recorded state transitions.
+	stateTransitions       []StateTransition // Bounded journal of recent state transitions.
+	sessionMetadata        agent.SessionMetadata
 	reportedContextWindow  int                             // Context window size reported by the agent (0 = unknown).
-	autoCompactTokenLimit  int                             // Configured threshold for this agent session (0 = unknown).
 	planFile               string                          // Path to plan file inside instance, captured from Write tool_use.
 	planContent            string                          // Content of the plan file, captured from Write tool_use input.
 	planExitID             string                          // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
@@ -534,28 +530,14 @@ func (t *Task) GetState() taskslog.State {
 func (t *Task) GetSessionID() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.sessionID
+	return t.sessionMetadata.SessionID
 }
 
 // SetSessionMetadata records persisted agent session metadata.
-func (t *Task) SetSessionMetadata(sessionID, model, effort, agentVersion string, autoCompactTokenLimit int) {
+func (t *Task) SetSessionMetadata(m agent.SessionMetadata) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if autoCompactTokenLimit > 0 {
-		t.autoCompactTokenLimit = autoCompactTokenLimit
-	}
-	if sessionID != "" {
-		t.sessionID = sessionID
-	}
-	if model != "" && t.reportedModel == "" {
-		t.reportedModel = model
-	}
-	if effort != "" && t.reportedEffort == "" {
-		t.reportedEffort = effort
-	}
-	if agentVersion != "" {
-		t.agentVersion = agentVersion
-	}
+	t.sessionMetadata.Restore(m)
 }
 
 // GetPlanFile returns the plan file path under the mutex.
@@ -719,54 +701,51 @@ type StateTransition struct {
 // server to build API responses without data races on fields that
 // addMessage/SeedTimeline modify concurrently.
 type Snapshot struct {
-	State                 taskslog.State
-	StateUpdatedAt        time.Time
-	TurnStartedAt         time.Time // non-zero only while state is Running
-	Repos                 []taskslog.RepoMount
-	RuntimeName           runtime.Name
-	RuntimeInstanceID     runtime.ID
-	Tailscale             bool
-	TailscaleFQDN         string
-	TailscaleAuthURL      string
-	USB                   bool
-	Display               bool
-	Sudo                  bool
-	SudoPassword          string
-	VNCPort               int // VNC WebSocket port (0 = no VNC).
-	GitHubToken           bool
-	RelayOffset           int64
-	Title                 string
-	SessionID             string
-	RequestedModel        string
-	RequestedEffort       string
-	ReportedModel         string
-	ReportedEffort        string
-	AgentVersion          string
-	ContextWindowLimit    int // Non-zero when reported by the agent at runtime.
-	AutoCompactTokenLimit int // Non-zero when known for this session.
-	InPlanMode            bool
-	PlanFile              string
-	PlanContent           string
-	PlanExitID            string
-	CostUSD               float64
-	NumTurns              int
-	Duration              time.Duration
-	Usage                 agent.Usage
-	LastUsage             agent.Usage
-	LastAPIUsage          agent.Usage
-	CacheExpiresAt        time.Time
-	DiffStat              v3.DiffStat
-	RepoStates            []v3.RepoState // Compact per-repo git state from the latest diff probe.
-	DiskUsed              int64
-	DiskKnown             bool
-	ForgeOwner            string
-	ForgeRepo             string
-	ForgePR               int
-	ForgePRState          forge.PRState // "open", "closed", "merged"; empty when no PR.
-	ForgeIssue            int
-	CIStatus              forge.CIStatus
-	CIChecks              []forge.Check
-	RateLimit             RateLimit
+	agent.SessionMetadata
+
+	State              taskslog.State
+	StateUpdatedAt     time.Time
+	TurnStartedAt      time.Time // non-zero only while state is Running
+	Repos              []taskslog.RepoMount
+	RuntimeName        runtime.Name
+	RuntimeInstanceID  runtime.ID
+	Tailscale          bool
+	TailscaleFQDN      string
+	TailscaleAuthURL   string
+	USB                bool
+	Display            bool
+	Sudo               bool
+	SudoPassword       string
+	VNCPort            int // VNC WebSocket port (0 = no VNC).
+	GitHubToken        bool
+	RelayOffset        int64
+	Title              string
+	RequestedModel     string
+	RequestedEffort    string
+	ContextWindowLimit int // Non-zero when reported by the agent at runtime.
+	InPlanMode         bool
+	PlanFile           string
+	PlanContent        string
+	PlanExitID         string
+	CostUSD            float64
+	NumTurns           int
+	Duration           time.Duration
+	Usage              agent.Usage
+	LastUsage          agent.Usage
+	LastAPIUsage       agent.Usage
+	CacheExpiresAt     time.Time
+	DiffStat           v3.DiffStat
+	RepoStates         []v3.RepoState // Compact per-repo git state from the latest diff probe.
+	DiskUsed           int64
+	DiskKnown          bool
+	ForgeOwner         string
+	ForgeRepo          string
+	ForgePR            int
+	ForgePRState       forge.PRState // "open", "closed", "merged"; empty when no PR.
+	ForgeIssue         int
+	CIStatus           forge.CIStatus
+	CIChecks           []forge.Check
+	RateLimit          RateLimit
 }
 
 // RateLimit records the active quota block resolved for a task. It is retained
@@ -1058,50 +1037,15 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			continue
 		}
 
+		t.sessionMetadata.Apply(msg)
 		t.observeUsageLocked(msg)
 		if _, ok := msg.(*agent.ExitMessage); ok {
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
 		}
 		switch m := msg.(type) {
-		case *agent.MetaSessionMessage:
-			if m.AutoCompactTokenLimit > 0 {
-				t.autoCompactTokenLimit = m.AutoCompactTokenLimit
-			}
-			if m.SessionID != "" {
-				t.sessionID = m.SessionID
-			}
-			if m.AgentVersion != "" {
-				t.agentVersion = m.AgentVersion
-			}
-			if m.ReportedModel != "" && t.reportedModel == "" {
-				t.reportedModel = m.ReportedModel
-			}
-			if m.ReportedEffort != "" && t.reportedEffort == "" {
-				t.reportedEffort = m.ReportedEffort
-			}
-		case *agent.InitMessage:
-			if m.AutoCompactTokenLimit > 0 {
-				t.autoCompactTokenLimit = m.AutoCompactTokenLimit
-			}
-			if m.SessionID != "" {
-				t.sessionID = m.SessionID
-			}
-			if m.Version != "" {
-				t.agentVersion = m.Version
-			}
-			if m.ReportedModel != "" {
-				t.reportedModel = m.ReportedModel
-			}
-			if m.ReportedEffort != "" {
-				t.reportedEffort = m.ReportedEffort
-			}
 		case *agent.SystemMessage:
 			switch m.Subtype {
-			case agent.SystemSubtypeModelRerouted:
-				if m.ReportedModel != "" {
-					t.reportedModel = m.ReportedModel
-				}
 			case "context_cleared", "compact_boundary":
 				if m.Subtype == "context_cleared" {
 					t.clearContextLocked()
@@ -1126,9 +1070,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			t.trackToolUse(m)
 		case *agent.UsageMessage:
 			t.lastAPIUsage = m.Usage
-			if m.ReportedModel != "" {
-				t.reportedModel = m.ReportedModel
-			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
 				t.cacheExpiresAt = time.Now().Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
@@ -1647,14 +1588,6 @@ func (t *Task) SetTitle(title string) {
 	t.mu.Unlock()
 }
 
-// SetAgentVersion sets the agent version reported by the init message.
-// Used when restoring purged tasks from logs without full message parsing.
-func (t *Task) SetAgentVersion(v string) {
-	t.mu.Lock()
-	t.agentVersion = v
-	t.mu.Unlock()
-}
-
 // GenerateTitle asks the LLM for a short title from the last ten root turns,
 // making up to two shortening requests when the title exceeds the
 // character limit and logging through the task-scoped log. No-op when the
@@ -1761,10 +1694,9 @@ func (t *Task) DiscardRollup() {
 	sink.Discard(meta)
 }
 
-// clearContextLocked resets session-owned metadata when a root context boundary
+// clearContextLocked resets turn and plan state when a root context boundary
 // is applied. The caller holds t.mu.
 func (t *Task) clearContextLocked() {
-	t.sessionID = ""
 	t.priorNumTurns = t.liveNumTurns
 	t.priorDuration = t.liveDuration
 	t.inPlanMode = false
@@ -1777,54 +1709,50 @@ func (t *Task) clearContextLocked() {
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
 func (t *Task) snapshotLocked() Snapshot {
 	return Snapshot{
-		State:                 t.state,
-		StateUpdatedAt:        t.stateUpdatedAt,
-		TurnStartedAt:         t.turnStartedAt,
-		Repos:                 append([]taskslog.RepoMount(nil), t.Repos...),
-		RuntimeName:           t.RuntimeName,
-		RuntimeInstanceID:     t.runtimeInstanceID,
-		Tailscale:             t.Tailscale,
-		TailscaleFQDN:         t.TailscaleFQDN,
-		TailscaleAuthURL:      t.TailscaleAuthURL,
-		USB:                   t.USB,
-		Display:               t.Display,
-		Sudo:                  t.Sudo,
-		SudoPassword:          t.SudoPassword,
-		VNCPort:               t.VNCPort,
-		GitHubToken:           t.GitHubToken,
-		RelayOffset:           t.RelayOffset,
-		Title:                 t.title,
-		SessionID:             t.sessionID,
-		RequestedModel:        t.RequestedModel,
-		RequestedEffort:       t.RequestedEffort,
-		ReportedModel:         t.reportedModel,
-		ReportedEffort:        t.reportedEffort,
-		AgentVersion:          t.agentVersion,
-		ContextWindowLimit:    t.reportedContextWindow,
-		AutoCompactTokenLimit: t.autoCompactTokenLimit,
-		InPlanMode:            t.inPlanMode,
-		PlanFile:              t.planFile,
-		PlanContent:           t.planContent,
-		PlanExitID:            t.planExitID,
-		CostUSD:               t.costTracker.TotalUSD,
-		NumTurns:              t.liveNumTurns,
-		Duration:              t.liveDuration,
-		Usage:                 t.liveUsage.Clone(),
-		LastUsage:             t.lastUsage.Clone(),
-		LastAPIUsage:          t.lastAPIUsage.Clone(),
-		CacheExpiresAt:        t.cacheExpiresAt,
-		DiffStat:              t.liveDiffStat,
-		RepoStates:            t.liveRepoStates,
-		DiskUsed:              t.diskUsed,
-		DiskKnown:             t.diskKnown,
-		ForgeOwner:            t.forgeOwner,
-		ForgeRepo:             t.forgeRepo,
-		ForgePR:               t.forgePR,
-		ForgePRState:          t.forgePRState,
-		ForgeIssue:            t.ForgeIssue,
-		CIStatus:              t.ciStatus,
-		CIChecks:              append([]forge.Check(nil), t.ciChecks...),
-		RateLimit:             t.rateLimit,
+		SessionMetadata:    t.sessionMetadata,
+		State:              t.state,
+		StateUpdatedAt:     t.stateUpdatedAt,
+		TurnStartedAt:      t.turnStartedAt,
+		Repos:              append([]taskslog.RepoMount(nil), t.Repos...),
+		RuntimeName:        t.RuntimeName,
+		RuntimeInstanceID:  t.runtimeInstanceID,
+		Tailscale:          t.Tailscale,
+		TailscaleFQDN:      t.TailscaleFQDN,
+		TailscaleAuthURL:   t.TailscaleAuthURL,
+		USB:                t.USB,
+		Display:            t.Display,
+		Sudo:               t.Sudo,
+		SudoPassword:       t.SudoPassword,
+		VNCPort:            t.VNCPort,
+		GitHubToken:        t.GitHubToken,
+		RelayOffset:        t.RelayOffset,
+		Title:              t.title,
+		RequestedModel:     t.RequestedModel,
+		RequestedEffort:    t.RequestedEffort,
+		ContextWindowLimit: t.reportedContextWindow,
+		InPlanMode:         t.inPlanMode,
+		PlanFile:           t.planFile,
+		PlanContent:        t.planContent,
+		PlanExitID:         t.planExitID,
+		CostUSD:            t.costTracker.TotalUSD,
+		NumTurns:           t.liveNumTurns,
+		Duration:           t.liveDuration,
+		Usage:              t.liveUsage.Clone(),
+		LastUsage:          t.lastUsage.Clone(),
+		LastAPIUsage:       t.lastAPIUsage.Clone(),
+		CacheExpiresAt:     t.cacheExpiresAt,
+		DiffStat:           t.liveDiffStat,
+		RepoStates:         t.liveRepoStates,
+		DiskUsed:           t.diskUsed,
+		DiskKnown:          t.diskKnown,
+		ForgeOwner:         t.forgeOwner,
+		ForgeRepo:          t.forgeRepo,
+		ForgePR:            t.forgePR,
+		ForgePRState:       t.forgePRState,
+		ForgeIssue:         t.ForgeIssue,
+		CIStatus:           t.ciStatus,
+		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
+		RateLimit:          t.rateLimit,
 	}
 }
 
@@ -1982,19 +1910,8 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		stateChanged = summaryChanged || t.state != initialState || t.inPlanMode != initialPlanMode || t.planExitID != initialPlanID || t.planContent != initialPlanContent
 		t.mu.Unlock()
 	}()
-	if meta, ok := m.(*agent.MetaSessionMessage); ok {
-		if meta.SessionID != "" {
-			t.sessionID = meta.SessionID
-		}
-		if meta.AgentVersion != "" {
-			t.agentVersion = meta.AgentVersion
-		}
-		if meta.ReportedModel != "" && t.reportedModel == "" {
-			t.reportedModel = meta.ReportedModel
-		}
-		if meta.ReportedEffort != "" && t.reportedEffort == "" {
-			t.reportedEffort = meta.ReportedEffort
-		}
+	t.sessionMetadata.Apply(m)
+	if _, ok := m.(*agent.MetaSessionMessage); ok {
 		return stateChanged, persistErr
 	}
 	producerAt := parsed.ProducerTime
@@ -2023,37 +1940,12 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *
 		}
 	}
 
-	// Capture metadata from the init message.
-	if init, ok := m.(*agent.InitMessage); ok && !child {
-		if init.AutoCompactTokenLimit > 0 {
-			t.autoCompactTokenLimit = init.AutoCompactTokenLimit
-		}
-		if init.SessionID != "" {
-			t.sessionID = init.SessionID
-		}
-		if init.Version != "" {
-			t.agentVersion = init.Version
-		}
-		if init.ReportedModel != "" {
-			t.reportedModel = init.ReportedModel
-		}
-		if init.ReportedEffort != "" {
-			t.reportedEffort = init.ReportedEffort
-		}
-	}
-	// Track model rerouting (codex): update reportedModel to the active model.
-	if sm, ok := m.(*agent.SystemMessage); ok && !child && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
-		t.reportedModel = sm.ReportedModel
-	}
 	// Track plan mode and plan file from tool_use events.
 	if tu, ok := m.(*agent.ToolUseMessage); ok && !child {
 		t.trackToolUse(tu)
 	}
 	if u, ok := m.(*agent.UsageMessage); ok && !child {
 		t.lastAPIUsage = u.Usage
-		if u.ReportedModel != "" {
-			t.reportedModel = u.ReportedModel
-		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
 			t.cacheExpiresAt = time.Now().Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
@@ -2334,6 +2226,7 @@ func (t *Task) terminalLogSummary(res *taskslog.Result) *taskslog.LoadedTask {
 		parentTaskID = t.ParentTaskID.String()
 	}
 	return &taskslog.LoadedTask{
+		SessionMetadata:   snapshot.SessionMetadata,
 		TaskID:            t.ID.String(),
 		Prompt:            t.InitialPrompt.Text,
 		Title:             snapshot.Title,
@@ -2363,10 +2256,6 @@ func (t *Task) terminalLogSummary(res *taskslog.Result) *taskslog.LoadedTask {
 		Mounts:            slices.Clone(t.Mounts),
 		RequestedModel:    t.RequestedModel,
 		RequestedEffort:   t.RequestedEffort,
-		ReportedModel:     snapshot.ReportedModel,
-		ReportedEffort:    snapshot.ReportedEffort,
-		SessionID:         snapshot.SessionID,
-		AgentVersion:      snapshot.AgentVersion,
 		DiffCreated:       t.DiffCreated(),
 		LastTrailer:       res,
 	}
@@ -2375,8 +2264,8 @@ func (t *Task) terminalLogSummary(res *taskslog.Result) *taskslog.LoadedTask {
 // activeModel returns the model to price usage against: the harness-reported
 // model when known, else the user-requested one.
 func (t *Task) activeModel() string {
-	if t.reportedModel != "" {
-		return t.reportedModel
+	if t.sessionMetadata.ReportedModel != "" {
+		return t.sessionMetadata.ReportedModel
 	}
 	return t.RequestedModel
 }

@@ -974,11 +974,14 @@ func TestStore(t *testing.T) {
 					})); err != nil {
 						t.Fatal(err)
 					}
-					if calls != 1 || len(loaded.Timeline) != 2 {
+					if calls != 1 || len(loaded.Timeline) != 3 {
 						t.Fatalf("native parses=%d,timeline=%#v", calls, loaded.Timeline)
 					}
-					if message, ok := loaded.Timeline[1].Message.(*agent.TextMessage); !ok || message.Text != "conversation" {
-						t.Fatalf("conversation=%#v", loaded.Timeline[1].Message)
+					if session, ok := loaded.Timeline[0].Message.(*agent.MetaSessionMessage); !ok || session.SessionID != "session-1" {
+						t.Fatalf("restoration=%#v", loaded.Timeline[0].Message)
+					}
+					if message, ok := loaded.Timeline[2].Message.(*agent.TextMessage); !ok || message.Text != "conversation" {
+						t.Fatalf("conversation=%#v", loaded.Timeline[2].Message)
 					}
 					if compressed {
 						cached, err := loadLogHeader(testLogger(), path, true)

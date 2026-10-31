@@ -108,7 +108,7 @@ func snapshotHandoffPromptInput(source *Task) handoffPromptInput {
 	source.mu.Lock()
 	defer source.mu.Unlock()
 
-	model := source.reportedModel
+	model := source.sessionMetadata.ReportedModel
 	if model == "" {
 		model = source.RequestedModel
 	}

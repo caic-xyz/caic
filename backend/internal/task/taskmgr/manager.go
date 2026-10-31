@@ -511,7 +511,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 	if err != nil {
 		return 0, badRequestf("%v", err)
 	}
-	t.SetSessionMetadata(p.ResumeSessionID, "", "", "", 0)
+	t.SetSessionMetadata(agent.SessionMetadata{SessionID: p.ResumeSessionID})
 	t.Repos = mounts
 	t.RuntimeName = runtimeName
 	t.MaxCPUs = p.MaxCPUs
@@ -1080,9 +1080,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.Sudo = lt.Sudo
 		t.GitHubToken = lt.GitHubToken
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
-		if lt.SessionID != "" || lt.ReportedModel != "" || lt.ReportedEffort != "" || lt.AgentVersion != "" || lt.AutoCompactTokenLimit > 0 {
-			t.SetSessionMetadata(lt.SessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion, lt.AutoCompactTokenLimit)
-		}
+		t.SetSessionMetadata(lt.SessionMetadata)
 		if lt.State == taskslog.StateRunning {
 			// Nothing adopted the instance that was running this log, so the task can
 			// never settle. Name the downgrade: a bare failure with no error gives the
@@ -1893,11 +1891,11 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 	if lt == nil {
 		return
 	}
-	sessionID := lt.SessionID
+	m := lt.SessionMetadata
 	if t.GetSessionID() != "" {
-		sessionID = ""
+		m.SessionID = ""
 	}
-	t.SetSessionMetadata(sessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion, lt.AutoCompactTokenLimit)
+	t.SetSessionMetadata(m)
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.

@@ -35,30 +35,29 @@ func TestRecordCursorControls(t *testing.T) {
 		}
 	})
 	var conversation []agent.TimedMessage
-	var init *agent.InitMessage
+	var session *agent.MetaSessionMessage
 	for record, err := range cursor.Read(t.Context()) {
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, message := range record.Messages {
-			if m, ok := message.Message.(*agent.InitMessage); ok {
-				init = m
-			} else {
-				conversation = append(conversation, message)
+			if m, ok := message.Message.(*agent.MetaSessionMessage); ok {
+				session = m
 			}
+			conversation = append(conversation, message)
 		}
 	}
 	loaded, err := loadSemanticTask(path, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if init == nil || init.SessionID != loaded.SessionID || init.ReportedModel != loaded.ReportedModel || init.ReportedEffort != loaded.ReportedEffort {
-		t.Fatalf("session context missing or differs from semantic loading: %+v", init)
+	if session == nil || session.SessionID != loaded.SessionID || session.ReportedModel != loaded.ReportedModel || session.ReportedEffort != loaded.ReportedEffort {
+		t.Fatalf("session context missing or differs from semantic loading: %+v", session)
 	}
-	if len(conversation) != 2 || !reflect.DeepEqual(conversation, loaded.Timeline) {
+	if len(conversation) != 3 || !reflect.DeepEqual(conversation, loaded.Timeline) {
 		t.Fatalf("conversation controls differ from semantic loading: %#v", conversation)
 	}
-	input, ok := conversation[0].Message.(*agent.UserInputMessage)
+	input, ok := conversation[1].Message.(*agent.UserInputMessage)
 	if !ok || input.Text != "follow up" || len(input.Images) != 1 || input.Images[0].Data != "aGk=" {
 		t.Fatalf("input/images not preserved: %#v", conversation[0].Message)
 	}

@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/maruel/genai"
 
@@ -34,6 +35,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -523,8 +525,8 @@ func TestTask(t *testing.T) {
 				} else {
 					tk.SeedTimeline(messages)
 				}
-				if tk.GetState() != taskslog.StateWaiting || tk.sessionID != "root" || tk.reportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
-					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionID, tk.reportedModel, tk.costTracker.Model, tk.inPlanMode)
+				if tk.GetState() != taskslog.StateWaiting || tk.sessionMetadata.SessionID != "root" || tk.sessionMetadata.ReportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
+					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionMetadata.SessionID, tk.sessionMetadata.ReportedModel, tk.costTracker.Model, tk.inPlanMode)
 				}
 				if tk.lastAPIUsage.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
 					t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.lastAPIUsage, tk.reportedContextWindow, tk.liveUsage)
@@ -624,17 +626,108 @@ func TestTask(t *testing.T) {
 			t.Fatalf("ContextWindowLimit = %d, want 180000", got)
 		}
 	})
-	t.Run("AutoCompactThresholdLiveAndReplay", func(t *testing.T) {
+	t.Run("SessionMetadataLiveAndPersistedReplay", func(t *testing.T) {
 		t.Parallel()
-		live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		live.addParsedMessage(agent.TimedMessage{Message: &agent.InitMessage{AutoCompactTokenLimit: 244800}})
-		if got := live.Snapshot().AutoCompactTokenLimit; got != 244800 {
-			t.Fatalf("live threshold = %d", got)
+		child := agent.MessageProvenance{Source: agent.MessageSource{DelegationToolUseID: "child"}}
+		steps := []struct {
+			message agent.Message
+			native  string
+			want    agent.SessionMetadata
+		}{
+			{message: &agent.MetaSessionMessage{SessionID: "first", ReportedModel: "initial", ReportedEffort: "low", AgentVersion: "1", AutoCompactTokenLimit: 100},
+				want: agent.SessionMetadata{SessionID: "first", ReportedModel: "initial", ReportedEffort: "low", AgentVersion: "1", AutoCompactTokenLimit: 100}},
+			{message: &agent.InitMessage{SessionID: "native", ReportedModel: "active", ReportedEffort: "high", Version: "2"},
+				native: `{"type":"system","subtype":"init","session_id":"native","model":"active","effort":"high","claude_code_version":"2"}`,
+				want:   agent.SessionMetadata{SessionID: "native", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "2", AutoCompactTokenLimit: 100}},
+			{message: &agent.MetaSessionMessage{SessionID: "restored", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "3", AutoCompactTokenLimit: 300},
+				want: agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "3", AutoCompactTokenLimit: 300}},
+			{message: &agent.InitMessage{Version: "4"},
+				native: `{"type":"system","subtype":"init","claude_code_version":"4"}`,
+				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: &agent.InitMessage{MessageProvenance: child, SessionID: "child", ReportedModel: "child-model", ReportedEffort: "max", Version: "child-version"},
+				native: `{"type":"system","subtype":"init","parent_tool_use_id":"child","session_id":"child","model":"child-model","effort":"max","claude_code_version":"child-version"}`,
+				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: &agent.MetaSessionMessage{MessageProvenance: child, SessionID: "child", ReportedModel: "child-model", ReportedEffort: "max", AgentVersion: "child-version", AutoCompactTokenLimit: 999},
+				want: agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: &agent.UsageMessage{ReportedModel: "routed", Usage: agent.Usage{InputTokens: 1, OutputTokens: 1}},
+				native: `{"type":"assistant","message":{"model":"routed","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: &agent.UsageMessage{MessageProvenance: child, ReportedModel: "child-model", Usage: agent.Usage{InputTokens: 1}},
+				native: `{"type":"assistant","parent_tool_use_id":"child","message":{"model":"child-model","content":[],"usage":{"input_tokens":1}}}`,
+				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: agent.ContextCleared(),
+				want: agent.SessionMetadata{ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
+			{message: &agent.MetaSessionMessage{SessionID: "next", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "5", AutoCompactTokenLimit: 400},
+				want: agent.SessionMetadata{SessionID: "next", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "5", AutoCompactTokenLimit: 400}},
 		}
-		restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		restored.SeedTimeline([]agent.Message{&agent.InitMessage{AutoCompactTokenLimit: 244800}})
-		if got := restored.Snapshot().AutoCompactTokenLimit; got != 244800 {
-			t.Fatalf("restored threshold = %d", got)
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				store := taskslog.NewStore(testLogger(), dir)
+				id := ksid.NewID()
+				name := id.String() + "-metadata.jsonl"
+				if compressed {
+					name += ".zst"
+				}
+				path := filepath.Join(dir, name)
+				live := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
+				encoded := []byte("{\"t\":\"caic_meta\",\"version\":3,\"harness\":\"claude\",\"prompt\":\"test\"}\n")
+				for i, step := range steps {
+					var record []byte
+					var err error
+					if step.native != "" {
+						record = []byte(`{"t":"agent","ts":1.000,"msg":` + step.native + `}`)
+					} else {
+						record, err = agent.MarshalLogMessage(step.message)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					encoded = append(append(encoded, record...), '\n')
+					complete := append(bytes.Clone(encoded), []byte("{\"t\":\"result\",\"state\":\"purged\"}\n")...)
+					if compressed {
+						enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+						if err != nil {
+							t.Fatal(err)
+						}
+						complete = enc.EncodeAll(complete, nil)
+						if err := enc.Close(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := os.WriteFile(path, complete, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					live.addParsedMessage(agent.TimedMessage{Message: step.message})
+					if got := live.Snapshot().SessionMetadata; got != step.want {
+						t.Fatalf("step %d live metadata = %+v, want %+v", i, got, step.want)
+					}
+					for _, cache := range []string{"scan", "cache"} {
+						var loaded []*taskslog.LoadedTask
+						if compressed {
+							loaded, err = store.LoadSettled()
+						} else {
+							loaded, err = store.LoadUnsettled()
+						}
+						if err != nil || len(loaded) != 1 {
+							t.Fatalf("step %d %s inventory: %d tasks, %v", i, cache, len(loaded), err)
+						}
+						lt := loaded[0]
+						if lt.SessionMetadata != step.want {
+							t.Fatalf("step %d %s inventory metadata = %+v, want %+v", i, cache, lt.SessionMetadata, step.want)
+						}
+						if err := lt.LoadMessagesWithResolver(backends.Default("", nil)); err != nil {
+							t.Fatal(err)
+						}
+						replayed := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
+						replayed.SeedTimelineParts(lt.Timeline, nil)
+						if got := replayed.Snapshot().SessionMetadata; got != step.want {
+							t.Fatalf("step %d %s persisted replay metadata = %+v, want %+v", i, cache, got, step.want)
+						}
+					}
+				}
+			})
 		}
 	})
 	t.Run("BackwardMessages", func(t *testing.T) {
@@ -928,7 +1021,7 @@ func TestTask(t *testing.T) {
 		tk.ContainerPlatform = "linux/amd64"
 		tk.SetTitle("title")
 		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-1", GitRoot: "/host/checkout"}}
-		tk.SetSessionMetadata("session-1", "reported", "", "1.2.3", 0)
+		tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1", ReportedModel: "reported", AgentVersion: "1.2.3", AutoCompactTokenLimit: 244800})
 		tk.SetState(taskslog.StatePurged)
 		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
 		parentID := ksid.NewID()
@@ -944,6 +1037,9 @@ func TestTask(t *testing.T) {
 
 		if summary.SessionID != "session-1" || summary.RequestedModel != "requested" || summary.ReportedModel != "reported" || summary.AgentVersion != "1.2.3" {
 			t.Errorf("session summary = (%q, %q, %q, %q)", summary.SessionID, summary.RequestedModel, summary.ReportedModel, summary.AgentVersion)
+		}
+		if summary.AutoCompactTokenLimit != 244800 {
+			t.Fatalf("terminal summary threshold = %d, want 244800", summary.AutoCompactTokenLimit)
 		}
 		if got := summary.ParentTaskID; got != parentID.String() {
 			t.Errorf("ParentTaskID = %q, want %q", got, parentID)
@@ -3755,19 +3851,10 @@ func TestTask(t *testing.T) {
 		})
 	})
 
-	t.Run("SetAgentVersion", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.SetAgentVersion("2.0.0")
-		snap := tk.Snapshot()
-		if snap.AgentVersion != "2.0.0" {
-			t.Errorf("AgentVersion = %q, want %q", snap.AgentVersion, "2.0.0")
-		}
-	})
 	t.Run("SetSessionMetadata", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested", "")
-		tk.SetSessionMetadata("session-1", "reported", "", "2.0.0", 244800)
+		tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1", ReportedModel: "reported", AgentVersion: "2.0.0", AutoCompactTokenLimit: 244800})
 		if got := tk.GetSessionID(); got != "session-1" {
 			t.Errorf("SessionID = %q, want session-1", got)
 		}

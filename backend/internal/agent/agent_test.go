@@ -910,7 +910,7 @@ func TestWriteMetaSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		init, ok := record.Messages[0].Message.(*InitMessage)
+		init, ok := record.Messages[0].Message.(*MetaSessionMessage)
 		if !ok || init.AutoCompactTokenLimit != 244800 {
 			t.Fatalf("restored message = %#v", record.Messages[0].Message)
 		}

@@ -31,6 +31,21 @@ func TestToolTimingTracker(t *testing.T) {
 	t.Parallel()
 	t.Run("ConvertMessage", func(t *testing.T) {
 		t.Parallel()
+		t.Run("SessionRestorationUsesInitPresentation", func(t *testing.T) {
+			t.Parallel()
+			tracker := NewToolTimingTracker("", harness.Claude, "", nil)
+			message := &agent.MetaSessionMessage{
+				Source:    agent.MessageSource{ThreadID: "thread"},
+				SessionID: "session", ReportedModel: "model", ReportedEffort: "high", AgentVersion: "1",
+			}
+			events := tracker.ConvertMessage(2, 0, message, time.Unix(10, 0))
+			want := []v1.EventMessage{{Kind: v1.EventKindInit, Ts: 10000, Source: v1.EventMessageSource{ThreadID: "thread"}, Init: &v1.EventInit{
+				SessionID: "session", ReportedModel: "model", ReportedEffort: "high", AgentVersion: "1", Harness: "claude",
+			}}}
+			if !reflect.DeepEqual(events, want) {
+				t.Fatalf("session presentation = %+v, want %+v", events, want)
+			}
+		})
 		t.Run("PrivateDeliveryControlsAreNotEvents", func(t *testing.T) {
 			t.Parallel()
 			gt := NewToolTimingTracker("", harness.Claude, "", nil)

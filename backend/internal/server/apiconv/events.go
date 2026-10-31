@@ -75,6 +75,16 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		tt.window.Update(msg)
 	}
 	countable, confirmed := tt.skillReads.Confirm(msg)
+	// Session controls remain restoration events for runtime folds. History
+	// presents their session fields using the established init event shape.
+	if m, ok := msg.(*agent.MetaSessionMessage); ok {
+		msg = &agent.InitMessage{
+			MessageProvenance: m.MessageProvenance,
+			SessionID:         m.SessionID, ReportedModel: m.ReportedModel,
+			ReportedEffort: m.ReportedEffort, Version: m.AgentVersion,
+			AutoCompactTokenLimit: m.AutoCompactTokenLimit,
+		}
+	}
 	switch m := msg.(type) {
 	case *agent.InitMessage:
 		return []v1.EventMessage{{

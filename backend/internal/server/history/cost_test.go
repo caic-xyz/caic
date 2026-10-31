@@ -31,6 +31,45 @@ func (journalPricer) ModelPrice(agent.QuotaProvider, string, time.Time) (usage.M
 
 func testSourcePricingInputs(t *testing.T) {
 	t.Parallel()
+	t.Run("session restoration does not reset native request accounting", func(t *testing.T) {
+		t.Parallel()
+		path := writeFixture(t,
+			`{"t":"caic_meta","version":3,"harness":"claude","model":"requested","prompt":"pricing"}`,
+			`{"t":"session","session_id":"initial","model":"restored"}`,
+			`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","session_id":"native","model":"native"}}`,
+			`{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"model":"usage-first","content":[],"usage":{"input_tokens":100000}}}}`,
+			`{"t":"session","session_id":"native","model":"stale"}`,
+			`{"t":"agent","ts":3.000,"msg":{"type":"result","subtype":"success","usage":{"input_tokens":100000}}}`,
+			`{"t":"agent","ts":4.000,"msg":{"type":"system","subtype":"init","session_id":"next","model":"next-native"}}`,
+			`{"t":"agent","ts":5.000,"msg":{"type":"assistant","message":{"model":"usage-second","content":[],"usage":{"input_tokens":200000}}}}`,
+			`{"t":"session","session_id":"next","model":"stale"}`,
+			`{"t":"agent","ts":6.000,"msg":{"type":"result","subtype":"success","usage":{"input_tokens":200000}}}`,
+		)
+		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := source.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		snapshot, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var costs []TurnEstimate
+		for cost, err := range source.TurnCosts(t.Context(), snapshot, snapshot.Through, journalPricer{}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			costs = append(costs, cost)
+		}
+		if len(costs) != 2 || costs[0].Model != "usage-first" || costs[1].Model != "usage-second" ||
+			math.Abs(costs[0].Cost.USD-0.2) > 1e-9 || math.Abs(costs[1].Cost.USD-0.4) > 1e-9 || math.Abs(costs[1].TotalUSD-0.6) > 1e-9 {
+			t.Fatalf("restoration changed native request model or pricing: %+v", costs)
+		}
+	})
 	t.Run("derived model retains per-request context pricing", func(t *testing.T) {
 		t.Parallel()
 		source, _ := costFixture(t, harness.Codex,

@@ -105,25 +105,11 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 }
 
 func discussionReportedSettings(msgs []Message) (model, effort string) {
+	var metadata SessionMetadata
 	for _, msg := range msgs {
-		if msg.Provenance().IsChild() {
-			continue
-		}
-		switch m := msg.(type) {
-		case *InitMessage:
-			if m.ReportedModel != "" {
-				model = m.ReportedModel
-			}
-			if m.ReportedEffort != "" {
-				effort = m.ReportedEffort
-			}
-		case *SystemMessage:
-			if m.ReportedModel != "" {
-				model = m.ReportedModel
-			}
-		}
+		metadata.Apply(msg)
 	}
-	return model, effort
+	return metadata.ReportedModel, metadata.ReportedEffort
 }
 
 // renderMsg writes a single message to the markdown builder.

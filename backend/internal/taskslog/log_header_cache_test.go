@@ -104,6 +104,36 @@ const pinnedHeaderTask = `{"task_id":"task","prompt":"prompt","title":"title","r
 
 func TestHeaderCache(t *testing.T) {
 	t.Parallel()
+	t.Run("RebuildsSessionProjectionFromVersion9", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"test","model":"requested"}`,
+			`{"t":"session","session_id":"initial","model":"initial","reported_effort":"low"}`,
+			`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init","session_id":"native","model":"active","effort":"high"}}`,
+			`{"t":"session","session_id":"restored","model":"stale","reported_effort":"low"}`,
+			`{"t":"context_cleared"}`,
+			`{"t":"result","state":"purged"}`)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"version":9,"log_size":%d,"log_mtime_unix_nano":%d,"task":{"session_id":"restored","reported_model":"stale","reported_effort":"low","state":"purged"}}`, info.Size(), info.ModTime().UnixNano())
+		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, source := range []string{"rebuild", "cache"} {
+			loaded, err := loadLogHeader(testLogger(), path, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.SessionID != "" || loaded.ReportedModel != "active" || loaded.ReportedEffort != "high" || loaded.RequestedModel != "requested" {
+				t.Fatalf("%s metadata = %+v, requested model = %q", source, loaded.SessionMetadata, loaded.RequestedModel)
+			}
+		}
+		if _, ok := readHeaderCache(path); !ok {
+			t.Fatal("reconstructed projection was not cached")
+		}
+	})
 	t.Run("InvalidatesOlderSchemas", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "task.jsonl")
@@ -114,7 +144,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, version := range []int{6, 7, 8} {
+		for _, version := range []int{6, 7, 8, 9} {
 			body := fmt.Sprintf(`{"version":%d,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, version, info.ModTime().UnixNano(), pinnedHeaderTask)
 			if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -135,7 +165,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"version":9,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
+		body := fmt.Sprintf(`{"version":10,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
 		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +245,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":9,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":10,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -244,7 +274,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":9,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":10,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
