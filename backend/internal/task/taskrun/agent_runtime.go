@@ -532,6 +532,9 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
 		return nil
 	}
+	// Announce the settled state now: a scheduled purge waits for the change
+	// signal to observe it, and unrelated activity must not be what wakes it.
+	r.NotifyTaskChange()
 
 	// Write log trailer so the task reloads as "stopped" (not "failed")
 	// after a server restart, preserving live stats for the UI.

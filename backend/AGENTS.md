@@ -6,6 +6,9 @@ Go backend for caic. Packages under `internal/` are private.
 
 - Pass `context.Context` through all call chains.
 - Use subtests (`t.Run`) to group related test cases under a single `Test*` function.
+- Before changing a task's terminal state or a lifecycle lock, read the
+  incarnation rules in the `taskmgr` package comment
+  (`internal/task/taskmgr/manager.go`).
 
 ## Serialized Structures
 

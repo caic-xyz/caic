@@ -1,7 +1,7 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-smoke upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-e2e-repeat test-smoke upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
 
 HTTP?=:2242
 
@@ -16,6 +16,7 @@ help:
 	@printf '  %-34s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
 	@printf '  %-34s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
 	@printf '  %-34s - %s\n' 'make test-e2e' 'Run Playwright end-to-end tests (slow, needs a frontend build)'
+	@printf '  %-34s - %s\n' 'make test-e2e-repeat' 'Repeat one Playwright spec with a fresh fake backend per round'
 	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
 	@printf '  %-34s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
@@ -116,6 +117,8 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent exec playwright test --config e2e/playwright.config.ts; \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
+	  echo ""; echo "=== Failed trace summary ==="; \
+	  uv run --locked python scripts/summarize_playwright_trace.py test-results; \
 	  echo ""; echo "=== Fake server log (test-results/e2e-server.log), last 100 lines: ==="; \
 	  tail -n 100 test-results/e2e-server.log 2>/dev/null; \
 	  auth_port=$${CAIC_E2E_AUTH_PORT:-$$(( $${CAIC_E2E_PORT:-8090} + 1 ))}; \
@@ -123,6 +126,25 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 	  tail -n 100 "test-results/e2e-auth-server-$$auth_port.log" 2>/dev/null; \
 	fi; \
 	exit $$status
+
+# Repeat one spec against a fresh fake backend per round. Playwright starts a
+# server per invocation, so in-memory fake state (device-code limits, fixtures)
+# resets between rounds; a plain --repeat-each keeps one server and trips those
+# limits instead of reproducing the original failure.
+ROUNDS ?= 3
+test-e2e-repeat: frontend-deps generate-sdks playwright-browser
+	@if [ -z "$(SPEC)" ]; then \
+	  echo "SPEC is required: make test-e2e-repeat SPEC=e2e/tests/<name>.spec.ts [ROUNDS=N]"; \
+	  exit 2; \
+	fi
+	@case "$(ROUNDS)" in \
+	  ''|*[!0-9]*|0) echo "ROUNDS must be a positive integer, got '$(ROUNDS)'"; exit 2 ;; \
+	esac
+	@pnpm --silent build
+	@for round in $$(seq 1 $(ROUNDS)); do \
+	  echo "=== e2e round $$round/$(ROUNDS): $(SPEC)"; \
+	  pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC) || exit $$?; \
+	done
 
 # Real runtime smoke tests exercise the md container path and cannot run
 # without that runtime (see the smoke build tag sources for what they need).

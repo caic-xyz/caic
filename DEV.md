@@ -21,6 +21,28 @@ visual style, and interaction character. Apply it to new and touched components;
 it does not call for a full UX redesign. See [frontend/AGENTS.md](frontend/AGENTS.md)
 for implementation and validation rules.
 
+## End-to-end failures
+
+`make test-e2e` prints a summary of every failed Playwright trace before the
+fake server logs. Read it in order: a document request marked `no response` is
+still in flight, and Playwright holds every locator query until a pending
+navigation commits, so such a request explains an assertion that stalls.
+Summarize a downloaded artifact with the same tool:
+
+```bash
+uv run --locked python scripts/summarize_playwright_trace.py test-results
+uv run --locked python scripts/summarize_playwright_trace.py trace.zip --logs 0
+```
+
+Repeat one spec when the failure looks timing-dependent. Every round starts its
+own fake backend, so in-memory fake state such as device-code limits and
+fixtures resets; `--repeat-each` keeps one server and trips those limits instead
+of reproducing the failure:
+
+```bash
+make test-e2e-repeat SPEC=e2e/tests/device-login.spec.ts ROUNDS=5
+```
+
 ## Profiling
 
 Enable profiling by adding a `[debug]` section to `~/.config/caic/config.toml`:

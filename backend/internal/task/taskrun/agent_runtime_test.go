@@ -1231,6 +1231,24 @@ func TestRunner(t *testing.T) {
 				}
 			})
 		}
+		t.Run("announces_the_stopped_transition", func(t *testing.T) {
+			t.Parallel()
+			stub := testContainer()
+			r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateRunning)
+			var announced []task.State
+			r.NotifyTaskChange = func() { announced = append(announced, tk.GetState()) }
+
+			r.StopTask(t.Context(), tk)
+
+			// A scheduled purge waits for this announcement, so the stop cannot
+			// leave the settled state unannounced until its own tail finishes.
+			if !slices.Contains(announced, task.StateStopped) {
+				t.Fatalf("announced states = %v, want the stopped transition", announced)
+			}
+		})
 		t.Run("recordsStoppedDiskUsage", func(t *testing.T) {
 			t.Parallel()
 			stub := testContainer()

@@ -8,6 +8,12 @@
 // honored for synchronous work (state checks, logging). Background goroutines
 // that must outlive any single request use serverCtx instead — it tracks the
 // lifetime of the Manager itself.
+//
+// A task incarnation publishes one terminal result through Entry.Finish, and a
+// purge is final for that incarnation: the runtime instance is gone, so a stop
+// that publishes afterwards cannot replace the purged snapshot. Lifecycle
+// operations that publish terminal results, meaning Stop, Revive, and the purge
+// completion, hold operationMu so the result order follows the state order.
 package taskmgr
 
 import (

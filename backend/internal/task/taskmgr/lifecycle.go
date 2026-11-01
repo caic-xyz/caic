@@ -585,6 +585,10 @@ func (r *Lifecycle) waitForPurgeDelay(ctx context.Context, delay time.Duration) 
 	}
 }
 
+// waitForStopped waits until the task leaves the stopping state and reports
+// whether it settled as stopped. It wakes on task-change announcements, so the
+// stop that sets the state announces it; a purge must not depend on unrelated
+// activity to observe the transition.
 func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
 	for r.entry.Task().GetState() == task.StateStopping {
 		changed := r.manager.Changed()
