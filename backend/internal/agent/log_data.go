@@ -64,7 +64,8 @@ func MarshalLogMessage(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *MetaResultMessage:
-		r := logV3MetaResultMessageToData(m, token)
+		r := v3.MetaResultMessage(*m)
+		r.MessageType = string(token)
 		record = r
 	case *MetaPRMessage:
 		r := v3.MetaPRMessage(*m)
@@ -91,52 +92,6 @@ func MarshalLogMessage(m Message) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(fields)
-}
-
-func logV3MetaResultMessageToData(m *MetaResultMessage, token taskslog.Kind) v3.MetaResultMessage {
-	return v3.MetaResultMessage{
-		MessageProvenance:        m.MessageProvenance,
-		MessageType:              string(token),
-		State:                    m.State,
-		Title:                    m.Title,
-		CostUSD:                  m.CostUSD,
-		Duration:                 m.Duration,
-		NumTurns:                 m.NumTurns,
-		InputTokens:              m.InputTokens,
-		OutputTokens:             m.OutputTokens,
-		CacheCreationInputTokens: m.CacheCreationInputTokens,
-		CacheWrites:              m.CacheWrites,
-		CacheReadInputTokens:     m.CacheReadInputTokens,
-		ReasoningOutputTokens:    m.ReasoningOutputTokens,
-		DiffStat:                 m.DiffStat,
-		DiskUsedBytes:            m.DiskUsedBytes,
-		Error:                    m.Error,
-		AgentResult:              m.AgentResult,
-		StartupFailure:           m.StartupFailure,
-	}
-}
-
-func logV3MetaResultMessageFromData(m *v3.MetaResultMessage) MetaResultMessage {
-	return MetaResultMessage{
-		MessageProvenance:        m.MessageProvenance,
-		MessageType:              m.MessageType,
-		State:                    m.State,
-		Title:                    m.Title,
-		CostUSD:                  m.CostUSD,
-		Duration:                 m.Duration,
-		NumTurns:                 m.NumTurns,
-		InputTokens:              m.InputTokens,
-		OutputTokens:             m.OutputTokens,
-		CacheCreationInputTokens: m.CacheCreationInputTokens,
-		CacheWrites:              m.CacheWrites,
-		CacheReadInputTokens:     m.CacheReadInputTokens,
-		ReasoningOutputTokens:    m.ReasoningOutputTokens,
-		DiffStat:                 m.DiffStat,
-		DiskUsedBytes:            m.DiskUsedBytes,
-		Error:                    m.Error,
-		AgentResult:              m.AgentResult,
-		StartupFailure:           m.StartupFailure,
-	}
 }
 
 // RecordedLog encodes runtime controls over an owned physical byte writer.

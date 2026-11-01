@@ -1234,28 +1234,7 @@ func (m *ModelInfoMessage) Type() string { return messageTypeModelInfo }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
-type MetaResultMessage struct {
-	MessageProvenance
-
-	MessageType              string          `json:"t"`
-	State                    string          `json:"state"`
-	Title                    string          `json:"title,omitempty"`
-	CostUSD                  float64         `json:"cost_usd,omitempty"`
-	Duration                 float64         `json:"duration,omitempty"` // Seconds.
-	NumTurns                 int             `json:"num_turns,omitempty"`
-	InputTokens              int             `json:"input_tokens,omitempty"`
-	OutputTokens             int             `json:"output_tokens,omitempty"`
-	CacheCreationInputTokens int             `json:"cache_creation_input_tokens,omitempty"`
-	CacheWrites              []v3.CacheWrite `json:"cache_writes,omitempty"`
-	CacheReadInputTokens     int             `json:"cache_read_input_tokens,omitempty"`
-	ReasoningOutputTokens    int             `json:"reasoning_output_tokens,omitempty"`
-	DiffStat                 v3.DiffStat     `json:"diff_stat,omitzero"`
-	// DiskUsedBytes is nil when the runtime could not measure disk usage.
-	DiskUsedBytes  *int64             `json:"disk_used_bytes,omitempty"`
-	Error          string             `json:"error,omitempty"`
-	AgentResult    string             `json:"agent_result,omitempty"`
-	StartupFailure *v3.StartupFailure `json:"startup_failure,omitempty"`
-}
+type MetaResultMessage v3.MetaResultMessage
 
 // SetUsage copies token accounting into result metadata.
 func (m *MetaResultMessage) SetUsage(u Usage) {

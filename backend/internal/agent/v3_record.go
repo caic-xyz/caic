@@ -105,7 +105,7 @@ func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, erro
 		msgs = []Message{new(MCPRequestMessage(*m))}
 
 	case *v3.MetaResultMessage:
-		msg := logV3MetaResultMessageFromData(m)
+		msg := MetaResultMessage(*m)
 		msg.MessageType = messageTypeResult
 		msgs = []Message{&msg}
 	case *v3.ModelInfoMessage:
