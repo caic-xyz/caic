@@ -1,9 +1,9 @@
-// Owns cookie identity, page-bound frontend preparation, and account reload/logout transitions.
+// Owns cookie identity, page-bound frontend preparation, and in-place or reloading account transitions.
 
 import { batch, createContext, createSignal, useContext, onCleanup, onMount, type ParentComponent } from "solid-js";
 
 import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
-import { APIError } from "@sdk/api.gen";
+import { APIError, createApiClient } from "@sdk/api.gen";
 import { api } from "./api";
 import { createFrontendPreparationClient, type FrontendPreparation } from "@maruel/gomode/web/FrontendVoiceTools";
 
@@ -21,6 +21,8 @@ interface AuthState {
   confirmLoggedOut: () => void;
   /** Invalidate native identity before reloading the current cookie session. */
   reloadIdentity: (destination?: "/") => void;
+  /** Refresh the cookie identity in place, or reload when the account or session is unusable. */
+  refreshIdentity: (signal?: AbortSignal) => Promise<boolean>;
 }
 
 declare global {
@@ -120,23 +122,14 @@ export const AuthProvider: ParentComponent = (props) => {
     });
     try {
       await api.logout(sessionID);
-    } catch (error) {
+    } catch {
       if (disposed) return;
-      if (error instanceof APIError && error.status === 401) {
-        reloadIdentity();
-        return;
-      }
       try {
-        const confirmedUser = await api.getMe();
-        settleIdentity(confirmedUser, true);
-      } catch (identityError) {
-        if (isConfirmedLoggedOut(identityError)) {
-          settleIdentity(null, false);
-          return;
-        }
+        await refreshIdentity();
+      } catch {
+        if (disposed) return;
         setUser(previousUser);
-        // The cookie may have changed despite the network error; require a fresh bootstrap.
-        return;
+        setReady(true);
       }
       return;
     }
@@ -155,9 +148,41 @@ export const AuthProvider: ParentComponent = (props) => {
     else window.location.reload();
   };
 
+  const refreshIdentity = async (signal?: AbortSignal): Promise<boolean> => {
+    if (disposed) return false;
+    const shown = user();
+    try {
+      const fresh = await createApiClient((url, init) => fetch(url, { ...init, cache: "no-store", signal })).getMe();
+      if (disposed || signal?.aborted || user() !== shown) return false;
+      if (!shown || fresh.id !== shown.id || fresh.provider !== shown.provider) {
+        reloadIdentity();
+        return false;
+      }
+      if (ready()) publishAuth({ authChanging: true });
+      settleIdentity(fresh, true);
+      return true;
+    } catch (error) {
+      if (disposed || signal?.aborted || user() !== shown) return false;
+      if (error instanceof APIError && (error.status === 401 || error.status === 404)) {
+        reloadIdentity();
+        return false;
+      }
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider
-      value={{ ready, providers, user, frontendPreparation, logout, confirmLoggedOut, reloadIdentity }}
+      value={{
+        ready,
+        providers,
+        user,
+        frontendPreparation,
+        logout,
+        confirmLoggedOut,
+        reloadIdentity,
+        refreshIdentity,
+      }}
     >
       {props.children}
     </AuthContext.Provider>

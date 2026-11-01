@@ -29,31 +29,38 @@ export default function SessionsPage() {
         auth.user()?.sessionID === sid &&
         !response.sessions.some((session) => session.current && session.id === sid)
       ) {
-        auth.reloadIdentity();
+        await auth.refreshIdentity();
       }
       return { sid, response };
     },
   );
   const [error, setError] = createSignal("");
   const [revoking, setRevoking] = createSignal("");
+  let revokeOperation = 0;
   async function revoke(id: string, current: boolean) {
     const sid = auth.user()?.sessionID;
     if (!sid || sessions()?.sid !== sid) return;
     const isCurrent = () => !disposed && auth.ready() && auth.user()?.sessionID === sid;
+    const operation = ++revokeOperation;
     const client = sessionClient(sid);
     setRevoking(id);
     setError("");
     try {
       await client.revokeSession(id);
       if (!isCurrent()) return;
-      if (current) auth.reloadIdentity();
+      if (current) await auth.refreshIdentity();
       else await refetch();
     } catch (e) {
       if (!isCurrent()) return;
-      if (e instanceof APIError && e.status === 401) auth.reloadIdentity();
-      else setError(e instanceof Error ? e.message : "Could not sign out the session.");
+      if (e instanceof APIError && e.status === 401) {
+        try {
+          await auth.refreshIdentity();
+        } catch (refreshError) {
+          setError(refreshError instanceof Error ? refreshError.message : "Could not sign out the session.");
+        }
+      } else setError(e instanceof Error ? e.message : "Could not sign out the session.");
     } finally {
-      if (isCurrent()) setRevoking("");
+      if (!disposed && revokeOperation === operation) setRevoking("");
     }
   }
   return (

@@ -1,7 +1,7 @@
 // Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
 
 import assert from "node:assert/strict";
-import { historyResponse, historyManifest } from "@tests/history";
+import { historyManifest } from "@tests/history";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSignal, Show } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -15,11 +15,9 @@ import type {
   HarnessInfo,
   Task,
   ISOTimestamp,
-  UserResp,
   Warning,
   TaskListEvent,
 } from "@sdk/types.gen";
-import type { HistoryEventsHandlers } from "@sdk/api.gen";
 
 // Structured HTTP errors preserve the transport status used by route recovery.
 function apiError(status: number): Error & { status: number } {
@@ -153,14 +151,13 @@ import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
 import { notifications } from "@maruel/gomode/web/notifications";
 import { executeFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
-import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
 import { AuthProvider, useAuth } from "./AuthContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 import { AppStateProvider, useAppState, type AppStore } from "./AppState";
-import { getVoiceTaskNumber, focusedVoiceTask } from "./voiceTaskState";
+import { focusedVoiceTask } from "./voiceTaskState";
 import { installFetchRouter } from "@tests/fetch-router";
 
 // Spies on the real api singleton and the notifications object replace the former module
@@ -228,13 +225,22 @@ fetchRouter.apiGet("/.well-known/gomode.json", () => ({
   webShell: { toolGroups: [{ name: "tasks", endpoint: "/api/caic/v1/mcp" }], voiceGateway: { url: "/" } },
 }));
 
+let appAuth: ReturnType<typeof useAuth> | null = null;
+
+function AuthProbe() {
+  appAuth = useAuth();
+  return null;
+}
+
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
   taskEventSubscriptions = 0;
+  appAuth = null;
   const history = createMemoryHistory();
   history.set({ value: initial });
   const utils = render(() => (
     <AuthProvider>
+      <AuthProbe />
       <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>
     </AuthProvider>
   ));
@@ -510,29 +516,24 @@ it("revokes authenticated preparation when a task stream error confirms a missin
   view.unmount();
 });
 
-it("does not give a replacement account the old account's prepared task data", async () => {
+it("rebinds prepared task data after a same-account session replacement", async () => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
     user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
   const { readiness } = preparationBridge();
-  vi.spyOn(api, "logout").mockRejectedValue(new Error("lost logout response"));
-  vi.spyOn(api, "getMe").mockResolvedValue({
-    id: "b",
-    sessionID: "session-b",
-    provider: "github",
-    username: "account-b",
-  });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "a", sessionID: "session-b", provider: "github", username: "account-a" }),
+  );
   const view = renderApp();
   await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
-  initialTaskSnapshot = null;
-  fireEvent.click(screen.getByTitle("account-a"));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
-  await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
-  await waitFor(() => expect(taskEventSubscriptions).toBe(2));
-  expect(readiness.at(-1)).toEqual(expect.objectContaining({ ready: false, tools: [] }));
-  dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+  const prepared = readiness.length;
+  if (!appAuth) throw new Error("Auth probe did not render");
+  await appAuth.refreshIdentity();
+  await waitFor(() => expect(readiness.length).toBeGreaterThan(prepared));
   await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  expect(readiness.at(-1)?.tools).toEqual([expect.objectContaining({ name: "focus_task" })]);
+  expect(screen.getByTitle("account-a")).toBeInTheDocument();
   view.unmount();
 });
 
@@ -607,205 +608,6 @@ describe("structured warnings", () => {
   }
 });
 
-it("aborts old-account history and opens the same task through the new account's scoped resources", async () => {
-  window.__CAIC_BOOTSTRAP__ = {
-    authProviders: ["github"],
-    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
-  };
-  const sharedTask = makeTask({ id: "shared", title: "Shared task", state: "waiting" });
-  initialTaskSnapshot = [sharedTask];
-  vi.mocked(api.getTask).mockResolvedValue(sharedTask);
-  const streams: { handlers: HistoryEventsHandlers; close: ReturnType<typeof vi.fn> }[] = [];
-  vi.mocked(api.historyEvents).mockImplementation((_id, _cursor, handlers) => {
-    const close = vi.fn();
-    streams.push({ handlers, close });
-    return { close } as unknown as EventSource;
-  });
-  const fallbackFetch = globalThis.fetch;
-  const delayed = deferred<Response>();
-  const historyRequests: string[] = [];
-  const pendingSignals: AbortSignal[] = [];
-  let account = "a";
-  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-    const url = String(input);
-    if (!url.includes("/history/")) return fallbackFetch(input, init);
-    historyRequests.push(url);
-    const scope = url.startsWith("/history/a/") ? "a" : "b";
-    const event = {
-      recordID: 520,
-      index: 0,
-      message: { kind: "text" as const, ts: 520, text: { text: `Private account ${account} transcript` } },
-    };
-    if (url.endsWith("/manifest")) {
-      const manifest = historyManifest([event], "");
-      manifest.bootstrap.scope = account;
-      manifest.bootstrap.resourceBase = `/history/${account}`;
-      const section = manifest.sections[0];
-      assert.ok(section);
-      section.id = "2";
-      manifest.sections.unshift({
-        id: "1",
-        body: { first: { recordID: 300, index: 0 }, last: { recordID: 300, index: 0 } },
-        turnCount: 1,
-        textCount: 1,
-        toolCount: 0,
-        durationMs: 1,
-        skills: [],
-      });
-      return Promise.resolve(Response.json(manifest));
-    }
-    if (url === "/history/a/slice/300/0/300/0") {
-      if (!init?.signal) throw new Error("History request has no owner signal");
-      pendingSignals.push(init.signal);
-      return delayed.promise;
-    }
-    return Promise.resolve(
-      historyResponse([
-        { ...event, message: { ...event.message, text: { text: `Private account ${scope} transcript` } } },
-      ]),
-    );
-  });
-  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
-  const checkedIdentity = deferred<UserResp>();
-  vi.spyOn(api, "getMe").mockReturnValue(checkedIdentity.promise);
-  renderApp("/task/@shared");
-  await screen.findByText("Private account a transcript");
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
-  await waitFor(() => expect(pendingSignals).toHaveLength(1));
-  await user.click(screen.getByTitle("account-a"));
-  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
-  expect(screen.getByText("Checking your session…")).toBeInTheDocument();
-  expect(pendingSignals[0]?.aborted).toBe(true);
-  expect(streams[0]?.close).toHaveBeenCalledOnce();
-  expect(screen.queryByText("Private account a transcript")).not.toBeInTheDocument();
-  const transition = historyRequests.length;
-  account = "b";
-  checkedIdentity.resolve({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" });
-  await screen.findByText("Private account b transcript");
-  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/b/slice/"))).toBe(true);
-  expect(historyRequests.slice(transition).some((url) => url.startsWith("/history/a/"))).toBe(false);
-  delayed.resolve(
-    historyResponse([
-      {
-        recordID: 300,
-        index: 0,
-        message: { kind: "text", ts: 300, text: { text: "Late private account a response" } },
-      },
-    ]),
-  );
-  await delayed.promise;
-  streams[0]?.handlers.onMessage({
-    recordID: 600,
-    index: 0,
-    message: { kind: "userInput", ts: 600, userInput: { text: "Retired account a stream" } },
-  });
-  await waitFor(() => expect(screen.getByText("Private account b transcript")).toBeInTheDocument());
-  expect(
-    screen.queryByText(/Late private account a|Retired account a|Private account a transcript/),
-  ).not.toBeInTheDocument();
-});
-
-it("destroys account A task and repo state before rendering confirmed account B", async () => {
-  window.__CAIC_BOOTSTRAP__ = {
-    authProviders: ["github"],
-    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
-  };
-  const accountBRepos = deferred<Repo[]>();
-  vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockReturnValueOnce(accountBRepos.promise);
-  vi.mocked(api.getConfig).mockResolvedValue({
-    imageConstraints: {
-      allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
-      maxImageBytes: 10485760,
-      maxPromptImageBytes: 20971520,
-    },
-    displayName: "caic",
-    tailscaleAvailable: false,
-    usbAvailable: false,
-    displayAvailable: false,
-    sudoAvailable: false,
-    gitHubTokenAvailable: false,
-    mcpOAuthAvailable: false,
-    voiceGateway: { mode: "embedded" },
-  } satisfies Config);
-  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
-  const checkedIdentity = deferred<UserResp>();
-  vi.spyOn(api, "getMe").mockReturnValue(checkedIdentity.promise);
-  const disconnectVoice = vi.spyOn(voiceSession, "disconnect");
-  const injectVoiceText = vi.spyOn(voiceSession, "injectText");
-
-  vi.mocked(api.listHarnesses).mockResolvedValue([
-    { name: "claude", models: [], supportsImages: true, supportsCompact: false, supportsModelRefresh: false },
-  ]);
-  const createPreview = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:account-a");
-  const revokePreview = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-  renderApp();
-  await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
-  const promptForm = screen.getByTestId("prompt-input").closest("form");
-  if (!promptForm) throw new Error("Prompt form missing");
-  await waitFor(() => expect(within(promptForm).getByTestId("attach-images")).toBeEnabled());
-  chooseDraftImage(promptForm, new File(["private image"], "private.png", { type: "image/png" }));
-  expect(createPreview).toHaveBeenCalledOnce();
-  await waitForTaskEventsSubscription();
-  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "a-task", title: "Account A task" })] });
-  expect(await screen.findByText("Account A task")).toBeInTheDocument();
-  dispatchWarning({
-    id: "same-id",
-    category: "ci_poll_failed",
-    message: "CI polling failed. CI status may be out of date.",
-    details: [{ repo: "repos/a", error: "rate limit exceeded" }],
-  });
-  expect(screen.getByText("CI polling failed. CI status may be out of date.")).toBeInTheDocument();
-  await screen.findByTestId("voice-overlay");
-  voiceSession.setState((state) => ({ ...state, connected: true }));
-  expect(getVoiceTaskNumber("a-task")).toBe(1);
-  dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "a-task", title: "Account A task", state: "running" }) });
-  dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "a-task", title: "Account A task", state: "waiting" }) });
-  expect(notifications.notify).toHaveBeenCalledWith("a-task", "Account A task is ready", "caic-waiting-a-task", {
-    enabled: true,
-  });
-
-  dispatchSSE({ kind: "health", health: highHealth });
-  expect(screen.getByRole("link", { name: "CPU high, memory high — open System" })).toBeInTheDocument();
-  const user = userEvent.setup();
-  await user.click(screen.getByTitle("account-a"));
-  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
-  expect(screen.getByText("Checking your session…")).toBeInTheDocument();
-  expect(revokePreview).toHaveBeenCalledWith("blob:account-a");
-  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
-  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
-  expect(screen.queryByText("CI polling failed. CI status may be out of date.")).not.toBeInTheDocument();
-  expect(notifications.dismissNotification).toHaveBeenCalledWith("a-task");
-  expect(disconnectVoice).toHaveBeenCalled();
-  expect(voiceSession.state.connected).toBe(false);
-  expect(getVoiceTaskNumber("a-task")).toBeUndefined();
-
-  checkedIdentity.resolve({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" });
-  await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
-  expect(screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" })).toBeInTheDocument();
-  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
-  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
-  expect(vi.mocked(api.listRepos)).toHaveBeenCalledTimes(2);
-
-  accountBRepos.resolve([repoB]);
-  await waitFor(() => expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument());
-  await screen.findByTestId("voice-overlay");
-  injectVoiceText.mockClear();
-  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "b-task", title: "Account B task" })] });
-  expect(await screen.findByText("Account B task")).toBeInTheDocument();
-  dispatchWarning({
-    id: "same-id",
-    category: "ci_poll_failed",
-    message: "CI polling failed. CI status may be out of date.",
-    details: [{ repo: "repos/b", error: "connection refused" }],
-  });
-  expect(screen.getByText("CI polling failed. CI status may be out of date.")).toBeInTheDocument();
-  expect(injectVoiceText).not.toHaveBeenCalled();
-  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
-  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
-});
-
 it("removes account data when the event stream discovers /auth/me returned 404", async () => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
@@ -833,46 +635,6 @@ it("removes account data when the event stream discovers /auth/me returned 404",
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /CPU .* — open System/ })).not.toBeInTheDocument();
   expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
-});
-
-it("ignores an old account's delayed /auth/me probe after switching accounts", async () => {
-  window.__CAIC_BOOTSTRAP__ = {
-    authProviders: ["github"],
-    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
-  };
-  vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockResolvedValueOnce([repoB]);
-  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
-  vi.spyOn(api, "getMe").mockResolvedValue({
-    id: "b",
-    sessionID: "session-b",
-    provider: "github",
-    username: "account-b",
-  });
-  const oldProbe = Promise.withResolvers<Response>();
-
-  renderApp();
-  await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
-  await waitForTaskEventsSubscription();
-  const priorFetch = globalThis.fetch;
-  vi.spyOn(globalThis, "fetch").mockImplementation((request, init) => {
-    if (request === "/auth/me") return oldProbe.promise;
-    return priorFetch(request, init);
-  });
-  const taskStream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource | undefined;
-  if (!taskStream) throw new Error("Task stream did not start");
-  taskStream.onerror?.(new Event("error"));
-
-  const user = userEvent.setup();
-  await user.click(screen.getByTitle("account-a"));
-  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
-  await waitFor(() => expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument());
-  oldProbe.resolve(new Response(null, { status: 404 }));
-  await Promise.resolve();
-
-  expect(screen.getByTitle("account-b")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" })).toBeInTheDocument();
-  expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).not.toBeInTheDocument();
 });
 
 describe("App task list loading state", () => {

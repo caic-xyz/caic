@@ -14,17 +14,21 @@ export default function BrowserVoiceShell() {
   const s = useAppState();
   return (
     <Show when={s.voiceGatewayAvailable()}>
-      <SharedBrowserVoiceShell
-        service="caic"
-        toolGroup="tasks"
-        clientName="caic-frontend"
-        preparation={s.frontendPreparation}
-        authorize={authorizeVoice}
-        setupFailed="Voice gateway setup failed. Reload the page to retry."
-        onError={(error) => console.error("Could not configure caic voice gateway", error)}
-      >
-        {({ session }) => <VoiceTaskUpdates tasks={s.tasks} session={session} />}
-      </SharedBrowserVoiceShell>
+      <Show when={s.frontendPreparation()} keyed>
+        {(preparation) => (
+          <SharedBrowserVoiceShell
+            service="caic"
+            toolGroup="tasks"
+            clientName="caic-frontend"
+            preparation={preparation}
+            authorize={authorizeVoice}
+            setupFailed="Voice gateway setup failed. Reload the page to retry."
+            onError={(error) => console.error("Could not configure caic voice gateway", error)}
+          >
+            {({ session }) => <VoiceTaskUpdates tasks={s.tasks} session={session} />}
+          </SharedBrowserVoiceShell>
+        )}
+      </Show>
     </Show>
   );
 }

@@ -1,7 +1,17 @@
 // Account-owned task membership, initial voice data readiness, connection state, settings, actions, caches, and drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
-import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
+import {
+  batch,
+  createContext,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  untrack,
+  useContext,
+  type JSX,
+} from "solid-js";
 import { createStore } from "solid-js/store";
 import { useNavigate, useLocation } from "@solidjs/router";
 
@@ -32,6 +42,7 @@ import type {
 } from "@sdk/types.gen";
 
 import { useHostMode } from "@maruel/gomode/web/HostMode";
+import type { FrontendPreparationScope } from "@maruel/gomode/web/FrontendVoiceTools";
 
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
@@ -98,8 +109,22 @@ function createAppStore() {
   const auth = useAuth();
   const identity = auth.frontendPreparation();
   if (identity === null) throw new Error("Task state requires an established identity");
-  const frontendPreparation = identity.createScope();
-  onCleanup(() => frontendPreparation.dispose());
+  const [frontendPreparation, setFrontendPreparation] = createSignal<FrontendPreparationScope>(identity.createScope());
+  createEffect(
+    on(
+      () => auth.frontendPreparation(),
+      (next) => {
+        if (next === null) return;
+        const scope = next.createScope();
+        setFrontendPreparation((previous) => {
+          previous.dispose();
+          return scope;
+        });
+      },
+      { defer: true },
+    ),
+  );
+  onCleanup(() => untrack(frontendPreparation).dispose());
   const hostMode = useHostMode();
   const initialTaskId = taskIdFromPath(location.pathname);
   let initialTaskFocusClaimed = false;
@@ -128,7 +153,7 @@ function createAppStore() {
   // this account, including an empty list. Reconnects retain usable cached
   // tasks; ordinary deltas and partial reconnect snapshots do not revoke it.
   const [initialTasksReady, setInitialTasksReady] = createSignal(false);
-  createEffect(() => frontendPreparation.setDataReady(initialTasksReady()));
+  createEffect(() => frontendPreparation().setDataReady(initialTasksReady()));
   let taskStreamGeneration = 0;
   let taskMembership = new Set<string>();
   const [tasksLoading, setTasksLoading] = createSignal(true);

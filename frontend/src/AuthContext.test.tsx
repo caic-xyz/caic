@@ -79,6 +79,73 @@ it("grants native access only for signed-in or auth-disabled bootstrap", async (
   await waitFor(() => expect(noAuth).toHaveBeenCalledWith('{"authChanged":true,"nativeAccess":true}'));
 });
 
+it("refreshes a same-account session in place", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(Response.json({ id: "a", sessionID: "session-b", provider: "github", username: "account-a" }));
+  await expect(currentAuth().refreshIdentity()).resolves.toBe(true);
+  expect(currentAuth().ready()).toBe(true);
+  expect(currentAuth().user()?.sessionID).toBe("session-b");
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({ cache: "no-store" });
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+  expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":true}');
+});
+
+it("reloads when the cookie identity changes accounts", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" }),
+  );
+
+  await expect(currentAuth().refreshIdentity()).resolves.toBe(false);
+  expect(currentAuth().ready()).toBe(false);
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+  expect(postMessage).toHaveBeenCalledTimes(2);
+});
+
+it("reloads when the refreshed identity is missing", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ error: { code: "NOT_FOUND", message: "missing" } }, { status: 404 }),
+  );
+
+  await expect(currentAuth().refreshIdentity()).resolves.toBe(false);
+  expect(currentAuth().ready()).toBe(false);
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+  expect(postMessage).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the rendered identity when an identity refresh fails", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network unavailable"));
+
+  await expect(currentAuth().refreshIdentity()).rejects.toThrow("network unavailable");
+  expect(currentAuth().ready()).toBe(true);
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenCalledTimes(1);
+});
+
+it("ignores a stale refresh after the identity changes", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  const probe = Promise.withResolvers<Response>();
+  vi.spyOn(globalThis, "fetch").mockReturnValue(probe.promise);
+  const refresh = currentAuth().refreshIdentity();
+  await Promise.resolve();
+  currentAuth().confirmLoggedOut();
+  probe.resolve(Response.json({ id: "a", sessionID: "session-a", provider: "github", username: "account-a" }));
+  await expect(refresh).resolves.toBe(false);
+  expect(currentAuth().user()).toBeNull();
+  expect(postMessage).toHaveBeenLastCalledWith('{"authChanged":true,"nativeAccess":false}');
+});
+
 it("settles a fallback identity check as logged out when /auth/me returns 404", async () => {
   delete window.__CAIC_BOOTSTRAP__;
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -115,57 +182,75 @@ it("keeps native monitoring paused until logout settles", async () => {
   expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":false}');
 });
 
-it("restores a confirmed signed-in user after a failed logout", async () => {
+it("refreshes a same-account session after a failed logout", async () => {
   const postMessage = renderAuth();
   await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
   vi.mocked(api.logout).mockRejectedValue(new Error("logout failed"));
-  vi.mocked(api.getMe).mockResolvedValue({
-    id: "b",
-    sessionID: "session-b",
-    provider: "github",
-    username: "account-b",
-  });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "a", sessionID: "session-b", provider: "github", username: "account-a" }),
+  );
 
   await currentAuth().logout();
   expect(currentAuth().ready()).toBe(true);
-  expect(currentAuth().user()?.username).toBe("account-b");
+  expect(currentAuth().user()?.sessionID).toBe("session-b");
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
   expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":true}');
 });
 
-it("settles logged out when identity check confirms 401 after logout error", async () => {
+it("reloads when a failed logout recovers a different account", async () => {
   const postMessage = renderAuth();
   await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
   vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
-  vi.mocked(api.getMe).mockRejectedValue(new APIError(401, "UNAUTHORIZED"));
-
-  await currentAuth().logout();
-  expect(currentAuth().ready()).toBe(true);
-  expect(currentAuth().user()).toBeNull();
-  expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":false}');
-});
-
-it("settles logged out when identity check confirms 404 after logout error", async () => {
-  const postMessage = renderAuth();
-  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
-  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
-  vi.mocked(api.getMe).mockRejectedValue(new APIError(404, "NOT_FOUND"));
-
-  await currentAuth().logout();
-  expect(currentAuth().ready()).toBe(true);
-  expect(currentAuth().user()).toBeNull();
-  expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":false}');
-});
-
-it("keeps the previous user hidden and native paused when identity is uncertain", async () => {
-  const postMessage = renderAuth();
-  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
-  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
-  vi.mocked(api.getMe).mockRejectedValue(new Error("network unavailable"));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" }),
+  );
 
   await currentAuth().logout();
   expect(currentAuth().ready()).toBe(false);
-  expect(currentAuth().user()?.username).toBe("account-a");
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenCalledTimes(2);
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+});
+
+it("reloads when logout recovery confirms 401", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ error: { code: "UNAUTHORIZED", message: "missing" } }, { status: 401 }),
+  );
+
+  await currentAuth().logout();
+  expect(currentAuth().ready()).toBe(false);
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenCalledTimes(2);
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+});
+
+it("reloads when logout recovery confirms 404", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ error: { code: "NOT_FOUND", message: "missing" } }, { status: 404 }),
+  );
+
+  await currentAuth().logout();
+  expect(currentAuth().ready()).toBe(false);
+  expect(currentAuth().user()?.id).toBe("a");
+  expect(postMessage).toHaveBeenCalledTimes(2);
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+});
+
+it("keeps the rendered identity when logout recovery fails", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network unavailable"));
+
+  await currentAuth().logout();
+  expect(currentAuth().ready()).toBe(true);
+  expect(currentAuth().user()?.id).toBe("a");
   expect(postMessage).toHaveBeenCalledTimes(2);
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
 });

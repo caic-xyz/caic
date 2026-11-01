@@ -1,8 +1,7 @@
-// Public pairing pages verify the approving account/session and expose shared recovery with normal caic cookie sessions.
+// Public pairing pages refresh the approving account/session in place and expose shared recovery with normal caic cookie sessions.
 
 import { Show } from "solid-js";
 import { DeviceLoginApproval, DeviceLoginDisplay } from "@maruel/gomode/web/DeviceLogin";
-import { APIError, createApiClient } from "@sdk/api.gen";
 import { useAuth } from "../AuthContext";
 import LoginPage from "./LoginPage";
 import styles from "./DeviceLoginPage.module.css";
@@ -40,28 +39,16 @@ export function DeviceApprovalPage() {
   const auth = useAuth();
   const verifyApprover = async (signal: AbortSignal) => {
     const shown = auth.user();
-    try {
-      const current = await createApiClient((url, init) => fetch(url, { ...init, cache: "no-store", signal })).getMe();
-      if (signal.aborted) return false;
-      if (
-        !shown ||
-        current.id !== shown.id ||
-        current.sessionID !== shown.sessionID ||
-        current.username !== shown.username ||
-        current.provider !== shown.provider
-      ) {
-        auth.reloadIdentity();
-        return false;
-      }
-      return true;
-    } catch (error) {
-      if (signal.aborted) return false;
-      if (error instanceof APIError && (error.status === 401 || error.status === 404)) {
-        auth.reloadIdentity();
-        return false;
-      }
-      throw error;
-    }
+    if (!(await auth.refreshIdentity(signal)) || signal.aborted) return false;
+    const current = auth.user();
+    return (
+      !!shown &&
+      !!current &&
+      current.id === shown.id &&
+      current.sessionID === shown.sessionID &&
+      current.username === shown.username &&
+      current.provider === shown.provider
+    );
   };
   return (
     <Show when={auth.ready()} fallback={<p role="status">Checking session…</p>}>
@@ -73,7 +60,7 @@ export function DeviceApprovalPage() {
           </main>
         }
       >
-        <Show when={auth.user()?.sessionID} keyed fallback={<LoginPage next="/device" />}>
+        <Show when={auth.user()?.sessionID} fallback={<LoginPage next="/device" />}>
           <main class={styles.page}>
             <h1>Approve device sign-in</h1>
             <p>

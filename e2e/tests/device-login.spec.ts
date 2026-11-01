@@ -5,12 +5,6 @@ import { test, expect } from "@playwright/test";
 const origin = process.env.CAIC_E2E_AUTH_URL ?? "";
 if (!origin) throw new Error("Missing configured device-login test origin");
 
-// A rejected identity probe reloads the document. Playwright holds locator
-// queries until the reloaded document commits, and that can outlast the default
-// expect timeout on a loaded CI runner, so the first query after each reload
-// gets an explicit budget.
-const reloadTimeout = { timeout: 20_000 };
-
 test("device approval, normal permissions, logout, and network protection", async ({ browser }) => {
   const display = await browser.newContext({ baseURL: origin, viewport: { width: 640, height: 480 } });
   const approver = await browser.newContext({ baseURL: origin });
@@ -320,9 +314,17 @@ test("account changes require re-entering the code before approval", async ({ br
     // check must reject the stale approval before sending a decision.
     await expect(approval.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
     await approval.evaluate(() => sessionStorage.removeItem("test-auth-events"));
+    await approval.evaluate(() => {
+      (window as unknown as { identityDocument?: string }).identityDocument = "rendered";
+    });
+    const reloaded = approval.waitForEvent("load");
     await approval.getByRole("button", { name: "Approve sign-in", exact: true }).click();
+    await reloaded;
     await expect(approval).toHaveURL(`${origin}/device`);
-    await expect(approval.getByText("Signed in as device-reviewer (gitlab).")).toBeVisible(reloadTimeout);
+    expect(
+      await approval.evaluate(() => (window as unknown as { identityDocument?: string }).identityDocument),
+    ).toBeUndefined();
+    await expect(approval.getByText("Signed in as device-reviewer (gitlab).")).toBeVisible();
     expect(await approval.evaluate(() => JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]"))).toEqual([
       { authChanging: true },
       { authChanged: true, nativeAccess: true },
@@ -477,14 +479,21 @@ test("same-account session replacement requires code re-entry and rejects an old
     const replacement = (await (await approver.request.get("/auth/me")).json()) as { id: string; sessionID: string };
     expect(replacement.id).toBe(original.id);
     expect(replacement.sessionID).not.toBe(original.sessionID);
+    await page.evaluate(() => {
+      (window as unknown as { identityDocument?: string }).identityDocument = "rendered";
+    });
     await page.getByRole("button", { name: "Approve sign-in", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("", reloadTimeout);
+    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Device code" })).toBeFocused();
+    await expect(page.getByRole("status")).toHaveText("Your account or request changed. Check the code again.");
+    expect(await page.evaluate(() => (window as unknown as { identityDocument?: string }).identityDocument)).toBe(
+      "rendered",
+    );
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toHaveCount(0);
     await page.getByRole("textbox", { name: "Device code" }).fill(code);
     await expect(page.getByRole("button", { name: "Approve sign-in", exact: true })).toBeVisible();
     let staleBody = "";
     let staleHeaders: Record<string, string> = {};
-    await page.evaluate(() => sessionStorage.removeItem("test-auth-events"));
     // Replace again after the fresh /me check, just before the actual POST.
     // One-shot interception removes the pattern before the identity reload can abort it.
     let finishReplacement!: () => void;
@@ -505,13 +514,24 @@ test("same-account session replacement requires code re-entry and rejects an old
       },
       { times: 1 },
     );
+    await page.evaluate(() => {
+      sessionStorage.removeItem("test-auth-events");
+      (window as unknown as { identityDocument?: string }).identityDocument = "rendered";
+    });
     const rejected = page.waitForResponse((response) => response.url().endsWith("/auth/device/approve"));
     await page.getByRole("button", { name: "Approve sign-in", exact: true }).click();
     expect((await rejected).status()).toBe(401);
     await replacementFinished;
-    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("", reloadTimeout);
+    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Device code" })).toBeFocused();
+    await expect(page.getByRole("status")).toHaveText("Your account or request changed. Check the code again.");
+    expect(await page.evaluate(() => (window as unknown as { identityDocument?: string }).identityDocument)).toBe(
+      "rendered",
+    );
     await expect(page.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
     expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]"))).toEqual([
+      { authChanging: true },
+      { authChanged: true, nativeAccess: true },
       { authChanging: true },
       { authChanged: true, nativeAccess: true },
     ]);
@@ -587,8 +607,10 @@ test("a delayed missing-session probe rediscovers the replacement without revoki
       },
       { times: 1 },
     );
+    const reloaded = page.waitForEvent("load");
     await page.getByRole("button", { name: "Approve sign-in", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("", reloadTimeout);
+    await reloaded;
+    await expect(page.getByRole("textbox", { name: "Device code" })).toHaveValue("");
     await expect(page.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
     expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]"))).toEqual([
       { authChanging: true },
@@ -702,10 +724,16 @@ test("stale account logout preserves a same-account replacement session", async 
     expect(replacement.id).toBe(original.id);
     expect(replacement.sessionID).not.toBe(original.sessionID);
     await page.evaluate(() => sessionStorage.removeItem("logout-auth-events"));
+    await page.evaluate(() => {
+      (window as unknown as { identityDocument?: string }).identityDocument = "rendered";
+    });
     const rejected = page.waitForResponse((response) => response.url().endsWith("/auth/logout"));
     await page.getByRole("button", { name: "Use another account", exact: true }).click();
     expect((await rejected).status()).toBe(401);
-    await expect(page.getByRole("button", { name: "Use another account", exact: true })).toBeVisible(reloadTimeout);
+    await expect(page.getByRole("button", { name: "Use another account", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { identityDocument?: string }).identityDocument)).toBe(
+      "rendered",
+    );
     expect(await (await context.request.get("/auth/me")).json()).toMatchObject({ sessionID: replacement.sessionID });
     const sessions = await (await context.request.get("/auth/sessions")).json();
     expect(sessions.sessions).toContainEqual(expect.objectContaining({ id: replacement.sessionID, current: true }));

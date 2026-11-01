@@ -197,7 +197,7 @@ function Shell(props: { children?: JSX.Element }) {
             open={shortcutsOpen()}
             onOpenChange={setShortcutsOpen}
             voiceAvailable={
-              hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && s.frontendPreparation.ready()
+              hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && s.frontendPreparation().ready()
             }
           />
           <VoiceTaskFocus mobile={mobile} />
