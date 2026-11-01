@@ -158,7 +158,11 @@ export const AuthProvider: ParentComponent = (props) => {
         reloadIdentity();
         return false;
       }
-      if (ready()) publishAuth({ authChanging: true });
+      if (fresh.sessionID === shown.sessionID && ready()) {
+        setUser(fresh);
+        return true;
+      }
+      if (fresh.sessionID !== shown.sessionID && ready()) publishAuth({ authChanging: true });
       settleIdentity(fresh, true);
       return true;
     } catch (error) {

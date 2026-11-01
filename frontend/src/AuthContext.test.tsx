@@ -93,6 +93,19 @@ it("refreshes a same-account session in place", async () => {
   expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":true}');
 });
 
+it("skips native auth transitions for an unchanged session", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "a", sessionID: "session-a", provider: "github", username: "Renamed account" }),
+  );
+
+  await expect(currentAuth().refreshIdentity()).resolves.toBe(true);
+  expect(currentAuth().ready()).toBe(true);
+  expect(currentAuth().user()?.username).toBe("Renamed account");
+  expect(postMessage).toHaveBeenCalledTimes(1);
+});
+
 it("reloads when the cookie identity changes accounts", async () => {
   const postMessage = renderAuth();
   await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
@@ -193,6 +206,21 @@ it("refreshes a same-account session after a failed logout", async () => {
   await currentAuth().logout();
   expect(currentAuth().ready()).toBe(true);
   expect(currentAuth().user()?.sessionID).toBe("session-b");
+  expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
+  expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":true}');
+});
+
+it("restores readiness after an unchanged session refresh during logout recovery", async () => {
+  const postMessage = renderAuth();
+  await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+  vi.mocked(api.logout).mockRejectedValue(new Error("logout response lost"));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ id: "a", sessionID: "session-a", provider: "github", username: "account-a" }),
+  );
+
+  await currentAuth().logout();
+  expect(currentAuth().ready()).toBe(true);
+  expect(currentAuth().user()?.id).toBe("a");
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
   expect(postMessage).toHaveBeenNthCalledWith(3, '{"authChanged":true,"nativeAccess":true}');
 });

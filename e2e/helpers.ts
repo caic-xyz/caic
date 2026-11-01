@@ -1,6 +1,6 @@
 // Shared e2e fixtures: isolated browser task choices, typed API client, and utilities.
 import { ok } from "node:assert/strict";
-import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test as base, expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
@@ -9,6 +9,32 @@ import path from "node:path";
 import { type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import { createPromptClient } from "../frontend/src/api";
 import type { HistoryBootstrap, PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
+
+// Record the host auth bridge used by device-login journeys and acknowledge native access.
+export async function installDeviceLoginAuthBridge(context: BrowserContext, eventKey: string) {
+  await context.addInitScript((storageKey) => {
+    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
+    const bridge: {
+      onmessage?: ((event: { data: string }) => void) | null;
+      postMessage(message: string): void;
+    } = {
+      postMessage(message: string) {
+        const events = JSON.parse(sessionStorage.getItem(storageKey) ?? "[]") as Record<string, unknown>[];
+        const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message) as Record<string, unknown>;
+        if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
+          throw new Error("Invalid bridge owner");
+        events.push(auth);
+        if (auth.authChanged === true && auth.nativeAccess === true) {
+          bridge.onmessage?.({
+            data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
+          });
+        }
+        sessionStorage.setItem(storageKey, JSON.stringify(events));
+      },
+    };
+    Object.defineProperty(window, "gomodeAuth", { value: bridge });
+  }, eventKey);
+}
 
 // Exercise the public asynchronous native bridge, including its page/identity/scope binding.
 export async function installNativeVoiceBridge(page: Page, connected: boolean) {

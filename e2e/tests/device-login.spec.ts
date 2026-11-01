@@ -1,6 +1,7 @@
 // Two browser contexts pair through explicit approval and receive normal caic cookie sessions.
 
 import { test, expect } from "@playwright/test";
+import { installDeviceLoginAuthBridge } from "../helpers";
 
 const origin = process.env.CAIC_E2E_AUTH_URL ?? "";
 if (!origin) throw new Error("Missing configured device-login test origin");
@@ -8,25 +9,7 @@ if (!origin) throw new Error("Missing configured device-login test origin");
 test("device approval, normal permissions, logout, and network protection", async ({ browser }) => {
   const display = await browser.newContext({ baseURL: origin, viewport: { width: 640, height: 480 } });
   const approver = await browser.newContext({ baseURL: origin });
-  await display.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    (window as typeof window & { gomodeAuth: { postMessage(message: string): void } }).gomodeAuth = {
-      postMessage(message: string) {
-        const events: string[] = JSON.parse(sessionStorage.getItem("auth-events") ?? "[]");
-        const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-        if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-          throw new Error("Invalid bridge owner");
-        events.push(JSON.stringify(auth));
-        if (auth.authChanged === true && auth.nativeAccess === true) {
-          const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-          bridge.gomodeAuth.onmessage?.({
-            data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-          });
-        }
-        sessionStorage.setItem("auth-events", JSON.stringify(events));
-      },
-    };
-  });
+  await installDeviceLoginAuthBridge(display, "auth-events");
   const screen = await display.newPage();
   const approval = await approver.newPage();
   const errors: string[] = [];
@@ -75,8 +58,8 @@ test("device approval, normal permissions, logout, and network protection", asyn
       await approval.getByRole("button", { name: "Approve sign-in" }).click();
       await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
       expect(
-        await screen.evaluate(() => (JSON.parse(sessionStorage.getItem("auth-events") ?? "[]") as string[]).slice(-2)),
-      ).toEqual(['{"authChanging":true}', '{"authChanged":true,"nativeAccess":true}']);
+        await screen.evaluate(() => (JSON.parse(sessionStorage.getItem("auth-events") ?? "[]") as unknown[]).slice(-2)),
+      ).toEqual([{ authChanging: true }, { authChanged: true, nativeAccess: true }]);
       const me = await display.request.get("/auth/me");
       expect(me.status()).toBe(200);
       expect(await me.json()).toMatchObject({
@@ -268,27 +251,7 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
 test("account changes require re-entering the code before approval", async ({ browser }) => {
   const display = await browser.newContext({ baseURL: origin });
   const approver = await browser.newContext({ baseURL: origin });
-  await approver.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    Object.defineProperty(window, "gomodeAuth", {
-      value: {
-        postMessage: (message: string) => {
-          const events: unknown[] = JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]");
-          const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-          if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-            throw new Error("Invalid bridge owner");
-          events.push(auth);
-          if (auth.authChanged === true && auth.nativeAccess === true) {
-            const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-            bridge.gomodeAuth.onmessage?.({
-              data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-            });
-          }
-          sessionStorage.setItem("test-auth-events", JSON.stringify(events));
-        },
-      },
-    });
-  });
+  await installDeviceLoginAuthBridge(approver, "test-auth-events");
   try {
     const screen = await display.newPage();
     const approval = await approver.newPage();
@@ -443,27 +406,7 @@ test("same-account session replacement requires code re-entry and rejects an old
 }) => {
   const display = await browser.newContext({ baseURL: origin });
   const approver = await browser.newContext({ baseURL: origin });
-  await approver.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    Object.defineProperty(window, "gomodeAuth", {
-      value: {
-        postMessage: (message: string) => {
-          const events: unknown[] = JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]");
-          const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-          if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-            throw new Error("Invalid bridge owner");
-          events.push(auth);
-          if (auth.authChanged === true && auth.nativeAccess === true) {
-            const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-            bridge.gomodeAuth.onmessage?.({
-              data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-            });
-          }
-          sessionStorage.setItem("test-auth-events", JSON.stringify(events));
-        },
-      },
-    });
-  });
+  await installDeviceLoginAuthBridge(approver, "test-auth-events");
   try {
     const screen = await display.newPage();
     const page = await approver.newPage();
@@ -532,8 +475,6 @@ test("same-account session replacement requires code re-entry and rejects an old
     expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]"))).toEqual([
       { authChanging: true },
       { authChanged: true, nativeAccess: true },
-      { authChanging: true },
-      { authChanged: true, nativeAccess: true },
     ]);
     const current = (await (await approver.request.get("/auth/me")).json()) as { sessionID: string };
     // Removing or updating the public pin cannot reuse the old CSRF proof.
@@ -563,27 +504,7 @@ test("a delayed missing-session probe rediscovers the replacement without revoki
 }) => {
   const display = await browser.newContext({ baseURL: origin });
   const approver = await browser.newContext({ baseURL: origin });
-  await approver.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    Object.defineProperty(window, "gomodeAuth", {
-      value: {
-        postMessage: (message: string) => {
-          const events: unknown[] = JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]");
-          const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-          if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-            throw new Error("Invalid bridge owner");
-          events.push(auth);
-          if (auth.authChanged === true && auth.nativeAccess === true) {
-            const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-            bridge.gomodeAuth.onmessage?.({
-              data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-            });
-          }
-          sessionStorage.setItem("test-auth-events", JSON.stringify(events));
-        },
-      },
-    });
-  });
+  await installDeviceLoginAuthBridge(approver, "test-auth-events");
   try {
     const screen = await display.newPage();
     const page = await approver.newPage();
@@ -628,27 +549,7 @@ test("a delayed missing-session probe rediscovers the replacement without revoki
 
 test("session sign-out rediscovers a replacement cookie before settling native identity", async ({ browser }) => {
   const context = await browser.newContext({ baseURL: origin });
-  await context.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    Object.defineProperty(window, "gomodeAuth", {
-      value: {
-        postMessage: (message: string) => {
-          const events: unknown[] = JSON.parse(sessionStorage.getItem("test-auth-events") ?? "[]");
-          const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-          if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-            throw new Error("Invalid bridge owner");
-          events.push(auth);
-          if (auth.authChanged === true && auth.nativeAccess === true) {
-            const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-            bridge.gomodeAuth.onmessage?.({
-              data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-            });
-          }
-          sessionStorage.setItem("test-auth-events", JSON.stringify(events));
-        },
-      },
-    });
-  });
+  await installDeviceLoginAuthBridge(context, "test-auth-events");
   try {
     const page = await context.newPage();
     expect((await context.request.get("/auth/gitlab/start?next=/device")).ok()).toBe(true);
@@ -689,25 +590,7 @@ test("session sign-out rediscovers a replacement cookie before settling native i
 
 test("stale account logout preserves a same-account replacement session", async ({ browser }) => {
   const context = await browser.newContext({ baseURL: origin });
-  await context.addInitScript(() => {
-    Object.defineProperty(window, "goModeFrontendDocument", { value: Promise.resolve("device-document") });
-    (window as typeof window & { gomodeAuth: { postMessage(message: string): void } }).gomodeAuth = {
-      postMessage(message: string) {
-        const events = JSON.parse(sessionStorage.getItem("logout-auth-events") ?? "[]") as unknown[];
-        const { frontendDocument, frontendRequest, ...auth } = JSON.parse(message);
-        if (frontendDocument !== "device-document" || typeof frontendRequest !== "string")
-          throw new Error("Invalid bridge owner");
-        events.push(auth);
-        if (auth.authChanged === true && auth.nativeAccess === true) {
-          const bridge = window as unknown as { gomodeAuth: { onmessage?: (event: { data: string }) => void } };
-          bridge.gomodeAuth.onmessage?.({
-            data: JSON.stringify({ frontendDocument, frontendRequest, frontendToken: "device-token" }),
-          });
-        }
-        sessionStorage.setItem("logout-auth-events", JSON.stringify(events));
-      },
-    };
-  });
+  await installDeviceLoginAuthBridge(context, "logout-auth-events");
   try {
     const page = await context.newPage();
     await page.goto("/device");
