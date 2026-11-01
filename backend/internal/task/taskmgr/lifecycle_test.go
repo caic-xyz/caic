@@ -26,6 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
@@ -253,6 +254,42 @@ func TestLifecycle(t *testing.T) {
 						t.Fatal("shutdown left an attached local session")
 					}
 				})
+			}
+		})
+	})
+	t.Run("finishPurge", func(t *testing.T) {
+		t.Run("waits_for_the_operation_that_owns_the_incarnation", func(t *testing.T) {
+			t.Parallel()
+			fake := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(task.StateStopped)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			recordTestTaskLog(t, m, e)
+			// A Stop that still owns the incarnation holds the lock while it
+			// publishes its terminal result and trailer. The purge must not
+			// transition the task or remove the runtime in the meantime.
+			e.Lifecycle.operationMu.Lock()
+			returned := make(chan struct{})
+			go func() {
+				defer close(returned)
+				e.Lifecycle.finishPurge(t.Context(), tk, false)
+			}()
+			select {
+			case <-returned:
+				e.Lifecycle.operationMu.Unlock()
+				t.Fatal("finishPurge returned while a lifecycle operation held the incarnation")
+			case <-time.After(20 * time.Millisecond):
+			}
+			e.Lifecycle.operationMu.Unlock()
+			<-returned
+			if got := tk.GetState(); got != task.StatePurged {
+				t.Errorf("state = %s, want purged", got)
+			}
+			if got := fake.Status("ctr-1"); got != runtimetest.StatusPurged {
+				t.Errorf("instance status = %s, want purged", got)
 			}
 		})
 	})

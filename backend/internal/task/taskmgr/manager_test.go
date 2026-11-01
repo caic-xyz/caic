@@ -347,13 +347,15 @@ func (b *waitingLaunchBackend) Launch(context.Context, []runtime.Repo, *runtime.
 
 // blockingStopBackend blocks in Stop until release is closed (or the context is
 // cancelled), widening the Stop/Purge race window. started and returned signal
-// the call's entry and exit.
+// the call's entry and exit. onPurge observes the entry when the runtime purge
+// runs, which is where a purge overtaking a stop becomes visible.
 type blockingStopBackend struct {
 	*runtimetest.FakeBackend
 
 	started  chan struct{}
 	returned chan struct{}
 	release  chan struct{}
+	onPurge  func()
 }
 
 func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
@@ -365,6 +367,13 @@ func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (b *blockingStopBackend) Purge(ctx context.Context, id runtime.ID) error {
+	if b.onPurge != nil {
+		b.onPurge()
+	}
+	return b.FakeBackend.Purge(ctx, id)
 }
 
 // blockedStopBackend ignores cancellation until the test releases it.
@@ -3674,6 +3683,10 @@ func TestManager(t *testing.T) {
 			m.Insert(tk.ID, entry)
 
 			recordTestTaskLog(t, m, entry)
+			// The purge must not reach the runtime before the stop it superseded
+			// publishes its result, or the entry and the log describe the stop.
+			var publishedDuringPurge *task.Result
+			fake.onPurge = func() { publishedDuringPurge = entry.Result() }
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
@@ -3717,6 +3730,9 @@ func TestManager(t *testing.T) {
 					t.Fatalf("state = %v, result = %v, want StatePurged after StopTask finishes", tk.GetState(), entry.Result())
 				}
 				time.Sleep(time.Millisecond)
+			}
+			if publishedDuringPurge == nil || publishedDuringPurge.State != task.StateStopped {
+				t.Fatalf("purge reached the runtime with published result %v, want the stopped result first", publishedDuringPurge)
 			}
 		})
 	})

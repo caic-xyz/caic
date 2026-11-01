@@ -34,7 +34,7 @@ type Lifecycle struct {
 
 	inputMu sync.Mutex // Serializes immediate input and waiting-turn queue delivery.
 
-	operationMu sync.Mutex // Keeps Stop/Revive completion in the same entry incarnation.
+	operationMu sync.Mutex // Keeps Stop/Revive/Purge completion in the same entry incarnation.
 
 	purgeMu         sync.Mutex
 	purgeCancel     context.CancelFunc
@@ -126,15 +126,8 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 			if !r.waitForPurgeDelay(purgeCtx, delay) {
 				return
 			}
-			if !t.SetStateIf(task.StateStopped, task.StatePurging) {
-				r.manager.log.InfoContext(purgeCtx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
-				return
-			}
-			r.manager.NotifyTaskChange()
 		}
-		cleanupCtx := context.WithoutCancel(purgeCtx)
-		r.cleanup(cleanupCtx, task.StatePurged)
-		r.manager.log.InfoContext(cleanupCtx, "purge completed", "task", t.ID, "final_state", t.GetState())
+		r.finishPurge(context.WithoutCancel(purgeCtx), t, purgeStoppedImmediately)
 	})
 	return nil
 }
@@ -829,6 +822,25 @@ func (r *Lifecycle) stopFailedSessionInstance(ctx context.Context, t *taskrun.Ta
 	if err := r.manager.Runtimes.Stop(ctx, id); err != nil {
 		r.manager.log.ErrorContext(ctx, "stop failed after session error", append(attrs, "err", err)...)
 	}
+}
+
+// finishPurge transitions a settled task to purging and removes its runtime while
+// operationMu is held. A Stop that still owns the incarnation publishes its
+// terminal result and trailer first; otherwise the purge would finish first and
+// the superseded stop would describe the task afterwards. Nothing else can start
+// once the task is purging, so this hold adds no contention.
+func (r *Lifecycle) finishPurge(ctx context.Context, t *taskrun.Task, stoppedImmediately bool) {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	if !stoppedImmediately {
+		if !t.SetStateIf(task.StateStopped, task.StatePurging) {
+			r.manager.log.InfoContext(ctx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
+			return
+		}
+		r.manager.NotifyTaskChange()
+	}
+	r.cleanup(ctx, task.StatePurged)
+	r.manager.log.InfoContext(ctx, "purge completed", "task", t.ID, "final_state", t.GetState())
 }
 
 func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
