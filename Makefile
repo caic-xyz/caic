@@ -15,7 +15,7 @@ help:
 	@printf '  %-34s - %s\n' 'make fix' 'Apply every autofix, then refresh generated indexes'
 	@printf '  %-34s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
 	@printf '  %-34s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
-	@printf '  %-34s - %s\n' 'make test-e2e' 'Run Playwright end-to-end tests (slow, needs a frontend build)'
+	@printf '  %-34s - %s\n' 'make test-e2e' 'Run Playwright end-to-end tests (slow)'
 	@printf '  %-34s - %s\n' 'make test-e2e-repeat' 'Repeat one Playwright spec with a fresh fake backend per round'
 	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
