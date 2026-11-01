@@ -9,12 +9,26 @@ import (
 )
 
 func BenchmarkSkillsFromCommand(b *testing.B) {
-	cmd := `sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && sed -n '1,240p' /home/user/.agents/skills/go-code-quality/SKILL.md`
-	b.ReportAllocs()
-	for range b.N {
-		if len(agent.SkillsFromCommand(cmd, "/repo")) != 2 {
-			b.Fatal("lost skill reads")
-		}
+	for _, tc := range []struct {
+		name string
+		cmd  string
+		want int
+	}{
+		{name: "no skill", cmd: "make verify && go test ./... && git status --short"},
+		{
+			name: "two reads",
+			cmd:  `sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && sed -n '1,240p' /home/user/.agents/skills/go-code-quality/SKILL.md`,
+			want: 2,
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if len(agent.SkillsFromCommand(tc.cmd, "/repo")) != tc.want {
+					b.Fatal("wrong skill reads")
+				}
+			}
+		})
 	}
 }
 

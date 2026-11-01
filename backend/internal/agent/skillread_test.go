@@ -130,6 +130,29 @@ func TestSkillsFromCommand(t *testing.T) {
 			},
 		},
 		{name: "pipeline hides read failure", in: "cat ~/.agents/skills/review/SKILL.md | head", want: nil},
+		// The next four inputs are recorded from real harness sessions: Codex,
+		// Claude Code, and Pi batch reads into one command, and OpenCode reads a
+		// skill directory outside the installed roots.
+		{
+			name: "recorded codex semicolon list",
+			in:   `/bin/bash -lc 'pwd; git status --short; cat docs/PLAN_SIMPLE_HISTORY.md; cat /home/user/.agents/skills/code-quality/references/typescript.md; cat /home/user/.agents/skills/web-frontend-quality/SKILL.md'`,
+			want: []agent.SkillFile{{Name: "web-frontend-quality", Path: "/home/user/.agents/skills/web-frontend-quality/SKILL.md"}},
+		},
+		{
+			name: "recorded claude code semicolon list",
+			in:   "cat ~/.claude/skills/web-frontend-quality/SKILL.md; ls ~/.claude/skills/web-frontend-quality ~/.claude/skills/procedural-music-generation; cat ~/.claude/skills/procedural-music-generation/SKILL.md",
+			want: []agent.SkillFile{{Name: "web-frontend-quality"}, {Name: "procedural-music-generation"}},
+		},
+		{
+			name: "recorded claude code cd",
+			in:   "cd /home/user/.agents/skills; grep -rn 'make verify' code-quality/SKILL.md; cat code-quality/SKILL.md",
+			want: []agent.SkillFile{{Name: "code-quality", Path: "/home/user/.agents/skills/code-quality/SKILL.md"}},
+		},
+		{
+			name: "recorded opencode skill dir outside the roots",
+			in:   "cat /tmp/go-skill/go-code-quality/SKILL.md",
+			want: nil,
+		},
 		{name: "quoted hash is not a comment", in: "cat '/tmp/#notes' && cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
 		{name: "quoted path", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{review}},
 		{name: "sed script mentions a skill", in: "sed -n '/~/.agents/skills/review/SKILL.md/p' /tmp/notes", want: nil},
@@ -137,7 +160,7 @@ func TestSkillsFromCommand(t *testing.T) {
 		{name: "subshell home-relative", in: "(cat ~/.agents/skills/review/SKILL.md)", want: []agent.SkillFile{review}},
 		{name: "quoted parenthesis in path", in: `cat "/home/notes)/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{{Name: "review", Path: "/home/notes)/.agents/skills/review/SKILL.md"}}},
 		{name: "subshell absolute", in: "(cat /home/u/.agents/skills/review/SKILL.md)", want: []agent.SkillFile{{Name: "review", Path: "/home/u/.agents/skills/review/SKILL.md"}}},
-		{name: "subshell cd", in: "(cd /other && cat .agents/skills/review/SKILL.md)", want: []agent.SkillFile{{Name: "review"}}},
+		{name: "subshell cd", in: "(cd /other && cat .agents/skills/review/SKILL.md)", want: []agent.SkillFile{{Name: "review", Path: "/other/.agents/skills/review/SKILL.md"}}},
 		{name: "escaped wrapper", in: `bash -lc "cat \"/a b/.agents/skills/review/SKILL.md\""`, want: []agent.SkillFile{{Name: "review", Path: "/a b/.agents/skills/review/SKILL.md"}}},
 		{name: "split substitution", in: "cat $(dirname /repo/file)/.agents/skills/review/SKILL.md", want: []agent.SkillFile{{Name: "review"}}},
 		{name: "empty", in: "", want: nil},
@@ -211,7 +234,8 @@ func TestInferredSkillReadsFromCommand(t *testing.T) {
 		{name: "relative with cwd", cmd: "cat .agents/skills/review/SKILL.md", cwd: "/repo", path: "/repo/.agents/skills/review/SKILL.md"},
 		{name: "relative without cwd", cmd: "cat .agents/skills/review/SKILL.md"},
 		{name: "dynamic prefix", cmd: "cat $ROOT/.agents/skills/review/SKILL.md", cwd: "/repo"},
-		{name: "cd dependent", cmd: "cd /other && cat .agents/skills/review/SKILL.md", cwd: "/repo"},
+		{name: "cd dependent", cmd: "cd /other && cat .agents/skills/review/SKILL.md", cwd: "/repo", path: "/other/.agents/skills/review/SKILL.md"},
+		{name: "cd into a skills root", cmd: "cd /home/user/.agents/skills && cat review/SKILL.md", cwd: "/repo", path: "/home/user/.agents/skills/review/SKILL.md"},
 		{name: "absolute after cd", cmd: "cd /other && cat /home/user/.agents/skills/review/SKILL.md", cwd: "/repo", path: "/home/user/.agents/skills/review/SKILL.md"},
 		{name: "home expansion unavailable", cmd: "cat ~/.agents/skills/review/SKILL.md", cwd: "/repo"},
 	} {

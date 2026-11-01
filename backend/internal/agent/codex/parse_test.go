@@ -278,7 +278,7 @@ func TestParseMessage(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct{ name, cmd, path string }{
 			{name: "relative operand", cmd: "cat .agents/skills/review/SKILL.md", path: "/repo/.agents/skills/review/SKILL.md"},
-			{name: "changed working directory", cmd: "cd /other && cat .agents/skills/review/SKILL.md"},
+			{name: "changed working directory", cmd: "cd /other && cat .agents/skills/review/SKILL.md", path: "/other/.agents/skills/review/SKILL.md"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()

@@ -30,6 +30,7 @@ require (
 	golang.org/x/net v0.59.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
@@ -270,7 +271,6 @@ require (
 	honnef.co/go/tools v0.8.1 // indirect
 	mvdan.cc/editorconfig v0.3.0 // indirect
 	mvdan.cc/gofumpt v0.12.0 // indirect
-	mvdan.cc/sh/v3 v3.14.1 // indirect
 	mvdan.cc/unparam v0.0.0-20260823230713-2fa3d841b0c8 // indirect
 )
 

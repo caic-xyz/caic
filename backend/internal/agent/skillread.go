@@ -6,6 +6,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
@@ -78,193 +80,220 @@ func (f *SkillFile) inferred(msgs []Message, sourceID string) []Message {
 // The caller must pass a command, not a whole tool input. Only simple
 // file-reading commands are considered; shell listings, searches, and globs
 // are not evidence that the skill file was opened. Relative operands resolve
-// against cwd; unresolved paths retain only the skill name.
+// against cwd and a literal cd target; unresolved paths retain only the skill
+// name.
+//
+// A read counts when its statement certainly ran and its status stays visible:
+// a `;` list, a newline, and an `&&` chain all count. A pipeline masks the
+// read's status behind its last stage, the right side of `||` may be skipped,
+// and a background statement outlives the result, so those contribute nothing.
+// A failing read inside the accepted forms still counts, because the shell
+// reports no per-statement status and the confirming tool result gates the
+// credit.
 func SkillsFromCommand(cmd, cwd string) []SkillFile {
-	if cmd == "" {
+	if !strings.Contains(cmd, "SKILL.md") {
+		return nil // most commands open no skill, and a parse cannot change that
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
 		return nil
 	}
-	cmd = strings.TrimSpace(cmd)
-	if strings.HasPrefix(cmd, "/bin/bash -lc ") || strings.HasPrefix(cmd, "bash -lc ") {
-		fields := shellReadWords(cmd)
-		if len(fields) == 3 {
-			return SkillsFromCommand(fields[2], cwd)
-		}
-		return nil
-	}
-
-	var files []SkillFile
-	cwdKnown := true
-	for _, segment := range shellReadSegments(cmd) {
-		fields := shellReadWords(segment)
-		// A substitution may span several words. None can supply a reliable
-		// path without the shell environment and the substitution result.
-		dynamic := strings.ContainsAny(segment, "$`")
-		if len(fields) == 0 {
-			continue
-		}
-		verb := fields[0]
-		switch verb {
-		case "cd", "pushd", "popd":
-			cwdKnown = false
-			continue
-		case "cat", "head", "tail", "less", "more", "bat", "nl", "sed":
-		default:
-			continue
-		}
-		scriptSeen := verb != "sed"
-		for i := 1; i < len(fields); i++ {
-			word := fields[i]
-			if strings.Contains(word, ">") {
-				break // output redirection names a destination, not a read
-			}
-			if strings.HasPrefix(word, "-") {
-				if verb == "sed" && (word == "-e" || word == "-f") {
-					i++
-					scriptSeen = true
-				}
-				continue
-			}
-			if !scriptSeen {
-				scriptSeen = true // sed's first positional operand is its script
-				continue
-			}
-			if f := SkillFromPath(word); f.Name != "" {
-				if dynamic || strings.HasPrefix(word, "~") || strings.ContainsAny(word, "*?[]{}") {
-					f.Path = ""
-				} else if !path.IsAbs(f.Path) {
-					if cwdKnown && path.IsAbs(cwd) {
-						f.Path = path.Join(cwd, f.Path)
-					} else {
-						f.Path = ""
-					}
-				}
-				files = append(files, f)
-			}
-		}
-	}
-	return files
+	s := commandScanner{cwd: cwd, cwdKnown: true}
+	s.statements(file.Stmts)
+	return s.files
 }
 
-// shellReadWords splits simple shell operands, removes their quoting, and
-// skips unquoted subshell parentheses.
-// Dynamic expansion is left intact; it cannot supply a reliable load path.
-func shellReadWords(s string) []string {
-	var words []string
-	for i := 0; i < len(s); {
-		if strings.ContainsRune("() \t\r\n", rune(s[i])) {
-			i++
-			continue
-		}
-		start := i
-		var word strings.Builder
-		quote := byte(0)
-		for i < len(s) {
-			c := s[i]
-			if quote == 0 && strings.ContainsRune("() \t\r\n", rune(c)) {
-				break
-			}
-			if c == '\\' && quote != '\'' && i+1 < len(s) &&
-				(quote != '"' || strings.ContainsRune("$`\"\\\n", rune(s[i+1]))) {
-				word.WriteString(s[start:i])
-				i++
-				if s[i] != '\n' {
-					word.WriteByte(s[i])
-				}
-				i++
-				start = i
-				continue
-			}
-			if c == '\'' || c == '"' {
-				if quote == 0 || quote == c {
-					word.WriteString(s[start:i])
-					if quote == 0 {
-						quote = c
-					} else {
-						quote = 0
-					}
-					i++
-					start = i
-					continue
-				}
-			}
-			i++
-		}
-		if quote != 0 {
-			return nil
-		}
-		if word.Len() == 0 {
-			words = append(words, s[start:i])
-		} else {
-			word.WriteString(s[start:i])
-			words = append(words, word.String())
-		}
-	}
-	return words
+// commandScanner collects the listed skills of the statements that certainly
+// ran, tracking the cwd a literal cd establishes.
+type commandScanner struct {
+	cwd      string
+	cwdKnown bool
+	files    []SkillFile
 }
 
-// shellReadSegments keeps only commands that certainly ran. An AND chain and a
-// semicolon list both run every segment in order. A pipeline, background
-// command, or OR branch makes that inference ambiguous, because it may skip or
-// subsume a segment. A failing read inside a semicolon list is still credited:
-// the list runs it whether or not a later segment succeeds, so its status is
-// invisible here.
-func shellReadSegments(cmd string) []string {
-	var segments []string
-	start := 0
-	quote := byte(0)
-	escaped := false
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		if escaped {
-			escaped = false
-			continue
+// statements visits statements that certainly run: semicolons and newlines.
+func (s *commandScanner) statements(stmts []*syntax.Stmt) {
+	for _, st := range stmts {
+		s.statement(st)
+	}
+}
+
+func (s *commandScanner) statement(st *syntax.Stmt) {
+	if st.Background || st.Coprocess {
+		return
+	}
+	switch cmd := st.Cmd.(type) {
+	case *syntax.CallExpr:
+		s.call(cmd)
+	case *syntax.BinaryCmd:
+		// `&&` proves both sides ran once the tool result succeeds. A pipeline
+		// masks each side's status, and an `||` right side may be skipped.
+		if cmd.Op == syntax.AndStmt {
+			s.statement(cmd.X)
+			s.statement(cmd.Y)
 		}
-		if c == '\\' && quote != '\'' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		if c == '\'' || c == '"' {
-			quote = c
-			continue
-		}
-		if c == '#' && (i == start || strings.ContainsRune(" \t;&|\n", rune(cmd[i-1]))) {
-			segments = append(segments, cmd[start:i])
-			for i < len(cmd) && cmd[i] != '\n' {
+	case *syntax.Subshell:
+		s.statements(cmd.Stmts)
+	case *syntax.Block:
+		s.statements(cmd.Stmts)
+	}
+}
+
+func (s *commandScanner) call(call *syntax.CallExpr) {
+	if len(call.Args) == 0 {
+		return
+	}
+	verb, ok := literal(call.Args[0])
+	if !ok {
+		return
+	}
+	if verb == "cd" || verb == "pushd" || verb == "popd" {
+		s.changeDir(verb, call.Args[1:])
+		return
+	}
+	if verb == "bash" || verb == "/bin/bash" {
+		s.wrapper(call.Args[1:])
+		return
+	}
+	switch verb {
+	case "cat", "head", "tail", "less", "more", "bat", "nl", "sed":
+		s.reads(verb, call.Args[1:])
+	}
+}
+
+// wrapper follows a bash -lc script argument to the reads it runs.
+func (s *commandScanner) wrapper(args []*syntax.Word) {
+	if len(args) != 2 {
+		return
+	}
+	flag, ok := literal(args[0])
+	if !ok || !strings.HasPrefix(flag, "-") || !strings.Contains(flag, "c") {
+		return
+	}
+	script, ok := literal(args[1])
+	if !ok {
+		return
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader(script), "")
+	if err != nil {
+		return
+	}
+	s.statements(file.Stmts)
+}
+
+// changeDir resolves a literal cd target. Every other form leaves the cwd
+// unknown, so a relative read after it keeps only its skill name.
+func (s *commandScanner) changeDir(verb string, args []*syntax.Word) {
+	s.cwdKnown = false
+	if verb != "cd" || len(args) != 1 {
+		return
+	}
+	target, ok := literal(args[0])
+	if !ok || strings.HasPrefix(target, "~") {
+		return
+	}
+	switch {
+	case path.IsAbs(target):
+		s.cwd = path.Clean(target)
+	case s.cwdKnown && path.IsAbs(s.cwd):
+		s.cwd = path.Join(s.cwd, target)
+	default:
+		return
+	}
+	s.cwdKnown = true
+}
+
+// reads appends the skills named by a read command's operands. A redirection
+// target is never an operand here, so a write to a skill path stays uncounted.
+func (s *commandScanner) reads(verb string, args []*syntax.Word) {
+	scriptSeen := verb != "sed"
+	for i := 0; i < len(args); i++ {
+		word, dynamic := wordText(args[i])
+		if strings.HasPrefix(word, "-") && !dynamic {
+			if verb == "sed" && (word == "-e" || word == "-f") {
 				i++
+				scriptSeen = true
 			}
-			if i < len(cmd) && strings.TrimSpace(cmd[i+1:]) != "" {
-				return nil
-			}
-			return segments
+			continue
 		}
-		switch {
-		case c == ';':
-			segments = append(segments, cmd[start:i])
-			start = i + 1
-		case c == '|' || c == '&' && (i+1 == len(cmd) || cmd[i+1] != '&'):
-			return nil
-		case c == '\n':
-			if strings.TrimSpace(cmd[i+1:]) != "" {
-				return nil
+		if !scriptSeen {
+			scriptSeen = true // sed's first positional operand is its script
+			continue
+		}
+		// Resolve before matching so a cd into a skills root reveals a relative
+		// name/SKILL.md operand. An unresolved or expanded operand names the
+		// skill without a path.
+		operand := word
+		if s.cwdKnown && !dynamic && !strings.HasPrefix(word, "~") && !path.IsAbs(word) {
+			if path.IsAbs(s.cwd) {
+				operand = path.Join(s.cwd, word)
 			}
-			segments = append(segments, cmd[start:i])
-			return segments
-		case c == '&':
-			segments = append(segments, cmd[start:i])
-			i++
-			start = i + 1
+		}
+		f := SkillFromPath(operand)
+		if f.Name == "" {
+			continue
+		}
+		if dynamic || !path.IsAbs(f.Path) {
+			f.Path = ""
+		}
+		s.files = append(s.files, f)
+	}
+}
+
+// wordText returns a word's literal text and whether any part of it expands at
+// run time. An expansion contributes no text, so a skill name after it stays
+// visible while its path stays unknown.
+func wordText(word *syntax.Word) (string, bool) {
+	var b strings.Builder
+	dynamic := false
+	var walk func(parts []syntax.WordPart, quoted bool)
+	walk = func(parts []syntax.WordPart, quoted bool) {
+		for _, part := range parts {
+			switch part := part.(type) {
+			case *syntax.Lit:
+				b.WriteString(unescape(part.Value, quoted))
+			case *syntax.SglQuoted:
+				b.WriteString(part.Value)
+			case *syntax.DblQuoted:
+				walk(part.Parts, true)
+			default:
+				dynamic = true
+			}
 		}
 	}
-	if start < len(cmd) {
-		segments = append(segments, cmd[start:])
+	walk(word.Parts, false)
+	return b.String(), dynamic
+}
+
+// unescape resolves a literal's backslash escapes. Inside double quotes the
+// shell only escapes $, `, ", backslash, and a newline.
+func unescape(s string, quoted bool) string {
+	if !strings.Contains(s, `\`) {
+		return s
 	}
-	return segments
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			if !quoted || next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n' {
+				i++
+				if next != '\n' {
+					b.WriteByte(next)
+				}
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// literal returns a word's text when nothing in it expands.
+func literal(word *syntax.Word) (string, bool) {
+	text, dynamic := wordText(word)
+	return text, !dynamic
 }
 
 // InferredSkillReadFromPath returns the messages for a path a harness opened,
