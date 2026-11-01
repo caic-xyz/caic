@@ -128,7 +128,7 @@ func logV3MetaResultMessageFromData(m *v3.MetaResultMessage) MetaResultMessage {
 		InputTokens:              m.InputTokens,
 		OutputTokens:             m.OutputTokens,
 		CacheCreationInputTokens: m.CacheCreationInputTokens,
-		CacheWrites:              logCacheWritesFromData(m.CacheCreationInputTokens, m.CacheCreation1hInputTokens, m.CacheWrites),
+		CacheWrites:              m.CacheWrites,
 		CacheReadInputTokens:     m.CacheReadInputTokens,
 		ReasoningOutputTokens:    m.ReasoningOutputTokens,
 		DiffStat:                 m.DiffStat,
@@ -137,23 +137,6 @@ func logV3MetaResultMessageFromData(m *v3.MetaResultMessage) MetaResultMessage {
 		AgentResult:              m.AgentResult,
 		StartupFailure:           m.StartupFailure,
 	}
-}
-
-// logCacheWritesFromData translates the stored one-hour subset at the decoding
-// boundary. Explicit duration buckets take precedence over that subset.
-func logCacheWritesFromData(total, oneHour int, buckets []v3.CacheWrite) []v3.CacheWrite {
-	if len(buckets) > 0 || oneHour <= 0 {
-		return buckets
-	}
-	oneHour = min(max(0, total), oneHour)
-	out := make([]v3.CacheWrite, 0, 2)
-	if remaining := total - oneHour; remaining > 0 {
-		out = append(out, v3.CacheWrite{Tokens: int64(remaining)})
-	}
-	if oneHour > 0 {
-		out = append(out, v3.CacheWrite{TTLSeconds: 3600, Tokens: int64(oneHour)})
-	}
-	return out
 }
 
 // RecordedLog encodes runtime controls over an owned physical byte writer.

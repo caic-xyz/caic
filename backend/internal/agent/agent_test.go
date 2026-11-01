@@ -1497,13 +1497,13 @@ func TestRelayGenerationCommand(t *testing.T) {
 }
 
 func TestLogRecordParser(t *testing.T) {
-	t.Run("ResultCacheLifetimePartition", func(t *testing.T) {
+	t.Run("ResultCacheLifetimeBuckets", func(t *testing.T) {
 		t.Parallel()
 		parser, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})
 		if err != nil {
 			t.Fatal(err)
 		}
-		record, err := parser.ParseRecord([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_creation_1h_input_tokens":100}`))
+		record, err := parser.ParseRecord([]byte(`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":0,"tokens":10},{"ttl_seconds":3600,"tokens":100}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}

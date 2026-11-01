@@ -242,7 +242,7 @@ func TestLoadLogHeader(t *testing.T) {
 				agent.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationInputTokens: 12,
 					CacheWrites:          tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 4}, {TTL: time.Hour, Tokens: 8}},
 					CacheReadInputTokens: 14, ReasoningOutputTokens: 9, CacheTTLSeconds: 300}},
-			{"authoritative trailer", "purged", `,"cost_usd":2.5,"duration":5,"num_turns":6,"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":20,"cache_creation_1h_input_tokens":20,"cache_read_input_tokens":28,"reasoning_output_tokens":18`,
+			{"authoritative trailer", "purged", `,"cost_usd":2.5,"duration":5,"num_turns":6,"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":20,"cache_writes":[{"ttl_seconds":3600,"tokens":20}],"cache_read_input_tokens":28,"reasoning_output_tokens":18`,
 				2.5, 5 * time.Second, 6, agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 20,
 					CacheWrites: tokens.CacheWrites{{TTL: time.Hour, Tokens: 20}}, CacheReadInputTokens: 28, ReasoningOutputTokens: 18}},
 		} {
