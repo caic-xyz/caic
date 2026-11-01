@@ -202,9 +202,12 @@ func shellReadWords(s string) []string {
 	return words
 }
 
-// shellReadSegments keeps only commands whose successful overall exit proves
-// every read ran and succeeded. A semicolon, pipeline, background command, or
-// OR branch makes that inference ambiguous; an AND chain preserves it.
+// shellReadSegments keeps only commands that certainly ran. An AND chain and a
+// semicolon list both run every segment in order. A pipeline, background
+// command, or OR branch makes that inference ambiguous, because it may skip or
+// subsume a segment. A failing read inside a semicolon list is still credited:
+// the list runs it whether or not a later segment succeeds, so its status is
+// invisible here.
 func shellReadSegments(cmd string) []string {
 	var segments []string
 	start := 0
@@ -240,17 +243,19 @@ func shellReadSegments(cmd string) []string {
 			}
 			return segments
 		}
-		if c == ';' || c == '|' || c == '&' && (i+1 == len(cmd) || cmd[i+1] != '&') {
+		switch {
+		case c == ';':
+			segments = append(segments, cmd[start:i])
+			start = i + 1
+		case c == '|' || c == '&' && (i+1 == len(cmd) || cmd[i+1] != '&'):
 			return nil
-		}
-		if c == '\n' {
+		case c == '\n':
 			if strings.TrimSpace(cmd[i+1:]) != "" {
 				return nil
 			}
 			segments = append(segments, cmd[start:i])
 			return segments
-		}
-		if c == '&' {
+		case c == '&':
 			segments = append(segments, cmd[start:i])
 			i++
 			start = i + 1

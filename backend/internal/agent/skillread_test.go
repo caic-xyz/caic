@@ -119,7 +119,16 @@ func TestSkillsFromCommand(t *testing.T) {
 		{name: "shell comment mentions a skill", in: "cat /tmp/notes # ~/.agents/skills/review/SKILL.md", want: nil},
 		{name: "shell comment covers later operators", in: "cat /tmp/notes # ignored && cat ~/.agents/skills/review/SKILL.md", want: nil},
 		{name: "OR branch may be skipped", in: "true || cat ~/.agents/skills/review/SKILL.md", want: nil},
-		{name: "semicolon hides read failure", in: "cat ~/.agents/skills/review/SKILL.md; true", want: nil},
+		{name: "semicolon list runs every read", in: "cat ~/.agents/skills/review/SKILL.md; true", want: []agent.SkillFile{review}},
+		{name: "semicolon list keeps a later read", in: "cat /tmp/notes; cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
+		{
+			name: "semicolon list with echo separators",
+			in:   "cat /home/user/.agents/skills/code-quality/SKILL.md; echo '=== TS ref ==='; cat /home/user/.agents/skills/web-frontend-quality/SKILL.md",
+			want: []agent.SkillFile{
+				{Name: "code-quality", Path: "/home/user/.agents/skills/code-quality/SKILL.md"},
+				{Name: "web-frontend-quality", Path: "/home/user/.agents/skills/web-frontend-quality/SKILL.md"},
+			},
+		},
 		{name: "pipeline hides read failure", in: "cat ~/.agents/skills/review/SKILL.md | head", want: nil},
 		{name: "quoted hash is not a comment", in: "cat '/tmp/#notes' && cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
 		{name: "quoted path", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{review}},
