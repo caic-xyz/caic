@@ -189,6 +189,35 @@ func TestEntry(t *testing.T) {
 				t.Error("Done() should stay closed after second Finish")
 			}
 		})
+		t.Run("valid_purged_is_final", func(t *testing.T) {
+			t.Parallel()
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
+			purged := &task.Result{State: task.StatePurged}
+			e.Finish(purged)
+			// The stop that a purge superseded can publish its older snapshot
+			// after the purge when it is descheduled between the state
+			// transition and this call.
+			e.Finish(&task.Result{State: task.StateStopped})
+			if e.Result() != purged {
+				t.Errorf("Result() = %v, want the purged result", e.Result().State)
+			}
+			select {
+			case <-e.Done():
+			default:
+				t.Error("Done() should stay closed after the ignored Finish")
+			}
+		})
+		t.Run("valid_purged_refresh", func(t *testing.T) {
+			t.Parallel()
+			e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
+			first := &task.Result{State: task.StatePurged, NumTurns: 1}
+			second := &task.Result{State: task.StatePurged, NumTurns: 2}
+			e.Finish(first)
+			e.Finish(second)
+			if e.Result() != second {
+				t.Error("Result() should contain the latest purged result")
+			}
+		})
 	})
 
 	t.Run("Cleanup", func(t *testing.T) {

@@ -125,11 +125,16 @@ func (e *Entry) SetMonitorBranch(b string) {
 // Finish records the completion result and closes the done channel in one
 // step: the snapshot is stored before done closes, so any goroutine that
 // observes Done() closed is guaranteed to also observe Result(). Concurrent
-// callers race and the last store wins. If the task is already terminal,
+// callers race and the last store wins, except that a purged result is final:
+// the purge removes the runtime instance, and the stop it superseded can
+// publish its older snapshot afterwards. If the task is already terminal,
 // Finish only refreshes the result.
 func (e *Entry) Finish(r *task.Result) {
 	for {
 		cur := e.term.Load()
+		if cur.result != nil && cur.result.State == task.StatePurged && r.State != task.StatePurged {
+			return
+		}
 		next := &entryTerminal{done: cur.done, result: r, terminal: true}
 		if e.term.CompareAndSwap(cur, next) {
 			if !cur.terminal {
