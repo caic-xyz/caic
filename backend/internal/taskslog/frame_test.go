@@ -5,6 +5,8 @@ package taskslog
 import (
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -119,4 +121,67 @@ func TestDecodeFrame(t *testing.T) {
 			}
 		})
 	})
+}
+
+// TestV3ControlFieldAllowed pins the strict frame field allowlist to the v3
+// schemas it guards, in both directions.
+func TestV3ControlFieldAllowed(t *testing.T) {
+	t.Parallel()
+	tags := map[logControlKind]map[string]bool{}
+	for kind := logControlMeta; kind <= logControlRelayGeneration; kind++ {
+		control := newControl(kind)
+		if control == nil {
+			t.Fatalf("kind %d has no schema", kind)
+		}
+		tags[kind] = v3JSONFields(reflect.TypeOf(control).Elem())
+	}
+	t.Run("schema field rejected", func(t *testing.T) {
+		t.Parallel()
+		for kind, names := range tags {
+			// caic_meta fields are validated by the strict owned-schema decoder.
+			if kind == logControlMeta {
+				continue
+			}
+			for name := range names {
+				if !v3ControlFieldAllowed(kind, name) {
+					t.Errorf("kind %d rejects schema field %q", kind, name)
+				}
+			}
+		}
+	})
+	t.Run("unmodelled field accepted", func(t *testing.T) {
+		t.Parallel()
+		for kind, names := range tags {
+			if kind == logControlMeta {
+				continue
+			}
+			fields, ok := v3ControlFields[kind]
+			if !ok {
+				t.Fatalf("kind %d has no field table", kind)
+			}
+			for _, name := range fields {
+				if !names[name] {
+					t.Errorf("kind %d accepts %q, which no schema models", kind, name)
+				}
+			}
+		}
+	})
+}
+
+// v3JSONFields returns the JSON names of a v3 control schema, including
+// embedded provenance.
+func v3JSONFields(t reflect.Type) map[string]bool {
+	out := make(map[string]bool, t.NumField())
+	for f := range t.Fields() {
+		if f.Anonymous {
+			for name := range v3JSONFields(f.Type) {
+				out[name] = true
+			}
+			continue
+		}
+		if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
 }

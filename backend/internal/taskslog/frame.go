@@ -246,70 +246,34 @@ func validateV3ControlFields(kind logControlKind, token Kind, fields []string) e
 	return nil
 }
 
+// v3ControlFields lists the top-level fields the strict decoder accepts for
+// each v3 control kind, mirroring the owned schemas. The envelope fields are
+// implicit. caic_meta is absent because its strict decoder owns its fields.
+var v3ControlFields = map[logControlKind][]string{
+	logControlDiffStat:            {"diff_stat", "repos", "ts"},
+	logControlExit:                {"cmd", "error", "exit_code", "signal", "stderr_truncated", "ts"},
+	logControlStrippedEnv:         {"variables"},
+	logControlSession:             {"agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id"},
+	logControlModelInfo:           {"context_window"},
+	logControlPR:                  {"forge_owner", "forge_pr", "forge_repo"},
+	logControlResult:              {"agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title"},
+	logControlTurnCommitSnapshot:  {"baseline", "change_stat", "repository_commits"},
+	logControlPendingUserAction:   {"action"},
+	logControlProvisioningLog:     {"line"},
+	logControlContextCleared:      {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
+	logControlInputDeliveryFailed: {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
+	logControlInputDelivery:       {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
+	logControlText:                {"phase", "text"},
+	logControlUserInput:           {"images", "text", "ts"},
+	logControlMCPRequest:          {"arguments", "id", "method", "name"},
+	logControlRelayGeneration:     {"generation"},
+}
+
 func v3ControlFieldAllowed(kind logControlKind, field string) bool {
 	if field == "t" || field == "source" {
 		return true
 	}
-	switch kind {
-	case logControlMeta:
-		return false
-	case logControlDiffStat:
-		return field == "diff_stat" || field == "repos" || field == "ts"
-	case logControlExit:
-		switch field {
-		case "cmd", "error", "exit_code", "signal", "stderr_truncated", "ts":
-			return true
-		}
-	case logControlStrippedEnv:
-		return field == "variables"
-	case logControlSession:
-		switch field {
-		case "agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id":
-			return true
-		}
-	case logControlModelInfo:
-		return field == "context_window"
-	case logControlPR:
-		switch field {
-		case "forge_owner", "forge_pr", "forge_repo":
-			return true
-		}
-	case logControlResult:
-		switch field {
-		case "agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title":
-			return true
-		}
-	case logControlTurnCommitSnapshot:
-		return field == "repository_commits" || field == "baseline" || field == "change_stat"
-	case logControlPendingUserAction:
-		return field == "action"
-	case logControlProvisioningLog:
-		return field == "line"
-	case logControlContextCleared, logControlInputDeliveryFailed, logControlInputDelivery:
-		// Released writers emitted the complete SystemMessage projection. Accept
-		// those established fields alongside the compact marker, so RestartSession
-		// history remains replayable; unrelated fields are still rejected.
-		switch field {
-		case "subtype", "session_id", "uuid", "detail", "model", "context_tokens_before", "context_tokens_after":
-			return true
-		}
-		return false
-	case logControlText:
-		switch field {
-		case "phase", "text":
-			return true
-		}
-	case logControlUserInput:
-		switch field {
-		case "images", "text", "ts":
-			return true
-		}
-	case logControlMCPRequest:
-		return field == "id" || field == "method" || field == "name" || field == "arguments"
-	case logControlRelayGeneration:
-		return field == "generation"
-	}
-	return false
+	return slices.Contains(v3ControlFields[kind], field)
 }
 
 func validateV3RecordBytes(line []byte) error {
@@ -429,7 +393,8 @@ const (
 	logControlRelayGeneration
 )
 
-func decodeControl(kind logControlKind, line []byte) (any, error) {
+// newControl returns an empty v3 control of the kind's owned schema.
+func newControl(kind logControlKind) any {
 	var out any
 	switch kind {
 	case logControlMeta:
@@ -469,6 +434,11 @@ func decodeControl(kind logControlKind, line []byte) (any, error) {
 	case logControlRelayGeneration:
 		out = new(v3.RelayGenerationMessage)
 	}
+	return out
+}
+
+func decodeControl(kind logControlKind, line []byte) (any, error) {
+	out := newControl(kind)
 	var err error
 	if kind == logControlMeta || kind == logControlText {
 		decoder := json.NewDecoder(bytes.NewReader(line))
