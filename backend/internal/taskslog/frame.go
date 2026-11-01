@@ -464,6 +464,22 @@ func decodeControl(kind logControlKind, line []byte) (any, error) {
 		if m.Harness == "" {
 			return nil, errors.New("missing harness")
 		}
+	case *v3.MetaResultMessage:
+		if m.CacheCreationInputTokens < 0 {
+			return nil, errors.New("negative cache creation tokens")
+		}
+		if len(m.CacheWrites) > 0 {
+			var total int64
+			for _, w := range m.CacheWrites {
+				if w.Tokens < 0 || total > math.MaxInt64-w.Tokens {
+					return nil, errors.New("invalid cache write tokens")
+				}
+				total += w.Tokens
+			}
+			if total != int64(m.CacheCreationInputTokens) {
+				return nil, fmt.Errorf("cache writes total %d, want %d", total, m.CacheCreationInputTokens)
+			}
+		}
 	case *v3.ModelInfoMessage:
 		if m.ContextWindow > 0 && int64(int(m.ContextWindow)) != m.ContextWindow {
 			return nil, errors.New("context_window out of range")

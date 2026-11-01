@@ -313,6 +313,10 @@ type ModelInfoMessage struct {
 }
 
 // MetaResultMessage is the persisted MetaResultMessage representation.
+//
+// CacheCreationInputTokens totals the cache writes that CacheWrites partitions
+// by lifetime. A record that carries both must agree, because readers prefer
+// CacheWrites.
 type MetaResultMessage struct {
 	MessageProvenance
 

@@ -168,6 +168,53 @@ func TestV3ControlFieldAllowed(t *testing.T) {
 	})
 }
 
+// TestDecodeFrameResultAccounting guards the result record's total against
+// its per-lifetime partition.
+func TestDecodeFrameResultAccounting(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, raw := range []string{
+			`{"t":"result","state":"purged"}`,
+			`{"t":"result","state":"purged","cache_creation_input_tokens":110}`,
+			`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":0,"tokens":10},{"ttl_seconds":3600,"tokens":100}]}`,
+		} {
+			t.Run(raw, func(t *testing.T) {
+				t.Parallel()
+				frame, err := DecodeFrame([]byte(raw))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := frame.Control.(*v3.MetaResultMessage); !ok {
+					t.Fatalf("control = %#v", frame.Control)
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			raw  string
+			want string
+		}{
+			{`{"t":"result","state":"purged","cache_creation_input_tokens":110,"cache_writes":[{"ttl_seconds":3600,"tokens":100}]}`, "cache writes total 100, want 110"},
+			{`{"t":"result","state":"purged","cache_creation_input_tokens":100,"cache_writes":[{"ttl_seconds":3600,"tokens":100},{"ttl_seconds":0,"tokens":10}]}`, "cache writes total 110, want 100"},
+			{`{"t":"result","state":"purged","cache_writes":[{"ttl_seconds":3600,"tokens":100}]}`, "cache writes total 100, want 0"},
+			{`{"t":"result","state":"purged","cache_creation_input_tokens":-1}`, "negative cache creation tokens"},
+			{`{"t":"result","state":"purged","cache_creation_input_tokens":100,"cache_writes":[{"ttl_seconds":3600,"tokens":-100}]}`, "invalid cache write tokens"},
+			{`{"t":"result","state":"purged","cache_creation_input_tokens":100,"cache_writes":[{"ttl_seconds":3600,"tokens":9223372036854775807},{"ttl_seconds":0,"tokens":9223372036854775807}]}`, "invalid cache write tokens"},
+		} {
+			t.Run(tc.want, func(t *testing.T) {
+				t.Parallel()
+				_, err := DecodeFrame([]byte(tc.raw))
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
+}
+
 // v3JSONFields returns the JSON names of a v3 control schema, including
 // embedded provenance.
 func v3JSONFields(t reflect.Type) map[string]bool {
