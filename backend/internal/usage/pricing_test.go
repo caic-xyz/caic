@@ -192,13 +192,13 @@ func TestPricer(t *testing.T) {
 			want  float64
 		}{
 			{"gpt-5.3-codex", 0.539},
-			{"gpt-5.6-cyber", 7.6125},
+			{"gpt-5.6-cyber", 3.825},
 			{"gpt-5.6-luna", 0.1218},
 			{"gpt-5.6-sol", 2.43},
 			{"gpt-5.6-terra", 1.218},
 			{"gpt-6-sol", 1.215},
 			{"gpt-daybreak-blue-latest", 2.43},
-			{"gpt-daybreak-red-latest", 7.6125},
+			{"gpt-daybreak-red-latest", 3.825},
 		} {
 			p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, tc.model, time.Now())
 			if !ok {
@@ -267,6 +267,12 @@ func TestPricer(t *testing.T) {
 		if got := p.CostBuckets(300_000, nil, 0, 1_000); got != 0.61 {
 			t.Errorf("aggregate cost = %v, want 0.61", got)
 		}
+		// A 12-hour cache write bills at 2.5x input; the default 30-minute
+		// lifetime keeps the 1.25x rate.
+		writes := tokens.CacheWrites{{TTL: 12 * time.Hour, Tokens: 1_000_000}, {TTL: 30 * time.Minute, Tokens: 1_000_000}}
+		if got := p.CostBuckets(0, writes, 0, 0); math.Abs(got-7.5) > 1e-9 {
+			t.Errorf("cache writes = %v, want 7.5", got)
+		}
 	})
 	t.Run("Sol61ProviderForms", func(t *testing.T) {
 		t.Parallel()
@@ -277,7 +283,7 @@ func TestPricer(t *testing.T) {
 				provider = agent.QuotaProviderCodex
 			}
 			got, ok := p.ModelPrice(provider, model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
-			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
+			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
 			if !ok || !reflect.DeepEqual(got, want) {
 				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
 			}
@@ -422,7 +428,7 @@ func TestPricer(t *testing.T) {
 	t.Run("CodexOpenAIApiEquivalent", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
-		want := ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
+		want := ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5.0}}, OutputPerMTok: 12.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
 		for _, model := range []string{
 			"openai-codex/gpt-5.6-terra",
 			"codex/gpt-5.6-terra",
@@ -448,7 +454,7 @@ func TestPricer(t *testing.T) {
 		if !ok {
 			t.Fatal("daybreak blue not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}); !reflect.DeepEqual(got, want) {
+		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 10.0}}, OutputPerMTok: 20.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}); !reflect.DeepEqual(got, want) {
 			t.Errorf("daybreak blue price = %+v, want %+v", got, want)
 		}
 	})
@@ -462,9 +468,9 @@ func TestPricer(t *testing.T) {
 			want     ModelPrice
 		}{
 			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 3600, PerMTok: 8}}, OutputPerMTok: 20}},
-			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, OutputPerMTok: 50, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
-			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
-			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 25.0}}, OutputPerMTok: 50, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 0.25}}, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 		} {
 			got, ok := p.ModelPrice(tc.provider, tc.model, at)
 			if !ok || !reflect.DeepEqual(got, tc.want) {

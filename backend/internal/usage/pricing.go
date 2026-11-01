@@ -408,9 +408,13 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 		// estimates use the one-hour write rate where one is published.
 		return pricing.providers["anthropic"].lookup(model, at)
 	case agent.QuotaProviderCodex:
-		// OpenAI model rates apply regardless of harness or credential mode.
-		// For subscription sessions these are API-equivalent estimates.
-		// RequestCost applies long-context rates when a request size is known.
+		// API-equivalent prices: OpenAI model rates apply regardless of harness
+		// or credential mode, so a Codex task reports what its requests would
+		// have cost on the API, including the API's long-context and cache-write
+		// charges. Subscription usage itself bills differently: it has no
+		// separate cache-write charge, keeps prompts cached for 12 hours, and
+		// has no long-context surcharge: https://learn.chatgpt.com/docs/pricing
+		// RequestCost applies the long-context rates when a request size is known.
 		return pricing.providers["openai"].lookup(model, at)
 	default:
 		// Direct OpenAI API models ("openai/...") are not a quota provider

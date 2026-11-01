@@ -485,12 +485,13 @@
                 "input_per_mtok": 12.5,
                 "cached_input_per_mtok": 1.25,
                 "cache_write_per_mtok": 15.625,
-                "output_per_mtok": 75.0,
-                "long_context": {
-                  "input_tokens_above": 272000,
-                  "input_multiplier": 2.0,
-                  "output_multiplier": 1.5
-                }
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 31.25
+                  }
+                ],
+                "output_per_mtok": 75.0
               }
             }
           ]
@@ -505,6 +506,12 @@
                 "input_per_mtok": 0.2,
                 "cached_input_per_mtok": 0.02,
                 "cache_write_per_mtok": 0.25,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 0.5
+                  }
+                ],
                 "output_per_mtok": 1.2,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -525,6 +532,12 @@
                 "input_per_mtok": 4.0,
                 "cached_input_per_mtok": 0.4,
                 "cache_write_per_mtok": 5.0,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 10.0
+                  }
+                ],
                 "output_per_mtok": 20.0,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -545,6 +558,12 @@
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 2.5,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 5.0
+                  }
+                ],
                 "output_per_mtok": 12.0,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -565,6 +584,12 @@
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.1,
                 "cache_write_per_mtok": 2.5,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 5.0
+                  }
+                ],
                 "output_per_mtok": 10.0,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -585,6 +610,12 @@
                 "input_per_mtok": 1.0,
                 "cached_input_per_mtok": 0.05,
                 "cache_write_per_mtok": 1.25,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 2.5
+                  }
+                ],
                 "output_per_mtok": 5.0,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -605,6 +636,12 @@
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 1.0,
                 "cache_write_per_mtok": 12.5,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 25.0
+                  }
+                ],
                 "output_per_mtok": 50.0,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -625,6 +662,12 @@
                 "input_per_mtok": 0.1,
                 "cached_input_per_mtok": 0.01,
                 "cache_write_per_mtok": 0.125,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 0.25
+                  }
+                ],
                 "output_per_mtok": 0.5,
                 "long_context": {
                   "input_tokens_above": 272000,
@@ -645,6 +688,12 @@
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 2.5,
+                "cache_write_prices": [
+                  {
+                    "ttl_seconds": 43200,
+                    "per_mtok": 5.0
+                  }
+                ],
                 "output_per_mtok": 10.0,
                 "long_context": {
                   "input_tokens_above": 272000,

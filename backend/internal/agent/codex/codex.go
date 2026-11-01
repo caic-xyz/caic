@@ -230,15 +230,17 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-const autoCompactTokenLimit = 244800
+const autoCompactTokenLimit = 350000
 
 func codexAppServerArgs() []string {
-	// Compact at 244,800 total active tokens: 90% of the 272K input-token
-	// threshold for Sol/Terra long-context API pricing (2x input/cache and 1.5x
-	// output rates for the full request). This leaves 27,200 tokens of headroom:
-	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
-	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
-	// The 90% margin follows Codex's default compaction/window ratio:
+	// Compact at 350,000 total active tokens, 70% of the 500K context window
+	// that Codex gives GPT-6.1 Sol: https://developers.openai.com/api/docs/models/gpt-6.1-sol
+	// Usage drawn from a ChatGPT subscription has no long-context surcharge, so
+	// the trigger does not need to stay under the 272K API threshold, even
+	// though caic's API-equivalent cost estimate charges the surcharge above it:
+	// https://learn.chatgpt.com/docs/pricing
+	// The margin left below the window lets a turn finish, and the 90% default
+	// compaction/window ratio is a ceiling, not a target:
 	// https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/protocol/src/openai_models.rs#L529
 	// This is a compaction trigger, not a hard billing cap: context can grow
 	// between checks, and included subscription quotas have separate accounting.
