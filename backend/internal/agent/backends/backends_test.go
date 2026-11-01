@@ -4,6 +4,7 @@ package backends
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -11,6 +12,23 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
+
+// withoutClockDurations clears durations measured between two reads of the wall
+// clock, which carry no interpretation state.
+func withoutClockDurations(msgs []agent.Message) []agent.Message {
+	cleared := make([]agent.Message, len(msgs))
+	for i, m := range msgs {
+		if r, ok := m.(*agent.ResultMessage); ok {
+			copied := *r
+			copied.DurationMs = 0
+			copied.DurationAPIMs = 0
+			cleared[i] = &copied
+			continue
+		}
+		cleared[i] = m
+	}
+	return cleared
+}
 
 func TestDefault(t *testing.T) {
 	t.Parallel()
@@ -121,8 +139,17 @@ func TestDefault(t *testing.T) {
 					t.Fatal(err)
 				}
 				want, err := fresh.ParseOutput([]byte(tc.result))
+				if tc.harness == harness.Pi {
+					// pi times the turn from the prompt it parsed, and both wires
+					// parse that prompt at different instants.
+					got = withoutClockDurations(got)
+					want = withoutClockDurations(want)
+				}
 				if err != nil || !reflect.DeepEqual(got, want) {
-					t.Fatalf("input mutated output state: got %#v, want %#v, err %v", got, want, err)
+					// Pointers print as addresses, so dump the decoded fields.
+					gotJSON, _ := json.Marshal(got)
+					wantJSON, _ := json.Marshal(want)
+					t.Fatalf("input mutated output state: got %s, want %s, err %v", gotJSON, wantJSON, err)
 				}
 			})
 		}
