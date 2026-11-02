@@ -29,7 +29,7 @@ func headerTaskToData(t *LoadedTask) *v11.Task {
 		Repos:                 headerReposToData(t.Repos),
 		Harness:               string(t.Harness),
 		StartedAt:             t.StartedAt,
-		LastStateUpdateAt:     t.LastStateUpdateAt,
+		LastStateUpdateAt:     t.LastActivityAt, // v11 keeps the historical field name.
 		State:                 string(t.State),
 		ForgeIssue:            t.ForgeIssue,
 		OwnerID:               t.OwnerID,
@@ -79,7 +79,7 @@ func headerTaskFromData(t *v11.Task) *LoadedTask {
 		Repos:                 headerReposFromData(t.Repos),
 		Harness:               harness.Name(t.Harness),
 		StartedAt:             t.StartedAt,
-		LastStateUpdateAt:     t.LastStateUpdateAt,
+		LastActivityAt:        t.LastStateUpdateAt,
 		State:                 task.State(t.State),
 		ForgeIssue:            t.ForgeIssue,
 		OwnerID:               t.OwnerID,

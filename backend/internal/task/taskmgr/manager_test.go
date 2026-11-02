@@ -3407,7 +3407,7 @@ func TestManager(t *testing.T) {
 					State:             task.StateStopped,
 					LastTrailer:       &task.Result{State: task.StateStopped},
 					StartedAt:         now.Add(-1 * time.Hour),
-					LastStateUpdateAt: now,
+					LastActivityAt:    now,
 					Tailscale:         true,
 					USB:               true,
 					Display:           true,
@@ -3478,12 +3478,12 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			id := ksid.NewID()
 			all := []*taskhistory.LoadedTask{{
-				TaskID:            id.String(),
-				Prompt:            "old task",
-				Harness:           "claude",
-				State:             task.StateStopped,
-				LastTrailer:       &task.Result{State: task.StateStopped},
-				LastStateUpdateAt: time.Now().UTC(),
+				TaskID:         id.String(),
+				Prompt:         "old task",
+				Harness:        "claude",
+				State:          task.StateStopped,
+				LastTrailer:    &task.Result{State: task.StateStopped},
+				LastActivityAt: time.Now().UTC(),
 			}}
 			if err := m.LoadPurgedTasks(all); err != nil {
 				t.Fatalf("LoadPurgedTasks: %v", err)
@@ -3554,11 +3554,11 @@ func TestManager(t *testing.T) {
 			id := ksid.NewID()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            id.String(),
-					Prompt:            "was running",
-					Repos:             []repo.Mount{{Name: "repo/a"}},
-					State:             task.StateRunning,
-					LastStateUpdateAt: now,
+					TaskID:         id.String(),
+					Prompt:         "was running",
+					Repos:          []repo.Mount{{Name: "repo/a"}},
+					State:          task.StateRunning,
+					LastActivityAt: now,
 				},
 			}
 			err := m.LoadPurgedTasks(all)
@@ -3577,10 +3577,10 @@ func TestManager(t *testing.T) {
 			id := ksid.NewID()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            id.String(),
-					Prompt:            "this is the prompt",
-					LastStateUpdateAt: now,
-					State:             task.StateStopped,
+					TaskID:         id.String(),
+					Prompt:         "this is the prompt",
+					LastActivityAt: now,
+					State:          task.StateStopped,
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
@@ -3596,9 +3596,9 @@ func TestManager(t *testing.T) {
 			id := ksid.NewID()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            id.String(),
-					Prompt:            "test",
-					LastStateUpdateAt: now,
+					TaskID:         id.String(),
+					Prompt:         "test",
+					LastActivityAt: now,
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
@@ -3613,10 +3613,10 @@ func TestManager(t *testing.T) {
 			now := time.Now().UTC()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            "invalid",
-					Prompt:            "test",
-					LastStateUpdateAt: now,
-					State:             task.StateStopped,
+					TaskID:         "invalid",
+					Prompt:         "test",
+					LastActivityAt: now,
+					State:          task.StateStopped,
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
@@ -3637,25 +3637,25 @@ func TestManager(t *testing.T) {
 			keptID := ksid.NewID()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            activeID.String(),
-					Prompt:            "replacement by id",
-					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-old"}},
-					LastStateUpdateAt: now,
-					State:             task.StateStopped,
+					TaskID:         activeID.String(),
+					Prompt:         "replacement by id",
+					Repos:          []repo.Mount{{Name: "repo/a", Branch: "caic-old"}},
+					LastActivityAt: now,
+					State:          task.StateStopped,
 				},
 				{
-					TaskID:            duplicateBranchID.String(),
-					Prompt:            "replacement by branch",
-					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-live"}},
-					LastStateUpdateAt: now,
-					State:             task.StateStopped,
+					TaskID:         duplicateBranchID.String(),
+					Prompt:         "replacement by branch",
+					Repos:          []repo.Mount{{Name: "repo/a", Branch: "caic-live"}},
+					LastActivityAt: now,
+					State:          task.StateStopped,
 				},
 				{
-					TaskID:            keptID.String(),
-					Prompt:            "kept",
-					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-kept"}},
-					LastStateUpdateAt: now,
-					State:             task.StateStopped,
+					TaskID:         keptID.String(),
+					Prompt:         "kept",
+					Repos:          []repo.Mount{{Name: "repo/a", Branch: "caic-kept"}},
+					LastActivityAt: now,
+					State:          task.StateStopped,
 				},
 			}
 			if err := m.LoadPurgedTasks(all); err != nil {
@@ -6529,11 +6529,11 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		all := make([]*taskhistory.LoadedTask, 0, 7)
 		for i := range 7 {
 			all = append(all, &taskhistory.LoadedTask{
-				TaskID:            ksid.NewID().String(),
-				Prompt:            "unsettled",
-				Repos:             []repo.Mount{{Name: "repo/a"}},
-				State:             task.StateStopped,
-				LastStateUpdateAt: now.Add(time.Duration(i) * time.Second),
+				TaskID:         ksid.NewID().String(),
+				Prompt:         "unsettled",
+				Repos:          []repo.Mount{{Name: "repo/a"}},
+				State:          task.StateStopped,
+				LastActivityAt: now.Add(time.Duration(i) * time.Second),
 			})
 		}
 		if err := m.LoadUnsettledTasks(all); err != nil {
@@ -6548,11 +6548,11 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		id := ksid.NewID()
 		if err := m.LoadUnsettledTasks([]*taskhistory.LoadedTask{{
-			TaskID:            id.String(),
-			Prompt:            "was running",
-			Repos:             []repo.Mount{{Name: "repo/a"}},
-			State:             task.StateRunning,
-			LastStateUpdateAt: time.Now().UTC(),
+			TaskID:         id.String(),
+			Prompt:         "was running",
+			Repos:          []repo.Mount{{Name: "repo/a"}},
+			State:          task.StateRunning,
+			LastActivityAt: time.Now().UTC(),
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
 		}
@@ -6570,12 +6570,12 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		id := ksid.NewID()
 		parentID := ksid.NewID()
 		if err := m.LoadUnsettledTasks([]*taskhistory.LoadedTask{{
-			TaskID:            id.String(),
-			ParentTaskID:      parentID.String(),
-			Prompt:            "delegated work",
-			Repos:             []repo.Mount{{Name: "repo/a"}},
-			State:             task.StateStopped,
-			LastStateUpdateAt: time.Now().UTC(),
+			TaskID:         id.String(),
+			ParentTaskID:   parentID.String(),
+			Prompt:         "delegated work",
+			Repos:          []repo.Mount{{Name: "repo/a"}},
+			State:          task.StateStopped,
+			LastActivityAt: time.Now().UTC(),
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
 		}

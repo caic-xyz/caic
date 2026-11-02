@@ -44,7 +44,7 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		}},
 		Harness:           harness.Claude,
 		StartedAt:         time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
-		LastStateUpdateAt: time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
+		LastActivityAt:    time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
 		State:             task.StatePurged,
 		ForgeIssue:        1,
 		OwnerID:           "user-1",

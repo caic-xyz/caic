@@ -276,7 +276,7 @@ func TestLoadLogHeader(t *testing.T) {
 							if loaded.SessionID != "root" || loaded.ReportedModel != "claude-opus-x" || loaded.ReportedEffort != "high" || loaded.AgentVersion != "2.1.0" {
 								t.Fatalf("root session metadata lost: %+v", loaded)
 							}
-							if loaded.State != task.State(tc.state) || loaded.Title != "reviving" || loaded.ForgeOwner != "org" || loaded.ForgeRepo != "repo" || loaded.ForgePR != 7 || !loaded.DiffCreated || !loaded.LastStateUpdateAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 500000000, time.UTC)) {
+							if loaded.State != task.State(tc.state) || loaded.Title != "reviving" || loaded.ForgeOwner != "org" || loaded.ForgeRepo != "repo" || loaded.ForgePR != 7 || !loaded.DiffCreated || !loaded.LastActivityAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 500000000, time.UTC)) {
 								t.Fatalf("control metadata lost: %+v", loaded)
 							}
 							if loaded.Prompt != "task" || loaded.RequestedModel != "requested" || loaded.RequestedEffort != "medium" || loaded.OwnerID != "owner" || loaded.ParentTaskID != "parent" || loaded.ForkedFromTaskID != "fork" || !loaded.CaicMCP || loaded.ForgeIssue != 5 || len(loaded.Repos) != 1 || loaded.Repos[0].Name != "org/repo" {

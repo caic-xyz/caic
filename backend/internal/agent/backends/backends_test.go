@@ -13,23 +13,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-// withoutClockDurations clears durations measured between two reads of the wall
-// clock, which carry no interpretation state.
-func withoutClockDurations(msgs []agent.Message) []agent.Message {
-	cleared := make([]agent.Message, len(msgs))
-	for i, m := range msgs {
-		if r, ok := m.(*agent.ResultMessage); ok {
-			copied := *r
-			copied.DurationMs = 0
-			copied.DurationAPIMs = 0
-			cleared[i] = &copied
-			continue
-		}
-		cleared[i] = m
-	}
-	return cleared
-}
-
 func TestDefault(t *testing.T) {
 	t.Parallel()
 
@@ -130,26 +113,44 @@ func TestDefault(t *testing.T) {
 				if raw, ok := wrong.Messages[0].Message.(*agent.RawMessage); !ok || string(raw.Raw) != tc.output {
 					t.Fatalf("wrong direction = %#v", wrong.Messages[0].Message)
 				}
-				got, err := wire.ParseOutput([]byte(tc.result))
+				records := []string{
+					`{"t":"input","ts":1.000,"msg":` + tc.input + `}`,
+					`{"t":"input","ts":2.000,"msg":` + tc.output + `}`,
+					`{"t":"agent","ts":3.000,"msg":` + tc.result + `}`,
+				}
+				messagesOf := func(record agent.ParsedRecord) []agent.Message {
+					out := make([]agent.Message, len(record.Messages))
+					for i, m := range record.Messages {
+						out[i] = m.Message
+					}
+					return out
+				}
+				gotRecord, err := parser.ParseRecord([]byte(records[2]))
 				if err != nil {
 					t.Fatal(err)
 				}
-				fresh := backends[tc.harness].NewWire()
-				if _, err := fresh.ParseInput([]byte(tc.input)); err != nil {
+				got := messagesOf(gotRecord)
+				// A fresh backend reparsing the identical history must produce the
+				// identical interpretation, including any recorded-time durations.
+				freshParser, err := agent.NewLogRecordParser(backends[tc.harness].NewWire())
+				if err != nil {
 					t.Fatal(err)
 				}
-				want, err := fresh.ParseOutput([]byte(tc.result))
-				if tc.harness == harness.Pi {
-					// pi times the turn from the prompt it parsed, and both wires
-					// parse that prompt at different instants.
-					got = withoutClockDurations(got)
-					want = withoutClockDurations(want)
+				for _, record := range records[:2] {
+					if _, err := freshParser.ParseRecord([]byte(record)); err != nil {
+						t.Fatal(err)
+					}
 				}
-				if err != nil || !reflect.DeepEqual(got, want) {
+				wantRecord, err := freshParser.ParseRecord([]byte(records[2]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := messagesOf(wantRecord)
+				if !reflect.DeepEqual(got, want) {
 					// Pointers print as addresses, so dump the decoded fields.
 					gotJSON, _ := json.Marshal(got)
 					wantJSON, _ := json.Marshal(want)
-					t.Fatalf("input mutated output state: got %s, want %s, err %v", gotJSON, wantJSON, err)
+					t.Fatalf("identical history decoded differently: got %s, want %s", gotJSON, wantJSON)
 				}
 			})
 		}

@@ -47,6 +47,8 @@ const (
 
 	// currentVersion guards both the schema and its projection semantics.
 	// Bump it when either changes so older entries rebuild from the journal.
+	// TODO(2026-11-02): Rename the persisted last_state_update_at key to
+	// last_activity_at in the next bump made for another reason.
 	currentVersion = 11
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid

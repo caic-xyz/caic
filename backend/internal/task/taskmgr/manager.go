@@ -1191,7 +1191,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 		t.Display = lt.Display
 		t.Sudo = lt.Sudo
 		t.GitHubToken = lt.GitHubToken
-		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
+		t.SetStateAt(lt.State, lt.LastActivityAt)
 		t.SetSessionMetadata(lt.SessionMetadata)
 		if lt.State == task.StateRunning {
 			// Nothing adopted the instance that was running this log, so the task can
@@ -2128,7 +2128,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if lt.Prompt != "" {
 		prompt = lt.Prompt
 		startedAt = lt.StartedAt
-		stateUpdatedAt = lt.LastStateUpdateAt
+		// A log without a loadable timeline only knows its last activity. Seeding
+		// replaces this with the recorded transition time when it infers a state.
+		stateUpdatedAt = lt.LastActivityAt
 	}
 	if stateUpdatedAt.IsZero() {
 		stateUpdatedAt = time.Now().UTC()

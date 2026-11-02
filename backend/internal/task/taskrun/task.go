@@ -153,8 +153,6 @@ type Task struct {
 	subs            []*sub          // active sequenced message subscribers
 	rateLimitSubs   []*rateLimitSub // active lossless quota subscribers
 	handle          *SessionHandle  // current active session; nil when no session is attached
-	priorNumTurns   int             // accumulated turns from all cleared sessions
-	priorDuration   time.Duration   // accumulated duration from all cleared sessions
 	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
 	turnStartedAt   time.Time       // when the current running turn started; zero when not running
 	costTracker     task.CostTracker
@@ -966,9 +964,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			case "context_cleared", "compact_boundary":
 				if m.Subtype == "context_cleared" {
 					t.clearContextLocked()
-				} else {
-					t.priorNumTurns = t.liveNumTurns
-					t.priorDuration = t.liveDuration
 				}
 				// Compaction replaces the conversation with a summary, so the
 				// pre-compaction usage no longer describes the live context.
@@ -989,7 +984,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			t.lastAPIUsage = m.Usage
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
-				t.cacheExpiresAt = time.Now().Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
+				t.cacheExpiresAt = entry.ProducerTime.Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
 			}
 			if m.ContextWindow > 0 {
 				t.reportedContextWindow = m.ContextWindow
@@ -1615,8 +1610,6 @@ func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run) {
 // clearContextLocked resets turn and plan state when a root context boundary
 // is applied. The caller holds t.mu.
 func (t *Task) clearContextLocked() {
-	t.priorNumTurns = t.liveNumTurns
-	t.priorDuration = t.liveDuration
 	t.inPlanMode = false
 	t.planFile = ""
 	t.planContent = ""
@@ -1895,7 +1888,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		t.lastAPIUsage = u.Usage
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
-			t.cacheExpiresAt = time.Now().Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
+			t.cacheExpiresAt = at.Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
 		}
 		if u.ContextWindow > 0 {
 			t.reportedContextWindow = u.ContextWindow
@@ -1966,9 +1959,6 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
 		if sm.Subtype == "context_cleared" {
 			t.clearContextLocked()
-		} else {
-			t.priorNumTurns = t.liveNumTurns
-			t.priorDuration = t.liveDuration
 		}
 		// Compaction replaces the conversation with a summary, so the
 		// pre-compaction usage no longer describes the live context.
@@ -1998,7 +1988,13 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		// StateStarting is also handled: the agent subprocess may
 		// produce a result before Checkout.Start calls SetState(Running).
 		if t.state == task.StateRunning || t.state == task.StateStarting || t.state == task.StateWaiting || t.state == task.StateAsking {
-			t.setState(t.settledTurnStateLocked())
+			next := t.settledTurnStateLocked()
+			t.setState(next)
+			if next == task.StateRunning {
+				// Duration now includes the settled turn, so the live delta starts
+				// at its result rather than at the turn that just ended.
+				t.turnStartedAt = at
+			}
 		}
 	}
 	if !child {
@@ -2155,7 +2151,7 @@ func (t *Task) terminalLogSummary(res *task.Result) *taskhistory.LoadedTask {
 		Repos:             snapshot.Repos,
 		Harness:           t.Harness,
 		StartedAt:         t.StartedAt,
-		LastStateUpdateAt: snapshot.StateUpdatedAt,
+		LastActivityAt:    snapshot.StateUpdatedAt,
 		State:             res.State,
 		ForgeIssue:        snapshot.ForgeIssue,
 		OwnerID:           t.OwnerID,
@@ -2476,16 +2472,15 @@ type timelineSnapshotLease struct {
 
 // seedStateTime returns the recorded time the loaded timeline entered state
 // next. Producer timestamps survive a restart, so the adopted task reports the
-// same state duration and running turn start as the live task did.
+// same state duration and running turn start as the live task did. A running
+// state comes from a trailing result that settled the parent turn while a
+// background subagent stays active; its duration already includes that turn, so
+// the live delta starts at the result.
 func seedStateTime(entries timelineEntries, next task.State) time.Time {
-	switch next {
-	case task.StateAsking:
+	if next == task.StateAsking {
 		return lastAskTime(entries)
-	case task.StateRunning:
-		return turnStartTime(entries)
-	default:
-		return lastResultTime(entries)
 	}
+	return lastResultTime(entries)
 }
 
 // lastResultTime returns the producer time of the trailing root result.
@@ -2521,10 +2516,10 @@ func turnStartTime(entries timelineEntries) time.Time {
 	skipResult := lastAgentMessage(entries) != nil
 	start := time.Time{}
 	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
+		if entry.Message.Provenance().IsChild() || nonSemanticMessage(entry.Message) {
 			continue
 		}
-		if turnMetadata(entry.Message) {
+		if _, ok := entry.Message.(*agent.SystemMessage); ok {
 			continue
 		}
 		if _, ok := entry.Message.(*agent.ResultMessage); ok {
@@ -2541,16 +2536,15 @@ func turnStartTime(entries timelineEntries) time.Time {
 	return start
 }
 
-// turnMetadata reports whether m is relay or caic metadata that cannot start a
-// running turn. Activity messages between two results belong to one turn.
-func turnMetadata(m agent.Message) bool {
+// nonSemanticMessage reports whether m is relay or caic bookkeeping that
+// neither settles a turn nor starts one.
+func nonSemanticMessage(m agent.Message) bool {
 	switch m.(type) {
 	case *agent.BackgroundCommandMessage, *agent.DiffStatMessage, *agent.ExitMessage,
 		*agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.MetaSessionMessage,
 		*agent.ModelInfoMessage, *agent.NativeSubagentMessage, *agent.PendingUserActionMessage,
 		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage,
-		*agent.SystemMessage, *agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage,
-		*agent.UsageMessage:
+		*agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage, *agent.UsageMessage:
 		return true
 	default:
 		return false
@@ -2558,36 +2552,17 @@ func turnMetadata(m agent.Message) bool {
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// TextDeltaMessage, NativeSubagentMessage, BackgroundCommandMessage, RawMessage), and returns the trailing
-// ResultMessage if the last semantically meaningful message is a result. Returns
-// nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
+// messages, and returns the trailing ResultMessage if the last semantically
+// meaningful message is a result. Returns nil if it is not a ResultMessage
+// (agent still producing output) or msgs is empty.
 func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 	var rejected map[*agent.UserInputMessage]struct{}
 	checkedInputs := false
 	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
+		if entry.Message.Provenance().IsChild() || nonSemanticMessage(entry.Message) {
 			continue
 		}
 		switch m := entry.Message.(type) {
-		case *agent.DiffStatMessage:
-			continue // Relay metadata; skip.
-		case *agent.ExitMessage:
-			continue // Relay metadata; skip.
-		case *agent.TurnCommitSnapshotMessage:
-			continue // Caic turn-boundary metadata; skip.
-		case *agent.PendingUserActionMessage:
-			continue // Reconnect metadata; skip.
-		case *agent.TextDeltaMessage:
-			continue // Streaming delta; skip.
-		case *agent.NativeSubagentMessage:
-			continue // Harness-native child activity; skip.
-		case *agent.BackgroundCommandMessage:
-			continue // Harness-native shell activity; skip.
-		case *agent.RawMessage:
-			continue // tool_progress, etc.; skip.
-		case *agent.UsageMessage:
-			continue // Token usage metadata; skip.
 		case *agent.SystemMessage:
 			if m.Subtype == agent.SystemSubtypeInputDeliveryFailed || agent.IsInputDeliveryControl(m) {
 				continue

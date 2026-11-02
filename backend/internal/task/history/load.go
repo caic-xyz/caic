@@ -72,7 +72,7 @@ type LoadedTask struct {
 	Repos             []repo.Mount // GitRoot will be empty for purged tasks loaded from logs.
 	Harness           harness.Name
 	StartedAt         time.Time
-	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	LastActivityAt    time.Time // Best-known state or activity time: latest relay ts from caic_diff_stat records, falling back to log file mtime.
 	State             task.State
 	ForgeIssue        int // Originating issue number for bot comment callbacks.
 	OwnerID           string
@@ -139,7 +139,7 @@ func loadedTaskFromMeta(path, taskID string, meta *v3.MetaMessage, modified time
 		RequestedModel:    meta.RequestedModel,
 		RequestedEffort:   meta.RequestedEffort,
 		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: modified,
+		LastActivityAt:    modified,
 		State:             task.StateRunning,
 		ForgeIssue:        meta.ForgeIssue,
 		OwnerID:           meta.OwnerID,
@@ -407,8 +407,8 @@ func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.Time
 				loaded.DiffCreated = true
 			}
 			if msg.Ts > 0 {
-				if t := tsToTime(msg.Ts); t.After(loaded.LastStateUpdateAt) {
-					loaded.LastStateUpdateAt = t
+				if t := tsToTime(msg.Ts); t.After(loaded.LastActivityAt) {
+					loaded.LastActivityAt = t
 				}
 			}
 		}
@@ -442,8 +442,8 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 		lt.State = loaded.State
 		lt.LastTrailer = loaded.LastTrailer
 	}
-	if loaded.LastStateUpdateAt.After(lt.LastStateUpdateAt) {
-		lt.LastStateUpdateAt = loaded.LastStateUpdateAt
+	if loaded.LastActivityAt.After(lt.LastActivityAt) {
+		lt.LastActivityAt = loaded.LastActivityAt
 	}
 	if loaded.ForgePR > 0 {
 		lt.ForgeOwner = loaded.ForgeOwner

@@ -585,6 +585,27 @@ func TestTask(t *testing.T) {
 			t.Errorf("CacheExpiresAt = %s, want unknown", got)
 		}
 	})
+	t.Run("CacheExpiryUsesRecordedTime", func(t *testing.T) {
+		t.Parallel()
+		// Replaying a log must not extend a cache whose TTL already elapsed.
+		usageAt := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+		want := usageAt.Add(5 * time.Minute)
+		live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		live.addParsedMessage(agent.TimedMessage{ProducerTime: usageAt, Message: &agent.UsageMessage{
+			Usage: agent.Usage{CacheReadInputTokens: 100, CacheTTLSeconds: 300},
+		}})
+		if got := live.Snapshot().CacheExpiresAt; !got.Equal(want) {
+			t.Errorf("live CacheExpiresAt = %s, want %s", got, want)
+		}
+		restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		restored.SetState(task.StateRunning)
+		restored.SeedTimelineParts(nil, []agent.TimedMessage{{ProducerTime: usageAt, Message: &agent.UsageMessage{
+			Usage: agent.Usage{CacheReadInputTokens: 100, CacheTTLSeconds: 300},
+		}}})
+		if got := restored.Snapshot().CacheExpiresAt; !got.Equal(want) {
+			t.Errorf("seeded CacheExpiresAt = %s, want %s", got, want)
+		}
+	})
 	t.Run("ResultContextWindowUpdatesSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -2720,6 +2741,20 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v (should infer waiting from trailing ResultMessage)", tk.GetState(), task.StateWaiting)
 			}
 		})
+		t.Run("TrailingMetadataKeepsTrailingResult", func(t *testing.T) {
+			t.Parallel()
+			// Session and model records are bookkeeping; they must not hide the
+			// result that settled the turn.
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetState(task.StateRunning)
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+				&agent.ResultMessage{MessageType: "result"},
+				&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s"},
+			}))
+			if got := tk.GetState(); got != task.StateWaiting {
+				t.Errorf("state = %v, want %v (trailing metadata is not semantic)", got, task.StateWaiting)
+			}
+		})
 		t.Run("RestoresWaitingStartFromResultTime", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -3161,13 +3196,19 @@ func TestTask(t *testing.T) {
 			t.Run("SeedTimelineInfersRunningForBackgroundSubagent", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-				tk.SetState(task.StateRunning)
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
-					result(),
-					native("child-1", agent.NativeSubagentStatusRunning),
-				}))
+				start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+				resultAt := start.Add(5 * time.Minute)
+				tk.SetStateAt(task.StateRunning, start)
+				tk.SeedTimelineParts(nil, []agent.TimedMessage{
+					{Message: result(), ProducerTime: resultAt},
+					{Message: native("child-1", agent.NativeSubagentStatusRunning), ProducerTime: resultAt.Add(time.Second)},
+				})
 				if got := tk.GetState(); got != task.StateRunning {
 					t.Errorf("state = %v, want %v (a background subagent is still active)", got, task.StateRunning)
+				}
+				snap := tk.Snapshot()
+				if !snap.TurnStartedAt.Equal(resultAt) || !snap.StateUpdatedAt.Equal(resultAt) {
+					t.Errorf("turn start = %v, state update = %v, want result time %v", snap.TurnStartedAt, snap.StateUpdatedAt, resultAt)
 				}
 			})
 			t.Run("SeedTimelineInfersWaitingForForegroundSubagent", func(t *testing.T) {
@@ -3221,6 +3262,28 @@ func TestTask(t *testing.T) {
 				addTaskMessage(tk, native("child-1", agent.NativeSubagentStatusCompleted))
 				if got := tk.GetState(); got != task.StateWaiting {
 					t.Errorf("state = %v, want %v after the last subagent settled", got, task.StateWaiting)
+				}
+			})
+			t.Run("ResultAnchorsLiveDeltaAtResult", func(t *testing.T) {
+				t.Parallel()
+				// Duration covers the turn that just settled, so the live delta must
+				// start at its result instead of the turn that ended.
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+				resultAt := start.Add(time.Minute)
+				tk.SetStateAt(task.StateRunning, start)
+				tk.SetTurnStartedAt(start)
+				tk.addParsedMessage(agent.TimedMessage{ProducerTime: start, Message: native("child-1", agent.NativeSubagentStatusRunning)})
+				tk.addParsedMessage(agent.TimedMessage{ProducerTime: resultAt, Message: &agent.ResultMessage{MessageType: "result", DurationMs: 60000}})
+				snap := tk.Snapshot()
+				if snap.State != task.StateRunning {
+					t.Fatalf("state = %v, want running", snap.State)
+				}
+				if !snap.TurnStartedAt.Equal(resultAt) {
+					t.Errorf("TurnStartedAt = %v, want result time %v", snap.TurnStartedAt, resultAt)
+				}
+				if snap.Duration != time.Minute {
+					t.Errorf("Duration = %v, want 1m", snap.Duration)
 				}
 			})
 			t.Run("ForegroundRunningCardFallsBackToWaiting", func(t *testing.T) {

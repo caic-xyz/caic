@@ -606,8 +606,8 @@ func TestStore(t *testing.T) {
 			if reloaded[0].LogSize != info.Size() {
 				t.Fatalf("reloaded log size = %d, want %d", reloaded[0].LogSize, info.Size())
 			}
-			if !reloaded[0].LastStateUpdateAt.Equal(updated) {
-				t.Fatalf("reloaded update time = %s, want %s", reloaded[0].LastStateUpdateAt, updated)
+			if !reloaded[0].LastActivityAt.Equal(updated) {
+				t.Fatalf("reloaded update time = %s, want %s", reloaded[0].LastActivityAt, updated)
 			}
 		})
 
