@@ -2304,7 +2304,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if lt.DiffCreated {
 		t.MarkDiffCreated()
 	}
-	t.SetStateAt(t.GetState(), stateUpdatedAt)
+	// SeedTimelineParts owns the transition time of a state inferred from the
+	// timeline: it uses recorded producer timestamps, so the adopted card keeps
+	// the waiting duration the live task showed before the restart. Recorded
+	// terminal results below override it with their own persisted time.
 	if importFailure == nil && lt.State == task.StateFailed {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
@@ -2319,7 +2322,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 	}
 
-	if !isExited {
+	if !isExited && t.GetState() == task.StateRunning && t.Snapshot().TurnStartedAt.IsZero() {
 		t.SetTurnStartedAt(time.Now().UTC())
 	}
 

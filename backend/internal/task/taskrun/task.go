@@ -1049,10 +1049,27 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// Only override non-terminal states — purged/crashed/failed tasks loaded
 	// from logs must keep their recorded state.
 	if view.Len() > 0 && t.state != task.StatePurged && t.state != task.StateCrashed && t.state != task.StateFailed && t.state != task.StatePurging {
-		if lastAgentMessage(view) != nil {
-			t.setState(t.settledTurnStateLocked())
-		} else if lastTurnHasUnansweredAsk(view) {
-			t.setState(task.StateAsking)
+		var next task.State
+		switch {
+		case lastAgentMessage(view) != nil:
+			next = t.settledTurnStateLocked()
+		case lastTurnHasUnansweredAsk(view):
+			next = task.StateAsking
+		}
+		if next != "" {
+			// Producer timestamps keep the adopted task's state duration and turn
+			// start equal to the live values the restart replaced.
+			if at := seedStateTime(view, next); !at.IsZero() {
+				t.seedStateAtLocked(next, at)
+			} else {
+				t.setState(next)
+			}
+		} else if t.state == task.StateRunning || t.state == task.StateStarting {
+			// The log ends mid-turn. Record the turn start because import set a
+			// provisional Running state without a turn timestamp.
+			if at := turnStartTime(view); !at.IsZero() {
+				t.seedStateAtLocked(task.StateRunning, at)
+			}
 		}
 	}
 }
@@ -1723,10 +1740,30 @@ func (t *Task) observeUsageLocked(msg agent.Message) {
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s task.State) {
-	at := time.Now().UTC()
+	t.setStateAtLocked(s, time.Now().UTC())
+}
+
+// setStateAtLocked updates the state at an explicit transition time. Entering
+// Running records the turn start; leaving it clears the turn start. Callers
+// hold t.mu.
+func (t *Task) setStateAtLocked(s task.State, at time.Time) {
 	if s == task.StateRunning && t.state != task.StateRunning {
 		t.turnStartedAt = at
 	} else if s != task.StateRunning {
+		t.turnStartedAt = time.Time{}
+	}
+	t.recordStateTransition(s, at)
+	t.state = s
+	t.stateUpdatedAt = at
+}
+
+// seedStateAtLocked applies a timeline-inferred state at its recorded
+// transition time. Seeding starts from a provisional Running state, so a
+// Running result always records the derived turn start. Callers hold t.mu.
+func (t *Task) seedStateAtLocked(s task.State, at time.Time) {
+	if s == task.StateRunning {
+		t.turnStartedAt = at
+	} else {
 		t.turnStartedAt = time.Time{}
 	}
 	t.recordStateTransition(s, at)
@@ -2435,6 +2472,89 @@ func (s TimelineSnapshot) Release() {
 type timelineSnapshotLease struct {
 	once    sync.Once
 	release func()
+}
+
+// seedStateTime returns the recorded time the loaded timeline entered state
+// next. Producer timestamps survive a restart, so the adopted task reports the
+// same state duration and running turn start as the live task did.
+func seedStateTime(entries timelineEntries, next task.State) time.Time {
+	switch next {
+	case task.StateAsking:
+		return lastAskTime(entries)
+	case task.StateRunning:
+		return turnStartTime(entries)
+	default:
+		return lastResultTime(entries)
+	}
+}
+
+// lastResultTime returns the producer time of the trailing root result.
+func lastResultTime(entries timelineEntries) time.Time {
+	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
+		if _, ok := entry.Message.(*agent.ResultMessage); ok {
+			return entry.ProducerTime
+		}
+	}
+	return time.Time{}
+}
+
+// lastAskTime returns the producer time of the trailing root question.
+func lastAskTime(entries timelineEntries) time.Time {
+	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
+		if _, ok := entry.Message.(*agent.AskMessage); ok {
+			return entry.ProducerTime
+		}
+	}
+	return time.Time{}
+}
+
+// turnStartTime returns when the turn that is still running began. A trailing
+// ResultMessage belongs to that turn when a background subagent outlived it, so
+// skip it and measure from the turn before.
+func turnStartTime(entries timelineEntries) time.Time {
+	skipResult := lastAgentMessage(entries) != nil
+	start := time.Time{}
+	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
+		if turnMetadata(entry.Message) {
+			continue
+		}
+		if _, ok := entry.Message.(*agent.ResultMessage); ok {
+			if skipResult {
+				skipResult = false
+				continue
+			}
+			return start
+		}
+		if !entry.ProducerTime.IsZero() {
+			start = entry.ProducerTime
+		}
+	}
+	return start
+}
+
+// turnMetadata reports whether m is relay or caic metadata that cannot start a
+// running turn. Activity messages between two results belong to one turn.
+func turnMetadata(m agent.Message) bool {
+	switch m.(type) {
+	case *agent.BackgroundCommandMessage, *agent.DiffStatMessage, *agent.ExitMessage,
+		*agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.MetaSessionMessage,
+		*agent.ModelInfoMessage, *agent.NativeSubagentMessage, *agent.PendingUserActionMessage,
+		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage,
+		*agent.SystemMessage, *agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage,
+		*agent.UsageMessage:
+		return true
+	default:
+		return false
+	}
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic

@@ -6857,6 +6857,86 @@ func runAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
 	}
 }
 
+// TestManagerRestoresTaskTimes verifies that an adopted task keeps the waiting
+// duration and total duration its card showed before the restart.
+func TestManagerRestoresTaskTimes(t *testing.T) {
+	t.Parallel()
+	taskID := ksid.NewID()
+	instanceID := runtime.NewID("test-runtime", "restore-times")
+	fake := &runtimetest.FakeInfo{Meta: map[string]string{
+		"restore-times\x00caic.id":      taskID.String(),
+		"restore-times\x00caic.harness": string(harness.Claude),
+	}}
+	cacheDir := t.TempDir()
+	logDir := filepath.Join(cacheDir, "tasks")
+	m := newTestManager(t, Config{
+		ServerCtx: t.Context(),
+		LogStore:  taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), backends.Default("", nil)),
+		Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+		Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}},
+	})
+	t.Cleanup(func() { _ = m.Close() })
+	registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
+	m.relay = fakeRelayReader{
+		statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+		readTailFn: func(context.Context, runtime.ConnectionTarget, int64) (agent.RelaySnapshot, int64, error) {
+			return agent.RelaySnapshot{}, 0, nil
+		},
+		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	resultAt := now.Add(-2 * time.Minute)
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := json.Marshal(logdata.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     3,
+		Prompt:      "do it",
+		Repos:       []logdata.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-11"}},
+		Harness:     string(harness.Claude),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := fmt.Sprintf(`{"t":"agent","ts":%.3f,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}}`, float64(resultAt.UnixMilli()-60000)/1000)
+	result := fmt.Sprintf(`{"t":"agent","ts":%.3f,"msg":{"type":"result","subtype":"success","is_error":false,"duration_ms":120000,"num_turns":1,"result":"done","session_id":"s","total_cost_usd":0.01,"usage":{}}}`, float64(resultAt.UnixMilli())/1000)
+	logs := string(meta) + "\n" + text + "\n" + result + "\n"
+	if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(logs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := m.logStore.LoadUnsettled()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
+		ID:    instanceID,
+		State: "running",
+		Repos: []runtime.Repo{{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-11", ContainerPath: "/home/user/src/caic-xyz/caic"}},
+	}}, loaded)
+	if err != nil {
+		t.Fatalf("ImportInstances: %v", err)
+	}
+	if len(adopted) != 1 {
+		t.Fatalf("adopted len = %d, want 1", len(adopted))
+	}
+	snap := adopted[0].Task().Snapshot()
+	if snap.State != task.StateWaiting {
+		t.Errorf("state = %v, want waiting", snap.State)
+	}
+	if !snap.StateUpdatedAt.Equal(resultAt) {
+		t.Errorf("StateUpdatedAt = %v, want recorded result time %v", snap.StateUpdatedAt, resultAt)
+	}
+	if !snap.TurnStartedAt.IsZero() {
+		t.Errorf("TurnStartedAt = %v, want zero for a waiting task", snap.TurnStartedAt)
+	}
+	if snap.Duration != 2*time.Minute {
+		t.Errorf("Duration = %v, want 2m", snap.Duration)
+	}
+}
+
 func TestLastResultText(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {

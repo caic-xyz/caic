@@ -2720,6 +2720,64 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v (should infer waiting from trailing ResultMessage)", tk.GetState(), task.StateWaiting)
 			}
 		})
+		t.Run("RestoresWaitingStartFromResultTime", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+			tk.SetStateAt(task.StateRunning, start)
+			tk.SeedTimelineParts(nil, []agent.TimedMessage{
+				{Message: &agent.TextMessage{Text: "working"}, ProducerTime: start},
+				{Message: &agent.ResultMessage{MessageType: "result", DurationMs: 120000}, ProducerTime: start.Add(2 * time.Minute)},
+			})
+			snap := tk.Snapshot()
+			if !snap.StateUpdatedAt.Equal(start.Add(2 * time.Minute)) {
+				t.Errorf("StateUpdatedAt = %v, want result producer time %v", snap.StateUpdatedAt, start.Add(2*time.Minute))
+			}
+			if !snap.TurnStartedAt.IsZero() {
+				t.Errorf("TurnStartedAt = %v, want zero for a waiting task", snap.TurnStartedAt)
+			}
+			if snap.Duration != 2*time.Minute {
+				t.Errorf("Duration = %v, want 2m", snap.Duration)
+			}
+		})
+		t.Run("RestoresTurnStartAfterPreviousResult", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+			tk.SetStateAt(task.StateRunning, start)
+			tk.SeedTimelineParts(nil, []agent.TimedMessage{
+				{Message: &agent.TextMessage{Text: "first turn"}, ProducerTime: start},
+				{Message: &agent.ResultMessage{MessageType: "result", DurationMs: 60000}, ProducerTime: start.Add(time.Minute)},
+				{Message: &agent.UserInputMessage{Text: "next"}, ProducerTime: start.Add(5 * time.Minute)},
+				{Message: &agent.TextMessage{Text: "working"}, ProducerTime: start.Add(5*time.Minute + time.Second)},
+			})
+			snap := tk.Snapshot()
+			if snap.State != task.StateRunning {
+				t.Fatalf("state = %v, want running", snap.State)
+			}
+			want := start.Add(5 * time.Minute)
+			if !snap.TurnStartedAt.Equal(want) || !snap.StateUpdatedAt.Equal(want) {
+				t.Errorf("turn start = %v, state update = %v, want %v", snap.TurnStartedAt, snap.StateUpdatedAt, want)
+			}
+		})
+		t.Run("RestoresAskingStartFromAskTime", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+			tk.SetStateAt(task.StateRunning, start)
+			askAt := start.Add(time.Minute)
+			tk.SeedTimelineParts(nil, []agent.TimedMessage{
+				{Message: &agent.AskMessage{ToolUseID: "ask1", Questions: []v3.AskQuestion{{Question: "which?"}}}, ProducerTime: askAt},
+				{Message: &agent.ResultMessage{MessageType: "result"}, ProducerTime: askAt.Add(10 * time.Second)},
+			})
+			snap := tk.Snapshot()
+			if snap.State != task.StateAsking {
+				t.Fatalf("state = %v, want asking", snap.State)
+			}
+			if !snap.StateUpdatedAt.Equal(askAt) {
+				t.Errorf("StateUpdatedAt = %v, want ask producer time %v", snap.StateUpdatedAt, askAt)
+			}
+		})
 		t.Run("InfersAsking", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
