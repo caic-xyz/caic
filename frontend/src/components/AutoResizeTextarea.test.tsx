@@ -137,6 +137,46 @@ describe("AutoResizeTextarea", () => {
     expect(selection?.isCollapsed).toBe(false);
   });
 
+  it("keeps a caret a caller places after the focus event", async () => {
+    const { getByRole } = render(() => <AutoResizeTextarea value="hello" onInput={() => {}} />);
+    const el = getByRole("textbox");
+
+    el.focus();
+    const text = el.firstChild;
+    if (!text) throw new Error("Editable text was not rendered");
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    await Promise.resolve();
+
+    expect(selectionOffset(el)).toBe(2);
+  });
+
+  it("keeps a caret a caller places after a leading line break", async () => {
+    const { getByRole } = render(() => <AutoResizeTextarea value={"\nhello"} onInput={() => {}} />);
+    const el = getByRole("textbox");
+
+    el.focus();
+    const text = el.querySelector("br")?.nextSibling;
+    if (!text) throw new Error("Editable text was not rendered");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    await Promise.resolve();
+
+    // The helper counts characters, and a line break has none, so compare the
+    // caret itself: it must still sit before the text and not at the end.
+    const live = window.getSelection();
+    expect(live?.anchorNode).toBe(text);
+    expect(live?.anchorOffset).toBe(0);
+  });
+
   it("is not editable when disabled", () => {
     const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />);
     expect(getByRole("textbox")).toHaveAttribute("contenteditable", "false");

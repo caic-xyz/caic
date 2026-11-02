@@ -5,6 +5,8 @@
 import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot, waitForVisualReadiness } from "../visual";
+import { visualPositionTime } from "../visual-fixtures";
+import { formatTimingDuration } from "../../frontend/src/timing";
 import type { Locator } from "@playwright/test";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 import path from "path";
@@ -214,10 +216,16 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  // This duration is the distance from the task start to the first init record,
-  // so it moves when the fake setup log gains a record; update it with the
-  // baselines.
-  await expect(page.getByTestId("task-setup").getByTestId("timing-duration")).toHaveText(/^450ms$/);
+  // The fixture re-times the setup records from the task start, so derive the
+  // duration the capture must show from the same positions it uses.
+  const startedAt = Date.parse(settledDetail.startedAt ?? "");
+  const manifest = await api.getHistoryManifest(id1);
+  const setupEnds = [manifest.metadata.initialInit, manifest.metadata.initialInput]
+    .filter((position) => position !== undefined)
+    .map((position) => visualPositionTime(startedAt, position));
+  ok(setupEnds.length > 0);
+  const setupMs = Math.min(...setupEnds) - startedAt;
+  await expect(page.getByTestId("task-setup").getByTestId("timing-duration")).toHaveText(formatTimingDuration(setupMs));
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();

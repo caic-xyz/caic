@@ -270,14 +270,8 @@ a.headerPR:hover {
 .textInput {
   flex: 1;
   max-height: 10rem;
-  padding: 0.4rem;
   overflow-y: auto;
   font: inherit;
-
-  /* Same box as the new-task prompt: match the float spacer, the trailing
-     buttons, and the text size; see .promptInput. */
-  line-height: 1.5rem;
-  resize: none;
 }
 
 .actionError {

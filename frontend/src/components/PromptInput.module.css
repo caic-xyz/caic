@@ -1,4 +1,4 @@
-/* Styles for the PromptInput component: container, drag-over, and image previews. */
+/* Styles for the PromptInput component: its text field, trailing controls, drag-over, and images. */
 
 .container {
   box-sizing: border-box;
@@ -52,6 +52,19 @@
   fill: currentcolor;
 }
 
+/* One line box, centered on the trailing controls: their box starts 0.25rem
+   below the row top and is 1.75rem tall, so their center sits 1.125rem down,
+   which half this line box plus the padding matches. The float below reserves
+   the same line box, so the second line starts at their bottom edge. Owners set
+   the font only; a different line box or padding breaks the centering. */
+
+/* More specific than an owner's class, whose font shorthand would otherwise
+   reset the line box. */
+.row > .input {
+  padding: 0.4rem 0.5rem;
+  line-height: 1.5rem;
+}
+
 .row:focus-within {
   border-color: var(--color-focus-border);
   box-shadow: inset 0 0 0 2px var(--color-focus-border);
@@ -70,6 +83,17 @@
   display: flex;
   gap: 0.125rem;
   align-items: center;
+}
+
+/* Keep the controls' box in the same units as the line box they sit beside: a
+   root font size below 16px shrinks the prompt but not a pixel-sized control,
+   which would put the second line back under it. The direct-child selectors
+   reach the triggers inside their menu wrappers without reaching a menu item. */
+.trailing > button,
+.trailing > div > button {
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0.25rem;
 }
 
 /* These controls sit on the input surface, where the shared hover tint is too
@@ -180,4 +204,12 @@
   margin: 0.25rem 0;
   font-size: 0.85rem;
   color: var(--color-danger);
+}
+
+/* The 1.25rem glyph matches the 20px icons these controls pass, in the units the
+   line box above uses. */
+.trailing > button svg,
+.trailing > div > button svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }

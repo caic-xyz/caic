@@ -141,3 +141,26 @@ test("Page Up and Page Down switch tasks while preserving prompt drafts", async 
   await expect(prompt).toBeFocused();
   await expect(prompt).toHaveText("draft for the second task");
 });
+
+test("keeps the caret when focus returns by keyboard", async ({ page }) => {
+  await page.goto("/");
+  const prompt = page.getByTestId("prompt-input");
+  await prompt.click();
+  await page.keyboard.type("hello");
+  // Leave the field and return without a pointer, so the editor must keep the
+  // caret the typist left instead of the position a fresh focus would pick.
+  await page.keyboard.press("F2");
+  await page.keyboard.press("Escape");
+  await expect(prompt).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(prompt).toHaveText("hello!");
+  // A focus that finds no selection inside the editor starts at the beginning of
+  // the text, which is the one position the editor must overwrite.
+  await prompt.evaluate((el) => {
+    window.getSelection()?.removeAllRanges();
+    el.blur();
+  });
+  await prompt.focus();
+  await page.keyboard.type("?");
+  await expect(prompt).toHaveText("hello!?");
+});

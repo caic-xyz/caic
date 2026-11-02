@@ -170,7 +170,7 @@ export default function PromptInput(props: Props) {
           onKeyDown={props.onKeyDown}
           placeholder={props.placeholder}
           disabled={props.disabled}
-          class={props.class}
+          class={`${styles.input}${props.class ? ` ${props.class}` : ""}`}
           tabIndex={props.tabIndex}
           data-testid={props["data-testid"]}
           spacerClass={spacerClass()}

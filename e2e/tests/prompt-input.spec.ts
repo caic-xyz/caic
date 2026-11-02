@@ -1,6 +1,41 @@
 // Screenshots of the prompt input with short and long text to verify button layout.
-import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
+import {
+  test,
+  expect,
+  createTaskAPI,
+  waitForCISettle,
+  waitForTaskState,
+  convertPngsToWebp,
+  type APIClient,
+} from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual";
+
+/** Creates the task cards the prompt captures show, newest first. */
+async function seedTaskList(api: APIClient) {
+  const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  if (!firstRepo) throw new Error("Fake server has no repository");
+  const prompts = [
+    "Reduce memory retained by collapsed patches",
+    "Document service authentication and callback URLs",
+    "Validate uploaded image dimensions before decoding",
+    "Add resource charts to the task statistics view",
+    "Delegate the auth review to three parallel subagents",
+  ];
+  const ids: string[] = [];
+  for (const text of prompts) {
+    const task = await api.createTask({
+      initialPrompt: { text },
+      repos: [{ name: firstRepo.path }],
+      harness: "claude",
+      model: "opus-5.5",
+      effort: "high",
+    });
+    ids.push(task.id);
+    await waitForTaskState(api, task.id, "waiting", 30_000);
+  }
+  await waitForCISettle(api, ids);
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -11,6 +46,16 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  // The task list behind the prompt is part of the capture. The documentation
+  // spec usually fills it first; when this spec runs alone, seed it so the
+  // capture never shows an empty list. Ask the server, because the cards load
+  // after the first paint.
+  if ((await api.listTasks()).length === 0) {
+    await seedTaskList(api);
+    await page.goto("/");
+    await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  }
+  await expect(page.locator("[data-task-id]").first()).toBeVisible({ timeout: 10_000 });
 
   const prompt = page.getByTestId("prompt-input");
 

@@ -45,11 +45,11 @@ export default function AutoResizeTextarea(props: Props) {
     queueMicrotask(() => {
       if (generation !== focusGeneration || document.activeElement !== editable) return;
       const selection = window.getSelection();
-      if (!selection) return;
-      // Keep a range selected after the focus event. Programmatic focus callers
-      // select content to replace it, and moving the caret would make their
-      // insertion append to the existing text instead.
-      if (!selection.isCollapsed) return;
+      if (!selection || !selection.isCollapsed) return;
+      // Restore over the empty start the browser places on focus. A caller that
+      // selected content or moved the caret after the focus event owns it:
+      // moving it would make its insertion land somewhere else.
+      if (!atContentStart(selection, editable)) return;
       const range = previousRange ?? document.createRange();
       if (!previousRange) {
         range.selectNodeContents(editable);
@@ -143,6 +143,21 @@ export default function AutoResizeTextarea(props: Props) {
       onBlur={handleBlur}
     />
   );
+}
+
+/** Whether the caret sits at the start of the editable's text. */
+function atContentStart(selection: Selection, editable: HTMLElement): boolean {
+  if (selection.rangeCount === 0) return true;
+  const live = selection.getRangeAt(0);
+  if (!editable.contains(live.startContainer)) return false;
+  const before = document.createRange();
+  before.selectNodeContents(editable);
+  before.setEnd(live.startContainer, live.startOffset);
+  // The browser's initial caret clones an empty text node, and a caret after a
+  // line break is preceded by an element that contributes no text, so compare
+  // both the text and the elements that precede the caret.
+  const preceding = before.cloneContents();
+  return preceding.textContent === "" && preceding.firstElementChild === null;
 }
 
 /** Block-level tags that browsers inject inside contentEditable divs. */

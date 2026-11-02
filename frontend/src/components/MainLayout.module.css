@@ -114,17 +114,8 @@
 .promptInput {
   flex: 1 1 100%;
   max-height: 10rem;
-  padding: 0.4rem 0.5rem;
   overflow-y: auto;
   font: inherit;
-
-  /* One line box, centered on the trailing buttons: their box starts 0.25rem
-     below the row top and is 1.75rem tall, so their center is 1.125rem down,
-     which half this line box plus the padding matches. The float spacer in
-     PromptInput.module.css reserves exactly this line box, so the second line
-     starts at the buttons' bottom edge. */
-  line-height: 1.5rem;
-  resize: none;
 }
 
 .hidden {

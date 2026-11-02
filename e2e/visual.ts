@@ -6,7 +6,14 @@ import { fileURLToPath } from "url";
 import { validateHistoryEvent, validateHistoryManifest, validateTask } from "../sdk/caic/ts/v1/validate.gen";
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
 import type { HistoryManifest, ImageRefreshStatus, ISOTimestamp } from "../sdk/caic/ts/v1/types.gen";
-import { resourceHistory, serverHealth, usageHistory } from "./visual-fixtures";
+import {
+  resourceHistory,
+  serverHealth,
+  systemStats,
+  usageHistory,
+  visualPositionTime,
+  visualRecordStrideMs,
+} from "./visual-fixtures";
 import { historyArray } from "../frontend/tests/history";
 
 const visualTime = "2026-09-02T12:00:00.000Z";
@@ -46,6 +53,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     return route.fulfill({ json: status });
   });
   await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: usageHistory() }));
+  await page.route("**/api/caic/v1/server/system-stats", (route) => route.fulfill({ json: systemStats() }));
   const historyResponse = async (route: Route) => {
     const response = await route.fetch();
     if (!response.ok()) throw new Error(`Visual history fetch failed: ${response.status()}`);
@@ -85,7 +93,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     const events = values.map((value: unknown) => {
       const event = validateHistoryEvent(value);
       // Raw record 1 is the log header; projected records begin at creation.
-      event.message.ts = start + (event.recordID - 2) * 150 + event.index;
+      event.message.ts = visualPositionTime(start, event);
       return event;
     });
     await route.fulfill({ contentType: "application/json", body: historyArray(events) });
@@ -98,14 +106,14 @@ export async function prepareVisualPage(page: Page): Promise<void> {
   // bodies and payload-free metadata to the same deterministic raw positions.
   // The health events are replaced too: the server samples the real host, so a
   // capture would record whichever CPU level the machine happened to report.
-  const fixtures = { samples: resourceHistory(), health: serverHealth() };
-  await page.addInitScript(({ samples, health }) => {
+  const fixtures = { samples: resourceHistory(), health: serverHealth(), stride: visualRecordStrideMs };
+  await page.addInitScript(({ samples, health, stride }) => {
     const histories = new Map<string, { start: number; timestamps: Map<string, number> }>();
     function normalize(id: string, manifest: HistoryManifest) {
       const history = histories.get(id);
       if (!history) throw new Error(`Visual task has no timestamp map: ${id}`);
       const positionTime = (position: { recordID: number; index: number }) =>
-        history.start + (position.recordID - 2) * 150 + position.index;
+        history.start + (position.recordID - 2) * stride + position.index;
       for (const section of manifest.sections) {
         for (const event of [section.boundary, section.endBoundary]) if (event) event.message.ts = positionTime(event);
       }
@@ -169,7 +177,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
           const value = JSON.parse(event.data) as { recordID: number; index: number; message: { ts: number } };
           const history = histories.get(id);
           if (!history) throw new Error("Visual live history has no timestamp map");
-          const ts = history.start + (value.recordID - 2) * 150 + value.index;
+          const ts = history.start + (value.recordID - 2) * stride + value.index;
           history.timestamps.set(`${value.recordID}:${value.index}`, value.message.ts);
           value.message.ts = ts;
           Object.defineProperty(event, "data", { value: JSON.stringify(value) });
@@ -267,6 +275,28 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
+    // Observable Plot measures its container while rendering, so a chart caught
+    // mid-layout disagrees with the next pass. Wait for its geometry to hold
+    // still, and fail instead of capturing a chart mid-layout.
+    const chartBoxes = () =>
+      Array.from(document.querySelectorAll("svg.caic-plot"))
+        .map((element) => {
+          const box = element.getBoundingClientRect();
+          return `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}`;
+        })
+        .join("|");
+    const settledFrames = 2;
+    let previous = chartBoxes();
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 60 && stableFrames < settledFrames; attempt++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = chartBoxes();
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+    }
+    if (stableFrames < settledFrames) {
+      throw new Error(`Chart geometry did not settle: ${previous}`);
+    }
   });
 }
 

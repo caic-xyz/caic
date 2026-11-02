@@ -4,11 +4,20 @@ import type {
   EventStats,
   ISOTimestamp,
   ServerHealth,
+  SystemStatsResp,
   UsageDashboardResp,
   UsageDashboardDay,
 } from "../sdk/caic/ts/v1/types.gen";
 
 export const visualEpoch = Date.UTC(2026, 8, 2, 12);
+
+/** Milliseconds between successive raw record positions in a capture. */
+export const visualRecordStrideMs = 150;
+
+/** Capture time of a raw record position, offset from the task start. */
+export function visualPositionTime(startMs: number, position: { recordID: number; index: number }): number {
+  return startMs + (position.recordID - 2) * visualRecordStrideMs + position.index;
+}
 
 /** Server health for the header level badge. The real server samples the host,
  *  so a capture would otherwise record whichever CPU level the machine had. */
@@ -43,6 +52,24 @@ export function resourceHistory(): EventStats[] {
       diskUsed: 842 * 1024 * 1024,
     };
   });
+}
+
+/** Server statistics for the System page. The real endpoint samples the host,
+ *  so a capture would record the machine that rendered it. */
+export function systemStats(): SystemStatsResp {
+  return {
+    samples: resourceHistory().map((sample) => ({
+      time: new Date(sample.ts).toISOString() as ISOTimestamp,
+      cpus: Array.from({ length: 8 }, (_, index) => ({ id: `cpu${index}`, usagePerc: sample.cpuPerc / 8 })),
+      memUsed: sample.memUsed,
+      memTotal: sample.memLimit,
+      memPerc: sample.memPerc,
+      netRx: sample.netRx,
+      netTx: sample.netTx,
+      diskUsed: sample.diskUsed,
+      diskTotal: 20 * 1024 * 1024 * 1024,
+    })),
+  };
 }
 
 export function usageHistory(): UsageDashboardResp {

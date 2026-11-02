@@ -12,6 +12,7 @@ declare const classes: {
   readonly "imagePreviewRow": string;
   readonly "imageRemove": string;
   readonly "imageThumb": string;
+  readonly "input": string;
   readonly "menuItem": string;
   readonly "row": string;
   readonly "spacer": string;
