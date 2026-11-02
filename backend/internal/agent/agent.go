@@ -150,6 +150,13 @@ type MessageParser interface {
 	ParseOutput(line []byte) ([]Message, error)
 }
 
+// timedParser optionally receives the producer time of the record it is about
+// to decode. A parser whose messages carry durations must use it instead of the
+// wall clock, so decoding recorded history reproduces the live projection.
+type timedParser interface {
+	SetProducerTime(at time.Time)
+}
+
 // RequestedEffort is an optional interface for WireFormat implementations that
 // encode the requested reasoning effort into their outgoing requests.
 type RequestedEffort interface {

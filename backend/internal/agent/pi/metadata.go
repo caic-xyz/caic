@@ -19,10 +19,20 @@ type piMetadata struct {
 
 	mu             sync.Mutex
 	session        agent.SessionMetadata
+	recordTime     time.Time
 	startTime      time.Time
 	numTurns       int
 	modelCtxWindow int64
 	modelProvider  string
+}
+
+// SetProducerTime records the producer time of the record being decoded. The
+// turn clock uses it instead of the wall clock so recorded history replays with
+// the durations the live session reported.
+func (w *piMetadata) SetProducerTime(at time.Time) {
+	w.mu.Lock()
+	w.recordTime = at
+	w.mu.Unlock()
 }
 
 func (w *piMetadata) ParseInput(line []byte) ([]agent.Message, error) {
@@ -98,9 +108,11 @@ func (w *piMetadata) ParseOutput(line []byte) ([]agent.Message, error) {
 }
 
 // beginPrompt applies the committed input boundary in both native projections.
+// DecodeFrame supplies the recorded producer time; a missing one leaves the
+// turn clock unset rather than substituting the replay instant.
 func (w *piMetadata) beginPrompt() {
 	w.mu.Lock()
-	w.startTime = time.Now()
+	w.startTime = w.recordTime
 	w.numTurns = 0
 	w.mu.Unlock()
 }
@@ -252,10 +264,10 @@ func (w *piMetadata) handleAgentEnd(line []byte) ([]agent.Message, error) {
 
 	w.mu.Lock()
 	var durationMs int64
-	if !w.startTime.IsZero() {
-		durationMs = time.Since(w.startTime).Milliseconds()
-		w.startTime = time.Time{}
+	if !w.startTime.IsZero() && !w.recordTime.IsZero() {
+		durationMs = max(0, w.recordTime.Sub(w.startTime).Milliseconds())
 	}
+	w.startTime = time.Time{}
 	numTurns := w.numTurns
 	w.numTurns = 0
 	w.mu.Unlock()

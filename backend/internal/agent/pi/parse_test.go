@@ -459,6 +459,7 @@ func TestHandleAgentEnd(t *testing.T) {
 	t.Run("retrying agent_end defers terminal result", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{startTime: time.Now().Add(-time.Second), numTurns: 2}
+		w.SetProducerTime(time.Now())
 
 		retry, err := w.ParseOutput([]byte(`{"type":"agent_end","messages":[],"willRetry":true}`))
 		if err != nil {
@@ -537,32 +538,44 @@ func TestHandleAgentEnd(t *testing.T) {
 
 func TestWireFormatDurationTracking(t *testing.T) {
 	t.Parallel()
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		w := &piWireFormat{}
-		w.mu.Lock()
-		w.startTime = time.Now().Add(-500 * time.Millisecond)
-		w.mu.Unlock()
-
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
-		if _, err := w.ParseOutput(turnEndLine); err != nil {
-			t.Fatalf("ParseMessage(turn_end): %v", err)
-		}
-
-		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50}}]}`)
-		endMsgs, err := w.ParseOutput(agentEndLine)
+	newParser := func(t *testing.T) *agent.LogRecordParser {
+		t.Helper()
+		parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
 		if err != nil {
-			t.Fatalf("ParseMessage(agent_end): %v", err)
+			t.Fatal(err)
 		}
-		if len(endMsgs) != 1 {
-			t.Fatalf("ParseMessage(agent_end) = %d messages, want 1", len(endMsgs))
+		return parser
+	}
+	parse := func(t *testing.T, parser *agent.LogRecordParser, line string) []agent.TimedMessage {
+		t.Helper()
+		record, err := parser.ParseRecord([]byte(line))
+		if err != nil {
+			t.Fatalf("ParseRecord(%s): %v", line, err)
 		}
-		rm, ok := endMsgs[0].(*agent.ResultMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", endMsgs[0])
+		return record.Messages
+	}
+	result := func(t *testing.T, messages []agent.TimedMessage) *agent.ResultMessage {
+		t.Helper()
+		var found *agent.ResultMessage
+		for _, message := range messages {
+			if rm, ok := message.Message.(*agent.ResultMessage); ok {
+				found = rm
+			}
 		}
-		if rm.DurationMs < 400 || rm.DurationMs > 700 {
-			t.Errorf("DurationMs = %d, want ~500", rm.DurationMs)
+		if found == nil {
+			t.Fatalf("messages = %#v, want a *agent.ResultMessage", messages)
+		}
+		return found
+	}
+
+	t.Run("recorded prompt bounds agent_end", func(t *testing.T) {
+		t.Parallel()
+		parser := newParser(t)
+		parse(t, parser, `{"t":"input","ts":100.000,"msg":{"type":"prompt","message":"go"}}`)
+		parse(t, parser, `{"t":"agent","ts":101.000,"msg":{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}}`)
+		rm := result(t, parse(t, parser, `{"t":"agent","ts":160.000,"msg":{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50}}]}}`))
+		if rm.DurationMs != 60000 {
+			t.Errorf("DurationMs = %d, want 60000 from recorded timestamps", rm.DurationMs)
 		}
 		if rm.NumTurns != 1 {
 			t.Errorf("NumTurns = %d, want 1", rm.NumTurns)
@@ -574,60 +587,32 @@ func TestWireFormatDurationTracking(t *testing.T) {
 
 	t.Run("no recorded prompt before agent_end", func(t *testing.T) {
 		t.Parallel()
-		w := &piWireFormat{}
-		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
-		endMsgs, err := w.ParseOutput(agentEndLine)
-		if err != nil {
-			t.Fatalf("ParseMessage(agent_end): %v", err)
-		}
-		rm, ok := endMsgs[0].(*agent.ResultMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", endMsgs[0])
-		}
+		parser := newParser(t)
+		rm := result(t, parse(t, parser, `{"t":"agent","ts":160.000,"msg":{"type":"agent_end","messages":[]}}`))
 		if rm.DurationMs != 0 {
-			t.Errorf("DurationMs = %d, want 0 when startTime was never set", rm.DurationMs)
+			t.Errorf("DurationMs = %d, want 0 when the log has no prompt", rm.DurationMs)
 		}
 	})
 
 	t.Run("committed prompt resets state between turns", func(t *testing.T) {
 		t.Parallel()
-		w := &piWireFormat{}
+		parser := newParser(t)
+		turnEnd := func(ts string) string {
+			return `{"t":"agent","ts":` + ts + `,"msg":{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":10,"output":5,"totalTokens":15}}}}`
+		}
+		agentEnd := func(ts string) string {
+			return `{"t":"agent","ts":` + ts + `,"msg":{"type":"agent_end","messages":[]}}`
+		}
+		parse(t, parser, `{"t":"input","ts":100.000,"msg":{"type":"prompt","message":"first"}}`)
+		parse(t, parser, turnEnd("105.000"))
+		result(t, parse(t, parser, agentEnd("110.000")))
 
-		w.mu.Lock()
-		w.startTime = time.Now().Add(-200 * time.Millisecond)
-		w.mu.Unlock()
-		turnEnd := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":10,"output":5,"totalTokens":15}}}`)
-		if _, err := w.ParseOutput(turnEnd); err != nil {
-			t.Fatal(err)
-		}
-		agentEnd := []byte(`{"type":"agent_end","messages":[]}`)
-		if _, err := w.ParseOutput(agentEnd); err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := w.ParseInput([]byte(`{"type":"prompt","message":"next turn"}`)); err != nil {
-			t.Fatal(err)
-		}
-		w.mu.Lock()
-		w.startTime = time.Now().Add(-300 * time.Millisecond)
-		w.mu.Unlock()
-		if _, err := w.ParseOutput(turnEnd); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.ParseOutput(turnEnd); err != nil {
-			t.Fatal(err)
-		}
-
-		endMsgs, err := w.ParseOutput(agentEnd)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rm, ok := endMsgs[0].(*agent.ResultMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.ResultMessage", endMsgs[0])
-		}
-		if rm.DurationMs < 200 || rm.DurationMs > 500 {
-			t.Errorf("DurationMs = %d, want ~300 (second turn)", rm.DurationMs)
+		parse(t, parser, `{"t":"input","ts":200.000,"msg":{"type":"prompt","message":"second"}}`)
+		parse(t, parser, turnEnd("210.000"))
+		parse(t, parser, turnEnd("220.000"))
+		rm := result(t, parse(t, parser, agentEnd("230.000")))
+		if rm.DurationMs != 30000 {
+			t.Errorf("DurationMs = %d, want 30000 for the second invocation", rm.DurationMs)
 		}
 		if rm.NumTurns != 2 {
 			t.Errorf("NumTurns = %d, want 2", rm.NumTurns)
@@ -1039,10 +1024,12 @@ func TestCommittedPromptBoundary(t *testing.T) {
 			if metadata.numTurns != 7 || metadata.startTime != time.Unix(1, 0) || wire.toolOutputLen["prior-tool"] != 100 {
 				t.Fatal("encoding advanced the observed prompt boundary")
 			}
+			producedAt := time.Unix(2, 0)
+			metadata.SetProducerTime(producedAt)
 			if _, err := parser.ParseInput(encoded); err != nil {
 				t.Fatal(err)
 			}
-			if metadata.numTurns != 0 || !metadata.startTime.After(time.Unix(1, 0)) || (projection == "full" && wire.toolOutputLen != nil) {
+			if metadata.numTurns != 0 || !metadata.startTime.Equal(producedAt) || (projection == "full" && wire.toolOutputLen != nil) {
 				t.Fatal("committed prompt did not reset its owned turn state")
 			}
 			for _, line := range []string{

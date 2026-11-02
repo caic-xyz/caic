@@ -57,6 +57,9 @@ func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
 func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, error) {
 	record := ParsedRecord{Provenance: FrameProvenance(frame), Control: frame.Control != nil}
 	if !record.Control {
+		if timed, ok := p.native.(timedParser); ok {
+			timed.SetProducerTime(frame.ProducerTime)
+		}
 		msgs, err := p.parseAndApplyNative(frame.Native, frame.Kind == taskslog.KindInput)
 		record.Messages = wrapParsedMessages(msgs, frame.ProducerTime)
 		return record, err
