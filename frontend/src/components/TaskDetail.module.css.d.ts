@@ -32,9 +32,10 @@ declare const classes: {
   readonly "ciStatus_pending": string;
   readonly "ciStatus_success": string;
   readonly "closeBtn": string;
+  readonly "composerMenu": string;
+  readonly "composerMenuAnchor": string;
   readonly "container": string;
   readonly "contextCleared": string;
-  readonly "contextMenuToggle": string;
   readonly "copied": string;
   readonly "copyIcon": string;
   readonly "diffLink": string;
@@ -95,9 +96,6 @@ declare const classes: {
   readonly "resultText": string;
   readonly "resultTiming": string;
   readonly "safetyWarning": string;
-  readonly "sendMenu": string;
-  readonly "sendMenuAnchor": string;
-  readonly "sendMenuItem": string;
   readonly "sessionDuration": string;
   readonly "sessionElided": string;
   readonly "sessionElidedExpanded": string;
@@ -115,8 +113,6 @@ declare const classes: {
   readonly "sudoCopyBtn": string;
   readonly "sudoPassword": string;
   readonly "sudoPasswordText": string;
-  readonly "syncButtonGroup": string;
-  readonly "syncDropdown": string;
   readonly "systemInit": string;
   readonly "systemMsg": string;
   readonly "taskError": string;

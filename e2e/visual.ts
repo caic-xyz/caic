@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { validateHistoryEvent, validateHistoryManifest, validateTask } from "../sdk/caic/ts/v1/validate.gen";
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
 import type { HistoryManifest, ImageRefreshStatus, ISOTimestamp } from "../sdk/caic/ts/v1/types.gen";
-import { resourceHistory, usageHistory } from "./visual-fixtures";
+import { resourceHistory, serverHealth, usageHistory } from "./visual-fixtures";
 import { historyArray } from "../frontend/tests/history";
 
 const visualTime = "2026-09-02T12:00:00.000Z";
@@ -96,7 +96,10 @@ export async function prepareVisualPage(page: Page): Promise<void> {
   await page.route("**/api/caic/v1/tasks/*/history/**/activity/*/*/*?*", historyResponse);
   // Preserve real SSE ordering and checkpoints while matching finite fixture
   // bodies and payload-free metadata to the same deterministic raw positions.
-  await page.addInitScript((samples) => {
+  // The health events are replaced too: the server samples the real host, so a
+  // capture would record whichever CPU level the machine happened to report.
+  const fixtures = { samples: resourceHistory(), health: serverHealth() };
+  await page.addInitScript(({ samples, health }) => {
     const histories = new Map<string, { start: number; timestamps: Map<string, number> }>();
     function normalize(id: string, manifest: HistoryManifest) {
       const history = histories.get(id);
@@ -149,7 +152,17 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     window.EventSource = class extends NativeEventSource {
       constructor(url: string | URL, options?: EventSourceInit) {
         super(url, options);
-        const task = /^\/api\/caic\/v1\/tasks\/([^/]+)\/history\/events$/.exec(new URL(url, location.href).pathname);
+        const pathname = new URL(url, location.href).pathname;
+        if (pathname === "/api/caic/v1/tasks/events") {
+          this.addEventListener("message", (event) => {
+            const value = JSON.parse(event.data) as { kind?: string; health?: unknown };
+            if (value.kind !== "health") return;
+            value.health = health;
+            Object.defineProperty(event, "data", { value: JSON.stringify(value) });
+          });
+          return;
+        }
+        const task = /^\/api\/caic\/v1\/tasks\/([^/]+)\/history\/events$/.exec(pathname);
         const id = task?.[1];
         if (!id) return;
         this.addEventListener("message", (event) => {
@@ -172,7 +185,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         this.addEventListener("stats", (event) => event.stopImmediatePropagation());
       }
     };
-  }, resourceHistory());
+  }, fixtures);
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 

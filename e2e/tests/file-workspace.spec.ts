@@ -127,7 +127,7 @@ for (const width of [390, 1000, 1440]) {
 
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
     if (width > 768) {
-      await page.getByRole("button", { name: "Context actions", exact: true }).click();
+      await page.getByRole("button", { name: "Task actions", exact: true }).click();
       await expect(page.getByRole("menu")).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("menu")).toBeHidden();

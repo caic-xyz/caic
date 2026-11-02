@@ -1,8 +1,28 @@
 // Deterministic API fixtures for documentation resource charts and usage trends.
 import { ok } from "node:assert/strict";
-import type { EventStats, UsageDashboardResp, UsageDashboardDay } from "../sdk/caic/ts/v1/types.gen";
+import type {
+  EventStats,
+  ISOTimestamp,
+  ServerHealth,
+  UsageDashboardResp,
+  UsageDashboardDay,
+} from "../sdk/caic/ts/v1/types.gen";
 
 export const visualEpoch = Date.UTC(2026, 8, 2, 12);
+
+/** Server health for the header level badge. The real server samples the host,
+ *  so a capture would otherwise record whichever CPU level the machine had. */
+export function serverHealth(): ServerHealth {
+  return {
+    time: new Date(visualEpoch).toISOString() as ISOTimestamp,
+    cpuPerc: 34,
+    cpuCount: 8,
+    memUsed: 568 * 1024 * 1024,
+    memTotal: 2 * 1024 * 1024 * 1024,
+    cpuHigh: false,
+    memHigh: false,
+  };
+}
 
 export function resourceHistory(): EventStats[] {
   return Array.from({ length: 24 }, (_, index) => {

@@ -15,7 +15,9 @@ declare const classes: {
   readonly "menuItem": string;
   readonly "row": string;
   readonly "spacer": string;
+  readonly "spacerOne": string;
+  readonly "spacerThree": string;
+  readonly "spacerTwo": string;
   readonly "trailing": string;
-  readonly "withSendMenu": string;
 };
 export default classes;

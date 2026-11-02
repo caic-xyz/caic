@@ -152,7 +152,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
       await expect(edit).toBeFocused();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.getByTestId("task-detail-prompt").fill("Please focus on the failing test");
-      await page.getByRole("button", { name: "Send options", exact: true }).click();
+      await page.getByRole("button", { name: "Task actions", exact: true }).click();
       await expect(page.getByRole("menuitem", { name: /Send now/ })).toBeInViewport({ ratio: 1 });
       await page.screenshot({ path: testInfo.outputPath(`send-options-${zoom * 100}.png`) });
       await page.keyboard.press("Escape");

@@ -28,14 +28,23 @@
 .spacer::before {
   float: right;
 
-  /* Match trailing buttons size + gap, and one line box: the prompt hosts set
-     line-height to this value, so the float ends where the second line starts. */
-  width: 4.375rem;
+  /* One line box: the prompt hosts set line-height to this value, so the float
+     ends where the second line starts. */
   height: 1.5rem;
   content: "";
 }
 
-.withSendMenu::before {
+/* Width of the trailing controls plus 0.5rem of clearance: 1.75rem per control,
+   0.125rem between them, and 0.25rem right offset. */
+.spacerOne::before {
+  width: 2.5rem;
+}
+
+.spacerTwo::before {
+  width: 4.375rem;
+}
+
+.spacerThree::before {
   width: 6.25rem;
 }
 

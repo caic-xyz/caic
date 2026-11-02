@@ -84,11 +84,11 @@ for (const mobile of [false, true]) {
       .locator('input[type="file"]')
       .setInputFiles({ name: "follow-up.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") });
     await expect(composer.getByRole("img", { name: "attached" })).toHaveCount(1);
-    await page.getByRole("button", { name: "Send options", exact: true }).click();
+    await page.getByRole("button", { name: "Task actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: /Send now/ })).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath("send-options.png") });
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("button", { name: "Send options", exact: true })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Task actions", exact: true })).toBeFocused();
     await expect(queue.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
     await expect(page.getByTestId("send-input")).toBeEnabled();
     await prompt.press("ArrowUp");
@@ -148,8 +148,8 @@ for (const mobile of [false, true]) {
       (request) => request.method() === "POST" && request.url().endsWith(`/tasks/${id}/input`),
     );
     if (mobile) {
-      await page.getByRole("button", { name: "Send options", exact: true }).focus();
-      await page.keyboard.press("ArrowDown");
+      await page.getByRole("button", { name: "Task actions", exact: true }).focus();
+      await page.keyboard.press("ArrowUp");
       await expect(page.getByRole("menuitem", { name: /Send now/ })).toBeFocused();
       await page.getByRole("menuitem", { name: /Send now/ }).click();
     } else await prompt.press("Control+Enter");

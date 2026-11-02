@@ -464,9 +464,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(bugFixCard2).toBeVisible({ timeout: 10_000 });
   await bugFixCard2.click();
   await page.setViewportSize({ width: 390, height: 844 });
-  // Verify the context menu toggle is visible at mobile width.
-  const contextToggle = page.locator("[aria-label='Context actions']");
-  await expect(contextToggle).toBeVisible({ timeout: 3_000 });
+  // Verify the task-actions menu is reachable at mobile width.
+  const actionsMenu = page.locator("[aria-label='Task actions']");
+  await expect(actionsMenu).toBeVisible({ timeout: 3_000 });
   await captureScreenshot(page, "mobile", "task-detail.png");
 
   // Screenshot 8: Dense task-detail header at the width where a larger phone

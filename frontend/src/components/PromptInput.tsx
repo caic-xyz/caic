@@ -36,12 +36,20 @@ interface Props {
   /** Element rendered inside the text field (trailing icon, like Android). */
   sendButton?: JSX.Element;
   /** Optional menu beside the send action, with space reserved inside the field. */
-  sendMenu?: JSX.Element;
+  menu?: JSX.Element;
   /** Elements rendered outside the text field row (action buttons). */
   children?: JSX.Element;
 }
 
 export default function PromptInput(props: Props) {
+  // The float spacer reserves the trailing controls' width, so it tracks how
+  // many of them the field renders.
+  const trailingControls = () => (props.supportsImages ? 1 : 0) + (props.sendButton ? 1 : 0) + (props.menu ? 1 : 0);
+  const spacerClass = () => {
+    const count = trailingControls();
+    const width = count >= 3 ? styles.spacerThree : count === 2 ? styles.spacerTwo : styles.spacerOne;
+    return `${styles.spacer} ${width}`;
+  };
   const [dragging, setDragging] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [menuFlipped, setMenuFlipped] = createSignal(false);
@@ -165,7 +173,7 @@ export default function PromptInput(props: Props) {
           class={props.class}
           tabIndex={props.tabIndex}
           data-testid={props["data-testid"]}
-          spacerClass={`${styles.spacer}${props.sendMenu ? ` ${styles.withSendMenu}` : ""}`}
+          spacerClass={spacerClass()}
         />
         <div class={styles.trailing}>
           <Show when={props.supportsImages}>
@@ -233,7 +241,7 @@ export default function PromptInput(props: Props) {
             </Dropdown>
           </Show>
           {props.sendButton}
-          {props.sendMenu}
+          {props.menu}
         </div>
       </div>
       <Show when={props.children}>

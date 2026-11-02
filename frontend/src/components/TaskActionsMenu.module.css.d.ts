@@ -5,5 +5,6 @@ declare const classes: {
   readonly "item": string;
   readonly "menu": string;
   readonly "menuPositioned": string;
+  readonly "shortcut": string;
 };
 export default classes;

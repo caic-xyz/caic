@@ -25,7 +25,7 @@ import ProcessesIcon from "@material-symbols/svg-400/outlined/account_tree.svg?s
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import EditIcon from "@material-symbols/svg-400/outlined/edit.svg?solid";
-import ExpandIcon from "@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?solid";
+import MoreIcon from "@material-symbols/svg-400/outlined/more_vert.svg?solid";
 
 import type {
   EventMessage,
@@ -301,11 +301,7 @@ export default function TaskDetail(props: Props) {
     setDismissedKey(quotaDismissalKey(props.rateLimit));
     props.onDismissQuotaWarning?.(props.taskId);
   };
-  const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
-  const [sendMenuOpen, setSendMenuOpen] = createSignal(false);
-  createEffect(() => {
-    if (props.taskState !== "running") setSendMenuOpen(false);
-  });
+  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
@@ -1708,111 +1704,86 @@ export default function TaskDetail(props: Props) {
                   <SendIcon class={styles.promptSendIcon} width="20" height="20" />
                 </ActionButton>
               }
-              sendMenu={
-                props.taskState === "running" ? (
-                  <Dropdown
-                    open={sendMenuOpen()}
-                    onOpenChange={setSendMenuOpen}
-                    class={styles.sendMenuAnchor}
-                    content={
-                      <div role="menu" aria-label="Send options" class={styles.sendMenu}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          class={styles.sendMenuItem}
-                          disabled={
-                            !canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)
-                          }
-                          onClick={() => {
-                            setSendMenuOpen(false);
-                            promptRef?.focus();
-                            void sendInput(true);
-                          }}
-                        >
-                          Send now <kbd>Ctrl+Enter</kbd>
-                        </button>
-                      </div>
-                    }
+              menu={
+                <Dropdown
+                  open={actionsMenuOpen()}
+                  onOpenChange={setActionsMenuOpen}
+                  class={styles.composerMenuAnchor}
+                  content={
+                    <TaskActionsMenu
+                      class={styles.composerMenu}
+                      sendNow={
+                        props.taskState === "running"
+                          ? {
+                              disabled:
+                                !canSendInput() ||
+                                sending() ||
+                                (!props.inputDraft.trim() && props.inputImages.length === 0),
+                              onSelect: () => {
+                                setActionsMenuOpen(false);
+                                promptRef?.focus();
+                                void sendInput(true);
+                              },
+                            }
+                          : undefined
+                      }
+                      forge={props.forge}
+                      forgePR={props.forgePR}
+                      baseBranch={props.baseBranch}
+                      active={isActive()}
+                      recoverable={isRecoverable()}
+                      waiting={isWaiting()}
+                      purging={props.taskState === "purging"}
+                      supportsCompact={props.supportsCompact}
+                      canFork={!!props.onFork && !!props.repo}
+                      onSync={() => {
+                        setActionsMenuOpen(false);
+                        doSync(false);
+                      }}
+                      onSyncDefault={() => {
+                        setActionsMenuOpen(false);
+                        doSync(false, SyncTargetDefault);
+                      }}
+                      onStop={() => {
+                        setActionsMenuOpen(false);
+                        props.onStop(props.taskId);
+                      }}
+                      onRevive={() => {
+                        setActionsMenuOpen(false);
+                        props.onRevive(props.taskId);
+                      }}
+                      onPurge={() => {
+                        setActionsMenuOpen(false);
+                        props.onPurge(props.taskId);
+                      }}
+                      onCompact={() => {
+                        setActionsMenuOpen(false);
+                        doCompact();
+                      }}
+                      onFork={() => {
+                        setActionsMenuOpen(false);
+                        props.onFork?.(props.taskId);
+                      }}
+                    />
+                  }
+                >
+                  <ActionButton
+                    label="Task actions"
+                    aria-haspopup="menu"
+                    aria-expanded={actionsMenuOpen()}
+                    disabled={!!pendingAction()}
+                    onClick={() => setActionsMenuOpen((open) => !open)}
                   >
-                    <ActionButton
-                      label="Send options"
-                      aria-haspopup="menu"
-                      aria-expanded={sendMenuOpen()}
-                      onClick={() => setSendMenuOpen((open) => !open)}
+                    <Show
+                      when={!pendingAction()}
+                      fallback={<LoadingIcon class={styles.promptControlIcon} width="20" height="20" />}
                     >
-                      <ExpandIcon class={styles.promptControlIcon} width="20" height="20" />
-                    </ActionButton>
-                  </Dropdown>
-                ) : null
+                      <MoreIcon class={styles.promptControlIcon} width="20" height="20" />
+                    </Show>
+                  </ActionButton>
+                </Dropdown>
               }
             />
-            <Dropdown
-              open={contextMenuOpen()}
-              onOpenChange={setContextMenuOpen}
-              class={styles.syncButtonGroup}
-              content={
-                <TaskActionsMenu
-                  class={styles.syncDropdown}
-                  forge={props.forge}
-                  forgePR={props.forgePR}
-                  baseBranch={props.baseBranch}
-                  active={isActive()}
-                  recoverable={isRecoverable()}
-                  waiting={isWaiting()}
-                  purging={props.taskState === "purging"}
-                  supportsCompact={props.supportsCompact}
-                  canFork={!!props.onFork && !!props.repo}
-                  onSync={() => {
-                    setContextMenuOpen(false);
-                    doSync(false);
-                  }}
-                  onSyncDefault={() => {
-                    setContextMenuOpen(false);
-                    doSync(false, SyncTargetDefault);
-                  }}
-                  onStop={() => {
-                    setContextMenuOpen(false);
-                    props.onStop(props.taskId);
-                  }}
-                  onRevive={() => {
-                    setContextMenuOpen(false);
-                    props.onRevive(props.taskId);
-                  }}
-                  onPurge={() => {
-                    setContextMenuOpen(false);
-                    props.onPurge(props.taskId);
-                  }}
-                  onCompact={() => {
-                    setContextMenuOpen(false);
-                    doCompact();
-                  }}
-                  onFork={() => {
-                    setContextMenuOpen(false);
-                    props.onFork?.(props.taskId);
-                  }}
-                />
-              }
-            >
-              <Show
-                when={!!pendingAction()}
-                fallback={
-                  <button
-                    type="button"
-                    class={styles.contextMenuToggle}
-                    disabled={!!pendingAction()}
-                    onClick={() => setContextMenuOpen((v) => !v)}
-                    aria-label="Context actions"
-                    title="Context actions"
-                  >
-                    &#8942;
-                  </button>
-                }
-              >
-                <button type="button" class={styles.contextMenuToggle} disabled>
-                  &#8987;
-                </button>
-              </Show>
-            </Dropdown>
           </form>
           <Show when={safetyIssues().length > 0}>
             <div class={styles.safetyWarning}>

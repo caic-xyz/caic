@@ -6,6 +6,7 @@ import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid"
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import ForkIcon from "@material-symbols/svg-400/outlined/fork_right.svg?solid";
 import RestartIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 
@@ -26,6 +27,9 @@ interface TaskActionsMenuProps {
   purging: boolean;
   supportsCompact?: boolean;
   canFork: boolean;
+  /** Queue the draft immediately. Omit it unless Enter queues the prompt
+   *  instead, which is what a running task does. */
+  sendNow?: { disabled: boolean; onSelect: () => void };
   onSync: () => void;
   onSyncDefault: () => void;
   onStop: () => void;
@@ -112,6 +116,21 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
           <ForkIcon width="1em" height="1em" />
           Fork
         </button>
+      </Show>
+      <Show when={props.sendNow}>
+        {(sendNow) => (
+          <button
+            type="button"
+            role="menuitem"
+            class={styles.item}
+            disabled={sendNow().disabled}
+            onClick={() => sendNow().onSelect()}
+          >
+            <SendIcon width="1em" height="1em" />
+            Send now
+            <kbd class={styles.shortcut}>Ctrl+Enter</kbd>
+          </button>
+        )}
       </Show>
     </div>
   );

@@ -1284,7 +1284,7 @@ describe("TaskDetail", () => {
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     expect(onQuotaRecovery).toHaveBeenCalledWith("abc");
 
-    await user.click(screen.getByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
     expect(onFork).toHaveBeenCalledWith("abc");
   });
@@ -1872,7 +1872,7 @@ describe("TaskDetail", () => {
     });
     expect(getByTestId("send-input")).toBeDisabled();
 
-    await user.click(getByLabelText("Context actions"));
+    await user.click(getByLabelText("Task actions"));
     await user.click(getByText("Revive"));
 
     expect(onRevive).toHaveBeenCalledWith("abc");
@@ -2344,7 +2344,7 @@ describe("streamed conversation", () => {
     });
 
     // The overflow menu toggle should be present.
-    const toggle = getByLabelText("Context actions");
+    const toggle = getByLabelText("Task actions");
     expect(toggle).toBeInTheDocument();
 
     // Menu items should not be visible before clicking.
@@ -2580,7 +2580,7 @@ describe("streamed conversation", () => {
     const sendInput = vi.fn(async () => {});
     {
       await renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: sendInput });
-      const actions = screen.getByRole("button", { name: "Context actions" });
+      const actions = screen.getByRole("button", { name: "Task actions" });
       actions.focus();
 
       await user.keyboard("{Control>}{Enter}{/Control}");
@@ -2603,7 +2603,7 @@ describe("streamed conversation", () => {
         onSendInput: sendInput,
       });
       expect(screen.getByTestId("send-input")).toBeDisabled();
-      screen.getByRole("button", { name: "Context actions" }).focus();
+      screen.getByRole("button", { name: "Task actions" }).focus();
 
       await user.keyboard("{Control>}{Enter}{/Control}");
 
@@ -2623,7 +2623,7 @@ describe("streamed conversation", () => {
     });
 
     // Toggle is present even when running.
-    const toggle = getByLabelText("Context actions");
+    const toggle = getByLabelText("Task actions");
     expect(toggle).toBeInTheDocument();
 
     await user.click(toggle);
@@ -2646,7 +2646,7 @@ describe("streamed conversation", () => {
       supportsCompact: false,
     });
 
-    await user.click(getByLabelText("Context actions"));
+    await user.click(getByLabelText("Task actions"));
 
     expect(getByText("Clear context")).toBeInTheDocument();
     expect(queryByText("Compact context")).not.toBeInTheDocument();

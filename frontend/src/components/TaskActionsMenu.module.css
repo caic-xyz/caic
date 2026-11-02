@@ -36,6 +36,12 @@
   background: var(--color-bg-input);
 }
 
+.shortcut {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
 .item:first-child {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }

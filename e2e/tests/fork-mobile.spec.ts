@@ -12,7 +12,7 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
   await expect(page.getByTestId("detail-pane")).toBeVisible();
   await expect(page.getByTestId("task-list")).toBeHidden();
 
-  await page.getByRole("button", { name: "Context actions" }).click();
+  await page.getByRole("button", { name: "Task actions" }).click();
   await page.getByRole("menuitem", { name: "Fork" }).click();
 
   await expect(page.getByTestId("fork-dialog")).toBeVisible();

@@ -2918,7 +2918,7 @@ describe("App repo chips: No repository", () => {
       ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(await screen.findByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
@@ -2933,7 +2933,7 @@ describe("App repo chips: No repository", () => {
       snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(await screen.findByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
     await user.click(screen.getByTestId("generate-handoff"));
 
@@ -2970,7 +2970,7 @@ describe("App repo chips: No repository", () => {
       snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(await screen.findByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const harnessSelect = screen.getByRole("combobox", {
@@ -3229,7 +3229,7 @@ describe("App repo chips: No repository", () => {
 
     await user.click(await screen.findByTestId("quota-recovery-detail-action"));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(screen.getByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     staleHandoff.resolve({ prompt: "Stale quota recovery handoff" });
@@ -3302,7 +3302,7 @@ describe("App repo chips: No repository", () => {
       snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(await screen.findByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
@@ -3321,7 +3321,7 @@ describe("App repo chips: No repository", () => {
       snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(await screen.findByRole("button", { name: "Task actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
