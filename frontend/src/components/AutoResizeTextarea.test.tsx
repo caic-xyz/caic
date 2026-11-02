@@ -122,6 +122,21 @@ describe("AutoResizeTextarea", () => {
     expect(selectionOffset(el)).toBe(2);
   });
 
+  it("keeps a selection made after the focus event", async () => {
+    const { getByRole } = render(() => <AutoResizeTextarea value="hello" onInput={() => {}} />);
+    const el = getByRole("textbox");
+
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    await Promise.resolve();
+
+    expect(selection?.isCollapsed).toBe(false);
+  });
+
   it("is not editable when disabled", () => {
     const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />);
     expect(getByRole("textbox")).toHaveAttribute("contenteditable", "false");

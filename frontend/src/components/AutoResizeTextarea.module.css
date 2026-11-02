@@ -1,7 +1,6 @@
 /* Styles for the contenteditable AutoResizeTextarea component. */
 
 .editable {
-  min-height: 2em;
   overflow-wrap: break-word;
   white-space: pre-wrap;
   border-radius: inherit;

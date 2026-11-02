@@ -214,7 +214,10 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  await expect(page.getByTestId("task-setup").locator("summary")).toContainText("300ms");
+  // This duration is the distance from the task start to the first init record,
+  // so it moves when the fake setup log gains a record; update it with the
+  // baselines.
+  await expect(page.getByTestId("task-setup").getByTestId("timing-duration")).toHaveText(/^450ms$/);
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();

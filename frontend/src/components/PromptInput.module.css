@@ -28,14 +28,15 @@
 .spacer::before {
   float: right;
 
-  /* Match trailing buttons size + gap. */
-  width: 4.5rem;
-  height: 2rem;
+  /* Match trailing buttons size + gap, and one line box: the prompt hosts set
+     line-height to this value, so the float ends where the second line starts. */
+  width: 4.375rem;
+  height: 1.5rem;
   content: "";
 }
 
 .withSendMenu::before {
-  width: 6.5rem;
+  width: 6.25rem;
 }
 
 .attachIcon {
@@ -58,8 +59,14 @@
   right: 0.25rem;
   z-index: 1;
   display: flex;
-  gap: 0.25rem;
+  gap: 0.125rem;
   align-items: center;
+}
+
+/* These controls sit on the input surface, where the shared hover tint is too
+   close to the surface to read as a hit target. */
+.trailing button:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--color-bg-input-hover);
 }
 
 .actionRow {

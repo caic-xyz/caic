@@ -273,8 +273,10 @@ a.headerPR:hover {
   padding: 0.4rem;
   overflow-y: auto;
   font: inherit;
-  font-size: 0.9rem;
-  line-height: 1.2;
+
+  /* Same box as the new-task prompt: match the float spacer, the trailing
+     buttons, and the text size; see .promptInput. */
+  line-height: 1.5rem;
   resize: none;
 }
 
@@ -1198,6 +1200,7 @@ a.ciStatus:hover {
   box-sizing: border-box;
   display: block;
   width: 100%;
+  min-height: 2em;
   max-height: 10rem;
   padding: 0.35rem;
   margin-top: 0.35rem;

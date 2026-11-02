@@ -46,6 +46,10 @@ export default function AutoResizeTextarea(props: Props) {
       if (generation !== focusGeneration || document.activeElement !== editable) return;
       const selection = window.getSelection();
       if (!selection) return;
+      // Keep a range selected after the focus event. Programmatic focus callers
+      // select content to replace it, and moving the caret would make their
+      // insertion append to the existing text instead.
+      if (!selection.isCollapsed) return;
       const range = previousRange ?? document.createRange();
       if (!previousRange) {
         range.selectNodeContents(editable);
