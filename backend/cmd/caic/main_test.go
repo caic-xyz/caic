@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -142,4 +143,10 @@ func TestExpandTilde(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

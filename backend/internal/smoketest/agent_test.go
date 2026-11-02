@@ -5,12 +5,14 @@ package smoketest
 import (
 	"context"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 )
 
 func TestFakeBackend(t *testing.T) {
@@ -164,4 +166,10 @@ func TestFakeBackend(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

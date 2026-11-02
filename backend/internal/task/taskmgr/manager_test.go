@@ -41,6 +41,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -7795,4 +7796,10 @@ func (b *blockedInputBackend) Start(ctx context.Context, opts *agent.Options) (*
 		return nil, err
 	}
 	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, b.stdin, opts.Records, nil), stdout, opts.Logger), nil
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -4908,4 +4909,10 @@ type fakePricer map[string]quotausage.ModelPrice
 func (p fakePricer) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
 	price, ok := p[modelID]
 	return price, ok
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

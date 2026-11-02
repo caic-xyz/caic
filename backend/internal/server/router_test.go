@@ -38,6 +38,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -3251,4 +3252,10 @@ func recordRouterTaskLog(t testing.TB, s *testRouter, tk *taskrun.Task) {
 		t.Fatal("task entry missing")
 	}
 	e.LogPath.Set(path)
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

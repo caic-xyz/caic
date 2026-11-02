@@ -27,6 +27,7 @@ import (
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -1294,4 +1295,10 @@ func TestTurnSnapshotBackend(t *testing.T) {
 			t.Fatal("turn snapshot committed pending work")
 		}
 	})
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

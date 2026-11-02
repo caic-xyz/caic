@@ -22,6 +22,7 @@ import (
 
 	"github.com/caic-xyz/md/git"
 
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
@@ -2329,5 +2330,34 @@ done
 				t.Fatalf("locked branch removed: %v", err)
 			}
 		})
+		t.Run("removes_config_of_deleted_branch", func(t *testing.T) {
+			t.Parallel()
+			root := initTestRepo(t, "main")
+			w := newInitializedTestCheckout(t, root)
+			b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+			// AllocateBranch records the upstream, so the section must exist for
+			// the deletion below to prove anything.
+			if got, err := g.RunGit(t.Context(), "config", "--get-regexp", "^branch\\."+b.Name+"\\."); err != nil || got == "" {
+				t.Fatalf("prepared config=%q %v", got, err)
+			}
+			// Another writer deletes the ref before the rollback compares it.
+			runGit(t, root, "update-ref", "-d", "refs/heads/"+b.Name)
+			if err := b.Rollback(t.Context(), logtest.Logger(t)); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := g.RunGit(t.Context(), "config", "--get-regexp", "^branch\\.caic-"); err == nil || got != "" {
+				t.Fatalf("rollback config=%q %v", got, err)
+			}
+		})
 	})
+}
+
+// TestMain isolates the package from the Git configuration of the host.
+func TestMain(m *testing.M) {
+	gittest.Isolate()
+	os.Exit(m.Run())
 }

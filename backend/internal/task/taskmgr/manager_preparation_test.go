@@ -22,14 +22,21 @@ import (
 )
 
 func preparationGit(t *testing.T, dir string, args ...string) string {
+	out, err := preparationGitResult(t, dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return out
+}
+
+// preparationGitResult runs Git and reports its status, for commands whose exit
+// status is itself the assertion.
+func preparationGitResult(t *testing.T, dir string, args ...string) (string, error) {
 	c := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // Test helper receives controlled Git arguments.
 	c.Dir = dir
 	c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	out, err := c.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(string(out)), err
 }
 
 // gatePreparationFetch blocks the repository's real upload-pack until release.
@@ -224,7 +231,14 @@ func runPreparationTests(t *testing.T) {
 					if got := preparationGit(t, b.Dir, "for-each-ref", "--format=%(refname)", ref); got != "" {
 						t.Fatalf("missing ref recreated: %q", got)
 					}
-				} else if got := preparationGit(t, b.Dir, "rev-parse", ref); got != want {
+					// The name is free, so its tracking would otherwise attach to
+					// a later branch of the same name.
+					if got, err := preparationGitResult(t, b.Dir, "config", "--get", "branch.caic-0.merge"); err == nil || got != "" {
+						t.Fatalf("missing branch kept tracking=%q %v", got, err)
+					}
+					return
+				}
+				if got := preparationGit(t, b.Dir, "rev-parse", ref); got != want {
 					t.Fatalf("preserved tip=%s want=%s", got, want)
 				}
 				if got := preparationGit(t, b.Dir, "config", "branch.caic-0.merge"); got != "refs/heads/main" {

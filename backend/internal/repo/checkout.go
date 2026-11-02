@@ -959,7 +959,9 @@ func (b *AllocatedBranch) rollbackLocked(ctx context.Context, log *slog.Logger) 
 		// only to distinguish that harmless race from a genuine Git failure.
 		if _, missing := g.RunGit(ctx, "show-ref", "--verify", "--quiet", ref); missing != nil {
 			if exit, ok := errors.AsType[*exec.ExitError](missing); ok && exit.ExitCode() == 1 {
-				return nil
+				// The name is free: nobody owns its config either, and leaving the
+				// section behind would attach it to a later branch of that name.
+				return b.removeConfig(ctx, g)
 			}
 			return errors.Join(err, missing)
 		}
@@ -969,6 +971,12 @@ func (b *AllocatedBranch) rollbackLocked(ctx context.Context, log *slog.Logger) 
 		}
 		return errors.Join(fmt.Errorf("remove prepared branch %s: %w", b.Name, err), readErr)
 	}
+	return b.removeConfig(ctx, g)
+}
+
+// removeConfig drops the branch section this allocation owns. A missing section
+// is not an error.
+func (b *AllocatedBranch) removeConfig(ctx context.Context, g *git.Checkout) error {
 	if _, err := g.RunGit(ctx, "config", "--local", "--remove-section", "branch."+b.Name); err != nil {
 		if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 5 {
 			return fmt.Errorf("remove prepared branch config %s: %w", b.Name, err)
