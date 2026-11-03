@@ -1,4 +1,4 @@
-// Preserves visible conversation anchors through context loading, live output, disclosure, and pane visibility changes.
+// Preserves visible conversation anchors through context loading, live output, disclosure, pane visibility, and pane width changes.
 import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 
 interface Anchor {
@@ -7,6 +7,7 @@ interface Anchor {
   scroll: number;
   height: number;
   viewport: number;
+  width: number;
 }
 
 export function createHistoryScroll(
@@ -43,6 +44,7 @@ export function createHistoryScroll(
       scroll: el.scrollTop,
       height: el.scrollHeight,
       viewport: el.clientHeight,
+      width: el.clientWidth,
     };
   }
 
@@ -70,10 +72,12 @@ export function createHistoryScroll(
       const prior = expansion ?? (structural && !following ? saved : null);
       if (prior) {
         const row = prior.key ? el.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(prior.key)}"]`) : null;
-        el.scrollTop =
-          row && prior.top !== null
-            ? el.scrollTop + row.getBoundingClientRect().top - prior.top
-            : prior.scroll + el.scrollHeight - prior.height;
+        if (row && prior.top !== null) el.scrollTop = el.scrollTop + row.getBoundingClientRect().top - prior.top;
+        // Without a row, the height delta stands in for the hidden content only
+        // while the pane width is unchanged: a reflow folds line wrapping into
+        // that delta, and the browser's own scroll anchoring places the text
+        // better than the correction does.
+        else if (prior.width === el.clientWidth) el.scrollTop = prior.scroll + el.scrollHeight - prior.height;
         writtenTop = el.scrollTop;
         following = nearBottom(el);
       } else if (following) {
@@ -152,7 +156,14 @@ export function createHistoryScroll(
     restoreAnchor(key: string, top: number | undefined) {
       const el = area();
       if (!el || top === undefined) return;
-      expansion = { key, top, scroll: el.scrollTop, height: el.scrollHeight, viewport: el.clientHeight };
+      expansion = {
+        key,
+        top,
+        scroll: el.scrollTop,
+        height: el.scrollHeight,
+        viewport: el.clientHeight,
+        width: el.clientWidth,
+      };
       schedule();
     },
     scroll() {

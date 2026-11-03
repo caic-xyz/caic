@@ -52,9 +52,11 @@ function fixture() {
   let visible = true;
   let height = 1_000,
     top = 0,
-    rowTop = 160;
+    rowTop = 160,
+    width = 400;
   Object.defineProperties(el, {
     clientHeight: { get: () => (visible ? 200 : 0) },
+    clientWidth: { get: () => (visible ? width : 0) },
     scrollHeight: { get: () => (visible ? height : 0) },
     scrollTop: {
       get: () => (visible ? top : 0),
@@ -94,6 +96,11 @@ function fixture() {
     setTask,
     setEpoch,
     setMessages,
+    reflow: (nextWidth: number, delta: number) => {
+      width = nextWidth;
+      height += delta;
+      resize([], {} as ResizeObserver);
+    },
     editPlan: () => {
       height += 40;
       setPlan("revised");
@@ -236,6 +243,35 @@ it("preserves an expansion anchor when a live append shares its render frame", a
     await paint();
     assert.equal(f.row.getBoundingClientRect().top, before);
     assert.equal(f.el.scrollTop, 200);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("keeps the reading position through structural growth at a constant width", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(300);
+    f.backfill();
+    await paint();
+    assert.equal(f.el.scrollTop, 600);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("leaves a reflowed reading position to native scroll anchoring", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(300);
+    // A content change landing across a width change wraps lines above and
+    // below the viewport, so the height delta no longer locates the text.
+    f.setEpoch((value) => value + 1);
+    f.reflow(320, 20);
+    await paint();
+    assert.equal(f.el.scrollTop, 300);
   } finally {
     f.dispose();
   }
