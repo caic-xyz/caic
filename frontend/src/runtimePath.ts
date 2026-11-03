@@ -6,15 +6,17 @@ const stepExtension = /\.(step|stp)$/i;
 const compressedStepExtension = /\.(stpz|(?:step|stp)\.(?:gz|zip))$/i;
 
 /**
- * Returns the runtime file path a markdown destination names, or null for web
- * URLs, protocol-relative URLs, and fragment anchors. A relative path resolves
+ * Returns the runtime file a markdown destination names, or null for web URLs,
+ * protocol-relative URLs, and fragment anchors. A relative path resolves
  * against baseDir when it is not null; otherwise the backend resolves it
- * against the task checkout.
+ * against the task checkout. Line is the 1-based source line a `#L10` or
+ * `:10` suffix names, or null.
  */
-export function runtimeFilePath(href: string, baseDir: string | null): string | null {
+export function runtimeFileTarget(href: string, baseDir: string | null): { path: string; line: number | null } | null {
   let path = href;
   if (path.startsWith("file:///")) path = path.slice(7);
   else if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.startsWith("#")) return null;
+  const line = lineSuffix(path);
   path = path.replace(/#.*$/, "").replace(/:\d+(?::\d+)?$/, "");
   if (!path) return null;
   // Marked decodes neither percent-encoded spaces nor file URI paths.
@@ -24,9 +26,21 @@ export function runtimeFilePath(href: string, baseDir: string | null): string | 
     return null;
   }
   if (baseDir !== null && !path.startsWith("/") && path !== "~" && !path.startsWith("~/")) {
-    path = joinPath(baseDir, path);
+    path = joinRuntimePath(baseDir, path);
   }
-  return path;
+  return { path, line };
+}
+
+/** Returns the runtime file path a markdown destination names, ignoring its line. */
+export function runtimeFilePath(href: string, baseDir: string | null): string | null {
+  return runtimeFileTarget(href, baseDir)?.path ?? null;
+}
+
+/** Extracts the line from a `#L10`, `#L10-L20`, or `:10:5` suffix. */
+function lineSuffix(href: string): number | null {
+  const match = /#L(\d+)(?:-L?\d+)?$/.exec(href) ?? /:(\d+)(?::\d+)?$/.exec(href);
+  const line = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(line) && line > 0 ? line : null;
 }
 
 export function isMarkdownPath(path: string): boolean {
@@ -57,7 +71,7 @@ export function dirname(path: string): string {
 }
 
 /** Joins and normalizes POSIX segments. Leading ".." segments of a relative result stay. */
-function joinPath(dir: string, rel: string): string {
+export function joinRuntimePath(dir: string, rel: string): string {
   const absolute = dir.startsWith("/");
   const out: string[] = [];
   for (const part of `${dir}/${rel}`.split("/")) {
@@ -74,9 +88,11 @@ export function taskRawURL(taskId: string, path: string): string {
   return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/raw?${new URLSearchParams({ path })}`;
 }
 
-/** The single in-app file viewer route for a runtime path. */
-export function taskViewURL(taskId: string, path: string): string {
-  return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ path })}`;
+/** The single in-app file viewer route for a runtime path and optional line. */
+export function taskViewURL(taskId: string, path: string, line: number | null = null): string {
+  const query = new URLSearchParams({ path });
+  if (line !== null) query.set("line", String(line));
+  return `/task/@${encodeURIComponent(taskId)}/view?${query}`;
 }
 
 /** The maximum image dimension used for document-pane previews. */

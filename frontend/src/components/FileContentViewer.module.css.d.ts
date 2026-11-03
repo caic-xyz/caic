@@ -3,6 +3,10 @@ declare const classes: {
   readonly "audio": string;
   readonly "container": string;
   readonly "content": string;
+  readonly "dirEntries": string;
+  readonly "dirEntry": string;
+  readonly "dirEntryName": string;
+  readonly "dirListing": string;
   readonly "error": string;
   readonly "frontMatter": string;
   readonly "frontMatterSource": string;
@@ -12,6 +16,7 @@ declare const classes: {
   readonly "page": string;
   readonly "pdfContent": string;
   readonly "source": string;
+  readonly "sourceLine": string;
   readonly "video": string;
 };
 export default classes;

@@ -32,6 +32,23 @@ for (const width of [390, 1280]) {
             resumePdf = resolve;
           });
         await route.fulfill({ contentType: "application/pdf", body: createPdfFixture() });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/home/user/src/artifacts") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            path: "/home/user/src/artifacts",
+            entries: [
+              { name: "reports", isDir: true },
+              { name: "summary.json", isDir: false },
+            ],
+            truncated: false,
+          }),
+        });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/home/user/src/artifacts/reports") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ path: "/home/user/src/artifacts/reports", entries: [], truncated: false }),
+        });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/broken.pdf") {
         await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.7\ninvalid" });
       } else {
@@ -41,7 +58,7 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), and [Notes](/notes.md).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Source line](/notes.go#L2), [Binary](/report.bin), [PDF](/report.pdf), [Broken PDF](/broken.pdf), [Notes](/notes.md), and [Data](/home/user/src/artifacts).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
@@ -70,12 +87,29 @@ for (const width of [390, 1280]) {
         "package notes\n// # Not a Markdown heading",
       );
       await page.keyboard.press("Escape");
+      await page.getByRole("link", { name: "Source line", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/notes.go")}&line=2`);
+      await expect(page.getByTestId("document-pane").locator("mark")).toHaveText("// # Not a Markdown heading");
+      await page.keyboard.press("Escape");
       await page.getByRole("link", { name: "Binary", exact: true }).click();
       await expect(page.getByText(/No preview for this file/)).toBeVisible();
       await expect(page.getByRole("link", { name: "raw file" })).toHaveAttribute(
         "href",
         `/api/caic/v1/tasks/${id}/raw?path=%2Freport.bin`,
       );
+      await page.keyboard.press("Escape");
+    });
+
+    await test.step("directory links list children and navigate", async () => {
+      await page.getByRole("link", { name: "Data", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/home/user/src/artifacts")}`);
+      await expect(page.getByRole("link", { name: "raw file" })).toHaveCount(0);
+      await page.getByRole("link", { name: "reports/", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/home/user/src/artifacts/reports")}`);
+      await expect(page.getByText("This directory is empty.")).toBeVisible();
+      await page.getByRole("link", { name: "Parent directory", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/home/user/src/artifacts")}`);
+      await expect(page.getByRole("link", { name: "summary.json", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
     });
 

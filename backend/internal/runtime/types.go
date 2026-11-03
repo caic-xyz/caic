@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"iter"
 	"strings"
@@ -372,6 +373,18 @@ type System interface {
 // FileChunkSize bounds each runtime file chunk to 64 KiB.
 const FileChunkSize = 64 << 10
 
+// DirEntryLimit bounds each directory listing.
+const DirEntryLimit = 500
+
+// ErrIsDir reports that a path names a directory where a regular file was required.
+var ErrIsDir = errors.New("path is a directory")
+
+// DirEntry is one immediate child of a runtime directory.
+type DirEntry struct {
+	Name  string
+	IsDir bool
+}
+
 // Files streams regular files from an instance, never the server's filesystem.
 type Files interface {
 	// ReadFile yields chunks of at most FileChunkSize bytes, borrowed until
@@ -381,6 +394,10 @@ type Files interface {
 	ReadFile(ctx context.Context, id ID, path string, offset, length int64) iter.Seq2[[]byte, error]
 	// FileSize returns the current regular-file size; it is not a version validator.
 	FileSize(ctx context.Context, id ID, path string) (int64, error)
+	// ReadDir returns immediate children of path sorted by name, capped at
+	// DirEntryLimit. truncated reports that children were dropped. Missing
+	// paths yield fs.ErrNotExist, non-directories ErrIsDir.
+	ReadDir(ctx context.Context, id ID, path string) (entries []DirEntry, truncated bool, err error)
 }
 
 // Lifecycle manages runtime instance lifecycle operations.

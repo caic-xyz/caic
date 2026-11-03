@@ -1,5 +1,5 @@
 // Document header adds file identity, raw access, and renderer actions to shared task-view controls.
-import { type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { taskRawURL } from "../runtimePath";
 import TaskViewHeader from "./TaskViewHeader";
 import styles from "./FileViewerHeader.module.css";
@@ -8,6 +8,7 @@ export default function FileViewerHeader(props: {
   taskId: string;
   taskPath: string;
   path: string;
+  directory?: boolean;
   children?: JSX.Element;
 }) {
   return (
@@ -16,14 +17,16 @@ export default function FileViewerHeader(props: {
       label="Document controls"
       actions={
         <>
-          <a
-            class={styles.rawLink}
-            href={taskRawURL(props.taskId, props.path)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            raw file
-          </a>
+          <Show when={!props.directory}>
+            <a
+              class={styles.rawLink}
+              href={taskRawURL(props.taskId, props.path)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              raw file
+            </a>
+          </Show>
           {props.children}
         </>
       }

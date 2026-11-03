@@ -224,4 +224,55 @@ describe("Markdown", () => {
     expect(stepLink).toHaveAttribute("href", "/task/@task123/view?path=assembly.step");
     expect(stepLink).toHaveAttribute("data-app-link");
   });
+
+  it("links local file destinations that contain spaces", async () => {
+    const viewHref = (path: string) => `/task/@task123/view?${new URLSearchParams({ path })}`;
+    renderMarkdown(
+      "Fetched into [`~/src/artifacts`](file:///home/user/src/artifacts), reviewed [`Alpha`](file:///home/user/src/artifacts/Alpha Report.pdf) and [`Beta`](file:///home/user/src/artifacts/Beta Report.pdf), see [Notes](notes/My Report.md).",
+      () => "task123",
+    );
+
+    expect(screen.getByRole("link", { name: "~/src/artifacts" })).toHaveAttribute(
+      "href",
+      viewHref("/home/user/src/artifacts"),
+    );
+    for (const report of ["Alpha", "Beta"]) {
+      const link = screen.getByRole("link", { name: report });
+      expect(link).toHaveAttribute("data-app-link");
+      expect(link).toHaveAttribute("href", viewHref(`/home/user/src/artifacts/${report} Report.pdf`));
+    }
+    expect(screen.getByText(/, reviewed/)).toBeInTheDocument();
+    expect(screen.getByText(/, see/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Notes" })).toHaveAttribute("href", viewHref("notes/My Report.md"));
+  });
+
+  it("opens a link at the line it names", async () => {
+    renderMarkdown("[Fetch](file:///home/user/src/fetch.py#L1509) and [Again](/a/b.go:12)", () => "task123");
+
+    expect(screen.getByRole("link", { name: "Fetch" })).toHaveAttribute(
+      "href",
+      "/task/@task123/view?path=%2Fhome%2Fuser%2Fsrc%2Ffetch.py&line=1509",
+    );
+    expect(screen.getByRole("link", { name: "Again" })).toHaveAttribute(
+      "href",
+      "/task/@task123/view?path=%2Fa%2Fb.go&line=12",
+    );
+  });
+
+  it("keeps destination titles and web links intact", async () => {
+    renderMarkdown('[Guide](/docs/user guide.md "User guide") [Site](https://example.com/docs)', () => "task123");
+
+    const guide = screen.getByRole("link", { name: "Guide" });
+    expect(guide).toHaveAttribute("href", "/task/@task123/view?path=%2Fdocs%2Fuser+guide.md");
+    expect(guide).toHaveAttribute("title", "User guide");
+    expect(screen.getByRole("link", { name: "Site" })).toHaveAttribute("href", "https://example.com/docs");
+  });
+
+  it("leaves code spans and web destinations untouched", async () => {
+    renderMarkdown("`[Guide](/code span.md)` then [Web](https://example.com/a b)", () => "task123");
+
+    expect(screen.getByText("[Guide](/code span.md)")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Guide" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Web" })).not.toBeInTheDocument();
+  });
 });

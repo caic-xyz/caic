@@ -23,6 +23,10 @@ export default function FileViewerPage() {
   const [query] = useSearchParams();
   const id = () => taskIdFromParam(params.taskId);
   const path = () => (typeof query.path === "string" ? query.path : null);
+  const line = () => {
+    const value = typeof query.line === "string" ? Number(query.line) : 0;
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  };
   const attachment = () => (typeof query.attachment === "string" ? taskAttachmentLocation(query.attachment) : null);
   const image = () => (typeof query.image === "string" ? inputImageSource(query.image) : null);
 
@@ -44,7 +48,7 @@ export default function FileViewerPage() {
                       <CadViewer taskId={taskId} taskPath={tp()} path={filePath} />
                     </Match>
                     <Match when={true}>
-                      <FileContentViewer taskId={taskId} taskPath={tp()} path={filePath} />
+                      <FileContentViewer taskId={taskId} taskPath={tp()} path={filePath} line={line()} />
                     </Match>
                   </Switch>
                 </section>

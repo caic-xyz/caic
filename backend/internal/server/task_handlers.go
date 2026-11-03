@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
@@ -611,7 +612,8 @@ func (h *taskHandlers) handleQueuedInputImage(w http.ResponseWriter, r *http.Req
 
 // handleTaskRaw is a raw browser resource endpoint, like the VNC WebSocket;
 // it is intentionally outside the generated JSON SDK. Active document formats
-// download as attachments so container content cannot run on caic's origin.
+// download as attachments so container content cannot run on caic's origin. A
+// directory has no byte stream, so it answers with its listing instead.
 func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	w.Header().Set("Cache-Control", "no-store")
@@ -632,6 +634,9 @@ func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 		var err error
 		size, err = h.taskSvc.taskFileSize(ctx, entry, name)
 		if err != nil {
+			if h.writeTaskDir(w, r, entry, name, err) {
+				return
+			}
 			writeError(ctx, w, err)
 			return
 		}
@@ -656,6 +661,9 @@ func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 	for data, err := range h.taskSvc.taskFile(ctx, entry, name, offset, length) {
 		if err != nil {
 			if !started {
+				if h.writeTaskDir(w, r, entry, name, err) {
+					return
+				}
 				writeError(ctx, w, err)
 				return
 			}
@@ -707,6 +715,33 @@ func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 		httpLogger(ctx).WarnContext(ctx, "task file shrank during range read", "missing_bytes", remaining)
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// writeTaskDir answers a directory read with its listing. It reports false when
+// err is not a directory error, so callers keep their regular error handling.
+func (h *taskHandlers) writeTaskDir(w http.ResponseWriter, r *http.Request, entry *taskmgr.Entry, name string, cause error) bool {
+	if !errors.Is(cause, runtime.ErrIsDir) {
+		return false
+	}
+	ctx := r.Context()
+	resolved, entries, truncated, err := h.taskSvc.taskDir(ctx, entry, name)
+	if err != nil {
+		writeError(ctx, w, err)
+		return true
+	}
+	w.Header().Del("Accept-Ranges")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodHead {
+		return true
+	}
+	listing := v1.TaskDirListing{Path: resolved, Entries: apiconv.TaskDirEntries(entries), Truncated: truncated}
+	if err := json.NewEncoder(w).Encode(listing); err != nil {
+		httpLogger(ctx).WarnContext(ctx, "encode directory listing", "task", entry.Task().ID, "err", err)
+	}
+	return true
 }
 
 // handleTaskAttachment serves one prompt image by its task-log location,

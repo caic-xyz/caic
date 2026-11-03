@@ -1,15 +1,29 @@
-// Renders task-runtime Markdown, images, native audio/video, lazy PDFs, bounded text, and unsupported downloads.
+// Renders task-runtime directories, Markdown, images, native audio/video, lazy PDFs, bounded text, and unsupported downloads.
 
-import { Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy, onCleanup } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Suspense,
+  Switch,
+  createMemo,
+  createResource,
+  createSignal,
+  lazy,
+  onCleanup,
+} from "solid-js";
+import { A } from "@solidjs/router";
 import { Dynamic } from "solid-js/web";
+import FolderIcon from "@material-symbols/svg-400/outlined/folder.svg?solid";
+import FileIcon from "@material-symbols/svg-400/outlined/draft.svg?solid";
 import ImagePreview from "./ImagePreview";
 import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./FileContentViewer.module.css";
 import Markdown, { MarkdownTaskContext } from "./Markdown";
-import { dirname, isMarkdownPath, taskRawURL } from "../runtimePath";
+import { dirname, isMarkdownPath, joinRuntimePath, taskRawURL, taskViewURL } from "../runtimePath";
 import { splitFrontMatter } from "../frontMatter";
-import { readTaskFilePreview } from "../taskFile";
+import { readTaskFilePreview, type TaskFilePreview } from "../taskFile";
 
 const PdfPreview = lazy(() => import("./PdfPreview"));
 
@@ -17,6 +31,80 @@ interface Props {
   taskId: string;
   taskPath: string;
   path: string;
+  line?: number | null;
+}
+
+// SourceText reveals and marks the line a link names. Splitting the text into
+// three parts keeps one element instead of one per line.
+function SourceText(props: { text: string; line: number | null }) {
+  const split = createMemo(() => {
+    if (props.line === null) return null;
+    const lines = props.text.split("\n");
+    if (props.line > lines.length) return null;
+    // The newline boundaries live in the strings: JSX drops whitespace-only children.
+    return {
+      before: lines.slice(0, props.line - 1).join("\n") + (props.line > 1 ? "\n" : ""),
+      target: lines[props.line - 1] ?? "",
+      after: (props.line < lines.length ? "\n" : "") + lines.slice(props.line).join("\n"),
+    };
+  });
+  return (
+    <Show when={split()} keyed fallback={<pre class={styles.source}>{props.text}</pre>}>
+      {(parts) => (
+        <pre class={styles.source}>
+          {parts.before}
+          <mark class={styles.sourceLine} ref={(el: HTMLElement) => el.scrollIntoView({ block: "center" })}>
+            {parts.target}
+          </mark>
+          {parts.after}
+        </pre>
+      )}
+    </Show>
+  );
+}
+
+// DirListing opens entries through the same viewer route, including the parent.
+function DirListing(props: { taskId: string; listing: Extract<TaskFilePreview, { kind: "dir" }> }) {
+  return (
+    <div class={styles.dirListing}>
+      <ul class={styles.dirEntries}>
+        <Show when={props.listing.path !== "/"}>
+          <li>
+            <A
+              class={styles.dirEntry}
+              href={taskViewURL(props.taskId, dirname(props.listing.path))}
+              aria-label="Parent directory"
+            >
+              <span class={styles.dirEntryName} aria-hidden="true">
+                ..
+              </span>
+            </A>
+          </li>
+        </Show>
+        <For each={props.listing.entries}>
+          {(entry) => (
+            <li>
+              <A
+                class={styles.dirEntry}
+                href={taskViewURL(props.taskId, joinRuntimePath(props.listing.path, entry.name))}
+              >
+                <Show when={entry.isDir} fallback={<FileIcon width="1.1em" height="1.1em" aria-hidden="true" />}>
+                  <FolderIcon width="1.1em" height="1.1em" aria-hidden="true" />
+                </Show>
+                <span class={styles.dirEntryName}>{entry.isDir ? `${entry.name}/` : entry.name}</span>
+              </A>
+            </li>
+          )}
+        </For>
+      </ul>
+      <Show when={props.listing.entries.length === 0}>
+        <div class={styles.notice}>This directory is empty.</div>
+      </Show>
+      <Show when={props.listing.truncated}>
+        <div class={styles.notice}>Showing the first {props.listing.entries.length} entries only.</div>
+      </Show>
+    </div>
+  );
 }
 
 function MediaPreview(props: { taskId: string; path: string; kind: "audio" | "video" }) {
@@ -70,10 +158,19 @@ export default function FileContentViewer(props: Props) {
     return preview?.kind === "text" ? preview : null;
   });
   const doc = createMemo(() => splitFrontMatter(textFile()?.text ?? ""));
+  const dirListing = createMemo(() => {
+    const preview = file.state === "ready" ? file() : null;
+    return preview?.kind === "dir" ? preview : null;
+  });
 
   return (
     <div class={styles.container}>
-      <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path} />
+      <FileViewerHeader
+        taskId={props.taskId}
+        taskPath={props.taskPath}
+        path={props.path}
+        directory={dirListing() !== null}
+      />
       <div class={`${styles.content} ${file.state === "ready" && file()?.kind === "pdf" ? styles.pdfContent : ""}`}>
         <Switch>
           <Match when={file.state === "errored"}>
@@ -98,6 +195,9 @@ export default function FileContentViewer(props: Props) {
               />
             </Show>
           </Match>
+          <Match when={dirListing()} keyed>
+            {(listing) => <DirListing taskId={props.taskId} listing={listing} />}
+          </Match>
           <Match when={file.state === "ready" && file()?.kind === "pdf"}>
             <Suspense fallback={<div class={styles.loading}>Loading PDF…</div>}>
               <PdfPreview taskId={props.taskId} path={props.path} />
@@ -112,11 +212,15 @@ export default function FileContentViewer(props: Props) {
           <Match when={file.state === "ready" && file()?.kind === "unsupported"}>
             <div class={styles.notice}>No preview for this file. Open the raw file to download it.</div>
           </Match>
-          <Match when={textFile() && !isMarkdownPath(props.path)}>
-            <pre class={styles.source}>{textFile()?.text}</pre>
-            <Show when={textFile()?.truncated}>
-              <div class={styles.notice}>File truncated: only the first 1 MiB is shown.</div>
-            </Show>
+          <Match when={!isMarkdownPath(props.path) && textFile()} keyed>
+            {(source) => (
+              <>
+                <SourceText text={source.text} line={props.line ?? null} />
+                <Show when={source.truncated}>
+                  <div class={styles.notice}>File truncated: only the first 1 MiB is shown.</div>
+                </Show>
+              </>
+            )}
           </Match>
           <Match when={textFile()}>
             <MarkdownTaskContext.Provider value={taskId}>

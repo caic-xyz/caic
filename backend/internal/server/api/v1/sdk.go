@@ -25,6 +25,8 @@ func SDKAPI() apispec.Config[api.ErrorCode] {
 		ExtraSeeds: []reflect.Type{
 			reflect.TypeFor[api.ErrorResponse](),
 			reflect.TypeFor[AuthBootstrapResp](),
+			// The raw endpoint serves this listing outside the route table.
+			reflect.TypeFor[TaskDirListing](),
 		},
 		KotlinPackage: "com.caic.sdk.v1",
 		APIDocTitle:   "caic API Reference",

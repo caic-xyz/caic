@@ -1,4 +1,4 @@
-// Markdown safely renders agent and file text with viewer links, copyable code, Pele diagrams, and a raw toggle.
+// Markdown safely renders agent and file text with viewer links, space-tolerant paths, copyable code, Pele diagrams, and a raw toggle.
 
 import {
   Show,
@@ -12,13 +12,13 @@ import {
   type Accessor,
 } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { Marked, Renderer, type Tokens } from "marked";
+import { Marked, Renderer, Tokenizer, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 
 import styles from "./Markdown.module.css";
-import { runtimeFilePath, taskRawURL, taskViewURL } from "../runtimePath";
+import { runtimeFilePath, runtimeFileTarget, taskRawURL, taskViewURL } from "../runtimePath";
 import { getMermaidCachedSvg, renderMermaidBlocks, toggleMermaidView } from "../mermaid";
 
 /** The task whose runtime files markdown paths name. Without it, links stay ordinary. */
@@ -46,6 +46,61 @@ const markdownRenderer = {
   },
 };
 
+// CommonMark ends a link destination at the first space, so agents that write
+// local paths with spaces emit literal text. Percent-encode those spaces and
+// retry the parse; code spans and web URLs stay untouched.
+function repairHeadLink(src: string): { source: string; raw: string } | null {
+  const head = linkHead.exec(src);
+  if (!head) return null;
+  const start = head[0].length;
+  const end = destinationEnd(src, start);
+  if (end < 0) return null;
+  const destination = src.slice(start, end);
+  const encoded = encodeDestination(destination);
+  if (encoded === destination) return null;
+  // The repaired destination is longer; the token must consume the original text.
+  return { source: src.slice(0, start) + encoded + src.slice(end), raw: src.slice(0, end + 1) };
+}
+
+/** Returns the index of the parenthesis that closes a link destination, or -1 across lines. */
+function destinationEnd(text: string, open: number): number {
+  let depth = 1;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\\") {
+      i++;
+    } else if (ch === "\n") {
+      return -1;
+    } else if (ch === "(") {
+      depth++;
+    } else if (ch === ")" && --depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+const linkHead = /^!?\[[^\]\n]*\]\(/;
+const localPathPrefix = /^(?:file:\/\/\/|\/|\.{1,2}\/|~\/)/;
+const quotedTitle = /^(.*?)(\s+(?:"[^"]*"|'[^']*'))$/;
+const parenTitle = /^([^\s]+)(\s+\([^)]*\))$/;
+
+function encodeDestination(destination: string): string {
+  const dest = destination.trim();
+  if (dest !== destination || !dest.includes(" ") || !isLocalPath(dest)) return destination;
+  const titled = quotedTitle.exec(dest) ?? parenTitle.exec(dest);
+  const path = titled?.[1] ?? dest;
+  if (!path.includes(" ")) return destination;
+  return path.replace(/ /g, "%20") + (titled?.[2] ?? "");
+}
+
+/** Accepts absolute, home, and relative paths that name a container file. */
+function isLocalPath(dest: string): boolean {
+  if (localPathPrefix.test(dest)) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//") || dest.startsWith("#")) return false;
+  return dest.includes("/");
+}
+
 /**
  * baseDir is the runtime directory of the rendered document. Relative links
  * and images resolve against it; without it the task checkout owns them.
@@ -54,16 +109,28 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
   const taskId = useContext(MarkdownTaskContext);
   const navigate = useNavigate();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
+  const runtimeTarget = (href: string) => (taskId ? runtimeFileTarget(href, props.baseDir ?? null) : null);
   const marked = new Marked({
     breaks: true,
     gfm: true,
+    tokenizer: {
+      link(this: Tokenizer, src: string): Tokens.Link | Tokens.Image | undefined {
+        const token = Tokenizer.prototype.link.call(this, src);
+        if (token) return token;
+        const repair = repairHeadLink(src);
+        if (!repair) return undefined;
+        const repaired = Tokenizer.prototype.link.call(this, repair.source);
+        if (repaired) repaired.raw = repair.raw;
+        return repaired;
+      },
+    },
     renderer: {
       ...markdownRenderer,
       link(this: Renderer, token: Tokens.Link): string {
-        const path = runtimePath(token.href);
-        if (path === null || !taskId) return Renderer.prototype.link.call(this, token);
+        const target = runtimeTarget(token.href);
+        if (target === null || !taskId) return Renderer.prototype.link.call(this, token);
         return Renderer.prototype.link
-          .call(this, { ...token, href: taskViewURL(taskId(), path) })
+          .call(this, { ...token, href: taskViewURL(taskId(), target.path, target.line) })
           .replace("<a ", "<a data-app-link ");
       },
       image(this: Renderer, token: Tokens.Image): string {

@@ -983,7 +983,7 @@ describe("TaskDetail", () => {
     expect(skill).not.toHaveAttribute("target");
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",
-      "/task/@abc/view?path=.%2Fsrc%2FApp.tsx",
+      "/task/@abc/view?path=.%2Fsrc%2FApp.tsx&line=12",
     );
     expect(screen.getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com");
     expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute("href", "mailto:user@example.com");

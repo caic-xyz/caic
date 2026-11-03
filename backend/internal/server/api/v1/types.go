@@ -1256,6 +1256,25 @@ type FileDiffResp struct {
 	Diff string `json:"diff"`
 }
 
+// TaskDirListing is the raw endpoint's representation of a directory: a
+// directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
+// immediate children as JSON instead. The endpoint stays outside the generated
+// SDK because the same URL also streams bytes.
+type TaskDirListing struct {
+	// Path is the resolved container directory.
+	Path string `json:"path"`
+	// Entries are the immediate children, sorted by name.
+	Entries []TaskDirEntry `json:"entries"`
+	// Truncated reports that entries were dropped at the runtime's limit.
+	Truncated bool `json:"truncated"`
+}
+
+// TaskDirEntry is one child of a listed directory.
+type TaskDirEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"isDir"`
+}
+
 // ProcessInfo describes a single process running inside the task runtime instance.
 type ProcessInfo struct {
 	// PID is the process ID.

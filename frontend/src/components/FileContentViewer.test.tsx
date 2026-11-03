@@ -10,11 +10,16 @@ import FileContentViewer from "./FileContentViewer";
 
 const textHeaders = { "Content-Type": "text/plain; charset=utf-8" };
 
-function renderViewer(path: string) {
-  window.history.replaceState(null, "", `/task/@abc/view?path=${encodeURIComponent(path)}`);
+function renderViewer(path: string, line: number | null = null) {
+  const query = new URLSearchParams({ path });
+  if (line !== null) query.set("line", String(line));
+  window.history.replaceState(null, "", `/task/@abc/view?${query}`);
   return render(() => (
     <Router>
-      <Route path="/*" component={() => <FileContentViewer taskId="abc" taskPath="/task/@abc+test" path={path} />} />
+      <Route
+        path="/*"
+        component={() => <FileContentViewer taskId="abc" taskPath="/task/@abc+test" path={path} line={line} />}
+      />
     </Router>
   ));
 }
@@ -44,7 +49,7 @@ describe("FileContentViewer", () => {
     expect(next).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fdocs%2Fnext.md");
     expect(next).not.toHaveAttribute("target");
     const source = screen.getByRole("link", { name: "Source" });
-    expect(source).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc%2Fa.go");
+    expect(source).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc%2Fa.go&line=3");
     expect(source).not.toHaveAttribute("target");
     expect(screen.getByRole("img", { name: "Shot" })).toHaveAttribute(
       "src",
@@ -136,10 +141,68 @@ describe("FileContentViewer", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("reveals and marks the line a link names", async () => {
+    const scrollIntoView = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    try {
+      fetchMock.mockResolvedValue(new Response("one\ntwo\nthree\n", { headers: textHeaders }));
+      const { container } = renderViewer("/notes.go", 2);
+
+      const mark = await screen.findByText("two");
+      expect(mark.tagName).toBe("MARK");
+      expect(container.querySelector("pre")?.textContent).toBe("one\ntwo\nthree\n");
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: original });
+    }
+  });
+
+  it("ignores a line past the end of the file", async () => {
+    fetchMock.mockResolvedValue(new Response("one\ntwo\n", { headers: textHeaders }));
+    const { container } = renderViewer("/notes.go", 9);
+
+    expect(await screen.findByText(/one/)).toBeInTheDocument();
+    expect(container.querySelector("mark")).toBeNull();
+  });
+
   it("cuts a file past the size limit and says so", async () => {
     fetchMock.mockResolvedValue(new Response(`# Big\n\n${"x".repeat(1.5 * 1024 * 1024)}\n`, { headers: textHeaders }));
     renderViewer("/big.md");
 
     expect(await screen.findByText(/File truncated/)).toBeInTheDocument();
+  });
+
+  it("lists a directory and links its entries and parent", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        path: "/home/user/src/artifacts",
+        entries: [
+          { name: "reports", isDir: true },
+          { name: "summary.json", isDir: false },
+        ],
+        truncated: false,
+      }),
+    );
+    renderViewer("/home/user/src/artifacts");
+
+    const dir = await screen.findByRole("link", { name: "reports/" });
+    expect(dir).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc%2Fartifacts%2Freports");
+    expect(screen.getByRole("link", { name: "summary.json" })).toHaveAttribute(
+      "href",
+      "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc%2Fartifacts%2Fsummary.json",
+    );
+    expect(screen.getByRole("link", { name: "Parent directory" })).toHaveAttribute(
+      "href",
+      "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc",
+    );
+    expect(screen.queryByRole("link", { name: "raw file" })).not.toBeInTheDocument();
+  });
+
+  it("reports a malformed directory listing", async () => {
+    fetchMock.mockResolvedValue(Response.json({ path: "/x", entries: "nope", truncated: false }));
+    renderViewer("/x");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("invalid directory listing");
   });
 });

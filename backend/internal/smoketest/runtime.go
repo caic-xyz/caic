@@ -393,6 +393,32 @@ func (*RuntimeBackend) FileSize(_ context.Context, _ runtime.ID, path string) (i
 	return int64(len(data)), err
 }
 
+// ReadDir serves deterministic directory listings derived from artifacts.
+func (*RuntimeBackend) ReadDir(_ context.Context, _ runtime.ID, path string) ([]runtime.DirEntry, bool, error) {
+	if _, ok := artifacts[path]; ok {
+		return nil, false, runtime.ErrIsDir
+	}
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	dirs := map[string]bool{}
+	for name := range artifacts {
+		rest, ok := strings.CutPrefix(name, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		child, _, nested := strings.Cut(rest, "/")
+		dirs[child] = dirs[child] || nested
+	}
+	if len(dirs) == 0 {
+		return nil, false, fs.ErrNotExist
+	}
+	entries := make([]runtime.DirEntry, 0, len(dirs))
+	for name, isDir := range dirs {
+		entries = append(entries, runtime.DirEntry{Name: name, IsDir: isDir})
+	}
+	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
+	return entries, false, nil
+}
+
 // nextStatsSeq reserves the next CPU index for one streamed sample. The manager
 // resubscribes whenever a task changes state, so histories from several runs
 // land in the same retained ring; consecutive indices keep every CPU reading in
@@ -479,27 +505,31 @@ func fakeProcesses() []runtime.ProcessInfo {
 	}
 }
 
+// artifacts is the deterministic file tree served to smoke and e2e browsers.
+// Values prefixed with base64: hold encoded binary content.
+var artifacts = map[string]string{
+	"/home/user/src/caic/test-results/screenshot.png":               "base64:iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+	"/home/user/.agents/skills/code-quality/SKILL.md":               "# Code quality\n\nRead the [reference](references/rules.md).\n",
+	"/home/user/.agents/skills/code-quality/references/rules.md":    "# Quality rules\n\nRead the [examples](examples.md).\n",
+	"/home/user/.agents/skills/code-quality/references/examples.md": "# Quality examples\n\nKeep changes focused.\n",
+	"/home/user/.agents/skills/review/SKILL.md":                     "# Review\n\nbehavior and failure paths.\n",
+	"/home/user/src/caic/README.md":                                 "# Task artifact\n\nSee the [guide](docs/guide.md).\n",
+	"/home/user/src/caic/docs/guide.md":                             "# Guide\n\n![Shot](../test-results/screenshot.png)\n\nBack to the [README](../README.md).\n",
+	"/home/user/src/caic/models/bracket.stl":                        "solid bracket\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 20 0\nendloop\nendfacet\nendsolid bracket\n",
+	"/home/user/src/caic/models/cube.step":                          "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('cube.step','2026-10-12',(''),(''),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n",
+}
+
 func artifactFile(path string) ([]byte, error) {
-	switch path {
-	case "/home/user/src/caic/test-results/screenshot.png":
-		return base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
-	case "/home/user/.agents/skills/code-quality/SKILL.md":
-		return []byte("# Code quality\n\nRead the [reference](references/rules.md).\n"), nil
-	case "/home/user/.agents/skills/code-quality/references/rules.md":
-		return []byte("# Quality rules\n\nRead the [examples](examples.md).\n"), nil
-	case "/home/user/.agents/skills/code-quality/references/examples.md":
-		return []byte("# Quality examples\n\nKeep changes focused.\n"), nil
-	case "/home/user/.agents/skills/review/SKILL.md":
-		return []byte("# Review\n\nbehavior and failure paths.\n"), nil
-	case "/home/user/src/caic/README.md":
-		return []byte("# Task artifact\n\nSee the [guide](docs/guide.md).\n"), nil
-	case "/home/user/src/caic/docs/guide.md":
-		return []byte("# Guide\n\n![Shot](../test-results/screenshot.png)\n\nBack to the [README](../README.md).\n"), nil
-	case "/home/user/src/caic/models/bracket.stl":
-		return []byte("solid bracket\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 20 0\nendloop\nendfacet\nendsolid bracket\n"), nil
-	case "/home/user/src/caic/models/cube.step":
-		return []byte("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('cube.step','2026-10-12',(''),(''),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"), nil
-	default:
+	content, ok := artifacts[path]
+	if !ok {
 		return nil, fs.ErrNotExist
 	}
+	if encoded, ok := strings.CutPrefix(content, "base64:"); ok {
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("decode artifact %s: %w", path, err)
+		}
+		return data, nil
+	}
+	return []byte(content), nil
 }

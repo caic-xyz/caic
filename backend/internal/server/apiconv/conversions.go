@@ -439,6 +439,15 @@ func ProcessInfos(procs []runtime.ProcessInfo) []v1.ProcessInfo {
 	return out
 }
 
+// TaskDirEntries converts runtime directory entries to API DTOs.
+func TaskDirEntries(entries []runtime.DirEntry) []v1.TaskDirEntry {
+	out := make([]v1.TaskDirEntry, len(entries))
+	for i, e := range entries {
+		out[i] = v1.TaskDirEntry{Name: e.Name, IsDir: e.IsDir}
+	}
+	return out
+}
+
 // Stats converts a runtime observation to its API representation.
 func Stats(cs *runtime.Stats) v1.EventStats {
 	var ceiling *float64

@@ -2471,3 +2471,22 @@ public struct AuthBootstrapResp: Codable {
     public let user: UserResp?
 }
 
+/// TaskDirEntry is one child of a listed directory.
+public struct TaskDirEntry: Codable {
+    public let name: String
+    public let isDir: Bool
+}
+
+/// TaskDirListing is the raw endpoint's representation of a directory: a
+/// directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
+/// immediate children as JSON instead. The endpoint stays outside the generated
+/// SDK because the same URL also streams bytes.
+public struct TaskDirListing: Codable {
+    /// Path is the resolved container directory.
+    public let path: String
+    /// Entries are the immediate children, sorted by name.
+    public let entries: [TaskDirEntry]
+    /// Truncated reports that entries were dropped at the runtime's limit.
+    public let truncated: Bool
+}
+

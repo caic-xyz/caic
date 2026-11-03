@@ -1091,7 +1091,7 @@ func (b *Backend) ReadFile(ctx context.Context, id runtime.ID, path string, offs
 			yield(nil, err)
 			return
 		}
-		command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -f "$p" ] || exit 45; exec dd if="$p" bs=65536 iflag=skip_bytes,count_bytes skip=` + strconv.FormatInt(offset, 10)
+		command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -d "$p" ] && exit 46; [ -f "$p" ] || exit 45; exec dd if="$p" bs=65536 iflag=skip_bytes,count_bytes skip=` + strconv.FormatInt(offset, 10)
 		if length >= 0 {
 			command += " count=" + strconv.FormatInt(length, 10)
 		}
@@ -1149,6 +1149,9 @@ func (b *Backend) ReadFile(ctx context.Context, id runtime.ID, path string, offs
 						case 45:
 							yield(nil, fs.ErrInvalid)
 							return
+						case 46:
+							yield(nil, runtime.ErrIsDir)
+							return
 						}
 					}
 					yield(nil, commandOutputError("read file", ct, err, stderr.data))
@@ -1184,7 +1187,7 @@ func (b *Backend) FileSize(ctx context.Context, id runtime.ID, path string) (int
 	if err != nil {
 		return 0, err
 	}
-	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -f "$p" ] || exit 45; exec stat -Lc %s -- "$p"`
+	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -d "$p" ] && exit 46; [ -f "$p" ] || exit 45; exec stat -Lc %s -- "$p"`
 	sshArgs := ct.SSHCommand(nil, command)
 	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and quoted path belong to the task container.
 	var stdout, stderr commandTailWriter
@@ -1196,6 +1199,8 @@ func (b *Backend) FileSize(ctx context.Context, id runtime.ID, path string) (int
 				return 0, fs.ErrNotExist
 			case 45:
 				return 0, fs.ErrInvalid
+			case 46:
+				return 0, runtime.ErrIsDir
 			}
 		}
 		return 0, commandOutputError("file size", ct, err, stderr.data)
@@ -1205,6 +1210,92 @@ func (b *Backend) FileSize(ctx context.Context, id runtime.ID, path string) (int
 		return 0, fmt.Errorf("invalid file size %q", stdout.data)
 	}
 	return size, nil
+}
+
+// dirListingByteLimit bounds one directory report before sorting and capping.
+const dirListingByteLimit = 1 << 20
+
+// ReadDir implements runtime.Files with one find report per call. The report is
+// read through a limit so a huge directory cannot exhaust server memory.
+func (b *Backend) ReadDir(ctx context.Context, id runtime.ID, path string) ([]runtime.DirEntry, bool, error) {
+	if !filepath.IsAbs(path) || strings.ContainsRune(path, 0) {
+		return nil, false, fs.ErrInvalid
+	}
+	localID, err := b.localID(id)
+	if err != nil {
+		return nil, false, err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return nil, false, err
+	}
+	// %Y follows symlinks, so a link to a directory lists as a directory.
+	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -d "$p" ] || exit 45; exec find "$p" -mindepth 1 -maxdepth 1 -printf '%f\t%Y\0'`
+	sshArgs := ct.SSHCommand(nil, command)
+	readCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(readCtx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and quoted path belong to the task container.
+	var stderr commandTailWriter
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, false, err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(stdout, dirListingByteLimit+1))
+	// Stopping early leaves find writing into a closed pipe; cancel before Wait.
+	clipped := len(data) > dirListingByteLimit
+	if clipped {
+		data = data[:dirListingByteLimit]
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, false, readErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if waitErr != nil && !clipped {
+		if e, ok := errors.AsType[*exec.ExitError](waitErr); ok {
+			switch e.ExitCode() {
+			case 44:
+				return nil, false, fs.ErrNotExist
+			case 45:
+				return nil, false, runtime.ErrIsDir
+			}
+		}
+		return nil, false, commandOutputError("list directory", ct, waitErr, stderr.data)
+	}
+	return parseDirEntries(data)
+}
+
+// parseDirEntries decodes NUL-delimited "name\ttype" records into entries
+// sorted by name, keeping at most runtime.DirEntryLimit of them.
+func parseDirEntries(data []byte) ([]runtime.DirEntry, bool, error) {
+	if end := bytes.LastIndexByte(data, 0) + 1; end < len(data) {
+		// A clipped transfer can end inside a record.
+		data = data[:end]
+	}
+	records := bytes.Split(data, []byte{0})
+	entries := make([]runtime.DirEntry, 0, len(records))
+	for _, record := range records {
+		if len(record) == 0 {
+			continue
+		}
+		sep := bytes.LastIndexByte(record, '\t')
+		if sep <= 0 || sep == len(record)-1 {
+			return nil, false, fmt.Errorf("invalid directory entry %q", record)
+		}
+		entries = append(entries, runtime.DirEntry{Name: string(record[:sep]), IsDir: record[sep+1] == 'd'})
+	}
+	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
+	if len(entries) <= runtime.DirEntryLimit {
+		return entries, false, nil
+	}
+	return entries[:runtime.DirEntryLimit], true, nil
 }
 
 // commandResult is the separated output of one command run in a container.

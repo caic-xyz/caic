@@ -2365,3 +2365,24 @@ export interface AuthBootstrapResp {
   user?: UserResp;
 }
 
+/** TaskDirEntry is one child of a listed directory. */
+export interface TaskDirEntry {
+  name: string;
+  isDir: boolean;
+}
+
+/**
+ * TaskDirListing is the raw endpoint's representation of a directory: a
+ * directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
+ * immediate children as JSON instead. The endpoint stays outside the generated
+ * SDK because the same URL also streams bytes.
+ */
+export interface TaskDirListing {
+  /** Path is the resolved container directory. */
+  path: string;
+  /** Entries are the immediate children, sorted by name. */
+  entries: TaskDirEntry[];
+  /** Truncated reports that entries were dropped at the runtime's limit. */
+  truncated: boolean;
+}
+

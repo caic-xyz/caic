@@ -493,7 +493,7 @@ func TestBackend(t *testing.T) {
 			err  error
 		}{
 			{filepath.Join(dir, "missing"), fs.ErrNotExist},
-			{dir, fs.ErrInvalid},
+			{dir, runtime.ErrIsDir},
 			{"relative", fs.ErrInvalid},
 		} {
 			seen := false
@@ -532,6 +532,71 @@ func TestBackend(t *testing.T) {
 		}
 		if string(got) != "456" {
 			t.Fatalf("offset read = %q", got)
+		}
+	})
+	t.Run("ReadDir", func(t *testing.T) {
+		t.Parallel()
+		if goruntime.GOOS != "linux" {
+			t.Skip("executes GNU find from the Linux container locally")
+		}
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "a dir"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "a dir", "nested.txt"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(dir, "a dir"), filepath.Join(dir, "c link")); err != nil {
+			t.Fatal(err)
+		}
+		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		id := runtime.NewID("docker", "file-test")
+		entries, truncated, err := b.ReadDir(t.Context(), id, dir)
+		if err != nil || truncated {
+			t.Fatalf("ReadDir = %v, %v", truncated, err)
+		}
+		want := []runtime.DirEntry{{Name: "a dir", IsDir: true}, {Name: "b.txt"}, {Name: "c link", IsDir: true}}
+		if !slices.Equal(entries, want) {
+			t.Fatalf("entries = %v, want %v", entries, want)
+		}
+		for _, tc := range []struct {
+			path string
+			err  error
+		}{
+			{filepath.Join(dir, "missing"), fs.ErrNotExist},
+			{filepath.Join(dir, "b.txt"), runtime.ErrIsDir},
+			{"relative", fs.ErrInvalid},
+		} {
+			if _, _, err := b.ReadDir(t.Context(), id, tc.path); !errors.Is(err, tc.err) {
+				t.Fatalf("ReadDir(%q) = %v, want %v", tc.path, err, tc.err)
+			}
+		}
+	})
+	t.Run("parse directory entries", func(t *testing.T) {
+		t.Parallel()
+		entries, truncated, err := parseDirEntries([]byte("b.txt\tf\x00a dir\td\x00"))
+		if err != nil || truncated {
+			t.Fatalf("parseDirEntries = %v, %v", truncated, err)
+		}
+		want := []runtime.DirEntry{{Name: "a dir", IsDir: true}, {Name: "b.txt"}}
+		if !slices.Equal(entries, want) {
+			t.Fatalf("entries = %v, want %v", entries, want)
+		}
+		// A clipped transfer drops its partial record.
+		if entries, _, err := parseDirEntries([]byte("a\tf\x00b\tf\x00tru")); err != nil || len(entries) != 2 {
+			t.Fatalf("clipped = %v, %v", entries, err)
+		}
+		many := bytes.Repeat([]byte("x\tf\x00"), runtime.DirEntryLimit+1)
+		if entries, truncated, err := parseDirEntries(many); err != nil || !truncated || len(entries) != runtime.DirEntryLimit {
+			t.Fatalf("cap = %d entries, truncated %v, %v", len(entries), truncated, err)
+		}
+		for _, bad := range [][]byte{[]byte("notab\x00"), []byte("only\t\x00")} {
+			if _, _, err := parseDirEntries(bad); err == nil {
+				t.Fatalf("parseDirEntries(%q) succeeded, want error", bad)
+			}
 		}
 	})
 	t.Run("ReadFile early stop", func(t *testing.T) {

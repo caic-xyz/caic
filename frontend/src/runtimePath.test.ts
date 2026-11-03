@@ -10,6 +10,7 @@ import {
   isStepPath,
   isStlPath,
   runtimeFilePath,
+  runtimeFileTarget,
   taskRawURL,
   taskViewURL,
 } from "./runtimePath";
@@ -25,6 +26,19 @@ describe("runtimeFilePath", () => {
     expect(runtimeFilePath("file:///home/user/skill%20notes.md", null)).toBe("/home/user/skill notes.md");
     expect(runtimeFilePath("/home/user/a.go:12:3", null)).toBe("/home/user/a.go");
     expect(runtimeFilePath("/home/user/a.md#intro", null)).toBe("/home/user/a.md");
+  });
+
+  it("names the line a fragment or suffix selects", () => {
+    expect(runtimeFileTarget("file:///home/user/fetch.py#L1509", null)).toEqual({
+      path: "/home/user/fetch.py",
+      line: 1509,
+    });
+    expect(runtimeFileTarget("/home/user/a.go:12", null)).toEqual({ path: "/home/user/a.go", line: 12 });
+    expect(runtimeFileTarget("/home/user/a.go:12:3", null)).toEqual({ path: "/home/user/a.go", line: 12 });
+    expect(runtimeFileTarget("/home/user/a.go#L10-L20", null)).toEqual({ path: "/home/user/a.go", line: 10 });
+    expect(runtimeFileTarget("/home/user/a.md#intro", null)).toEqual({ path: "/home/user/a.md", line: null });
+    expect(runtimeFileTarget("/home/user/a.md#L0", null)).toEqual({ path: "/home/user/a.md", line: null });
+    expect(runtimeFileTarget("./b.go:7", null)).toEqual({ path: "./b.go", line: 7 });
   });
 
   it("passes relative paths through unchanged without a base directory", () => {
@@ -110,6 +124,7 @@ describe("URLs", () => {
   it("encode the runtime path as a query value", () => {
     expect(taskRawURL("abc", "/home/user/a b.md")).toBe("/api/caic/v1/tasks/abc/raw?path=%2Fhome%2Fuser%2Fa+b.md");
     expect(taskViewURL("abc", "/home/user/a b.md")).toBe("/task/@abc/view?path=%2Fhome%2Fuser%2Fa+b.md");
+    expect(taskViewURL("abc", "/home/user/a b.md", 12)).toBe("/task/@abc/view?path=%2Fhome%2Fuser%2Fa+b.md&line=12");
   });
 });
 

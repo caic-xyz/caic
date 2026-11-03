@@ -1,5 +1,6 @@
 // Streams bounded STEP downloads with progress and reads task-file previews and other CAD formats.
 
+import type { TaskDirEntry, TaskDirListing } from "@sdk/types.gen";
 import { isCompressedStepPath, taskRawURL } from "./runtimePath";
 
 const maxTextBytes = 1 << 20;
@@ -7,6 +8,7 @@ const imageTypes = new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg"
 
 export type TaskFilePreview =
   | { kind: "text"; text: string; truncated: boolean }
+  | { kind: "dir"; path: string; entries: TaskDirEntry[]; truncated: boolean }
   | { kind: "audio" }
   | { kind: "image" }
   | { kind: "pdf" }
@@ -33,6 +35,7 @@ export async function readTaskFilePreview(taskId: string, path: string, signal: 
     .trim();
   const textFile = contentType.startsWith("text/");
   if (!textFile) {
+    if (contentType === "application/json") return readDirListing(res);
     await res.body?.cancel();
     if (contentType.startsWith("audio/")) return { kind: "audio" };
     if (contentType.startsWith("video/")) return { kind: "video" };
@@ -58,6 +61,30 @@ export async function readTaskFilePreview(taskId: string, path: string, signal: 
     // Cancellation after a bounded preview must not replace its successful result.
     await reader.cancel().catch(() => undefined);
   }
+}
+
+// The raw endpoint answers a directory with its listing instead of bytes.
+async function readDirListing(res: Response): Promise<TaskFilePreview> {
+  const listing: unknown = await res.json().catch(() => null);
+  if (!isDirListing(listing)) {
+    throw new Error("invalid directory listing");
+  }
+  return { kind: "dir", path: listing.path, entries: listing.entries, truncated: listing.truncated };
+}
+
+function isDirListing(value: unknown): value is TaskDirListing {
+  if (typeof value !== "object" || value === null) return false;
+  const { path, entries, truncated } = value as Record<string, unknown>;
+  return (
+    typeof path === "string" &&
+    typeof truncated === "boolean" &&
+    Array.isArray(entries) &&
+    entries.every((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null) return false;
+      const { name, isDir } = entry as Record<string, unknown>;
+      return typeof name === "string" && typeof isDir === "boolean";
+    })
+  );
 }
 
 function contentLength(res: Response): number | null {

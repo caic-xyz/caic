@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"iter"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -234,6 +235,10 @@ func (f *FakeBackend) ReadFile(_ context.Context, _ runtime.ID, path string, off
 	return func(yield func([]byte, error) bool) {
 		data, ok := f.Files[path]
 		if !ok {
+			if f.hasChildren(path) {
+				yield(nil, runtime.ErrIsDir)
+				return
+			}
 			yield(nil, fs.ErrNotExist)
 			return
 		}
@@ -267,9 +272,53 @@ func (f *FakeBackend) ReadFile(_ context.Context, _ runtime.ID, path string, off
 func (f *FakeBackend) FileSize(_ context.Context, _ runtime.ID, path string) (int64, error) {
 	data, ok := f.Files[path]
 	if !ok {
+		if f.hasChildren(path) {
+			return 0, runtime.ErrIsDir
+		}
 		return 0, fs.ErrNotExist
 	}
 	return int64(len(data)), nil
+}
+
+// ReadDir implements runtime.Files over the fixture paths. Every file below
+// path contributes its first segment, which is a directory when deeper paths
+// follow.
+func (f *FakeBackend) ReadDir(_ context.Context, _ runtime.ID, path string) ([]runtime.DirEntry, bool, error) {
+	if _, ok := f.Files[path]; ok {
+		return nil, false, runtime.ErrIsDir
+	}
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	dirs := map[string]bool{}
+	for name := range f.Files {
+		rest, ok := strings.CutPrefix(name, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		child, _, nested := strings.Cut(rest, "/")
+		dirs[child] = dirs[child] || nested
+	}
+	if len(dirs) == 0 {
+		return nil, false, fs.ErrNotExist
+	}
+	entries := make([]runtime.DirEntry, 0, len(dirs))
+	for name, isDir := range dirs {
+		entries = append(entries, runtime.DirEntry{Name: name, IsDir: isDir})
+	}
+	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
+	if len(entries) <= runtime.DirEntryLimit {
+		return entries, false, nil
+	}
+	return entries[:runtime.DirEntryLimit], true, nil
+}
+
+func (f *FakeBackend) hasChildren(path string) bool {
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	for name := range f.Files {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *FakeBackend) set(id runtime.ID, s InstanceStatus) {

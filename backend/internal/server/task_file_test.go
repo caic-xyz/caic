@@ -259,6 +259,40 @@ func TestTaskFile(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("directory lists its children", func(t *testing.T) {
+		t.Parallel()
+		s, _, id := newTaskDiffTestRouter(t)
+		testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &runtimetest.FakeBackend{Files: map[string][]byte{
+			"/dir/a.txt":     []byte("a"),
+			"/dir/sub/b.txt": []byte("b"),
+		}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/dir", nil)
+		testTaskHandlers(s).routes().ServeHTTP(w, req)
+		want := `{"path":"/dir","entries":[{"name":"a.txt","isDir":false},{"name":"sub","isDir":true}],"truncated":false}` + "\n"
+		if w.Code != http.StatusOK || w.Body.String() != want {
+			t.Fatalf("status %d, body %q", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Accept-Ranges") != "" {
+			t.Fatalf("headers = %v", w.Header())
+		}
+	})
+
+	t.Run("ranged directory lists its children", func(t *testing.T) {
+		t.Parallel()
+		s, _, id := newTaskDiffTestRouter(t)
+		testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &runtimetest.FakeBackend{Files: map[string][]byte{
+			"/dir/a.txt": []byte("a"),
+		}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/dir", nil)
+		req.Header.Set("Range", "bytes=0-1")
+		testTaskHandlers(s).routes().ServeHTTP(w, req)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"a.txt"`) {
+			t.Fatalf("status %d, body %q", w.Code, w.Body.String())
+		}
+	})
 }
 
 // failingFileRuntime models a source that fails after committing the first chunk.

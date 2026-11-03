@@ -579,6 +579,15 @@ func (r *Router) FileSize(ctx context.Context, id ID, path string) (int64, error
 	return rt.FileSize(ctx, id, path)
 }
 
+// ReadDir lists one runtime directory's immediate children.
+func (r *Router) ReadDir(ctx context.Context, id ID, path string) ([]DirEntry, bool, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return nil, false, err
+	}
+	return rt.ReadDir(ctx, id, path)
+}
+
 // observe records the duration of one router operation, attributed to the
 // runtime that served it when there is one.
 func (r *Router) observe(ctx context.Context, name string, start time.Time, err error, attrs ...metrics.Attr) {

@@ -1319,6 +1319,19 @@ func (s *taskService) taskFileSize(ctx context.Context, entry *taskmgr.Entry, na
 	return size, taskFileError(err)
 }
 
+// taskDir lists one container directory and reports its resolved path.
+func (s *taskService) taskDir(ctx context.Context, entry *taskmgr.Entry, name string) (resolvedPath string, entries []runtime.DirEntry, truncated bool, err error) {
+	id, resolved, err := taskFilePath(entry, name)
+	if err != nil {
+		return "", nil, false, err
+	}
+	entries, truncated, err = s.runtimes.ReadDir(ctx, id, resolved)
+	if err != nil {
+		return "", nil, false, taskFileError(err)
+	}
+	return resolved, entries, truncated, nil
+}
+
 // taskFilePath resolves relative links against the primary container checkout.
 // The runtime owns all reads; host files are never used as a fallback.
 func taskFilePath(entry *taskmgr.Entry, name string) (runtime.ID, string, error) {
@@ -1347,6 +1360,8 @@ func taskFileError(err error) error {
 		return nil
 	case errors.Is(err, fs.ErrNotExist):
 		return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "file not found"}
+	case errors.Is(err, runtime.ErrIsDir):
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path is a directory", Cause: err}
 	case errors.Is(err, fs.ErrInvalid):
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path is not a regular file"}
 	default:
