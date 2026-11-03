@@ -457,6 +457,57 @@
       ]
     },
     {
+      "provider": "gemini",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "retrieved": "2026-11-03",
+      "models": [
+        {
+          "id": "gemini-4-argon",
+          "source": "https://ai.google.dev/gemini-api/docs/pricing#gemini-4-argon",
+          "retrieved": "2026-11-03",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.1,
+                "output_per_mtok": 10.0
+              }
+            },
+            {
+              "effective_from": "2026-12-01",
+              "price": {
+                "input_per_mtok": 4.0,
+                "cached_input_per_mtok": 0.2,
+                "output_per_mtok": 20.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "source": "https://ai.google.dev/gemini-api/docs/pricing#gemini-3.8-flash",
+          "retrieved": "2026-11-03",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.75,
+                "cached_input_per_mtok": 0.075,
+                "output_per_mtok": 3.75
+              }
+            },
+            {
+              "effective_from": "2027-01-01",
+              "price": {
+                "input_per_mtok": 1.5,
+                "cached_input_per_mtok": 0.15,
+                "output_per_mtok": 7.5
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "provider": "openai",
       "source": "https://developers.openai.com/api/docs/pricing",
       "retrieved": "2026-10-27",

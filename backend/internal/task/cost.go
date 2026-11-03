@@ -3,7 +3,6 @@
 package task
 
 import (
-	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -200,12 +199,9 @@ func (c *CostTracker) modelPrice(model string, at time.Time, pricer usage.ModelP
 	if at.IsZero() {
 		at = time.Now()
 	}
-	// Pi and OpenCode identify the billing provider in the model ID. Native
-	// Codex can report a bare model ID, which needs an OpenAI provider hint.
-	var provider agent.QuotaProvider
-	if c.Harness == harness.Codex && !strings.Contains(model, "/") {
-		provider = agent.QuotaProviderCodex
-	}
+	// Harnesses that report bare model IDs need their billing provider
+	// resolved from the harness. Prefixed IDs name it themselves.
+	provider := agent.BillingProviderForModel(c.Harness, model)
 	return pricer.ModelPrice(provider, model, at)
 }
 

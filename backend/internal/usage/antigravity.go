@@ -19,7 +19,8 @@ import (
 
 // AntigravityFetcher polls agy's account quota without running a model turn.
 // It runs on the caic server, where agy owns sign-in and token renewal. Bucket
-// IDs identify independent model-pool/window limits; token costs remain unknown.
+// IDs identify independent model-pool/window limits; caic prices token usage
+// separately from the model IDs agy reports.
 type AntigravityFetcher struct {
 	baseFetcher
 

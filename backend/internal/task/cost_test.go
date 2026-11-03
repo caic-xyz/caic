@@ -45,6 +45,18 @@ func TestCostTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("AntigravityStepUsagePricesAtAPIRates", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Antigravity, Model: "gemini-3.8-flash-high"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: c.Model, Usage: agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}}, at, pricer)
+		// The result repeats conversation-wide usage across resumed processes.
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 5_000_000, OutputTokens: 5_000_000}}, at, pricer)
+		if !ok || cost.Source != CostEstimated || math.Abs(cost.USD-4.5) > 1e-9 {
+			t.Fatalf("cost = %+v/%v, want 4.5", cost, ok)
+		}
+	})
+
 	t.Run("OpenAIRequestsAcrossHarnesses", func(t *testing.T) {
 		t.Parallel()
 		for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {

@@ -130,6 +130,7 @@ export default function TaskCard(props: TaskCardProps) {
     const h = props.harness;
     if (h === "claude") return "Claude Code subscription";
     if (h === "codex") return "Codex subscription";
+    if (h === "antigravity") return "Antigravity subscription";
     return "";
   };
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();

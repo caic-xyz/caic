@@ -57,7 +57,10 @@ func (s *accounting) observeStep(step *antigravity.StepUpdatePayload) ([]agent.M
 	}
 	s.usage.Add(&step.Usage)
 	source.ItemID = strconv.FormatInt(step.StepIndex, 10)
-	return []agent.Message{&agent.UsageMessage{Source: source, Usage: convertUsage(&step.Usage), ReportedModel: s.model, ModelDerived: true}}, true
+	// Each DONE step is one completed API request, so its usage prices on its
+	// own. The result event repeats conversation-wide usage that spans resumed
+	// processes and must not price the turn.
+	return []agent.Message{&agent.UsageMessage{Source: source, Usage: convertUsage(&step.Usage), ReportedModel: s.model, PerCall: true, ModelDerived: true}}, true
 }
 
 func (s *accounting) finishConversation(id string) {

@@ -30,7 +30,10 @@ Use the maintained relay and preserve v3 input provenance.
 
 Result usage, duration, and turn count include the entire conversation,
 including resumed processes. Sum DONE-step usage for per-turn totals. Keep
-conversation-wide measurements out of neutral per-turn fields.
+conversation-wide measurements out of neutral per-turn fields. Mark each
+DONE-step usage `PerCall`: agy sets usage once per model call, so caic prices
+it at the vendor's API rates while the result's conversation-wide usage stays
+out of the estimate.
 
 Run `make check-agent-logs` for offline DTO drift checks. Live parsers accept
 unknown fields.

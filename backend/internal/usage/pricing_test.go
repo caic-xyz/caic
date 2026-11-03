@@ -210,6 +210,55 @@ func TestPricer(t *testing.T) {
 			}
 		}
 	})
+	t.Run("GeminiAPIRates", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		for _, tc := range []struct {
+			name, model string
+			at          time.Time
+			want        ModelPrice
+		}{
+			{
+				"Argon standard", "gemini-4-argon-high",
+				time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, OutputPerMTok: 10},
+			},
+			{
+				"Argon increase", "gemini-4-argon-medium",
+				time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, OutputPerMTok: 20},
+			},
+			{
+				"Flash standard", "gemini-3.8-flash-low",
+				time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 0.75, CachedInputPerMTok: 0.075, OutputPerMTok: 3.75},
+			},
+			{
+				"Flash increase", "gemini-3.8-flash-high",
+				time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+				ModelPrice{InputPerMTok: 1.5, CachedInputPerMTok: 0.15, OutputPerMTok: 7.5},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				got, ok := p.ModelPrice(agent.QuotaProviderGemini, tc.model, tc.at)
+				if !ok {
+					t.Fatalf("ModelPrice(%q) not priced", tc.model)
+				}
+				if !reflect.DeepEqual(got, tc.want) {
+					t.Errorf("price = %+v, want %+v", got, tc.want)
+				}
+			})
+		}
+		// A prefixed model ID resolves the provider without a harness hint.
+		if got, ok := p.ModelPrice("", "gemini/gemini-4-argon", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 2 {
+			t.Errorf("prefixed gemini price = %+v/%v, want Gemini rates", got, ok)
+		}
+		// OpenRouter passes Gemini billing through at the upstream rates.
+		if got, ok := p.ModelPrice("", "openrouter/google/gemini-3.8-flash", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 0.75 {
+			t.Errorf("openrouter gemini price = %+v/%v, want Gemini rates", got, ok)
+		}
+	})
 	t.Run("ClaudeRequestCost", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {

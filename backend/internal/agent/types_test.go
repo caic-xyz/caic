@@ -5,6 +5,8 @@ package agent
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 func TestUsageMessage(t *testing.T) {
@@ -81,6 +83,28 @@ func TestQuotaProvider(t *testing.T) {
 		for _, tc := range tests {
 			if got := QuotaProviderForModel(tc.model); got != tc.want {
 				t.Errorf("QuotaProviderForModel(%q) = %q, want %q", tc.model, got, tc.want)
+			}
+		}
+	})
+	t.Run("BillingProviderForModel", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			harness harness.Name
+			model   string
+			want    QuotaProvider
+		}{
+			{harness.Codex, "gpt-6.1-sol", QuotaProviderCodex},
+			{harness.Codex, "openai/gpt-6.1-sol", ""},
+			{harness.Antigravity, "gemini-3.8-flash-high", QuotaProviderGemini},
+			{harness.Antigravity, "claude-opus-5-5-low", QuotaProviderAnthropic},
+			{harness.Antigravity, "gpt-oss-120b-medium", ""},
+			{harness.Antigravity, "gemini/gemini-3.8-flash", ""},
+			{harness.Claude, "claude-sonnet-4-5", ""},
+			{harness.Pi, "zai/glm-5.3-flash", ""},
+		}
+		for _, tc := range tests {
+			if got := BillingProviderForModel(tc.harness, tc.model); got != tc.want {
+				t.Errorf("BillingProviderForModel(%q, %q) = %q, want %q", tc.harness, tc.model, got, tc.want)
 			}
 		}
 	})

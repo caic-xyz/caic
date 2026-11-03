@@ -49,6 +49,8 @@ func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
 		return pricing.providers["zai"].lookup(model, at)
 	case agent.QuotaProviderDeepSeek:
 		return pricing.providers["deepseek"].lookup(model, at)
+	case agent.QuotaProviderGemini:
+		return pricing.providers["gemini"].lookup(model, at)
 	default:
 		return ModelPrice{}, false
 	}
@@ -400,12 +402,17 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 			return ModelPrice{}, false
 		}
 		return staticModelPrice(upstream, model, at)
+	case agent.QuotaProviderGemini:
+		// Gemini bills implicit cache reads at the cached-input price; the
+		// hourly cache-storage fee is outside per-request token pricing.
+		return pricing.providers["gemini"].lookup(model, at)
 	case agent.QuotaProviderAnthropic:
-		// API-equivalent prices: Claude Code subscriptions are not billed per
-		// token, and Claude Code's own reported total stays authoritative for
-		// the claudecode provider. Cache writes bill at 1.25x input (5m) and
-		// cache reads at the model's published cache-read rate; historical
-		// estimates use the one-hour write rate where one is published.
+		// API-equivalent prices: Claude Code and Antigravity subscriptions are
+		// not billed per token, and Claude Code's own reported total stays
+		// authoritative for the claudecode provider. Cache writes bill at 1.25x
+		// input (5m) and cache reads at the model's published cache-read rate;
+		// historical estimates use the one-hour write rate where one is
+		// published.
 		return pricing.providers["anthropic"].lookup(model, at)
 	case agent.QuotaProviderCodex:
 		// API-equivalent prices: OpenAI model rates apply regardless of harness

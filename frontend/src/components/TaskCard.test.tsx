@@ -129,7 +129,7 @@ describe("TaskCard", () => {
     expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
   });
 
-  for (const harness of ["claude", "codex", "pi", undefined]) {
+  for (const harness of ["claude", "codex", "antigravity", "pi", undefined]) {
     it(`shows cost beside timing without depending on model metadata (${harness})`, () => {
       renderCard(() => <TaskCard {...props({ harness, model: undefined, costUSD: 1.25, duration: 10 })} />);
 
@@ -138,7 +138,7 @@ describe("TaskCard", () => {
       expect(cost).toHaveTextContent("$1.25");
       expect(timing).toHaveTextContent(/1m\s*\/\s*1m 10s/);
       expect(timing?.parentElement).toContainElement(screen.getByTestId("state-badge"));
-      if (harness === "claude" || harness === "codex") {
+      if (harness === "claude" || harness === "codex" || harness === "antigravity") {
         const trigger = cost.firstElementChild;
         if (!trigger) throw new Error("Missing cost tooltip trigger");
         fireEvent.mouseEnter(trigger);

@@ -212,6 +212,9 @@ func TestWireFormat(t *testing.T) {
 						if m.ReportedModel != "" {
 							t.Fatalf("invented model: %q", m.ReportedModel)
 						}
+						if !m.PerCall {
+							t.Fatal("DONE-step usage must price as one API request")
+						}
 						calls = append(calls, m.Usage)
 					case *agent.ToolUseMessage:
 						uses[m.ToolUseID] = m.Name
