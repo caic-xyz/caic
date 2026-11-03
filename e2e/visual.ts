@@ -301,8 +301,12 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
 }
 
 export async function captureScreenshot(page: Page, layout: FrontendScreenshotLayout, filename: string): Promise<void> {
-  // Keep incidental hover controls from depending on the previous click or resize.
+  // Keep incidental hover controls and focus rings from depending on the
+  // previous click or resize.
   await page.mouse.move(0, 0);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   await waitForVisualReadiness(page);
   const outputDir = screenshotDir(layout);
   mkdirSync(outputDir, { recursive: true });

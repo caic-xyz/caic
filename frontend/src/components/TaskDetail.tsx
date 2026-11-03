@@ -1111,6 +1111,7 @@ export default function TaskDetail(props: Props) {
           </Show>
           <span
             class={styles.headerMeta}
+            data-testid="task-header-meta"
             ref={(element) => {
               headerMetaRef = element;
             }}
@@ -1231,7 +1232,7 @@ export default function TaskDetail(props: Props) {
               })()}
             </Show>
           </span>
-          <A class={styles.diffLink} href={`${taskPath()}/info`} aria-label="Task info" title="Task info">
+          <A class={styles.glyphLink} href={`${taskPath()}/info`} aria-label="Task info" title="Task info">
             <InfoIcon width="13" height="13" aria-hidden="true" />
           </A>
           <Show
@@ -1271,7 +1272,7 @@ export default function TaskDetail(props: Props) {
             }
           >
             <A
-              class={styles.diffLink}
+              class={styles.glyphLink}
               href={`${taskPath()}/processes`}
               aria-label="Task processes"
               title="Task processes"

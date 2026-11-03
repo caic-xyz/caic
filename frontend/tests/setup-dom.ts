@@ -110,12 +110,10 @@ const matchMediaStub = (query: string) => ({
 Object.defineProperty(dom.window, "matchMedia", { configurable: true, value: matchMediaStub });
 globalTarget["matchMedia"] = matchMediaStub;
 
-// Component code reads observer constructors from the global scope, where jsdom
-// exposes them only on its window.
+// Component code reads DOM constructors from the global scope, where jsdom
+// exposes them only on its window. ResizeObserver is absent entirely, so stub
+// the methods components call.
 globalTarget["MutationObserver"] = dom.window.MutationObserver;
-
-// jsdom does not implement ResizeObserver; stub it so components using it
-// (e.g. VoiceOverlay measuring its panel height) don't throw in tests.
 class ResizeObserverStub {
   observe() {}
   unobserve() {}

@@ -17,6 +17,27 @@ async function requiredBox(locator: Locator) {
   return box;
 }
 
+// Compare the ink position of a text run, not its box center: a font-size change
+// keeps centered boxes aligned while it moves their baselines.
+async function textBaseline(locator: Locator): Promise<number> {
+  return locator.evaluate((node) => {
+    const canvas = document.createElement("canvas").getContext("2d");
+    if (!canvas) throw new Error("2D canvas is unavailable");
+    const style = getComputedStyle(node);
+    canvas.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const ascent = canvas.measureText("x").fontBoundingBoxAscent;
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      if (!text.nodeValue?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rect = range.getClientRects()[0];
+      if (rect) return rect.top + ascent;
+    }
+    throw new Error("expected a text run");
+  });
+}
+
 async function stabilizeWidget(locator: Locator) {
   await locator.evaluate(async (body) => {
     const style = document.createElement("style");
@@ -81,9 +102,6 @@ test("generate settings screenshots", async ({ page, api }) => {
       Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2)),
     ).toBeLessThanOrEqual(1);
   }
-  await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  });
   await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
   await captureScreenshot(page, "desktop", "settings-mounts.png");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -254,6 +272,15 @@ test("generate documentation screenshots", async ({ page, api }) => {
       return Math.max(...centers) - Math.min(...centers);
     })
     .toBeLessThanOrEqual(1);
+
+  // Every header text item sits on one baseline. The metadata row's CI badge
+  // raises its line box, so allow the sub-pixel offset it costs.
+  const desktopBaselines = await Promise.all([
+    textBaseline(desktopHeader.getByTestId("task-header-meta")),
+    textBaseline(desktopHeader.getByTestId("repo-state-diff-stats").first()),
+    textBaseline(desktopHeader.getByTestId("task-stats-summary")),
+  ]);
+  expect(Math.max(...desktopBaselines) - Math.min(...desktopBaselines)).toBeLessThanOrEqual(1);
 
   // Screenshot 2: Repository changes with an expanded per-file patch.
   await page
@@ -479,6 +506,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
       }),
     )
     .toBe(true);
+  // The narrow pane wraps the header, so it hides the raw Git line totals.
+  await expect(page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats").first()).toBeHidden();
   await captureScreenshot(page, "desktop", "task-vnc.png");
 
   // Screenshot 7: Mobile — task detail at phone viewport.

@@ -304,6 +304,10 @@ a.featureIconBadge:focus-visible {
   display: flex;
   align-items: center;
   margin-left: auto;
+
+  /* The card's dense summary row keeps its own line metric instead of the card's
+     row spacing. */
+  line-height: 1;
 }
 
 .purgeBtn,

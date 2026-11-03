@@ -101,7 +101,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
       </svg>
       <span class={styles.visuallyHidden}>{resourceAnnouncement(latest())}</span>
       <Show when={tokens() > 0}>
-        <span class={styles.iconSummary}>
+        <span class={styles.iconSummary} data-testid="task-stats-summary">
           {formatTokens(tokens())}
           <Show when={props.usage.costUSD > 0}>
             <span class={styles.iconSummarySeparator}> · </span>

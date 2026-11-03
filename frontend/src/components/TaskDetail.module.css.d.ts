@@ -43,6 +43,7 @@ declare const classes: {
   readonly "elidedTurnExpanded": string;
   readonly "fileChangesInput": string;
   readonly "fixCIBtn": string;
+  readonly "glyphLink": string;
   readonly "header": string;
   readonly "headerBranch": string;
   readonly "headerLoading": string;

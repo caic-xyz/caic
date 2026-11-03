@@ -467,10 +467,8 @@ a.headerPR:hover {
   margin-top: 0.25rem;
 }
 
-/* Inline-flex shrinks the link to its glyph and centers that glyph on the row
-   axis. On the text baseline a 13px glyph sits above the row center and hangs
-   below the baseline. Text links keep the row baseline because their flex line
-   box uses the inherited metrics. */
+/* Text link such as the VNC entry. It keeps the row baseline because its flex
+   line box uses the inherited metrics. */
 .diffLink {
   display: inline-flex;
   flex-shrink: 0;
@@ -482,6 +480,30 @@ a.headerPR:hover {
 
 .diffLink:hover {
   text-decoration: underline;
+}
+
+/* Glyph-only header link. Inline-flex centers the glyph on the row axis instead
+   of leaving it on the text baseline, and the square box gives it the same hit
+   target and hover treatment as the statistics link. */
+.glyphLink {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-link);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.glyphLink:hover {
+  background: var(--color-bg-hover);
+}
+
+.glyphLink:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
 }
 
 .repoStateLinks {
