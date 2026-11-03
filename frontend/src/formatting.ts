@@ -15,10 +15,12 @@ export function formatBalance(currency: string, total: number): string {
 }
 
 export function formatCost(usd: number): string {
+  if (usd === 0) return "$0.00";
   return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
 }
 
 export function formatTokens(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}Gt`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
   return `${n}t`;

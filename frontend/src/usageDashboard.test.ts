@@ -262,18 +262,13 @@ describe("summarizeUsageDays drill-down", () => {
     expect(summary.harnesses.map((entry) => entry.name)).toEqual(["claude"]);
   });
 
-  it("drops days without the selected subject", () => {
+  it("drops days without the selected subject from the summary", () => {
     const summary = summarizeUsageDays([day("2026-01-23", { models: [], harnesses: [] }), drillDay("2026-01-24")], {
       model: "model-a",
     });
 
     expect(summary.turns).toBe(2);
     expect(summary.models.map((entry) => entry.name)).toEqual(["model-a"]);
-    expect(
-      usageDailySeries([day("2026-01-23", { models: [], harnesses: [] }), drillDay("2026-01-24")], {
-        model: "model-a",
-      }),
-    ).toEqual([{ day: "2026-01-24", tokens: 100, costUSD: 0.2, inProgress: false }]);
   });
 
   it("sums an unknown subject to empty counters", () => {
@@ -287,14 +282,53 @@ describe("summarizeUsageDays drill-down", () => {
   it("resolves daily chart points through the drill-down", () => {
     const days = [drillDay("2026-01-24"), drillDay("2026-01-25")];
 
-    expect(usageDailySeries(days)).toEqual([
+    expect(usageDailySeries(days, "all", null)).toEqual([
       { day: "2026-01-24", tokens: 100, costUSD: 0.9, inProgress: false },
       { day: "2026-01-25", tokens: 100, costUSD: 0.9, inProgress: false },
     ]);
-    expect(usageDailySeries(days, { harness: "claude" })).toEqual([
+    expect(usageDailySeries(days, "all", { harness: "claude" })).toEqual([
       { day: "2026-01-24", tokens: 100, costUSD: 0.2, inProgress: false },
       { day: "2026-01-25", tokens: 100, costUSD: 0.2, inProgress: false },
     ]);
+  });
+
+  it("zeroes a recorded day without the selected subject", () => {
+    const days = [drillDay("2026-01-24"), day("2026-01-25", { models: [], harnesses: [] }), drillDay("2026-01-26")];
+
+    expect(usageDailySeries(days, "all", { model: "model-a" }).map((point) => [point.day, point.tokens])).toEqual([
+      ["2026-01-24", 100],
+      ["2026-01-25", 0],
+      ["2026-01-26", 100],
+    ]);
+  });
+
+  it("keeps one chart point per day of the range, zeroing the missing ones", () => {
+    const days = [day("2026-01-01"), day("2026-01-04"), day("2026-01-10")];
+
+    expect(usageDailySeries(days, "all", null).map((point) => [point.day, point.tokens])).toEqual([
+      ["2026-01-01", 35],
+      ["2026-01-02", 0],
+      ["2026-01-03", 0],
+      ["2026-01-04", 35],
+      ["2026-01-05", 0],
+      ["2026-01-06", 0],
+      ["2026-01-07", 0],
+      ["2026-01-08", 0],
+      ["2026-01-09", 0],
+      ["2026-01-10", 35],
+    ]);
+    // The range window counts back from the latest recorded day and never
+    // reaches before the first one.
+    expect(usageDailySeries(days, "7", null).map((point) => point.day)).toEqual([
+      "2026-01-04",
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+      "2026-01-08",
+      "2026-01-09",
+      "2026-01-10",
+    ]);
+    expect(usageDailySeries(days.slice(2), "7", null).map((point) => point.day)).toEqual(["2026-01-10"]);
   });
 });
 

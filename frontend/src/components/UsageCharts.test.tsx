@@ -47,7 +47,9 @@ function utcDay(offsetDays: number): string {
 describe("UsageCharts", () => {
   it("totals every token category for each day", async () => {
     const user = userEvent.setup();
-    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5)])} />);
+    const { findByTestId } = render(() => (
+      <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5)], "all", null)} />
+    ));
     const charts = await findByTestId("usage-charts");
 
     await user.click(within(charts).getByText("Daily totals (1)"));
@@ -60,7 +62,7 @@ describe("UsageCharts", () => {
 
   it("marks the accumulating day as provisional in the trend and the totals", async () => {
     const { findByTestId } = render(() => (
-      <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)])} />
+      <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null)} />
     ));
     const charts = await findByTestId("usage-charts");
 
@@ -74,9 +76,37 @@ describe("UsageCharts", () => {
     expect(within(charts).getByRole("table")).toHaveTextContent(`${utcDay(0)} (in progress)`);
   });
 
+  it("scales the token axis to the next unit past a billion tokens", async () => {
+    const { findByTestId } = render(() => (
+      <UsageCharts points={usageDailySeries([day(utcDay(-1), 1_500_000_000, 0.5)], "all", null)} />
+    ));
+    const charts = await findByTestId("usage-charts");
+
+    expect(charts.textContent).toContain("Gt");
+    expect(charts.textContent).not.toContain("1500.0Mt");
+  });
+
+  it("keeps a zero point and a zero total for a day without usage", async () => {
+    const { findByTestId } = render(() => (
+      <UsageCharts points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null)} />
+    ));
+    const charts = await findByTestId("usage-charts");
+
+    const titles = Array.from(charts.querySelectorAll("title"), (title) => title.textContent ?? "");
+    expect(titles.some((title) => title.startsWith(`${utcDay(-1)}: 0t`))).toBe(true);
+
+    await userEvent.setup().click(within(charts).getByText("Daily totals (3)"));
+    const empty = within(within(charts).getByRole("table")).getByText(utcDay(-1)).closest("tr");
+    if (!empty) throw new Error("the day without usage is missing from the totals");
+    expect(empty).toHaveTextContent("0t");
+    expect(empty).toHaveTextContent("$0.00");
+  });
+
   it("says nothing about an unfinished day when every day is complete", async () => {
     const { findByTestId } = render(() => (
-      <UsageCharts points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)])} />
+      <UsageCharts
+        points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)], "all", null)}
+      />
     ));
     const charts = await findByTestId("usage-charts");
 

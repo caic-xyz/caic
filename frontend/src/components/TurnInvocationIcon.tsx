@@ -10,6 +10,7 @@ import ModalDialog from "./ModalDialog";
 import styles from "./TurnInvocationIcon.module.css";
 
 function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1)}Gt`;
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}Mt`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}kt`;
   return `${tokens}t`;

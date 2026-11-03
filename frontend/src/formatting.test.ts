@@ -3,7 +3,34 @@
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
-import { formatBytes, formatElapsed, staleStateColor, stateColor, toolCallDetail } from "./formatting";
+import {
+  formatBytes,
+  formatCost,
+  formatElapsed,
+  formatTokens,
+  staleStateColor,
+  stateColor,
+  toolCallDetail,
+} from "./formatting";
+
+describe("formatTokens", () => {
+  it("scales to the largest unit that keeps a token count readable", () => {
+    expect(formatTokens(1_000_000_000)).toBe("1.0Gt");
+    expect(formatTokens(1_500_000_000)).toBe("1.5Gt");
+    expect(formatTokens(999_900_000)).toBe("999.9Mt");
+    expect(formatTokens(15_000_000)).toBe("15.0Mt");
+    expect(formatTokens(15_000)).toBe("15kt");
+    expect(formatTokens(999)).toBe("999t");
+  });
+});
+
+describe("formatCost", () => {
+  it("separates an exact zero from a cost below one cent", () => {
+    expect(formatCost(0)).toBe("$0.00");
+    expect(formatCost(0.004)).toBe("<$0.01");
+    expect(formatCost(1.234)).toBe("$1.23");
+  });
+});
 
 describe("formatBytes", () => {
   it("formats resident memory using binary units", () => {

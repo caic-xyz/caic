@@ -154,16 +154,35 @@ function addLeaderboard(
   entries.set(name, entry);
 }
 
-// usageDaysForRange returns the most recent calendar-day window, based on the
-// latest rollup day rather than the viewer's local clock.
-export function usageDaysForRange(days: readonly UsageDashboardDay[], range: UsageRange): UsageDashboardDay[] {
-  if (range === "all" || days.length === 0) return [...days];
+// usageWindowStart returns the first UTC day of the selected range. The window
+// counts back from the latest rollup day rather than the viewer's local clock,
+// and never reaches before the first recorded day.
+function usageWindowStart(days: readonly UsageDashboardDay[], range: UsageRange): string | null {
+  const first = days[0]?.day;
   const latest = days.at(-1)?.day;
-  if (!latest) return [];
+  if (!first || !latest) return null;
+  if (range === "all") return first;
   const end = new Date(`${latest}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() - Number(range) + 1);
   const start = end.toISOString().slice(0, 10);
-  return days.filter((day) => day.day >= start);
+  return start > first ? start : first;
+}
+
+// utcDays lists every UTC day key from start through end inclusive.
+function utcDays(start: string, end: string): string[] {
+  const span = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+  const first = new Date(`${start}T00:00:00Z`);
+  return Array.from({ length: Math.max(span, 0) }, (_, offset) => {
+    const date = new Date(first);
+    date.setUTCDate(date.getUTCDate() + offset);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+// usageDaysForRange returns the recorded rollup days inside the selected range.
+export function usageDaysForRange(days: readonly UsageDashboardDay[], range: UsageRange): UsageDashboardDay[] {
+  const start = usageWindowStart(days, range);
+  return start === null ? [] : days.filter((day) => day.day >= start);
 }
 
 // usageRangeFrom accepts known ranges and defaults stale URL values to 30 days.
@@ -277,25 +296,30 @@ export function summarizeUsageDays(
   };
 }
 
-// usageDailySeries resolves each day through the drill-down into chart points;
-// days without usage for the selected subject contribute nothing.
+// usageDailySeries resolves one chart point per UTC day of the selected range,
+// through any active drill-down. A day without a rollup row, or without usage
+// for the drilled subject, contributes a zero point so the trend keeps its
+// daily spacing instead of joining two distant days.
 export function usageDailySeries(
   days: readonly UsageDashboardDay[],
-  drilldown: UsageDrilldown | null = null,
+  range: UsageRange,
+  drilldown: UsageDrilldown | null,
 ): UsageDailyPoint[] {
+  const start = usageWindowStart(days, range);
+  const latest = days.at(-1)?.day;
+  if (start === null || !latest) return [];
+  const byDay = new Map(days.map((day) => [day.day, day]));
   const today = new Date().toISOString().slice(0, 10);
-  const points: UsageDailyPoint[] = [];
-  for (const day of days) {
-    const view = dayView(day, drilldown);
-    if (!view) continue;
-    points.push({
-      day: day.day,
-      inProgress: day.day === today,
-      tokens: tokenTotal(view.tokens),
-      costUSD: view.costUSD,
-    });
-  }
-  return points;
+  return utcDays(start, latest).map((key) => {
+    const day = byDay.get(key);
+    const view = day ? dayView(day, drilldown) : null;
+    return {
+      day: key,
+      inProgress: key === today,
+      tokens: view ? tokenTotal(view.tokens) : 0,
+      costUSD: view ? view.costUSD : 0,
+    };
+  });
 }
 
 // usageCacheHitRate returns cache reads as a share of all input context.

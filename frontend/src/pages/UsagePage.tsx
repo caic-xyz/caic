@@ -68,7 +68,7 @@ export default function UsagePage() {
 
   const days = createMemo(() => usageDaysForRange(dashboard()?.days ?? [], range()));
   const summary = createMemo(() => summarizeUsageDays(days(), drilldown()));
-  const points = createMemo(() => usageDailySeries(days(), drilldown()));
+  const points = createMemo(() => usageDailySeries(dashboard()?.days ?? [], range(), drilldown()));
   const cacheHitRate = () => usageCacheHitRate(summary().tokens);
   const dataSince = () => formatDay(dashboard()?.dataSince);
 
