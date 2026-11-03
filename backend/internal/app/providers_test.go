@@ -88,7 +88,7 @@ func TestEstimateUsageRowCost(t *testing.T) {
 		{"Antigravity Gemini", "antigravity", "gemini-3.8-flash-high", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 4.5, true},
 		{"Antigravity Claude", "antigravity", "claude-opus-5-5-low", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
 		{"Antigravity open weight", "antigravity", "gpt-oss-120b-medium", data.TokenBuckets{Input: 1_000_000}, 0, false},
-		{"unknown harness", "new", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000}, 0, false},
+		{"unregistered harness", "new", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000}, 2, true},
 		{"unknown model", "codex", "unpriced", data.TokenBuckets{Input: 1_000_000}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

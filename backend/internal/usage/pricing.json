@@ -349,6 +349,26 @@
       ]
     },
     {
+      "provider": "cerebras",
+      "source": "https://inference-docs.cerebras.ai/api-reference/models/public-models",
+      "retrieved": "2026-11-03",
+      "models": [
+        {
+          "id": "gpt-oss-120b",
+          "source": "https://inference-docs.cerebras.ai/api-reference/models/public-models",
+          "retrieved": "2026-11-03",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.35,
+                "output_per_mtok": 0.75
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "provider": "deepseek",
       "source": "https://api-docs.deepseek.com/quick_start/pricing",
       "retrieved": "2026-09-21",
@@ -501,6 +521,27 @@
                 "input_per_mtok": 1.5,
                 "cached_input_per_mtok": 0.15,
                 "output_per_mtok": 7.5
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "provider": "groq",
+      "source": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+      "retrieved": "2026-11-03",
+      "models": [
+        {
+          "id": "gpt-oss-120b",
+          "source": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+          "retrieved": "2026-11-03",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.15,
+                "cached_input_per_mtok": 0.075,
+                "output_per_mtok": 0.6
               }
             }
           ]
@@ -762,6 +803,31 @@
         {
           "id": "gpt-daybreak-red-latest",
           "alias": "gpt-5.6-cyber"
+        }
+      ]
+    },
+    {
+      "provider": "runinfra",
+      "source": "https://runinfra.ai/inference-api/qwen3-8-27b",
+      "retrieved": "2026-11-03",
+      "models": [
+        {
+          "id": "qwen3.8-27b",
+          "source": "https://runinfra.ai/inference-api/qwen3-8-27b",
+          "retrieved": "2026-11-03",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.1,
+                "cached_input_per_mtok": 0.01,
+                "output_per_mtok": 0.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "qwen/qwen3.8-27b",
+          "alias": "qwen3.8-27b"
         }
       ]
     },

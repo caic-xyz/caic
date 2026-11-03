@@ -199,10 +199,7 @@ func (c *CostTracker) modelPrice(model string, at time.Time, pricer usage.ModelP
 	if at.IsZero() {
 		at = time.Now()
 	}
-	// Harnesses that report bare model IDs need their billing provider
-	// resolved from the harness. Prefixed IDs name it themselves.
-	provider := agent.BillingProviderForModel(c.Harness, model)
-	return pricer.ModelPrice(provider, model, at)
+	return pricer.ModelPrice(model, at)
 }
 
 func (c *CostTracker) addEstimatedCost(usd float64) {

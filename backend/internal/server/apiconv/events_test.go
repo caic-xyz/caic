@@ -21,7 +21,7 @@ import (
 
 type conversionPricer struct{}
 
-func (conversionPricer) ModelPrice(_ agent.QuotaProvider, model string, _ time.Time) (usage.ModelPrice, bool) {
+func (conversionPricer) ModelPrice(model string, _ time.Time) (usage.ModelPrice, bool) {
 	if model != "gpt-6-sol" {
 		return usage.ModelPrice{}, false
 	}

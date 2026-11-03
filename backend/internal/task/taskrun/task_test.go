@@ -4906,7 +4906,7 @@ func BenchmarkTaskCacheWriteReplay(b *testing.B) {
 // fakePricer prices a fixed set of models; unlisted models are unpriced.
 type fakePricer map[string]quotausage.ModelPrice
 
-func (p fakePricer) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
+func (p fakePricer) ModelPrice(modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
 	price, ok := p[modelID]
 	return price, ok
 }

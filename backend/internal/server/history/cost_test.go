@@ -25,7 +25,7 @@ import (
 
 type journalPricer struct{}
 
-func (journalPricer) ModelPrice(agent.QuotaProvider, string, time.Time) (usage.ModelPrice, bool) {
+func (journalPricer) ModelPrice(string, time.Time) (usage.ModelPrice, bool) {
 	return usage.ModelPrice{InputPerMTok: 2, OutputPerMTok: 10, LongContext: usage.LongContextPrice{InputTokensAbove: 272_000, InputMultiplier: 2, OutputMultiplier: 1.5}}, true
 }
 
@@ -267,7 +267,7 @@ func costFixture(t testing.TB, h harness.Name, groups ...[]agent.Message) (*Sour
 
 type contextPricer struct{ rate float64 }
 
-func (p contextPricer) ModelPrice(agent.QuotaProvider, string, time.Time) (usage.ModelPrice, bool) {
+func (p contextPricer) ModelPrice(string, time.Time) (usage.ModelPrice, bool) {
 	return usage.ModelPrice{InputPerMTok: p.rate}, true
 }
 
@@ -348,7 +348,7 @@ func TestTurnEstimateModel(t *testing.T) {
 
 type cacheJournalPricer struct{ scale float64 }
 
-func (p cacheJournalPricer) ModelPrice(agent.QuotaProvider, string, time.Time) (usage.ModelPrice, bool) {
+func (p cacheJournalPricer) ModelPrice(string, time.Time) (usage.ModelPrice, bool) {
 	return usage.ModelPrice{CacheWritePerMTok: 3 * p.scale, CacheWritePrices: []usage.CacheWritePrice{{TTLSeconds: 300, PerMTok: 5 * p.scale}, {TTLSeconds: 3600, PerMTok: 9 * p.scale}}}, true
 }
 

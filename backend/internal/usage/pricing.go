@@ -34,28 +34,6 @@ type ModelPrice struct {
 	LongContext        LongContextPrice  `json:"long_context,omitzero"`
 }
 
-// staticModelPrice prices model under a harness model-provider prefix, or ""
-// when the prefix is not a known pricing provider.
-func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
-	if provider == "openai" {
-		return pricing.providers["openai"].lookup(model, at)
-	}
-	switch agent.QuotaProviderForModel(provider + "/x") {
-	case agent.QuotaProviderAnthropic:
-		return pricing.providers["anthropic"].lookup(model, at)
-	case agent.QuotaProviderCodex:
-		return pricing.providers["openai"].lookup(model, at)
-	case agent.QuotaProviderZai:
-		return pricing.providers["zai"].lookup(model, at)
-	case agent.QuotaProviderDeepSeek:
-		return pricing.providers["deepseek"].lookup(model, at)
-	case agent.QuotaProviderGemini:
-		return pricing.providers["gemini"].lookup(model, at)
-	default:
-		return ModelPrice{}, false
-	}
-}
-
 // RequestCost prices one API request, including all cached input when selecting
 // its context tier. Cost and CostBuckets retain base rates for aggregates whose
 // individual request sizes are unknown. Reasoning tokens are included in output.
@@ -153,8 +131,7 @@ type LongContextPrice struct {
 	OutputMultiplier float64 `json:"output_multiplier"`
 }
 
-// modelPriceTable maps the model IDs of one provider to their price
-// schedules.
+// modelPriceTable maps model IDs to their price schedules.
 type modelPriceTable map[string]ModelPricing
 
 // lookup resolves model in the table, matching the exact model ID or the
@@ -174,6 +151,21 @@ func (t modelPriceTable) lookup(model string, at time.Time) (ModelPrice, bool) {
 		return ModelPrice{}, false
 	}
 	return t[best].Price(at)
+}
+
+// priceSuffix resolves model or its suffix after additional routing segments,
+// so a provider prefix survives forms such as "groq/openai/gpt-oss-120b".
+func (t modelPriceTable) priceSuffix(model string, at time.Time) (ModelPrice, bool) {
+	for {
+		if price, ok := t.lookup(model, at); ok {
+			return price, true
+		}
+		_, rest, ok := strings.Cut(model, "/")
+		if !ok {
+			return ModelPrice{}, false
+		}
+		model = rest
+	}
 }
 
 // PeakWindow is a daily UTC time range in which a peak price tier applies.
@@ -335,24 +327,24 @@ func (m ModelPricing) Price(at time.Time) (ModelPrice, bool) {
 // strings such as "zai/glm-5.3-flash" or "openrouter/z-ai/glm-5.3-flash".
 type ModelPricer interface {
 	// ModelPrice returns the per-million-token USD price for modelID that is
-	// in effect at at, and whether the model is priced at all. provider hints
-	// at the billing provider for harnesses that report unprefixed model IDs;
-	// "" derives it from the model ID prefix. Subscription-backed providers
-	// price at their API-equivalent rates.
-	ModelPrice(provider agent.QuotaProvider, modelID string, at time.Time) (ModelPrice, bool)
+	// in effect at at, and whether the model is priced at all. Routing and
+	// vendor prefixes are ignored when the model has a published schedule.
+	// Subscription-backed providers price at their API-equivalent rates.
+	ModelPrice(modelID string, at time.Time) (ModelPrice, bool)
 }
 
-// Pricer resolves per-model token pricing from the quota providers:
-// fetcher-supplied live pricing (OpenRouter) and static published schedules.
-// The same model rates apply across harnesses; subscription sessions use
-// API-equivalent estimates rather than subscription quota accounting.
+// Pricer resolves per-model token pricing from fetcher-supplied live prices
+// (OpenRouter) and the embedded published schedules. The same model rates apply
+// across harnesses; subscription sessions use API-equivalent estimates rather
+// than subscription quota accounting. Schedules hold per-token rates only;
+// storage and other non-token fees stay outside them.
 type Pricer struct {
 	fetchers map[agent.QuotaProvider]ModelPricer
 }
 
-// NewPricer creates a quota-provider model pricer from the registered
-// provider fetchers. Fetchers may implement ModelPricer to supply live
-// per-model pricing; the rest of the resolution uses static schedules.
+// NewPricer creates a model pricer from the registered provider fetchers.
+// Fetchers may implement ModelPricer to supply live per-model pricing; the
+// rest of the resolution uses the embedded schedules.
 func NewPricer(fetchers []ProviderFetcher) *Pricer {
 	p := &Pricer{fetchers: make(map[agent.QuotaProvider]ModelPricer, len(fetchers))}
 	for _, f := range fetchers {
@@ -364,73 +356,22 @@ func NewPricer(fetchers []ProviderFetcher) *Pricer {
 }
 
 // ModelPrice implements ModelPricer.
-func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at time.Time) (ModelPrice, bool) {
+func (p *Pricer) ModelPrice(modelID string, at time.Time) (ModelPrice, bool) {
 	lower := strings.ToLower(modelID)
-	prefix, rest, hasPrefix := strings.Cut(lower, "/")
-	if provider == "" {
-		provider = agent.QuotaProviderForModel(modelID)
-	}
-	model := lower
-	if hasPrefix {
-		model = rest
-	}
 	// Fetcher-supplied pricing wins: it reflects what the provider actually
 	// bills. The model ID is trimmed to the provider-native form first.
-	if f, ok := p.fetchers[provider]; ok && hasPrefix {
-		if price, ok := f.ModelPrice(provider, rest, at); ok {
-			return price, true
+	if provider := agent.QuotaProviderForModel(lower); provider != "" {
+		if f, ok := p.fetchers[provider]; ok {
+			if _, rest, ok := strings.Cut(lower, "/"); ok {
+				if price, ok := f.ModelPrice(rest, at); ok {
+					return price, true
+				}
+			}
 		}
 	}
-	switch provider {
-	case agent.QuotaProviderZai:
-		// Z.ai bills cache creation at the input price and cache reads at the
-		// cached-input price; its "cached input storage" fee is currently free.
-		return pricing.providers["zai"].lookup(model, at)
-	case agent.QuotaProviderDeepSeek:
-		// DeepSeek bills cache reads at the cache-hit price and uncached input
-		// (including cache writes) at the cache-miss price.
-		return pricing.providers["deepseek"].lookup(model, at)
-	case agent.QuotaProviderOpenRouter:
-		// Live OpenRouter pricing is unavailable (no fetcher configured, or
-		// the fetch failed): fall back to the upstream provider's published
-		// prices, which approximate what OpenRouter passes through.
-		if !hasPrefix {
-			return ModelPrice{}, false
-		}
-		upstream, model, ok := strings.Cut(rest, "/")
-		if !ok {
-			return ModelPrice{}, false
-		}
-		return staticModelPrice(upstream, model, at)
-	case agent.QuotaProviderGemini:
-		// Gemini bills implicit cache reads at the cached-input price; the
-		// hourly cache-storage fee is outside per-request token pricing.
-		return pricing.providers["gemini"].lookup(model, at)
-	case agent.QuotaProviderAnthropic:
-		// API-equivalent prices: Claude Code and Antigravity subscriptions are
-		// not billed per token, and Claude Code's own reported total stays
-		// authoritative for the claudecode provider. Cache writes bill at 1.25x
-		// input (5m) and cache reads at the model's published cache-read rate;
-		// historical estimates use the one-hour write rate where one is
-		// published.
-		return pricing.providers["anthropic"].lookup(model, at)
-	case agent.QuotaProviderCodex:
-		// API-equivalent prices: OpenAI model rates apply regardless of harness
-		// or credential mode, so a Codex task reports what its requests would
-		// have cost on the API, including the API's long-context and cache-write
-		// charges. Subscription usage itself bills differently: it has no
-		// separate cache-write charge, keeps prompts cached for 12 hours, and
-		// has no long-context surcharge: https://learn.chatgpt.com/docs/pricing
-		// RequestCost applies the long-context rates when a request size is known.
-		return pricing.providers["openai"].lookup(model, at)
-	default:
-		// Direct OpenAI API models ("openai/...") are not a quota provider
-		// but bill at OpenAI's published rates.
-		if provider == "" {
-			return staticModelPrice(prefix, model, at)
-		}
-		return ModelPrice{}, false
-	}
+	// Static schedules match the model ID or its suffix after any routing and
+	// vendor prefixes.
+	return pricing.price(lower, at)
 }
 
 // pricingJSON embeds the provider price schedules, keeping the numbers,
@@ -446,11 +387,89 @@ var pricingJSON []byte
 var pricing = mustLoadPricing()
 
 // pricingTables is the decoded pricing.json content: one model schedule map
-// per provider name, plus every provider's peak windows in order for
-// pricing-phase reporting.
+// per provider name, every provider's peak windows in order for pricing-phase
+// reporting, and one index of the model IDs that only one provider prices.
 type pricingTables struct {
 	providers   map[string]modelPriceTable
 	peakWindows map[string][]PeakWindow
+	models      modelPriceTable
+}
+
+// mustLoadPricing decodes the embedded schedules, panicking on failure: the
+// data ships in the binary and unit tests validate it, so a decode failure is
+// a build defect rather than a recoverable runtime condition.
+func mustLoadPricing() pricingTables {
+	tables, err := parsePricingJSON(pricingJSON)
+	if err != nil {
+		panic(fmt.Sprintf("pricing.json: %v", err))
+	}
+	return tables
+}
+
+// parsePricingJSON decodes and validates a pricing.json document.
+func parsePricingJSON(data []byte) (pricingTables, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var file pricingFile
+	if err := dec.Decode(&file); err != nil {
+		return pricingTables{}, err
+	}
+	if err := file.Validate(); err != nil {
+		return pricingTables{}, err
+	}
+	tables := pricingTables{
+		providers:   make(map[string]modelPriceTable, len(file.Providers)),
+		peakWindows: make(map[string][]PeakWindow, len(file.Providers)),
+		models:      make(modelPriceTable),
+	}
+	shared := make(map[string]struct{})
+	for i := range file.Providers {
+		p := &file.Providers[i]
+		built, err := p.build()
+		if err != nil {
+			return pricingTables{}, fmt.Errorf("provider %q: %w", p.Provider, err)
+		}
+		tables.providers[p.Provider] = built.models
+		for id, tiers := range built.models {
+			if _, ok := tables.models[id]; ok {
+				shared[id] = struct{}{}
+				continue
+			}
+			tables.models[id] = tiers
+		}
+		for _, name := range slices.Sorted(maps.Keys(built.windows)) {
+			tables.peakWindows[p.Provider] = append(tables.peakWindows[p.Provider], built.windows[name]...)
+		}
+	}
+	// A shared ID needs a provider prefix to disambiguate.
+	for id := range shared {
+		delete(tables.models, id)
+	}
+	return tables, nil
+}
+
+// price resolves a lowercased model ID against the static schedules. A prefix
+// that names a provider selects that provider's table, so two providers can
+// price the same model ID differently. A shared ID without a provider prefix
+// stays unpriced.
+func (t pricingTables) price(model string, at time.Time) (ModelPrice, bool) {
+	for {
+		if head, rest, ok := strings.Cut(model, "/"); ok {
+			if table, ok := t.providers[head]; ok {
+				if price, ok := table.priceSuffix(rest, at); ok {
+					return price, true
+				}
+			}
+		}
+		if price, ok := t.models.lookup(model, at); ok {
+			return price, true
+		}
+		_, rest, ok := strings.Cut(model, "/")
+		if !ok {
+			return ModelPrice{}, false
+		}
+		model = rest
+	}
 }
 
 // pricingFile mirrors the pricing.json document.
@@ -459,7 +478,8 @@ type pricingFile struct {
 }
 
 // Validate reports whether the document holds at least one provider, each
-// named once and valid.
+// named once and valid. Providers may price the same model ID, which a
+// provider prefix resolves.
 func (f *pricingFile) Validate() error {
 	if len(f.Providers) == 0 {
 		return errors.New("no providers")
@@ -723,46 +743,6 @@ func (w pricingWindow) toPeakWindow(holidays []string) (PeakWindow, error) {
 		return PeakWindow{}, err
 	}
 	return PeakWindow{Days: days, Holidays: holidays, Start: w.Start, End: w.End}, nil
-}
-
-// mustLoadPricing decodes the embedded schedules, panicking on failure: the
-// data ships in the binary and unit tests validate it, so a decode failure is
-// a build defect rather than a recoverable runtime condition.
-func mustLoadPricing() pricingTables {
-	tables, err := parsePricingJSON(pricingJSON)
-	if err != nil {
-		panic(fmt.Sprintf("pricing.json: %v", err))
-	}
-	return tables
-}
-
-// parsePricingJSON decodes and validates a pricing.json document.
-func parsePricingJSON(data []byte) (pricingTables, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var file pricingFile
-	if err := dec.Decode(&file); err != nil {
-		return pricingTables{}, err
-	}
-	if err := file.Validate(); err != nil {
-		return pricingTables{}, err
-	}
-	tables := pricingTables{
-		providers:   make(map[string]modelPriceTable, len(file.Providers)),
-		peakWindows: make(map[string][]PeakWindow, len(file.Providers)),
-	}
-	for i := range file.Providers {
-		p := &file.Providers[i]
-		built, err := p.build()
-		if err != nil {
-			return pricingTables{}, fmt.Errorf("provider %q: %w", p.Provider, err)
-		}
-		tables.providers[p.Provider] = built.models
-		for _, name := range slices.Sorted(maps.Keys(built.windows)) {
-			tables.peakWindows[p.Provider] = append(tables.peakWindows[p.Provider], built.windows[name]...)
-		}
-	}
-	return tables, nil
 }
 
 // providerPricing is one provider's validated model schedules and window

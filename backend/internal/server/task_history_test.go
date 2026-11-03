@@ -99,7 +99,7 @@ type historyPricerSpy struct {
 	calls atomic.Int64
 }
 
-func (p *historyPricerSpy) ModelPrice(agent.QuotaProvider, string, time.Time) (usage.ModelPrice, bool) {
+func (p *historyPricerSpy) ModelPrice(string, time.Time) (usage.ModelPrice, bool) {
 	p.calls.Add(1)
 	return usage.ModelPrice{InputPerMTok: float64(p.rate.Load())}, true
 }

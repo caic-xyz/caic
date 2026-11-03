@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
@@ -35,14 +33,7 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 // historical row. Reported costs never need it: this fills rows written before
 // live pricing covered their harness.
 func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.Time) (float64, bool) {
-	h := harness.Name(row.Harness)
-	provider := agent.BillingProviderForModel(h, row.Model)
-	if h == harness.Claude {
-		// Claude Code reports its own totals live, so a row without a reported
-		// cost falls back to Anthropic's published rates.
-		provider = agent.QuotaProviderAnthropic
-	}
-	price, ok := pricer.ModelPrice(provider, row.Model, at)
+	price, ok := pricer.ModelPrice(row.Model, at)
 	if !ok {
 		return 0, false
 	}

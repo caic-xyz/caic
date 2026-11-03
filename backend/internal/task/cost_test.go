@@ -378,6 +378,17 @@ func TestCostTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("ClaudePerCallUsageEstimatesAtAnthropicRates", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Claude, Model: "claude-sonnet-5-5"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{ReportedModel: c.Model, Usage: agent.Usage{InputTokens: 1_000_000}}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 99}, at, pricer)
+		if !ok || cost.Source != CostEstimated || math.Abs(cost.USD-2) > 1e-9 {
+			t.Fatalf("cost = %+v/%v, want 2 estimated", cost, ok)
+		}
+	})
+
 	t.Run("OpenCodeCumulativeSnapshotBecomesTurnDelta", func(t *testing.T) {
 		t.Parallel()
 		c := CostTracker{Harness: harness.OpenCode, Model: "gpt-6-sol"}
@@ -429,7 +440,7 @@ func TestCostTracker(t *testing.T) {
 // fakePricer prices a fixed set of models; unlisted models are unpriced.
 type fakePricer map[string]usage.ModelPrice
 
-func (p fakePricer) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (usage.ModelPrice, bool) {
+func (p fakePricer) ModelPrice(modelID string, _ time.Time) (usage.ModelPrice, bool) {
 	price, ok := p[modelID]
 	return price, ok
 }

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
@@ -890,36 +889,6 @@ type QuotaProvider string
 func QuotaProviderForModel(model string) QuotaProvider {
 	provider, _, _ := strings.Cut(strings.ToLower(model), "/")
 	return quotaProviderModelAliases[provider]
-}
-
-// BillingProviderForModel maps a model ID reported by harness h to the quota
-// provider whose published prices bill it. A prefixed model ID returns "" so
-// the pricer resolves the provider from its own prefix; a harness that reports
-// bare IDs resolves them here. Returns "" when the prices come from another
-// source or are unknown.
-func BillingProviderForModel(h harness.Name, model string) QuotaProvider {
-	if strings.Contains(model, "/") {
-		return "" // The model ID names its billing provider.
-	}
-	switch h {
-	case harness.Codex:
-		return QuotaProviderCodex
-	case harness.Antigravity:
-		// agy reports bare IDs from a multi-vendor catalog. GPT-OSS is an
-		// open-weight model with no published per-token rate.
-		switch {
-		case strings.HasPrefix(model, "gemini-"):
-			return QuotaProviderGemini
-		case strings.HasPrefix(model, "claude-"):
-			return QuotaProviderAnthropic
-		default:
-			return ""
-		}
-	default:
-		// Pi and OpenCode qualify the model ID; Claude Code reports its own
-		// authoritative cost.
-		return ""
-	}
 }
 
 // Valid reports whether p is a supported quota provider.

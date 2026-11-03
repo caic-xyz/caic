@@ -169,7 +169,7 @@ func TestPricer(t *testing.T) {
 		} {
 			t.Run(tc.model, func(t *testing.T) {
 				t.Parallel()
-				p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, tc.model, time.Now())
+				p, ok := NewPricer(nil).ModelPrice(tc.model, time.Now())
 				if !ok {
 					t.Fatalf("missing price for %s", tc.model)
 				}
@@ -200,7 +200,7 @@ func TestPricer(t *testing.T) {
 			{"gpt-daybreak-blue-latest", 2.43},
 			{"gpt-daybreak-red-latest", 3.825},
 		} {
-			p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, tc.model, time.Now())
+			p, ok := NewPricer(nil).ModelPrice(tc.model, time.Now())
 			if !ok {
 				t.Fatalf("missing price for %s", tc.model)
 			}
@@ -241,7 +241,7 @@ func TestPricer(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				got, ok := p.ModelPrice(agent.QuotaProviderGemini, tc.model, tc.at)
+				got, ok := p.ModelPrice(tc.model, tc.at)
 				if !ok {
 					t.Fatalf("ModelPrice(%q) not priced", tc.model)
 				}
@@ -251,11 +251,11 @@ func TestPricer(t *testing.T) {
 			})
 		}
 		// A prefixed model ID resolves the provider without a harness hint.
-		if got, ok := p.ModelPrice("", "gemini/gemini-4-argon", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 2 {
+		if got, ok := p.ModelPrice("gemini/gemini-4-argon", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 2 {
 			t.Errorf("prefixed gemini price = %+v/%v, want Gemini rates", got, ok)
 		}
 		// OpenRouter passes Gemini billing through at the upstream rates.
-		if got, ok := p.ModelPrice("", "openrouter/google/gemini-3.8-flash", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 0.75 {
+		if got, ok := p.ModelPrice("openrouter/google/gemini-3.8-flash", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)); !ok || got.InputPerMTok != 0.75 {
 			t.Errorf("openrouter gemini price = %+v/%v, want Gemini rates", got, ok)
 		}
 	})
@@ -278,7 +278,7 @@ func TestPricer(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderAnthropic, tc.model, time.Now())
+				p, ok := NewPricer(nil).ModelPrice(tc.model, time.Now())
 				if !ok {
 					t.Fatal("missing model price")
 				}
@@ -291,7 +291,7 @@ func TestPricer(t *testing.T) {
 
 	t.Run("RequestCost", func(t *testing.T) {
 		t.Parallel()
-		p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, "gpt-6.1-sol", time.Now())
+		p, ok := NewPricer(nil).ModelPrice("gpt-6.1-sol", time.Now())
 		if !ok {
 			t.Fatal("Sol price missing")
 		}
@@ -327,11 +327,7 @@ func TestPricer(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
 		for _, model := range []string{"gpt-6.1-sol", "openai-codex/gpt-6.1-sol", "openai/gpt-6.1-sol", "openrouter/openai/gpt-6.1-sol"} {
-			provider := agent.QuotaProvider("")
-			if model == "gpt-6.1-sol" {
-				provider = agent.QuotaProviderCodex
-			}
-			got, ok := p.ModelPrice(provider, model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
+			got, ok := p.ModelPrice(model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
 			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
 			if !ok || !reflect.DeepEqual(got, want) {
 				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
@@ -342,11 +338,7 @@ func TestPricer(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
 		for _, model := range []string{"gpt-6.1-terra", "openai-codex/gpt-6.1-terra", "openai/gpt-6.1-terra", "openrouter/openai/gpt-6.1-terra"} {
-			provider := agent.QuotaProvider("")
-			if model == "gpt-6.1-terra" {
-				provider = agent.QuotaProviderCodex
-			}
-			price, ok := p.ModelPrice(provider, model, time.Now())
+			price, ok := p.ModelPrice(model, time.Now())
 			if !ok {
 				t.Fatalf("%s price missing", model)
 			}
@@ -373,7 +365,7 @@ func TestPricer(t *testing.T) {
 			{"zai/glm-4.7-flash", ModelPrice{}},
 		}
 		for _, tc := range tests {
-			got, ok := p.ModelPrice("", tc.model, time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+			got, ok := p.ModelPrice(tc.model, time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 			if !ok {
 				t.Errorf("ModelPrice(%q) not priced", tc.model)
 				continue
@@ -425,7 +417,7 @@ func TestPricer(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				got, ok := p.ModelPrice("", "deepseek/deepseek-flash", tc.at)
+				got, ok := p.ModelPrice("deepseek/deepseek-flash", tc.at)
 				if !ok {
 					t.Fatal("deepseek-flash not priced")
 				}
@@ -441,7 +433,7 @@ func TestPricer(t *testing.T) {
 		// 2026-09-25 (Friday) is the Mid-Autumn holiday; the following Monday
 		// peaks normally.
 		holiday := time.Date(2026, 9, 25, 2, 0, 0, 0, time.UTC)
-		got, ok := p.ModelPrice("", "deepseek/deepseek-flash", holiday)
+		got, ok := p.ModelPrice("deepseek/deepseek-flash", holiday)
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
@@ -449,7 +441,7 @@ func TestPricer(t *testing.T) {
 			t.Errorf("holiday peak-hour price = %+v, want off-peak %+v", got, want)
 		}
 		after := time.Date(2026, 9, 28, 2, 0, 0, 0, time.UTC)
-		got, ok = p.ModelPrice("", "deepseek/deepseek-flash", after)
+		got, ok = p.ModelPrice("deepseek/deepseek-flash", after)
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
@@ -457,21 +449,58 @@ func TestPricer(t *testing.T) {
 			t.Errorf("post-holiday peak-hour price = %+v, want peak %+v", got, want)
 		}
 	})
+	t.Run("RunInfraQwen", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		at := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+		want := ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, OutputPerMTok: 0.4}
+		for _, model := range []string{
+			"runinfra/qwen3.8-27b",
+			"runinfra/Qwen/Qwen3.8-27B",
+			"openrouter/runinfra/qwen3.8-27b",
+		} {
+			got, ok := p.ModelPrice(model, at)
+			if !ok || !reflect.DeepEqual(got, want) {
+				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
+			}
+		}
+	})
+
+	t.Run("SharedOpenWeightModel", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		at := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+		for _, tc := range []struct {
+			model string
+			want  ModelPrice
+		}{
+			{"cerebras/gpt-oss-120b", ModelPrice{InputPerMTok: 0.35, OutputPerMTok: 0.75}},
+			{"groq/gpt-oss-120b", ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.075, OutputPerMTok: 0.6}},
+			{"groq/openai/gpt-oss-120b", ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.075, OutputPerMTok: 0.6}},
+			{"openrouter/groq/gpt-oss-120b", ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.075, OutputPerMTok: 0.6}},
+		} {
+			got, ok := p.ModelPrice(tc.model, at)
+			if !ok || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%s price = %+v/%v, want %+v", tc.model, got, ok, tc.want)
+			}
+		}
+		for _, model := range []string{"gpt-oss-120b", "openai/gpt-oss-120b"} {
+			if _, ok := p.ModelPrice(model, at); ok {
+				t.Errorf("%s priced without a provider prefix", model)
+			}
+		}
+	})
+
 	t.Run("Unpriced", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
 		for _, model := range []string{
-			"unknown-provider/glm-5.3-flash",
+			"unknown-provider/unknown-model",
 			"",
 		} {
-			if _, ok := p.ModelPrice("", model, time.Now()); ok {
+			if _, ok := p.ModelPrice(model, time.Now()); ok {
 				t.Errorf("ModelPrice(%q) priced, want unpriced", model)
 			}
-		}
-		// The claudecode provider never prices: Claude Code's own reported
-		// total stays authoritative.
-		if _, ok := p.ModelPrice(agent.QuotaProviderClaudeCode, "claude-sonnet-4-5", time.Now()); ok {
-			t.Error("claudecode provider priced, want unpriced")
 		}
 	})
 	t.Run("CodexOpenAIApiEquivalent", func(t *testing.T) {
@@ -483,7 +512,7 @@ func TestPricer(t *testing.T) {
 			"codex/gpt-5.6-terra",
 			"openai/gpt-5.6-terra",
 		} {
-			got, ok := p.ModelPrice("", model, time.Now())
+			got, ok := p.ModelPrice(model, time.Now())
 			if !ok {
 				t.Errorf("ModelPrice(%q) not priced", model)
 				continue
@@ -494,12 +523,12 @@ func TestPricer(t *testing.T) {
 		}
 		// The Codex harness reports prefixless model IDs; the task hints the
 		// provider.
-		got, ok := p.ModelPrice(agent.QuotaProviderCodex, "gpt-5.6-terra", time.Now())
+		got, ok := p.ModelPrice("gpt-5.6-terra", time.Now())
 		if !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("hinted price = %+v/%v, want %+v", got, ok, want)
 		}
 		// Daybreak aliases price at the model they currently point to.
-		got, ok = p.ModelPrice(agent.QuotaProviderCodex, "gpt-daybreak-blue-latest", time.Now())
+		got, ok = p.ModelPrice("gpt-daybreak-blue-latest", time.Now())
 		if !ok {
 			t.Fatal("daybreak blue not priced")
 		}
@@ -521,13 +550,13 @@ func TestPricer(t *testing.T) {
 			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 0.25}}, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, CacheWritePrices: []CacheWritePrice{{TTLSeconds: 43200, PerMTok: 5}}, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 		} {
-			got, ok := p.ModelPrice(tc.provider, tc.model, at)
+			got, ok := p.ModelPrice(tc.model, at)
 			if !ok || !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("%s price = %+v/%v, want %+v", tc.model, got, ok, tc.want)
 			}
 		}
 		for _, model := range []string{"openrouter/anthropic/claude-opus-5-5", "openrouter/openai/gpt-6-sol"} {
-			if _, ok := p.ModelPrice("", model, at); !ok {
+			if _, ok := p.ModelPrice(model, at); !ok {
 				t.Errorf("%s fallback price unavailable", model)
 			}
 		}
@@ -535,7 +564,7 @@ func TestPricer(t *testing.T) {
 	t.Run("AnthropicApiEquivalent", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
-		got, ok := p.ModelPrice("", "anthropic/claude-sonnet-4-5", time.Now())
+		got, ok := p.ModelPrice("anthropic/claude-sonnet-4-5", time.Now())
 		if !ok {
 			t.Fatal("anthropic model not priced")
 		}
@@ -544,7 +573,7 @@ func TestPricer(t *testing.T) {
 			t.Errorf("price = %+v, want %+v", got, want)
 		}
 		// Dated model IDs share the family price.
-		got, ok = p.ModelPrice("", "anthropic/claude-opus-4-6-20260115", time.Now())
+		got, ok = p.ModelPrice("anthropic/claude-opus-4-6-20260115", time.Now())
 		if !ok {
 			t.Fatal("dated anthropic model not priced")
 		}
@@ -562,7 +591,7 @@ func TestPricer(t *testing.T) {
 		t.Cleanup(server.Close)
 		p := NewPricer([]ProviderFetcher{stubOpenRouterFetcher(t, server)})
 
-		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Now())
+		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Now())
 		if !ok {
 			t.Fatal("openrouter model not priced via fetcher")
 		}
@@ -579,7 +608,7 @@ func TestPricer(t *testing.T) {
 		// Without a registered OpenRouter fetcher, pricing falls back to the
 		// upstream provider's static published prices.
 		p := NewPricer(nil)
-		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}
@@ -597,7 +626,7 @@ func TestPricer(t *testing.T) {
 		t.Cleanup(server.Close)
 		p := NewPricer([]ProviderFetcher{stubOpenRouterFetcher(t, server)})
 
-		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}
@@ -688,10 +717,18 @@ func TestParsePricingJSON(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parsePricingJSON(pricingJSON) = %v", err)
 		}
-		for _, name := range []string{"anthropic", "openai", "zai", "deepseek"} {
+		for _, name := range []string{"anthropic", "cerebras", "deepseek", "gemini", "groq", "openai", "runinfra", "zai"} {
 			if len(tables.providers[name]) == 0 {
 				t.Errorf("provider %q has no models", name)
 			}
+		}
+		// The global index resolves a model without its provider.
+		if _, ok := tables.models["gemini-3.8-flash"]; !ok {
+			t.Error("gemini-3.8-flash missing from the model index")
+		}
+		// A model ID that two providers price needs a provider prefix.
+		if _, ok := tables.models["gpt-oss-120b"]; ok {
+			t.Error("shared gpt-oss-120b is in the unprefixed model index")
 		}
 		if got := len(tables.peakWindows["deepseek"]); got != 2 {
 			t.Errorf("deepseek peak windows = %d, want 2", got)
@@ -703,6 +740,37 @@ func TestParsePricingJSON(t *testing.T) {
 		}
 		if want := tables.providers["deepseek"]["deepseek-flash"]; !slices.EqualFunc(tiers, want, func(a, b PriceTier) bool { return reflect.DeepEqual(a.Price, b.Price) }) {
 			t.Errorf("deepseek-v4-flash tiers = %+v, want deepseek-flash %+v", tiers, want)
+		}
+	})
+
+	t.Run("SharedModelIDs", func(t *testing.T) {
+		t.Parallel()
+		data := `{"providers":[` +
+			`{"provider":"cerebras","source":"https://example.test","retrieved":"2026-11-03","models":[` +
+			`{"id":"gpt-oss-120b","tiers":[{"price":{"input_per_mtok":0.35}}]},` +
+			`{"id":"cerebras-only","tiers":[{"price":{"input_per_mtok":0.5}}]}]},` +
+			`{"provider":"groq","source":"https://example.test","retrieved":"2026-11-03","models":[` +
+			`{"id":"gpt-oss-120b","tiers":[{"price":{"input_per_mtok":0.15}}]}]}]}`
+		tables, err := parsePricingJSON([]byte(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			model string
+			input float64
+			want  bool
+		}{
+			{"cerebras/gpt-oss-120b", 0.35, true},
+			{"cerebras/openai/gpt-oss-120b", 0.35, true},
+			{"groq/gpt-oss-120b", 0.15, true},
+			{"openrouter/groq/gpt-oss-120b", 0.15, true},
+			{"cerebras-only", 0.5, true},
+			{"gpt-oss-120b", 0, false},
+		} {
+			got, ok := tables.price(tc.model, time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC))
+			if ok != tc.want || (ok && got.InputPerMTok != tc.input) {
+				t.Errorf("price(%q) = %+v/%v, want %v/%v", tc.model, got, ok, tc.input, tc.want)
+			}
 		}
 	})
 
