@@ -349,6 +349,7 @@ export default function TaskDetail(props: Props) {
   });
 
   createEffect(() => {
+    timeline.loading();
     const hasRepositoryState =
       repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat));
     if (!hasRepositoryState) {
@@ -1298,6 +1299,11 @@ export default function TaskDetail(props: Props) {
               costUSD: props.costUSD ?? 0,
             }}
           />
+          <Show when={timeline.loading() && !timeline.error()}>
+            <span class={styles.headerLoading} role="status" aria-label="Loading history">
+              <LoadingIcon aria-hidden="true" />
+            </span>
+          </Show>
         </div>
         <Show when={props.parentTaskID || props.childTasks.length > 0}>
           <nav class={styles.hierarchy} aria-label="Task hierarchy">
@@ -1366,11 +1372,6 @@ export default function TaskDetail(props: Props) {
               <pre class={styles.taskErrorText}>{error}</pre>
             </section>
           )}
-        </Show>
-        <Show when={timeline.loading() && !timeline.error()}>
-          <div class={styles.historyLoading} role="status" aria-label="Loading history">
-            <LoadingIcon aria-hidden="true" />
-          </div>
         </Show>
         <div
           class={styles.messageArea}

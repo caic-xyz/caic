@@ -45,6 +45,7 @@ declare const classes: {
   readonly "fixCIBtn": string;
   readonly "header": string;
   readonly "headerBranch": string;
+  readonly "headerLoading": string;
   readonly "headerMeta": string;
   readonly "headerPR": string;
   readonly "headerRepo": string;

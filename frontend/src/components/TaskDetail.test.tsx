@@ -880,6 +880,48 @@ describe("TaskDetail", () => {
     expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute("href", "/task/@abc+test-task/stats");
   });
 
+  it("shows the loading spinner in the header next to task statistics while loading", async () => {
+    let resolveHistory!: (value: Response) => void;
+    const historyPromise = new Promise<Response>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).endsWith("/manifest")) return historyPromise;
+      return Promise.resolve(fixtureHistoryResponse(String(input), fixtureEvents, fixturePrompt));
+    });
+
+    render(() => (
+      <Router>
+        <Route
+          path="/*"
+          component={() => (
+            <HostModeProvider>
+              <TaskTimelineProvider taskId="abc">
+                <TaskDetail
+                  {...baseProps}
+                  taskId="abc"
+                  cumulativeInputTokens={1000}
+                  cumulativeOutputTokens={500}
+                  costUSD={0.02}
+                />
+              </TaskTimelineProvider>
+            </HostModeProvider>
+          )}
+        />
+      </Router>
+    ));
+
+    const header = screen.getByTestId("task-detail-header");
+    const spinner = within(header).getByRole("status", { name: "Loading history" });
+    expect(spinner).toBeInTheDocument();
+    const stats = within(header).getByRole("link", { name: "Task statistics" });
+    expect(stats).toBeInTheDocument();
+    expect(spinner.previousElementSibling).toBe(stats);
+
+    resolveHistory(fixtureHistoryResponse("/manifest", [], ""));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading history" })).not.toBeInTheDocument());
+  });
+
   it("keeps header Git line totals when its capped title ellipsizes", async () => {
     const title = "OAuth security hardening and migration";
     await renderTaskDetail({ title });

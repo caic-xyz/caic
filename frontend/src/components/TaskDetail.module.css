@@ -1318,9 +1318,25 @@ a.ciStatus:hover {
   color: var(--color-text-secondary);
 }
 
+.headerLoading {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-text-secondary);
+}
+
 .historyLoading svg {
   width: 1em;
   height: 1em;
+  animation: history-loading 1s linear infinite;
+}
+
+.headerLoading svg {
+  width: 1rem;
+  height: 1rem;
   animation: history-loading 1s linear infinite;
 }
 
@@ -1331,7 +1347,8 @@ a.ciStatus:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .historyLoading svg {
+  .historyLoading svg,
+  .headerLoading svg {
     animation: none;
   }
 }
