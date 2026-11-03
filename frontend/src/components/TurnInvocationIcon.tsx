@@ -5,19 +5,13 @@ import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
 
 import type { EventChangeStat, HistoryTurn } from "@sdk/types.gen";
+import { formatMoney, formatTokens } from "../formatting";
 import { formatTimingDuration } from "../timing";
 import ModalDialog from "./ModalDialog";
 import styles from "./TurnInvocationIcon.module.css";
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1)}Gt`;
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}Mt`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}kt`;
-  return `${tokens}t`;
-}
-
 function formatUSD(usd: number): string {
-  return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
+  return `$${formatMoney(usd, usd < 0.01 ? 4 : 2)}`;
 }
 
 function formatTotalDuration(ms: number): string {

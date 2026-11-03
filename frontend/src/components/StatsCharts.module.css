@@ -82,8 +82,22 @@
   color: var(--color-text-muted);
 }
 
-.sampleDetails {
+/* Keeps the sample table below the charts and out of the two-column grid, with
+   a width cap so its nine columns cannot widen the charts beside it. */
+.samples {
   grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 0.45rem;
+  margin-top: 0.15rem;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.samplesTitle {
+  margin: 0 0 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
 }
 
 .resourceUnavailable {

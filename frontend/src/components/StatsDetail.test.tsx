@@ -111,9 +111,9 @@ describe("StatsContent", () => {
     ));
 
     const summary = getByTestId("task-usage-summary");
-    expect(summary).toHaveTextContent("New input1.0kt");
-    expect(summary).toHaveTextContent("Cache write2.0kt");
-    expect(summary).toHaveTextContent("Cache read7.0kt");
+    expect(summary).toHaveTextContent("New input1kt");
+    expect(summary).toHaveTextContent("Cache write2kt");
+    expect(summary).toHaveTextContent("Cache read7kt");
     expect(summary).toHaveTextContent("Output500t");
     expect(summary).toHaveTextContent("Thinking200t");
     expect(summary).toHaveTextContent("Cache hit 70%");
@@ -136,7 +136,6 @@ describe("StatsContent", () => {
   });
 
   it("shows aligned resource history and network throughput", async () => {
-    const user = userEvent.setup();
     const { findByLabelText, findByTestId } = render(() => (
       <StatsContent tools={[]} stats={stats} turns={[]} usage={usage} />
     ));
@@ -176,8 +175,7 @@ describe("StatsContent", () => {
     hover(txChart, 140);
     expect(rxChart).toHaveTextContent("RX 2.0 KiB/s");
     expect(txChart).toHaveTextContent("TX 1.0 KiB/s");
-    const summary = within(resources).getByText("Exact samples (3)");
-    await user.click(summary);
+    expect(within(resources).getByText("Exact samples")).toBeInTheDocument();
     const scroller = within(resources).getByRole("region", {
       name: "Exact resource samples",
     });
@@ -187,8 +185,8 @@ describe("StatsContent", () => {
     const table = within(resources).getByRole("table");
     expect(table).toHaveTextContent("CPU");
     expect(table).toHaveTextContent("RX/s");
-    expect(table).toHaveTextContent("2.0 KiB/s (2048 B/s)");
-    expect(table).toHaveTextContent("1.0 MiB (1048576 B)");
+    expect(table).toHaveTextContent("2.0 KiB/s");
+    expect(table).toHaveTextContent("1.0 MiB");
   });
 
   it("shows CPU equivalents without inventing unknown capacity", async () => {
@@ -281,8 +279,7 @@ describe("StatsContent", () => {
     expect(diskChart).toHaveTextContent("1.0 MiB");
   });
 
-  it("preserves irregular exact sample values in the accessible table", async () => {
-    const user = userEvent.setup();
+  it("rounds the exact sample table to readable precision", async () => {
     const irregularStats: [EventStats, EventStats] = [
       {
         ...stats[0],
@@ -304,14 +301,17 @@ describe("StatsContent", () => {
     ];
     const { findByTestId } = render(() => <StatsContent tools={[]} stats={irregularStats} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
-    await user.click(within(resources).getByText("Exact samples (2)"));
     const table = within(resources).getByRole("table");
-    expect(table).toHaveTextContent("1970-01-01T00:00:03.234Z");
-    expect(table).toHaveTextContent("87.65432%");
-    expect(table).toHaveTextContent("76.54321%");
-    expect(table).toHaveTextContent("751 B/s (750.5 B/s)");
-    expect(table).toHaveTextContent("0.5 B/s (0.5 B/s)");
-    expect(table).toHaveTextContent("1.5 KiB (1537 B)");
+    // Local time, one decimal per percentage, and whole bytes per rate.
+    expect(table).toHaveTextContent(new Date(3_234).toLocaleString());
+    expect(table).not.toHaveTextContent("1970-01-01T");
+    expect(table).toHaveTextContent("87.7%");
+    expect(table).toHaveTextContent("76.5%");
+    expect(table).toHaveTextContent("12.3%");
+    expect(table).toHaveTextContent("23.5%");
+    expect(table).toHaveTextContent("751 B/s");
+    expect(table).toHaveTextContent("0.5 B/s");
+    expect(table).toHaveTextContent("1.5 KiB");
   });
 
   it("does not infer network throughput from one sample", async () => {
@@ -365,7 +365,8 @@ describe("StatsContent", () => {
     const table = within(figure).getByRole("table");
     expect(table).toHaveTextContent("Turn 1");
     expect(table).toHaveTextContent("7kt");
-    expect(table).toHaveTextContent("11kt");
+    // The shared formatter keeps one decimal, so a 10.5kt total stays exact.
+    expect(table).toHaveTextContent("10.5kt");
   });
 
   it("lists cumulative tool time as the chart's text alternative", async () => {

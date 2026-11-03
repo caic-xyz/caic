@@ -2,5 +2,7 @@
 declare const classes: {
   readonly "button": string;
   readonly "content": string;
+  readonly "spin": string;
+  readonly "spinner": string;
 };
 export default classes;

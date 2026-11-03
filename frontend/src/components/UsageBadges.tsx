@@ -54,11 +54,8 @@ function spendLabel(bal: QuotaBalance): string {
 }
 
 function spendTooltip(bal: QuotaBalance): string {
-  const s = currencySign(bal.currency);
-  if (bal.extraEnabled) {
-    return `${s}${(bal.usedCredits ?? 0).toFixed(2)} / ${s}${(bal.monthlyLimit ?? 0).toFixed(2)}`;
-  }
-  return `Disabled — ${s}${(bal.usedCredits ?? 0).toFixed(2)} / ${s}${(bal.monthlyLimit ?? 0).toFixed(2)}`;
+  const spend = `${formatBalance(bal.currency, bal.usedCredits ?? 0)} / ${formatBalance(bal.currency, bal.monthlyLimit ?? 0)}`;
+  return bal.extraEnabled ? spend : `Disabled — ${spend}`;
 }
 
 function RateLimitBadge(props: { rl: Accessor<QuotaRateLimit>; now: Accessor<number>; label: string }) {

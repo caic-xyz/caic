@@ -5,6 +5,7 @@ import TaskViewHeader from "./TaskViewHeader";
 
 import type { EventStats } from "@sdk/types.gen";
 
+import { formatMoney, formatTokens } from "../formatting";
 import type { ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
 import styles from "./StatsDetail.module.css";
@@ -41,14 +42,8 @@ interface StatsDetailProps extends StatsContentProps {
   status?: JSX.Element;
 }
 
-function formatUsageTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}Mt`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}kt`;
-  return `${tokens}t`;
-}
-
 function formatUSD(usd: number): string {
-  return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
+  return `$${formatMoney(usd, usd < 0.01 ? 4 : 2)}`;
 }
 
 function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
@@ -111,31 +106,29 @@ export function StatsContent(props: StatsContentProps) {
           <div class={styles.usageGrid}>
             <div class={styles.usageMetric} title="Input tokens that were neither written to nor read from cache">
               <span class={styles.usageLabel}>New input</span>
-              <strong>{formatUsageTokens(usage().inputTokens)}</strong>
+              <strong>{formatTokens(usage().inputTokens)}</strong>
             </div>
             <div class={styles.usageMetric} title="Input tokens written to the provider prompt cache">
               <span class={styles.usageLabel}>Cache write</span>
-              <strong>{formatUsageTokens(usage().cacheWriteInputTokens)}</strong>
+              <strong>{formatTokens(usage().cacheWriteInputTokens)}</strong>
             </div>
             <div class={styles.usageMetric} title="Input tokens served from the provider prompt cache">
               <span class={styles.usageLabel}>Cache read</span>
-              <strong>{formatUsageTokens(usage().cacheReadInputTokens)}</strong>
+              <strong>{formatTokens(usage().cacheReadInputTokens)}</strong>
             </div>
             <div class={styles.usageMetric} title="All generated output tokens, including thinking tokens">
               <span class={styles.usageLabel}>Output</span>
-              <strong>{formatUsageTokens(usage().outputTokens)}</strong>
+              <strong>{formatTokens(usage().outputTokens)}</strong>
             </div>
             <div class={styles.usageMetric} title="Thinking or reasoning tokens; included in output">
               <span class={styles.usageLabel}>Thinking</span>
-              <strong>
-                {usage().reasoningOutputTokens > 0 ? formatUsageTokens(usage().reasoningOutputTokens) : "—"}
-              </strong>
+              <strong>{usage().reasoningOutputTokens > 0 ? formatTokens(usage().reasoningOutputTokens) : "—"}</strong>
             </div>
           </div>
           <div class={styles.efficiencyRow}>
             <span>
               <span class={styles.usageLabel}>Total </span>
-              {formatUsageTokens(usage().totalTokens)}
+              {formatTokens(usage().totalTokens)}
             </span>
             <span title="Share of input context served from cache">
               <span class={styles.usageLabel}>Cache hit </span>

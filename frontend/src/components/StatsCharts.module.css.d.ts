@@ -14,7 +14,8 @@ declare const classes: {
   readonly "resourceRange": string;
   readonly "resourceRow": string;
   readonly "resourceUnavailable": string;
-  readonly "sampleDetails": string;
+  readonly "samples": string;
+  readonly "samplesTitle": string;
   readonly "title": string;
 };
 export default classes;

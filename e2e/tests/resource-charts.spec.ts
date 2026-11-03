@@ -46,7 +46,6 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
     await expect(resources).not.toContainText("of capacity");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
-  await resources.getByText("Exact samples").click();
   await expect(resources.getByRole("table")).toContainText("Configured CPU ceiling");
   await expect(resources.getByRole("table")).toContainText("CPU quota");
   await expect(resources.getByRole("table")).toContainText("1.5");
@@ -135,10 +134,10 @@ for (const history of ["clustered", "live"] as const) {
         for (const client of clients) client.write(`event: stats\ndata: ${JSON.stringify(sample)}\n\n`);
         await expect(resources).toContainText("3 samples");
         await expect(resources).toContainText("177.0%");
-        await resources.getByText("Exact samples").click();
         await expect(resources.getByRole("table").locator("tbody tr")).toHaveCount(3);
-        await expect(resources.getByRole("table").locator("tbody tr").first().locator("td").nth(1)).toHaveText("177%");
-        await resources.getByText("Exact samples").click();
+        await expect(resources.getByRole("table").locator("tbody tr").first().locator("td").nth(1)).toHaveText(
+          "177.0%",
+        );
         await expect(cpu.locator('[aria-label="dot"] circle')).toHaveCount(3);
       }
 

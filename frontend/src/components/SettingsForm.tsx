@@ -272,8 +272,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   <div class={styles.runtimeRefresh}>
                     <ActionButton
                       label={`Refresh image and coding agents for ${rt.name}`}
-                      disabled={props.imageRefreshStatus(rt.name).state === "running"}
-                      aria-busy={props.imageRefreshStatus(rt.name).state === "running"}
+                      loading={props.imageRefreshStatus(rt.name).state === "running"}
                       onClick={() => void props.startImageRefresh(rt.name)}
                     >
                       <RefreshIcon class={styles.actionIcon} aria-hidden="true" />

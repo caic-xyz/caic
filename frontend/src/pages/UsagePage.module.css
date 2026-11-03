@@ -1,48 +1,16 @@
 /* Styles for Monitoring's cross-task usage dashboard. */
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: end;
-  justify-content: space-between;
-}
-
-.header h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  line-height: 1.2;
-}
-
-.header p,
-.panel p,
-.meta,
 .empty,
 .noRows {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
 }
 
-.header p,
-.panel p {
-  margin: 0.25rem 0 0;
-}
-
 .controls {
   display: flex;
   gap: 0.5rem;
-  align-items: end;
-}
-
-.controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.controlLabel {
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .controls select {
@@ -55,7 +23,6 @@
   border-radius: var(--radius-md);
 }
 
-.meta,
 .error,
 .empty {
   margin: 0.75rem 0;
@@ -136,6 +103,9 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+
+  /* Panels keep their own height; a long neighbour must not stretch them. */
+  align-items: start;
   margin-top: 1rem;
 }
 
@@ -208,6 +178,12 @@
 
 .countList strong {
   font-variant-numeric: tabular-nums;
+}
+
+/* The panel edge closes the last row; a rule under it would double the line. */
+.table tbody tr:last-child > *,
+.countList li:last-child {
+  border-bottom: none;
 }
 
 @media (width <= 700px) {

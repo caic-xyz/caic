@@ -5,25 +5,18 @@
   container-type: inline-size;
 }
 
-.page h2 {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
-}
-
-.description {
-  max-width: 64rem;
-  margin: 0 0 1rem;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
+.controls {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .error {
   color: var(--color-error);
 }
 
-.cpuDetails {
-  margin-top: 1rem;
-  font-size: 0.8rem;
+.cpuTitle {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
 }
 
 .cpuGrid {

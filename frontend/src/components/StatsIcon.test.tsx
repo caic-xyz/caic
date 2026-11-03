@@ -62,7 +62,7 @@ describe("StatsIcon", () => {
 
     const trigger = getByRole("link", { name: "Task statistics" });
     expect(trigger).toHaveAttribute("href", "/task/@task/stats");
-    expect(trigger).toHaveTextContent("11kt");
+    expect(trigger).toHaveTextContent("10.5kt");
     expect(trigger).toHaveTextContent("$0.13");
   });
 

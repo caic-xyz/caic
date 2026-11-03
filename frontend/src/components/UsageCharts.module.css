@@ -25,9 +25,3 @@
     grid-template-columns: 1fr;
   }
 }
-
-.note {
-  margin: 0.4rem 0 0;
-  font-size: 0.68rem;
-  color: var(--color-text-muted);
-}

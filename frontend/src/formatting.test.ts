@@ -15,10 +15,15 @@ import {
 
 describe("formatTokens", () => {
   it("scales to the largest unit that keeps a token count readable", () => {
-    expect(formatTokens(1_000_000_000)).toBe("1.0Gt");
+    expect(formatTokens(1_000_000_000)).toBe("1Gt");
     expect(formatTokens(1_500_000_000)).toBe("1.5Gt");
-    expect(formatTokens(999_900_000)).toBe("999.9Mt");
-    expect(formatTokens(15_000_000)).toBe("15.0Mt");
+    expect(formatTokens(999_000_000)).toBe("999Mt");
+    // Three significant digits escalate across a unit boundary instead of
+    // printing 1000Mt.
+    expect(formatTokens(999_900_000)).toBe("1Gt");
+    expect(formatTokens(15_000_000)).toBe("15Mt");
+    expect(formatTokens(500_000_000)).toBe("500Mt");
+    expect(formatTokens(1_500)).toBe("1.5kt");
     expect(formatTokens(15_000)).toBe("15kt");
     expect(formatTokens(999)).toBe("999t");
   });
@@ -26,9 +31,15 @@ describe("formatTokens", () => {
 
 describe("formatCost", () => {
   it("separates an exact zero from a cost below one cent", () => {
-    expect(formatCost(0)).toBe("$0.00");
+    expect(formatCost(0)).toBe("$0");
     expect(formatCost(0.004)).toBe("<$0.01");
     expect(formatCost(1.234)).toBe("$1.23");
+  });
+
+  it("drops whole dollars' cents", () => {
+    expect(formatCost(200)).toBe("$200");
+    expect(formatCost(30.3)).toBe("$30.30");
+    expect(formatCost(30.34)).toBe("$30.34");
   });
 });
 

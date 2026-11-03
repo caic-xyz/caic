@@ -32,7 +32,7 @@ for (const width of [390, 1280]) {
     await expect(menu.getByRole("menuitem")).toHaveText(["Settings", "Monitoring", "Keyboard shortcuts"]);
     await menu.getByRole("menuitem", { name: "Monitoring" }).click();
     await expect(page).toHaveURL(/\/monitoring$/);
-    await expect(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Usage", exact: true })).toBeVisible();
     await expect.poll(() => requests.usage).toBe(1);
     expect(requests.system).toBe(0);
     expect(requests.metrics).toBe(0);
@@ -52,9 +52,9 @@ for (const width of [390, 1280]) {
     await system.press("Enter");
     await expect(page).toHaveURL(/\?section=system$/);
     await expect(system).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "System", exact: true })).toBeVisible();
     await expect.poll(() => requests.system).toBe(1);
-    await expect(page.getByRole("heading", { name: "Usage", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Usage", exact: true })).toHaveCount(0);
     expect(await nav.boundingBox()).toEqual(frame);
 
     // Hold the next poll across a section switch: its late completion must not
@@ -63,7 +63,8 @@ for (const width of [390, 1280]) {
     await expect.poll(() => pending !== undefined).toBe(true);
     await metrics.click();
     await expect(metrics).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "Metrics", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Metrics", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh metrics" })).toBeVisible();
     await expect.poll(() => requests.metrics).toBe(1);
     await pending?.fulfill({ json: fixture });
     await page.clock.runFor(11000);
@@ -80,7 +81,7 @@ for (const width of [390, 1280]) {
     await expect(metrics).toHaveAttribute("aria-current", "page");
     await page.reload();
     await expect(metrics).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "Metrics", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Metrics", exact: true })).toBeVisible();
     await page.goto("/monitoring?section=unknown&range=invalid");
     await expect(usage).toHaveAttribute("aria-current", "page");
     await expect(page.getByLabel("Usage date range")).toHaveValue("30");

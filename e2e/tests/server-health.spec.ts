@@ -138,7 +138,7 @@ for (const width of [320, 390, 1280]) {
       await link.focus();
       await link.press("Enter");
       await expect(page).toHaveURL(/\/monitoring\?section=system$/);
-      await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+      await expect(page.getByRole("region", { name: "System", exact: true })).toBeVisible();
       expect(errors).toEqual([]);
     } finally {
       server.closeAllConnections();

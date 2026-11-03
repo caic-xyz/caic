@@ -654,7 +654,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (const layout of ["desktop", "mobile"] as const) {
     await page.setViewportSize(layout === "desktop" ? { width: 1280, height: 800 } : { width: 390, height: 844 });
     const resources = page.getByTestId("resource-charts");
-    await resources.scrollIntoViewIfNeeded();
+    // The exact-sample table makes the section taller than the pane, so align
+    // its top instead of centering it: the charts must stay in view.
+    await resources.evaluate((el) => el.scrollIntoView({ block: "start" }));
     for (const label of [
       "CPU utilization over time",
       "Memory utilization over time",

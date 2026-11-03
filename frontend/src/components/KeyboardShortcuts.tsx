@@ -123,17 +123,20 @@ export default function KeyboardShortcuts(props: Props) {
 
   const taskCards = () => Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
 
+  // navigateTask reports whether a task list was there to move through.
   function navigateTask(
     delta: number,
     focusPrompt: boolean,
     currentTaskId: string | null | undefined = s.selectedId(),
-  ) {
+  ): boolean {
     const cards = taskCards();
-    if (cards.length === 0) return;
+    if (cards.length === 0) return false;
     const current = cards.findIndex((el) => el.dataset.taskId === currentTaskId);
     const next = current === -1 ? (delta > 0 ? 0 : cards.length - 1) : (current + delta + cards.length) % cards.length;
     const card = cards[next];
-    if (card) openTaskFromCard(card, focusPrompt);
+    if (!card) return false;
+    openTaskFromCard(card, focusPrompt);
+    return true;
   }
 
   function purgeSelectedTask() {
@@ -182,8 +185,17 @@ export default function KeyboardShortcuts(props: Props) {
         (taskPrompt || !isEditing(target)) &&
         (event.key === "PageDown" || event.key === "PageUp")
       ) {
-        event.preventDefault();
-        navigateTask(event.key === "PageDown" ? 1 : -1, true);
+        if (!navigateTask(event.key === "PageDown" ? 1 : -1, true)) {
+          // The shell scrolls a content column, not the document, so the
+          // browser's own paging moves nothing: page that column here.
+          const scroller = pageScroller(target);
+          if (!scroller) return;
+          event.preventDefault();
+          const step = Math.max(80, scroller.clientHeight - 40);
+          scroller.scrollBy({ top: event.key === "PageDown" ? step : -step, behavior: "auto" });
+        } else {
+          event.preventDefault();
+        }
         return;
       }
       if (event.key === "Tab" && !event.shiftKey && focusedCard) {
@@ -218,12 +230,10 @@ export default function KeyboardShortcuts(props: Props) {
       if (isEditing(target)) return;
       if (event.shiftKey) return;
 
-      if (event.key === "ArrowDown") {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        // Without a task list the arrows keep their scrolling behaviour.
+        if (!navigateTask(event.key === "ArrowDown" ? 1 : -1, false)) return;
         event.preventDefault();
-        navigateTask(1, false);
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        navigateTask(-1, false);
       }
     };
 
@@ -252,6 +262,17 @@ export default function KeyboardShortcuts(props: Props) {
       </ModalDialog>
     </Show>
   );
+}
+
+// pageScroller returns the column a page key scrolls: the focused element's
+// own scroller, or the shell's content column when nothing is focused.
+function pageScroller(target: HTMLElement | null): HTMLElement | null {
+  for (let el: HTMLElement | null = target; el; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(el).overflowY)) return el;
+  }
+  const main = document.querySelector<HTMLElement>("main");
+  if (main && main.scrollHeight > main.clientHeight) return main;
+  return null;
 }
 
 function ShortcutSection(props: { title: string; shortcuts: { keys: string; action: string }[] }) {

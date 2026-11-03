@@ -1,21 +1,28 @@
 // SystemPage is Monitoring's live whole-machine resource history and logical-CPU view.
 
 import { For, Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js";
+import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 import type { SystemStatsResp } from "@sdk/types.gen";
 
 import { api } from "../api";
+import ActionButton from "../components/ActionButton";
 import type { ResourceSample } from "../components/StatsCharts";
+import SectionControls from "../components/SectionControls";
 import styles from "./SystemPage.module.css";
 
-const ResourceCharts = lazy(() => import("../components/StatsCharts").then((m) => ({ default: m.ResourceCharts })));
+const statsCharts = () => import("../components/StatsCharts");
+const ResourceCharts = lazy(() => statsCharts().then((m) => ({ default: m.ResourceCharts })));
+const ResourceSamples = lazy(() => statsCharts().then((m) => ({ default: m.ResourceSamples })));
 
 export default function SystemPage() {
   const [data, setData] = createSignal<SystemStatsResp | null>(null);
   const [error, setError] = createSignal("");
-  const [cpuDetails, setCPUDetails] = createSignal(false);
+  const [refreshing, setRefreshing] = createSignal(false);
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = async () => {
+    // A manual refresh restarts the polling cadence instead of adding to it.
+    clearTimeout(timer);
     try {
       const result = await api.getSystemStats();
       if (active) {
@@ -26,6 +33,14 @@ export default function SystemPage() {
       if (active) setError(e instanceof Error ? e.message : "Could not load system utilization");
     } finally {
       if (active) timer = setTimeout(() => void refresh(), 5000);
+    }
+  };
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
     }
   };
   onMount(() => void refresh());
@@ -58,13 +73,13 @@ export default function SystemPage() {
   const latest = () => data()?.samples.at(-1);
   return (
     <section class={styles.page} aria-label="System">
-      <h2>System</h2>
-      <p class={styles.description}>
-        The machine running caic, including all processes. Five-second samples; five minutes of history. CPU usage is
-        100% per fully busy logical CPU. Memory excludes available and reclaimable cache. Network totals include all
-        interfaces, so traffic may be counted on multiple interfaces. Disk usage covers the filesystem containing the
-        server working directory.
-      </p>
+      <SectionControls>
+        <div class={styles.controls}>
+          <ActionButton label="Refresh system" loading={refreshing()} onClick={() => void refreshNow()}>
+            <RefreshIcon width={20} height={20} />
+          </ActionButton>
+        </div>
+      </SectionControls>
       <Show when={error()}>
         <p role="alert" class={styles.error}>
           {error()} Retained samples may be out of date.
@@ -72,23 +87,20 @@ export default function SystemPage() {
       </Show>
       <Show when={stats().length > 0} fallback={<p>Waiting for system samples…</p>}>
         <Suspense fallback={<p>Loading charts…</p>}>
-          <ResourceCharts stats={stats()} scope="machine" />
-          <details class={styles.cpuDetails} onToggle={(event) => setCPUDetails(event.currentTarget.open)}>
-            <summary>Logical CPUs ({latest()?.cpus.length ?? 0})</summary>
-            <Show when={cpuDetails()}>
-              <div class={styles.cpuGrid}>
-                <For each={latest()?.cpus ?? []}>
-                  {(cpu) => (
-                    <div class={styles.cpuRow}>
-                      <span>{cpu.id}</span>
-                      <meter min={0} max={100} value={cpu.usagePerc} aria-label={`${cpu.id} utilization`} />
-                      <span>{cpu.usagePerc.toFixed(1)}%</span>
-                    </div>
-                  )}
-                </For>
-              </div>
-            </Show>
-          </details>
+          <ResourceCharts samples={false} stats={stats()} scope="machine" />
+          <h3 class={styles.cpuTitle}>Logical CPUs ({latest()?.cpus.length ?? 0})</h3>
+          <div class={styles.cpuGrid}>
+            <For each={latest()?.cpus ?? []}>
+              {(cpu) => (
+                <div class={styles.cpuRow}>
+                  <span>{cpu.id}</span>
+                  <meter min={0} max={100} value={cpu.usagePerc} aria-label={`${cpu.id} utilization`} />
+                  <span>{cpu.usagePerc.toFixed(1)}%</span>
+                </div>
+              )}
+            </For>
+          </div>
+          <ResourceSamples scope="machine" stats={stats()} />
         </Suspense>
       </Show>
     </section>

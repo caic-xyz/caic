@@ -1985,7 +1985,7 @@ describe("TaskDetail", () => {
     expect(dialog).toHaveTextContent("Combined API time0:02");
     expect(dialog).toHaveTextContent("Time awaiting user response0:59");
     expect(dialog).toHaveTextContent("Generated change6 file changes · +30 −8 · 1 binary");
-    expect(dialog).toHaveTextContent("Cost$0.0000");
+    expect(dialog).toHaveTextContent("Cost$0");
     expect(dialog).toHaveTextContent("New input300t");
     expect(queryByText("first response")).not.toBeInTheDocument();
   });

@@ -1,5 +1,20 @@
 /* Styles for the shared Monitoring frame and section navigation. */
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+/* Holds the controls the selected section portals into the tab row. */
+.controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 .page {
   flex: 1;
   min-width: 0;
@@ -28,7 +43,6 @@
   width: fit-content;
   max-width: 100%;
   padding: 0.25rem;
-  margin-bottom: 1.25rem;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);

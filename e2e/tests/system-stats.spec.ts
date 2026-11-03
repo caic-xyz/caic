@@ -48,7 +48,7 @@ for (const width of [390, 1280]) {
       route.fulfill({ json: { ...fixture, error: requests++ === 0 ? fixture.error : undefined } }),
     );
     await page.goto("/monitoring?section=system");
-    await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "System", exact: true })).toBeVisible();
     await expect(page.getByLabel("CPU utilization over time")).toBeVisible();
     await expect(page.getByLabel("Memory utilization over time")).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("memory unavailable");
@@ -63,12 +63,17 @@ for (const width of [390, 1280]) {
       expect(memory.y).toBeGreaterThanOrEqual(cpu.y + cpu.height);
     }
 
-    await page.getByText("Logical CPUs (4)", { exact: true }).click();
+    // The logical CPUs are always expanded, so their meters are reachable.
     await expect(page.getByRole("meter", { name: "cpu0 utilization", exact: true })).toHaveAttribute("value", "100");
     await expect(page.getByRole("meter", { name: "cpu3 utilization", exact: true })).toHaveAttribute("value", "27");
     const lastCPU = page.getByRole("meter", { name: "cpu7 utilization", exact: true });
     await lastCPU.scrollIntoViewIfNeeded();
     await expect(lastCPU).toBeInViewport();
+
+    // The refresh action forces a sample fetch between scheduled polls.
+    const before = requests;
+    await page.getByRole("button", { name: "Refresh system" }).click();
+    await expect.poll(() => requests).toBeGreaterThan(before);
 
     const cpuGraphic = await page.getByLabel("CPU utilization over time").elementHandle();
     await expect(page.getByRole("alert")).toHaveCount(0, { timeout: 10000 });

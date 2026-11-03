@@ -1,12 +1,14 @@
 // MetricsPage shows server operation measurements in Monitoring.
 
 import { For, Show, createSignal, onMount } from "solid-js";
+import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
 import type { MetricSeries, MetricsResp } from "@sdk/types.gen";
 
 import { api } from "../api";
-import Button from "../components/Button";
+import ActionButton from "../components/ActionButton";
 import MetricDistribution from "../components/MetricDistribution";
+import SectionControls from "../components/SectionControls";
 import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
 
@@ -88,14 +90,14 @@ export default function MetricsPage() {
 
   return (
     <section aria-label="Metrics">
+      <SectionControls>
+        <div class={styles.controls}>
+          <ActionButton label="Refresh metrics" loading={loading()} onClick={() => void refresh()}>
+            <RefreshIcon width={20} height={20} />
+          </ActionButton>
+        </div>
+      </SectionControls>
       <div class={styles.metricsPanel}>
-        <h2 class={styles.metricsPanelTitle}>Metrics</h2>
-        <p class={styles.metricsDescription}>
-          Measurements of server operations and resources. A histogram is read through its percentiles, a counter
-          through its total, and a gauge through its current value and observed range. Percentiles and totals cover the
-          most recent retained measurements per series, and the spread column marks each histogram's median and 95th
-          percentile on a zero-based scale that ends at its observed maximum.
-        </p>
         <Show when={meta()}>
           <p class={styles.metricsMeta}>{meta()}</p>
         </Show>
@@ -104,7 +106,7 @@ export default function MetricsPage() {
             {error()}
           </p>
         </Show>
-        <Show when={series().length > 0} fallback={<p class={styles.metricsDescription}>Nothing recorded yet.</p>}>
+        <Show when={series().length > 0} fallback={<p class={styles.metricsEmpty}>Nothing recorded yet.</p>}>
           <div class={styles.tableScroll}>
             <table class={styles.table}>
               <thead>
@@ -152,11 +154,6 @@ export default function MetricsPage() {
             </table>
           </div>
         </Show>
-        <div class={styles.actions}>
-          <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
-            {loading() ? "Refreshing…" : "Refresh"}
-          </Button>
-        </div>
       </div>
     </section>
   );

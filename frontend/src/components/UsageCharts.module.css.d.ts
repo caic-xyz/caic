@@ -2,6 +2,5 @@
 declare const classes: {
   readonly "figure": string;
   readonly "grid": string;
-  readonly "note": string;
 };
 export default classes;

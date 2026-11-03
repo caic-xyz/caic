@@ -14,9 +14,8 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/monitoring");
 
-  await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Usage", exact: true })).toBeVisible();
   await expect(page.getByLabel("Usage date range")).toHaveValue("30");
-  await expect(page.getByText(/Data since/)).toBeVisible();
   await expect(page.getByRole("region", { name: "Usage summary" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Usage summary" }).getByText("Compactions")).toBeVisible();
   await expect(page.getByText("API time")).toBeVisible();
@@ -27,9 +26,8 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await expect(page.getByRole("columnheader", { name: "Compactions" })).toHaveCount(2);
   await expect(page.getByRole("heading", { name: "Tools" })).toBeVisible();
   await expect(page.getByTestId("usage-charts")).toBeVisible();
-  // The rollup holds the current day, which is still accumulating, so the trend
-  // states that its last point is provisional.
-  await expect(page.getByTestId("usage-charts")).toContainText("still accumulating");
+  // Daily totals are a normal table at the end of the panels, newest first.
+  await expect(page.getByRole("region", { name: "Daily usage totals" })).toBeVisible();
   await page.getByLabel("Usage date range").selectOption("all");
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -51,7 +49,7 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await page.reload();
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
   await page.getByRole("navigation", { name: "Monitoring sections" }).getByRole("link", { name: "System" }).click();
-  await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "System", exact: true })).toBeVisible();
   await page.getByRole("navigation", { name: "Monitoring sections" }).getByRole("link", { name: "Usage" }).click();
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
 

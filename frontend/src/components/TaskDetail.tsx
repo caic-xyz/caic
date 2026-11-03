@@ -50,6 +50,7 @@ import type {
   PendingInput,
   GitRepositoryState,
 } from "@sdk/types.gen";
+import { formatMoney } from "../formatting";
 import { RootConversationProjection } from "../rootConversation";
 import type { DraftImage } from "../images";
 import { rememberTaskViewOrigin } from "../taskView";
@@ -2480,7 +2481,7 @@ function ResultCard(props: {
     const current = result();
     const parts: string[] = [];
     if (current.cost && current.cost.usd > 0)
-      parts.push(`${current.cost.source === "estimated" ? "~" : ""}$${current.cost.usd.toFixed(4)}`);
+      parts.push(`${current.cost.source === "estimated" ? "~" : ""}$${formatMoney(current.cost.usd, 4)}`);
     if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });

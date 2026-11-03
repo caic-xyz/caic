@@ -11,19 +11,43 @@ export function currencySign(currency: string): string {
 
 /** Formats a monetary balance value. */
 export function formatBalance(currency: string, total: number): string {
-  return `${currencySign(currency)}${total.toFixed(2)}`;
+  return `${currencySign(currency)}${formatMoney(total, 2)}`;
+}
+
+// formatMoney renders an amount with the given decimal places, dropping a
+// fractional part that is entirely zero so 200.00 reads as 200.
+export function formatMoney(amount: number, decimals: number): string {
+  return amount.toFixed(decimals).replace(/\.0+$/, "");
 }
 
 export function formatCost(usd: number): string {
-  if (usd === 0) return "$0.00";
-  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+  if (usd === 0) return "$0";
+  return usd < 0.01 ? "<$0.01" : `$${formatMoney(usd, 2)}`;
 }
 
+// tokenUnits lists the scaled token magnitudes, largest first. Counts below one
+// kilotoken stay in plain tokens.
+const tokenUnits = [
+  { scale: 1_000_000_000, suffix: "Gt" },
+  { scale: 1_000_000, suffix: "Mt" },
+  { scale: 1_000, suffix: "kt" },
+];
+
+// formatTokens scales a token count to the largest unit that keeps it readable
+// with three significant digits: a round limit stays 245kt while a per-turn
+// count keeps its tenth of a kilotoken, and a zero fraction is dropped so
+// 500.0Mt reads as 500Mt.
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}Gt`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
-  return `${n}t`;
+  if (n < 1) return `${n}t`;
+  // Round first so a value just below a unit boundary displays in the next one.
+  const step = 10 ** (Math.floor(Math.log10(n)) - 2);
+  const total = Math.round(n / step) * step;
+  for (const unit of tokenUnits) {
+    if (total < unit.scale) continue;
+    const value = total / unit.scale;
+    return `${value < 100 ? formatMoney(value, 1) : String(Math.round(value))}${unit.suffix}`;
+  }
+  return `${Math.round(total)}t`;
 }
 
 export function formatDuration(seconds: number): string {

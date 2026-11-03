@@ -43,9 +43,9 @@ describe("TurnInvocationIcon", () => {
     expect(dialog).toHaveTextContent("User wait0:03");
     expect(dialog).toHaveTextContent("Generated change3 files · +14 −2 · 1 binary");
     expect(dialog).toHaveTextContent("Cost$0.13");
-    expect(dialog).toHaveTextContent("New input1.0kt");
-    expect(dialog).toHaveTextContent("Cache write2.0kt");
-    expect(dialog).toHaveTextContent("Cache read7.0kt");
+    expect(dialog).toHaveTextContent("New input1kt");
+    expect(dialog).toHaveTextContent("Cache write2kt");
+    expect(dialog).toHaveTextContent("Cache read7kt");
     expect(dialog).toHaveTextContent("Output500t");
     expect(dialog).toHaveTextContent("Thinking200t");
 

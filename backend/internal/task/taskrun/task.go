@@ -2209,7 +2209,8 @@ func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.T
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
-	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.rollupEffortLocked(m), t.costTracker.TotalUSD)
+	model, effort := t.rollupAttributionLocked(m)
+	e, ok := rollupEvent(m, at, producerAt, replayed, model, effort, t.costTracker.TotalUSD)
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}
@@ -2230,27 +2231,26 @@ func (t *Task) rollupMetaLocked() usagedb.TaskMeta {
 	}
 }
 
-// rollupModelLocked resolves the attribution model for one message: the
-// model the message itself reports when present, else the task's active
-// model. The caller holds t.mu.
-func (t *Task) rollupModelLocked(m agent.Message) string {
+// rollupAttributionLocked resolves the model and thinking effort one message
+// attributes to the rollup: what the message reports when present, else the
+// task's active values. A child actor reports its own model on usage messages
+// and never its effort, so it inherits neither from the task. The caller holds
+// t.mu.
+func (t *Task) rollupAttributionLocked(m agent.Message) (model, effort string) {
 	if u, ok := m.(*agent.UsageMessage); ok && u.ReportedModel != "" {
-		return u.ReportedModel
+		model = u.ReportedModel
 	}
 	if m.Provenance().IsChild() {
-		return ""
+		return model, ""
 	}
-	return t.activeModel()
+	if model == "" {
+		model = t.activeModel()
+	}
+	return model, t.activeEffort()
 }
 
-// rollupEffortLocked resolves the thinking effort that applies to one message:
-// the task's reported effort, else the requested one. A child actor reports its
-// own model but never its effort, so its usage carries none. The caller holds
-// t.mu.
-func (t *Task) rollupEffortLocked(m agent.Message) string {
-	if m.Provenance().IsChild() {
-		return ""
-	}
+// activeEffort returns the thinking effort the task currently runs at.
+func (t *Task) activeEffort() string {
 	if t.sessionMetadata.ReportedEffort != "" {
 		return t.sessionMetadata.ReportedEffort
 	}

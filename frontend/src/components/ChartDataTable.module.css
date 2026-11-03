@@ -1,4 +1,4 @@
-/* Styles for a chart's collapsed text alternative table. */
+/* Styles for a chart's text alternative table. */
 
 .details {
   font-size: 0.68rem;
@@ -12,9 +12,15 @@
 }
 
 .wrap {
-  max-height: 12rem;
+  width: 100%;
+  max-width: 100%;
   margin-top: 0.3rem;
   overflow: auto;
+}
+
+/* A disclosure stays short; an inline table grows and lets the page scroll. */
+.details .wrap {
+  max-height: 12rem;
 }
 
 .wrap:focus-visible {

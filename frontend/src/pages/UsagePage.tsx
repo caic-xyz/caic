@@ -2,11 +2,13 @@
 
 import { createMemo, createSignal, For, lazy, onMount, Show, Suspense } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
+import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
 import type { UsageDashboardResp } from "@sdk/types.gen";
 
 import { api } from "../api";
-import Button from "../components/Button";
+import ActionButton from "../components/ActionButton";
+import SectionControls from "../components/SectionControls";
 import { formatCost, formatTokens } from "../formatting";
 import {
   summarizeUsageDays,
@@ -14,22 +16,12 @@ import {
   usageDailySeries,
   usageDaysForRange,
   usageRangeFrom,
+  type UsageDailyPoint,
   type UsageDrilldown,
-  type UsageRange,
 } from "../usageDashboard";
 import styles from "./UsagePage.module.css";
 
 const UsageCharts = lazy(() => import("../components/UsageCharts"));
-
-function rangeLabel(range: UsageRange): string {
-  return range === "all" ? "All retained days" : `Last ${range} days`;
-}
-
-function formatDay(day: string | undefined): string {
-  if (!day) return "";
-  const value = new Date(`${day}T00:00:00Z`);
-  return Number.isNaN(value.getTime()) ? day : value.toLocaleDateString();
-}
 
 function formatUsageDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(1)} ms`;
@@ -70,7 +62,6 @@ export default function UsagePage() {
   const summary = createMemo(() => summarizeUsageDays(days(), drilldown()));
   const points = createMemo(() => usageDailySeries(dashboard()?.days ?? [], range(), drilldown()));
   const cacheHitRate = () => usageCacheHitRate(summary().tokens);
-  const dataSince = () => formatDay(dashboard()?.dataSince);
 
   // Router-owned filters restore on reload and browser history navigation.
   const applyDrilldown = (next: UsageDrilldown | null) => {
@@ -89,37 +80,23 @@ export default function UsagePage() {
 
   return (
     <section aria-label="Usage">
-      <div class={styles.header}>
-        <div>
-          <h2>Usage</h2>
-          <p>Cross-task activity from the daily usage rollup. Repository counts are distinct task-days.</p>
-        </div>
+      <SectionControls>
         <div class={styles.controls}>
-          <label>
-            <span class={styles.controlLabel}>Range</span>
-            <select
-              aria-label="Usage date range"
-              value={range()}
-              onChange={(event) => setSearch({ range: event.currentTarget.value }, { replace: false, scroll: false })}
-            >
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-              <option value="all">All retained days</option>
-            </select>
-          </label>
-          <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
-            {loading() ? "Refreshing…" : "Refresh"}
-          </Button>
+          <select
+            aria-label="Usage date range"
+            value={range()}
+            onChange={(event) => setSearch({ range: event.currentTarget.value }, { replace: false, scroll: false })}
+          >
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="all">All retained days</option>
+          </select>
+          <ActionButton label="Refresh usage" loading={loading()} onClick={() => void refresh()}>
+            <RefreshIcon width={20} height={20} />
+          </ActionButton>
         </div>
-      </div>
-
-      <Show when={dataSince()}>
-        <p class={styles.meta}>
-          Data since {dataSince()} · {rangeLabel(range())}
-          <Show when={drillLabel()}> · filtered to {drillLabel()}</Show>
-        </p>
-      </Show>
+      </SectionControls>
       <Show when={error()}>
         <p class={styles.error} role="alert">
           {error()}
@@ -190,37 +167,27 @@ export default function UsagePage() {
           <div class={styles.lowerGrid}>
             <section class={styles.panel}>
               <h2>Models</h2>
-              <p>
-                Tokens, turns, compactions, and reported cost over the selected range. Select a row to drill every panel
-                down to that model.
-              </p>
               <Leaderboard entries={summary().models} showCost kind="model" onSelect={selectModel} />
             </section>
             <section class={styles.panel}>
               <h2>Harnesses</h2>
-              <p>
-                Tokens, turns, compactions, reported cost, and cached input over the selected range. Select a row to
-                drill every panel down to that harness.
-              </p>
               <Leaderboard entries={summary().harnesses} showCost showCache kind="harness" onSelect={selectHarness} />
             </section>
             <section class={styles.panel}>
               <h2>Tools</h2>
-              <p>
-                Calls count on their start day; timed calls and duration count on completion day. Total time sums
-                concurrent calls, and the median covers measured calls only.
-              </p>
               <ToolTable entries={summary().tools} />
             </section>
             <section class={styles.panel}>
               <h2>Repositories</h2>
-              <p>Task-days over the selected range.</p>
               <CountList entries={summary().repos} empty="No repository activity." />
             </section>
             <section class={styles.panel}>
               <h2>Skills</h2>
-              <p>Task-days over the selected range.</p>
               <CountList entries={summary().skills} empty="No skill use." />
+            </section>
+            <section class={styles.panel}>
+              <h2>Daily totals</h2>
+              <DailyTotals points={points()} />
             </section>
           </div>
         </Show>
@@ -289,8 +256,34 @@ function Leaderboard(props: {
   );
 }
 
+function DailyTotals(props: { points: readonly UsageDailyPoint[] }) {
+  return (
+    <div class={styles.tableWrap} role="region" aria-label="Daily usage totals" tabIndex={0}>
+      <table class={styles.table}>
+        <thead>
+          <tr>
+            <th scope="col">Day</th>
+            <th scope="col">Tokens</th>
+            <th scope="col">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={[...props.points].reverse()}>
+            {(point) => (
+              <tr>
+                <th scope="row">{point.inProgress ? `${point.day} (in progress)` : point.day}</th>
+                <td>{formatTokens(point.tokens)}</td>
+                <td>{formatCost(point.costUSD)}</td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tools"] }) {
-  const partial = () => props.entries.some((entry) => entry.distributionCalls < entry.timedCalls);
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No tool calls in this range.</p>}>
       <div class={styles.tableWrap} role="region" aria-label="Tool durations" tabIndex={0}>
@@ -321,12 +314,6 @@ function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tool
           </tbody>
         </table>
       </div>
-      <Show when={partial()}>
-        <p class={styles.drilldown}>
-          Median covers the calls recorded with a duration distribution; earlier calls count toward calls and total
-          only.
-        </p>
-      </Show>
     </Show>
   );
 }

@@ -9,7 +9,7 @@ import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
 import { formatTimingDuration } from "../timing";
-import ChartDataTable from "./ChartDataTable";
+import ChartDataTable, { DataTable } from "./ChartDataTable";
 import { ToggleChip } from "./FormControls";
 import PlotHost from "./PlotHost";
 import styles from "./StatsCharts.module.css";
@@ -44,6 +44,33 @@ const maxResourceSamples = 120;
 // than being clipped by the viewport at the edges of the sampled range.
 const readoutHalfWidth = 34;
 
+// tickMargin reserves the half label a centered end tick needs, at the chart's
+// ten pixel font.
+function tickMargin(label: string | undefined): number {
+  return label ? Math.ceil((label.length * 5.5) / 2) + 3 : 3;
+}
+
+// resourceTimeTicks picks the ages, in seconds, that keep a label: a round step
+// small enough to fit the chart width, newest first.
+function resourceTimeTicks(spanMs: number, width: number): number[] {
+  const steps = [10, 30, 60, 120, 300, 600];
+  const spanSeconds = Math.max(spanMs / 1000, 1);
+  const maxLabels = Math.max(2, Math.floor(width / 56));
+  const step = steps.find((candidate) => spanSeconds / candidate <= maxLabels) ?? steps[steps.length - 1] ?? 600;
+  const ticks: number[] = [];
+  for (let age = 0; age <= spanSeconds; age += step) ticks.push(age);
+  return ticks;
+}
+
+// formatSampleAge labels one tick as its distance back from the newest sample.
+function formatSampleAge(ageSeconds: number): string {
+  if (ageSeconds <= 0) return "now";
+  if (ageSeconds < 60) return `-${Math.round(ageSeconds)}s`;
+  const minutes = Math.floor(ageSeconds / 60);
+  const seconds = Math.round(ageSeconds % 60);
+  return seconds ? `-${minutes}m${String(seconds).padStart(2, "0")}s` : `-${minutes}m`;
+}
+
 function formatSampleTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
     hour: "2-digit",
@@ -57,7 +84,11 @@ function formatThroughput(bytesPerSecond: number): string {
 }
 
 function formatShare(share: number): string {
-  return `${(share * 100).toFixed(1)}%`;
+  return formatPercent(share * 100);
+}
+
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
 }
 
 function formatShareTick(share: number): string {
@@ -73,14 +104,8 @@ function throughputScaleMax(data: readonly ResourceDatum[]): number {
   return Math.ceil(normalized / step) * step * unit;
 }
 
-function formatExactBytes(value: number, perSecond: boolean): string {
-  const unit = perSecond ? "B/s" : "B";
-  const compact = `${formatBytes(value)}${perSecond ? "/s" : ""}`;
-  return `${compact} (${String(value)} ${unit})`;
-}
-
 function formatExactSampleTime(ts: number): string {
-  return new Date(ts).toISOString();
+  return new Date(ts).toLocaleString();
 }
 
 function tokenData(turns: readonly HistoryTurn[], asShare: boolean): TokenDatum[] {
@@ -146,9 +171,15 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
     options.axisFormat !== null && options.maxValue !== null
       ? Math.max(40, Math.max(options.axisFormat(0).length, options.axisFormat(options.maxValue).length) * 7 + 4)
       : 3;
-  const marginLeft = showAxis && options.axisAnchor === "left" ? axisMargin : 3;
-  const marginRight = showAxis && options.axisAnchor === "right" ? axisMargin : 3;
   const span = domain ? domain[1] - domain[0] : 0;
+  const valueMarginLeft = showAxis && options.axisAnchor === "left" ? axisMargin : 3;
+  const valueMarginRight = showAxis && options.axisAnchor === "right" ? axisMargin : 3;
+  const timeTicks = domain ? resourceTimeTicks(span, width - valueMarginLeft - valueMarginRight) : [];
+  // A tick label is centered on its tick, so the end labels need half a label of
+  // room beyond the plot area or the frame clips them.
+  const timeLabels = timeTicks.map(formatSampleAge);
+  const marginLeft = Math.max(valueMarginLeft, tickMargin(timeLabels[0]));
+  const marginRight = Math.max(valueMarginRight, tickMargin(timeLabels.at(-1)));
   const readoutInset = span > 0 ? (readoutHalfWidth / (width - marginLeft - marginRight)) * span : 0;
   const readoutTs = (sample: ResourceDatum) =>
     Math.min(Math.max(sample.ts, (domain?.[0] ?? sample.ts) + readoutInset), (domain?.[1] ?? sample.ts) - readoutInset);
@@ -159,13 +190,23 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
     width,
     height: options.height,
     margin: 3,
-    marginBottom: showAxis ? 8 : 3,
+    marginBottom: 18,
     marginLeft,
     marginRight,
     marginTop: showAxis ? 8 : 3,
     className: "caic-plot",
     style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
-    x: { axis: null, domain },
+    x: {
+      domain,
+      // The newest sample is the right edge, so ages count back from it. The
+      // scale label would echo the channel name, which the ages already explain.
+      label: null,
+      labelArrow: false,
+      ticks: timeTicks.map((age) => (domain ? domain[1] - age * 1000 : age)),
+      tickFormat: (ts: number) => formatSampleAge(domain ? (domain[1] - ts) / 1000 : 0),
+      tickPadding: 2,
+      tickSize: 2,
+    },
     y: showAxis
       ? {
           axis: options.axisAnchor,
@@ -206,7 +247,13 @@ export interface ResourceSample extends EventStats {
   diskTotal?: number;
 }
 
-export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope: "machine" | "task" }) {
+export function ResourceCharts(props: {
+  stats: readonly ResourceSample[];
+  scope: "machine" | "task";
+  // A page that renders the sample table itself, after later sections, turns it
+  // off here instead of showing it twice.
+  samples?: boolean;
+}) {
   const latest = () => props.stats.at(-1);
   const cpuObservedMax = () => Math.max(...props.stats.map((sample) => sample.cpuPerc));
   const cpuScaleMax = () =>
@@ -233,31 +280,6 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
   const networkRates = createMemo(() => deriveNetworkRates(props.stats));
   const rx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.rxBytesPerSecond }));
   const tx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.txBytesPerSecond }));
-  const exactSampleRows = () =>
-    props.stats
-      .map((sample, index) => {
-        const rate = networkRates()[index];
-        if (!rate) throw new Error("Resource sample has no matching network rate");
-        return { rate, sample };
-      })
-      .reverse()
-      .map(({ rate, sample }) => [
-        formatExactSampleTime(sample.ts),
-        `${String(sample.cpuPerc)}%`,
-        ...(props.scope === "machine" ? [sample.cpuCount === undefined ? "Unknown" : String(sample.cpuCount)] : []),
-        ...(props.scope === "task"
-          ? [
-              sample.cpuCeiling === undefined ? "Unknown" : String(sample.cpuCeiling),
-              sample.cpuQuota === undefined ? "Unknown" : sample.cpuQuota === 0 ? "None" : String(sample.cpuQuota),
-              sample.runtimeCPUs === undefined ? "Unknown" : String(sample.runtimeCPUs),
-            ]
-          : []),
-        `${String(sample.memPerc)}%`,
-        rate.rxBytesPerSecond === null ? "—" : formatExactBytes(rate.rxBytesPerSecond, true),
-        rate.txBytesPerSecond === null ? "—" : formatExactBytes(rate.txBytesPerSecond, true),
-        sample.diskUsed < 0 ? "—" : formatExactBytes(sample.diskUsed, false),
-      ]);
-
   return (
     <div class={styles.resourceGrid} data-testid="resource-charts">
       <div class={styles.resourceRow}>
@@ -277,7 +299,7 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
               axisFormat: (value) => `${Math.round(value)}%`,
               color: "var(--color-primary)",
               formatValue: (value) => `${value.toFixed(1)}%`,
-              height: 58,
+              height: 76,
               label: "CPU utilization",
               maxValue: cpuScaleMax(),
             })
@@ -328,7 +350,7 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
               axisFormat: null,
               color: "var(--color-success)",
               formatValue: (value) => `${value.toFixed(1)}%`,
-              height: 58,
+              height: 76,
               label: "Memory utilization",
               maxValue: 100,
             })
@@ -365,7 +387,7 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
                     axisFormat: formatThroughput,
                     color: "var(--color-primary)",
                     formatValue: (value) => `RX ${formatThroughput(value)}`,
-                    height: 44,
+                    height: 62,
                     label: "Network receive throughput",
                     maxValue: throughputScaleMax(rx()),
                   })
@@ -389,7 +411,7 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
                     axisFormat: formatThroughput,
                     color: "var(--color-plan)",
                     formatValue: (value) => `TX ${formatThroughput(value)}`,
-                    height: 44,
+                    height: 62,
                     label: "Network transmit throughput",
                     maxValue: throughputScaleMax(tx()),
                   })
@@ -431,9 +453,46 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
         </Show>
       </div>
       <div class={styles.resourceRange}>{timeRange()}</div>
-      <ChartDataTable
-        caption="Exact samples"
-        class={styles.sampleDetails}
+      <Show when={props.samples !== false}>
+        <ResourceSamples scope={props.scope} stats={props.stats} />
+      </Show>
+    </div>
+  );
+}
+
+// ResourceSamples lists every sample behind the resource charts. A page that
+// places the table itself, below other sections, turns it off on the charts.
+export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope: "machine" | "task" }) {
+  const networkRates = createMemo(() => deriveNetworkRates(props.stats));
+  const rows = () =>
+    props.stats
+      .map((sample, index) => {
+        const rate = networkRates()[index];
+        if (!rate) throw new Error("Resource sample has no matching network rate");
+        return { rate, sample };
+      })
+      .reverse()
+      .map(({ rate, sample }) => [
+        formatExactSampleTime(sample.ts),
+        formatPercent(sample.cpuPerc),
+        ...(props.scope === "machine" ? [sample.cpuCount === undefined ? "Unknown" : String(sample.cpuCount)] : []),
+        ...(props.scope === "task"
+          ? [
+              sample.cpuCeiling === undefined ? "Unknown" : String(sample.cpuCeiling),
+              sample.cpuQuota === undefined ? "Unknown" : sample.cpuQuota === 0 ? "None" : String(sample.cpuQuota),
+              sample.runtimeCPUs === undefined ? "Unknown" : String(sample.runtimeCPUs),
+            ]
+          : []),
+        formatPercent(sample.memPerc),
+        rate.rxBytesPerSecond === null ? "—" : formatThroughput(rate.rxBytesPerSecond),
+        rate.txBytesPerSecond === null ? "—" : formatThroughput(rate.txBytesPerSecond),
+        sample.diskUsed < 0 ? "—" : formatBytes(sample.diskUsed),
+      ]);
+
+  return (
+    <section class={styles.samples} aria-label="Exact resource samples panel">
+      <h3 class={styles.samplesTitle}>Exact samples</h3>
+      <DataTable
         columns={[
           "Time",
           "CPU (100% per CPU)",
@@ -444,9 +503,9 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
           "Disk",
         ]}
         regionLabel="Exact resource samples"
-        rows={exactSampleRows()}
+        rows={rows()}
       />
-    </div>
+    </section>
   );
 }
 

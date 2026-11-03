@@ -187,14 +187,14 @@ describe("UsageBadges", () => {
       const u = makeUsage([makeProvider({ balance: makeBalance(110, "CNY") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).toContain("¥110.00");
+      expect(container.textContent).toContain("¥110");
     });
 
     it("shows ?? for unknown currency", () => {
       const u = makeUsage([makeProvider({ balance: makeBalance(100, "EUR") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).toContain("??100.00");
+      expect(container.textContent).toContain("??100");
     });
 
     it("red when balance <= 0", () => {

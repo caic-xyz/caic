@@ -1365,6 +1365,25 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
+  it("pages the content column on pages without a task list", async () => {
+    renderApp("/monitoring");
+    await screen.findByRole("navigation", { name: "Monitoring sections" });
+    const main = document.querySelector("main");
+    assert.ok(main);
+    Object.defineProperties(main, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 2_000 },
+    });
+    const scrollBy = vi.fn();
+    main.scrollBy = scrollBy;
+
+    const paging = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "PageDown" });
+    document.body.dispatchEvent(paging);
+
+    expect(paging.defaultPrevented).toBe(true);
+    expect(scrollBy).toHaveBeenCalledWith({ top: 360, behavior: "auto" });
+  });
+
   it("navigates from focused task cards with page keys and arrows", async () => {
     const user = userEvent.setup();
     const first = makeTask({ id: "first", title: "first task" });
@@ -2361,17 +2380,20 @@ describe("App repo chips: No repository", () => {
     await user.click(link);
     expect(history.get()).toBe("/monitoring");
     expect(await screen.findByRole("heading", { name: "Monitoring" })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Usage" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Usage" })).toBeInTheDocument();
     await waitFor(() => expect(api.getUsageDashboard).toHaveBeenCalledOnce());
+    // The icon-only refresh keeps an accessible name and reloads the panel.
+    await user.click(screen.getByRole("button", { name: "Refresh usage" }));
+    await waitFor(() => expect(api.getUsageDashboard).toHaveBeenCalledTimes(2));
     expect(api.getMetrics).not.toHaveBeenCalled();
     const nav = screen.getByRole("navigation", { name: "Monitoring sections" });
     expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
     expect(within(nav).getByRole("link", { name: "Usage" })).toHaveAttribute("aria-current", "page");
     await user.click(within(nav).getByRole("link", { name: "Metrics" }));
     expect(history.get()).toBe("/monitoring?section=metrics");
-    expect(await screen.findByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Metrics" })).toBeInTheDocument();
     await waitFor(() => expect(api.getMetrics).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("heading", { name: "Usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Usage" })).not.toBeInTheDocument();
   });
 
   it("shows a tool median from the recorded duration distribution", async () => {
@@ -2428,9 +2450,6 @@ describe("App repo chips: No repository", () => {
     expect(within(region).getByRole("row", { name: /Read/ })).toHaveTextContent("5.0 s");
     // A call recorded before the rollup kept a distribution has no median.
     expect(within(region).getByRole("row", { name: /Bash/ })).toHaveTextContent("—");
-    expect(
-      await screen.findByText(/Median covers the calls recorded with a duration distribution/),
-    ).toBeInTheDocument();
   });
 
   it("renders operation latency as a routed page", async () => {
@@ -2486,7 +2505,7 @@ describe("App repo chips: No repository", () => {
 
     renderApp("/monitoring?section=metrics");
 
-    expect(await screen.findByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Metrics" })).toBeInTheDocument();
     expect(await screen.findByText(/caic 1\.2\.3 on host-1\./)).toBeInTheDocument();
     const table = await screen.findByRole("table");
     const createRow = within(table).getByRole("rowheader", { name: "container.launch" }).closest("tr");
