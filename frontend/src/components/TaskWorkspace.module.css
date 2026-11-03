@@ -16,6 +16,9 @@
 }
 
 .workspace .hidden {
+  /* Keep this display: none. historyScroll detects an out-of-layout pane by its
+     zero client height to hold a pending correction, and the app repairs a
+     scroll offset that some engines drop when a pane leaves the layout. */
   display: none;
 }
 

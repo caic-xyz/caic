@@ -1,5 +1,6 @@
 // Preserves visible conversation anchors through context loading, live output, disclosure, pane visibility, and pane width changes.
 import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
+import { anchorAt, anchorRow } from "./anchorKeys";
 
 interface Anchor {
   key: string | null;
@@ -34,28 +35,15 @@ export function createHistoryScroll(
   const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
   function anchor(el: HTMLElement): Anchor {
-    const bounds = el.getBoundingClientRect();
-    const row = [...el.querySelectorAll<HTMLElement>("[data-anchor-key]")].find((candidate) => {
-      const box = candidate.getBoundingClientRect();
-      return box.bottom > bounds.top && box.top < bounds.bottom;
-    });
+    const position = anchorAt(el);
     return {
-      key: row?.dataset.anchorKey ?? null,
-      top: row?.getBoundingClientRect().top ?? null,
+      key: position.key,
+      top: position.top,
       scroll: el.scrollTop,
       height: el.scrollHeight,
       viewport: el.clientHeight,
       width: el.clientWidth,
     };
-  }
-
-  // The saved key can be any message identity, so match it as data instead of
-  // building an attribute selector out of it.
-  function anchorRow(el: HTMLElement, key: string | null): HTMLElement | null {
-    if (!key) return null;
-    return (
-      [...el.querySelectorAll<HTMLElement>("[data-anchor-key]")].find((row) => row.dataset.anchorKey === key) ?? null
-    );
   }
 
   function write(el: HTMLElement, top: number) {

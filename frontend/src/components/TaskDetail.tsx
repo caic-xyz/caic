@@ -82,6 +82,7 @@ import { compareHistoryPosition, historyPositionKey } from "../historyPosition";
 import { createLiveDuration } from "../liveDuration";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { createHistoryScroll } from "../historyScroll";
+import { anchorRow, groupAnchor, sessionAnchor, turnAnchor } from "../anchorKeys";
 import { inputImageViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
@@ -273,9 +274,7 @@ export default function TaskDetail(props: Props) {
     if (restore && home)
       queueMicrotask(() => {
         if (!messageAreaRef?.isConnected) return;
-        messageAreaRef
-          .querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(`session:${home}`)}"] button`)
-          ?.focus();
+        anchorRow(messageAreaRef, sessionAnchor(home))?.querySelector("button")?.focus();
       });
   };
   const currentActivities = () =>
@@ -1480,7 +1479,7 @@ export default function TaskDetail(props: Props) {
                       {/* Collapsed past turn: single clickable row. */}
                       <Match when={elided()} keyed>
                         {(e) => (
-                          <div class={styles.elidedTurn} data-anchor-key={`turn:${e.key}`}>
+                          <div class={styles.elidedTurn} data-anchor-key={turnAnchor(e.key)}>
                             <button
                               type="button"
                               class={styles.turnToggle}
@@ -1502,7 +1501,7 @@ export default function TaskDetail(props: Props) {
                         {(h) => (
                           <div
                             class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}`}
-                            data-anchor-key={`turn:${h.turnKey}`}
+                            data-anchor-key={turnAnchor(h.turnKey)}
                           >
                             <button
                               type="button"
@@ -1529,7 +1528,7 @@ export default function TaskDetail(props: Props) {
                             class={gi().indent === "turn" ? styles.indentTurn : undefined}
                             data-testid={gi().group.messageKey ? "stream-message" : undefined}
                             data-message-key={gi().group.messageKey}
-                            data-anchor-key={gi().group.messageKey ? `msg:${gi().group.messageKey}` : undefined}
+                            data-anchor-key={groupAnchor(gi().group)}
                           >
                             <div class={styles.timedItemContent}>
                               <Show
@@ -1858,7 +1857,7 @@ function ArchivedSession(props: {
     <section data-testid="history-section" data-section-id={props.section.id}>
       <div
         class={`${styles.sessionElided}${props.open ? ` ${styles.sessionElidedExpanded}` : ""}`}
-        data-anchor-key={`session:${props.section.id}`}
+        data-anchor-key={sessionAnchor(props.section.id)}
       >
         <button
           type="button"
@@ -1957,7 +1956,7 @@ function ArchivedSessionBody(props: {
             <>
               <div
                 class={`${styles.elidedTurn}${expanded() ? ` ${styles.elidedTurnExpanded}` : ""}`}
-                data-anchor-key={`turn:${key()}`}
+                data-anchor-key={turnAnchor(key())}
               >
                 <button
                   type="button"

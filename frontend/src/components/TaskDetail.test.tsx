@@ -631,6 +631,52 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
+  it("keeps conversation anchor keys unique across sessions, turns, and groups", async () => {
+    const source = { threadID: "live", turnID: "turn", itemID: "item" };
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      for (const message of [
+        {
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "archived", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "codex" },
+        },
+        { kind: "text", ts: 2, text: { text: "archived answer" } },
+        resultEvent(3),
+        { kind: "system", ts: 4, system: { subtype: "compact_boundary" } },
+        { kind: "text", ts: 5, source, text: { text: "identified answer" } },
+        { kind: "textDelta", ts: 6, textDelta: { text: "unidentified answer" } },
+        { kind: "toolUse", ts: 7, source, toolUse: { toolUseID: "read", name: "Read", input: {} } },
+        { kind: "toolResult", ts: 7, source, toolResult: { toolUseID: "read", duration: 0.1 } },
+        resultEvent(8),
+      ] satisfies EventMessage[])
+        emit(handlers, message);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    await renderTaskDetail({ taskId: "anchor-uniqueness" });
+    await screen.findByText("unidentified answer", { exact: true });
+    // An anchor lookup returns the first row that matches, so a duplicate key
+    // would restore the wrong row without any visible error.
+    const keys = () =>
+      [...document.querySelectorAll<HTMLElement>("[data-anchor-key]")].map((row) => row.dataset.anchorKey);
+    const unique = () => {
+      const values = keys();
+      expect(values.length).toBeGreaterThan(0);
+      expect(values.filter((key) => !key)).toEqual([]);
+      expect(new Set(values).size).toBe(values.length);
+      return values;
+    };
+    const live = unique();
+    expect(live.some((key) => key?.startsWith("session:"))).toBe(true);
+    expect(live.some((key) => key?.startsWith("msg:"))).toBe(true);
+    // Agents that report no turn or item identity still anchor on their events.
+    expect(live.some((key) => key?.startsWith("ev:"))).toBe(true);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /^Compacted session · 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^1 message/ }));
+    await screen.findByText("archived answer", { exact: true });
+    expect(unique().some((key) => key?.startsWith("turn:"))).toBe(true);
+  });
+
   it("keeps the current separator and focused skill link mounted during live flushes", async () => {
     let send: ((message: EventMessage) => void) | undefined;
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
