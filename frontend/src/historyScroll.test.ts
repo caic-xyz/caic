@@ -93,6 +93,9 @@ function fixture() {
     show: () => {
       visible = true;
     },
+    dropOffset: () => {
+      top = 0;
+    },
     setTask,
     setEpoch,
     setMessages,
@@ -272,6 +275,42 @@ it("leaves a reflowed reading position to native scroll anchoring", async () => 
     f.reflow(320, 20);
     await paint();
     assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("restores the offset when the layout drops it across a hidden pane", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(300);
+    f.hide();
+    f.reflow(400, 0);
+    await paint();
+    f.dropOffset();
+    f.show();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("holds a pending content correction until the pane returns", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(300);
+    f.setEpoch((value) => value + 1);
+    f.hide();
+    f.reflow(400, 0);
+    await paint();
+    f.show();
+    f.reflow(400, 40);
+    await paint();
+    assert.equal(f.el.scrollTop, 340);
   } finally {
     f.dispose();
   }

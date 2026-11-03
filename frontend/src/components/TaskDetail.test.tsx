@@ -832,6 +832,9 @@ describe("TaskDetail", () => {
     });
     await renderTaskDetail();
     const block = screen.getByTestId("stream-message");
+    // The message identity is what keeps the row in place across canonical
+    // history replacement, so it is the conversation's scroll anchor too.
+    expect(block).toHaveAttribute("data-anchor-key", 'msg:["parent","turn","answer","text"]');
     send?.({ kind: "text", ts: 2000, source, text: { text: "Finished." } });
     const completion = resultEvent(3000);
     if (!completion.result) throw new Error("Missing result payload");

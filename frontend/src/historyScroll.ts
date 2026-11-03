@@ -29,6 +29,7 @@ export function createHistoryScroll(
   let frame: number | null = null;
   let structural = false;
   let scrollInput = false;
+  let hidden = false;
 
   const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
@@ -46,6 +47,20 @@ export function createHistoryScroll(
       viewport: el.clientHeight,
       width: el.clientWidth,
     };
+  }
+
+  // The saved key can be any message identity, so match it as data instead of
+  // building an attribute selector out of it.
+  function anchorRow(el: HTMLElement, key: string | null): HTMLElement | null {
+    if (!key) return null;
+    return (
+      [...el.querySelectorAll<HTMLElement>("[data-anchor-key]")].find((row) => row.dataset.anchorKey === key) ?? null
+    );
+  }
+
+  function write(el: HTMLElement, top: number) {
+    el.scrollTop = top;
+    writtenTop = el.scrollTop;
   }
 
   function schedule() {
@@ -68,22 +83,33 @@ export function createHistoryScroll(
       )
         return;
       frame = null;
-      if (el.clientHeight === 0) return;
+      if (el.clientHeight === 0) {
+        // Out of layout. Hold a pending structural correction for the frame
+        // that brings the pane back instead of letting it wait for an unrelated
+        // later frame.
+        hidden = true;
+        return;
+      }
+      const returning = hidden;
+      hidden = false;
       const prior = expansion ?? (structural && !following ? saved : null);
       if (prior) {
-        const row = prior.key ? el.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(prior.key)}"]`) : null;
-        if (row && prior.top !== null) el.scrollTop = el.scrollTop + row.getBoundingClientRect().top - prior.top;
+        const row = anchorRow(el, prior.key);
+        if (row && prior.top !== null) write(el, el.scrollTop + row.getBoundingClientRect().top - prior.top);
         // Without a row, the height delta stands in for the hidden content only
         // while the pane width is unchanged: a reflow folds line wrapping into
         // that delta, and the browser's own scroll anchoring places the text
         // better than the correction does.
-        else if (prior.width === el.clientWidth) el.scrollTop = prior.scroll + el.scrollHeight - prior.height;
-        writtenTop = el.scrollTop;
-        following = nearBottom(el);
+        else if (prior.width === el.clientWidth) write(el, prior.scroll + el.scrollHeight - prior.height);
+      } else if (returning && !following && el.scrollTop === 0 && saved !== null && saved.scroll > 0) {
+        // Some engines reset the offset of a display:none pane. Nothing else can
+        // scroll it while it is hidden, so a zero offset with a saved one means
+        // the layout dropped the position.
+        write(el, saved.scroll);
       } else if (following) {
-        el.scrollTop = el.scrollHeight;
-        writtenTop = el.scrollTop;
+        write(el, el.scrollHeight);
       }
+      following = nearBottom(el);
       structural = false;
       scrollInput = false;
       expansion = null;
@@ -103,6 +129,7 @@ export function createHistoryScroll(
       expansion = null;
       writtenTop = null;
       structural = false;
+      hidden = false;
     } else if (epoch !== nextEpoch) {
       structural = true;
       expansion = null;

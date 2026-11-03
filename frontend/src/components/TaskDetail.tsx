@@ -1520,13 +1520,16 @@ export default function TaskDetail(props: Props) {
                           </div>
                         )}
                       </Match>
-                      {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
+                      {/* Message group: non-keyed to preserve iframe state in WidgetCard. The
+                          message identity survives canonical history replacement, so it also
+                          anchors the visible conversation row. */}
                       <Match when={grpItem()}>
                         {(gi) => (
                           <div
                             class={gi().indent === "turn" ? styles.indentTurn : undefined}
                             data-testid={gi().group.messageKey ? "stream-message" : undefined}
                             data-message-key={gi().group.messageKey}
+                            data-anchor-key={gi().group.messageKey ? `msg:${gi().group.messageKey}` : undefined}
                           >
                             <div class={styles.timedItemContent}>
                               <Show

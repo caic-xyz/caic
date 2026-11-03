@@ -1,6 +1,26 @@
 // Browser coverage for persistent task/document panes, viewport full screen, history, and CAD identity.
+import { type Page } from "@playwright/test";
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
+
+// The conversation preserves the visible content, not a pixel offset that only
+// means the same thing at one pane width, so measure where a known row sits in
+// the message area and report every layout metric a failure needs.
+async function conversationPosition(page: Page) {
+  const link = page.getByRole("link", { name: "Guide", exact: true });
+  await expect(link).toBeVisible();
+  return link.evaluate((element) => {
+    const area = element.closest<HTMLElement>('[data-testid="task-message-area"]');
+    if (!area) throw new Error("Guide link is outside the conversation");
+    return {
+      offset: Math.round(element.getBoundingClientRect().top - area.getBoundingClientRect().top),
+      scroll: Math.round(area.scrollTop),
+      height: Math.round(area.scrollHeight),
+      viewport: Math.round(area.clientHeight),
+      width: Math.round(area.clientWidth),
+    };
+  });
+}
 
 for (const width of [390, 1280]) {
   test(`document close and browser history have distinct behavior at ${width}px`, async ({
@@ -98,8 +118,8 @@ for (const width of [390, 1000, 1440]) {
     await page.getByTestId("task-detail-prompt").fill("Keep this draft");
     const initialStreams = streams;
     await page.getByRole("link", { name: "Guide", exact: true }).scrollIntoViewIfNeeded();
-    let taskScroll = await page.getByTestId("task-message-area").evaluate((element) => element.scrollTop);
-    expect(taskScroll).toBeGreaterThan(0);
+    let taskPosition = await conversationPosition(page);
+    expect(taskPosition.scroll).toBeGreaterThan(0);
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
     if (width > 768) {
@@ -115,7 +135,7 @@ for (const width of [390, 1000, 1440]) {
       await page.keyboard.press("Shift+Tab");
       await expect(page.getByTestId("task-detail-prompt")).not.toBeFocused();
       await page.getByRole("link", { name: "Guide", exact: true }).scrollIntoViewIfNeeded();
-      taskScroll = await page.getByTestId("task-message-area").evaluate((element) => element.scrollTop);
+      taskPosition = await conversationPosition(page);
       await page.getByTitle("Expand sidebar").click();
       await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
       await page.getByTitle("Collapse sidebar").click();
@@ -174,7 +194,10 @@ for (const width of [390, 1000, 1440]) {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("task-detail-prompt")).toHaveText("Keep this draft");
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
-    expect(await page.getByTestId("task-message-area").evaluate((element) => element.scrollTop)).toBe(taskScroll);
+    // The pane width legitimately differs once the document closes, so compare
+    // where the row sits; the message carries every metric a failure needs.
+    const restored = await conversationPosition(page);
+    expect(restored.offset, JSON.stringify({ taskPosition, restored })).toBe(taskPosition.offset);
     expect(await conversation?.evaluate((node) => node.isConnected)).toBe(true);
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
