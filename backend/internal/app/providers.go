@@ -32,24 +32,15 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 }
 
 // estimateUsageRowCost selects today's API-equivalent model price for a
-// historical row. Claude and Codex report unprefixed IDs; OpenCode and Pi
-// carry the billing provider in their model IDs. Antigravity pricing is unknown.
+// historical row. Reported costs never need it: this fills rows written before
+// live pricing covered their harness.
 func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.Time) (float64, bool) {
-	var provider agent.QuotaProvider
-	var known bool
-	switch harness.Name(row.Harness) {
-	case harness.Antigravity:
-		return 0, false // Subscription quota does not establish API-equivalent pricing.
-	case harness.Claude:
-		provider, known = agent.QuotaProviderAnthropic, true
-	case harness.Codex:
-		provider, known = agent.QuotaProviderCodex, true
-	case harness.OpenCode, harness.Pi:
-		known = true
-		// Their model IDs carry the billing provider.
-	}
-	if !known {
-		return 0, false
+	h := harness.Name(row.Harness)
+	provider := agent.BillingProviderForModel(h, row.Model)
+	if h == harness.Claude {
+		// Claude Code reports its own totals live, so a row without a reported
+		// cost falls back to Anthropic's published rates.
+		provider = agent.QuotaProviderAnthropic
 	}
 	price, ok := pricer.ModelPrice(provider, row.Model, at)
 	if !ok {

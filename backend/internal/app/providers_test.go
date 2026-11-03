@@ -85,6 +85,9 @@ func TestEstimateUsageRowCost(t *testing.T) {
 		{"Codex unprefixed", "codex", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.2, true},
 		{"OpenCode prefixed", "opencode", "openai/gpt-6-luna", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 0.6, true},
 		{"Pi prefixed", "pi", "anthropic/claude-opus-5-5", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
+		{"Antigravity Gemini", "antigravity", "gemini-3.8-flash-high", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 4.5, true},
+		{"Antigravity Claude", "antigravity", "claude-opus-5-5-low", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
+		{"Antigravity open weight", "antigravity", "gpt-oss-120b-medium", data.TokenBuckets{Input: 1_000_000}, 0, false},
 		{"unknown harness", "new", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000}, 0, false},
 		{"unknown model", "codex", "unpriced", data.TokenBuckets{Input: 1_000_000}, 0, false},
 	} {
