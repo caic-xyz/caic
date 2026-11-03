@@ -64,7 +64,7 @@ custom-gcl:
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
-verify: custom-gcl frontend-deps
+verify: custom-gcl frontend-deps git-hooks
 	@./scripts/run-concurrently.sh sdk,workflows,go,js,ts,eslint,python,shell,misc \
 		'cd ./backend/internal/server/api/v1 && go run ../../../cmd/gen-api-sdk -check' \
 		'go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12' \
@@ -165,6 +165,10 @@ coverage: frontend-deps
 git-hooks:
 	@./scripts/install-git-hooks.sh
 	@git config merge.ours.driver true
+	@hooks=$$(git config --local --get core.hooksPath); \
+	  [ "$$hooks" = "scripts/hooks" ] || { \
+	    echo "core.hooksPath is '$$hooks', want scripts/hooks; run make git-hooks" >&2; exit 1; \
+	  }
 
 frontend-dev: frontend-deps
 	@pnpm --silent dev
