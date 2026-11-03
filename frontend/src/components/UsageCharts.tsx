@@ -9,10 +9,17 @@ import type { UsageDailyPoint } from "../usageDashboard";
 import PlotHost from "./PlotHost";
 import styles from "./UsageCharts.module.css";
 
-interface TrendOptions {
+interface TrendSeries {
+  label: string;
   value: (item: UsageDailyPoint) => number;
   color: string;
   format: (value: number) => string;
+}
+
+interface TrendOptions {
+  series: TrendSeries[];
+  y: string;
+  // The single-series charts fill under their line.
   area: boolean;
 }
 
@@ -23,35 +30,44 @@ function trendMarks(data: readonly UsageDailyPoint[], options: TrendOptions): Pl
   const partial = data.find((item) => item.inProgress);
   const last = complete.at(-1);
   const x = (item: UsageDailyPoint) => utcDay(item.day);
+  const rows = options.series.flatMap((series) =>
+    complete.map((item) => ({ ts: x(item), series: series.label, value: series.value(item) })),
+  );
   const marks: Plot.Markish[] = [];
-  if (options.area) {
-    marks.push(Plot.areaY(complete, { x, y: options.value, fill: options.color, fillOpacity: 0.2 }));
+  const only = options.series.length === 1 ? options.series[0] : undefined;
+  if (only && options.area) {
+    marks.push(Plot.areaY(complete, { x, y: only.value, fill: only.color, fillOpacity: 0.2 }));
   }
-  marks.push(Plot.lineY(complete, { x, y: options.value, stroke: options.color, strokeWidth: 2 }));
-  marks.push(Plot.dot(complete, { x, y: options.value, fill: options.color, r: 2.5 }));
-  if (partial && last) {
-    marks.push(
-      Plot.lineY([last, partial], {
-        x,
-        y: options.value,
-        stroke: options.color,
-        strokeWidth: 2,
-        strokeDasharray: "3 3",
-        strokeOpacity: 0.6,
-      }),
-    );
+  // z groups the series explicitly; Plot otherwise infers it from the values.
+  marks.push(Plot.lineY(rows, { x: "ts", y: "value", z: "series", stroke: "series", strokeWidth: 2 }));
+  if (only) {
+    marks.push(Plot.dot(complete, { x, y: only.value, fill: only.color, r: 2.5 }));
   }
-  if (partial) {
-    marks.push(
-      Plot.dot([partial], {
-        x,
-        y: options.value,
-        fill: "var(--color-bg-surface)",
-        stroke: options.color,
-        strokeWidth: 1.5,
-        r: 2.5,
-      }),
-    );
+  for (const series of options.series) {
+    if (partial && last) {
+      marks.push(
+        Plot.lineY([last, partial], {
+          x,
+          y: series.value,
+          stroke: series.color,
+          strokeWidth: 2,
+          strokeDasharray: "3 3",
+          strokeOpacity: 0.6,
+        }),
+      );
+    }
+    if (partial && only) {
+      marks.push(
+        Plot.dot([partial], {
+          x,
+          y: only.value,
+          fill: "var(--color-bg-surface)",
+          stroke: only.color,
+          strokeWidth: 1.5,
+          r: 2.5,
+        }),
+      );
+    }
   }
   return marks;
 }
@@ -88,11 +104,22 @@ function dayAnchors(data: readonly UsageDailyPoint[], width: number): Plot.Marki
   });
 }
 
-function drawDailyTrend(
-  data: readonly UsageDailyPoint[],
-  width: number,
-  options: TrendOptions & { y: string; tickFormat: (value: number) => string },
-): Element {
+// readoutLabel names every series for one day, so a hover reads both lines.
+function readoutLabel(series: readonly TrendSeries[], item: UsageDailyPoint): string {
+  const values = series
+    .map((entry) =>
+      series.length === 1
+        ? entry.format(entry.value(item))
+        : `${entry.format(entry.value(item))} ${entry.label.toLowerCase()}`,
+    )
+    .join(" · ");
+  return `${formatDayTick(utcDay(item.day))} · ${values}${item.inProgress ? " (in progress)" : ""}`;
+}
+
+function drawDailyTrend(data: readonly UsageDailyPoint[], width: number, options: TrendOptions): Element {
+  const primary = options.series[0];
+  if (!primary) throw new Error("A daily trend needs one series");
+  const legend = options.series.length > 1;
   return Plot.plot({
     ...basePlot(width, plotHeight),
     marginTop: plotMarginTop,
@@ -110,7 +137,13 @@ function drawDailyTrend(
       tickFormat: formatDayTick,
     },
     // The direction arrow repeats the axis label, which already names the unit.
-    y: { grid: true, label: options.y, labelArrow: false, tickFormat: options.tickFormat, zero: true },
+    y: { grid: true, label: options.y, labelArrow: false, tickFormat: primary.format, zero: true },
+    // A second series needs its name on screen; the axis cannot carry two.
+    color: {
+      domain: options.series.map((series) => series.label),
+      range: options.series.map((series) => series.color),
+      legend,
+    },
     marks: [
       dayAnchors(data, width),
       ...trendMarks(data, options),
@@ -119,12 +152,10 @@ function drawDailyTrend(
       ...crosshairMarks(
         data.map((item) => ({
           x: utcDay(item.day).getTime(),
-          value: options.value(item),
-          label: `${formatDayTick(utcDay(item.day))} · ${options.format(options.value(item))}${
-            item.inProgress ? " (in progress)" : ""
-          }`,
+          value: primary.value(item),
+          label: readoutLabel(options.series, item),
         })),
-        { color: options.color, plotWidth: width - plotMarginLeft - plotMarginRight },
+        { color: primary.color, plotWidth: width - plotMarginLeft - plotMarginRight },
       ),
     ],
   });
@@ -163,7 +194,7 @@ function formatDayTick(value: Date): string {
 export default function UsageCharts(props: {
   points: readonly UsageDailyPoint[];
   // The totals the page sums over the same range, shown beside each title.
-  totals: { tokens: number; costUSD: number };
+  totals: { tokens: number; costUSD: number; turns: number; subagentSpawns: number };
   subject?: string;
 }) {
   const data = () => props.points;
@@ -173,6 +204,29 @@ export default function UsageCharts(props: {
     `${subject} per UTC day for the selected range${scope()}.${
       accumulating() ? " The current day is still accumulating, so its point is provisional." : ""
     }`;
+  const count = (value: number) => String(Math.round(value));
+  const tokens: TrendSeries = {
+    label: "Tokens",
+    value: (item) => item.tokens,
+    color: "var(--color-primary)",
+    format: formatTokens,
+  };
+  const cost: TrendSeries = {
+    label: "Cost",
+    value: (item) => item.costUSD,
+    color: "var(--color-plan)",
+    format: formatCost,
+  };
+  const turns: TrendSeries[] = [
+    { label: "Turns", value: (item) => item.turns, color: "var(--color-primary)", format: count },
+    { label: "Compactions", value: (item) => item.compactions, color: "var(--color-plan)", format: count },
+  ];
+  const spawns: TrendSeries = {
+    label: "Subagents",
+    value: (item) => item.subagentSpawns,
+    color: "var(--color-success)",
+    format: count,
+  };
 
   return (
     <div data-testid="usage-charts">
@@ -187,16 +241,7 @@ export default function UsageCharts(props: {
           <PlotHost
             label="Total tokens per day"
             description={description("Total tokens")}
-            draw={(width) =>
-              drawDailyTrend(data(), width, {
-                area: true,
-                color: "var(--color-primary)",
-                format: formatTokens,
-                tickFormat: formatTokens,
-                value: (item) => item.tokens,
-                y: "Tokens",
-              })
-            }
+            draw={(width) => drawDailyTrend(data(), width, { area: true, series: [tokens], y: "Tokens" })}
           />
         </section>
         <section class={styles.figure}>
@@ -209,16 +254,34 @@ export default function UsageCharts(props: {
           <PlotHost
             label="Reported cost per day in US dollars"
             description={description("Reported cost in US dollars")}
-            draw={(width) =>
-              drawDailyTrend(data(), width, {
-                area: false,
-                color: "var(--color-plan)",
-                format: formatCost,
-                tickFormat: formatCost,
-                value: (item) => item.costUSD,
-                y: "USD",
-              })
-            }
+            draw={(width) => drawDailyTrend(data(), width, { area: false, series: [cost], y: "USD" })}
+          />
+        </section>
+        <section class={styles.figure}>
+          <header class={styles.header}>
+            <h2>Turns per day</h2>
+            <strong aria-label={`Total ${count(props.totals.turns)}`} title="Total over the selected range">
+              {count(props.totals.turns)}
+            </strong>
+          </header>
+          <PlotHost
+            label="Turns and compactions per day"
+            description={description("Turns, with compactions drawn beside them")}
+            // One scale carries both counts, so it names the unit, not a series.
+            draw={(width) => drawDailyTrend(data(), width, { area: false, series: turns, y: "Count" })}
+          />
+        </section>
+        <section class={styles.figure}>
+          <header class={styles.header}>
+            <h2>Subagents per day</h2>
+            <strong aria-label={`Total ${count(props.totals.subagentSpawns)}`} title="Total over the selected range">
+              {count(props.totals.subagentSpawns)}
+            </strong>
+          </header>
+          <PlotHost
+            label="Subagent spawns per day"
+            description={description("Subagent spawns")}
+            draw={(width) => drawDailyTrend(data(), width, { area: false, series: [spawns], y: "Subagents" })}
           />
         </section>
       </div>

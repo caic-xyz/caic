@@ -2,6 +2,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
+import { chartClass } from "../chartPlot";
 import styles from "./PlotHost.module.css";
 
 // Below this width a plot stops being legible, so the host scrolls instead of
@@ -41,9 +42,10 @@ export default function PlotHost(props: PlotHostProps) {
     // Drawing through the effect tracks the data the draw reads, so a new sample
     // rebuilds the figure while unrelated renders of the parent do not.
     const plot = props.draw(plotWidth);
-    // Name the graphic itself. A figure that also carries a legend keeps its
-    // readable legend text, and the image states what it shows.
-    const graphic = plot.localName === "svg" ? plot : (plot.querySelector("svg") ?? plot);
+    // Name the plot, not the legend that Plot draws beside it: both are SVGs,
+    // and the legend must keep its own readable text.
+    const graphic =
+      plot.localName === "svg" ? plot : (plot.querySelector(`svg.${chartClass}`) ?? plot.querySelector("svg") ?? plot);
     graphic.setAttribute("role", "img");
     graphic.setAttribute("aria-label", props.label);
     if (props.description) graphic.setAttribute("aria-description", props.description);

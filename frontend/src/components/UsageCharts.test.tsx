@@ -74,6 +74,8 @@ function renderCharts(points: UsageDailyPoint[], subject?: string) {
   const totals = {
     tokens: points.reduce((sum, point) => sum + point.tokens, 0),
     costUSD: points.reduce((sum, point) => sum + point.costUSD, 0),
+    turns: points.reduce((sum, point) => sum + point.turns, 0),
+    subagentSpawns: points.reduce((sum, point) => sum + point.subagentSpawns, 0),
   };
   return render(() => <UsageCharts points={points} subject={subject} totals={totals} />);
 }
@@ -115,6 +117,21 @@ describe("UsageCharts", () => {
     }
   });
 
+  it("names both series in the turns readout", async () => {
+    const older = { ...day(utcDay(-2), 15_000, 0.5), turns: 4, compactions: 0 };
+    const newer = { ...day(utcDay(-1), 15_000, 0.5), turns: 12, compactions: 3 };
+    const { findByTestId } = renderCharts(usageDailySeries([older, newer], "all", null));
+    const charts = await findByTestId("usage-charts");
+    const turnsChart = Array.from(charts.querySelectorAll("svg")).find(
+      (svg) => svg.getAttribute("aria-label") === "Turns and compactions per day",
+    );
+    if (!turnsChart) throw new Error("missing turns chart");
+
+    hover(turnsChart, 1);
+
+    expect(readoutText(charts)).toContain("12 turns · 3 compactions");
+  });
+
   it("labels the first day of the range", async () => {
     const days: UsageDashboardDay[] = [];
     for (let offset = -13; offset <= 0; offset++) days.push(day(utcDay(offset), 15_000, 0.5));
@@ -133,9 +150,9 @@ describe("UsageCharts", () => {
     const { findByTestId } = renderCharts(usageDailySeries(days, "all", null));
     const charts = await findByTestId("usage-charts");
 
-    // Two charts, one anchor per day: the axis thins its labels, not the days.
+    // Four charts, one anchor per day: the axis thins its labels, not the days.
     const anchors = dayAnchors(charts);
-    expect(anchors).toHaveLength(28);
+    expect(anchors).toHaveLength(56);
     expect(lineSpan(anchors)).toBeGreaterThan(100);
   });
 
@@ -146,7 +163,7 @@ describe("UsageCharts", () => {
     const charts = await findByTestId("usage-charts");
 
     const anchors = dayAnchors(charts);
-    expect(anchors).toHaveLength(180);
+    expect(anchors).toHaveLength(360);
     expect(lineSpan(anchors)).toBe(4);
   });
 
@@ -171,7 +188,9 @@ describe("UsageCharts", () => {
     );
     const charts = await findByTestId("usage-charts");
 
-    expect(charts.querySelectorAll('g[aria-label="dot"] circle')).toHaveLength(4);
+    // The single-series charts draw a dot per day; the turns chart draws two
+    // lines and no dots.
+    expect(charts.querySelectorAll('g[aria-label="dot"] circle')).toHaveLength(6);
     for (const chart of Array.from(charts.querySelectorAll("svg"))) {
       hover(chart, 1);
       expect(readoutText(charts)).not.toContain("(in progress)");

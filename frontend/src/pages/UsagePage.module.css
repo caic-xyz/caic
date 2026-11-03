@@ -68,10 +68,10 @@
   color: var(--color-error);
 }
 
-/* Eight tiles fill two even rows; auto-fit left the last one alone. */
+/* Both tiles and charts fill their row instead of leaving the last one alone. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.6rem;
   margin: 1rem 0;
 }

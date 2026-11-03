@@ -334,12 +334,13 @@ describe("summarizeUsageDays drill-down", () => {
     const days = [drillDay("2026-01-24"), drillDay("2026-01-25")];
 
     expect(usageDailySeries(days, "all", null)).toEqual([
-      { day: "2026-01-24", tokens: 100, costUSD: 0.9, inProgress: false },
-      { day: "2026-01-25", tokens: 100, costUSD: 0.9, inProgress: false },
+      { day: "2026-01-24", tokens: 100, costUSD: 0.9, turns: 9, compactions: 0, subagentSpawns: 0, inProgress: false },
+      { day: "2026-01-25", tokens: 100, costUSD: 0.9, turns: 9, compactions: 0, subagentSpawns: 0, inProgress: false },
     ]);
+    // The drill-down narrows every per-day count, not just the money.
     expect(usageDailySeries(days, "all", { harness: "claude" })).toEqual([
-      { day: "2026-01-24", tokens: 100, costUSD: 0.2, inProgress: false },
-      { day: "2026-01-25", tokens: 100, costUSD: 0.2, inProgress: false },
+      { day: "2026-01-24", tokens: 100, costUSD: 0.2, turns: 2, compactions: 1, subagentSpawns: 3, inProgress: false },
+      { day: "2026-01-25", tokens: 100, costUSD: 0.2, turns: 2, compactions: 1, subagentSpawns: 3, inProgress: false },
     ]);
   });
 

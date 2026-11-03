@@ -121,10 +121,6 @@ export default function UsagePage() {
           </Show>
           <section class={styles.metrics} aria-label="Usage summary">
             <div>
-              <span>Turns</span>
-              <strong>{summary().turns}</strong>
-            </div>
-            <div>
               <span>Cache hit rate</span>
               <strong>{(cacheHitRate() * 100).toFixed(1)}%</strong>
             </div>
@@ -144,17 +140,18 @@ export default function UsagePage() {
               <span>Errored turns</span>
               <strong>{summary().erroredTurns}</strong>
             </div>
-            <div>
-              <span>Subagent spawns</span>
-              <strong>{summary().subagentSpawns}</strong>
-            </div>
           </section>
 
           <Suspense fallback={<p class={styles.empty}>Loading charts…</p>}>
             <UsageCharts
               points={points()}
               subject={drillLabel()}
-              totals={{ tokens: summary().totalTokens, costUSD: summary().costUSD }}
+              totals={{
+                tokens: summary().totalTokens,
+                costUSD: summary().costUSD,
+                turns: summary().turns,
+                subagentSpawns: summary().subagentSpawns,
+              }}
             />
           </Suspense>
 

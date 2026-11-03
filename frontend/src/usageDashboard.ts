@@ -52,6 +52,9 @@ export interface UsageDailyPoint {
   day: string;
   tokens: number;
   costUSD: number;
+  turns: number;
+  compactions: number;
+  subagentSpawns: number;
   inProgress: boolean;
 }
 
@@ -358,6 +361,9 @@ export function usageDailySeries(
       inProgress: key === today,
       tokens: view ? tokenTotal(view.tokens) : 0,
       costUSD: view ? view.costUSD : 0,
+      turns: view ? view.turns : 0,
+      compactions: view ? view.compactions : 0,
+      subagentSpawns: view ? view.subagentSpawns : 0,
     };
   });
 }
