@@ -10,6 +10,7 @@ declare const classes: {
   readonly "metrics": string;
   readonly "noRows": string;
   readonly "panel": string;
+  readonly "panelHeader": string;
   readonly "rowButton": string;
   readonly "tableWrap": string;
 };

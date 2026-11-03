@@ -160,7 +160,12 @@ function formatDayTick(value: Date): string {
   return `${month}-${day}`;
 }
 
-export default function UsageCharts(props: { points: readonly UsageDailyPoint[]; subject?: string }) {
+export default function UsageCharts(props: {
+  points: readonly UsageDailyPoint[];
+  // The totals the page sums over the same range, shown beside each title.
+  totals: { tokens: number; costUSD: number };
+  subject?: string;
+}) {
   const data = () => props.points;
   const accumulating = () => data().some((item) => item.inProgress);
   const scope = () => (props.subject ? ` for ${props.subject}` : "");
@@ -173,7 +178,12 @@ export default function UsageCharts(props: { points: readonly UsageDailyPoint[];
     <div data-testid="usage-charts">
       <div class={styles.grid}>
         <section class={styles.figure}>
-          <h2>Tokens per day</h2>
+          <header class={styles.header}>
+            <h2>Tokens per day</h2>
+            <strong aria-label={`Total ${formatTokens(props.totals.tokens)}`} title="Total over the selected range">
+              {formatTokens(props.totals.tokens)}
+            </strong>
+          </header>
           <PlotHost
             label="Total tokens per day"
             description={description("Total tokens")}
@@ -190,7 +200,12 @@ export default function UsageCharts(props: { points: readonly UsageDailyPoint[];
           />
         </section>
         <section class={styles.figure}>
-          <h2>Cost per day</h2>
+          <header class={styles.header}>
+            <h2>Cost per day</h2>
+            <strong aria-label={`Total ${formatCost(props.totals.costUSD)}`} title="Total over the selected range">
+              {formatCost(props.totals.costUSD)}
+            </strong>
+          </header>
           <PlotHost
             label="Reported cost per day in US dollars"
             description={description("Reported cost in US dollars")}

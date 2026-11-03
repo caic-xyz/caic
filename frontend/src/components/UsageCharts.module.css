@@ -14,10 +14,28 @@
   border-radius: var(--radius-lg);
 }
 
-.figure h2 {
-  margin: 0 0 0.5rem;
+.header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.9rem;
   color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.header strong {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 @media (width <= 700px) {

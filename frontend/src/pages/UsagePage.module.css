@@ -68,9 +68,10 @@
   color: var(--color-error);
 }
 
+/* Eight tiles fill two even rows; auto-fit left the last one alone. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.6rem;
   margin: 1rem 0;
 }
@@ -117,6 +118,20 @@
   margin: 0;
   font-size: 0.9rem;
   color: var(--color-text-secondary);
+}
+
+/* A panel total sits beside its title, as the charts carry theirs. */
+.panelHeader {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.panelHeader strong {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The shared table supplies the rules; the panel only spaces it from its title. */

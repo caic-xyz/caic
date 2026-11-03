@@ -6,7 +6,7 @@ import { expect } from "@tests/expect";
 
 import type { UsageDashboardDay } from "@sdk/types.gen";
 
-import { usageDailySeries } from "../usageDashboard";
+import { usageDailySeries, type UsageDailyPoint } from "../usageDashboard";
 import UsageCharts from "./UsageCharts";
 
 function day(dayKey: string, tokens: number, costUSD: number): UsageDashboardDay {
@@ -69,11 +69,20 @@ function lineSpan(lines: readonly SVGLineElement[]): number {
   return Number(first.getAttribute("y2")) - Number(first.getAttribute("y1"));
 }
 
+// renderCharts supplies the range totals the Usage page sums for the titles.
+function renderCharts(points: UsageDailyPoint[], subject?: string) {
+  const totals = {
+    tokens: points.reduce((sum, point) => sum + point.tokens, 0),
+    costUSD: points.reduce((sum, point) => sum + point.costUSD, 0),
+  };
+  return render(() => <UsageCharts points={points} subject={subject} totals={totals} />);
+}
+
 describe("UsageCharts", () => {
   it("marks the accumulating day as a provisional point in the trend", async () => {
-    const { findByTestId } = render(() => (
-      <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null)} />
-    ));
+    const { findByTestId } = renderCharts(
+      usageDailySeries([day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null),
+    );
     const charts = await findByTestId("usage-charts");
 
     // The provisional point is drawn hollow and named in its readout, so it is
@@ -85,9 +94,7 @@ describe("UsageCharts", () => {
   });
 
   it("scales the token axis to the next unit past a billion tokens", async () => {
-    const { findByTestId } = render(() => (
-      <UsageCharts points={usageDailySeries([day(utcDay(-1), 1_500_000_000, 0.5)], "all", null)} />
-    ));
+    const { findByTestId } = renderCharts(usageDailySeries([day(utcDay(-1), 1_500_000_000, 0.5)], "all", null));
     const charts = await findByTestId("usage-charts");
 
     expect(charts.textContent).toContain("Gt");
@@ -95,9 +102,9 @@ describe("UsageCharts", () => {
   });
 
   it("keeps a zero point for a day without usage", async () => {
-    const { findByTestId } = render(() => (
-      <UsageCharts points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null)} />
-    ));
+    const { findByTestId } = renderCharts(
+      usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)], "all", null),
+    );
     const charts = await findByTestId("usage-charts");
 
     // The zero-filled middle day is reachable, so a gap in usage reads as zero
@@ -111,7 +118,7 @@ describe("UsageCharts", () => {
   it("labels the first day of the range", async () => {
     const days: UsageDashboardDay[] = [];
     for (let offset = -13; offset <= 0; offset++) days.push(day(utcDay(offset), 15_000, 0.5));
-    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries(days, "all", null)} />);
+    const { findByTestId } = renderCharts(usageDailySeries(days, "all", null));
     const charts = await findByTestId("usage-charts");
 
     const labels = Array.from(charts.querySelectorAll("svg text"), (node) => node.textContent ?? "").filter((text) =>
@@ -123,7 +130,7 @@ describe("UsageCharts", () => {
   it("anchors every day of a readable range with a full-height rule", async () => {
     const days: UsageDashboardDay[] = [];
     for (let offset = -13; offset <= 0; offset++) days.push(day(utcDay(offset), 15_000, 0.5));
-    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries(days, "all", null)} />);
+    const { findByTestId } = renderCharts(usageDailySeries(days, "all", null));
     const charts = await findByTestId("usage-charts");
 
     // Two charts, one anchor per day: the axis thins its labels, not the days.
@@ -135,7 +142,7 @@ describe("UsageCharts", () => {
   it("falls back to short day ticks once the days crowd together", async () => {
     const days: UsageDashboardDay[] = [];
     for (let offset = -89; offset <= 0; offset++) days.push(day(utcDay(offset), 15_000, 0.5));
-    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries(days, "all", null)} />);
+    const { findByTestId } = renderCharts(usageDailySeries(days, "all", null));
     const charts = await findByTestId("usage-charts");
 
     const anchors = dayAnchors(charts);
@@ -146,7 +153,7 @@ describe("UsageCharts", () => {
   it("thins the day axis across a long range", async () => {
     const days: UsageDashboardDay[] = [];
     for (let offset = -364; offset <= 0; offset++) days.push(day(utcDay(offset), 15_000, 0.5));
-    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries(days, "all", null)} />);
+    const { findByTestId } = renderCharts(usageDailySeries(days, "all", null));
     const charts = await findByTestId("usage-charts");
 
     // Both charts share the day scale; a year of days must not draw a label per
@@ -159,11 +166,9 @@ describe("UsageCharts", () => {
   });
 
   it("keeps every point complete when the range ends before today", async () => {
-    const { findByTestId } = render(() => (
-      <UsageCharts
-        points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)], "all", null)}
-      />
-    ));
+    const { findByTestId } = renderCharts(
+      usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)], "all", null),
+    );
     const charts = await findByTestId("usage-charts");
 
     expect(charts.querySelectorAll('g[aria-label="dot"] circle')).toHaveLength(4);

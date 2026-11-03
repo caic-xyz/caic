@@ -63,6 +63,7 @@ export default function UsagePage() {
   const summary = createMemo(() => summarizeUsageDays(days(), drilldown()));
   const points = createMemo(() => usageDailySeries(dashboard()?.days ?? [], range(), drilldown()));
   const cacheHitRate = () => usageCacheHitRate(summary().tokens);
+  const skillTaskDays = () => summary().skills.reduce((total, skill) => total + skill.count, 0);
 
   // Router-owned filters restore on reload and browser history navigation.
   const applyDrilldown = (next: UsageDrilldown | null) => {
@@ -120,24 +121,12 @@ export default function UsagePage() {
           </Show>
           <section class={styles.metrics} aria-label="Usage summary">
             <div>
-              <span>Total tokens</span>
-              <strong>{formatTokens(summary().totalTokens)}</strong>
-            </div>
-            <div>
               <span>Turns</span>
               <strong>{summary().turns}</strong>
             </div>
             <div>
               <span>Cache hit rate</span>
               <strong>{(cacheHitRate() * 100).toFixed(1)}%</strong>
-            </div>
-            <div>
-              <span>Reported cost</span>
-              <strong>{formatCost(summary().costUSD)}</strong>
-            </div>
-            <div>
-              <span>Skill task-days</span>
-              <strong>{summary().skills.reduce((total, skill) => total + skill.count, 0)}</strong>
             </div>
             <div>
               <span>Compactions</span>
@@ -162,7 +151,11 @@ export default function UsagePage() {
           </section>
 
           <Suspense fallback={<p class={styles.empty}>Loading charts…</p>}>
-            <UsageCharts points={points()} subject={drillLabel()} />
+            <UsageCharts
+              points={points()}
+              subject={drillLabel()}
+              totals={{ tokens: summary().totalTokens, costUSD: summary().costUSD }}
+            />
           </Suspense>
 
           <div class={styles.lowerGrid}>
@@ -183,7 +176,15 @@ export default function UsagePage() {
               <CountList entries={summary().repos} empty="No repository activity." />
             </section>
             <section class={styles.panel}>
-              <h2>Skills</h2>
+              <header class={styles.panelHeader}>
+                <h2>Skills</h2>
+                <strong
+                  aria-label={`${skillTaskDays()} skill task-days`}
+                  title="Task-days that read a skill over the selected range"
+                >
+                  {skillTaskDays()}
+                </strong>
+              </header>
               <CountList entries={summary().skills} empty="No skill use." />
             </section>
             <section class={styles.panel}>
