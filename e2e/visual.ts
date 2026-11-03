@@ -279,7 +279,7 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
     // mid-layout disagrees with the next pass. Wait for its geometry to hold
     // still, and fail instead of capturing a chart mid-layout.
     const chartBoxes = () =>
-      Array.from(document.querySelectorAll("svg.caic-plot"))
+      Array.from(document.querySelectorAll("svg.data-chart"))
         .map((element) => {
           const box = element.getBoundingClientRect();
           return `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}`;

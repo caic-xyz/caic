@@ -5,6 +5,7 @@ import { createMemo, createSignal, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
 
+import { basePlot, crosshairMarks, labelMargin, tickMargin } from "../chartPlot";
 import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
@@ -39,16 +40,6 @@ interface ResourceChartOptions {
 
 const tokenCategories = ["New input", "Cache write", "Cache read", "Output"];
 const maxResourceSamples = 120;
-// Half the width of the longest pointer readout ("RX 1.0 KB/s"). The readout is
-// centered on the focused sample, so it parks this far inside the frame rather
-// than being clipped by the viewport at the edges of the sampled range.
-const readoutHalfWidth = 34;
-
-// tickMargin reserves the half label a centered end tick needs, at the chart's
-// ten pixel font.
-function tickMargin(label: string | undefined): number {
-  return label ? Math.ceil((label.length * 5.5) / 2) + 3 : 3;
-}
 
 // resourceTimeTicks picks the ages, in seconds, that keep a label: a round step
 // small enough to fit the chart width, newest first.
@@ -131,12 +122,9 @@ function tokenData(turns: readonly HistoryTurn[], asShare: boolean): TokenDatum[
 function drawTokenChart(turns: readonly HistoryTurn[], width: number, asShare: boolean): Element {
   const data = tokenData(turns, asShare);
   return Plot.plot({
-    width,
-    height: 180,
+    ...basePlot(width, 180),
     marginLeft: 48,
     marginBottom: 32,
-    className: "caic-plot",
-    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
     x: { type: "band", label: "Turn", padding: 0.25, domain: turns.map((_, i) => String(i + 1)) },
     y: asShare
       ? { label: null, grid: true, domain: [0, 1], ticks: [0, 0.5, 1], tickFormat: formatShareTick }
@@ -163,13 +151,11 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
   const last = data.at(-1);
   const domain: [number, number] | undefined = first && last ? [first.ts, last.ts] : undefined;
   const available = data.filter((sample): sample is ResourceDatum & { value: number } => sample.value !== null);
-  const showAxis = options.axisAnchor !== null && options.axisFormat !== null && options.maxValue !== null;
-  // Plot does not enlarge margins for tick text. At the fixed 10 px chart font,
-  // reserve a conservative seven pixels per formatted character plus ticks and
-  // padding: throughput units are wider than percentage labels.
+  const valueAxis = options.axisFormat !== null && options.maxValue !== null;
+  const showAxis = options.axisAnchor !== null && valueAxis;
   const axisMargin =
     options.axisFormat !== null && options.maxValue !== null
-      ? Math.max(40, Math.max(options.axisFormat(0).length, options.axisFormat(options.maxValue).length) * 7 + 4)
+      ? Math.max(40, labelMargin(options.axisFormat(0)), labelMargin(options.axisFormat(options.maxValue)))
       : 3;
   const span = domain ? domain[1] - domain[0] : 0;
   const valueMarginLeft = showAxis && options.axisAnchor === "left" ? axisMargin : 3;
@@ -180,22 +166,21 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
   const timeLabels = timeTicks.map(formatSampleAge);
   const marginLeft = Math.max(valueMarginLeft, tickMargin(timeLabels[0]));
   const marginRight = Math.max(valueMarginRight, tickMargin(timeLabels.at(-1)));
-  const readoutInset = span > 0 ? (readoutHalfWidth / (width - marginLeft - marginRight)) * span : 0;
-  const readoutTs = (sample: ResourceDatum) =>
-    Math.min(Math.max(sample.ts, (domain?.[0] ?? sample.ts) + readoutInset), (domain?.[1] ?? sample.ts) - readoutInset);
-  // The crosshair follows the pointer in one dimension along the sampled range;
-  // px and py stay bound to the sample so every pointer mark focuses the same one.
-  const focus = Plot.pointerX({ px: "ts", py: "value" });
+  const crosshair = crosshairMarks(
+    data.map((sample) => ({
+      x: sample.ts,
+      value: sample.value,
+      label: sample.value === null ? "" : options.formatValue(sample.value),
+    })),
+    { color: options.color, plotWidth: width - marginLeft - marginRight },
+  );
   return Plot.plot({
-    width,
-    height: options.height,
+    ...basePlot(width, options.height),
     margin: 3,
-    marginBottom: 18,
+    marginBottom: 22,
     marginLeft,
     marginRight,
     marginTop: showAxis ? 8 : 3,
-    className: "caic-plot",
-    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
     x: {
       domain,
       // The newest sample is the right edge, so ages count back from it. The
@@ -210,11 +195,12 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
     y: showAxis
       ? {
           axis: options.axisAnchor,
-          domain: [0, options.maxValue],
+          domain: [0, options.maxValue ?? 0],
           label: null,
+          grid: true,
           tickFormat: options.axisFormat,
           tickPadding: 2,
-          ticks: [0, options.maxValue],
+          ticks: [0, (options.maxValue ?? 0) / 2, options.maxValue ?? 0],
           tickSize: 2,
           zero: true,
         }
@@ -224,20 +210,9 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
     marks: [
       Plot.lineY(data, { x: "ts", y: "value", stroke: options.color, strokeWidth: 1.5 }),
       Plot.dot(available, { x: "ts", y: "value", fill: options.color, r: 1.8 }),
-      Plot.ruleX(data, { ...focus, x: "ts", stroke: options.color, strokeOpacity: 0.45 }),
       // Samples with no measurement (disk before it reports, throughput before a
-      // second sample) have no readout to show, so they leave the rule alone.
-      Plot.text(data, {
-        ...focus,
-        x: readoutTs,
-        frameAnchor: "top",
-        dy: 2,
-        textAnchor: "middle",
-        fill: "var(--color-text-secondary)",
-        stroke: "var(--color-bg-surface)",
-        strokeWidth: 3,
-        text: (sample: ResourceDatum) => (sample.value === null ? null : options.formatValue(sample.value)),
-      }),
+      // second sample) leave the rule alone and show no readout.
+      ...crosshair,
     ],
   });
 }
@@ -255,6 +230,8 @@ export function ResourceCharts(props: {
   samples?: boolean;
 }) {
   const latest = () => props.stats.at(-1);
+  // A page has room to draw the same charts taller than a pane does.
+  const heights = () => (props.scope === "machine" ? { value: 140, network: 104 } : { value: 76, network: 62 });
   const cpuObservedMax = () => Math.max(...props.stats.map((sample) => sample.cpuPerc));
   const cpuScaleMax = () =>
     Math.max(
@@ -270,16 +247,35 @@ export function ResourceCharts(props: {
     if (first === last) return `1 sample · ${formatSampleTime(last.ts)}`;
     return `${props.stats.length} samples · ${formatSampleTime(first.ts)}–${formatSampleTime(last.ts)}`;
   };
-  const cpu = () => props.stats.map((sample) => ({ ts: sample.ts, value: sample.cpuPerc }));
-  const memory = () => props.stats.map((sample) => ({ ts: sample.ts, value: sample.memPerc }));
+  const cpu = () =>
+    windowAnchored(
+      props.stats.map((sample) => ({ ts: sample.ts, value: sample.cpuPerc })),
+      props.scope,
+    );
+  const memory = () =>
+    windowAnchored(
+      props.stats.map((sample) => ({ ts: sample.ts, value: sample.memPerc })),
+      props.scope,
+    );
   const disk = () =>
-    props.stats.map((sample) => ({
-      ts: sample.ts,
-      value: sample.diskUsed >= 0 ? sample.diskUsed : null,
-    }));
+    windowAnchored(
+      props.stats.map((sample) => ({
+        ts: sample.ts,
+        value: sample.diskUsed >= 0 ? sample.diskUsed : null,
+      })),
+      props.scope,
+    );
   const networkRates = createMemo(() => deriveNetworkRates(props.stats));
-  const rx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.rxBytesPerSecond }));
-  const tx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.txBytesPerSecond }));
+  const rx = () =>
+    windowAnchored(
+      networkRates().map((sample) => ({ ts: sample.ts, value: sample.rxBytesPerSecond })),
+      props.scope,
+    );
+  const tx = () =>
+    windowAnchored(
+      networkRates().map((sample) => ({ ts: sample.ts, value: sample.txBytesPerSecond })),
+      props.scope,
+    );
   return (
     <div class={styles.resourceGrid} data-testid="resource-charts">
       <div class={styles.resourceRow}>
@@ -299,7 +295,7 @@ export function ResourceCharts(props: {
               axisFormat: (value) => `${Math.round(value)}%`,
               color: "var(--color-primary)",
               formatValue: (value) => `${value.toFixed(1)}%`,
-              height: 76,
+              height: heights().value,
               label: "CPU utilization",
               maxValue: cpuScaleMax(),
             })
@@ -346,11 +342,11 @@ export function ResourceCharts(props: {
           label="Memory utilization over time"
           draw={(width) =>
             drawResourceChart(memory(), width, {
-              axisAnchor: null,
-              axisFormat: null,
+              axisAnchor: "left",
+              axisFormat: (value) => `${Math.round(value)}%`,
               color: "var(--color-success)",
               formatValue: (value) => `${value.toFixed(1)}%`,
-              height: 76,
+              height: heights().value,
               label: "Memory utilization",
               maxValue: 100,
             })
@@ -387,7 +383,7 @@ export function ResourceCharts(props: {
                     axisFormat: formatThroughput,
                     color: "var(--color-primary)",
                     formatValue: (value) => `RX ${formatThroughput(value)}`,
-                    height: 62,
+                    height: heights().network,
                     label: "Network receive throughput",
                     maxValue: throughputScaleMax(rx()),
                   })
@@ -411,7 +407,7 @@ export function ResourceCharts(props: {
                     axisFormat: formatThroughput,
                     color: "var(--color-plan)",
                     formatValue: (value) => `TX ${formatThroughput(value)}`,
-                    height: 62,
+                    height: heights().network,
                     label: "Network transmit throughput",
                     maxValue: throughputScaleMax(tx()),
                   })
@@ -440,11 +436,14 @@ export function ResourceCharts(props: {
             label="Writable disk usage over time"
             draw={(width) =>
               drawResourceChart(disk(), width, {
+                // The used bytes sit in a narrow band under a much larger total,
+                // so this chart scales to the data and puts the total in its
+                // caption instead of flattening the trend against a fixed axis.
                 axisAnchor: null,
                 axisFormat: null,
                 color: "var(--color-warning-text)",
                 formatValue: formatBytes,
-                height: 58,
+                height: heights().value,
                 label: "Writable disk usage",
                 maxValue: null,
               })
@@ -458,6 +457,20 @@ export function ResourceCharts(props: {
       </Show>
     </div>
   );
+}
+
+// machineWindowMs is the machine ring: sixty samples five seconds apart. The
+// server publishes its first sample five seconds after it starts, so anchoring
+// the series at the start of that window keeps the plot from rescaling with
+// every sample while the server is fresh. The anchor carries no value, so it
+// draws nothing and the table keeps only measured rows.
+const machineWindowMs = 60 * 5_000;
+
+function windowAnchored(data: readonly ResourceDatum[], scope: "machine" | "task"): readonly ResourceDatum[] {
+  const first = data[0];
+  const last = data.at(-1);
+  if (scope !== "machine" || !first || !last || last.ts - first.ts >= machineWindowMs) return data;
+  return [{ ts: last.ts - machineWindowMs, value: null }, ...data];
 }
 
 // ResourceSamples lists every sample behind the resource charts. A page that
@@ -514,12 +527,9 @@ export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope
 function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Element {
   const height = Math.max(92, tools.length * 25 + 34);
   return Plot.plot({
-    width,
-    height,
-    marginLeft: Math.min(150, Math.max(62, Math.max(...tools.map((tool) => tool.name.length)) * 7)),
+    ...basePlot(width, height),
+    marginLeft: Math.min(150, Math.max(62, Math.max(...tools.map((tool) => labelMargin(tool.name))))),
     marginBottom: 28,
-    className: "caic-plot",
-    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
     x: { label: "Cumulative time", grid: true, tickFormat: formatTimingDuration },
     y: {
       label: null,

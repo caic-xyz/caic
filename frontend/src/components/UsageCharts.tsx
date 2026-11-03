@@ -3,6 +3,7 @@
 
 import * as Plot from "@observablehq/plot";
 
+import { basePlot, crosshairMarks } from "../chartPlot";
 import { formatCost, formatTokens } from "../formatting";
 import type { UsageDailyPoint } from "../usageDashboard";
 import PlotHost from "./PlotHost";
@@ -21,15 +22,13 @@ function trendMarks(data: readonly UsageDailyPoint[], options: TrendOptions): Pl
   const complete = data.filter((item) => !item.inProgress);
   const partial = data.find((item) => item.inProgress);
   const last = complete.at(-1);
-  const title = (item: UsageDailyPoint) =>
-    `${item.day}${item.inProgress ? " (in progress)" : ""}: ${options.format(options.value(item))}`;
   const x = (item: UsageDailyPoint) => utcDay(item.day);
   const marks: Plot.Markish[] = [];
   if (options.area) {
     marks.push(Plot.areaY(complete, { x, y: options.value, fill: options.color, fillOpacity: 0.2 }));
   }
   marks.push(Plot.lineY(complete, { x, y: options.value, stroke: options.color, strokeWidth: 2 }));
-  marks.push(Plot.dot(complete, { x, y: options.value, fill: options.color, r: 2.5, title }));
+  marks.push(Plot.dot(complete, { x, y: options.value, fill: options.color, r: 2.5 }));
   if (partial && last) {
     marks.push(
       Plot.lineY([last, partial], {
@@ -51,7 +50,6 @@ function trendMarks(data: readonly UsageDailyPoint[], options: TrendOptions): Pl
         stroke: options.color,
         strokeWidth: 1.5,
         r: 2.5,
-        title,
       }),
     );
   }
@@ -96,13 +94,11 @@ function drawDailyTrend(
   options: TrendOptions & { y: string; tickFormat: (value: number) => string },
 ): Element {
   return Plot.plot({
-    width,
-    height: plotHeight,
+    ...basePlot(width, plotHeight),
     marginTop: plotMarginTop,
     marginRight: plotMarginRight,
     marginBottom: plotMarginBottom,
     marginLeft: plotMarginLeft,
-    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "11px" },
     // A UTC day scale keeps the daily spacing the series guarantees. The ticks
     // are explicit so the range never starts on an unlabelled day, unlike the
     // interval d3 picks on its own.
@@ -115,7 +111,22 @@ function drawDailyTrend(
     },
     // The direction arrow repeats the axis label, which already names the unit.
     y: { grid: true, label: options.y, labelArrow: false, tickFormat: options.tickFormat, zero: true },
-    marks: [dayAnchors(data, width), ...trendMarks(data, options)],
+    marks: [
+      dayAnchors(data, width),
+      ...trendMarks(data, options),
+      // The same pointer readout the resource charts use, so one hover gesture
+      // reads a point in every chart the app draws.
+      ...crosshairMarks(
+        data.map((item) => ({
+          x: utcDay(item.day).getTime(),
+          value: options.value(item),
+          label: `${formatDayTick(utcDay(item.day))} · ${options.format(options.value(item))}${
+            item.inProgress ? " (in progress)" : ""
+          }`,
+        })),
+        { color: options.color, plotWidth: width - plotMarginLeft - plotMarginRight },
+      ),
+    ],
   });
 }
 

@@ -43,6 +43,20 @@ function utcDay(offsetDays: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+// hover dispatches the pointer event Plot listens to; the plot area starts at the
+// left margin and ends before the right one.
+function hover(chart: Element, fraction: number): void {
+  const width = Number(chart.getAttribute("width"));
+  chart.dispatchEvent(
+    new MouseEvent("pointermove", { clientX: 52 + fraction * (width - 52 - 20), clientY: 90, bubbles: true }),
+  );
+}
+
+// readoutText returns the pointer readout the crosshair draws above the chart.
+function readoutText(charts: HTMLElement): string {
+  return Array.from(charts.querySelectorAll('[aria-label="text"] text'), (node) => node.textContent ?? "").join("|");
+}
+
 // dayAnchors selects the day marks of both charts: Plot paints each mark group
 // with the border stroke, which separates them from the axis and the grid.
 function dayAnchors(charts: HTMLElement): SVGLineElement[] {
@@ -64,8 +78,10 @@ describe("UsageCharts", () => {
 
     // The provisional point is drawn hollow and named in its readout, so it is
     // not read as a completed fall in usage.
-    const titles = Array.from(charts.querySelectorAll("title"), (title) => title.textContent ?? "");
-    expect(titles.some((title) => title.includes(`${utcDay(0)} (in progress)`))).toBe(true);
+    for (const chart of Array.from(charts.querySelectorAll("svg"))) {
+      hover(chart, 1);
+      expect(readoutText(charts)).toContain("(in progress)");
+    }
   });
 
   it("scales the token axis to the next unit past a billion tokens", async () => {
@@ -84,8 +100,12 @@ describe("UsageCharts", () => {
     ));
     const charts = await findByTestId("usage-charts");
 
-    const titles = Array.from(charts.querySelectorAll("title"), (title) => title.textContent ?? "");
-    expect(titles.some((title) => title.startsWith(`${utcDay(-1)}: 0t`))).toBe(true);
+    // The zero-filled middle day is reachable, so a gap in usage reads as zero
+    // rather than a missing point.
+    for (const chart of Array.from(charts.querySelectorAll("svg"))) {
+      hover(chart, 0.5);
+      expect(readoutText(charts)).toContain(`${utcDay(-1).slice(5)} · 0t`);
+    }
   });
 
   it("labels the first day of the range", async () => {
@@ -146,8 +166,10 @@ describe("UsageCharts", () => {
     ));
     const charts = await findByTestId("usage-charts");
 
-    const titles = Array.from(charts.querySelectorAll("title"), (title) => title.textContent ?? "");
-    expect(titles.some((title) => title.includes("(in progress)"))).toBe(false);
-    expect(titles).toHaveLength(4);
+    expect(charts.querySelectorAll('g[aria-label="dot"] circle')).toHaveLength(4);
+    for (const chart of Array.from(charts.querySelectorAll("svg"))) {
+      hover(chart, 1);
+      expect(readoutText(charts)).not.toContain("(in progress)");
+    }
   });
 });

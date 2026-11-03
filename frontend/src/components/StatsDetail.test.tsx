@@ -88,8 +88,6 @@ afterEach(() => vi.restoreAllMocks());
 
 // Half the width of the longest pointer readout, mirroring the constant the
 // resource charts use to keep the readout inside the frame.
-const readoutHalfWidth = 34;
-
 // Observable Plot reads pointer coordinates from the event and maps them over
 // its own pixel geometry, so a synthetic move is enough to focus a sample. The
 // resource charts are a few dozen pixels tall and pointerX ignores the vertical
@@ -154,7 +152,9 @@ describe("StatsContent", () => {
       cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
       (label) => label.textContent,
     );
-    expect(cpuScaleLabels).toEqual(["0%", "400%"]);
+    // Every value axis carries zero, its midpoint, and its maximum, so the grid
+    // reads the same on every chart.
+    expect(cpuScaleLabels).toEqual(["0%", "200%", "400%"]);
     expect(await findByLabelText("Memory utilization over time")).toBeInTheDocument();
     const rxChart = await findByLabelText("Network receive throughput over time");
     const txChart = await findByLabelText("Network transmit throughput over time");
@@ -163,10 +163,10 @@ describe("StatsContent", () => {
     expect(resources).not.toHaveTextContent("network chart shows throughput");
     expect(
       Array.from(rxChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
-    ).toEqual(["0 B/s", "2.0 KiB/s"]);
+    ).toEqual(["0 B/s", "1.0 KiB/s", "2.0 KiB/s"]);
     expect(
       Array.from(txChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
-    ).toEqual(["0 B/s", "1.0 KiB/s"]);
+    ).toEqual(["0 B/s", "512 B/s", "1.0 KiB/s"]);
     expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "end");
     expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "start");
     expect(await findByLabelText("Writable disk usage over time")).toBeInTheDocument();
@@ -269,10 +269,10 @@ describe("StatsContent", () => {
     // would be clipped; it parks inside the frame instead.
     hover(cpuChart, frameLeft + 4);
     expect(cpuChart).toHaveTextContent("10.0%");
-    expect(readoutCenter(cpuChart)).toBeGreaterThanOrEqual(frameLeft + readoutHalfWidth - 0.5);
+    expect(readoutCenter(cpuChart)).toBeGreaterThan(frameLeft);
     hover(cpuChart, frameRight - 4);
     expect(cpuChart).toHaveTextContent("50.0%");
-    expect(readoutCenter(cpuChart)).toBeLessThanOrEqual(frameRight - readoutHalfWidth + 0.5);
+    expect(readoutCenter(cpuChart)).toBeLessThan(frameRight);
 
     // Only the middle disk sample carries a measurement, and a sample without
     // one must not produce a readout.

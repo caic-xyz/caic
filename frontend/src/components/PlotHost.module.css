@@ -9,7 +9,8 @@
   margin: 0;
 }
 
-.chart :global(.caic-plot-swatches) {
+/* Observable Plot derives legend class names from the chart class. */
+.chart :global(.data-chart-swatches) {
   gap: 0.2rem 0.65rem;
   margin-bottom: 0.15rem;
   font-size: 0.66rem;

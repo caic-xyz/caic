@@ -188,7 +188,12 @@ for (const history of ["clustered", "live"] as const) {
             const cells = row.querySelectorAll("td");
             return { ts: Date.parse(cells[0]?.textContent ?? ""), cpu: Number.parseFloat(cells[1]?.textContent ?? "") };
           });
-          return { samples, value: text?.textContent ?? "", transform: text?.getAttribute("transform") ?? "" };
+          return {
+            samples,
+            value: text?.textContent ?? "",
+            transform: text?.getAttribute("transform") ?? "",
+            width: text instanceof SVGElement ? (text as SVGElement & { getBBox(): DOMRect }).getBBox().width : 0,
+          };
         });
         if (snapshot.samples.length < 2) return "missing samples";
         const timestamps = snapshot.samples.map((sample) => sample.ts);
@@ -200,9 +205,11 @@ for (const history of ["clustered", "live"] as const) {
         const actual = Number.parseFloat(snapshot.value);
         if (!expected.includes(actual)) return `${actual} is not a ${edge} edge sample (${expected.join(", ")})`;
         if (edge === "right") {
-          // Plot and DOM layout use slightly different floating-point rounding.
+          // The readout is centered on the focused sample, so half of the text
+          // it actually renders must stay inside the frame. Plot and DOM layout
+          // use slightly different floating-point rounding.
           const x = Number(/translate\(([-\d.]+)/u.exec(snapshot.transform)?.[1] ?? Number.NaN);
-          if (!(x <= box.width - 3 - 34 + 0.5)) return `readout at ${x} clips the right edge`;
+          if (!(x + snapshot.width / 2 <= box.width - 3 + 0.5)) return `readout at ${x} clips the right edge`;
         }
         return "matched";
       }
@@ -231,7 +238,7 @@ for (const history of ["clustered", "live"] as const) {
                 const bounds = svg.getBoundingClientRect();
                 const ticks = Array.from(svg.querySelectorAll('[aria-label="y-axis tick label"] text'));
                 return (
-                  ticks.length === 2 &&
+                  ticks.length === 3 &&
                   ticks.every((tick) => {
                     const box = tick.getBoundingClientRect();
                     return box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5;
