@@ -6,6 +6,7 @@ import TaskViewHeader from "./TaskViewHeader";
 
 import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
 
+import Table from "./Table";
 import styles from "./TaskInfo.module.css";
 import { api } from "../api";
 
@@ -112,28 +113,26 @@ function LineageRow(props: { label: string; id: string }) {
 function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
   return (
     <Show when={(props.mounts?.length ?? 0) > 0} fallback={<div class={styles.empty}>{props.empty}</div>}>
-      <div class={styles.tableWrap}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th class={styles.th}>Host path</th>
-              <th class={styles.th}>Runtime path</th>
-              <th class={styles.th}>Read-only</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={sortedMounts(props.mounts)}>
-              {(m) => (
-                <tr>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{m.hostPath || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{m.containerPath || "—"}</td>
-                  <td class={styles.td}>{readOnlyText(m.readOnly)}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+      <Table align="labels" label="Mounted paths">
+        <thead>
+          <tr>
+            <th scope="col">Host path</th>
+            <th scope="col">Runtime path</th>
+            <th scope="col">Read-only</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={sortedMounts(props.mounts)}>
+            {(m) => (
+              <tr>
+                <td class={styles.pathCell}>{m.hostPath || "—"}</td>
+                <td class={styles.pathCell}>{m.containerPath || "—"}</td>
+                <td>{readOnlyText(m.readOnly)}</td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </Table>
     </Show>
   );
 }
@@ -141,38 +140,35 @@ function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
 function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
   return (
     <Show when={(props.caches?.length ?? 0) > 0} fallback={<div class={styles.empty}>No caches</div>}>
-      <div class={styles.tableWrap}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th class={styles.th}>Name</th>
-              <th class={styles.th}>Description</th>
-              <th class={styles.th}>Host path</th>
-              <th class={styles.th}>Runtime path</th>
-              <th class={styles.th}>Flags</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={sortedCaches(props.caches)}>
-              {(c) => {
-                const flags = () =>
-                  [c.readOnly ? "read-only snapshot" : "", c.shallow ? "shallow copy" : ""]
-                    .filter(Boolean)
-                    .join(", ") || "—";
-                return (
-                  <tr>
-                    <td class={styles.td}>{c.name || "—"}</td>
-                    <td class={styles.td}>{c.description || "—"}</td>
-                    <td class={`${styles.td} ${styles.pathCell}`}>{c.hostPath || "—"}</td>
-                    <td class={`${styles.td} ${styles.pathCell}`}>{c.containerPath || "—"}</td>
-                    <td class={styles.td}>{flags()}</td>
-                  </tr>
-                );
-              }}
-            </For>
-          </tbody>
-        </table>
-      </div>
+      <Table align="labels" label="Mounted caches">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Description</th>
+            <th scope="col">Host path</th>
+            <th scope="col">Runtime path</th>
+            <th scope="col">Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={sortedCaches(props.caches)}>
+            {(c) => {
+              const flags = () =>
+                [c.readOnly ? "read-only snapshot" : "", c.shallow ? "shallow copy" : ""].filter(Boolean).join(", ") ||
+                "—";
+              return (
+                <tr>
+                  <td>{c.name || "—"}</td>
+                  <td>{c.description || "—"}</td>
+                  <td class={styles.pathCell}>{c.hostPath || "—"}</td>
+                  <td class={styles.pathCell}>{c.containerPath || "—"}</td>
+                  <td>{flags()}</td>
+                </tr>
+              );
+            }}
+          </For>
+        </tbody>
+      </Table>
     </Show>
   );
 }
@@ -180,34 +176,32 @@ function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
 function RepoTable(props: { repos?: TaskInfoRepo[] }) {
   return (
     <Show when={(props.repos?.length ?? 0) > 0} fallback={<div class={styles.empty}>No repositories</div>}>
-      <div class={styles.tableWrap}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th class={styles.th}>Name</th>
-              <th class={styles.th}>Base</th>
-              <th class={styles.th}>Branch</th>
-              <th class={styles.th}>Git root</th>
-              <th class={styles.th}>Runtime path</th>
-              <th class={styles.th}>Remote</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={sortedRepos(props.repos)}>
-              {(r) => (
-                <tr>
-                  <td class={styles.td}>{r.name}</td>
-                  <td class={styles.td}>{r.baseBranch || "—"}</td>
-                  <td class={styles.td}>{r.branch || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{r.gitRoot || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{r.containerPath || "—"}</td>
-                  <td class={`${styles.td} ${styles.pathCell}`}>{r.remoteURL || "—"}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+      <Table align="labels" label="Task repositories">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Base</th>
+            <th scope="col">Branch</th>
+            <th scope="col">Git root</th>
+            <th scope="col">Runtime path</th>
+            <th scope="col">Remote</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={sortedRepos(props.repos)}>
+            {(r) => (
+              <tr>
+                <td>{r.name}</td>
+                <td>{r.baseBranch || "—"}</td>
+                <td>{r.branch || "—"}</td>
+                <td class={styles.pathCell}>{r.gitRoot || "—"}</td>
+                <td class={styles.pathCell}>{r.containerPath || "—"}</td>
+                <td class={styles.pathCell}>{r.remoteURL || "—"}</td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </Table>
     </Show>
   );
 }

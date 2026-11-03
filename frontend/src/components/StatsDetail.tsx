@@ -10,7 +10,9 @@ import type { ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
 import styles from "./StatsDetail.module.css";
 
-const StatsCharts = lazy(() => import("./StatsCharts"));
+const statsCharts = () => import("./StatsCharts");
+const StatsCharts = lazy(() => statsCharts().then((module) => ({ default: module.default })));
+const SampleTable = lazy(() => statsCharts().then((module) => ({ default: module.ResourceSamples })));
 const noStats: readonly EventStats[] = [];
 const noTools: readonly ToolTimingSummary[] = [];
 const noTurns: readonly HistoryTurn[] = [];
@@ -159,10 +161,17 @@ export function StatsContent(props: StatsContentProps) {
         <h2 class={styles.sectionTitle}>Resources</h2>
         <Show when={props.stats.length > 0} fallback={<div class={styles.noData}>No data yet</div>}>
           <Suspense fallback={<div class={styles.noData}>Loading resource history…</div>}>
-            <StatsCharts stats={props.stats} turns={noTurns} tools={noTools} />
+            <StatsCharts samples={false} stats={props.stats} turns={noTurns} tools={noTools} />
           </Suspense>
         </Show>
       </section>
+      <Show when={props.stats.length > 0}>
+        <section class={styles.section} aria-label="Exact resource samples">
+          <Suspense fallback={<div class={styles.noData}>Loading samples…</div>}>
+            <SampleTable scope="task" stats={props.stats} />
+          </Suspense>
+        </section>
+      </Show>
     </div>
   );
 }

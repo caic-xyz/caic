@@ -143,7 +143,6 @@ describe("StatsContent", () => {
     expect(resources).toHaveTextContent("Memory3.0 KiB / 4.0 KiB");
     expect(resources).toHaveTextContent("NetworkRX 3.0 KiB · TX 1.0 KiB");
     expect(resources).toHaveTextContent("DiskUnavailable");
-    expect(resources).toHaveTextContent("3 samples");
     const cpuChart = await findByLabelText("CPU utilization over time");
     expect(cpuChart).toBeInTheDocument();
     const cpuDots = Array.from(cpuChart.querySelectorAll("circle"));
@@ -175,8 +174,9 @@ describe("StatsContent", () => {
     hover(txChart, 140);
     expect(rxChart).toHaveTextContent("RX 2.0 KiB/s");
     expect(txChart).toHaveTextContent("TX 1.0 KiB/s");
-    const samples = within(resources).getByTestId("exact-samples");
-    expect(within(samples).getByText("Exact samples")).toBeInTheDocument();
+    // The samples sit in their own block, outside the resource charts.
+    expect(within(resources).queryByTestId("exact-samples")).toBeNull();
+    const samples = await findByTestId("exact-samples");
     const scroller = within(samples).getByRole("region", {
       name: "Exact resource samples",
     });
@@ -304,8 +304,7 @@ describe("StatsContent", () => {
       },
     ];
     const { findByTestId } = render(() => <StatsContent tools={[]} stats={irregularStats} turns={[]} usage={usage} />);
-    const resources = await findByTestId("resource-charts");
-    const table = within(within(resources).getByTestId("exact-samples")).getByRole("table");
+    const table = within(await findByTestId("exact-samples")).getByRole("table");
     // Local time, one decimal per percentage, and whole bytes per rate.
     expect(table).toHaveTextContent(new Date(3_234).toLocaleString());
     expect(table).not.toHaveTextContent("1970-01-01T");

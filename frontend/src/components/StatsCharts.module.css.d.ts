@@ -11,11 +11,9 @@ declare const classes: {
   readonly "note": string;
   readonly "resourceGrid": string;
   readonly "resourceHeader": string;
-  readonly "resourceRange": string;
   readonly "resourceRow": string;
   readonly "resourceUnavailable": string;
   readonly "samples": string;
-  readonly "samplesTitle": string;
   readonly "title": string;
 };
 export default classes;

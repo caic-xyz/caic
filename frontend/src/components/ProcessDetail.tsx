@@ -12,6 +12,7 @@ import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.s
 import type { ProcessInfo } from "@sdk/types.gen";
 
 import { formatBytes, formatElapsed, formatTime } from "../formatting";
+import Table from "./Table";
 import styles from "./ProcessDetail.module.css";
 import { api } from "../api";
 
@@ -186,7 +187,7 @@ function ProcessRow(props: RowProps) {
 
   return (
     <tr>
-      <td class={`${styles.td} ${styles.processCell}`} style={{ "--tree-depth": `${props.node.depth}` }}>
+      <td class={styles.processCell} style={{ "--tree-depth": `${props.node.depth}` }}>
         <span class={styles.treeLines} data-testid="process-graph" aria-hidden="true">
           <For each={continuationColumns()}>
             {(column) => (
@@ -229,7 +230,7 @@ function ProcessRow(props: RowProps) {
           </Show>
         </div>
       </td>
-      <td class={styles.td}>
+      <td>
         <div class={styles.actionsRow}>
           <button
             class={styles.signalBtn}
@@ -249,27 +250,27 @@ function ProcessRow(props: RowProps) {
           </button>
         </div>
       </td>
-      <td class={styles.td}>{props.node.pid}</td>
-      <td class={styles.td}>{props.node.pgrp}</td>
-      <td class={styles.td}>{props.node.user}</td>
-      <td class={styles.td}>
+      <td>{props.node.pid}</td>
+      <td>{props.node.pgrp}</td>
+      <td>{props.node.user}</td>
+      <td>
         <span class={styles.state} style={{ "--state-color": stateColor(props.node.state) }}>
           {props.node.state}
         </span>
       </td>
-      <td class={styles.td}>{props.node.priority}</td>
-      <td class={styles.td}>{props.node.nice}</td>
-      <td class={styles.td}>{props.node.threads}</td>
-      <td class={styles.td}>{props.node.openFDs ?? "—"}</td>
-      <td class={styles.td}>{props.node.cpu.toFixed(1)}</td>
-      <td class={styles.td}>{props.node.mem.toFixed(1)}</td>
-      <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
-      <td class={styles.td}>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
-      <td class={styles.td} title={formatTime(props.node.startedAt)}>
+      <td>{props.node.priority}</td>
+      <td>{props.node.nice}</td>
+      <td>{props.node.threads}</td>
+      <td>{props.node.openFDs ?? "—"}</td>
+      <td>{props.node.cpu.toFixed(1)}</td>
+      <td>{props.node.mem.toFixed(1)}</td>
+      <td>{formatBytes(props.node.rssBytes)}</td>
+      <td>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
+      <td title={formatTime(props.node.startedAt)}>
         {props.todayOnly ? new Date(props.node.startedAt).toLocaleTimeString() : formatTime(props.node.startedAt)}
       </td>
-      <td class={styles.td}>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
-      <td class={styles.td}>
+      <td>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
+      <td>
         <div class={styles.cmd}>{props.node.command}</div>
       </td>
     </tr>
@@ -397,28 +398,28 @@ export default function ProcessDetail(props: Props) {
           <Show when={tree()} keyed fallback={<div class={styles.empty}>No running processes</div>}>
             {(roots) => (
               <Show when={roots.length > 0} fallback={<div class={styles.empty}>No running processes</div>}>
-                <table class={styles.table}>
+                <Table align="labels" class={styles.scroller} label="Running processes">
                   <thead>
                     <tr>
-                      <th class={styles.th}>PROCESS</th>
-                      <th class={styles.th}>ACTIONS</th>
-                      <th class={styles.th}>PID</th>
-                      <th class={styles.th}>PGRP</th>
-                      <th class={styles.th}>USER</th>
-                      <th class={styles.th}>S</th>
-                      <th class={styles.th}>PRI</th>
-                      <th class={styles.th}>NI</th>
-                      <th class={styles.th}>THREADS</th>
-                      <th class={styles.th}>FDS</th>
-                      <th class={styles.th} title="CPU use averaged over the process lifetime; 100% equals one core">
+                      <th scope="col">PROCESS</th>
+                      <th scope="col">ACTIONS</th>
+                      <th scope="col">PID</th>
+                      <th scope="col">PGRP</th>
+                      <th scope="col">USER</th>
+                      <th scope="col">S</th>
+                      <th scope="col">PRI</th>
+                      <th scope="col">NI</th>
+                      <th scope="col">THREADS</th>
+                      <th scope="col">FDS</th>
+                      <th scope="col" title="CPU use averaged over the process lifetime; 100% equals one core">
                         CPU AVG %
                       </th>
-                      <th class={styles.th}>MEM</th>
-                      <th class={styles.th}>RSS</th>
-                      <th class={styles.th}>CPU TIME</th>
-                      <th class={styles.th}>STARTED</th>
-                      <th class={styles.th}>AGE</th>
-                      <th class={styles.th}>COMMAND</th>
+                      <th scope="col">MEM</th>
+                      <th scope="col">RSS</th>
+                      <th scope="col">CPU TIME</th>
+                      <th scope="col">STARTED</th>
+                      <th scope="col">AGE</th>
+                      <th scope="col">COMMAND</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -436,7 +437,7 @@ export default function ProcessDetail(props: Props) {
                       )}
                     </For>
                   </tbody>
-                </table>
+                </Table>
               </Show>
             )}
           </Show>

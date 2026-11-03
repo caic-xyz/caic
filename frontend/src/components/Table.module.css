@@ -1,4 +1,4 @@
-/* Styles for the shared scrollable data table and its row rules. */
+/* Styles for the shared data table: one wrapper, one header, one row rule. */
 
 .wrap {
   width: 100%;
@@ -8,7 +8,7 @@
 
 .wrap:focus-visible {
   outline: 2px solid var(--color-focus-border);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .table {
@@ -18,28 +18,45 @@
   border-collapse: collapse;
 }
 
+/* A chart's text alternative packs into a narrow pane. */
 .dense {
   font-size: 0.68rem;
 }
 
-/* A table in a narrow pane takes its content width instead of spreading a few
-   columns across the pane. */
+/* A table fits its columns instead of its panel. */
 .fit {
   width: auto;
 }
 
 .table th,
 .table td {
-  padding: 0.35rem;
+  padding: 0.3rem 0.4rem;
   text-align: right;
   white-space: nowrap;
   border-bottom: 1px solid var(--color-border-light);
 }
 
-.table thead th {
-  color: var(--color-text-muted);
+/* A table of labels rather than numbers reads from the left. */
+.labels th,
+.labels td {
+  text-align: left;
 }
 
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block: 0.35rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  background: var(--color-bg-surface);
+}
+
+/* The first column names the row, so it reads from the left. */
 .table th:first-child,
 .table td:first-child {
   overflow: hidden;

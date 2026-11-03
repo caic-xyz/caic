@@ -16,12 +16,10 @@ declare const classes: {
   readonly "processCount": string;
   readonly "processName": string;
   readonly "processToggle": string;
+  readonly "scroller": string;
   readonly "signalBtn": string;
   readonly "signalKill": string;
   readonly "state": string;
-  readonly "table": string;
-  readonly "td": string;
-  readonly "th": string;
   readonly "toolbar": string;
   readonly "toolbarBtn": string;
   readonly "treeBranch": string;

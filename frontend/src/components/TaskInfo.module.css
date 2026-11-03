@@ -101,36 +101,6 @@
   color: var(--color-primary);
 }
 
-.tableWrap {
-  overflow: auto;
-}
-
-.table {
-  width: 100%;
-  font-size: 0.8rem;
-  border-collapse: collapse;
-}
-
-.th {
-  padding: 0.3rem 0.4rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--color-text-tertiary);
-  text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--color-border-light);
-}
-
-.td {
-  padding: 0.25rem 0.4rem;
-  vertical-align: baseline;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  border-bottom: 1px solid var(--color-border-light);
-}
-
 .pathCell {
   min-width: 160px;
   font-family: monospace;

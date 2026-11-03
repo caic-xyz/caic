@@ -2,6 +2,7 @@
 declare const classes: {
   readonly "dense": string;
   readonly "fit": string;
+  readonly "labels": string;
   readonly "table": string;
   readonly "wrap": string;
 };

@@ -62,14 +62,6 @@ function formatSampleAge(ageSeconds: number): string {
   return seconds ? `-${minutes}m${String(seconds).padStart(2, "0")}s` : `-${minutes}m`;
 }
 
-function formatSampleTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
 function formatThroughput(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`;
 }
@@ -240,13 +232,6 @@ export function ResourceCharts(props: {
       ...props.stats.map((sample) => (sample.cpuCount ?? sample.cpuCeiling ?? 0) * 100),
     );
   const cpuCount = () => latest()?.cpuCount ?? null;
-  const timeRange = () => {
-    const first = props.stats[0];
-    const last = props.stats.at(-1);
-    if (!first || !last) return "";
-    if (first === last) return `1 sample · ${formatSampleTime(last.ts)}`;
-    return `${props.stats.length} samples · ${formatSampleTime(first.ts)}–${formatSampleTime(last.ts)}`;
-  };
   const cpu = () =>
     windowAnchored(
       props.stats.map((sample) => ({ ts: sample.ts, value: sample.cpuPerc })),
@@ -451,7 +436,6 @@ export function ResourceCharts(props: {
           />
         </Show>
       </div>
-      <div class={styles.resourceRange}>{timeRange()}</div>
       <Show when={props.samples !== false}>
         <ResourceSamples scope={props.scope} stats={props.stats} />
       </Show>
@@ -504,7 +488,6 @@ export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope
 
   return (
     <section class={styles.samples} data-testid="exact-samples">
-      <h3 class={styles.samplesTitle}>Exact samples</h3>
       <DataTable
         columns={[
           "Time",
@@ -553,6 +536,8 @@ export default function StatsCharts(props: {
   stats: readonly EventStats[];
   turns: readonly HistoryTurn[];
   tools: readonly ToolTimingSummary[];
+  // A page that renders the sample table in its own block turns it off here.
+  samples?: boolean;
 }) {
   const stats = createMemo<readonly EventStats[]>((previous) => {
     const next = props.stats.slice(-maxResourceSamples);
@@ -587,7 +572,7 @@ export default function StatsCharts(props: {
   return (
     <>
       <Show when={stats().length > 0}>
-        <ResourceCharts stats={stats()} scope="task" />
+        <ResourceCharts samples={props.samples} stats={stats()} scope="task" />
       </Show>
       <Show when={turns().length > 0}>
         <div class={styles.figure} data-testid="turn-token-chart">

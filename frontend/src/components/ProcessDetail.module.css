@@ -59,8 +59,16 @@
 }
 
 .content {
+  display: flex;
   flex: 1;
-  overflow: auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The table scrolls itself so its header can stay in place. */
+.scroller {
+  flex: 1;
+  min-height: 0;
 }
 
 .loading,
@@ -73,39 +81,6 @@
 
 .error {
   color: var(--color-danger);
-}
-
-.table {
-  --process-rule-color: color-mix(in srgb, var(--color-border-light) 40%, transparent);
-
-  width: 100%;
-  font-size: 0.8rem;
-  border-collapse: collapse;
-}
-
-.th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 0.3rem 0.4rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  vertical-align: bottom;
-  color: var(--color-text-tertiary);
-  text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  background: var(--color-bg-elevated);
-  border-bottom: 1px solid var(--process-rule-color);
-}
-
-.td {
-  padding: 0.2rem 0.4rem;
-  font-variant-numeric: tabular-nums;
-  vertical-align: baseline;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  border-bottom: 1px solid var(--process-rule-color);
 }
 
 .cmd {
@@ -133,7 +108,9 @@
 .processCell {
   --tree-depth: 0;
   --tree-width: calc(var(--tree-depth) * 1ch);
-  --tree-junction-y: calc(1px + 0.2rem + 0.625em);
+
+  /* The shared table pads each cell by 0.3rem; the junction meets the text. */
+  --tree-junction-y: calc(1px + 0.3rem + 0.625em);
 
   position: relative;
 }

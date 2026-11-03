@@ -121,7 +121,7 @@ for (const history of ["clustered", "live"] as const) {
       const sampleTable = page.getByTestId("exact-samples");
       await expect(resources).toBeVisible();
       await expect(resources).toContainText("configured ceiling ≤ 4 CPUs");
-      await expect(resources).toContainText(`${samples.length} samples`);
+      await expect(sampleTable.getByRole("table").locator("tbody tr")).toHaveCount(samples.length);
       const cpu = page.getByLabel("CPU utilization over time");
       await expect(cpu).toBeVisible();
       if (server) {
@@ -135,7 +135,6 @@ for (const history of ["clustered", "live"] as const) {
         });
         expect(clients.size).toBe(1);
         for (const client of clients) client.write(`event: stats\ndata: ${JSON.stringify(sample)}\n\n`);
-        await expect(resources).toContainText("3 samples");
         await expect(resources).toContainText("177.0%");
         await expect(sampleTable.getByRole("table").locator("tbody tr")).toHaveCount(3);
         await expect(sampleTable.getByRole("table").locator("tbody tr").first().locator("td").nth(1)).toHaveText(

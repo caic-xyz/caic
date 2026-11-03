@@ -16,11 +16,7 @@ declare const classes: {
   readonly "pathCell": string;
   readonly "section": string;
   readonly "sectionTitle": string;
-  readonly "table": string;
-  readonly "tableWrap": string;
   readonly "taskLink": string;
-  readonly "td": string;
-  readonly "th": string;
   readonly "value": string;
   readonly "warningList": string;
 };
