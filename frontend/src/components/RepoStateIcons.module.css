@@ -26,11 +26,13 @@
   border-radius: var(--radius-sm);
 }
 
+/* The markers inherit the host's font size so their numbers share its baseline;
+   line-height 1 keeps the dense glyph row at its own height. */
 .icons > span {
   display: inline-flex;
   gap: 0.03rem;
   align-items: center;
-  font-size: 0.75rem;
+  font-size: inherit;
   font-weight: 600;
   line-height: 1;
 }

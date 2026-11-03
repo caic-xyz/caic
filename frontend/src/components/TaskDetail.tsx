@@ -313,35 +313,63 @@ export default function TaskDetail(props: Props) {
     return !!element && element.scrollWidth > element.clientWidth;
   }
 
-  function headerWraps(): boolean {
-    if (!headerRef) return false;
-    const headerItems = Array.from(headerRef.children).filter(
-      (child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none",
-    );
-    const first = headerItems[0]?.getBoundingClientRect();
-    const firstCenter = first && first.top + first.height / 2;
-    return (
-      firstCenter !== undefined &&
-      headerItems.some((item) => {
-        const box = item.getBoundingClientRect();
-        return Math.abs(box.top + box.height / 2 - firstCenter) > 1;
-      })
-    );
+  function headerRows(): number {
+    if (!headerRef) return 0;
+    const centers = Array.from(headerRef.children)
+      .filter(
+        (child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none",
+      )
+      .map((child) => child.getBoundingClientRect())
+      .filter((box) => box.width > 0)
+      .map((box) => box.top + box.height / 2)
+      .sort((a, b) => a - b);
+    let rows = 0;
+    let lastCenter: number | undefined;
+    for (const center of centers) {
+      if (lastCenter === undefined || center - lastCenter > 1) rows++;
+      lastCenter = center;
+    }
+    return rows;
   }
 
+  // The header only wraps when its items no longer fit, so the line totals give
+  // way to the repository context once a second row appears.
   function scheduleHeaderGitStatsElision() {
     if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
-    setElideHeaderGitStats(false);
     headerGitStatsFrame = requestAnimationFrame(() => {
       headerGitStatsFrame = undefined;
-      setElideHeaderGitStats(isEllipsized(headerMetaRef) || headerWraps());
+      // Measure the unwrapped layout in this frame. The browser paints only the
+      // final value, so the temporary layout is never displayed.
+      setElideHeaderGitStats(false);
+      setElideHeaderGitStats(isEllipsized(headerMetaRef) || headerRows() > 1);
     });
   }
 
   onMount(() => {
     scheduleHeaderGitStatsElision();
     window.addEventListener("resize", scheduleHeaderGitStatsElision);
+    // The header settles after mount: panel widths animate, CI checks and Git
+    // state arrive, and token totals stream in. Re-decide on any of those so the
+    // outcome does not depend on when the first measurement ran.
+    const observer = new MutationObserver((records) => {
+      const ownAttributeOnly = records.every(
+        (record) => record.type === "attributes" && record.attributeName === "data-elide-diff-stats",
+      );
+      if (!ownAttributeOnly) scheduleHeaderGitStatsElision();
+    });
+    const resizeObserver = new ResizeObserver(scheduleHeaderGitStatsElision);
+    if (headerRef) {
+      observer.observe(headerRef, {
+        attributeFilter: ["data-elide-diff-stats"],
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
+      resizeObserver.observe(headerRef);
+    }
     onCleanup(() => {
+      observer.disconnect();
+      resizeObserver.disconnect();
       window.removeEventListener("resize", scheduleHeaderGitStatsElision);
       if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
     });

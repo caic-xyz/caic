@@ -17,12 +17,17 @@
   color: var(--color-text-secondary);
 }
 
+/* One font size and one line height for every header item. A shared metric keeps
+   text baselines identical, and the centered flex items then share one optical
+   center with them. */
 .header {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
   margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .header h3 {
@@ -76,7 +81,6 @@
   min-width: 8rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.85rem;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -85,7 +89,6 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.8rem;
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
@@ -464,9 +467,14 @@ a.headerPR:hover {
   margin-top: 0.25rem;
 }
 
+/* Inline-flex shrinks the link to its glyph and centers that glyph on the row
+   axis. On the text baseline a 13px glyph sits above the row center and hangs
+   below the baseline. Text links keep the row baseline because their flex line
+   box uses the inherited metrics. */
 .diffLink {
+  display: inline-flex;
   flex-shrink: 0;
-  font-size: 0.75rem;
+  align-items: center;
   color: var(--color-link);
   white-space: nowrap;
   text-decoration: none;
@@ -1335,8 +1343,8 @@ a.ciStatus:hover {
 }
 
 .headerLoading svg {
-  width: 1rem;
-  height: 1rem;
+  width: 1em;
+  height: 1em;
   animation: history-loading 1s linear infinite;
 }
 

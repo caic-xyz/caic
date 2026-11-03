@@ -1000,12 +1000,48 @@ describe("TaskDetail", () => {
       scrollWidth: { configurable: true, value: 320 },
     });
     window.dispatchEvent(new Event("resize"));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     const diffLink = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
     });
-    expect(diffLink).toHaveAttribute("data-elide-diff-stats", "");
+    await waitFor(() => expect(diffLink).toHaveAttribute("data-elide-diff-stats", ""));
+  });
+
+  it("re-decides header Git line totals when a late item wraps the header", async () => {
+    await renderTaskDetail();
+
+    const header = screen.getByTestId("task-detail-header");
+    const link = await screen.findByRole("link", {
+      name: /my-repo: 2 changed files/,
+    });
+    const layOut = (centers: number[]) => {
+      Array.from(header.children).forEach((child, index) => {
+        const center = centers[index] ?? centers[centers.length - 1] ?? 0;
+        const height = 16;
+        const top = center - height / 2;
+        vi.spyOn(child, "getBoundingClientRect").mockReturnValue({
+          bottom: top + height,
+          height,
+          left: 0,
+          right: 10,
+          toJSON: () => ({}),
+          top,
+          width: 10,
+          x: 0,
+          y: top,
+        });
+      });
+    };
+
+    // Everything shares one flex line, so the raw totals stay.
+    layOut(Array.from(header.children).map(() => 40));
+    header.append(document.createElement("span"));
+    await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
+
+    // A header item that arrives later occupies a second line.
+    layOut(Array.from(header.children).map((_, index) => (index === 0 ? 40 : 60)));
+    header.append(document.createElement("span"));
+    await waitFor(() => expect(link).toHaveAttribute("data-elide-diff-stats", ""));
   });
 
   it("keeps header Git line totals on one center-aligned flex line", async () => {

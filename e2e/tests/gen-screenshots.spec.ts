@@ -239,6 +239,22 @@ test("generate documentation screenshots", async ({ page, api }) => {
   }
   await captureScreenshot(page, "desktop", "task-detail.png");
 
+  // The Git markers and the glyph links share one optical center on the row, so
+  // no icon sits on the text baseline instead of the row axis.
+  const desktopHeader = page.getByTestId("task-detail-header");
+  await expect
+    .poll(async () => {
+      const boxes = await Promise.all([
+        requiredBox(desktopHeaderStats.first().locator("xpath=../..")),
+        requiredBox(desktopHeader.getByRole("link", { name: "Task info" })),
+        requiredBox(desktopHeader.getByRole("link", { name: "Task processes" })),
+        requiredBox(desktopHeader.getByRole("link", { name: "Task statistics" })),
+      ]);
+      const centers = boxes.map((box) => box.y + box.height / 2);
+      return Math.max(...centers) - Math.min(...centers);
+    })
+    .toBeLessThanOrEqual(1);
+
   // Screenshot 2: Repository changes with an expanded per-file patch.
   await page
     .getByTestId("task-detail-header")

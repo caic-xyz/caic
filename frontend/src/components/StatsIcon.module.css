@@ -17,9 +17,10 @@
   background: var(--color-bg-hover);
 }
 
+/* The summary inherits the host row's typography so its baseline matches the
+   neighboring header text. */
 .iconSummary {
-  margin-left: 0.3rem;
-  font-size: 0.75rem;
+  margin-left: 0.4em;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-secondary);
   white-space: nowrap;
