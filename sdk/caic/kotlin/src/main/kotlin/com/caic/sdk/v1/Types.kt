@@ -3190,14 +3190,16 @@ data class AuthBootstrapResp(val authProviders: List<String>, val user: UserResp
 
 /** TaskDirEntry is one child of a listed directory. */
 @Serializable
-data class TaskDirEntry(val name: String, val isDir: Boolean)
+data class TaskDirEntry(
+    val name: String,
+    val isDir: Boolean,
+    /** Size is the reported size in bytes; a directory reports its own metadata. */
+    val size: Long,
+    /** Modified is the modification time, absent when the runtime cannot report it. */
+    val modified: Instant? = null,
+)
 
-/**
- * TaskDirListing is the raw endpoint's representation of a directory: a
- * directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
- * immediate children as JSON instead. The endpoint stays outside the generated
- * SDK because the same URL also streams bytes.
- */
+/** TaskDirListing is the raw endpoint's directory representation. */
 @Serializable
 data class TaskDirListing(
     /** Path is the resolved container directory. */

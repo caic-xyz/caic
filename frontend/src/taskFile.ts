@@ -4,6 +4,8 @@ import type { TaskDirEntry, TaskDirListing } from "@sdk/types.gen";
 import { isCompressedStepPath, taskRawURL } from "./runtimePath";
 
 const maxTextBytes = 1 << 20;
+// Mirrors v1.TaskDirListingMediaType; the raw endpoint serves listings under it.
+export const dirListingMediaType = "application/vnd.caic.dir+json";
 const imageTypes = new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/webp"]);
 
 export type TaskFilePreview =
@@ -35,7 +37,7 @@ export async function readTaskFilePreview(taskId: string, path: string, signal: 
     .trim();
   const textFile = contentType.startsWith("text/");
   if (!textFile) {
-    if (contentType === "application/json") return readDirListing(res);
+    if (contentType === dirListingMediaType) return readDirListing(res);
     await res.body?.cancel();
     if (contentType.startsWith("audio/")) return { kind: "audio" };
     if (contentType.startsWith("video/")) return { kind: "video" };
@@ -81,8 +83,13 @@ function isDirListing(value: unknown): value is TaskDirListing {
     Array.isArray(entries) &&
     entries.every((entry: unknown) => {
       if (typeof entry !== "object" || entry === null) return false;
-      const { name, isDir } = entry as Record<string, unknown>;
-      return typeof name === "string" && typeof isDir === "boolean";
+      const { name, isDir, size, modified } = entry as Record<string, unknown>;
+      return (
+        typeof name === "string" &&
+        typeof isDir === "boolean" &&
+        typeof size === "number" &&
+        (modified === undefined || modified === null || typeof modified === "string")
+      );
     })
   );
 }

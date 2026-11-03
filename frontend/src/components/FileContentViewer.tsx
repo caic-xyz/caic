@@ -23,6 +23,7 @@ import styles from "./FileContentViewer.module.css";
 import Markdown, { MarkdownTaskContext } from "./Markdown";
 import { dirname, isMarkdownPath, joinRuntimePath, taskRawURL, taskViewURL } from "../runtimePath";
 import { splitFrontMatter } from "../frontMatter";
+import { formatBytes } from "../formatting";
 import { readTaskFilePreview, type TaskFilePreview } from "../taskFile";
 
 const PdfPreview = lazy(() => import("./PdfPreview"));
@@ -87,11 +88,19 @@ function DirListing(props: { taskId: string; listing: Extract<TaskFilePreview, {
               <A
                 class={styles.dirEntry}
                 href={taskViewURL(props.taskId, joinRuntimePath(props.listing.path, entry.name))}
+                title={
+                  entry.modified ? `${entry.name}, modified ${new Date(entry.modified).toLocaleString()}` : entry.name
+                }
               >
                 <Show when={entry.isDir} fallback={<FileIcon width="1.1em" height="1.1em" aria-hidden="true" />}>
                   <FolderIcon width="1.1em" height="1.1em" aria-hidden="true" />
                 </Show>
                 <span class={styles.dirEntryName}>{entry.isDir ? `${entry.name}/` : entry.name}</span>
+                <Show when={!entry.isDir}>
+                  <span class={styles.dirEntryMeta} aria-hidden="true">
+                    {formatBytes(entry.size)}
+                  </span>
+                </Show>
               </A>
             </li>
           )}
@@ -212,9 +221,12 @@ export default function FileContentViewer(props: Props) {
           <Match when={file.state === "ready" && file()?.kind === "unsupported"}>
             <div class={styles.notice}>No preview for this file. Open the raw file to download it.</div>
           </Match>
-          <Match when={!isMarkdownPath(props.path) && textFile()} keyed>
+          <Match when={(props.line !== null || !isMarkdownPath(props.path)) && textFile()} keyed>
             {(source) => (
               <>
+                <Show when={isMarkdownPath(props.path)}>
+                  <div class={styles.notice}>Source view: the link names line {props.line}.</div>
+                </Show>
                 <SourceText text={source.text} line={props.line ?? null} />
                 <Show when={source.truncated}>
                   <div class={styles.notice}>File truncated: only the first 1 MiB is shown.</div>
@@ -222,7 +234,7 @@ export default function FileContentViewer(props: Props) {
               </>
             )}
           </Match>
-          <Match when={textFile()}>
+          <Match when={props.line === null && isMarkdownPath(props.path) && textFile()}>
             <MarkdownTaskContext.Provider value={taskId}>
               <article class={styles.page}>
                 <Show when={doc().frontMatter} keyed>

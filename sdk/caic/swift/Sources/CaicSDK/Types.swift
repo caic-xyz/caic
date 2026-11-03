@@ -2475,12 +2475,13 @@ public struct AuthBootstrapResp: Codable {
 public struct TaskDirEntry: Codable {
     public let name: String
     public let isDir: Bool
+    /// Size is the reported size in bytes; a directory reports its own metadata.
+    public let size: Int
+    /// Modified is the modification time, absent when the runtime cannot report it.
+    public let modified: ISOTimestamp?
 }
 
-/// TaskDirListing is the raw endpoint's representation of a directory: a
-/// directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
-/// immediate children as JSON instead. The endpoint stays outside the generated
-/// SDK because the same URL also streams bytes.
+/// TaskDirListing is the raw endpoint's directory representation.
 public struct TaskDirListing: Codable {
     /// Path is the resolved container directory.
     public let path: String

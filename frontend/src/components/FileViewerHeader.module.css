@@ -18,3 +18,18 @@
   font-size: 0.8rem;
   color: var(--color-link);
 }
+
+.crumb {
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumb:hover,
+.crumb:focus-visible {
+  color: var(--color-link);
+  text-decoration: underline;
+}
+
+.crumbCurrent {
+  color: var(--color-text-primary);
+}

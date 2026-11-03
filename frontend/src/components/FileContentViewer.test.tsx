@@ -7,6 +7,11 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import FileContentViewer from "./FileContentViewer";
+import { dirListingMediaType } from "../taskFile";
+
+function listingResponse(listing: unknown): Response {
+  return new Response(JSON.stringify(listing), { headers: { "Content-Type": dirListingMediaType } });
+}
 
 const textHeaders = { "Content-Type": "text/plain; charset=utf-8" };
 
@@ -173,13 +178,13 @@ describe("FileContentViewer", () => {
     expect(await screen.findByText(/File truncated/)).toBeInTheDocument();
   });
 
-  it("lists a directory and links its entries and parent", async () => {
+  it("lists a directory with sizes and links its entries and parent", async () => {
     fetchMock.mockResolvedValue(
-      Response.json({
+      listingResponse({
         path: "/home/user/src/artifacts",
         entries: [
-          { name: "reports", isDir: true },
-          { name: "summary.json", isDir: false },
+          { name: "reports", isDir: true, size: 4096 },
+          { name: "summary.json", isDir: false, size: 1536, modified: "2026-11-03T12:00:00.000Z" },
         ],
         truncated: false,
       }),
@@ -196,13 +201,34 @@ describe("FileContentViewer", () => {
       "href",
       "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc",
     );
+    expect(screen.getByText("1.5 KiB")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "summary.json" })).toHaveAttribute(
+      "title",
+      "summary.json, modified " + new Date("2026-11-03T12:00:00.000Z").toLocaleString(),
+    );
     expect(screen.queryByRole("link", { name: "raw file" })).not.toBeInTheDocument();
   });
 
   it("reports a malformed directory listing", async () => {
-    fetchMock.mockResolvedValue(Response.json({ path: "/x", entries: "nope", truncated: false }));
+    fetchMock.mockResolvedValue(listingResponse({ path: "/x", entries: "nope", truncated: false }));
     renderViewer("/x");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("invalid directory listing");
+  });
+
+  it("treats plain JSON as an ordinary file", async () => {
+    fetchMock.mockResolvedValue(Response.json({ path: "/x", entries: [], truncated: false }));
+    renderViewer("/data.json");
+
+    expect(await screen.findByText(/No preview for this file/)).toBeInTheDocument();
+  });
+
+  it("shows a Markdown file as source when the link names a line", async () => {
+    fetchMock.mockResolvedValue(new Response("# Heading\n\nBody\n", { headers: textHeaders }));
+    const { container } = renderViewer("/notes.md", 2);
+
+    expect(await screen.findByText(/Source view: the link names line 2/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Heading" })).not.toBeInTheDocument();
+    expect(container.querySelector("mark")?.textContent).toBe("");
   });
 });

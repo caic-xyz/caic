@@ -200,7 +200,8 @@ endsolid sample
     fetchMock.mockResolvedValue(new Response(stlBytes));
     renderViewer("/home/user/models/sample.stl");
 
-    expect(screen.getByText("/home/user/models/sample.stl")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Path" })).toHaveAttribute("title", "/home/user/models/sample.stl");
+    expect(screen.getByText("sample.stl")).toHaveAttribute("aria-current", "page");
     const rawLink = screen.getByRole("link", { name: "raw file" });
     expect(rawLink).toHaveAttribute("href", "/api/caic/v1/tasks/abc/raw?path=%2Fhome%2Fuser%2Fmodels%2Fsample.stl");
     expect(rawLink).toHaveAttribute("target", "_blank");

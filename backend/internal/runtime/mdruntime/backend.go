@@ -1212,8 +1212,10 @@ func (b *Backend) FileSize(ctx context.Context, id runtime.ID, path string) (int
 	return size, nil
 }
 
-// dirListingByteLimit bounds one directory report before sorting and capping.
-const dirListingByteLimit = 1 << 20
+// dirListingByteLimit bounds one directory report before sorting and capping. It
+// fits DirEntryLimit records with maximum-length names, so every directory at or
+// below the limit lists completely.
+const dirListingByteLimit = 8 << 20
 
 // ReadDir implements runtime.Files with one find report per call. The report is
 // read through a limit so a huge directory cannot exhaust server memory.
@@ -1230,7 +1232,7 @@ func (b *Backend) ReadDir(ctx context.Context, id runtime.ID, path string) ([]ru
 		return nil, false, err
 	}
 	// %Y follows symlinks, so a link to a directory lists as a directory.
-	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -d "$p" ] || exit 45; exec find "$p" -mindepth 1 -maxdepth 1 -printf '%f\t%Y\0'`
+	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -d "$p" ] || exit 45; exec find "$p" -mindepth 1 -maxdepth 1 -printf '%f\t%Y\t%s\t%T@\0'`
 	sshArgs := ct.SSHCommand(nil, command)
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1272,8 +1274,9 @@ func (b *Backend) ReadDir(ctx context.Context, id runtime.ID, path string) ([]ru
 	return parseDirEntries(data)
 }
 
-// parseDirEntries decodes NUL-delimited "name\ttype" records into entries
-// sorted by name, keeping at most runtime.DirEntryLimit of them.
+// parseDirEntries decodes NUL-delimited "name\ttype\tsize\tmtime" records into
+// entries sorted by name, keeping at most runtime.DirEntryLimit of them. Names
+// may contain tabs and newlines, so the last three fields delimit the name.
 func parseDirEntries(data []byte) ([]runtime.DirEntry, bool, error) {
 	if end := bytes.LastIndexByte(data, 0) + 1; end < len(data) {
 		// A clipped transfer can end inside a record.
@@ -1285,17 +1288,50 @@ func parseDirEntries(data []byte) ([]runtime.DirEntry, bool, error) {
 		if len(record) == 0 {
 			continue
 		}
-		sep := bytes.LastIndexByte(record, '\t')
-		if sep <= 0 || sep == len(record)-1 {
+		fields := bytes.Split(record, []byte{'\t'})
+		if len(fields) < 4 {
 			return nil, false, fmt.Errorf("invalid directory entry %q", record)
 		}
-		entries = append(entries, runtime.DirEntry{Name: string(record[:sep]), IsDir: record[sep+1] == 'd'})
+		name := string(bytes.Join(fields[:len(fields)-3], []byte{'\t'}))
+		if name == "" {
+			return nil, false, fmt.Errorf("invalid directory entry %q", record)
+		}
+		size, err := strconv.ParseInt(string(fields[len(fields)-2]), 10, 64)
+		if err != nil || size < 0 {
+			return nil, false, fmt.Errorf("invalid directory entry size %q", record)
+		}
+		modified, err := parseFindTimestamp(fields[len(fields)-1])
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid directory entry time %q", record)
+		}
+		entries = append(entries, runtime.DirEntry{
+			Name:     name,
+			IsDir:    string(fields[len(fields)-3]) == "d",
+			Size:     size,
+			Modified: &modified,
+		})
 	}
 	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
 	if len(entries) <= runtime.DirEntryLimit {
 		return entries, false, nil
 	}
 	return entries[:runtime.DirEntryLimit], true, nil
+}
+
+// parseFindTimestamp decodes find's %T@ seconds with a fractional part. The
+// fraction is parsed as digits so the time keeps nanosecond precision.
+func parseFindTimestamp(field []byte) (time.Time, error) {
+	whole, fraction, _ := strings.Cut(string(field), ".")
+	seconds, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fraction = (fraction + "000000000")[:9]
+	nanos, err := strconv.ParseInt(fraction, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(seconds, nanos), nil
 }
 
 // commandResult is the separated output of one command run in a container.

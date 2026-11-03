@@ -558,9 +558,23 @@ func TestBackend(t *testing.T) {
 		if err != nil || truncated {
 			t.Fatalf("ReadDir = %v, %v", truncated, err)
 		}
-		want := []runtime.DirEntry{{Name: "a dir", IsDir: true}, {Name: "b.txt"}, {Name: "c link", IsDir: true}}
-		if !slices.Equal(entries, want) {
-			t.Fatalf("entries = %v, want %v", entries, want)
+		got := make([]string, 0, len(entries))
+		for _, e := range entries {
+			kind := "-"
+			if e.IsDir {
+				kind = "d"
+			}
+			if e.Modified == nil || e.Modified.IsZero() {
+				t.Fatalf("entry %q has no modification time", e.Name)
+			}
+			got = append(got, kind+" "+e.Name)
+		}
+		want := []string{"d a dir", "- b.txt", "d c link"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("entries = %v, want %v", got, want)
+		}
+		if entries[1].Size != 1 {
+			t.Fatalf("b.txt size = %d, want 1", entries[1].Size)
 		}
 		for _, tc := range []struct {
 			path string
@@ -577,23 +591,28 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("parse directory entries", func(t *testing.T) {
 		t.Parallel()
-		entries, truncated, err := parseDirEntries([]byte("b.txt\tf\x00a dir\td\x00"))
+		entries, truncated, err := parseDirEntries([]byte("b.txt\tf\t3\t1700000000.2500000000\x00a\tdir\td\t4096\t1700000001.0000000000\x00"))
 		if err != nil || truncated {
 			t.Fatalf("parseDirEntries = %v, %v", truncated, err)
 		}
-		want := []runtime.DirEntry{{Name: "a dir", IsDir: true}, {Name: "b.txt"}}
-		if !slices.Equal(entries, want) {
-			t.Fatalf("entries = %v, want %v", entries, want)
+		if len(entries) != 2 || entries[0].Name != "a\tdir" || !entries[0].IsDir || entries[0].Size != 4096 {
+			t.Fatalf("entries = %+v", entries)
+		}
+		if entries[1].Name != "b.txt" || entries[1].IsDir || entries[1].Size != 3 {
+			t.Fatalf("entries = %+v", entries)
+		}
+		if want := time.Unix(0, 1700000000*int64(time.Second)+250*int64(time.Millisecond)); !entries[1].Modified.Equal(want) {
+			t.Fatalf("modified = %v, want %v", entries[1].Modified, want)
 		}
 		// A clipped transfer drops its partial record.
-		if entries, _, err := parseDirEntries([]byte("a\tf\x00b\tf\x00tru")); err != nil || len(entries) != 2 {
+		if entries, _, err := parseDirEntries([]byte("a\tf\t1\t1.0\x00b\tf\t1\t1.0\x00tru")); err != nil || len(entries) != 2 {
 			t.Fatalf("clipped = %v, %v", entries, err)
 		}
-		many := bytes.Repeat([]byte("x\tf\x00"), runtime.DirEntryLimit+1)
+		many := bytes.Repeat([]byte("x\tf\t1\t1.0\x00"), runtime.DirEntryLimit+1)
 		if entries, truncated, err := parseDirEntries(many); err != nil || !truncated || len(entries) != runtime.DirEntryLimit {
 			t.Fatalf("cap = %d entries, truncated %v, %v", len(entries), truncated, err)
 		}
-		for _, bad := range [][]byte{[]byte("notab\x00"), []byte("only\t\x00")} {
+		for _, bad := range [][]byte{[]byte("notab\x00"), []byte("only\tf\x00"), []byte("a\tf\tbig\t1.0\x00"), []byte("a\tf\t1\tbad\x00")} {
 			if _, _, err := parseDirEntries(bad); err == nil {
 				t.Fatalf("parseDirEntries(%q) succeeded, want error", bad)
 			}

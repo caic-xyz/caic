@@ -34,19 +34,28 @@ for (const width of [390, 1280]) {
         await route.fulfill({ contentType: "application/pdf", body: createPdfFixture() });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/home/user/src/artifacts") {
         await route.fulfill({
-          contentType: "application/json",
+          contentType: "application/vnd.caic.dir+json",
           body: JSON.stringify({
             path: "/home/user/src/artifacts",
             entries: [
-              { name: "reports", isDir: true },
-              { name: "summary.json", isDir: false },
+              { name: "reports", isDir: true, size: 4096 },
+              { name: "summary.json", isDir: false, size: 1536 },
             ],
+            truncated: false,
+          }),
+        });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/home/user/src") {
+        await route.fulfill({
+          contentType: "application/vnd.caic.dir+json",
+          body: JSON.stringify({
+            path: "/home/user/src",
+            entries: [{ name: "artifacts", isDir: true, size: 4096 }],
             truncated: false,
           }),
         });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/home/user/src/artifacts/reports") {
         await route.fulfill({
-          contentType: "application/json",
+          contentType: "application/vnd.caic.dir+json",
           body: JSON.stringify({ path: "/home/user/src/artifacts/reports", entries: [], truncated: false }),
         });
       } else if (new URL(route.request().url()).searchParams.get("path") === "/broken.pdf") {
@@ -110,6 +119,10 @@ for (const width of [390, 1280]) {
       await page.getByRole("link", { name: "Parent directory", exact: true }).click();
       await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/home/user/src/artifacts")}`);
       await expect(page.getByRole("link", { name: "summary.json", exact: true })).toBeVisible();
+      await expect(page.getByText("1.5 KiB")).toBeVisible();
+      await page.getByRole("navigation", { name: "Path" }).getByRole("link", { name: "src", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/home/user/src")}`);
+      await expect(page.getByRole("link", { name: "artifacts/", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
     });
 

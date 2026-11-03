@@ -413,7 +413,11 @@ func (*RuntimeBackend) ReadDir(_ context.Context, _ runtime.ID, path string) ([]
 	}
 	entries := make([]runtime.DirEntry, 0, len(dirs))
 	for name, isDir := range dirs {
-		entries = append(entries, runtime.DirEntry{Name: name, IsDir: isDir})
+		entry := runtime.DirEntry{Name: name, IsDir: isDir}
+		if !isDir {
+			entry.Size = int64(len(artifacts[prefix+name]))
+		}
+		entries = append(entries, entry)
 	}
 	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
 	return entries, false, nil

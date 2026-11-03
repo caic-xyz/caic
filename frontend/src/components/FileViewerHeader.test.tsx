@@ -30,6 +30,28 @@ function fixture(extra: JSX.Element) {
 afterEach(cleanup);
 
 describe("FileViewerHeader", () => {
+  it("links path segments and marks the current one", async () => {
+    window.history.replaceState(null, "", "/task/@abc/view?path=%2Fhome%2Fuser%2Fdocs%2Fguide.md");
+    render(() => (
+      <Router>
+        <Route
+          path="/*"
+          component={() => <FileViewerHeader taskId="abc" taskPath="/task/@abc" path="/home/user/docs/guide.md" />}
+        />
+      </Router>
+    ));
+
+    expect(screen.getByRole("navigation", { name: "Path" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "home" })).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome");
+    expect(screen.getByRole("link", { name: "user" })).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser");
+    expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute(
+      "href",
+      "/task/@abc/view?path=%2Fhome%2Fuser%2Fdocs",
+    );
+    expect(screen.getByText("guide.md")).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "guide.md" })).not.toBeInTheDocument();
+  });
+
   it("lets a capture-phase dropdown close without closing the document", async () => {
     const [open, setOpen] = createSignal(false);
     fixture(

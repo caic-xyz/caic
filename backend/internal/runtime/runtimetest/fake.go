@@ -302,7 +302,11 @@ func (f *FakeBackend) ReadDir(_ context.Context, _ runtime.ID, path string) ([]r
 	}
 	entries := make([]runtime.DirEntry, 0, len(dirs))
 	for name, isDir := range dirs {
-		entries = append(entries, runtime.DirEntry{Name: name, IsDir: isDir})
+		entry := runtime.DirEntry{Name: name, IsDir: isDir}
+		if !isDir {
+			entry.Size = int64(len(f.Files[prefix+name]))
+		}
+		entries = append(entries, entry)
 	}
 	slices.SortFunc(entries, func(a, b runtime.DirEntry) int { return strings.Compare(a.Name, b.Name) })
 	if len(entries) <= runtime.DirEntryLimit {

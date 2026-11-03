@@ -259,6 +259,17 @@ describe("Markdown", () => {
     );
   });
 
+  it("links spaced destinations with nested labels and reference definitions", async () => {
+    const viewHref = (path: string) => `/task/@task123/view?${new URLSearchParams({ path })}`;
+    renderMarkdown(
+      "Plan [draft v2](/docs/Plan draft.md) and [Notes][notes].\n\n[notes]: /docs/My Notes.md",
+      () => "task123",
+    );
+
+    expect(screen.getByRole("link", { name: "draft v2" })).toHaveAttribute("href", viewHref("/docs/Plan draft.md"));
+    expect(screen.getByRole("link", { name: "Notes" })).toHaveAttribute("href", viewHref("/docs/My Notes.md"));
+  });
+
   it("keeps destination titles and web links intact", async () => {
     renderMarkdown('[Guide](/docs/user guide.md "User guide") [Site](https://example.com/docs)', () => "task123");
 

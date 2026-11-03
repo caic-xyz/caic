@@ -1256,10 +1256,13 @@ type FileDiffResp struct {
 	Diff string `json:"diff"`
 }
 
-// TaskDirListing is the raw endpoint's representation of a directory: a
-// directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
-// immediate children as JSON instead. The endpoint stays outside the generated
-// SDK because the same URL also streams bytes.
+// TaskDirListingMediaType marks a directory listing served by the raw endpoint.
+// A directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
+// immediate children under this media type instead of bytes. The endpoint stays
+// outside the generated SDK because the same URL also streams files.
+const TaskDirListingMediaType = "application/vnd.caic.dir+json"
+
+// TaskDirListing is the raw endpoint's directory representation.
 type TaskDirListing struct {
 	// Path is the resolved container directory.
 	Path string `json:"path"`
@@ -1273,6 +1276,10 @@ type TaskDirListing struct {
 type TaskDirEntry struct {
 	Name  string `json:"name"`
 	IsDir bool   `json:"isDir"`
+	// Size is the reported size in bytes; a directory reports its own metadata.
+	Size int64 `json:"size"`
+	// Modified is the modification time, absent when the runtime cannot report it.
+	Modified *time.Time `json:"modified,omitempty"`
 }
 
 // ProcessInfo describes a single process running inside the task runtime instance.

@@ -5,6 +5,7 @@ declare const classes: {
   readonly "content": string;
   readonly "dirEntries": string;
   readonly "dirEntry": string;
+  readonly "dirEntryMeta": string;
   readonly "dirEntryName": string;
   readonly "dirListing": string;
   readonly "error": string;

@@ -121,7 +121,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 	botFixCISpec.Annotations = &mcp.ToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
 	return []mcp.ToolSpec{
-		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List current coding tasks in stable active-first order. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List coding tasks in stable active-first order. A task-scoped agent lists only the tasks it created; task_get_detail accepts any stable task ID. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,

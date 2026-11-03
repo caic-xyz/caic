@@ -2369,14 +2369,13 @@ export interface AuthBootstrapResp {
 export interface TaskDirEntry {
   name: string;
   isDir: boolean;
+  /** Size is the reported size in bytes; a directory reports its own metadata. */
+  size: number /* int64 */;
+  /** Modified is the modification time, absent when the runtime cannot report it. */
+  modified?: ISOTimestamp;
 }
 
-/**
- * TaskDirListing is the raw endpoint's representation of a directory: a
- * directory has no byte stream, so GET /api/caic/v1/tasks/{id}/raw returns its
- * immediate children as JSON instead. The endpoint stays outside the generated
- * SDK because the same URL also streams bytes.
- */
+/** TaskDirListing is the raw endpoint's directory representation. */
 export interface TaskDirListing {
   /** Path is the resolved container directory. */
   path: string;

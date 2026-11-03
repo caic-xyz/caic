@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 func TestTaskFile(t *testing.T) {
@@ -270,11 +271,11 @@ func TestTaskFile(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/dir", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, req)
-		want := `{"path":"/dir","entries":[{"name":"a.txt","isDir":false},{"name":"sub","isDir":true}],"truncated":false}` + "\n"
+		want := `{"path":"/dir","entries":[{"name":"a.txt","isDir":false,"size":1},{"name":"sub","isDir":true,"size":0}],"truncated":false}` + "\n"
 		if w.Code != http.StatusOK || w.Body.String() != want {
 			t.Fatalf("status %d, body %q", w.Code, w.Body.String())
 		}
-		if w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Accept-Ranges") != "" {
+		if w.Header().Get("Content-Type") != v1.TaskDirListingMediaType || w.Header().Get("Accept-Ranges") != "" {
 			t.Fatalf("headers = %v", w.Header())
 		}
 	})

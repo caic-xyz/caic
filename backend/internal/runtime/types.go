@@ -374,7 +374,7 @@ type System interface {
 const FileChunkSize = 64 << 10
 
 // DirEntryLimit bounds each directory listing.
-const DirEntryLimit = 500
+const DirEntryLimit = 16000
 
 // ErrIsDir reports that a path names a directory where a regular file was required.
 var ErrIsDir = errors.New("path is a directory")
@@ -383,6 +383,10 @@ var ErrIsDir = errors.New("path is a directory")
 type DirEntry struct {
 	Name  string
 	IsDir bool
+	// Size is the reported size in bytes; a directory reports its own metadata.
+	Size int64
+	// Modified is the modification time, or nil when the runtime cannot report it.
+	Modified *time.Time
 }
 
 // Files streams regular files from an instance, never the server's filesystem.

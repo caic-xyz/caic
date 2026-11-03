@@ -730,7 +730,7 @@ func (h *taskHandlers) writeTaskDir(w http.ResponseWriter, r *http.Request, entr
 		return true
 	}
 	w.Header().Del("Accept-Ranges")
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", v1.TaskDirListingMediaType)
 	w.Header().Set("Content-Disposition", "inline")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

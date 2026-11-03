@@ -50,9 +50,8 @@ const markdownRenderer = {
 // local paths with spaces emit literal text. Percent-encode those spaces and
 // retry the parse; code spans and web URLs stay untouched.
 function repairHeadLink(src: string): { source: string; raw: string } | null {
-  const head = linkHead.exec(src);
-  if (!head) return null;
-  const start = head[0].length;
+  const start = linkHeadEnd(src);
+  if (start === null) return null;
   const end = destinationEnd(src, start);
   if (end < 0) return null;
   const destination = src.slice(start, end);
@@ -80,7 +79,39 @@ function destinationEnd(text: string, open: number): number {
   return -1;
 }
 
-const linkHead = /^!?\[[^\]\n]*\]\(/;
+/** Returns the offset after "(" of a leading link or image label, or null. */
+function linkHeadEnd(src: string): number | null {
+  const offset = src.startsWith("![") ? 1 : 0;
+  if (src[offset] !== "[") return null;
+  let depth = 0;
+  for (let i = offset; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "\\") {
+      i++;
+    } else if (ch === "\n") {
+      return null;
+    } else if (ch === "[") {
+      depth++;
+    } else if (ch === "]" && --depth === 0) {
+      return src[i + 1] === "(" ? i + 2 : null;
+    }
+  }
+  return null;
+}
+
+/** Returns a link definition with its local-file destination spaces encoded. */
+function repairHeadDefinition(src: string): { source: string; raw: string } | null {
+  const head = definitionHead.exec(src);
+  if (!head) return null;
+  const start = head[0].length;
+  const lineEnd = src.indexOf("\n", start);
+  const end = lineEnd < 0 ? src.length : lineEnd;
+  const encoded = encodeDestination(src.slice(start, end));
+  if (encoded === src.slice(start, end)) return null;
+  return { source: src.slice(0, start) + encoded + src.slice(end), raw: src.slice(0, end) };
+}
+
+const definitionHead = /^ {0,3}\[[^\]\n]*\]:[ \t]*/;
 const localPathPrefix = /^(?:file:\/\/\/|\/|\.{1,2}\/|~\/)/;
 const quotedTitle = /^(.*?)(\s+(?:"[^"]*"|'[^']*'))$/;
 const parenTitle = /^([^\s]+)(\s+\([^)]*\))$/;
@@ -120,6 +151,15 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
         const repair = repairHeadLink(src);
         if (!repair) return undefined;
         const repaired = Tokenizer.prototype.link.call(this, repair.source);
+        if (repaired) repaired.raw = repair.raw;
+        return repaired;
+      },
+      def(this: Tokenizer, src: string): Tokens.Def | undefined {
+        const token = Tokenizer.prototype.def.call(this, src);
+        if (token) return token;
+        const repair = repairHeadDefinition(src);
+        if (!repair) return undefined;
+        const repaired = Tokenizer.prototype.def.call(this, repair.source);
         if (repaired) repaired.raw = repair.raw;
         return repaired;
       },

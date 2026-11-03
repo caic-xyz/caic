@@ -131,3 +131,15 @@
   color: inherit;
   background: var(--color-primary-container);
 }
+
+.dirEntryMeta {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.dirEntries > li {
+  contain-intrinsic-size: auto 1.9rem;
+  content-visibility: auto;
+}
