@@ -18,9 +18,6 @@ export interface UsageToolEntry {
   calls: number;
   timedCalls: number;
   durationMs: number;
-  // distributionCalls counts the timed calls whose duration landed in a
-  // bucket, which is every call recorded after the rollup kept a distribution.
-  distributionCalls: number;
   // medianMs is null when no call in the range kept a duration distribution.
   medianMs: number | null;
 }
@@ -143,7 +140,7 @@ function counts(entries: readonly UsageDashboardCount[]): UsageDashboardCount[] 
 }
 
 function newToolEntry(name: string): UsageToolEntry {
-  return { name, calls: 0, timedCalls: 0, durationMs: 0, distributionCalls: 0, medianMs: null };
+  return { name, calls: 0, timedCalls: 0, durationMs: 0, medianMs: null };
 }
 
 // usageToolMedianMs estimates a tool's median duration from merged buckets. Each
@@ -306,7 +303,6 @@ export function summarizeUsageDays(
       const buckets = toolBuckets.get(timing.name) ?? new Map<number, number>();
       for (const bucket of timing.buckets) {
         buckets.set(bucket.upperMs, (buckets.get(bucket.upperMs) ?? 0) + bucket.count);
-        entry.distributionCalls += bucket.count;
       }
       toolBuckets.set(timing.name, buckets);
       tools.set(timing.name, entry);

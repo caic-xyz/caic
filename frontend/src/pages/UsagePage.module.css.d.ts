@@ -11,7 +11,6 @@ declare const classes: {
   readonly "noRows": string;
   readonly "panel": string;
   readonly "rowButton": string;
-  readonly "table": string;
   readonly "tableWrap": string;
 };
 export default classes;

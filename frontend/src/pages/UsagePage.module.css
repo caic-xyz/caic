@@ -119,40 +119,9 @@
   color: var(--color-text-secondary);
 }
 
+/* The shared table supplies the rules; the panel only spaces it from its title. */
 .tableWrap {
   margin-top: 0.65rem;
-  overflow-x: auto;
-}
-
-.tableWrap:focus-visible {
-  outline: 2px solid var(--color-focus-border);
-  outline-offset: 2px;
-}
-
-.table {
-  width: 100%;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  padding: 0.35rem;
-  text-align: right;
-  border-bottom: 1px solid var(--color-border-light);
-}
-
-.table thead th {
-  color: var(--color-text-muted);
-}
-
-.table th:first-child,
-.table td:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: left;
-  white-space: nowrap;
 }
 
 .countList {
@@ -180,8 +149,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The panel edge closes the last row; a rule under it would double the line. */
-.table tbody tr:last-child > *,
+/* The panel edge closes the last entry; a rule under it would double the line. */
 .countList li:last-child {
   border-bottom: none;
 }

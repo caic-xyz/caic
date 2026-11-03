@@ -462,7 +462,10 @@ export function ResourceCharts(props: {
 
 // ResourceSamples lists every sample behind the resource charts. A page that
 // places the table itself, below other sections, turns it off on the charts.
+// A task pane is too narrow for the machine-only columns: its throughput charts
+// carry the rates, and its CPU ceiling, quota, and runtime barely move.
 export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope: "machine" | "task" }) {
+  const machine = () => props.scope === "machine";
   const networkRates = createMemo(() => deriveNetworkRates(props.stats));
   const rows = () =>
     props.stats
@@ -475,31 +478,29 @@ export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope
       .map(({ rate, sample }) => [
         formatExactSampleTime(sample.ts),
         formatPercent(sample.cpuPerc),
-        ...(props.scope === "machine" ? [sample.cpuCount === undefined ? "Unknown" : String(sample.cpuCount)] : []),
-        ...(props.scope === "task"
+        ...(machine() ? [sample.cpuCount === undefined ? "Unknown" : String(sample.cpuCount)] : []),
+        formatPercent(sample.memPerc),
+        ...(machine()
           ? [
-              sample.cpuCeiling === undefined ? "Unknown" : String(sample.cpuCeiling),
-              sample.cpuQuota === undefined ? "Unknown" : sample.cpuQuota === 0 ? "None" : String(sample.cpuQuota),
-              sample.runtimeCPUs === undefined ? "Unknown" : String(sample.runtimeCPUs),
+              rate.rxBytesPerSecond === null ? "—" : formatThroughput(rate.rxBytesPerSecond),
+              rate.txBytesPerSecond === null ? "—" : formatThroughput(rate.txBytesPerSecond),
             ]
           : []),
-        formatPercent(sample.memPerc),
-        rate.rxBytesPerSecond === null ? "—" : formatThroughput(rate.rxBytesPerSecond),
-        rate.txBytesPerSecond === null ? "—" : formatThroughput(rate.txBytesPerSecond),
         sample.diskUsed < 0 ? "—" : formatBytes(sample.diskUsed),
       ]);
 
   return (
-    <section class={styles.samples} aria-label="Exact resource samples panel">
+    <section class={styles.samples} data-testid="exact-samples">
       <h3 class={styles.samplesTitle}>Exact samples</h3>
       <DataTable
         columns={[
           "Time",
-          "CPU (100% per CPU)",
-          ...(props.scope === "machine" ? ["CPUs"] : ["Configured CPU ceiling", "CPU quota", "Runtime CPUs"]),
+          // The parenthetical explains the multi-CPU scale, which the machine
+          // view needs beside its CPU count; a task sample spans one ceiling.
+          machine() ? "CPU (100% per CPU)" : "CPU",
+          ...(machine() ? ["CPUs"] : []),
           "Memory",
-          "RX/s",
-          "TX/s",
+          ...(machine() ? ["RX/s", "TX/s"] : []),
           "Disk",
         ]}
         regionLabel="Exact resource samples"

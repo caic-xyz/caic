@@ -6,7 +6,6 @@ declare const classes: {
   readonly "metricsMeta": string;
   readonly "metricsPanel": string;
   readonly "spreadCell": string;
-  readonly "table": string;
   readonly "tableScroll": string;
 };
 export default classes;

@@ -8,6 +8,7 @@ import type { MetricSeries, MetricsResp } from "@sdk/types.gen";
 import { api } from "../api";
 import ActionButton from "../components/ActionButton";
 import MetricDistribution from "../components/MetricDistribution";
+import Table from "../components/Table";
 import SectionControls from "../components/SectionControls";
 import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
@@ -107,52 +108,50 @@ export default function MetricsPage() {
           </p>
         </Show>
         <Show when={series().length > 0} fallback={<p class={styles.metricsEmpty}>Nothing recorded yet.</p>}>
-          <div class={styles.tableScroll}>
-            <table class={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Outcome</th>
-                  <th scope="col">Attributes</th>
-                  <th scope="col">Count</th>
-                  <th scope="col">Total</th>
-                  <th scope="col">Spread</th>
-                  <th scope="col">p50</th>
-                  <th scope="col">p95</th>
-                  <th scope="col">Max</th>
-                  <th scope="col">Last</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={series()}>
-                  {(metric) => (
-                    <tr>
-                      <th scope="row">{metric.name}</th>
-                      <td>{metric.kind}</td>
-                      <td>{metric.outcome}</td>
-                      <td>{formatAttrs(metric.attrs)}</td>
-                      <td>{metric.count}</td>
-                      <td>{formatStat(metric, "sum")}</td>
-                      <td class={styles.spreadCell}>
-                        <MetricDistribution
-                          percentiles={hasStat(metric.kind, "p95")}
-                          format={(value) => formatAmount(value, metric.unit)}
-                          p50={metric.p50}
-                          p95={metric.p95}
-                          max={metric.max}
-                        />
-                      </td>
-                      <td>{formatStat(metric, "p50")}</td>
-                      <td>{formatStat(metric, "p95")}</td>
-                      <td>{formatStat(metric, "max")}</td>
-                      <td>{formatStat(metric, "last")}</td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
+          <Table class={styles.tableScroll} label="Operation measurements">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Kind</th>
+                <th scope="col">Outcome</th>
+                <th scope="col">Attributes</th>
+                <th scope="col">Count</th>
+                <th scope="col">Total</th>
+                <th scope="col">Spread</th>
+                <th scope="col">p50</th>
+                <th scope="col">p95</th>
+                <th scope="col">Max</th>
+                <th scope="col">Last</th>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={series()}>
+                {(metric) => (
+                  <tr>
+                    <th scope="row">{metric.name}</th>
+                    <td>{metric.kind}</td>
+                    <td>{metric.outcome}</td>
+                    <td>{formatAttrs(metric.attrs)}</td>
+                    <td>{metric.count}</td>
+                    <td>{formatStat(metric, "sum")}</td>
+                    <td class={styles.spreadCell}>
+                      <MetricDistribution
+                        percentiles={hasStat(metric.kind, "p95")}
+                        format={(value) => formatAmount(value, metric.unit)}
+                        p50={metric.p50}
+                        p95={metric.p95}
+                        max={metric.max}
+                      />
+                    </td>
+                    <td>{formatStat(metric, "p50")}</td>
+                    <td>{formatStat(metric, "p95")}</td>
+                    <td>{formatStat(metric, "max")}</td>
+                    <td>{formatStat(metric, "last")}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </Table>
         </Show>
       </div>
     </section>

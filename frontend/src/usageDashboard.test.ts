@@ -127,9 +127,7 @@ describe("summarizeUsageDays", () => {
     expect(summary.wallMs).toBe(3000);
     expect(summary.compactions).toBe(2);
     expect(summary.erroredTurns).toBe(1);
-    expect(summary.tools).toEqual([
-      { name: "Read", calls: 3, timedCalls: 2, durationMs: 1500, distributionCalls: 2, medianMs: 500 },
-    ]);
+    expect(summary.tools).toEqual([{ name: "Read", calls: 3, timedCalls: 2, durationMs: 1500, medianMs: 500 }]);
     expect(summary.costUSD).toBeCloseTo(0.3);
     expect(summary.repos).toEqual([{ name: "caic", count: 3 }]);
     expect(summary.skills).toEqual([{ name: "review", count: 4 }]);
@@ -162,7 +160,6 @@ describe("summarizeUsageDays", () => {
     // The mean sits at 1.08s, pulled up by one slow call; the median sits in the
     // first bucket, whose interpolation tops out at its 100ms bound.
     expect(summary.tools[0]).toMatchObject({ name: "Read", timedCalls: 5, durationMs: 5_400, medianMs: 100 });
-    expect(summary.tools[0]?.distributionCalls).toBe(5);
   });
 
   it("leaves the median unknown when no call kept a distribution", () => {
@@ -170,7 +167,7 @@ describe("summarizeUsageDays", () => {
       day("2026-01-24", { toolTimings: [{ name: "Read", count: 2, durationMs: 1_000, buckets: [] }] }),
     ]);
 
-    expect(summary.tools[0]).toMatchObject({ name: "Read", timedCalls: 2, distributionCalls: 0, medianMs: null });
+    expect(summary.tools[0]).toMatchObject({ name: "Read", timedCalls: 2, medianMs: null });
   });
 
   it("weights harness cache hit rate by input tokens across days", () => {
@@ -273,9 +270,7 @@ describe("summarizeUsageDays drill-down", () => {
     expect(summary.compactions).toBe(1);
     expect(summary.subagentSpawns).toBe(3);
     expect(summary.costUSD).toBeCloseTo(0.2);
-    expect(summary.tools).toEqual([
-      { name: "Read", calls: 4, timedCalls: 2, durationMs: 1200, distributionCalls: 0, medianMs: null },
-    ]);
+    expect(summary.tools).toEqual([{ name: "Read", calls: 4, timedCalls: 2, durationMs: 1200, medianMs: null }]);
     expect(summary.skills).toEqual([{ name: "review", count: 1 }]);
     expect(summary.repos).toEqual([{ name: "caic", count: 1 }]);
     expect(summary.models.map((entry) => entry.name)).toEqual(["model-a"]);

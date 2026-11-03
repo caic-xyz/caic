@@ -667,15 +667,17 @@ test("generate documentation screenshots", async ({ page, api }) => {
       const chart = page.getByLabel(label, { exact: true });
       await expect(chart).toBeVisible();
       await expect.poll(() => chart.locator('[aria-label="dot"] circle').count()).toBeGreaterThanOrEqual(23);
-      await expect
-        .poll(() =>
-          chart.evaluate((svg) => {
-            const box = svg.getBoundingClientRect();
-            return box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
-          }),
-        )
-        .toBe(true);
     }
+    // Only the first chart must be framed, so a later section growing taller
+    // changes what the shot shows instead of failing the generator.
+    await expect
+      .poll(() =>
+        page.getByLabel("CPU utilization over time", { exact: true }).evaluate((svg) => {
+          const box = svg.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+        }),
+      )
+      .toBe(true);
     await captureScreenshot(page, layout, "task-resources.png");
   }
   await page.setViewportSize({ width: 1280, height: 800 });

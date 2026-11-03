@@ -46,9 +46,11 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
     await expect(resources).not.toContainText("of capacity");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
-  await expect(resources.getByRole("table")).toContainText("Configured CPU ceiling");
-  await expect(resources.getByRole("table")).toContainText("CPU quota");
-  await expect(resources.getByRole("table")).toContainText("1.5");
+  // The sample table keeps the measured values; the ceiling and quota live in
+  // the chart caption above it.
+  const samples = page.getByTestId("exact-samples");
+  await expect(samples.getByRole("table")).toContainText("Disk");
+  await expect(samples.getByRole("table")).not.toContainText("Configured CPU ceiling");
   event.stats.cpuQuota = null;
   event.stats.cpuCeiling = 8;
   event.stats.cpuError = "inspect unavailable";
@@ -116,6 +118,7 @@ for (const history of ["clustered", "live"] as const) {
       await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
 
       const resources = page.getByTestId("resource-charts");
+      const sampleTable = page.getByTestId("exact-samples");
       await expect(resources).toBeVisible();
       await expect(resources).toContainText("configured ceiling ≤ 4 CPUs");
       await expect(resources).toContainText(`${samples.length} samples`);
@@ -134,8 +137,8 @@ for (const history of ["clustered", "live"] as const) {
         for (const client of clients) client.write(`event: stats\ndata: ${JSON.stringify(sample)}\n\n`);
         await expect(resources).toContainText("3 samples");
         await expect(resources).toContainText("177.0%");
-        await expect(resources.getByRole("table").locator("tbody tr")).toHaveCount(3);
-        await expect(resources.getByRole("table").locator("tbody tr").first().locator("td").nth(1)).toHaveText(
+        await expect(sampleTable.getByRole("table").locator("tbody tr")).toHaveCount(3);
+        await expect(sampleTable.getByRole("table").locator("tbody tr").first().locator("td").nth(1)).toHaveText(
           "177.0%",
         );
         await expect(cpu.locator('[aria-label="dot"] circle')).toHaveCount(3);
@@ -180,9 +183,7 @@ for (const history of ["clustered", "live"] as const) {
         await page.mouse.move(aim.x, aim.y);
         const snapshot = await cpu.evaluate((svg) => {
           const text = svg.querySelector('[aria-label="text"] text');
-          const rows = Array.from(
-            svg.closest('[data-testid="resource-charts"]')?.querySelectorAll("table tbody tr") ?? [],
-          );
+          const rows = Array.from(document.querySelectorAll('[data-testid="exact-samples"] table tbody tr'));
           const samples = rows.map((row) => {
             const cells = row.querySelectorAll("td");
             return { ts: Date.parse(cells[0]?.textContent ?? ""), cpu: Number.parseFloat(cells[1]?.textContent ?? "") };

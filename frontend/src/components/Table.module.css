@@ -1,0 +1,47 @@
+/* Styles for the shared scrollable data table and its row rules. */
+
+.wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+}
+
+.wrap:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
+.table {
+  width: 100%;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+}
+
+.dense {
+  font-size: 0.68rem;
+}
+
+.table th,
+.table td {
+  padding: 0.35rem;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.table thead th {
+  color: var(--color-text-muted);
+}
+
+.table th:first-child,
+.table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+/* The panel edge closes the last row; a rule under it would double the line. */
+.table tbody tr:last-child > * {
+  border-bottom: none;
+}

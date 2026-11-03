@@ -175,17 +175,21 @@ describe("StatsContent", () => {
     hover(txChart, 140);
     expect(rxChart).toHaveTextContent("RX 2.0 KiB/s");
     expect(txChart).toHaveTextContent("TX 1.0 KiB/s");
-    expect(within(resources).getByText("Exact samples")).toBeInTheDocument();
-    const scroller = within(resources).getByRole("region", {
+    const samples = within(resources).getByTestId("exact-samples");
+    expect(within(samples).getByText("Exact samples")).toBeInTheDocument();
+    const scroller = within(samples).getByRole("region", {
       name: "Exact resource samples",
     });
     expect(scroller).toHaveAttribute("tabindex", "0");
     scroller.focus();
     expect(scroller).toHaveFocus();
-    const table = within(resources).getByRole("table");
+    const table = within(samples).getByRole("table");
+    // A task pane keeps the measured values: the throughput and CPU-metadata
+    // columns its charts and caption already state stay out.
     expect(table).toHaveTextContent("CPU");
-    expect(table).toHaveTextContent("RX/s");
-    expect(table).toHaveTextContent("2.0 KiB/s");
+    expect(table).not.toHaveTextContent("RX/s");
+    expect(table).not.toHaveTextContent("Configured CPU ceiling");
+    expect(table).not.toHaveTextContent("Runtime CPUs");
     expect(table).toHaveTextContent("1.0 MiB");
   });
 
@@ -301,7 +305,7 @@ describe("StatsContent", () => {
     ];
     const { findByTestId } = render(() => <StatsContent tools={[]} stats={irregularStats} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
-    const table = within(resources).getByRole("table");
+    const table = within(within(resources).getByTestId("exact-samples")).getByRole("table");
     // Local time, one decimal per percentage, and whole bytes per rate.
     expect(table).toHaveTextContent(new Date(3_234).toLocaleString());
     expect(table).not.toHaveTextContent("1970-01-01T");
@@ -309,8 +313,6 @@ describe("StatsContent", () => {
     expect(table).toHaveTextContent("76.5%");
     expect(table).toHaveTextContent("12.3%");
     expect(table).toHaveTextContent("23.5%");
-    expect(table).toHaveTextContent("751 B/s");
-    expect(table).toHaveTextContent("0.5 B/s");
     expect(table).toHaveTextContent("1.5 KiB");
   });
 

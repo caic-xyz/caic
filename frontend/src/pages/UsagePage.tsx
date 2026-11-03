@@ -9,6 +9,7 @@ import type { UsageDashboardResp } from "@sdk/types.gen";
 import { api } from "../api";
 import ActionButton from "../components/ActionButton";
 import SectionControls from "../components/SectionControls";
+import Table from "../components/Table";
 import { formatCost, formatTokens } from "../formatting";
 import {
   summarizeUsageDays,
@@ -205,115 +206,109 @@ function Leaderboard(props: {
 }) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No usage in this range.</p>}>
-      <div class={styles.tableWrap} role="region" aria-label="Usage leaderboard" tabIndex={0}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Tokens</th>
-              <th scope="col">Turns</th>
-              <th scope="col">Compactions</th>
-              <Show when={props.showCost}>
-                <th scope="col">Cost</th>
-              </Show>
-              <Show when={props.showCache}>
-                <th scope="col">Cache hit</th>
-              </Show>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={props.entries}>
-              {(entry) => (
-                <tr>
-                  <th scope="row">
-                    <Show when={props.kind && props.onSelect} fallback={entry.name}>
-                      <button
-                        type="button"
-                        class={styles.rowButton}
-                        title={`Show only ${props.kind} ${entry.name}`}
-                        onClick={() => props.onSelect?.(entry.name)}
-                      >
-                        {entry.name}
-                      </button>
-                    </Show>
-                  </th>
-                  <td>{formatTokens(entry.tokens)}</td>
-                  <td>{entry.turns}</td>
-                  <td>{entry.compactions}</td>
-                  <Show when={props.showCost}>
-                    <td>{formatCost(entry.costUSD)}</td>
+      <Table class={styles.tableWrap} label="Usage leaderboard">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Tokens</th>
+            <th scope="col">Turns</th>
+            <th scope="col">Compactions</th>
+            <Show when={props.showCost}>
+              <th scope="col">Cost</th>
+            </Show>
+            <Show when={props.showCache}>
+              <th scope="col">Cache hit</th>
+            </Show>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={props.entries}>
+            {(entry) => (
+              <tr>
+                <th scope="row">
+                  <Show when={props.kind && props.onSelect} fallback={entry.name}>
+                    <button
+                      type="button"
+                      class={styles.rowButton}
+                      title={`Show only ${props.kind} ${entry.name}`}
+                      onClick={() => props.onSelect?.(entry.name)}
+                    >
+                      {entry.name}
+                    </button>
                   </Show>
-                  <Show when={props.showCache}>
-                    <td>{entry.cacheHitRate === undefined ? "—" : `${(entry.cacheHitRate * 100).toFixed(1)}%`}</td>
-                  </Show>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+                </th>
+                <td>{formatTokens(entry.tokens)}</td>
+                <td>{entry.turns}</td>
+                <td>{entry.compactions}</td>
+                <Show when={props.showCost}>
+                  <td>{formatCost(entry.costUSD)}</td>
+                </Show>
+                <Show when={props.showCache}>
+                  <td>{entry.cacheHitRate === undefined ? "—" : `${(entry.cacheHitRate * 100).toFixed(1)}%`}</td>
+                </Show>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </Table>
     </Show>
   );
 }
 
 function DailyTotals(props: { points: readonly UsageDailyPoint[] }) {
   return (
-    <div class={styles.tableWrap} role="region" aria-label="Daily usage totals" tabIndex={0}>
-      <table class={styles.table}>
-        <thead>
-          <tr>
-            <th scope="col">Day</th>
-            <th scope="col">Tokens</th>
-            <th scope="col">Cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          <For each={[...props.points].reverse()}>
-            {(point) => (
-              <tr>
-                <th scope="row">{point.inProgress ? `${point.day} (in progress)` : point.day}</th>
-                <td>{formatTokens(point.tokens)}</td>
-                <td>{formatCost(point.costUSD)}</td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
-    </div>
+    <Table class={styles.tableWrap} label="Daily usage totals">
+      <thead>
+        <tr>
+          <th scope="col">Day</th>
+          <th scope="col">Tokens</th>
+          <th scope="col">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <For each={[...props.points].reverse()}>
+          {(point) => (
+            <tr>
+              <th scope="row">{point.inProgress ? `${point.day} (in progress)` : point.day}</th>
+              <td>{formatTokens(point.tokens)}</td>
+              <td>{formatCost(point.costUSD)}</td>
+            </tr>
+          )}
+        </For>
+      </tbody>
+    </Table>
   );
 }
 
 function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tools"] }) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No tool calls in this range.</p>}>
-      <div class={styles.tableWrap} role="region" aria-label="Tool durations" tabIndex={0}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th scope="col">Tool</th>
-              <th scope="col">Calls</th>
-              <th scope="col">Timed</th>
-              <th scope="col">Total</th>
-              <th scope="col">Median</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={props.entries}>
-              {(entry) => (
-                <tr>
-                  <th scope="row" title={entry.name}>
-                    {entry.name}
-                  </th>
-                  <td>{entry.calls}</td>
-                  <td>{entry.timedCalls}</td>
-                  <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs) : "—"}</td>
-                  <td>{entry.medianMs === null ? "—" : formatUsageDuration(entry.medianMs)}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+      <Table class={styles.tableWrap} label="Tool durations">
+        <thead>
+          <tr>
+            <th scope="col">Tool</th>
+            <th scope="col">Calls</th>
+            <th scope="col">Timed</th>
+            <th scope="col">Total</th>
+            <th scope="col">Median</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={props.entries}>
+            {(entry) => (
+              <tr>
+                <th scope="row" title={entry.name}>
+                  {entry.name}
+                </th>
+                <td>{entry.calls}</td>
+                <td>{entry.timedCalls}</td>
+                <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs) : "—"}</td>
+                <td>{entry.medianMs === null ? "—" : formatUsageDuration(entry.medianMs)}</td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </Table>
     </Show>
   );
 }
