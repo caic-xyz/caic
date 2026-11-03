@@ -503,6 +503,7 @@ export function ResourceSamples(props: { stats: readonly ResourceSample[]; scope
           ...(machine() ? ["RX/s", "TX/s"] : []),
           "Disk",
         ]}
+        fit={props.scope === "task"}
         regionLabel="Exact resource samples"
         rows={rows()}
       />

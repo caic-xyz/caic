@@ -9,12 +9,14 @@ interface DataTableProps {
   regionLabel: string;
   columns: readonly string[];
   rows: readonly (readonly string[])[];
+  // fit sizes the table to its columns for a pane narrower than its panel.
+  fit?: boolean;
   class?: string;
 }
 
 export function DataTable(props: DataTableProps) {
   return (
-    <Table class={props.class} dense label={props.regionLabel}>
+    <Table class={props.class} dense fit={props.fit} label={props.regionLabel}>
       <thead>
         <tr>
           <Index each={props.columns}>{(column) => <th scope="col">{column()}</th>}</Index>

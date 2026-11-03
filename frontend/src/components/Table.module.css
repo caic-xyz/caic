@@ -22,6 +22,12 @@
   font-size: 0.68rem;
 }
 
+/* A table in a narrow pane takes its content width instead of spreading a few
+   columns across the pane. */
+.fit {
+  width: auto;
+}
+
 .table th,
 .table td {
   padding: 0.35rem;
