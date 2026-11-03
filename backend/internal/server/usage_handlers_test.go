@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -159,7 +160,7 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheWrites: []data.CacheWrite{{TTLSeconds: 7200, Tokens: 50}}, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
 			ToolCalls:    map[string]int{"Read": 2},
-			ToolTimings:  map[string]data.ToolTiming{"Read": {Count: 1, DurationMs: 1250}},
+			ToolTimings:  map[string]data.ToolTiming{"Read": data.ToolCallTiming(1250)},
 			SkillReads:   map[string]int{"review": 2},
 		},
 	})
@@ -213,7 +214,10 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	if len(day.Skills) != 1 || day.Skills[0] != (v1.UsageDashboardCount{Name: "review", Count: 1}) {
 		t.Errorf("skills = %#v", day.Skills)
 	}
-	if len(day.ToolTimings) != 1 || day.ToolTimings[0] != (v1.UsageDashboardToolTiming{Name: "Read", Count: 1, DurationMs: 1250}) {
+	// The duration distribution travels with the totals so a client can derive
+	// a median over any selected range.
+	wantTiming := v1.UsageDashboardToolTiming{Name: "Read", Count: 1, DurationMs: 1250, Buckets: []v1.UsageDashboardToolDuration{{UpperMs: 2000, Count: 1}}}
+	if len(day.ToolTimings) != 1 || !reflect.DeepEqual(day.ToolTimings[0], wantTiming) {
 		t.Errorf("tool timings = %#v", day.ToolTimings)
 	}
 }

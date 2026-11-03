@@ -139,7 +139,7 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 	if e.ToolResultID != "" {
 		if t := s.toolTimings[id]; t != nil {
 			if name, ms, ok := t.Finish(e.ToolResultID, e.ToolProducerTime, e.ToolNativeDurationMs); ok {
-				e.Delta.ToolTimings = map[string]data.ToolTiming{name: {Count: 1, DurationMs: ms}}
+				e.Delta.ToolTimings = map[string]data.ToolTiming{name: data.ToolCallTiming(ms)}
 			}
 			if len(t.pending) == 0 {
 				delete(s.toolTimings, id)
@@ -474,8 +474,12 @@ func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
 			day.skills[skill][row.TaskID] = struct{}{}
 		}
 	}
-	if row.Model != "" {
-		b := day.modelBucket(row.Model)
+	// Rows written before the rollup canonicalized model labels carry the
+	// reported model, so folding applies the same label. The conversion is
+	// idempotent for labels already stored.
+	model := ModelLabel(row.Model, "")
+	if model != "" {
+		b := day.modelBucket(model)
 		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
@@ -484,8 +488,8 @@ func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
 		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
-	if row.Harness != "" && row.Model != "" {
-		b := day.crossBucket(row.Harness, row.Model)
+	if row.Harness != "" && model != "" {
+		b := day.crossBucket(row.Harness, model)
 		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
@@ -771,7 +775,7 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 		Repos:                    make(map[string]int, len(d.repos)),
 		Skills:                   make(map[string]int, len(d.skills)),
 		Tools:                    cloneCounts(d.ToolCalls),
-		ToolTimings:              maps.Clone(d.ToolTimings),
+		ToolTimings:              cloneToolTimings(d.ToolTimings),
 	}
 	for model, b := range d.models {
 		out.Models[model] = newModelRollup(b)
@@ -1049,7 +1053,7 @@ type taskPending struct {
 
 // fold records one event into the task's pending buckets.
 func (p *taskPending) fold(e *Event, synthetic bool) {
-	key := bucketKey{day: e.At.UTC().Format(dayFormat), model: e.Model}
+	key := bucketKey{day: e.At.UTC().Format(dayFormat), model: ModelLabel(e.Model, e.Effort)}
 	b := p.buckets[key]
 	if b == nil {
 		b = &bucket{}
@@ -1197,6 +1201,19 @@ func cloneCounts(m map[string]int) map[string]int {
 	return out
 }
 
+// cloneToolTimings copies each timing's duration buckets so a rollup snapshot
+// does not share them with the live aggregates.
+func cloneToolTimings(m map[string]data.ToolTiming) map[string]data.ToolTiming {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]data.ToolTiming, len(m))
+	for name, timing := range m {
+		out[name] = timing.Clone()
+	}
+	return out
+}
+
 // countTaskSets flattens skill or repo distinct-task sets to their counts.
 func countTaskSets(sets map[string]map[string]struct{}) map[string]int {
 	if sets == nil {
@@ -1222,7 +1239,7 @@ func newModelRollup(b *bucket) ModelRollup {
 		CostUSD:        b.CostUSD,
 		ContextWindow:  b.ContextWindow,
 		ToolCalls:      cloneCounts(b.ToolCalls),
-		ToolTimings:    maps.Clone(b.ToolTimings),
+		ToolTimings:    cloneToolTimings(b.ToolTimings),
 		Skills:         countTaskSets(b.skillTasks),
 		Repos:          countTaskSets(b.repoTasks),
 	}
@@ -1241,7 +1258,7 @@ func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) H
 		SubagentSpawns: b.Spawns,
 		CostUSD:        b.CostUSD,
 		ToolCalls:      cloneCounts(b.ToolCalls),
-		ToolTimings:    maps.Clone(b.ToolTimings),
+		ToolTimings:    cloneToolTimings(b.ToolTimings),
 		Skills:         countTaskSets(b.skillTasks),
 		Repos:          countTaskSets(b.repoTasks),
 		Models:         make(map[string]ModelRollup),

@@ -1755,15 +1755,28 @@ UsageDashboardCount is a named counter such as a skill read or tool call.
 | `name` | `string` |  | yes |
 | `count` | `int` |  | yes |
 
+### UsageDashboardToolDuration
+
+UsageDashboardToolDuration counts measured calls whose duration falls above
+the previous bucket's upperMs and at most its own.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `upperMs` | `int64` |  | yes |
+| `count` | `int` |  | yes |
+
 ### UsageDashboardToolTiming
 
 UsageDashboardToolTiming measures completed tool calls with known duration.
+Buckets keeps the duration distribution that a range-wide median needs; rows
+written before the distribution existed contribute counts without buckets.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
 | `count` | `int` |  | yes |
 | `durationMs` | `int64` |  | yes |
+| `buckets` | `UsageDashboardToolDuration[]` |  | yes |
 
 ### UsageDashboardRepo
 

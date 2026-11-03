@@ -8,6 +8,7 @@ export interface UsageLeaderboardEntry {
   name: string;
   tokens: number;
   turns: number;
+  compactions: number;
   costUSD: number;
   cacheHitRate?: number; // populated for harness entries
 }
@@ -17,6 +18,11 @@ export interface UsageToolEntry {
   calls: number;
   timedCalls: number;
   durationMs: number;
+  // distributionCalls counts the timed calls whose duration landed in a
+  // bucket, which is every call recorded after the rollup kept a distribution.
+  distributionCalls: number;
+  // medianMs is null when no call in the range kept a duration distribution.
+  medianMs: number | null;
 }
 
 export interface UsageDashboardSummary {
@@ -136,6 +142,31 @@ function counts(entries: readonly UsageDashboardCount[]): UsageDashboardCount[] 
   return [...entries].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
+function newToolEntry(name: string): UsageToolEntry {
+  return { name, calls: 0, timedCalls: 0, durationMs: 0, distributionCalls: 0, medianMs: null };
+}
+
+// usageToolMedianMs estimates a tool's median duration from merged buckets. Each
+// bucket holds the calls above the previous bound and at most its own, and a
+// rank inside one bucket is interpolated linearly, so the estimate stays within
+// one bucket of the measured median.
+function usageToolMedianMs(buckets: ReadonlyMap<number, number>): number | null {
+  const bounds = [...buckets.keys()].sort((a, b) => a - b);
+  const total = bounds.reduce((sum, bound) => sum + (buckets.get(bound) ?? 0), 0);
+  if (total === 0) return null;
+  const rank = Math.ceil(total / 2);
+  let lower = 0;
+  let before = 0;
+  for (const bound of bounds) {
+    const count = buckets.get(bound) ?? 0;
+    if (count === 0) continue;
+    if (before + count >= rank) return lower + ((rank - before) / count) * (bound - lower);
+    before += count;
+    lower = bound;
+  }
+  return lower;
+}
+
 function leaderboard(entries: Map<string, UsageLeaderboardEntry>): UsageLeaderboardEntry[] {
   return [...entries.values()].sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
 }
@@ -145,11 +176,13 @@ function addLeaderboard(
   name: string,
   tokens: UsageDashboardTokens,
   turns: number,
+  compactions: number,
   costUSD: number,
 ): void {
-  const entry = entries.get(name) ?? { name, tokens: 0, turns: 0, costUSD: 0 };
+  const entry = entries.get(name) ?? { name, tokens: 0, turns: 0, compactions: 0, costUSD: 0 };
   entry.tokens += tokenTotal(tokens);
   entry.turns += turns;
+  entry.compactions += compactions;
   entry.costUSD += costUSD;
   entries.set(name, entry);
 }
@@ -205,6 +238,7 @@ export function summarizeUsageDays(
   const harnesses = new Map<string, UsageLeaderboardEntry>();
   const harnessTokens = new Map<string, UsageDashboardTokens>();
   const tools = new Map<string, UsageToolEntry>();
+  const toolBuckets = new Map<string, Map<number, number>>();
   let turns = 0;
   let erroredTurns = 0;
   let apiMs = 0;
@@ -234,19 +268,19 @@ export function summarizeUsageDays(
       const harness = day.harnesses.find((entry) => entry.harness === drilldown.harness);
       for (const model of harness?.models ?? []) {
         if (drilldown.model && model.model !== drilldown.model) continue;
-        addLeaderboard(models, model.model, model.tokens, model.turns, model.costUSD);
+        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD);
       }
     } else {
       for (const model of day.models) {
         if (drilldown?.model && model.model !== drilldown.model) continue;
-        addLeaderboard(models, model.model, model.tokens, model.turns, model.costUSD);
+        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD);
       }
     }
     if (drilldown?.model) {
       for (const harness of day.harnesses) {
         const pair = harness.models.find((entry) => entry.model === drilldown.model);
         if (!pair) continue;
-        addLeaderboard(harnesses, harness.harness, pair.tokens, pair.turns, pair.costUSD);
+        addLeaderboard(harnesses, harness.harness, pair.tokens, pair.turns, pair.compactions, pair.costUSD);
         const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
         addTokens(combined, pair.tokens);
         harnessTokens.set(harness.harness, combined);
@@ -254,23 +288,33 @@ export function summarizeUsageDays(
     } else {
       for (const harness of day.harnesses) {
         if (drilldown?.harness && harness.harness !== drilldown.harness) continue;
-        addLeaderboard(harnesses, harness.harness, harness.tokens, harness.turns, harness.costUSD);
+        addLeaderboard(harnesses, harness.harness, harness.tokens, harness.turns, harness.compactions, harness.costUSD);
         const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
         addTokens(combined, harness.tokens);
         harnessTokens.set(harness.harness, combined);
       }
     }
     for (const tool of view.tools) {
-      const entry = tools.get(tool.name) ?? { name: tool.name, calls: 0, timedCalls: 0, durationMs: 0 };
+      const entry = tools.get(tool.name) ?? newToolEntry(tool.name);
       entry.calls += tool.count;
       tools.set(tool.name, entry);
     }
     for (const timing of view.toolTimings) {
-      const entry = tools.get(timing.name) ?? { name: timing.name, calls: 0, timedCalls: 0, durationMs: 0 };
+      const entry = tools.get(timing.name) ?? newToolEntry(timing.name);
       entry.timedCalls += timing.count;
       entry.durationMs += timing.durationMs;
+      const buckets = toolBuckets.get(timing.name) ?? new Map<number, number>();
+      for (const bucket of timing.buckets) {
+        buckets.set(bucket.upperMs, (buckets.get(bucket.upperMs) ?? 0) + bucket.count);
+        entry.distributionCalls += bucket.count;
+      }
+      toolBuckets.set(timing.name, buckets);
       tools.set(timing.name, entry);
     }
+  }
+
+  for (const [name, entry] of tools) {
+    entry.medianMs = usageToolMedianMs(toolBuckets.get(name) ?? new Map<number, number>());
   }
 
   return {

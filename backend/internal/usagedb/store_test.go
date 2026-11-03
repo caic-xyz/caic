@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +192,48 @@ func TestStore(t *testing.T) {
 			days := s.Days()
 			if len(days) != 2 || days[0].Day != "2026-02-05" || days[1].Day != "2026-02-06" {
 				t.Errorf("days = %+v", days)
+			}
+		})
+
+		t.Run("attribution labels merge one model into one bucket", func(t *testing.T) {
+			t.Parallel()
+			s := newTestStore(t, t.TempDir())
+			meta := testMeta(ksid.NewID())
+			at := atUTC(5, 10, 0, 0)
+
+			s.Observe(meta, &Event{At: at, Model: "openai-codex/gpt-6.1-sol", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "gpt-6.1-sol", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(2 * time.Second), Model: "gpt-6.1-sol", Effort: "high", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(3 * time.Second), Model: "claude-sonnet-5-5-medium", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+
+			days := s.Days()
+			if len(days) != 1 {
+				t.Fatalf("days = %d, want 1", len(days))
+			}
+			got := make(map[string]int, len(days[0].Models))
+			for label, model := range days[0].Models {
+				got[label] = model.Turns
+			}
+			want := map[string]int{"claude-sonnet-5-5 (medium)": 1, "gpt-6.1-sol": 2, "gpt-6.1-sol (high)": 1}
+			if !maps.Equal(got, want) {
+				t.Errorf("models = %v, want %v", got, want)
+			}
+		})
+
+		t.Run("recovery folds historical model spellings into one label", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			rows := []string{
+				`{"kind":"usage","day":"2026-02-05","ts":1770285600000,"task_id":"t1","harness":"codex","repos":["caic"],"model":"openai-codex/gpt-6.1-sol","turns":1}`,
+				`{"kind":"usage","day":"2026-02-05","ts":1770285601000,"task_id":"t1","harness":"codex","repos":["caic"],"model":"gpt-6.1-sol","turns":1}`,
+			}
+			if err := os.WriteFile(filepath.Join(dir, "2026-02-05.jsonl"), []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+				t.Fatalf("write day file: %v", err)
+			}
+			s := newTestStore(t, dir)
+			days := s.Days()
+			if len(days) != 1 || len(days[0].Models) != 1 || days[0].Models["gpt-6.1-sol"].Turns != 2 {
+				t.Fatalf("models = %+v, want one canonical label", days)
 			}
 		})
 
@@ -388,8 +432,11 @@ func TestStore(t *testing.T) {
 			s.Observe(meta, &Event{At: at.Add(2 * time.Second), ToolProducerTime: at.Add(2 * time.Second), ToolResultID: "a"})
 			s.Observe(meta, &Event{At: at.Add(3 * time.Second), ToolProducerTime: at.Add(3 * time.Second), ToolStartID: "b", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
 			s.Observe(meta, &Event{At: at.Add(4 * time.Second), TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			one := data.ToolCallTiming(2000)
+			two := data.ToolCallTiming(2000)
+			two.Add(data.ToolCallTiming(2000))
 			day := s.Days()[0]
-			if day.Tools["Bash"] != 2 || day.ToolTimings["Bash"] != (data.ToolTiming{Count: 1, DurationMs: 2000}) {
+			if day.Tools["Bash"] != 2 || !reflect.DeepEqual(day.ToolTimings["Bash"], one) {
 				t.Errorf("live tool totals = %v, %v", day.Tools, day.ToolTimings)
 			}
 			if err := s.Close(); err != nil {
@@ -397,7 +444,7 @@ func TestStore(t *testing.T) {
 			}
 			reopened := newTestStore(t, dir)
 			day = reopened.Days()[0]
-			if day.Tools["Bash"] != 2 || day.ToolTimings["Bash"] != (data.ToolTiming{Count: 1, DurationMs: 2000}) {
+			if day.Tools["Bash"] != 2 || !reflect.DeepEqual(day.ToolTimings["Bash"], one) {
 				t.Errorf("recovered tool totals = %v, %v", day.Tools, day.ToolTimings)
 			}
 			// Adoption replays the start at the durable watermark before seeing its
@@ -406,14 +453,14 @@ func TestStore(t *testing.T) {
 			reopened.Observe(meta, &Event{At: at.Add(5 * time.Second), ToolProducerTime: at.Add(5 * time.Second), Replayed: true, ToolResultID: "b"})
 			reopened.Observe(meta, &Event{At: at.Add(6 * time.Second), Replayed: true, TurnBoundary: true, Delta: data.Delta{Turns: 1}})
 			day = reopened.Days()[0]
-			if day.Tools["Bash"] != 2 || day.ToolTimings["Bash"] != (data.ToolTiming{Count: 2, DurationMs: 4000}) {
+			if day.Tools["Bash"] != 2 || !reflect.DeepEqual(day.ToolTimings["Bash"], two) {
 				t.Errorf("resumed tool totals = %v, %v", day.Tools, day.ToolTimings)
 			}
 			reopened.Observe(meta, &Event{At: at.Add(7 * time.Second), ToolStartID: "c", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
 			reopened.Observe(meta, &Event{At: at.Add(8 * time.Second), ToolResultID: "c"})
 			reopened.Observe(meta, &Event{At: at.Add(9 * time.Second), TurnBoundary: true, Delta: data.Delta{Turns: 1}})
 			day = reopened.Days()[0]
-			if day.Tools["Bash"] != 3 || day.ToolTimings["Bash"] != (data.ToolTiming{Count: 2, DurationMs: 4000}) {
+			if day.Tools["Bash"] != 3 || !reflect.DeepEqual(day.ToolTimings["Bash"], two) {
 				t.Errorf("timestamp-less tool totals = %v, %v", day.Tools, day.ToolTimings)
 			}
 		})

@@ -1805,11 +1805,21 @@ public struct UsageDashboardCount: Codable {
     public let count: Int
 }
 
+/// UsageDashboardToolDuration counts measured calls whose duration falls above
+/// the previous bucket's upperMs and at most its own.
+public struct UsageDashboardToolDuration: Codable {
+    public let upperMs: Int
+    public let count: Int
+}
+
 /// UsageDashboardToolTiming measures completed tool calls with known duration.
+/// Buckets keeps the duration distribution that a range-wide median needs; rows
+/// written before the distribution existed contribute counts without buckets.
 public struct UsageDashboardToolTiming: Codable {
     public let name: String
     public let count: Int
     public let durationMs: Int
+    public let buckets: [UsageDashboardToolDuration]
 }
 
 /// UsageDashboardRepo is a repository leaderboard entry for one UTC day.

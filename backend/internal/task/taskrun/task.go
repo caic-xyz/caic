@@ -2209,7 +2209,7 @@ func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.T
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
-	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.costTracker.TotalUSD)
+	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.rollupEffortLocked(m), t.costTracker.TotalUSD)
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}
@@ -2241,6 +2241,20 @@ func (t *Task) rollupModelLocked(m agent.Message) string {
 		return ""
 	}
 	return t.activeModel()
+}
+
+// rollupEffortLocked resolves the thinking effort that applies to one message:
+// the task's reported effort, else the requested one. A child actor reports its
+// own model but never its effort, so its usage carries none. The caller holds
+// t.mu.
+func (t *Task) rollupEffortLocked(m agent.Message) string {
+	if m.Provenance().IsChild() {
+		return ""
+	}
+	if t.sessionMetadata.ReportedEffort != "" {
+		return t.sessionMetadata.ReportedEffort
+	}
+	return t.RequestedEffort
 }
 
 func (t *Task) timelineViewLocked() timelineEntries {

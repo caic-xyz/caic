@@ -2441,12 +2441,24 @@ data class UsageDashboardTokens(
 @Serializable
 data class UsageDashboardCount(val name: String, val count: Int)
 
-/** UsageDashboardToolTiming measures completed tool calls with known duration. */
+/**
+ * UsageDashboardToolDuration counts measured calls whose duration falls above
+ * the previous bucket's upperMs and at most its own.
+ */
+@Serializable
+data class UsageDashboardToolDuration(val upperMs: Long, val count: Int)
+
+/**
+ * UsageDashboardToolTiming measures completed tool calls with known duration.
+ * Buckets keeps the duration distribution that a range-wide median needs; rows
+ * written before the distribution existed contribute counts without buckets.
+ */
 @Serializable
 data class UsageDashboardToolTiming(
     val name: String,
     val count: Int,
     val durationMs: Long,
+    val buckets: List<UsageDashboardToolDuration>,
 )
 
 /**

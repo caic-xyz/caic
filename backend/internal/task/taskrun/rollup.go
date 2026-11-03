@@ -15,8 +15,8 @@ import (
 //
 // Adapters identify additive usage and context-only result snapshots so live
 // and restored rollups count the same token contributions for every harness.
-func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model string, costUSD float64) (usagedb.Event, bool) {
-	e := usagedb.Event{At: at, Replayed: replayed, Model: model, CostUSD: costUSD}
+func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, costUSD float64) (usagedb.Event, bool) {
+	e := usagedb.Event{At: at, Replayed: replayed, Model: model, Effort: effort, CostUSD: costUSD}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if m.Additive {

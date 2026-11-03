@@ -42,13 +42,15 @@ type TaskMeta struct {
 // Event is one ingest record from a task fold. At is the record's producer
 // time (zero only for timestamp-less adopted replay), Replayed identifies a
 // retained-history replay, Model is the attribution model (empty when
-// unknown), and CostUSD is the task's live priced-cost snapshot at the fold
+// unknown), Effort is the thinking effort active for it (empty when unknown or
+// unreported), and CostUSD is the task's live priced-cost snapshot at the fold
 // — the store derives cost movement from consecutive snapshots and never
 // prices itself.
 type Event struct {
 	At                   time.Time
 	Replayed             bool
 	Model                string
+	Effort               string
 	CostUSD              float64
 	TurnBoundary         bool   // a completed turn; the store flushes on it
 	ToolStartID          string // tool-use correlation; not persisted in a usage row

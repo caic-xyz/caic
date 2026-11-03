@@ -155,6 +155,10 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 		if model == "" {
 			model = lt.RequestedModel
 		}
+		effort := lt.ReportedEffort
+		if effort == "" {
+			effort = lt.RequestedEffort
+		}
 		repos := make([]string, len(lt.Repos))
 		for i, repo := range lt.Repos {
 			repos[i] = repo.Name
@@ -168,11 +172,14 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				model = usageClaudeModel(model, confirmed)
 			}
 			attributedModel := model
+			attributedEffort := effort
 			if confirmed.Provenance().IsChild() {
 				attributedModel = ""
 				if u, ok := confirmed.(*agent.UsageMessage); ok {
 					attributedModel = u.ReportedModel
 				}
+				// A child actor reports its own model but never its effort.
+				attributedEffort = ""
 			}
 			delta, ok := usageDelta(confirmed)
 			switch m := confirmed.(type) {
@@ -182,7 +189,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 			case *agent.ToolResultMessage:
 				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
 				if name, ms, measured := toolTimings.Finish(key.String(), at, m.DurationMs); measured {
-					delta.ToolTimings = map[string]data.ToolTiming{name: {Count: 1, DurationMs: ms}}
+					delta.ToolTimings = map[string]data.ToolTiming{name: data.ToolCallTiming(ms)}
 					ok = true
 				}
 			}
@@ -190,7 +197,8 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				return
 			}
 			day := at.UTC().Format(usageDayFormat)
-			k := key{day: day, model: attributedModel}
+			label := usagedb.ModelLabel(attributedModel, attributedEffort)
+			k := key{day: day, model: label}
 			row := buckets[k]
 			if row == nil {
 				row = &data.UsageRow{
@@ -199,7 +207,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 					TaskID:  lt.TaskID,
 					Harness: string(lt.Harness),
 					Repos:   slices.Clone(repos),
-					Model:   attributedModel,
+					Model:   label,
 				}
 				buckets[k] = row
 			}

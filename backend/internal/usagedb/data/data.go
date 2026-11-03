@@ -5,6 +5,7 @@
 package data
 
 import (
+	"cmp"
 	"slices"
 	"time"
 )
@@ -168,17 +169,71 @@ func (d *Delta) Add(o *Delta) {
 			d.ToolTimings = make(map[string]ToolTiming)
 		}
 		current := d.ToolTimings[name]
-		current.Count += timing.Count
-		current.DurationMs += timing.DurationMs
+		current.Add(timing)
 		d.ToolTimings[name] = current
 	}
 }
 
-// ToolTiming sums completed calls with a measured duration.
-// Calls without a usable native duration or producer-time pair are excluded.
+// ToolTiming sums completed calls with a measured duration and keeps the
+// duration distribution its median needs. Calls without a usable native
+// duration or producer-time pair are excluded, and rows written before the
+// distribution existed carry no buckets.
 type ToolTiming struct {
-	Count      int   `json:"count"`
-	DurationMs int64 `json:"duration_ms"`
+	Count      int              `json:"count"`
+	DurationMs int64            `json:"duration_ms"`
+	Buckets    []DurationBucket `json:"duration_buckets,omitzero"`
+}
+
+// ToolCallTiming returns the timing of one measured tool call. Durations above
+// the largest bound share the last bucket.
+func ToolCallTiming(ms int64) ToolTiming {
+	upper := durationBucketUpperMs[len(durationBucketUpperMs)-1]
+	for _, bound := range durationBucketUpperMs {
+		if ms <= bound {
+			upper = bound
+			break
+		}
+	}
+	return ToolTiming{Count: 1, DurationMs: ms, Buckets: []DurationBucket{{UpperMs: upper, Count: 1}}}
+}
+
+// Add merges o into t: counters sum and bucket counts combine per bound.
+func (t *ToolTiming) Add(o ToolTiming) {
+	t.Count += o.Count
+	t.DurationMs += o.DurationMs
+	for _, bucket := range o.Buckets {
+		i := slices.IndexFunc(t.Buckets, func(e DurationBucket) bool { return e.UpperMs == bucket.UpperMs })
+		if i < 0 {
+			t.Buckets = append(t.Buckets, bucket)
+			continue
+		}
+		t.Buckets[i].Count += bucket.Count
+	}
+	slices.SortFunc(t.Buckets, func(a, b DurationBucket) int { return cmp.Compare(a.UpperMs, b.UpperMs) })
+}
+
+// Clone copies the bucket slice for independently owned snapshots.
+func (t *ToolTiming) Clone() ToolTiming {
+	out := *t
+	out.Buckets = slices.Clone(t.Buckets)
+	return out
+}
+
+// DurationBucket counts measured calls whose duration falls above the previous
+// bucket's UpperMs and at most its own. Bounds come from durationBucketUpperMs,
+// so merging only needs to sum counts per bound.
+type DurationBucket struct {
+	UpperMs int64 `json:"upper_ms"`
+	Count   int   `json:"count"`
+}
+
+// durationBucketUpperMs is the duration bucket ladder in milliseconds. It stays
+// coarse enough to keep one tool's distribution compact and fine enough that a
+// median interpolated inside one bucket is close to the measured one.
+var durationBucketUpperMs = [...]int64{
+	5, 10, 20, 50, 100, 200, 500,
+	1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000,
+	200_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 86_400_000,
 }
 
 // UsageRow records a task/model delta for one UTC day.

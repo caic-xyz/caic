@@ -2374,6 +2374,65 @@ describe("App repo chips: No repository", () => {
     expect(screen.queryByRole("heading", { name: "Usage" })).not.toBeInTheDocument();
   });
 
+  it("shows a tool median from the recorded duration distribution", async () => {
+    vi.mocked(api.getUsageDashboard).mockResolvedValue({
+      dataSince: "2026-01-24",
+      days: [
+        {
+          day: "2026-01-24",
+          tokens: {
+            inputTokens: 10,
+            cacheWrite5mTokens: 0,
+            cacheWrite1hTokens: 0,
+            cacheReadTokens: 0,
+            outputTokens: 5,
+            reasoningTokens: 0,
+          },
+          turns: 1,
+          erroredTurns: 0,
+          apiMs: 0,
+          wallMs: 0,
+          compactions: 0,
+          subagentSpawns: 0,
+          subagentSpawnsBackground: 0,
+          costUSD: 0.1,
+          models: [],
+          harnesses: [],
+          repos: [],
+          skills: [],
+          tools: [
+            { name: "Read", count: 3 },
+            { name: "Bash", count: 2 },
+          ],
+          toolTimings: [
+            {
+              name: "Read",
+              count: 3,
+              durationMs: 30_000,
+              buckets: [
+                { upperMs: 5_000, count: 2 },
+                { upperMs: 20_000, count: 1 },
+              ],
+            },
+            { name: "Bash", count: 2, durationMs: 4_000, buckets: [] },
+          ],
+        },
+      ],
+    });
+
+    renderApp("/monitoring");
+
+    const region = await screen.findByRole("region", { name: "Tool durations" });
+    expect(within(region).getByRole("columnheader", { name: "Median" })).toBeInTheDocument();
+    // The mean of Read is 10s; two calls inside 5s put the median at the bound.
+    expect(within(region).getByRole("row", { name: /Read/ })).toHaveTextContent("5.0 s");
+    // A call recorded before the rollup kept a distribution has no median.
+    expect(within(region).getByRole("row", { name: /Bash/ })).toHaveTextContent("—");
+    expect(
+      await screen.findByText(/Median covers the calls recorded with a duration distribution/),
+    ).toBeInTheDocument();
+  });
+
   it("renders operation latency as a routed page", async () => {
     vi.mocked(api.getMetrics).mockResolvedValue({
       since: "2026-01-01T00:00:00Z" as ISOTimestamp,

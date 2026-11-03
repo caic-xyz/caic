@@ -1064,10 +1064,20 @@ type UsageDashboardCount struct {
 }
 
 // UsageDashboardToolTiming measures completed tool calls with known duration.
+// Buckets keeps the duration distribution that a range-wide median needs; rows
+// written before the distribution existed contribute counts without buckets.
 type UsageDashboardToolTiming struct {
-	Name       string `json:"name"`
-	Count      int    `json:"count"`
-	DurationMs int64  `json:"durationMs"`
+	Name       string                       `json:"name"`
+	Count      int                          `json:"count"`
+	DurationMs int64                        `json:"durationMs"`
+	Buckets    []UsageDashboardToolDuration `json:"buckets"`
+}
+
+// UsageDashboardToolDuration counts measured calls whose duration falls above
+// the previous bucket's upperMs and at most its own.
+type UsageDashboardToolDuration struct {
+	UpperMs int64 `json:"upperMs"`
+	Count   int   `json:"count"`
 }
 
 // UsageDashboardDay is the complete daily usage snapshot from the durable

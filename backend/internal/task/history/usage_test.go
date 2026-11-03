@@ -10,23 +10,21 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/task/history"
-
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/maruel/ksid"
 )
 
 func TestStore(t *testing.T) {
@@ -179,7 +177,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			days := rollup.Days()
-			if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (data.ToolTiming{Count: 1, DurationMs: 2500}) {
+			if len(days) != 1 || days[0].Tools["Read"] != 1 || !reflect.DeepEqual(days[0].ToolTimings["Read"], data.ToolCallTiming(2500)) {
 				t.Errorf("backfilled tool totals = %+v", days)
 			}
 		})

@@ -89,9 +89,33 @@ export function usageHistory(): UsageDashboardResp {
       { name: "Bash", count: count * 4 },
     ];
     const toolTimings = [
-      { name: "Read", count: count * 12, durationMs: count * 1800 },
-      { name: "Edit", count: count * 6, durationMs: count * 1200 },
-      { name: "Bash", count: count * 4, durationMs: count * 24000 },
+      {
+        name: "Read",
+        count: count * 12,
+        durationMs: count * 1800,
+        buckets: [
+          { upperMs: 200, count: count * 9 },
+          { upperMs: 500, count: count * 3 },
+        ],
+      },
+      {
+        name: "Edit",
+        count: count * 6,
+        durationMs: count * 1200,
+        buckets: [
+          { upperMs: 200, count: count * 4 },
+          { upperMs: 500, count: count * 2 },
+        ],
+      },
+      {
+        name: "Bash",
+        count: count * 4,
+        durationMs: count * 24000,
+        buckets: [
+          { upperMs: 5000, count: count * 3 },
+          { upperMs: 10000, count },
+        ],
+      },
     ];
     const repos = [
       { repo: "caic", tasks: count },

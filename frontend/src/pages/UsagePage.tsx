@@ -191,16 +191,16 @@ export default function UsagePage() {
             <section class={styles.panel}>
               <h2>Models</h2>
               <p>
-                Tokens, turns, and reported cost over the selected range. Select a row to drill every panel down to that
-                model.
+                Tokens, turns, compactions, and reported cost over the selected range. Select a row to drill every panel
+                down to that model.
               </p>
               <Leaderboard entries={summary().models} showCost kind="model" onSelect={selectModel} />
             </section>
             <section class={styles.panel}>
               <h2>Harnesses</h2>
               <p>
-                Tokens, turns, reported cost, and cached input over the selected range. Select a row to drill every
-                panel down to that harness.
+                Tokens, turns, compactions, reported cost, and cached input over the selected range. Select a row to
+                drill every panel down to that harness.
               </p>
               <Leaderboard entries={summary().harnesses} showCost showCache kind="harness" onSelect={selectHarness} />
             </section>
@@ -208,7 +208,7 @@ export default function UsagePage() {
               <h2>Tools</h2>
               <p>
                 Calls count on their start day; timed calls and duration count on completion day. Total time sums
-                concurrent calls, and average uses measured calls only.
+                concurrent calls, and the median covers measured calls only.
               </p>
               <ToolTable entries={summary().tools} />
             </section>
@@ -245,6 +245,7 @@ function Leaderboard(props: {
               <th scope="col">Name</th>
               <th scope="col">Tokens</th>
               <th scope="col">Turns</th>
+              <th scope="col">Compactions</th>
               <Show when={props.showCost}>
                 <th scope="col">Cost</th>
               </Show>
@@ -271,6 +272,7 @@ function Leaderboard(props: {
                   </th>
                   <td>{formatTokens(entry.tokens)}</td>
                   <td>{entry.turns}</td>
+                  <td>{entry.compactions}</td>
                   <Show when={props.showCost}>
                     <td>{formatCost(entry.costUSD)}</td>
                   </Show>
@@ -288,6 +290,7 @@ function Leaderboard(props: {
 }
 
 function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tools"] }) {
+  const partial = () => props.entries.some((entry) => entry.distributionCalls < entry.timedCalls);
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No tool calls in this range.</p>}>
       <div class={styles.tableWrap} role="region" aria-label="Tool durations" tabIndex={0}>
@@ -298,7 +301,7 @@ function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tool
               <th scope="col">Calls</th>
               <th scope="col">Timed</th>
               <th scope="col">Total</th>
-              <th scope="col">Average</th>
+              <th scope="col">Median</th>
             </tr>
           </thead>
           <tbody>
@@ -311,13 +314,19 @@ function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tool
                   <td>{entry.calls}</td>
                   <td>{entry.timedCalls}</td>
                   <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs) : "—"}</td>
-                  <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs / entry.timedCalls) : "—"}</td>
+                  <td>{entry.medianMs === null ? "—" : formatUsageDuration(entry.medianMs)}</td>
                 </tr>
               )}
             </For>
           </tbody>
         </table>
       </div>
+      <Show when={partial()}>
+        <p class={styles.drilldown}>
+          Median covers the calls recorded with a duration distribution; earlier calls count toward calls and total
+          only.
+        </p>
+      </Show>
     </Show>
   );
 }

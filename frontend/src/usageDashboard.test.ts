@@ -104,7 +104,17 @@ describe("summarizeUsageDays", () => {
         compactions: 2,
         erroredTurns: 1,
         tools: [{ name: "Read", count: 3 }],
-        toolTimings: [{ name: "Read", count: 2, durationMs: 1500 }],
+        toolTimings: [
+          {
+            name: "Read",
+            count: 2,
+            durationMs: 1500,
+            buckets: [
+              { upperMs: 500, count: 1 },
+              { upperMs: 1_000, count: 1 },
+            ],
+          },
+        ],
         costUSD: 0.2,
         repos: [{ repo: "caic", tasks: 2 }],
         skills: [{ name: "review", count: 3 }],
@@ -117,7 +127,9 @@ describe("summarizeUsageDays", () => {
     expect(summary.wallMs).toBe(3000);
     expect(summary.compactions).toBe(2);
     expect(summary.erroredTurns).toBe(1);
-    expect(summary.tools).toEqual([{ name: "Read", calls: 3, timedCalls: 2, durationMs: 1500 }]);
+    expect(summary.tools).toEqual([
+      { name: "Read", calls: 3, timedCalls: 2, durationMs: 1500, distributionCalls: 2, medianMs: 500 },
+    ]);
     expect(summary.costUSD).toBeCloseTo(0.3);
     expect(summary.repos).toEqual([{ name: "caic", count: 3 }]);
     expect(summary.skills).toEqual([{ name: "review", count: 4 }]);
@@ -125,6 +137,40 @@ describe("summarizeUsageDays", () => {
     expect(usageCacheHitRate(summary.tokens)).toBeCloseTo(2 / 3);
     assert.ok(summary.harnesses[0] !== undefined);
     expect(summary.harnesses[0].cacheHitRate).toBeCloseTo(2 / 3);
+  });
+
+  it("estimates the tool median from merged duration buckets", () => {
+    const summary = summarizeUsageDays([
+      day("2026-01-24", {
+        toolTimings: [
+          {
+            name: "Read",
+            count: 4,
+            durationMs: 400,
+            buckets: [
+              { upperMs: 100, count: 3 },
+              { upperMs: 5_000, count: 1 },
+            ],
+          },
+        ],
+      }),
+      day("2026-01-25", {
+        toolTimings: [{ name: "Read", count: 1, durationMs: 5_000, buckets: [{ upperMs: 5_000, count: 1 }] }],
+      }),
+    ]);
+
+    // The mean sits at 1.08s, pulled up by one slow call; the median sits in the
+    // first bucket, whose interpolation tops out at its 100ms bound.
+    expect(summary.tools[0]).toMatchObject({ name: "Read", timedCalls: 5, durationMs: 5_400, medianMs: 100 });
+    expect(summary.tools[0]?.distributionCalls).toBe(5);
+  });
+
+  it("leaves the median unknown when no call kept a distribution", () => {
+    const summary = summarizeUsageDays([
+      day("2026-01-24", { toolTimings: [{ name: "Read", count: 2, durationMs: 1_000, buckets: [] }] }),
+    ]);
+
+    expect(summary.tools[0]).toMatchObject({ name: "Read", timedCalls: 2, distributionCalls: 0, medianMs: null });
   });
 
   it("weights harness cache hit rate by input tokens across days", () => {
@@ -167,7 +213,7 @@ describe("summarizeUsageDays drill-down", () => {
       costUSD: 0.2,
       contextWindow: 200,
       tools: [{ name: "Read", count: 4 }],
-      toolTimings: [{ name: "Read", count: 2, durationMs: 1200 }],
+      toolTimings: [{ name: "Read", count: 2, durationMs: 1200, buckets: [] }],
       skills: [{ name: "review", count: 1 }],
       repos: [{ repo: "caic", tasks: 1 }],
     };
@@ -206,7 +252,7 @@ describe("summarizeUsageDays drill-down", () => {
           subagentSpawns: 3,
           costUSD: 0.2,
           tools: [{ name: "Read", count: 4 }],
-          toolTimings: [{ name: "Read", count: 2, durationMs: 1200 }],
+          toolTimings: [{ name: "Read", count: 2, durationMs: 1200, buckets: [] }],
           skills: [{ name: "review", count: 1 }],
           repos: [{ repo: "caic", tasks: 1 }],
           models: [pair],
@@ -227,7 +273,9 @@ describe("summarizeUsageDays drill-down", () => {
     expect(summary.compactions).toBe(1);
     expect(summary.subagentSpawns).toBe(3);
     expect(summary.costUSD).toBeCloseTo(0.2);
-    expect(summary.tools).toEqual([{ name: "Read", calls: 4, timedCalls: 2, durationMs: 1200 }]);
+    expect(summary.tools).toEqual([
+      { name: "Read", calls: 4, timedCalls: 2, durationMs: 1200, distributionCalls: 0, medianMs: null },
+    ]);
     expect(summary.skills).toEqual([{ name: "review", count: 1 }]);
     expect(summary.repos).toEqual([{ name: "caic", count: 1 }]);
     expect(summary.models.map((entry) => entry.name)).toEqual(["model-a"]);
@@ -260,6 +308,14 @@ describe("summarizeUsageDays drill-down", () => {
     expect(summary.skills).toEqual([{ name: "review", count: 1 }]);
     expect(summary.models.map((entry) => entry.name)).toEqual(["model-a"]);
     expect(summary.harnesses.map((entry) => entry.name)).toEqual(["claude"]);
+  });
+
+  it("attributes compactions to the drilled model and harness", () => {
+    const summary = summarizeUsageDays([drillDay("2026-01-24")], { model: "model-a" });
+
+    expect(summary.compactions).toBe(1);
+    expect(summary.models[0]).toMatchObject({ name: "model-a", compactions: 1 });
+    expect(summary.harnesses[0]).toMatchObject({ name: "claude", compactions: 1 });
   });
 
   it("drops days without the selected subject from the summary", () => {

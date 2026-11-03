@@ -2035,11 +2035,25 @@ export interface UsageDashboardCount {
   count: number /* int */;
 }
 
-/** UsageDashboardToolTiming measures completed tool calls with known duration. */
+/**
+ * UsageDashboardToolDuration counts measured calls whose duration falls above
+ * the previous bucket's upperMs and at most its own.
+ */
+export interface UsageDashboardToolDuration {
+  upperMs: number /* int64 */;
+  count: number /* int */;
+}
+
+/**
+ * UsageDashboardToolTiming measures completed tool calls with known duration.
+ * Buckets keeps the duration distribution that a range-wide median needs; rows
+ * written before the distribution existed contribute counts without buckets.
+ */
 export interface UsageDashboardToolTiming {
   name: string;
   count: number /* int */;
   durationMs: number /* int64 */;
+  buckets: UsageDashboardToolDuration[];
 }
 
 /**

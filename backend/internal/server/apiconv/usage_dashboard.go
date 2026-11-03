@@ -51,7 +51,11 @@ func usageDashboardToolTimings(timings map[string]data.ToolTiming) []v1.UsageDas
 	out := make([]v1.UsageDashboardToolTiming, len(names))
 	for i, name := range names {
 		timing := timings[name]
-		out[i] = v1.UsageDashboardToolTiming{Name: name, Count: timing.Count, DurationMs: timing.DurationMs}
+		buckets := make([]v1.UsageDashboardToolDuration, len(timing.Buckets))
+		for j, bucket := range timing.Buckets {
+			buckets[j] = v1.UsageDashboardToolDuration{UpperMs: bucket.UpperMs, Count: bucket.Count}
+		}
+		out[i] = v1.UsageDashboardToolTiming{Name: name, Count: timing.Count, DurationMs: timing.DurationMs, Buckets: buckets}
 	}
 	return out
 }
