@@ -50,18 +50,9 @@ export default function KeyboardShortcuts(props: Props) {
   let shortcutOpenerTaskId: string | undefined;
 
   const navigationShortcuts = () => {
-    const harnesses = s.harnesses();
-    const f3 =
-      harnesses.length > 1
-        ? { keys: "F3", action: "Focus harness for the new task" }
-        : harnesses.find((harness) => harness.name === s.selectedHarness())?.models.length
-          ? { keys: "F3", action: "Focus model for the new task" }
-          : s.runtimes().length > 1
-            ? { keys: "F3", action: "Focus runtime for the new task" }
-            : null;
     return [
       { keys: "F2", action: "Focus repositories for the new task" },
-      ...(f3 ? [f3] : []),
+      { keys: "F3", action: "Expand and focus features for the new task" },
       ...(props.voiceAvailable ? [{ keys: "F4", action: "Toggle voice mode" }] : []),
       ...navigationShortcutsAfterModelSettings,
     ];
@@ -81,7 +72,6 @@ export default function KeyboardShortcuts(props: Props) {
     s.navigate("/");
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(selector);
-      if (el?.matches("[data-testid='runtime-select']")) s.setFeaturesOpen(true);
       el?.focus();
     });
   }
@@ -217,9 +207,8 @@ export default function KeyboardShortcuts(props: Props) {
       }
       if (event.key === "F3") {
         event.preventDefault();
-        focusNewTaskControl(
-          "[data-testid='harness-select'], [data-testid='model-select'], [data-testid='effort-select'], [data-testid='runtime-select']",
-        );
+        s.setFeaturesOpen(true);
+        focusNewTaskControl("#new-task-features :is(select, button, input):enabled");
         return;
       }
       if (event.key === "Delete" && event.shiftKey) {

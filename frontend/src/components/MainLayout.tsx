@@ -43,9 +43,6 @@ export default function MainLayout(props: { children?: JSX.Element }) {
     if (s.selectedId() === null) setSidebarOverride(null);
   });
   const sidebarOpen = () => s.selectedId() === null || (sidebarOverride() ?? (mode() === "closed" || !compact()));
-  const modelSettingVisible = () =>
-    s.harnesses().length > 1 ||
-    (s.harnesses().find((harness) => harness.name === s.selectedHarness())?.models.length ?? 0) > 0;
 
   return (
     <>
@@ -85,7 +82,6 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         <HarnessControls
           harnesses={s.harnesses()}
           harness={s.selectedHarness()}
-          harnessKeyShortcuts="F3"
           model={s.selectedModel()}
           effort={s.selectedEffort()}
           onHarness={s.setSelectedHarness}
@@ -101,7 +97,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           aria-label={s.featuresOpen() ? "Hide features" : "Show features"}
           aria-expanded={s.featuresOpen()}
           aria-controls="new-task-features"
-          title={s.featuresOpen() ? "Hide features" : "Show features"}
+          aria-keyshortcuts="F3"
+          title={s.featuresOpen() ? "Hide features" : "Show features (F3)"}
           onClick={() => s.setFeaturesOpen((open) => !open)}
         >
           <ChevronRightIcon
@@ -115,9 +112,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           {s.runtimes().length > 1 && (
             <ControlSelect
               aria-label="Runtime"
-              aria-keyshortcuts={modelSettingVisible() ? undefined : "F3"}
               data-testid="runtime-select"
-              title={modelSettingVisible() ? undefined : "Choose runtime (F3)"}
               value={s.selectedRuntimeName()}
               onChange={(e) => s.setSelectedRuntimeName(e.currentTarget.value)}
             >

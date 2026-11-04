@@ -20,6 +20,16 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   await page.keyboard.press("Escape");
   await expect(newTaskPrompt).toBeFocused();
 
+  await newTaskPrompt.press("F3");
+  const features = page.locator("#new-task-features");
+  await expect(features).toBeVisible();
+  await expect(features.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("F3");
+  await expect(features).toBeVisible();
+  await expect(features.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(newTaskPrompt).toBeFocused();
+
   await newTaskPrompt.press("F2");
   await expect(repoLabel).toBeFocused();
   await page.keyboard.press("Tab");

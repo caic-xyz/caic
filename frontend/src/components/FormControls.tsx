@@ -39,7 +39,6 @@ export function HarnessControls(props: {
   onHarness: (harness: string) => void;
   onModel: (model: string) => void;
   onEffort: (effort: string) => void;
-  harnessKeyShortcuts?: string;
   onHarnessCommit?: () => void;
   // Disambiguates aria-labels when two instances coexist, e.g. "Fork ".
   labelPrefix?: string;
@@ -77,9 +76,7 @@ export function HarnessControls(props: {
         <ControlSelect
           ref={harnessSelect}
           aria-label={label("Harness")}
-          aria-keyshortcuts={props.harnessKeyShortcuts}
           data-testid={props.labelPrefix ? "fork-harness-select" : "harness-select"}
-          title={props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined}
           value={props.harness}
           onChange={(e) => props.onHarness(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -106,7 +103,6 @@ export function HarnessControls(props: {
         <SearchableSelect
           class={styles.selectTrigger}
           ariaLabel={label("Model")}
-          ariaKeyShortcuts={props.harnesses.length > 1 ? undefined : props.harnessKeyShortcuts}
           value={props.model}
           options={modelOptions}
           placeholder="Search models…"
