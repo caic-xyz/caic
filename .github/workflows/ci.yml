@@ -106,6 +106,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Use scratch storage for md images and Go temporary files
+        # Match md's smoke runner setup: keep the large container stores and
+        # Go's temporary build and test files on the runner's scratch disk.
+        run: |
+          df -h / /mnt
+          sudo systemctl stop docker.service docker.socket containerd.service
+          sudo rm -rf /var/lib/docker
+          sudo mkdir -p /mnt/docker
+          sudo ln -s /mnt/docker /var/lib/docker
+          sudo systemctl start containerd.service docker.service
+          sudo mkdir -p /mnt/user-containers /mnt/go-test-tmp
+          sudo chown "$USER:$USER" /mnt/user-containers /mnt/go-test-tmp
+          mkdir -p ~/.local/share
+          ln -s /mnt/user-containers ~/.local/share/containers
+          df -h / /mnt
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -115,6 +130,7 @@ jobs:
           # Absolute so the artifact step does not depend on the test binary's
           # working directory, which Go sets to the package directory.
           CAIC_SMOKE_LOG: ${{ github.workspace }}/smoke-server.log
+          TMPDIR: /mnt/go-test-tmp
         run: make test-smoke
       - name: Upload Smoke failure artifacts
         if: failure() && steps.smoke.outcome == 'failure'
