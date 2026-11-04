@@ -308,6 +308,9 @@ func (c *VoiceGatewayConfig) Validate() error {
 		}
 		return nil
 	case VoiceGatewayModeEmbedded:
+		if c.Config.Server.WebRTCUDPPort < 0 {
+			return errors.New("voice-gateway.config.server.webrtc_udp_port must be nonnegative; use mode disabled to disable voice")
+		}
 		return c.Config.ValidateEmbedded()
 	default:
 		return fmt.Errorf("voice gateway mode must be %q, %q, or %q, got %q", VoiceGatewayModeDisabled, VoiceGatewayModeEmbedded, VoiceGatewayModeExternal, c.Mode)

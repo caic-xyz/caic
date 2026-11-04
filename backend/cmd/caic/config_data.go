@@ -8,65 +8,30 @@ import (
 )
 
 func voiceConfigToRuntime(c *data.VoiceConfig) voicegateway.Config {
-	var issuers []voicegateway.TrustedIssuerConfig
-	if c.TrustedIssuers != nil {
-		issuers = make([]voicegateway.TrustedIssuerConfig, len(c.TrustedIssuers))
-	}
+	out := voicegateway.Config{Server: voicegateway.ServerConfig{HTTP: c.Server.HTTP, WebRTCUDPPort: c.Server.WebRTCUDPPort}}
 	for i := range c.TrustedIssuers {
 		v := &c.TrustedIssuers[i]
-		issuers[i] = voicegateway.TrustedIssuerConfig{
-			Service: v.Service, Issuer: v.Issuer, PublicKey: v.PublicKey,
-			OAuth: v.OAuth, Audience: v.Audience, Scope: v.Scope,
-		}
+		out.TrustedIssuers = append(out.TrustedIssuers, voicegateway.TrustedIssuerConfig{Service: v.Service, Issuer: v.Issuer, PublicKey: v.PublicKey, OAuth: v.OAuth, Scope: v.Scope})
 	}
-	return voicegateway.Config{
-		Model: c.Model, Backend: c.Backend, TrustedIssuers: issuers,
-		Server: voicegateway.ServerConfig{HTTP: c.Server.HTTP, WebRTCUDPPort: c.Server.WebRTCUDPPort},
-		LocalStack: voicegateway.LocalStackConfig{
-			ASR: voicegateway.LocalStackASRConfig{
-				Engine:   voicegateway.LocalStackASREngine(c.LocalStack.ASR.Engine),
-				Provider: c.LocalStack.ASR.Provider, Remote: c.LocalStack.ASR.Remote, Model: c.LocalStack.ASR.Model,
-			},
-			LLM: voicegateway.LocalStackLLMConfig{
-				Provider: c.LocalStack.LLM.Provider, Remote: c.LocalStack.LLM.Remote,
-				Model: c.LocalStack.LLM.Model, APIKeyName: c.LocalStack.LLM.APIKeyName,
-			},
-			TTS: voicegateway.LocalStackTTSConfig{
-				Engine: voicegateway.LocalStackTTSEngine(c.LocalStack.TTS.Engine),
-				Remote: c.LocalStack.TTS.Remote, Model: c.LocalStack.TTS.Model, Voice: c.LocalStack.TTS.Voice,
-			},
-		},
+	for i := range c.Realtime {
+		v := &c.Realtime[i]
+		out.Realtime = append(out.Realtime, voicegateway.RealtimeConfig{Label: v.Label, ModelConfig: voiceModelToRuntime(&v.ModelConfig), CacheDir: v.CacheDir, Threads: v.Threads, Slots: v.Slots, ContextSize: v.ContextSize, MaxOutputTokens: v.MaxOutputTokens, SetupTimeoutSeconds: v.SetupTimeoutSeconds, PendingAudioSeconds: v.PendingAudioSeconds})
 	}
+	for i := range c.Chat {
+		v := &c.Chat[i]
+		out.Chat = append(out.Chat, voicegateway.ChatConfig{Label: v.Label, ModelConfig: voiceModelToRuntime(&v.ModelConfig)})
+	}
+	for i := range c.LocalStack {
+		v := &c.LocalStack[i]
+		out.LocalStack = append(out.LocalStack, voicegateway.LocalStackConfig{Label: v.Label, TextOnly: v.TextOnly,
+			LLM: voiceModelToRuntime(&v.LLM),
+			ASR: voicegateway.LocalStackASRConfig{Engine: voicegateway.LocalStackASREngine(v.ASR.Engine), Provider: v.ASR.Provider, Remote: v.ASR.Remote, Model: v.ASR.Model},
+			TTS: voicegateway.LocalStackTTSConfig{Engine: voicegateway.LocalStackTTSEngine(v.TTS.Engine), Remote: v.TTS.Remote, Model: v.TTS.Model, Voice: v.TTS.Voice},
+		})
+	}
+	return out
 }
 
-func voiceConfigToData(c *voicegateway.Config) data.VoiceConfig {
-	var issuers []data.TrustedIssuerConfig
-	if c.TrustedIssuers != nil {
-		issuers = make([]data.TrustedIssuerConfig, len(c.TrustedIssuers))
-	}
-	for i := range c.TrustedIssuers {
-		v := &c.TrustedIssuers[i]
-		issuers[i] = data.TrustedIssuerConfig{
-			Service: v.Service, Issuer: v.Issuer, PublicKey: v.PublicKey,
-			OAuth: v.OAuth, Audience: v.Audience, Scope: v.Scope,
-		}
-	}
-	return data.VoiceConfig{
-		Model: c.Model, Backend: c.Backend, TrustedIssuers: issuers,
-		Server: data.ServerConfig{HTTP: c.Server.HTTP, WebRTCUDPPort: c.Server.WebRTCUDPPort},
-		LocalStack: data.LocalStackConfig{
-			ASR: data.LocalStackASRConfig{
-				Engine:   data.LocalStackASREngine(c.LocalStack.ASR.Engine),
-				Provider: c.LocalStack.ASR.Provider, Remote: c.LocalStack.ASR.Remote, Model: c.LocalStack.ASR.Model,
-			},
-			LLM: data.LocalStackLLMConfig{
-				Provider: c.LocalStack.LLM.Provider, Remote: c.LocalStack.LLM.Remote,
-				Model: c.LocalStack.LLM.Model, APIKeyName: c.LocalStack.LLM.APIKeyName,
-			},
-			TTS: data.LocalStackTTSConfig{
-				Engine: data.LocalStackTTSEngine(c.LocalStack.TTS.Engine),
-				Remote: c.LocalStack.TTS.Remote, Model: c.LocalStack.TTS.Model, Voice: c.LocalStack.TTS.Voice,
-			},
-		},
-	}
+func voiceModelToRuntime(c *data.ModelConfig) voicegateway.ModelConfig {
+	return voicegateway.ModelConfig{LlamaCPPServer: c.LlamaCPPServer, Provider: c.Provider, Remote: c.Remote, Model: c.Model, APIKeyName: c.APIKeyName}
 }

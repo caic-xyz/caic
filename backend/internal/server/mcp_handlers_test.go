@@ -862,7 +862,11 @@ func TestMCPHandlers(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			defer close(done)
-			for update := range changes {
+			for update, err := range changes {
+				if err != nil {
+					t.Error(err)
+					return
+				}
 				got <- update
 				return
 			}
@@ -910,7 +914,11 @@ func TestMCPHandlers(t *testing.T) {
 		wg.Go(func() {
 			defer close(done)
 			count := 0
-			for update := range changes {
+			for update, err := range changes {
+				if err != nil {
+					t.Error(err)
+					return
+				}
 				updates <- update
 				count++
 				if count == 1 {

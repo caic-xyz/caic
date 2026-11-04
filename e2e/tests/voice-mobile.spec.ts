@@ -37,7 +37,10 @@ test("browser voice selects a text choice on mobile and displays a failed choice
           { id: "gemini", label: "Gemini Live", transports: ["webrtc"] },
           ...(includeTextChoice ? [{ id: "text", label: "Text model", transports: ["text"] }] : []),
         ],
-        defaultChoiceID: "gemini",
+        defaults: [
+          { transport: "webrtc", id: "gemini" },
+          ...(includeTextChoice ? [{ transport: "text", id: "text" }] : []),
+        ],
       },
     }),
   );
@@ -46,9 +49,9 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   await page.goto("/");
   const overlay = page.getByTestId("voice-overlay");
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
-  const choice = overlay.getByRole("combobox", { name: "Voice choice", exact: true });
-  await expect(choice).toHaveValue("gemini");
+  await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
   await overlay.getByRole("radio", { name: "Browser speech", exact: true }).check();
+  const choice = overlay.getByRole("combobox", { name: "LLM", exact: true });
   await expect(choice).toBeEnabled();
   await expect(choice).toHaveValue("text");
   await expect(overlay.getByRole("alert")).toBeEmpty();

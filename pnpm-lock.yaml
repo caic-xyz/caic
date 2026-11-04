@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@maruel/gomode':
-        specifier: github:maruel/gomode#e14811299d941ef16ab1af826ebcabb8d1af8f5a
-        version: git+https://github.com/maruel/gomode.git#e14811299d941ef16ab1af826ebcabb8d1af8f5a(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
+        specifier: github:maruel/gomode#4ded89ae053691f17432f64ef14112c747f37621
+        version: https://codeload.github.com/maruel/gomode/tar.gz/4ded89ae053691f17432f64ef14112c747f37621(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
       '@material-symbols/svg-400':
         specifier: 0.47.4
         version: 0.47.4
@@ -791,8 +791,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@maruel/gomode@git+https://github.com/maruel/gomode.git#e14811299d941ef16ab1af826ebcabb8d1af8f5a':
-    resolution: {commit: e14811299d941ef16ab1af826ebcabb8d1af8f5a, repo: https://github.com/maruel/gomode.git, type: git}
+  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/4ded89ae053691f17432f64ef14112c747f37621':
+    resolution: {gitHosted: true, integrity: sha512-TMl0lEfLVdb9u1bx68vGJ1GY/5f4+X90Ub/hY6JLj+fqWh3mCcLm9yi87EC8qdjsYrY84Ncp8aaRKq/b3Mfl7g==, tarball: https://codeload.github.com/maruel/gomode/tar.gz/4ded89ae053691f17432f64ef14112c747f37621}
     version: 0.1.0
     engines: {node: '>=26 <27', pnpm: '>=12.5.1'}
     peerDependencies:
@@ -801,6 +801,9 @@ packages:
 
   '@material-symbols/svg-400@0.47.4':
     resolution: {integrity: sha512-o6vhGUH7Lk6epJkDJevmjRF2vQz2ognSlJujHW5O10S/2CTwVD+CRxCePfgj3tF0GVwhJMkd8qCMYUCfAEhXkg==}
+
+  '@material-symbols/svg-400@0.48.2':
+    resolution: {integrity: sha512-JJXRvRoHhMbrSFQIkiUwjFkCnurH0Yg+cGMCn9xS0PRtLXovIAQCz7NltNn/teQ9VRYmbzZB75Uw6Hx0umu5Bg==}
 
   '@napi-rs/canvas-android-arm64@1.0.10':
     resolution: {integrity: sha512-0sDMvme+7fj6bHERUaBs5SvEyWaORc91VUkaB4RrtG7p6dBrBNGy1of8cyEKDxygd1FlHtW+Thunj8lSixzY7A==}
@@ -3747,13 +3750,15 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@maruel/gomode@git+https://github.com/maruel/gomode.git#e14811299d941ef16ab1af826ebcabb8d1af8f5a(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
+  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/4ded89ae053691f17432f64ef14112c747f37621(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
     dependencies:
-      '@material-symbols/svg-400': 0.47.4
+      '@material-symbols/svg-400': 0.48.2
       '@solidjs/router': 1.0.0(solid-js@1.9.15)
       solid-js: 1.9.15
 
   '@material-symbols/svg-400@0.47.4': {}
+
+  '@material-symbols/svg-400@0.48.2': {}
 
   '@napi-rs/canvas-android-arm64@1.0.10':
     optional: true

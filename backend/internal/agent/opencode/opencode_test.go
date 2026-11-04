@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/genai/acp"
+
 	genaiopencode "github.com/maruel/genai/providers/opencode"
 	"github.com/maruel/gomode/mcp/mcptest"
 
@@ -123,18 +125,18 @@ func TestHandshake(t *testing.T) {
 					t.Fatal(err)
 				}
 				lines := strings.Split(strings.TrimSpace(stdin.String()), "\n")
-				var request genaiopencode.JSONRPCRequest
+				var request acp.JSONRPCRequest
 				if err := json.Unmarshal([]byte(lines[1]), &request); err != nil {
 					t.Fatal(err)
 				}
-				wantMethod := genaiopencode.MethodSessionNew
+				wantMethod := acp.MethodSessionNew
 				if resume != "" {
-					wantMethod = genaiopencode.MethodSessionLoad
+					wantMethod = acp.MethodSessionLoad
 				}
 				if request.Method != wantMethod {
 					t.Fatalf("method = %s, want %s", request.Method, wantMethod)
 				}
-				var params genaiopencode.SessionLoadParams
+				var params acp.SessionLoadParams
 				if err := json.Unmarshal(request.Params, &params); err != nil {
 					t.Fatal(err)
 				}
@@ -185,24 +187,24 @@ func TestHandshake(t *testing.T) {
 		if len(lines) != 4 {
 			t.Fatalf("request count = %d, want 4; requests = %s", len(lines), stdin.String())
 		}
-		var modelRequest, effortRequest genaiopencode.JSONRPCRequest
+		var modelRequest, effortRequest acp.JSONRPCRequest
 		if err := json.Unmarshal([]byte(lines[2]), &modelRequest); err != nil {
 			t.Fatalf("unmarshal model request: %v", err)
 		}
 		if err := json.Unmarshal([]byte(lines[3]), &effortRequest); err != nil {
 			t.Fatalf("unmarshal effort request: %v", err)
 		}
-		if modelRequest.Method != genaiopencode.MethodSessionSetConfigOption || effortRequest.Method != genaiopencode.MethodSessionSetConfigOption {
+		if modelRequest.Method != acp.MethodSessionSetConfigOption || effortRequest.Method != acp.MethodSessionSetConfigOption {
 			t.Fatalf("configuration request methods = %q, %q", modelRequest.Method, effortRequest.Method)
 		}
-		var modelParams, effortParams genaiopencode.SetSessionConfigOptionParams
+		var modelParams, effortParams acp.SetSessionConfigOptionParams
 		if err := json.Unmarshal(modelRequest.Params, &modelParams); err != nil {
 			t.Fatalf("unmarshal model params: %v", err)
 		}
 		if err := json.Unmarshal(effortRequest.Params, &effortParams); err != nil {
 			t.Fatalf("unmarshal effort params: %v", err)
 		}
-		if modelParams.ConfigID != genaiopencode.ConfigOptionModel || modelParams.Value != selectedModel {
+		if modelParams.ConfigID != acp.ConfigOptionModel || modelParams.Value != selectedModel {
 			t.Fatalf("model params = %#v", modelParams)
 		}
 		if effortParams.ConfigID != genaiopencode.ConfigOptionEffort || effortParams.Value != "high" {
@@ -369,18 +371,18 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	t.Parallel()
 
 	res := &handshakeResult{currentModel: "fallback/model"}
-	err := res.setConfigOptions([]genaiopencode.SessionConfigOption{
+	err := res.setConfigOptions([]acp.SessionConfigOption{
 		{
-			ID:           genaiopencode.ConfigOptionModel,
-			Type:         genaiopencode.ConfigOptionTypeSelect,
+			ID:           acp.ConfigOptionModel,
+			Type:         acp.ConfigOptionTypeSelect,
 			CurrentValue: json.RawMessage(`"openai/gpt-5"`),
-			Options:      []genaiopencode.ConfigOptionValue{{Value: "openai/gpt-5"}, {Value: "anthropic/claude-sonnet-4"}},
+			Options:      []acp.ConfigOptionValue{{Value: "openai/gpt-5"}, {Value: "anthropic/claude-sonnet-4"}},
 		},
 		{
 			ID:           genaiopencode.ConfigOptionEffort,
-			Type:         genaiopencode.ConfigOptionTypeSelect,
+			Type:         acp.ConfigOptionTypeSelect,
 			CurrentValue: json.RawMessage(`"high"`),
-			Options:      []genaiopencode.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
+			Options:      []acp.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
 		},
 	})
 	if err != nil {
@@ -392,8 +394,8 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	if got := res.configOption(genaiopencode.ConfigOptionEffort); got == nil || len(got.Options) != 2 || got.Options[0].Value != "minimal" || got.Options[1].Value != "high" {
 		t.Fatalf("effort option = %#v, want minimal and high", got)
 	}
-	if err := res.setConfigOptions([]genaiopencode.SessionConfigOption{{
-		ID:           genaiopencode.ConfigOptionModel,
+	if err := res.setConfigOptions([]acp.SessionConfigOption{{
+		ID:           acp.ConfigOptionModel,
 		CurrentValue: json.RawMessage(`true`),
 	}}); err == nil || !strings.Contains(err.Error(), "decode current model configuration") {
 		t.Fatalf("setConfigOptions error = %v, want model decoding error", err)

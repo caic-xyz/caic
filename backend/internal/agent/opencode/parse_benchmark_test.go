@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/maruel/genai/acp"
+
 	genaiopencode "github.com/maruel/genai/providers/opencode"
 )
 
@@ -24,8 +26,8 @@ func BenchmarkParseToolCallUpdateRawOutput(b *testing.B) {
 }
 
 func BenchmarkHandshakeResultSetConfigOptions(b *testing.B) {
-	options := []genaiopencode.SessionConfigOption{
-		{ID: genaiopencode.ConfigOptionModel, CurrentValue: json.RawMessage(`"openai/gpt-5"`)},
+	options := []acp.SessionConfigOption{
+		{ID: acp.ConfigOptionModel, CurrentValue: json.RawMessage(`"openai/gpt-5"`)},
 		{ID: genaiopencode.ConfigOptionEffort, CurrentValue: json.RawMessage(`"high"`)},
 	}
 	b.ReportAllocs()

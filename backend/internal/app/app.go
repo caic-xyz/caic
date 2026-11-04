@@ -45,7 +45,6 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/voicegateway"
 	"github.com/maruel/gomode/voicegateway/voicertc"
 	"golang.org/x/sync/errgroup"
 )
@@ -234,18 +233,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 
 	var voiceBridge *voicertc.Bridge
 	if cfg.Voice.Gateway.Mode == server.VoiceGatewayModeEmbedded {
-		voiceCfg := cfg.Voice.Gateway.Config
-		port := voiceCfg.Server.WebRTCUDPPort
-		key := providerAPIKey("gemini", cfg.Agent.CoreEnv, nil)
-		switch {
-		case port < 0:
-		case voiceCfg.Backend == voicegateway.BackendGeminiLive && key == "":
-			appLog.InfoContext(ctx, "voice bridge disabled: GEMINI_API_KEY not set")
-		default:
-			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port, filepath.Join(cfg.Dirs.CacheDir, "voice-gateway"))
-			if err != nil {
-				return nil, fmt.Errorf("voice bridge: %w", err)
-			}
+		voiceCfg := cfg.Voice.Gateway.Config.Available(ctx)
+		if err := voiceCfg.ValidateEmbedded(); err != nil {
+			return nil, fmt.Errorf("available voice pipelines: %w", err)
+		}
+		voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, filepath.Join(cfg.Dirs.CacheDir, "voice-gateway"))
+		if err != nil {
+			return nil, fmt.Errorf("voice bridge: %w", err)
 		}
 	}
 

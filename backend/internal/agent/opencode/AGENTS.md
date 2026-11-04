@@ -6,11 +6,11 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 ## Architecture
 
 - `opencode.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire_test.go` — Wire type unmarshaling tests (types from `github.com/maruel/genai/providers/opencode`)
+- `wire_test.go` — Wire type unmarshaling tests (types from `github.com/maruel/genai/acp`)
 - `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
 - `parse_test.go` — Parser tests including wireFormat prompt response handling
 
-Wire types are provided by `github.com/maruel/genai/providers/opencode` (imported as `oc`).
+Wire types are provided by `github.com/maruel/genai/acp` (imported as `oc`).
 
 ## Event → agent.Message Mapping
 
@@ -31,7 +31,7 @@ Wire types are provided by `github.com/maruel/genai/providers/opencode` (importe
 
 ## Upstream Source
 
-Type names in `github.com/maruel/genai/providers/opencode` follow the upstream ACP SDK definitions:
+Type names in `github.com/maruel/genai/acp` follow the upstream ACP SDK definitions:
 
 - `packages/opencode/src/acp/agent.ts` — session update types and request/response handling
 

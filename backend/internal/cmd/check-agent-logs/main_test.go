@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/genai/acp"
+
 	"github.com/klauspost/compress/zstd"
-	opencodedto "github.com/maruel/genai/providers/opencode"
 )
 
 func TestRun(t *testing.T) {
@@ -718,7 +719,7 @@ func TestCheckOpenCode(t *testing.T) {
 
 	t.Run("requests", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[openCodeRequestKey]opencodedto.Method)
+		methods := make(map[openCodeRequestKey]acp.Method)
 		valid := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
 		if _, err := checkOpenCode(valid, true, methods); err != nil {
 			t.Fatal(err)
@@ -737,14 +738,14 @@ func TestCheckOpenCode(t *testing.T) {
 
 	t.Run("unmatched response", func(t *testing.T) {
 		t.Parallel()
-		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), false, make(map[openCodeRequestKey]opencodedto.Method)); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
+		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), false, make(map[openCodeRequestKey]acp.Method)); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
 			t.Fatalf("checkOpenCode error = %v, want unmatched response", err)
 		}
 	})
 
 	t.Run("strict response result", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[openCodeRequestKey]opencodedto.Method)
+		methods := make(map[openCodeRequestKey]acp.Method)
 		request := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
 		if _, err := checkOpenCode(request, true, methods); err != nil {
 			t.Fatal(err)
@@ -782,7 +783,7 @@ func TestCheckOpenCode(t *testing.T) {
 		if err := run([]string{path}, &out); err == nil {
 			t.Fatal("run succeeded, want schema validation error")
 		}
-		for _, want := range []string{"harness=opencode", "dto=*opencode.AgentMessageChunkUpdate", `json: unknown field "newField"`, "providers/opencode/dto.go"} {
+		for _, want := range []string{"harness=opencode", "dto=*acp.AgentMessageChunkUpdate", `json: unknown field "newField"`, "acp/dto.go"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("output missing %q:\n%s", want, out.String())
 			}

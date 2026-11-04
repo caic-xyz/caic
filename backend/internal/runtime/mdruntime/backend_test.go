@@ -420,8 +420,8 @@ func TestBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		cancel()
-		for range stream {
-			t.Fatal("unexpected event after cancellation")
+		for event, err := range stream {
+			t.Fatalf("unexpected event after cancellation: %v, %v", event, err)
 		}
 	})
 	t.Run("WatchStats", func(t *testing.T) {

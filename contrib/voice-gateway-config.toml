@@ -1,43 +1,151 @@
 # voice-gateway configuration
-# Copy to ~/.config/voice-gateway/config.toml and edit as needed.
-
-# ── Gemini ───────────────────────────────────────────────────────────────────
-
-# Gemini Live model used by the gateway. The API key is always read from
-# GEMINI_API_KEY. Use gemini-3.8-live, or gemini-3.8-live-extended-thinking
-# for background reasoning. Bare IDs are accepted; the models/ prefix is added.
-#model = "gemini-3.8-live"
-
-# Use the local half-duplex stack instead of Gemini Live. Omit
-# [local_stack.llm] to let voice-gateway manage llama.cpp with the default
-# Gemma GGUF model.
-#backend = "local-stack"
+# Copy to ~/.config/voice-gateway/config.toml.
 #
-# Use this only when you run llama-server yourself.
-#[local_stack.llm]
-#provider = "llamacpp"
-#remote = "http://127.0.0.1:8080"
-#model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
-
-# ── Server ───────────────────────────────────────────────────────────────────
+# With systemd, put API keys in ~/.config/systemd/user/voice-gateway.env,
+# beside voice-gateway.service. See https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example.
+#
+# Provider names come from genai's providers.All registry at https://github.com/maruel/genai
+#
+# At standalone startup, unavailable providers are hidden with a warning.
+# Managed llama.cpp and explicit local endpoints remain selectable without
+# default-endpoint probes.
 
 [server]
-# HTTP listen address for voice gateway signaling.
-#http = ":3479"
+# Use an HTTPS reverse proxy for secure signaling.
+http = "127.0.0.1:3479"
+# The WebRTC UDP port must be reachable by clients (directly or through NAT).
+webrtc_udp_port = 3478
 
-# UDP port for WebRTC ICE (single-port mux).
-# 0 (default) = enabled with OS-assigned ephemeral port.
-# >0 = enabled on that static port (open it in your firewall for UDP traffic).
-# The gateway automatically asks the router to map this selected port with UPnP
-# IGD and advertises the router's external address in ICE when that succeeds.
-# GEMINI_API_KEY is required.
-#webrtc_udp_port = 0
+# [[trusted_issuers]]
+# service = "replace-with-host-service"
+# issuer = "https://host.example"
+# oauth = true
 
-# ── Trusted Service Token Issuers ────────────────────────────────────────────
+# Realtime Audio models.
 
-# Import the public key exposed by a service backend. The service keeps the
-# private key and signs short-lived voice-gateway tokens for authenticated users.
-#[[trusted_issuers]]
-#service = "caic"
-#issuer = "https://caic.example.com"
-#public_key = "ed25519:..."
+[[realtime]]
+label = "Gemini Live"
+provider = "gemini"
+model = "gemini-3.8-live"
+
+[[realtime]]
+label = "Gemini Live Thinking ($)"
+provider = "gemini"
+model = "gemini-3.8-live-extended-thinking"
+
+[[realtime]]
+label = "GPT Realtime mini"
+provider = "openai"
+model = "gpt-realtime-2.1-mini"
+
+[[realtime]]
+label = "GPT Realtime ($)"
+provider = "openai"
+model = "gpt-realtime-2.1"
+
+# Native audio-to-audio LFM3, independent of the ASR/LLM/TTS stack.
+# llamacppsrv downloads and starts the managed llama.cpp audio server.
+[[realtime]]
+label = "LFM3 audio"
+provider = "llamacpp"
+llamacppsrv = true
+model = "LiquidAI/LFM3-Audio-2B-GGUF/LFM3-Audio-2B-Q4_K_M.gguf"
+context_size = 65536
+setup_timeout_seconds = 15
+pending_audio_seconds = 5
+# remote = "http://127.0.0.1:8080" directly on the choice.
+
+# Remote LLMs
+# Clients transcribe and speak for all chat choices. Credentials are listed in
+# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example.
+
+[[chat]]
+label = "GPT 6 Luna"
+provider = "openai"
+model = "gpt-6-luna"
+
+[[chat]]
+label = "Claude Haiku 5.5"
+provider = "anthropic"
+model = "claude-haiku-5-5"
+
+[[chat]]
+label = "Gemini Flash 3.8"
+provider = "gemini"
+model = "gemini-3.8-flash"
+
+[[chat]]
+label = "Gemini Flash Lite"
+provider = "gemini"
+model = "gemini-flash-lite-latest"
+
+[[chat]]
+label = "DeepSeek Flash"
+provider = "deepseek"
+model = "deepseek-flash"
+
+[[chat]]
+label = "Groq Qwen3.8-27B"
+provider = "groq"
+model = "qwen/qwen3.8-27b"
+
+[[chat]]
+label = "Openrouter Gemma-4-26B-A4B (free)"
+provider = "openrouter"
+model = "google/gemma-4-26b-a4b-it:free"
+
+[[chat]]
+label = "Cerebras GPT OSS 120B"
+provider = "cerebras"
+model = "gpt-oss-120b"
+
+[[chat]]
+label = "Mistral Small"
+provider = "mistral"
+model = "mistral-small-latest"
+
+[[chat]]
+label = "Alibaba Qwen3.8 Flash"
+provider = "alibaba"
+model = "qwen3.8-flash"
+
+[[chat]]
+label = "Cohere Command A"
+provider = "cohere"
+model = "command-a-03-2025"
+
+[[chat]]
+label = "Together Qwen3.8 Flash"
+provider = "togetherai"
+model = "Qwen/Qwen3.8-Flash"
+
+# An arbitrary OpenAI-compatible chat endpoint:
+# [[chat]]
+# label = "Remote compatible LLM"
+# provider = "openaicompatible"
+# remote = "https://llm.example/v1/chat/completions"
+# model = "your-model"
+# api_key_name = "REMOTE_LLM_API_KEY"
+
+# Local ASR/LLM/TTS stack. Prerequisites: https://github.com/maruel/gomode/blob/main/docs/VOICE_LOCAL_STACK.md.
+# Set text_only = true on the local_stack entry and omit ASR/TTS to use client speech.
+# [[local_stack]]
+# label = "Local stack"
+# [local_stack.llm]
+# provider = "llamacpp"
+# llamacppsrv = true
+# model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+# [local_stack.asr]
+# engine = "openai-audio"
+# remote = "http://127.0.0.1:8000"
+# model = "mlx-community/parakeet-tdt-0.6b-v3"
+# [local_stack.tts]
+# engine = "kittentts"
+# model = "KittenML/kitten-tts-2"
+# voice = "Luna"
+# Alternatively, use an existing speech server (started separately):
+# [local_stack.tts]
+# engine = "openai-audio"
+# remote = "http://127.0.0.1:8000"
+# model = "mlx-community/Kokoro-82M-bf16"
+# voice = "af_heart"

@@ -8,13 +8,15 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/maruel/genai/acp"
+
 	"github.com/buger/jsonparser"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/maruel/genai/providers/opencode"
 )
 
 type pendingRequest struct {
-	method    opencode.Method
+	method    acp.Method
 	sessionID string
 }
 
@@ -37,16 +39,16 @@ func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
 	if err := json.Unmarshal(probe.ID, &id); err != nil {
 		return nil, fmt.Errorf("unmarshal request ID: %w", err)
 	}
-	method := opencode.Method(probe.Method)
+	method := acp.Method(probe.Method)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if method == opencode.MethodInitialize {
+	if method == acp.MethodInitialize {
 		clear(w.requests)
 	}
 	// A reused request ID replaces the old request, including with an unrelated method.
 	delete(w.requests, id)
 	switch method {
-	case opencode.MethodSessionPrompt, opencode.MethodInitialize, opencode.MethodSessionNew, opencode.MethodSessionLoad, opencode.MethodSessionSetConfigOption:
+	case acp.MethodSessionPrompt, acp.MethodInitialize, acp.MethodSessionNew, acp.MethodSessionLoad, acp.MethodSessionSetConfigOption:
 		sid, err := agent.JSONString(probe.Params, "sessionId")
 		if err != nil {
 			return nil, err
@@ -83,12 +85,12 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		request, matched := w.requests[id]
 		delete(w.requests, id)
 		foreign := request.sessionID != "" && w.session.SessionID != "" && request.sessionID != w.session.SessionID &&
-			(request.method == opencode.MethodSessionPrompt || request.method == opencode.MethodSessionSetConfigOption)
+			(request.method == acp.MethodSessionPrompt || request.method == acp.MethodSessionSetConfigOption)
 		w.mu.Unlock()
 		if foreign {
 			return nil, true, nil
 		}
-		if matched && request.method == opencode.MethodSessionPrompt {
+		if matched && request.method == acp.MethodSessionPrompt {
 			result, err := promptResult(line)
 			if err != nil {
 				return nil, true, err
@@ -120,14 +122,14 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		w.session.Update(metadata)
 		known := w.session
 		w.mu.Unlock()
-		if request.method == opencode.MethodSessionNew || request.method == opencode.MethodSessionLoad {
+		if request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad {
 			return []agent.Message{&agent.InitMessage{SessionID: known.SessionID, ReportedModel: known.ReportedModel, ReportedEffort: known.ReportedEffort, Version: known.AgentVersion}}, true, nil
 		}
 		report := &agent.SessionMetadataMessage{SessionMetadata: metadata}
 		report.Source.ThreadID = request.sessionID
 		return []agent.Message{report}, true, nil
 	}
-	if opencode.Method(probe.Method) != opencode.MethodSessionUpdate {
+	if acp.Method(probe.Method) != acp.MethodSessionUpdate {
 		return nil, false, nil
 	}
 	sid, err := agent.JSONString(probe.Params, "sessionId")
@@ -148,11 +150,11 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 	if err != nil {
 		return nil, true, err
 	}
-	switch opencode.UpdateType(typ) {
-	case opencode.UpdateUsageUpdate:
+	switch acp.UpdateType(typ) {
+	case acp.UpdateUsageUpdate:
 		msgs, err := usageUpdate(update)
 		return msgs, true, err
-	case opencode.UpdateConfigOptionUpdate:
+	case acp.UpdateConfigOptionUpdate:
 		metadata := agent.SessionMetadata{SessionID: sid}
 		if err := parseConfigOptions(update, &metadata); err != nil {
 			return nil, true, err
@@ -167,13 +169,13 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 	return nil, false, nil
 }
 
-func sessionResultMetadata(method opencode.Method, requestedSession string, result []byte) (agent.SessionMetadata, error) {
+func sessionResultMetadata(method acp.Method, requestedSession string, result []byte) (agent.SessionMetadata, error) {
 	if err := requireMetadataObject(result); err != nil {
 		return agent.SessionMetadata{}, err
 	}
 	metadata := agent.SessionMetadata{}
 	switch method {
-	case opencode.MethodInitialize:
+	case acp.MethodInitialize:
 		info, err := agent.JSONField(result, "agentInfo")
 		if err != nil {
 			return agent.SessionMetadata{}, err
@@ -183,13 +185,13 @@ func sessionResultMetadata(method opencode.Method, requestedSession string, resu
 		}
 		metadata.AgentVersion, err = agent.JSONString(info, "version")
 		return metadata, err
-	case opencode.MethodSessionNew, opencode.MethodSessionLoad:
+	case acp.MethodSessionNew, acp.MethodSessionLoad:
 		var err error
 		metadata.SessionID, err = agent.JSONString(result, "sessionId")
 		if err != nil {
 			return agent.SessionMetadata{}, err
 		}
-		if metadata.SessionID == "" && method == opencode.MethodSessionLoad {
+		if metadata.SessionID == "" && method == acp.MethodSessionLoad {
 			metadata.SessionID = requestedSession
 		}
 		if metadata.SessionID == "" {
@@ -208,7 +210,7 @@ func sessionResultMetadata(method opencode.Method, requestedSession string, resu
 		}
 		err = parseConfigOptions(result, &metadata)
 		return metadata, err
-	case opencode.MethodSessionSetConfigOption:
+	case acp.MethodSessionSetConfigOption:
 		metadata.SessionID = requestedSession
 		err := parseConfigOptions(result, &metadata)
 		return metadata, err
@@ -246,7 +248,7 @@ func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata) error {
 			parseErr = err
 			return
 		}
-		parseErr = applyConfigValue(metadata, opencode.ConfigOptionID(id), current)
+		parseErr = applyConfigValue(metadata, acp.ConfigOptionID(id), current)
 	})
 	if err != nil {
 		return err
@@ -254,9 +256,9 @@ func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata) error {
 	return parseErr
 }
 
-func applyConfigValue(metadata *agent.SessionMetadata, id opencode.ConfigOptionID, value []byte) error {
+func applyConfigValue(metadata *agent.SessionMetadata, id acp.ConfigOptionID, value []byte) error {
 	switch id {
-	case opencode.ConfigOptionModel:
+	case acp.ConfigOptionModel:
 		if err := json.Unmarshal(value, &metadata.ReportedModel); err != nil {
 			return fmt.Errorf("decode current model configuration: %w", err)
 		}
@@ -330,14 +332,14 @@ func promptResult(line []byte) (*agent.ResultMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if opencode.StopReason(reason) == opencode.StopReasonCancelled || opencode.StopReason(reason) == opencode.StopReasonRefusal {
+	if acp.StopReason(reason) == acp.StopReasonCancelled || acp.StopReason(reason) == acp.StopReasonRefusal {
 		rm.IsError, rm.Result = true, reason
 	}
 	rawUsage, err := agent.JSONField(result, "usage")
 	if err != nil {
 		return nil, err
 	}
-	var usage opencode.PromptUsage
+	var usage acp.PromptUsage
 	if rawUsage != nil {
 		if err := json.Unmarshal(rawUsage, &usage); err != nil {
 			return nil, fmt.Errorf("unmarshal prompt usage: %w", err)

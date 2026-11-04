@@ -16,12 +16,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maruel/genai/acp"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 	codexdto "github.com/maruel/genai/providers/codex"
-	opencodedto "github.com/maruel/genai/providers/opencode"
 	pidto "github.com/maruel/genai/providers/pi"
 )
 
@@ -64,7 +65,7 @@ type finding struct {
 	hint    string
 }
 
-func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[openCodeRequestKey]opencodedto.Method) *finding {
+func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[openCodeRequestKey]acp.Method) *finding {
 	if len(message) != 0 && message[0] == '"' {
 		var reason string
 		if err := json.Unmarshal(message, &reason); err == nil {
@@ -126,6 +127,9 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 
 func (f finding) String() string {
 	hint := f.hint
+	if hint == "" && f.harness == "opencode" {
+		hint = "update: ~/src/genai/acp/dto.go"
+	}
 	if hint == "" {
 		hint = "update: ~/src/genai/providers/" + providerDir(f.harness) + "/dto.go"
 	}
@@ -315,7 +319,7 @@ func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 		}
 	}
 
-	checker := &messageChecker{path: path, harness: harness, line: 1, openCodeMethods: make(map[openCodeRequestKey]opencodedto.Method)}
+	checker := &messageChecker{path: path, harness: harness, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method)}
 	parser, err := agent.NewLogRecordParser(checker)
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
@@ -339,7 +343,7 @@ type messageChecker struct {
 	path            string
 	harness         string
 	line            int
-	openCodeMethods map[openCodeRequestKey]opencodedto.Method
+	openCodeMethods map[openCodeRequestKey]acp.Method
 	findings        []finding
 }
 
@@ -776,8 +780,8 @@ func checkPiInput(data []byte) (string, error) {
 	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
 
-func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]opencodedto.Method) (string, error) {
-	var probe opencodedto.MessageProbe
+func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]acp.Method) (string, error) {
+	var probe acp.MessageProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "MessageProbe", err
 	}
@@ -785,7 +789,7 @@ func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]openc
 		return "JSONRPCMessage", fmt.Errorf("unexpected native type %q", probe.Type)
 	}
 
-	var msg opencodedto.JSONRPCMessage
+	var msg acp.JSONRPCMessage
 	if err := strictDecode(data, &msg); err != nil {
 		return "JSONRPCMessage", err
 	}
@@ -829,28 +833,28 @@ func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]openc
 	return checkOpenCodeResponse(method, msg.Result)
 }
 
-func checkOpenCodeRequest(method opencodedto.Method, params json.RawMessage, input bool) (string, error) {
+func checkOpenCodeRequest(method acp.Method, params json.RawMessage, input bool) (string, error) {
 	if !input {
-		if method != opencodedto.MethodSessionRequestPermission {
+		if method != acp.MethodSessionRequestPermission {
 			return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode output request method %q; add its DTO and checker dispatch", method)
 		}
-		return "*opencode.PermissionRequestParams", strictDecode(params, &opencodedto.PermissionRequestParams{})
+		return "*acp.PermissionRequestParams", strictDecode(params, &acp.PermissionRequestParams{})
 	}
 	var dst any
 	switch method {
-	case opencodedto.MethodInitialize:
-		dst = &opencodedto.InitializeParams{}
-	case opencodedto.MethodSessionNew:
-		dst = &opencodedto.SessionNewParams{}
-	case opencodedto.MethodSessionLoad:
-		dst = &opencodedto.SessionLoadParams{}
-	case opencodedto.MethodSessionPrompt:
-		dst = &opencodedto.SessionPromptParams{}
-	case opencodedto.MethodSessionSetModel:
-		dst = &opencodedto.SetSessionModelParams{}
-	case opencodedto.MethodSessionSetConfigOption:
-		dst = &opencodedto.SetSessionConfigOptionParams{}
-	case opencodedto.MethodSessionCancel, opencodedto.MethodSessionSetMode:
+	case acp.MethodInitialize:
+		dst = &acp.InitializeParams{}
+	case acp.MethodSessionNew:
+		dst = &acp.SessionNewParams{}
+	case acp.MethodSessionLoad:
+		dst = &acp.SessionLoadParams{}
+	case acp.MethodSessionPrompt:
+		dst = &acp.SessionPromptParams{}
+	case acp.MethodSessionSetModel:
+		dst = &acp.SetSessionModelParams{}
+	case acp.MethodSessionSetConfigOption:
+		dst = &acp.SetSessionConfigOptionParams{}
+	case acp.MethodSessionCancel, acp.MethodSessionSetMode:
 		return "JSONRPCMessage", fmt.Errorf("OpenCode request %q has no genai DTO; add its DTO and checker strict decode", method)
 	default:
 		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode request method %q; add its DTO and checker dispatch", method)
@@ -862,46 +866,46 @@ func isEmptyJSON(raw json.RawMessage) bool {
 	return len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
-func checkOpenCodeNotification(method opencodedto.Method, params json.RawMessage) (string, error) {
-	if method == opencodedto.MethodSessionRequestPermission {
-		return "*opencode.PermissionRequestParams", strictDecode(params, &opencodedto.PermissionRequestParams{})
+func checkOpenCodeNotification(method acp.Method, params json.RawMessage) (string, error) {
+	if method == acp.MethodSessionRequestPermission {
+		return "*acp.PermissionRequestParams", strictDecode(params, &acp.PermissionRequestParams{})
 	}
-	if method != opencodedto.MethodSessionUpdate {
+	if method != acp.MethodSessionUpdate {
 		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode notification method %q; add its DTO and checker dispatch", method)
 	}
 
-	var updateParams opencodedto.SessionUpdateParams
+	var updateParams acp.SessionUpdateParams
 	if err := strictDecode(params, &updateParams); err != nil {
-		return "*opencode.SessionUpdateParams", err
+		return "*acp.SessionUpdateParams", err
 	}
 	if isEmptyJSON(updateParams.Update) {
-		return "*opencode.SessionUpdateParams", errors.New("session/update params are missing update")
+		return "*acp.SessionUpdateParams", errors.New("session/update params are missing update")
 	}
-	var probe opencodedto.UpdateProbe
+	var probe acp.UpdateProbe
 	if err := json.Unmarshal(updateParams.Update, &probe); err != nil {
 		return "UpdateProbe", err
 	}
 	var dst any
 	switch probe.SessionUpdate {
-	case opencodedto.UpdateAgentMessageChunk:
-		dst = &opencodedto.AgentMessageChunkUpdate{}
-	case opencodedto.UpdateAgentThoughtChunk:
-		dst = &opencodedto.AgentThoughtChunkUpdate{}
-	case opencodedto.UpdateUserMessageChunk:
-		dst = &opencodedto.UserMessageChunkUpdate{}
-	case opencodedto.UpdateToolCall:
-		dst = &opencodedto.ToolCallUpdate{}
-	case opencodedto.UpdateToolCallUpdate:
-		dst = &opencodedto.ToolCallUpdateUpdate{}
-	case opencodedto.UpdatePlan:
-		dst = &opencodedto.PlanUpdate{}
-	case opencodedto.UpdateUsageUpdate:
-		dst = &opencodedto.UsageUpdateUpdate{}
-	case opencodedto.UpdateCurrentModeUpdate:
-		dst = &opencodedto.CurrentModeUpdate{}
-	case opencodedto.UpdateAvailableCommandsUpdate:
-		dst = &opencodedto.AvailableCommandsUpdate{}
-	case opencodedto.UpdateSessionInfoUpdate, opencodedto.UpdateConfigOptionUpdate:
+	case acp.UpdateAgentMessageChunk:
+		dst = &acp.AgentMessageChunkUpdate{}
+	case acp.UpdateAgentThoughtChunk:
+		dst = &acp.AgentThoughtChunkUpdate{}
+	case acp.UpdateUserMessageChunk:
+		dst = &acp.UserMessageChunkUpdate{}
+	case acp.UpdateToolCall:
+		dst = &acp.ToolCallUpdate{}
+	case acp.UpdateToolCallUpdate:
+		dst = &acp.ToolCallUpdateUpdate{}
+	case acp.UpdatePlan:
+		dst = &acp.PlanUpdate{}
+	case acp.UpdateUsageUpdate:
+		dst = &acp.UsageUpdateUpdate{}
+	case acp.UpdateCurrentModeUpdate:
+		dst = &acp.CurrentModeUpdate{}
+	case acp.UpdateAvailableCommandsUpdate:
+		dst = &acp.AvailableCommandsUpdate{}
+	case acp.UpdateSessionInfoUpdate, acp.UpdateConfigOptionUpdate:
 		return "UpdateProbe", fmt.Errorf("OpenCode session update %q has no genai DTO; add its DTO and checker strict decode", probe.SessionUpdate)
 	default:
 		return "UpdateProbe", fmt.Errorf("unrecognized OpenCode session update %q; add its DTO and checker dispatch", probe.SessionUpdate)
@@ -909,20 +913,20 @@ func checkOpenCodeNotification(method opencodedto.Method, params json.RawMessage
 	return fmt.Sprintf("%T", dst), strictDecode(updateParams.Update, dst)
 }
 
-func checkOpenCodeResponse(method opencodedto.Method, result json.RawMessage) (string, error) {
+func checkOpenCodeResponse(method acp.Method, result json.RawMessage) (string, error) {
 	var dst any
 	switch method {
-	case opencodedto.MethodInitialize:
-		dst = &opencodedto.InitializeResult{}
-	case opencodedto.MethodSessionNew, opencodedto.MethodSessionLoad:
-		dst = &opencodedto.SessionNewResult{}
-	case opencodedto.MethodSessionPrompt:
-		dst = &opencodedto.PromptResult{}
-	case opencodedto.MethodSessionRequestPermission:
-		dst = &opencodedto.PermissionResponseResult{}
-	case opencodedto.MethodSessionSetConfigOption:
-		dst = &opencodedto.SetSessionConfigOptionResult{}
-	case opencodedto.MethodSessionSetModel, opencodedto.MethodSessionCancel, opencodedto.MethodSessionSetMode:
+	case acp.MethodInitialize:
+		dst = &acp.InitializeResult{}
+	case acp.MethodSessionNew, acp.MethodSessionLoad:
+		dst = &acp.SessionNewResult{}
+	case acp.MethodSessionPrompt:
+		dst = &acp.PromptResult{}
+	case acp.MethodSessionRequestPermission:
+		dst = &acp.PermissionResponseResult{}
+	case acp.MethodSessionSetConfigOption:
+		dst = &acp.SetSessionConfigOptionResult{}
+	case acp.MethodSessionSetModel, acp.MethodSessionCancel, acp.MethodSessionSetMode:
 		return "JSONRPCMessage", fmt.Errorf("OpenCode response for %q has no genai DTO; add its DTO and checker strict decode", method)
 	default:
 		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode response method %q; add its DTO and checker dispatch", method)

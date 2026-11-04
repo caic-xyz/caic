@@ -62,13 +62,13 @@ func TestNativeMetadataParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			for _, compressed := range []bool{false, true} {
-				for _, clear := range []bool{false, true} {
-					t.Run(fmt.Sprintf("compressed=%t/clear=%t", compressed, clear), func(t *testing.T) {
+				for _, cleared := range []bool{false, true} {
+					t.Run(fmt.Sprintf("compressed=%t/clear=%t", compressed, cleared), func(t *testing.T) {
 						t.Parallel()
 						records := []string{fmt.Sprintf(`{"t":"caic_meta","version":3,"prompt":"native session","harness":%q}`, tc.harness)}
 						records = append(records, tc.records...)
 						want := tc.want
-						if clear {
+						if cleared {
 							records = append(records, `{"t":"context_cleared"}`)
 							want.SessionID = ""
 						}

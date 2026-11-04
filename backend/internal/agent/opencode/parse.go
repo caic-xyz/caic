@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -31,21 +31,21 @@ import (
 //   - UserInputMessage     — user_message_chunk
 //   - SystemMessage        — current_mode_update
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
+func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *acp.ToolCallUpdateUpdate, error) {
 	// JSON-RPC response (has "id").
 	if probe.ID != nil && probe.Method == "" {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 
 	// JSON-RPC notification — dispatch on method.
-	msg := opencode.JSONRPCMessage{Method: opencode.Method(probe.Method), Params: probe.Params}
+	msg := acp.JSONRPCMessage{Method: acp.Method(probe.Method), Params: probe.Params}
 
 	switch msg.Method {
-	case opencode.MethodSessionUpdate:
+	case acp.MethodSessionUpdate:
 		msgs, toolCall, err := parseSessionUpdate(msg.Params, line)
 		return msgs, toolCall, err
 
-	case opencode.MethodSessionRequestPermission:
+	case acp.MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
 		// In the stateless parser, emit as RawMessage.
 		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil, nil
@@ -56,7 +56,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *
 }
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
-func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
+func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *acp.ToolCallUpdateUpdate, error) {
 	update, err := agent.JSONField(params, "update")
 	if err != nil {
 		return nil, nil, fmt.Errorf("session/update params: %w", err)
@@ -69,49 +69,49 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		return nil, nil, fmt.Errorf("session/update probe: %w", err)
 	}
 
-	switch opencode.UpdateType(typ) {
-	case opencode.UpdateAgentMessageChunk:
-		var u opencode.AgentMessageChunkUpdate
+	switch acp.UpdateType(typ) {
+	case acp.UpdateAgentMessageChunk:
+		var u acp.AgentMessageChunkUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil, nil
 
-	case opencode.UpdateAgentThoughtChunk:
-		var u opencode.AgentThoughtChunkUpdate
+	case acp.UpdateAgentThoughtChunk:
+		var u acp.AgentThoughtChunkUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil, nil
 
-	case opencode.UpdateUserMessageChunk:
-		var u opencode.UserMessageChunkUpdate
+	case acp.UpdateUserMessageChunk:
+		var u acp.UserMessageChunkUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil, nil
 
-	case opencode.UpdateToolCall, opencode.UpdateToolCallUpdate:
+	case acp.UpdateToolCall, acp.UpdateToolCallUpdate:
 		// The announcement and the update carry the same fields, so decode once
 		// and hand the same value to the conversion and to native correlation.
-		var u opencode.ToolCallUpdateUpdate
+		var u acp.ToolCallUpdateUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", opencode.UpdateType(typ), err)
+			return nil, nil, fmt.Errorf("%s: %w", acp.UpdateType(typ), err)
 		}
 		var msgs []agent.Message
-		if opencode.UpdateType(typ) == opencode.UpdateToolCall {
+		if acp.UpdateType(typ) == acp.UpdateToolCall {
 			msgs = parseToolCall(&u)
 		} else {
 			msgs = parseToolCallUpdate(&u)
 		}
 		return msgs, &u, nil
 
-	case opencode.UpdatePlan:
+	case acp.UpdatePlan:
 		msgs, err := parsePlanUpdate(update)
 		return msgs, nil, err
 
-	case opencode.UpdateCurrentModeUpdate:
-		var u opencode.CurrentModeUpdate
+	case acp.UpdateCurrentModeUpdate:
+		var u acp.CurrentModeUpdate
 		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("current_mode_update: %w", err)
 		}
@@ -121,20 +121,20 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 			Detail:      u.CurrentModeID,
 		}}, nil, nil
 
-	case opencode.UpdateSessionInfoUpdate:
+	case acp.UpdateSessionInfoUpdate:
 		return nil, nil, nil // cosmetic, skip
 
-	case opencode.UpdateAvailableCommandsUpdate:
+	case acp.UpdateAvailableCommandsUpdate:
 		return nil, nil, nil // internal, skip
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(opencode.UpdateType(typ)), Raw: append([]byte(nil), line...)}}, nil, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(acp.UpdateType(typ)), Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 }
 
 // parseToolCall handles tool_call session updates (initial tool announcement),
 // rendering the update its caller decoded.
-func parseToolCall(u *opencode.ToolCallUpdateUpdate) []agent.Message {
+func parseToolCall(u *acp.ToolCallUpdateUpdate) []agent.Message {
 	// Check for widget tool.
 	if _, ok := agent.WidgetToolNames[u.Title]; ok {
 		return []agent.Message{agent.NewWidgetMessage(u.ToolCallID, u.RawInput)}
@@ -156,14 +156,14 @@ func parseToolCall(u *opencode.ToolCallUpdateUpdate) []agent.Message {
 // with the real tool input. This is necessary because the initial tool_call
 // notification has an empty rawInput ({}); the actual arguments only arrive
 // in the tool_call_update.
-func parseToolCallUpdate(u *opencode.ToolCallUpdateUpdate) []agent.Message {
+func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 	switch u.Status {
-	case opencode.StatusCompleted:
+	case acp.StatusCompleted:
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}
-	case opencode.StatusFailed:
+	case acp.StatusFailed:
 		errMsg := extractToolError(u)
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}
-	case opencode.StatusInProgress:
+	case acp.StatusInProgress:
 		var msgs []agent.Message
 		// Emit a ToolUseMessage with the real input when available.
 		if len(u.RawInput) > 2 {
@@ -230,7 +230,7 @@ func addEditInputView(use *agent.ToolUseMessage) {
 }
 
 func parseEditInput(raw json.RawMessage) (string, []agent.TextReplacement, bool) {
-	var input opencode.EditInput
+	var input acp.EditInput
 	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil || input.FilePath == "" || input.OldString == "" {
 		return "", nil, false
 	}
@@ -247,7 +247,7 @@ type toolCallRawOutput struct {
 
 // extractToolError extracts the error message from a failed tool call update.
 // It checks rawOutput.error first (structured), then falls back to content text.
-func extractToolError(u *opencode.ToolCallUpdateUpdate) string {
+func extractToolError(u *acp.ToolCallUpdateUpdate) string {
 	raw := decodeToolCallRawOutput(u.RawOutput)
 	if raw.Error != "" {
 		return raw.Error
@@ -262,7 +262,7 @@ func extractToolError(u *opencode.ToolCallUpdateUpdate) string {
 
 // extractToolOutputDelta extracts streaming output from an in-progress tool call.
 // It checks rawOutput.output first (structured), then falls back to content text.
-func extractToolOutputDelta(u *opencode.ToolCallUpdateUpdate) string {
+func extractToolOutputDelta(u *acp.ToolCallUpdateUpdate) string {
 	raw := decodeToolCallRawOutput(u.RawOutput)
 	if raw.Output != "" {
 		return raw.Output
@@ -283,7 +283,7 @@ func decodeToolCallRawOutput(data json.RawMessage) toolCallRawOutput {
 
 // parsePlanUpdate converts a plan update to a TodoMessage.
 func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
-	var u opencode.PlanUpdate
+	var u acp.PlanUpdate
 	if err := json.Unmarshal(data, &u); err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
@@ -301,7 +301,7 @@ func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
 }
 
 // normalizeToolName maps OpenCode tool titles and kinds to caic canonical names.
-func normalizeToolName(title string, kind opencode.ToolKind) string {
+func normalizeToolName(title string, kind acp.ToolKind) string {
 	// Normalize to lowercase for matching.
 	lower := strings.ToLower(title)
 
@@ -335,17 +335,17 @@ func normalizeToolName(title string, kind opencode.ToolKind) string {
 
 	// Fall back to kind-based mapping.
 	switch kind {
-	case opencode.KindExecute:
+	case acp.KindExecute:
 		return "Bash"
-	case opencode.KindEdit:
+	case acp.KindEdit:
 		return "Edit"
-	case opencode.KindRead:
+	case acp.KindRead:
 		return "Read"
-	case opencode.KindSearch:
+	case acp.KindSearch:
 		return "Grep"
-	case opencode.KindFetch:
+	case acp.KindFetch:
 		return "WebFetch"
-	case opencode.KindDelete, opencode.KindMove, opencode.KindThink, opencode.KindSwitchMode, opencode.KindOther:
+	case acp.KindDelete, acp.KindMove, acp.KindThink, acp.KindSwitchMode, acp.KindOther:
 		// No mapping; fall through to passthrough.
 	}
 

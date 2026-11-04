@@ -34,7 +34,10 @@ func TestRouter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for range stream {
+		for _, err := range stream {
+			if err != nil {
+				t.Fatal(err)
+			}
 			break
 		}
 		select {
@@ -251,8 +254,8 @@ func TestRouter(t *testing.T) {
 			t.Fatal(err)
 		}
 		cancel()
-		for range events {
-			t.Fatal("unexpected event after cancellation")
+		for event, err := range events {
+			t.Fatalf("unexpected event after cancellation: %v, %v", event, err)
 		}
 	})
 

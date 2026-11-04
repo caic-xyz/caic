@@ -829,7 +829,16 @@ func TestControlConn(t *testing.T) {
 		readDone := make(chan error, 1)
 		var transport sync.WaitGroup
 		transport.Go(func() { readDone <- c.ReadMessages(stdout, c) })
-		t.Cleanup(func() { c.Cancel(); _ = output.Close(); <-readDone; transport.Wait() })
+		t.Cleanup(func() {
+			c.Cancel()
+			if err := output.Close(); err != nil {
+				t.Error(err)
+			}
+			if err := <-readDone; err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
+			transport.Wait()
+		})
 		if err := c.setPendingAsk(pendingControlAsk{requestID: "first", questions: []v3.AskQuestion{{Question: "Choice?"}}}); err != nil {
 			t.Fatal(err)
 		}

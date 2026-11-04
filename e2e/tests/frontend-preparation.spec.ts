@@ -91,7 +91,10 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
   });
   await page.route("**/api/voicegateway/v1/voice/choices", (route) =>
     route.fulfill({
-      json: { choices: [{ id: "test", label: "Test voice", transports: ["webrtc"] }], defaultChoiceID: "test" },
+      json: {
+        choices: [{ id: "test", label: "Test voice", transports: ["webrtc"] }],
+        defaults: [{ transport: "webrtc", id: "test" }],
+      },
     }),
   );
   await page.route("**/api/caic/v1/tasks/events", async (route) => {

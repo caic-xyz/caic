@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -23,13 +23,13 @@ type nativeSubagents struct {
 // the only update that can prove or settle a delegation, so toolCall is nil for
 // every other update; the canonical conversion already decoded the one it hands
 // over.
-func (n *nativeSubagents) parse(toolCall *opencode.ToolCallUpdateUpdate) ([]agent.Message, error) {
+func (n *nativeSubagents) parse(toolCall *acp.ToolCallUpdateUpdate) ([]agent.Message, error) {
 	if toolCall == nil || toolCall.ToolCallID == "" {
 		return nil, nil
 	}
 	// v1.18.31 acp/tool.ts preserves the raw task title on initial events,
 	// followed by the task schema. A normalized name such as Agent is not proof.
-	if toolCall.Title == "task" && toolCall.Kind == opencode.KindThink {
+	if toolCall.Title == "task" && toolCall.Kind == acp.KindThink {
 		n.taskTools[toolCall.ToolCallID] = struct{}{}
 	}
 	_, knownTask := n.taskTools[toolCall.ToolCallID]
@@ -60,14 +60,14 @@ func (n *nativeSubagents) parse(toolCall *opencode.ToolCallUpdateUpdate) ([]agen
 	}
 	s.Status = agent.NativeSubagentStatusUnknown
 	switch toolCall.Status {
-	case opencode.StatusPending:
+	case acp.StatusPending:
 		// Queued does not establish active execution.
-	case opencode.StatusInProgress:
+	case acp.StatusInProgress:
 		s.Status = agent.NativeSubagentStatusRunning
-	case opencode.StatusCompleted:
+	case acp.StatusCompleted:
 		s.Status = agent.NativeSubagentStatusCompleted
 		s.Result = taskResultText(extractToolOutputDelta(toolCall))
-	case opencode.StatusFailed:
+	case acp.StatusFailed:
 		s.Status = agent.NativeSubagentStatusFailed
 		s.Result = extractToolError(toolCall)
 	}

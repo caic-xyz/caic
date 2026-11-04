@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/config/data"
+	"github.com/maruel/gomode/voicegateway"
 )
 
 // uncommentDirective strips the leading '#' from a commented-out TOML directive
@@ -26,10 +27,11 @@ var uncommentDirective = regexp.MustCompile(`(?m)^#([^ ])`)
 
 // TestContribConfigDefaults uncomments every default directive in the shipped
 // contrib/config.toml and verifies the result loads into exactly the built-in
-// defaults. This guards the real template (not a copy) on two axes at once:
+// host defaults and explicit voice examples. This guards the real template:
 //   - faithfulness: loadTOMLConfig uses DisallowUnknownFields, so an undocumented
 //     or misspelled key fails the load;
-//   - accuracy: the documented defaults must match defaultConfig().
+//   - accuracy: the host defaults match defaultConfig(), and example voice
+//     pipelines validate without implicitly enabling voice.
 func TestContribConfigDefaults(t *testing.T) {
 	t.Parallel()
 	const contribPath = "../../../contrib/config.toml"
@@ -46,6 +48,14 @@ func TestContribConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s documents a key caic rejects, or a malformed default: %v", contribPath, err)
 	}
+	pipeline := voiceConfigToRuntime(&got.VoiceGateway.Config)
+	if err := pipeline.ValidateEmbedded(); err != nil {
+		t.Fatalf("sample pipelines are invalid: %v", err)
+	}
+	if len(pipeline.Realtime) == 0 || len(pipeline.Chat) == 0 {
+		t.Fatal("sample must document explicit realtime and chat pipelines")
+	}
+	got.VoiceGateway.Config = data.VoiceConfig{}
 	want := defaultConfig()
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("uncommenting %s does not reproduce the defaults:\n got = %+v\nwant = %+v", contribPath, got, want)
@@ -139,6 +149,7 @@ client_secret = "gitlab-client-secret"
 allowed_users = ["carol"]
 
 [voice-gateway]
+mode = "external"
 url = "https://voice.example.com"
 
 [debug]
@@ -256,14 +267,14 @@ OPENROUTER_API_KEY = "sk-or-test"
 		t.Parallel()
 		dir := t.TempDir()
 		content := `
-[core.env]
-GEMINI_API_KEY = "AIza_test"
-
-[voice-gateway.config]
+[voice-gateway]
+mode = "embedded"
+[[voice-gateway.config.realtime]]
+label = "Test live"
+provider = "gemini"
 model = "gemini-live-test"
-
 [voice-gateway.config.server]
-webrtc_udp_port = -1
+webrtc_udp_port = 3478
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
@@ -272,18 +283,18 @@ webrtc_udp_port = -1
 		if err != nil {
 			t.Fatal(err)
 		}
-		if tc.VoiceGateway.Config.Model != "gemini-live-test" {
-			t.Errorf("VoiceGateway.Config.Model = %q, want gemini-live-test", tc.VoiceGateway.Config.Model)
+		if tc.VoiceGateway.Config.Realtime[0].Model != "gemini-live-test" {
+			t.Errorf("VoiceGateway.Config.Model = %q, want gemini-live-test", tc.VoiceGateway.Config.Realtime[0].Model)
 		}
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Voice.Gateway.Config.Model != "gemini-live-test" {
-			t.Errorf("Voice.Gateway.Config.Model = %q, want gemini-live-test", cfg.Voice.Gateway.Config.Model)
+		if cfg.Voice.Gateway.Config.Realtime[0].Model != "gemini-live-test" {
+			t.Errorf("Voice.Gateway.Config.Model = %q, want gemini-live-test", cfg.Voice.Gateway.Config.Realtime[0].Model)
 		}
-		if cfg.Voice.Gateway.Config.Server.WebRTCUDPPort != -1 {
-			t.Errorf("Voice.Gateway.Config.Server.WebRTCUDPPort = %d, want -1", cfg.Voice.Gateway.Config.Server.WebRTCUDPPort)
+		if cfg.Voice.Gateway.Config.Server.WebRTCUDPPort != 3478 {
+			t.Errorf("Voice.Gateway.Config.Server.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.Config.Server.WebRTCUDPPort)
 		}
 	})
 
@@ -306,22 +317,26 @@ http = ":3479"
 		}
 	})
 
-	t.Run("rejects voice gateway mode", func(t *testing.T) {
+	t.Run("rejects unknown voice gateway mode", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		content := `
 [voice-gateway]
-mode = "embedded"
+mode = "unknown"
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := loadTOMLConfig(dir)
-		if err == nil {
-			t.Fatal("expected error")
+		tc, err := loadTOMLConfig(dir)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(err.Error(), "missing in the target struct") {
-			t.Fatalf("unexpected error: %v", err)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.Voice.Gateway.Validate(); err == nil {
+			t.Fatal("unknown voice gateway mode accepted")
 		}
 	})
 
@@ -402,6 +417,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		tc := &data.Config{
 			Server: data.Server{ExternalURL: "https://caic.example.com"},
 			VoiceGateway: data.VoiceGateway{
+				Mode:                 "external",
 				URL:                  "https://voice.example.com",
 				InstanceID:           "caic-main",
 				SigningPrivateKeyPEM: "voice.pem",
@@ -634,7 +650,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		dir := t.TempDir()
 		tc := &data.Config{
 			VoiceGateway: data.VoiceGateway{
-				URL: "https://voice.example.com",
+				Mode: "external",
+				URL:  "https://voice.example.com",
 			},
 		}
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
@@ -649,52 +666,29 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("default voice gateway embedded with gemini key", func(t *testing.T) {
+	t.Run("voice stays disabled with configured credentials", func(t *testing.T) {
 		t.Parallel()
-		dir := t.TempDir()
 		tc := defaultConfig()
-		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Voice.Gateway.Mode != "embedded" {
-			t.Errorf("Voice.Gateway.Mode = %q, want embedded", cfg.Voice.Gateway.Mode)
-		}
-	})
-
-	t.Run("external voice gateway wins over gemini key", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		tc := defaultConfig()
-		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
+		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "unused-test-key"}
 		tc.VoiceGateway.URL = "https://voice.example.com"
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Voice.Gateway.Mode != "external" {
-			t.Errorf("Voice.Gateway.Mode = %q, want external", cfg.Voice.Gateway.Mode)
-		}
-		if cfg.Voice.Gateway.URL != "https://voice.example.com" {
-			t.Errorf("Voice.Gateway.URL = %q, want https://voice.example.com", cfg.Voice.Gateway.URL)
+		if cfg.Voice.Gateway.Mode != "disabled" {
+			t.Fatalf("voice mode = %q", cfg.Voice.Gateway.Mode)
 		}
 	})
-
-	t.Run("embedded voice gateway default config", func(t *testing.T) {
+	t.Run("embedded voice requires explicit pipelines", func(t *testing.T) {
 		t.Parallel()
-		dir := t.TempDir()
 		tc := defaultConfig()
-		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		tc.VoiceGateway.Mode = "embedded"
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Voice.Gateway.Mode != "embedded" {
-			t.Errorf("Voice.Gateway.Mode = %q, want embedded", cfg.Voice.Gateway.Mode)
-		}
-		if cfg.Voice.Gateway.Config.Server.HTTP != "" {
-			t.Errorf("Voice.Gateway.Config.Server.HTTP = %q, want empty", cfg.Voice.Gateway.Config.Server.HTTP)
+		if err := cfg.Voice.Gateway.Validate(); err == nil {
+			t.Fatal("empty embedded pipeline accepted")
 		}
 	})
 }
@@ -919,37 +913,67 @@ func TestAllowOriginsOrDefault(t *testing.T) {
 	})
 }
 
+func TestVoiceGatewayEnvironment(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "unused-test-key")
+	t.Setenv("OPENAI_API_KEY", "unused-test-key")
+	tc := defaultConfig()
+	cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Voice.Gateway.Mode != "disabled" {
+		t.Fatalf("voice mode = %q", cfg.Voice.Gateway.Mode)
+	}
+}
+
 func TestVoiceConfigDiskProjection(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	const fixture = `[voice-gateway.config]
-backend="local-stack"
-model="fixture-model"
+	const fixture = `[voice-gateway]
+mode="embedded"
 [voice-gateway.config.server]
-webrtc_udp_port=-1
-[voice-gateway.config.local_stack.asr]
-engine="openai-audio"
-provider="fixture-asr-provider"
-remote="https://example.invalid/asr"
-model="fixture-asr-model"
-[voice-gateway.config.local_stack.llm]
+webrtc_udp_port=3478
+[[voice-gateway.config.realtime]]
+label="Native audio"
+provider="llamacpp"
+llamacppsrv=true
+model="Fixture/Audio/model.gguf"
+cache_dir="/tmp/audio-models"
+threads=4
+slots=2
+context_size=65536
+max_output_tokens=2048
+setup_timeout_seconds=20
+pending_audio_seconds=8
+[[voice-gateway.config.chat]]
+label="Remote chat"
 provider="openaicompatible"
-remote="https://example.invalid/llm"
-model="fixture-llm-model"
-api_key_name="FIXTURE_API_KEY"
+remote="https://llm.example/v1/chat/completions"
+model="chat-model"
+api_key_name="CHAT_KEY"
+[[voice-gateway.config.local_stack]]
+label="Speech stack"
+text_only=false
+[voice-gateway.config.local_stack.asr]
+engine="genai"
+provider="llamacpp"
+remote="http://localhost:8081"
+model="asr-model"
+[voice-gateway.config.local_stack.llm]
+provider="llamacpp"
+llamacppsrv=true
+model="local-model"
 [voice-gateway.config.local_stack.tts]
 engine="openai-audio"
-remote="https://example.invalid/tts"
-model="fixture-tts-model"
-voice="fixture-voice"
+remote="http://localhost:8082"
+model="tts-model"
+voice="voice-name"
 [[voice-gateway.config.trusted_issuers]]
 service="caic"
-issuer="https://example.invalid"
-public_key="fixture-public-key"
+issuer="https://caic.example"
 oauth=true
-audience="fixture-audience"
-scope="fixture-scope"
+scope="voice.session"
 `
+	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -961,15 +985,17 @@ scope="fixture-scope"
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Voice.Gateway.Config
-	if got.Server.WebRTCUDPPort != -1 || got.Backend != "local-stack" || got.Model != "fixture-model" || got.LocalStack.ASR.Engine != "openai-audio" || got.LocalStack.ASR.Provider != "fixture-asr-provider" || got.LocalStack.ASR.Remote != "https://example.invalid/asr" || got.LocalStack.ASR.Model != "fixture-asr-model" || got.LocalStack.LLM.Provider != "openaicompatible" || got.LocalStack.LLM.Remote != "https://example.invalid/llm" || got.LocalStack.LLM.Model != "fixture-llm-model" || got.LocalStack.LLM.APIKeyName != "FIXTURE_API_KEY" || got.LocalStack.TTS.Engine != "openai-audio" || got.LocalStack.TTS.Remote != "https://example.invalid/tts" || got.LocalStack.TTS.Model != "fixture-tts-model" || got.LocalStack.TTS.Voice != "fixture-voice" {
-		t.Fatalf("voice config projection lost fields: %#v", got)
+	if err := cfg.Voice.Gateway.Validate(); err != nil {
+		t.Fatal(err)
 	}
-	if len(got.TrustedIssuers) != 1 {
-		t.Fatalf("issuer count = %d", len(got.TrustedIssuers))
+	want := voicegateway.Config{
+		Server:         voicegateway.ServerConfig{WebRTCUDPPort: 3478},
+		Realtime:       []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048, SetupTimeoutSeconds: 20, PendingAudioSeconds: 8}},
+		Chat:           []voicegateway.ChatConfig{{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"}},
+		LocalStack:     []voicegateway.LocalStackConfig{{Label: "Speech stack", ASR: voicegateway.LocalStackASRConfig{Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.LocalStackTTSConfig{Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
+		TrustedIssuers: []voicegateway.TrustedIssuerConfig{{Service: "caic", Issuer: "https://caic.example", OAuth: true, Scope: "voice.session"}},
 	}
-	issuer := got.TrustedIssuers[0]
-	if issuer.Service != "caic" || issuer.Issuer != "https://example.invalid" || issuer.PublicKey != "fixture-public-key" || !issuer.OAuth || issuer.Audience != "fixture-audience" || issuer.Scope != "fixture-scope" {
-		t.Fatalf("issuer projection lost fields: %#v", issuer)
+	if !reflect.DeepEqual(cfg.Voice.Gateway.Config, want) {
+		t.Fatalf("voice projection = %#v, want %#v", cfg.Voice.Gateway.Config, want)
 	}
 }

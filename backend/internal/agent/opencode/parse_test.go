@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -638,30 +638,30 @@ func TestNormalizeToolName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		title string
-		kind  opencode.ToolKind
+		kind  acp.ToolKind
 		want  string
 	}{
-		{"bash", opencode.KindExecute, "Bash"},
-		{"edit", opencode.KindEdit, "Edit"},
-		{"write", opencode.KindEdit, "Write"},
-		{"read", opencode.KindRead, "Read"},
-		{"glob", opencode.KindSearch, "Glob"},
-		{"grep", opencode.KindSearch, "Grep"},
-		{"list", opencode.KindRead, "ListDirectory"},
-		{"webfetch", opencode.KindFetch, "WebFetch"},
-		{"websearch", opencode.KindSearch, "WebSearch"},
-		{"todowrite", opencode.KindOther, "TodoWrite"},
-		{"task", opencode.KindOther, "Agent"},
+		{"bash", acp.KindExecute, "Bash"},
+		{"edit", acp.KindEdit, "Edit"},
+		{"write", acp.KindEdit, "Write"},
+		{"read", acp.KindRead, "Read"},
+		{"glob", acp.KindSearch, "Glob"},
+		{"grep", acp.KindSearch, "Grep"},
+		{"list", acp.KindRead, "ListDirectory"},
+		{"webfetch", acp.KindFetch, "WebFetch"},
+		{"websearch", acp.KindSearch, "WebSearch"},
+		{"todowrite", acp.KindOther, "TodoWrite"},
+		{"task", acp.KindOther, "Agent"},
 		// Additional name mappings.
-		{"patch", opencode.KindEdit, "Edit"},
+		{"patch", acp.KindEdit, "Edit"},
 		// Kind-based fallback.
-		{"unknown_tool", opencode.KindExecute, "Bash"},
-		{"unknown_tool", opencode.KindEdit, "Edit"},
-		{"unknown_tool", opencode.KindRead, "Read"},
-		{"unknown_tool", opencode.KindSearch, "Grep"},
-		{"unknown_tool", opencode.KindFetch, "WebFetch"},
+		{"unknown_tool", acp.KindExecute, "Bash"},
+		{"unknown_tool", acp.KindEdit, "Edit"},
+		{"unknown_tool", acp.KindRead, "Read"},
+		{"unknown_tool", acp.KindSearch, "Grep"},
+		{"unknown_tool", acp.KindFetch, "WebFetch"},
 		// Passthrough.
-		{"custom_mcp_tool", opencode.KindOther, "custom_mcp_tool"},
+		{"custom_mcp_tool", acp.KindOther, "custom_mcp_tool"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.title+"_"+string(tt.kind), func(t *testing.T) {

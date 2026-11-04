@@ -35,8 +35,8 @@
 # Tailscale API key: required for Tailscale ephemeral node.
 # Obtain from https://login.tailscale.com/admin/settings/keys
 # TAILSCALE_API_KEY = "tskey-..."
-# Gemini API key: required for the Gemini Live voice agent and for title
-# generation when provider is "gemini". Obtain from https://aistudio.google.com/app/apikey
+# Gemini API key for title generation when provider is "gemini".
+# Obtain from https://aistudio.google.com/app/apikey
 # GEMINI_API_KEY = "AIza..."
 
 # ── Server ───────────────────────────────────────────────────────────────────
@@ -82,11 +82,9 @@
 
 # ── Voice Gateway ────────────────────────────────────────────────────────────
 
-# Voice support is derived automatically:
-#   url set                       advertise that standalone gateway.
-#   no url and GEMINI_API_KEY set  host the embedded gateway in-process.
-#   no url and no GEMINI_API_KEY   disabled.
+# Voice stays disabled until mode is explicitly set to embedded or external.
 [voice-gateway]
+#mode = "disabled"  # "disabled" (default), "embedded", or "external".
 # Standalone voice gateway URL.
 #url = ""  # e.g. "https://voice.example.com"
 # External mode also requires a fixed server.external_url and an instance ID.
@@ -106,28 +104,142 @@
 # server.external_url/.well-known/oauth-authorization-server.
 #instance_id = ""  # e.g. "caic-main"
 
-# Embedded gateway runtime config, used only when caic hosts the gateway
-# in-process. Same shape as contrib/voice-gateway-config.toml.
-[voice-gateway.config]
-# The API key is always read from GEMINI_API_KEY.
-#model = "gemini-3.8-live"
-
+# Embedded pipelines match the standalone voice-gateway configuration below.
+# Provider credentials come from the gateway process environment. Only embedded
+# mode probes provider availability and starts the available configured pipelines.
+# The host owns HTTP and authentication; do not set config.server.http.
 [voice-gateway.config.server]
-# UDP port for WebRTC ICE (single-port mux). 0 = OS-assigned ephemeral port;
-# >0 = a static port (open it for UDP in your firewall). Requires GEMINI_API_KEY.
-# The gateway HTTP port is not configurable here; use server.http.
 #webrtc_udp_port = 0
 
-# Local model stack (set backend = "local-stack"). Omit these to let caic manage
-# llama.cpp with the default Gemma model; set them to point at servers you run.
-# [voice-gateway.config.local_stack.asr]
-# provider = "llamacpp"
-# remote = "http://127.0.0.1:8081"
-# model = "..."
+# Realtime Audio models.
+
+
+[[voice-gateway.config.realtime]]
+label = "Gemini Live"
+provider = "gemini"
+model = "gemini-3.8-live"
+
+[[voice-gateway.config.realtime]]
+label = "Gemini Live Thinking ($)"
+provider = "gemini"
+model = "gemini-3.8-live-extended-thinking"
+
+[[voice-gateway.config.realtime]]
+label = "GPT Realtime mini"
+provider = "openai"
+model = "gpt-realtime-2.1-mini"
+
+[[voice-gateway.config.realtime]]
+label = "GPT Realtime ($)"
+provider = "openai"
+model = "gpt-realtime-2.1"
+
+# Native audio-to-audio LFM3, independent of the ASR/LLM/TTS stack.
+# llamacppsrv downloads and starts the managed llama.cpp audio server.
+[[voice-gateway.config.realtime]]
+label = "LFM3 audio"
+provider = "llamacpp"
+llamacppsrv = true
+model = "LiquidAI/LFM3-Audio-2B-GGUF/LFM3-Audio-2B-Q4_K_M.gguf"
+context_size = 65536
+setup_timeout_seconds = 15
+pending_audio_seconds = 5
+# remote = "http://127.0.0.1:8080" directly on the choice.
+
+# Remote LLMs
+# Clients transcribe and speak for all chat choices. Credentials are listed in
+# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example.
+
+[[voice-gateway.config.chat]]
+label = "GPT 6 Luna"
+provider = "openai"
+model = "gpt-6-luna"
+
+[[voice-gateway.config.chat]]
+label = "Claude Haiku 5.5"
+provider = "anthropic"
+model = "claude-haiku-5-5"
+
+[[voice-gateway.config.chat]]
+label = "Gemini Flash 3.8"
+provider = "gemini"
+model = "gemini-3.8-flash"
+
+[[voice-gateway.config.chat]]
+label = "Gemini Flash Lite"
+provider = "gemini"
+model = "gemini-flash-lite-latest"
+
+[[voice-gateway.config.chat]]
+label = "DeepSeek Flash"
+provider = "deepseek"
+model = "deepseek-flash"
+
+[[voice-gateway.config.chat]]
+label = "Groq Qwen3.8-27B"
+provider = "groq"
+model = "qwen/qwen3.8-27b"
+
+[[voice-gateway.config.chat]]
+label = "Openrouter Gemma-4-26B-A4B (free)"
+provider = "openrouter"
+model = "google/gemma-4-26b-a4b-it:free"
+
+[[voice-gateway.config.chat]]
+label = "Cerebras GPT OSS 120B"
+provider = "cerebras"
+model = "gpt-oss-120b"
+
+[[voice-gateway.config.chat]]
+label = "Mistral Small"
+provider = "mistral"
+model = "mistral-small-latest"
+
+[[voice-gateway.config.chat]]
+label = "Alibaba Qwen3.8 Flash"
+provider = "alibaba"
+model = "qwen3.8-flash"
+
+[[voice-gateway.config.chat]]
+label = "Cohere Command A"
+provider = "cohere"
+model = "command-a-03-2025"
+
+[[voice-gateway.config.chat]]
+label = "Together Qwen3.8 Flash"
+provider = "togetherai"
+model = "Qwen/Qwen3.8-Flash"
+
+# An arbitrary OpenAI-compatible chat endpoint:
+# [[voice-gateway.config.chat]]
+# label = "Remote compatible LLM"
+# provider = "openaicompatible"
+# remote = "https://llm.example/v1/chat/completions"
+# model = "your-model"
+# api_key_name = "REMOTE_LLM_API_KEY"
+
+# Local ASR/LLM/TTS stack. Prerequisites: https://github.com/maruel/gomode/blob/main/docs/VOICE_LOCAL_STACK.md.
+# Set text_only = true on the local_stack entry and omit ASR/TTS to use client speech.
+# [[voice-gateway.config.local_stack]]
+# label = "Local stack"
 # [voice-gateway.config.local_stack.llm]
 # provider = "llamacpp"
-# remote = "http://127.0.0.1:8080"
+# llamacppsrv = true
 # model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+# [voice-gateway.config.local_stack.asr]
+# engine = "openai-audio"
+# remote = "http://127.0.0.1:8000"
+# model = "mlx-community/parakeet-tdt-0.6b-v3"
+# [voice-gateway.config.local_stack.tts]
+# engine = "kittentts"
+# model = "KittenML/kitten-tts-2"
+# voice = "Luna"
+# Alternatively, use an existing speech server (started separately):
+# [voice-gateway.config.local_stack.tts]
+# engine = "openai-audio"
+# remote = "http://127.0.0.1:8000"
+# model = "mlx-community/Kokoro-82M-bf16"
+# voice = "af_heart"
 
 # ── AI ───────────────────────────────────────────────────────────────────────
 

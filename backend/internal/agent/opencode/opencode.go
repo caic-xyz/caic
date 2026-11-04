@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maruel/genai/acp"
+
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/genai/providers/opencode"
@@ -165,25 +167,25 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	id := w.allocIDLocked()
 	sessionID, supportsImage := w.session.SessionID, w.supportsImage
 	w.mu.Unlock()
-	content := make([]opencode.PromptContent, 0, 1+len(p.Images))
-	content = append(content, opencode.PromptContent{Type: opencode.ContentText, Text: p.Text})
+	content := make([]acp.PromptContent, 0, 1+len(p.Images))
+	content = append(content, acp.PromptContent{Type: acp.ContentText, Text: p.Text})
 	if supportsImage {
 		for _, img := range p.Images {
-			content = append(content, opencode.PromptContent{
-				Type:     opencode.ContentImage,
+			content = append(content, acp.PromptContent{
+				Type:     acp.ContentImage,
 				Data:     img.Data,
 				MimeType: img.MediaType,
 			})
 		}
 	}
-	params, err := marshalParams(opencode.SessionPromptParams{SessionID: sessionID, Prompt: content})
+	params, err := marshalParams(acp.SessionPromptParams{SessionID: sessionID, Prompt: content})
 	if err != nil {
 		return nil, fmt.Errorf("marshal session/prompt params: %w", err)
 	}
-	req := opencode.JSONRPCRequest{
+	req := acp.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
-		Method:  opencode.MethodSessionPrompt,
+		Method:  acp.MethodSessionPrompt,
 		Params:  params,
 	}
 	return marshalInput(req)
@@ -212,11 +214,11 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 		w.mu.Lock()
 		w.nextID = max(w.nextID, id)
 		w.mu.Unlock()
-		if opencode.Method(probe.Method) == opencode.MethodSessionPrompt {
+		if acp.Method(probe.Method) == acp.MethodSessionPrompt {
 			w.mu.Lock()
 			w.resetAccumulatedOutputLocked()
 			w.mu.Unlock()
-			var prompt opencode.SessionPromptParams
+			var prompt acp.SessionPromptParams
 			if err := json.Unmarshal(probe.Params, &prompt); err != nil {
 				return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
 			}
@@ -224,11 +226,11 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 			for i := range prompt.Prompt {
 				content := &prompt.Prompt[i]
 				switch content.Type {
-				case opencode.ContentText:
+				case acp.ContentText:
 					input.Text += content.Text
-				case opencode.ContentImage:
+				case acp.ContentImage:
 					input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
-				case opencode.ContentAudio, opencode.ContentResource, opencode.ContentResourceLink:
+				case acp.ContentAudio, acp.ContentResource, acp.ContentResourceLink:
 					// UserInputMessage currently has no representation for these ACP content types.
 				}
 			}
@@ -262,13 +264,13 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		w.mu.Lock()
 		request, matched := w.requests[id]
 		w.mu.Unlock()
-		if matched && request.method == opencode.MethodInitialize {
+		if matched && request.method == acp.MethodInitialize {
 			result, err := agent.JSONField(line, "result")
 			if err != nil {
 				return nil, err
 			}
 			if len(result) > 0 && string(result) != "null" {
-				var initialized opencode.InitializeResult
+				var initialized acp.InitializeResult
 				if err := json.Unmarshal(result, &initialized); err != nil {
 					return nil, err
 				}
@@ -301,7 +303,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if toolCall != nil && toolCall.ToolCallID != "" {
 		w.mu.Lock()
 		switch toolCall.Status {
-		case opencode.StatusInProgress:
+		case acp.StatusInProgress:
 			if _, seen := w.skillReadCalls[toolCall.ToolCallID]; seen {
 				msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
 					switch m.(type) {
@@ -321,9 +323,9 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 					}
 				}
 			}
-		case opencode.StatusCompleted, opencode.StatusFailed:
+		case acp.StatusCompleted, acp.StatusFailed:
 			delete(w.skillReadCalls, toolCall.ToolCallID)
-		case opencode.StatusPending:
+		case acp.StatusPending:
 			// The initial announcement has no input to classify.
 		}
 		w.mu.Unlock()
@@ -397,7 +399,7 @@ type handshakeResult struct {
 	currentModel  string // Model ID the session is using.
 	currentEffort string // Reasoning effort the session is using.
 	agentVersion  string // Agent version string from initialize.
-	configOptions []opencode.SessionConfigOption
+	configOptions []acp.SessionConfigOption
 }
 
 // handshake performs the ACP initialize → session/new sequence and returns
@@ -412,20 +414,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	res := &handshakeResult{}
 
 	// 1. Send initialize request.
-	initParams, err := marshalParams(opencode.InitializeParams{
+	initParams, err := marshalParams(acp.InitializeParams{
 		ProtocolVersion: 1,
-		ClientCapabilities: opencode.ClientCapabilities{
+		ClientCapabilities: acp.ClientCapabilities{
 			Terminal: false,
 		},
-		ClientInfo: opencode.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+		ClientInfo: acp.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal initialize params: %w", err)
 	}
-	initReq := opencode.JSONRPCRequest{
+	initReq := acp.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      res.allocID(),
-		Method:  opencode.MethodInitialize,
+		Method:  acp.MethodInitialize,
 		Params:  initParams,
 	}
 	if err := writeJSONInput(ctx, stdin, initReq, opts.Records); err != nil {
@@ -449,12 +451,12 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	}
 
 	// Extract capabilities and agent info.
-	var initResult opencode.InitializeResult
+	var initResult acp.InitializeResult
 	if initResp.Result != nil {
 		if err := json.Unmarshal(initResp.Result, &initResult); err != nil {
 			return nil, nil, fmt.Errorf("parse initialize result: %w", err)
 		}
-		metadata, err := sessionResultMetadata(opencode.MethodInitialize, "", initResp.Result)
+		metadata, err := sessionResultMetadata(acp.MethodInitialize, "", initResp.Result)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -463,41 +465,41 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 
 	// 2. Create or resume session. Use ACP's native MCP registration so user
 	// configuration, including inline JSONC, stays untouched.
-	servers := []opencode.MCPServer{}
+	servers := []acp.MCPServer{}
 	if opts.MCP != nil {
-		servers = append(servers, opencode.MCPServer{
+		servers = append(servers, acp.MCPServer{
 			Name:    "caic",
 			Command: "python3",
 			Args:    []string{agent.RelayScriptPath, "caic-mcp"},
-			Env:     []opencode.EnvVariable{{Name: "CAIC_RELAY_DIR", Value: agent.RelayDir}},
+			Env:     []acp.EnvVariable{{Name: "CAIC_RELAY_DIR", Value: agent.RelayDir}},
 		})
 	}
-	var sessionReq opencode.JSONRPCRequest
+	var sessionReq acp.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
 		// session/load reads local session data under ~/.local/share/opencode/
 		// by default. The ID alone cannot recover missing history. md mounts
 		// OpenCode's data directory into new containers; custom storage must
 		// also be accessible. The load request supplies this task's workspace.
 		// https://opencode.ai/docs/troubleshooting/#storage
-		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: servers})
+		params, err := marshalParams(acp.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: servers})
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal session/load params: %w", err)
 		}
-		sessionReq = opencode.JSONRPCRequest{
+		sessionReq = acp.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      res.allocID(),
-			Method:  opencode.MethodSessionLoad,
+			Method:  acp.MethodSessionLoad,
 			Params:  params,
 		}
 	} else {
-		params, err := marshalParams(opencode.SessionNewParams{Cwd: opts.Dir, McpServers: servers})
+		params, err := marshalParams(acp.SessionNewParams{Cwd: opts.Dir, McpServers: servers})
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal session/new params: %w", err)
 		}
-		sessionReq = opencode.JSONRPCRequest{
+		sessionReq = acp.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      res.allocID(),
-			Method:  opencode.MethodSessionNew,
+			Method:  acp.MethodSessionNew,
 			Params:  params,
 		}
 	}
@@ -512,7 +514,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	}
 
 	// Extract session ID and models from result.
-	var snResult opencode.SessionNewResult
+	var snResult acp.SessionNewResult
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
 		return nil, nil, fmt.Errorf("parse session result: %w", err)
 	}
@@ -532,7 +534,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 		model = res.currentModel
 	}
 	if model != "" && model != res.currentModel {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model, opts.Records, handleMCP); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, acp.ConfigOptionModel, model, opts.Records, handleMCP); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -545,7 +547,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 	return res, records.Reader(), nil
 }
 
-func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) error {
+func (res *handshakeResult) setConfigOptions(options []acp.SessionConfigOption) error {
 	res.configOptions = options
 	m := &agent.SessionMetadata{}
 	for i := range options {
@@ -563,7 +565,7 @@ func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOpt
 	return nil
 }
 
-func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.SessionConfigOption {
+func (res *handshakeResult) configOption(id acp.ConfigOptionID) *acp.SessionConfigOption {
 	for i := range res.configOptions {
 		if res.configOptions[i].ID == id {
 			return &res.configOptions[i]
@@ -572,24 +574,24 @@ func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.S
 	return nil
 }
 
-func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string, owner *agent.Records, handleMCP func(agent.MCPRequest) error) error {
+func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id acp.ConfigOptionID, value string, owner *agent.Records, handleMCP func(agent.MCPRequest) error) error {
 	option := res.configOption(id)
 	if option == nil {
 		return fmt.Errorf("opencode ACP does not expose %q for the selected model", id)
 	}
-	if option.Type != opencode.ConfigOptionTypeSelect {
+	if option.Type != acp.ConfigOptionTypeSelect {
 		return fmt.Errorf("opencode ACP %q option has unsupported type %q", id, option.Type)
 	}
-	if id != opencode.ConfigOptionModel && !hasConfigValue(option.Options, value) {
+	if id != acp.ConfigOptionModel && !hasConfigValue(option.Options, value) {
 		return fmt.Errorf("opencode ACP %q value %q is unavailable", id, value)
 	}
-	params, err := marshalParams(opencode.SetSessionConfigOptionParams{SessionID: res.sessionID, ConfigID: id, Value: value})
+	params, err := marshalParams(acp.SetSessionConfigOptionParams{SessionID: res.sessionID, ConfigID: id, Value: value})
 	if err != nil {
 		return fmt.Errorf("marshal session/set_config_option params: %w", err)
 	}
 	requestID := res.allocID()
-	if err := writeJSONInput(ctx, stdin, opencode.JSONRPCRequest{
-		JSONRPC: "2.0", ID: requestID, Method: opencode.MethodSessionSetConfigOption, Params: params,
+	if err := writeJSONInput(ctx, stdin, acp.JSONRPCRequest{
+		JSONRPC: "2.0", ID: requestID, Method: acp.MethodSessionSetConfigOption, Params: params,
 	}, owner); err != nil {
 		return fmt.Errorf("write session/set_config_option: %w", err)
 	}
@@ -597,7 +599,7 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	if err != nil {
 		return fmt.Errorf("read session/set_config_option response: %w", err)
 	}
-	var result opencode.SetSessionConfigOptionResult
+	var result acp.SetSessionConfigOptionResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return fmt.Errorf("parse session/set_config_option response: %w", err)
 	}
@@ -631,7 +633,7 @@ func normalizeModels(models []agent.Model) []agent.Model {
 	return normalized
 }
 
-func hasConfigValue(values []opencode.ConfigOptionValue, want string) bool {
+func hasConfigValue(values []acp.ConfigOptionValue, want string) bool {
 	for _, value := range values {
 		if value.Value == want {
 			return true
@@ -660,7 +662,7 @@ func writeJSONInput(ctx context.Context, w io.Writer, v any, owner *agent.Record
 
 // readJSONRPCResponse waits for the expected request reply, servicing task-scoped
 // MCP controls so an eager client cannot block the ACP handshake.
-func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, expectedID int64, handleMCP func(agent.MCPRequest) error) (*opencode.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, expectedID int64, handleMCP func(agent.MCPRequest) error) (*acp.JSONRPCMessage, error) {
 	for {
 		line, controls, err := r.ReadRecord()
 		if err != nil {
@@ -685,7 +687,7 @@ func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, expect
 		if len(line) == 0 {
 			continue
 		}
-		var msg opencode.JSONRPCMessage
+		var msg acp.JSONRPCMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("unmarshal response: %w", err)
 		}

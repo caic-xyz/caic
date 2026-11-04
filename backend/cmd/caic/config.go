@@ -20,7 +20,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/config/data"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/maruel/gomode/voicegateway"
 )
 
 // defaultConfig returns a data.Config with sensible defaults pre-populated.
@@ -42,16 +41,10 @@ func defaultConfig() data.Config {
 		},
 		VoiceGateway: data.VoiceGateway{
 			TokenMode: string(server.VoiceTokenModeScoped),
-			Config:    embeddedVoiceGatewayConfigDefaults(),
+			Mode:      data.VoiceGatewayModeDisabled,
 		},
 		Debug: data.Debug{LogLevel: "info"},
 	}
-}
-
-func embeddedVoiceGatewayConfigDefaults() data.VoiceConfig {
-	cfg := voicegateway.DefaultConfig()
-	cfg.Server.HTTP = ""
-	return voiceConfigToData(&cfg)
 }
 
 // loadTOMLConfig reads and parses config.toml from cfgDir.
@@ -129,13 +122,11 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 	}
 	// Resolve core env vars: explicit config values take precedence over the host environment.
 	tailscaleAPIKey := coreEnvOrDefault(tc.Core.Env, "TAILSCALE_API_KEY")
-	geminiAPIKey := coreEnvOrDefault(tc.Core.Env, "GEMINI_API_KEY")
-	voiceGatewayMode := server.VoiceGatewayModeDisabled
-	if tc.VoiceGateway.URL != "" {
-		voiceGatewayMode = server.VoiceGatewayModeExternal
-	} else if geminiAPIKey != "" {
-		voiceGatewayMode = server.VoiceGatewayModeEmbedded
+	voiceGatewayMode := server.VoiceGatewayMode(tc.VoiceGateway.Mode)
+	if voiceGatewayMode == "" {
+		voiceGatewayMode = server.VoiceGatewayModeDisabled
 	}
+
 	var voiceTokenMode server.VoiceTokenMode
 	switch tc.VoiceGateway.TokenMode {
 	case "", string(server.VoiceTokenModeScoped):
