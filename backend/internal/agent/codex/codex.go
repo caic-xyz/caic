@@ -770,6 +770,7 @@ func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
 
 // recordedInputEcho suppresses only the native item proved by a recorded
 // turn/start request and its matching reply. Other root and child inputs remain.
+// Multiple requests can share a running turn, each with its own input item.
 func (w *wireFormat) recordedInputEcho(source *agent.MessageSource) bool {
 	for i := range w.inputTurns {
 		t := &w.inputTurns[i]
@@ -777,7 +778,9 @@ func (w *wireFormat) recordedInputEcho(source *agent.MessageSource) bool {
 			if t.itemID == "" {
 				t.itemID = source.ItemID
 			}
-			return t.itemID == source.ItemID
+			if t.itemID == source.ItemID {
+				return true
+			}
 		}
 	}
 	return false
