@@ -2,13 +2,18 @@
 # Copy to ~/.config/voice-gateway/config.toml.
 #
 # With systemd, put API keys in ~/.config/systemd/user/voice-gateway.env,
-# beside voice-gateway.service. See https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example.
+# beside voice-gateway.service. See https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example for the format.
 #
 # Provider names come from genai's providers.All registry at https://github.com/maruel/genai
 #
 # At standalone startup, unavailable providers are hidden with a warning.
-# Managed llama.cpp and explicit local endpoints remain selectable without
-# default-endpoint probes.
+#
+# Set effort on [[realtime]], [[chat]], or [local_stack.llm]:
+# Omit effort to send no effort option; "off" requests minimal thinking;
+# "low", "medium", "high", "xhigh", and "max" request increasing effort.
+# Supported levels depend on the model. Omit it for models that reject effort.
+#
+# Prices checked 2026-11-05: USD, uncached input and output.
 
 [server]
 # Use an HTTPS reverse proxy for secure signaling.
@@ -16,8 +21,10 @@ http = "127.0.0.1:3479"
 # The WebRTC UDP port must be reachable by clients (directly or through NAT).
 webrtc_udp_port = 3480
 
-# Managed local choices load on first use. Active sessions pin their workers;
-# idle choices are evicted after this timeout or when capacity is needed.
+# Local-stack, chat, and native llama.cpp audio load on first use. A choice counts as
+# one instance, including its ASR/LLM/TTS workers. Active sessions pin instances;
+# another choice waits when all instances are busy. Idle choices are evicted
+# first when capacity is needed. External servers remain operator-owned.
 [local_stack_runtime]
 idle_timeout_seconds = 3600
 max_instances = 1
@@ -30,24 +37,34 @@ max_instances = 1
 # Realtime Audio models.
 
 [[realtime]]
+# https://aistudio.google.com/docs/pricing#gemini-3.8-live
+# Text: $0.75/MTok in, $4.50/MTok out. Audio: $0.30/hr in, $1.08/hr out.
 label = "Gemini Live"
 provider = "gemini"
 model = "gemini-3.8-live"
 
 [[realtime]]
-label = "Gemini Live Thinking ($)"
+# https://aistudio.google.com/docs/pricing#gemini-3.8-live
+# Text: $0.75/MTok in, $4.50/MTok out. Audio: $0.30/hr in, $1.08/hr out.
+label = "Gemini Live Thinking"
 provider = "gemini"
 model = "gemini-3.8-live-extended-thinking"
 
 [[realtime]]
+# https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini
+# Text: $0.60/MTok in, $2.40/MTok out. Audio: ~$0.36/hr in, ~$1.44/hr out.
 label = "GPT Realtime mini"
 provider = "openai"
 model = "gpt-realtime-2.1-mini"
+effort = "low"
 
 [[realtime]]
+# https://developers.openai.com/api/docs/models/gpt-realtime-2.1
+# Text: $4.00/MTok in, $24.00/MTok out. Audio: ~$1.152/hr in, ~$4.608/hr out.
 label = "GPT Realtime ($)"
 provider = "openai"
 model = "gpt-realtime-2.1"
+effort = "low"
 
 # Native audio-to-audio LFM3, independent of the ASR/LLM/TTS stack.
 # llamacppsrv downloads and starts the managed llama.cpp audio server.
@@ -61,67 +78,89 @@ context_size = 65536
 
 # Remote LLMs
 # Clients transcribe and speak for all chat choices. Credentials are listed in
-# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example.
+# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example,
+# using genai's provider environment variables.
 
 [[chat]]
+# https://developers.openai.com/api/docs/models/gpt-6-luna
+# $0.10/MTok in, $0.50/MTok out; prompts >272K tokens: $0.20/MTok in, $0.75/MTok out.
 label = "GPT 6 Luna"
 provider = "openai"
 model = "gpt-6-luna"
+effort = "low"
 
 [[chat]]
+# https://platform.claude.com/docs/en/models/haiku-5-5/overview
+# $0.10/MTok in, $0.50/MTok out; prompts >100K tokens: $0.50/MTok in, $2.50/MTok out.
 label = "Claude Haiku 5.5"
 provider = "anthropic"
 model = "claude-haiku-5-5"
+effort = "low"
 
 [[chat]]
+# https://aistudio.google.com/docs/pricing#gemini-3.8-flash
+# $0.75/MTok in, $3.75/MTok out through 2026-12-31; then $1.50/MTok in, $7.50/MTok out.
 label = "Gemini Flash 3.8"
 provider = "gemini"
 model = "gemini-3.8-flash"
+effort = "low"
 
 [[chat]]
+# https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite
+# $0.30/MTok in, $2.50/MTok out.
 label = "Gemini Flash Lite"
 provider = "gemini"
 model = "gemini-flash-lite-latest"
+effort = "low"
 
 [[chat]]
+# https://api-docs.deepseek.com/quick_start/pricing/
+# Off-peak: $0.15/MTok in, $0.60/MTok out. Peak: $0.30/MTok in, $1.20/MTok out.
 label = "DeepSeek Flash"
 provider = "deepseek"
 model = "deepseek-flash"
+effort = "low"
 
 [[chat]]
-label = "Groq Qwen3.8-27B"
-provider = "groq"
-model = "qwen/qwen3.8-27b"
-
-[[chat]]
-label = "Openrouter Gemma-4-26B-A4B (free)"
+# https://openrouter.ai/minimax/minimax-m3.1-flash
+# From $0.1125/MTok in, $0.45/MTok out (25% promotion); list: $0.15/MTok in, $0.60/MTok out.
+label = "Openrouter Minimax M3.1 Flash"
 provider = "openrouter"
-model = "google/gemma-4-26b-a4b-it:free"
+model = "minimax/minimax-m3.1-flash"
+# Optional: "latency" (lowest), "price" (lowest), or "throughput" (highest).
+# Omit to use OpenRouter's default routing. Also supported in [local_stack.llm].
+openrouter_sort = "latency"
 
 [[chat]]
-label = "Cerebras GPT OSS 120B"
-provider = "cerebras"
-model = "gpt-oss-120b"
+# https://openrouter.ai/xiaomi/mimo-v2.6-flash
+# From $0.10/MTok in, $0.28/MTok out.
+label = "Openrouter MiMo-V2.6-Flash"
+provider = "openrouter"
+model = "xiaomi/mimo-v2.6-flash"
+openrouter_sort = "latency"
 
 [[chat]]
-label = "Mistral Small"
+# https://openrouter.ai/mistralai/ministral-14b-2512
+# $0.20/MTok in, $0.20/MTok out
+label = "Openrouter Ministral 3 14B"
+provider = "openrouter"
+model = "mistralai/ministral-14b-2512"
+openrouter_sort = "latency"
+
+[[chat]]
+# https://docs.mistral.ai/models/ministral-3-14b-25-12
+# $0.20/MTok in, $0.20/MTok out.
+label = "Mistral Ministral 3 14B"
 provider = "mistral"
-model = "mistral-small-latest"
+model = "ministral-14b-2512"
 
 [[chat]]
+# https://www.qwencloud.com/models/qwen3.8-flash?region=us-east-1
+# Global scope: $0.113/MTok in, $0.382/MTok out. US scope: $0.15/MTok in, $0.47/MTok out.
 label = "Alibaba Qwen3.8 Flash"
 provider = "alibaba"
 model = "qwen3.8-flash"
-
-[[chat]]
-label = "Cohere Command A"
-provider = "cohere"
-model = "command-a-03-2025"
-
-[[chat]]
-label = "Together Qwen3.8 Flash"
-provider = "togetherai"
-model = "Qwen/Qwen3.8-Flash"
+effort = "low"
 
 # An arbitrary OpenAI-compatible chat endpoint:
 # [[chat]]
@@ -139,6 +178,7 @@ model = "Qwen/Qwen3.8-Flash"
 # provider = "llamacpp"
 # llamacppsrv = true
 # model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+# effort = "low"
 # [local_stack.asr]
 # engine = "openai-audio"
 # remote = "http://127.0.0.1:8000"
