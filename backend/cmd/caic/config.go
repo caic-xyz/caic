@@ -218,7 +218,7 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 				InstanceID: tc.VoiceGateway.InstanceID,
 				TokenMode:  voiceTokenMode,
 				SigningKey: voiceSigningKey,
-				Config:     voiceConfigToRuntime(&tc.VoiceGateway.Config),
+				Config:     tc.VoiceGateway.Config,
 			},
 		},
 		Debug: server.DebugConfig{

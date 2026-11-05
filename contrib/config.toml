@@ -111,6 +111,12 @@
 [voice-gateway.config.server]
 #webrtc_udp_port = 0
 
+# Managed local choices load on first use. Active sessions pin their workers;
+# idle choices are evicted after this timeout or when capacity is needed.
+[voice-gateway.config.local_stack_runtime]
+idle_timeout_seconds = 3600
+max_instances = 1
+
 # Realtime Audio models.
 
 
@@ -142,8 +148,6 @@ provider = "llamacpp"
 llamacppsrv = true
 model = "LiquidAI/LFM3-Audio-2B-GGUF/LFM3-Audio-2B-Q4_K_M.gguf"
 context_size = 65536
-setup_timeout_seconds = 15
-pending_audio_seconds = 5
 # remote = "http://127.0.0.1:8080" directly on the choice.
 
 # Remote LLMs

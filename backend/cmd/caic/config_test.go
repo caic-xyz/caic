@@ -48,14 +48,14 @@ func TestContribConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s documents a key caic rejects, or a malformed default: %v", contribPath, err)
 	}
-	pipeline := voiceConfigToRuntime(&got.VoiceGateway.Config)
+	pipeline := &got.VoiceGateway.Config
 	if err := pipeline.ValidateEmbedded(); err != nil {
 		t.Fatalf("sample pipelines are invalid: %v", err)
 	}
 	if len(pipeline.Realtime) == 0 || len(pipeline.Chat) == 0 {
 		t.Fatal("sample must document explicit realtime and chat pipelines")
 	}
-	got.VoiceGateway.Config = data.VoiceConfig{}
+	got.VoiceGateway.Config = voicegateway.Config{}
 	want := defaultConfig()
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("uncommenting %s does not reproduce the defaults:\n got = %+v\nwant = %+v", contribPath, got, want)
@@ -926,12 +926,15 @@ func TestVoiceGatewayEnvironment(t *testing.T) {
 	}
 }
 
-func TestVoiceConfigDiskProjection(t *testing.T) {
+func TestVoiceGatewayConfig(t *testing.T) {
 	t.Parallel()
 	const fixture = `[voice-gateway]
 mode="embedded"
 [voice-gateway.config.server]
 webrtc_udp_port=3478
+[voice-gateway.config.local_stack_runtime]
+idle_timeout_seconds=120
+max_instances=2
 [[voice-gateway.config.realtime]]
 label="Native audio"
 provider="llamacpp"
@@ -942,8 +945,6 @@ threads=4
 slots=2
 context_size=65536
 max_output_tokens=2048
-setup_timeout_seconds=20
-pending_audio_seconds=8
 [[voice-gateway.config.chat]]
 label="Remote chat"
 provider="openaicompatible"
@@ -989,13 +990,14 @@ scope="voice.session"
 		t.Fatal(err)
 	}
 	want := voicegateway.Config{
-		Server:         voicegateway.ServerConfig{WebRTCUDPPort: 3478},
-		Realtime:       []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048, SetupTimeoutSeconds: 20, PendingAudioSeconds: 8}},
-		Chat:           []voicegateway.ChatConfig{{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"}},
-		LocalStack:     []voicegateway.LocalStackConfig{{Label: "Speech stack", ASR: voicegateway.LocalStackASRConfig{Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.LocalStackTTSConfig{Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
-		TrustedIssuers: []voicegateway.TrustedIssuerConfig{{Service: "caic", Issuer: "https://caic.example", OAuth: true, Scope: "voice.session"}},
+		LocalStackRuntime: voicegateway.LocalStackRuntimeConfig{IdleTimeoutSeconds: 120, MaxInstances: 2},
+		Server:            voicegateway.ServerConfig{WebRTCUDPPort: 3478},
+		Realtime:          []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048}},
+		Chat:              []voicegateway.ChatConfig{{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"}},
+		LocalStack:        []voicegateway.LocalStackConfig{{Label: "Speech stack", ASR: voicegateway.LocalStackASRConfig{Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.LocalStackTTSConfig{Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
+		TrustedIssuers:    []voicegateway.TrustedIssuerConfig{{Service: "caic", Issuer: "https://caic.example", OAuth: true, Scope: "voice.session"}},
 	}
 	if !reflect.DeepEqual(cfg.Voice.Gateway.Config, want) {
-		t.Fatalf("voice projection = %#v, want %#v", cfg.Voice.Gateway.Config, want)
+		t.Fatalf("voice config = %#v, want %#v", cfg.Voice.Gateway.Config, want)
 	}
 }
