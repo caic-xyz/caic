@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"strings"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
@@ -25,9 +26,13 @@ func compressMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		accepted := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
-		enc := negotiateEncoding(accepted)
-		if enc == "" || r.Method == http.MethodHead {
+		w.Header().Add("Vary", "Accept-Encoding")
+		enc, ok := negotiateEncoding(strings.Join(r.Header.Values("Accept-Encoding"), ","), []string{"zstd", "br", "gzip", "identity"})
+		if !ok {
+			http.Error(w, "no acceptable content encoding", http.StatusNotAcceptable)
+			return
+		}
+		if enc == "identity" || r.Method == http.MethodHead {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -46,16 +51,6 @@ func compressMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(cw, r)
 	})
-}
-
-// negotiateEncoding picks the best encoding the client accepts.
-func negotiateEncoding(accepted map[string]struct{}) string {
-	for _, enc := range []string{"zstd", "br", "gzip"} {
-		if _, ok := accepted[enc]; ok {
-			return enc
-		}
-	}
-	return ""
 }
 
 // compressWriter wraps http.ResponseWriter to compress the response body.

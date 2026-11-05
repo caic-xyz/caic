@@ -172,7 +172,7 @@ func TestAssetHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 
-		// Brotli is always preferred since it's the native format.
+		// Brotli wins equal-weight ties because it is the native format.
 		if got := w.Header().Get("Content-Encoding"); got != "br" {
 			t.Errorf("Content-Encoding = %q, want %q", got, "br")
 		}
@@ -371,33 +371,6 @@ func TestInjectIntoHead(t *testing.T) {
 	})
 }
 
-func TestParseAcceptEncoding(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		header string
-		want   map[string]struct{}
-	}{
-		{"gzip, br", map[string]struct{}{"gzip": {}, "br": {}}},
-		{"zstd;q=1.0, gzip;q=0.5", map[string]struct{}{"zstd": {}, "gzip": {}}},
-		{"", map[string]struct{}{}},
-		{"identity", map[string]struct{}{"identity": {}}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.header, func(t *testing.T) {
-			t.Parallel()
-			got := parseAcceptEncoding(tt.header)
-			for k := range tt.want {
-				if _, ok := got[k]; !ok {
-					t.Errorf("parseAcceptEncoding(%q) missing key %q", tt.header, k)
-				}
-			}
-			if len(got) != len(tt.want) {
-				t.Errorf("parseAcceptEncoding(%q) has %d entries, want %d", tt.header, len(got), len(tt.want))
-			}
-		})
-	}
-}
-
 // Decompression helpers for roundtrip verification.
 
 func decompressBrotli(t *testing.T, data []byte) []byte {
@@ -432,4 +405,70 @@ func decompressGzip(t *testing.T, data []byte) []byte {
 		t.Fatalf("gzip decompress: %v", err)
 	}
 	return out
+}
+func TestEncodingNegotiation(t *testing.T) {
+	t.Parallel()
+	dist := fstest.MapFS{"assets/app.js.br": {Data: brCompress(t, []byte("test payload"))}}
+	handlers := []struct {
+		name    string
+		handler http.Handler
+		tie     string
+	}{
+		{name: "static", handler: &assetHandler{dist: dist}, tie: "br"},
+		{name: "dynamic", handler: compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("test payload"))
+		})), tie: "zstd"},
+	}
+	for _, handler := range handlers {
+		t.Run(handler.name, func(t *testing.T) {
+			t.Parallel()
+			for _, test := range []struct {
+				name   string
+				header string
+				want   string
+			}{
+				{name: "excluded brotli", header: "br;q=0, gzip", want: "gzip"},
+				{name: "quality preference", header: "br;q=0.1, gzip;q=0.9, zstd;q=0.5", want: "gzip"},
+				{name: "tie", header: "gzip, br, zstd", want: handler.tie},
+				{name: "wildcard", header: "*;q=0.7, br;q=0, zstd;q=0", want: "gzip"},
+				{name: "explicit overrides wildcard", header: "*;q=1, br;q=0.5, zstd;q=0.3", want: "gzip"},
+				{name: "identity preference", header: "identity;q=1, gzip;q=0.5", want: ""},
+				{name: "identity fallback", header: "deflate", want: ""},
+				{name: "empty", header: "", want: ""},
+				{name: "all compressed excluded", header: "br;q=0, gzip;q=0, zstd;q=0", want: ""},
+				{name: "explicit identity", header: "*;q=0, identity;q=0.5", want: ""},
+				{name: "case insensitive", header: "GZip;Q=1, BR;q=0", want: "gzip"},
+				{name: "invalid quality", header: "br;q=bogus, gzip;q=0.5", want: "gzip"},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					t.Parallel()
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
+					req.Header.Set("Accept-Encoding", test.header)
+					rec := httptest.NewRecorder()
+					handler.handler.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						t.Fatalf("status = %d, want 200", rec.Code)
+					}
+					if got := rec.Header().Get("Content-Encoding"); got != test.want {
+						t.Errorf("Content-Encoding = %q, want %q", got, test.want)
+					}
+					if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+						t.Error("response does not vary by Accept-Encoding")
+					}
+				})
+			}
+			t.Run("unacceptable", func(t *testing.T) {
+				t.Parallel()
+				for _, header := range []string{"*;q=0", "deflate, identity;q=0", "br;q=0, gzip;q=0, zstd;q=0, identity;q=0"} {
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
+					req.Header.Set("Accept-Encoding", header)
+					rec := httptest.NewRecorder()
+					handler.handler.ServeHTTP(rec, req)
+					if rec.Code != http.StatusNotAcceptable {
+						t.Errorf("Accept-Encoding %q: status = %d, want 406", header, rec.Code)
+					}
+				}
+			})
+		})
+	}
 }
