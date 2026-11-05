@@ -423,8 +423,10 @@ func (r *Router) buildAPIHandler() http.Handler {
 	// The embedded gateway answers only when caic owns a bridge. An external or
 	// disabled gateway has no routes here.
 	if r.voiceBridge != nil {
-		mountPrefix(apiMux, "", "/api/voicegateway/v1",
-			voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge))
+		gateway := voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge)
+		for _, version := range []string{"v1", "v2"} {
+			mountPrefix(apiMux, "", "/api/voicegateway/"+version, gateway)
+		}
 	}
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())

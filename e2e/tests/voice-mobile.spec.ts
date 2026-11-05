@@ -30,7 +30,7 @@ test("browser voice selects a text choice on mobile and displays a failed choice
     }),
   );
   let includeTextChoice = true;
-  await page.route("**/api/voicegateway/v1/voice/choices", (route) =>
+  await page.route("**/api/voicegateway/v2/voice/choices", (route) =>
     route.fulfill({
       json: {
         choices: [

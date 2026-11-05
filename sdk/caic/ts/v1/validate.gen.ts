@@ -1004,4 +1004,3 @@ export function validateTaskHistoryStreamError(raw: ValidatorInput): TaskHistory
     message: asString(obj["message"], "TaskHistoryStreamError.message"),
   };
 }
-

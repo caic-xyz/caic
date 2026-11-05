@@ -89,7 +89,7 @@ test("browser voice and its keyboard shortcut wait for initial task preparation"
     manifest.webShell.voiceGateway = { url: "/" };
     await route.fulfill({ response, json: manifest });
   });
-  await page.route("**/api/voicegateway/v1/voice/choices", (route) =>
+  await page.route("**/api/voicegateway/v2/voice/choices", (route) =>
     route.fulfill({
       json: {
         choices: [{ id: "test", label: "Test voice", transports: ["webrtc"] }],

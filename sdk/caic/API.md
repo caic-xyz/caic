@@ -2565,4 +2565,3 @@ TaskHistoryStreamError reports that task history could not be replayed.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `message` | `string` |  | yes |
-

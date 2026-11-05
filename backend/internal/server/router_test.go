@@ -2098,8 +2098,10 @@ func TestVoiceRoutesByMode(t *testing.T) {
 		if got := status(t, h, cookie, "/api/caic/v1/voice/token"); got != http.StatusOK {
 			t.Fatalf("token endpoint = %d, want 200", got)
 		}
-		if got := status(t, h, cookie, "/api/voicegateway/v1/voice/text"); got != http.StatusNotFound {
-			t.Fatalf("gateway route = %d, want 404", got)
+		for _, version := range []string{"v1", "v2"} {
+			if got := status(t, h, cookie, "/api/voicegateway/"+version+"/voice/text"); got != http.StatusNotFound {
+				t.Fatalf("%s gateway route = %d, want 404", version, got)
+			}
 		}
 	})
 
@@ -2113,8 +2115,10 @@ func TestVoiceRoutesByMode(t *testing.T) {
 		}
 		cookie := sessionCookie(t, s, user)
 		// A bridge without a local-stack backend cannot serve text sessions.
-		if got := status(t, h, cookie, "/api/voicegateway/v1/voice/text"); got != http.StatusServiceUnavailable {
-			t.Fatalf("gateway route = %d, want 503", got)
+		for _, version := range []string{"v1", "v2"} {
+			if got := status(t, h, cookie, "/api/voicegateway/"+version+"/voice/text"); got != http.StatusServiceUnavailable {
+				t.Fatalf("%s gateway route = %d, want 503", version, got)
+			}
 		}
 		if got := status(t, h, cookie, "/api/caic/v1/voice/token"); got != http.StatusNotFound {
 			t.Fatalf("token endpoint = %d, want 404", got)
@@ -2129,7 +2133,7 @@ func TestVoiceRoutesByMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		cookie := sessionCookie(t, s, user)
-		for _, path := range []string{"/api/voicegateway/v1/voice/text", "/api/caic/v1/voice/token"} {
+		for _, path := range []string{"/api/voicegateway/v1/voice/text", "/api/voicegateway/v2/voice/text", "/api/caic/v1/voice/token"} {
 			if got := status(t, h, cookie, path); got != http.StatusNotFound {
 				t.Fatalf("%s = %d, want 404", path, got)
 			}
