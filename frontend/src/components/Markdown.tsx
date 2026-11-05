@@ -1,4 +1,4 @@
-// Markdown safely renders agent and file text with viewer links, space-tolerant paths, copyable code, Pele diagrams, and a raw toggle.
+// Markdown safely renders agent and file text with viewer links, external links in new tabs, copyable code, Pele diagrams, and a raw toggle.
 
 import {
   Show,
@@ -23,6 +23,18 @@ import { getMermaidCachedSvg, renderMermaidBlocks, toggleMermaidView } from "../
 
 /** The task whose runtime files markdown paths name. Without it, links stay ordinary. */
 export const MarkdownTaskContext = createContext<Accessor<string>>();
+
+const markdownSanitizer = DOMPurify();
+markdownSanitizer.addHook("afterSanitizeAttributes", (node) => {
+  if (
+    node instanceof HTMLAnchorElement &&
+    (node.protocol === "http:" || node.protocol === "https:") &&
+    node.origin !== window.location.origin
+  ) {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
 
 const markdownRenderer = {
   code(this: Renderer, token: Tokens.Code): string {
@@ -182,7 +194,7 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
   });
   // Content cannot submit authenticated forms or install page-wide CSS.
   const html = createMemo(() =>
-    DOMPurify.sanitize(marked.parse(props.text) as string, {
+    markdownSanitizer.sanitize(marked.parse(props.text) as string, {
       USE_PROFILES: { html: true },
       FORBID_TAGS: ["form", "style"],
       FORBID_ATTR: ["form", "formaction", "formenctype", "formmethod", "formtarget"],

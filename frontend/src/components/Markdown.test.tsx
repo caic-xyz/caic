@@ -209,6 +209,28 @@ describe("Markdown", () => {
     expect(codeLink).not.toHaveAttribute("target");
   });
 
+  it("opens external Markdown, automatic, and HTML links in new tabs", () => {
+    renderMarkdown(
+      '[Site](https://example.com/docs "Documentation") https://example.org <a href="//example.net">HTML</a>',
+      () => "task123",
+    );
+
+    for (const name of ["Site", "https://example.org", "HTML"]) {
+      const link = screen.getByRole("link", { name });
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    }
+    expect(screen.getByRole("link", { name: "Site" })).toHaveAttribute("title", "Documentation");
+  });
+
+  it("keeps same-origin, fragment, and email links in the current tab", () => {
+    renderMarkdown(`[App](${window.location.origin}/task/123) [Section](#section) [Email](mailto:hello@example.com)`);
+
+    for (const name of ["App", "Section", "Email"]) {
+      expect(screen.getByRole("link", { name })).not.toHaveAttribute("target");
+    }
+  });
+
   it("routes in-app CAD links for STL, STEP, and 3MF models when MarkdownTaskContext is provided", async () => {
     renderMarkdown("See [Model](part.stl), [Assembly](assembly.step), or [Print](print.3mf).", () => "task123");
 
