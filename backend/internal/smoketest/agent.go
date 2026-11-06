@@ -115,6 +115,9 @@ func VisualModelInventory(h harness.Name) agent.ModelInventory {
 		m.ID = "gpt-6.1-sol"
 		m.ContextWindow = 272_000
 		m.EffortOptions = []string{"low", "medium", "high"}
+	case harness.Dsh:
+		m.ID = "deepseek-official/deepseek-v4-flash"
+		m.EffortOptions = []string{"off", "high", "max"}
 	case harness.OpenCode:
 		// OpenCode keeps the general fixture model; it is not a capture example.
 	case harness.Pi:

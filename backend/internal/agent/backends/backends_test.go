@@ -17,6 +17,9 @@ func TestDefault(t *testing.T) {
 	t.Parallel()
 
 	b := Default(t.TempDir(), nil)
+	if dsh := b[harness.Dsh]; dsh == nil || dsh.Harness() != harness.Dsh {
+		t.Fatal("DeepSeek Harness backend is missing")
+	}
 	if _, ok := b[harness.Antigravity].(*antigravity.Backend); !ok {
 		t.Fatalf("Antigravity backend = %T, want native implementation", b[harness.Antigravity])
 	}

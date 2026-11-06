@@ -1,9 +1,10 @@
-// Harness model inventory cache refresh and deletion watcher.
+// Harness model inventory refresh validates catalogs, owns temporary-runtime cleanup, and preserves cached models on failure.
 
 package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -55,8 +56,7 @@ func (r *HarnessModels) Refresh(ctx context.Context, h harness.Name) error {
 	}
 	purgeStaleModelRefreshInstances(ctx, r.Log, r.Router)
 	cache := agent.OpenHarnessCache(filepath.Join(r.CacheDir, "harnesses.json"))
-	refreshOneHarness(ctx, r.Log, cache, r.Router, r.TaskManager, h, fetcher, r.HarnessEnv[string(h)])
-	return nil
+	return refreshOneHarness(ctx, r.Log, cache, r.Router, r.TaskManager, h, fetcher, r.HarnessEnv[string(h)])
 }
 
 // Watch refreshes stale model caches at startup, then watches harnesses.json
@@ -119,7 +119,9 @@ func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string
 		if fresh && !force {
 			continue
 		}
-		refreshOneHarness(ctx, log, cache, router, taskMgr, h, fetchers[h], env)
+		if err := refreshOneHarness(ctx, log, cache, router, taskMgr, h, fetchers[h], env); err != nil {
+			log.WarnContext(ctx, "model refresh failed", "harness", h, "err", err)
+		}
 	}
 }
 
@@ -162,7 +164,7 @@ func refreshOneHarness(
 	h harness.Name,
 	fetcher agent.ModelFetcher,
 	env []string,
-) {
+) error {
 	log.InfoContext(ctx, "model cache stale, fetching", "harness", h)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -177,29 +179,37 @@ func refreshOneHarness(
 		LogWriter: w,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "launch failed", "harness", h, "err", err)
-		return
+		return fmt.Errorf("launch model discovery: %w", err)
 	}
-	defer func() {
-		if err := router.Purge(context.WithoutCancel(ctx), name); err != nil {
-			log.WarnContext(ctx, "purge failed", "harness", h, "instance", name, "err", err)
-		}
-	}()
+	// Finish cleanup before publishing a new catalog. A failed refresh keeps
+	// the previously usable models both in memory and on disk.
+	var inventory agent.ModelInventory
 	conn, err := router.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w})
 	if err != nil {
-		log.WarnContext(ctx, "connect failed", "harness", h, "err", err)
-		return
+		err = fmt.Errorf("connect model discovery: %w", err)
+	} else {
+		inventory, err = fetcher.FetchModelInventory(ctx, conn.AgentTarget, env)
+		if err != nil {
+			err = fmt.Errorf("fetch model inventory: %w", err)
+		} else if len(inventory.Models) == 0 {
+			err = errors.New("model discovery returned no models")
+		}
 	}
-	inventory, err := fetcher.FetchModelInventory(ctx, conn.AgentTarget, env)
+	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	purgeErr := router.Purge(cleanup, name)
+	cancelCleanup()
+	if purgeErr != nil {
+		err = errors.Join(err, fmt.Errorf("purge model discovery instance: %w", purgeErr))
+	}
 	if err != nil {
-		log.WarnContext(ctx, "fetch failed", "harness", h, "err", err)
-		return
+		return err
 	}
 	if b, ok := taskMgr.Backends[h]; ok {
 		b.SetModelInventory(inventory)
 	}
 	cache.SetModelInventory(h, inventory, agent.APIKeyHash(env))
 	log.InfoContext(ctx, "model cache refreshed", "harness", h, "count", len(inventory.Models))
+	return nil
 }
 
 type phaseLogWriter struct {

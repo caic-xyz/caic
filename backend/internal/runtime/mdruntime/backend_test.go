@@ -1091,6 +1091,23 @@ func TestBackend(t *testing.T) {
 		})
 	})
 
+	t.Run("DSHMounts", func(t *testing.T) {
+		t.Parallel()
+		fc := &fakeMDContainer{}
+		b := newTestBackend(&fakeMDClient{})
+		b.HarnessEnv = map[string][]string{"dsh": {"DSH_HOME=/home/user/.dsh"}}
+		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{Harness: harness.Dsh})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(fc.agentPaths) != 1 || !slices.Contains(fc.agentPaths[0].HomePaths, ".dsh") {
+			t.Fatalf("dsh agent paths = %+v, want persisted .dsh state", fc.agentPaths)
+		}
+		if !slices.Contains(opts.ExtraEnv, "DSH_HOME=/home/user/.dsh") {
+			t.Fatalf("dsh env = %v", opts.ExtraEnv)
+		}
+	})
+
 	t.Run("mdStartOpts", func(t *testing.T) {
 		t.Parallel()
 		fc := &fakeMDContainer{

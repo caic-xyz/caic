@@ -763,12 +763,12 @@ func TestCheckOpenCode(t *testing.T) {
 		}
 	})
 
-	t.Run("known updates without DTO", func(t *testing.T) {
+	t.Run("session and configuration updates", func(t *testing.T) {
 		t.Parallel()
-		for _, update := range []string{"session_info_update", "config_option_update"} {
-			data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"` + update + `"}}}`)
-			if _, err := checkOpenCode(data, false, nil); err == nil || !strings.Contains(err.Error(), "has no genai DTO") {
-				t.Fatalf("checkOpenCode(%s) error = %v, want missing DTO error", update, err)
+		for _, update := range []string{`{"sessionUpdate":"session_info_update","title":"DSH task"}`, `{"sessionUpdate":"config_option_update","configOptions":[]}`} {
+			data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":` + update + `}}`)
+			if _, err := checkOpenCode(data, false, nil); err != nil {
+				t.Fatal(err)
 			}
 		}
 	})
@@ -1006,4 +1006,32 @@ func writeLog(t *testing.T, path string, lines []string, compressed bool) string
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestCheckDSH(t *testing.T) {
+	t.Parallel()
+	t.Run("resume and configuration", func(t *testing.T) {
+		t.Parallel()
+		methods := make(map[openCodeRequestKey]acp.Method)
+		for _, record := range []struct {
+			input bool
+			data  string
+		}{
+			{true, `{"jsonrpc":"2.0","id":1,"method":"session/resume","params":{"sessionId":"persisted","cwd":"/workspace","mcpServers":[]}}`},
+			{false, `{"jsonrpc":"2.0","id":1,"result":{"configOptions":[]}}`},
+			{false, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"persisted","update":{"sessionUpdate":"config_option_update","configOptions":[]}}}`},
+		} {
+			if finding := checkMessage("dsh.jsonl", 2, "dsh", []byte(record.data), record.input, methods); finding != nil {
+				t.Fatal(finding.String())
+			}
+		}
+	})
+
+	t.Run("unknown resume field", func(t *testing.T) {
+		t.Parallel()
+		finding := checkMessage("dsh.jsonl", 2, "dsh", []byte(`{"jsonrpc":"2.0","id":1,"method":"session/resume","params":{"sessionId":"persisted","cwd":"/workspace","unexpected":true}}`), true, make(map[openCodeRequestKey]acp.Method))
+		if finding == nil || !strings.Contains(finding.String(), `unknown field "unexpected"`) || !strings.Contains(finding.String(), "acp/dto.go") {
+			t.Fatalf("finding = %v, want strict ACP field diagnostic", finding)
+		}
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/dsh"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
@@ -17,6 +18,7 @@ func Default(cacheDir string, harnessEnv map[string][]string) agent.Backends {
 		harness.Antigravity: antigravity.New(cacheDir, harnessEnv[string(harness.Antigravity)]),
 		harness.Claude:      claudecode.New(),
 		harness.Codex:       codex.New(cacheDir, harnessEnv[string(harness.Codex)]),
+		harness.Dsh:         dsh.New(cacheDir, harnessEnv[string(harness.Dsh)]),
 		harness.OpenCode:    opencode.New(cacheDir, harnessEnv[string(harness.OpenCode)]),
 		harness.Pi:          pi.New(cacheDir, harnessEnv[string(harness.Pi)]),
 	}

@@ -28,6 +28,8 @@ func Harness(h harness.Name) (v1.Harness, error) {
 		return v1.HarnessClaude, nil
 	case harness.Codex:
 		return v1.HarnessCodex, nil
+	case harness.Dsh:
+		return v1.HarnessDsh, nil
 	case harness.OpenCode:
 		return v1.HarnessOpenCode, nil
 	case harness.Pi:
@@ -46,6 +48,8 @@ func ParseHarness(s string) (v1.Harness, error) {
 		return v1.HarnessClaude, nil
 	case string(harness.Codex):
 		return v1.HarnessCodex, nil
+	case string(harness.Dsh):
+		return v1.HarnessDsh, nil
 	case string(harness.OpenCode):
 		return v1.HarnessOpenCode, nil
 	case string(harness.Pi):
@@ -64,6 +68,8 @@ func AgentHarness(h v1.Harness) (harness.Name, error) {
 		return harness.Claude, nil
 	case v1.HarnessCodex:
 		return harness.Codex, nil
+	case v1.HarnessDsh:
+		return harness.Dsh, nil
 	case v1.HarnessOpenCode:
 		return harness.OpenCode, nil
 	case v1.HarnessPi:

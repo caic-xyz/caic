@@ -310,6 +310,10 @@ effort = "low"
 # Most of codex configuration is via its configuration described at
 # https://developers.openai.com/codex/config-reference
 
+# DeepSeek Harness ACP profile; existing ~/.dsh configuration is shared by md.
+[harness.dsh.env]
+# DEEPSEEK_API_KEY = "sk-..."
+
 [harness.opencode.env]
 # Most of opencode configuration is via its configuration described at
 # https://opencode.ai/docs/config/

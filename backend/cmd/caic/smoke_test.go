@@ -559,6 +559,18 @@ func TestSmoke(t *testing.T) {
 	})
 }
 
+// serverFixture configures one isolated real-runtime server fixture.
+type serverFixture struct {
+	// mdConfigDir optionally reuses keys and the specialized image from an
+	// operator-owned disposable md configuration. Its tests must run serially.
+	mdConfigDir string
+	// backends overrides the agent backends. Empty uses the standard caic set.
+	backends map[harness.Name]agent.Backend
+	// harnessEnv builds the per-harness container environment from the fixture's
+	// run token.
+	harnessEnv func(runToken string) map[string][]string
+}
+
 type smokeServer struct {
 	t           *testing.T
 	rootDir     string
@@ -573,74 +585,6 @@ type smokeServer struct {
 
 	serverLog     *os.File
 	serverLogPath string
-}
-
-func (s *smokeServer) close() {
-	s.stop()
-}
-
-func (s *smokeServer) restart() string {
-	s.stop()
-	s.start()
-	return s.baseURL
-}
-
-func (s *smokeServer) start() {
-	ctx, cancel := context.WithCancel(s.t.Context())
-	addr := s.addr
-	if addr == "" {
-		addr = "127.0.0.1:0"
-	}
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", addr)
-	if err != nil {
-		cancel()
-		s.t.Fatalf("listen: %v", err)
-	}
-
-	// The fixture always logs at debug level to its server log; the failure dump
-	// set up by startServerFixture is what makes a host-dependent failure
-	// diagnosable.
-	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(s.serverLog, &slog.HandlerOptions{Level: slog.LevelDebug})), s.rootDir, s.cfg)
-	if err != nil {
-		cancel()
-		if closeErr := ln.Close(); closeErr != nil {
-			s.t.Fatalf("close listener after server.New failure: %v", closeErr)
-		}
-		s.t.Fatalf("server.New: %v", err)
-	}
-
-	s.addr = ln.Addr().String()
-	s.baseURL = "http://" + s.addr
-	s.cancel = cancel
-	s.group, ctx = errgroup.WithContext(ctx)
-	s.group.Go(func() error { return srv.Serve(ctx, ln) })
-	if err := waitForReady(ctx, s.baseURL); err != nil {
-		s.stop()
-		s.t.Fatalf("server not ready: %v", err)
-	}
-}
-
-func (s *smokeServer) stop() {
-	if s.cancel == nil {
-		return
-	}
-	s.cancel()
-	err := s.group.Wait()
-	s.cancel = nil
-	s.group = nil
-	if err != nil && !errors.Is(err, context.Canceled) {
-		s.t.Errorf("server.Serve: %v", err)
-	}
-}
-
-// serverFixture configures one isolated real-runtime server fixture.
-type serverFixture struct {
-	// backends overrides the agent backends. Empty uses the standard caic set.
-	backends map[harness.Name]agent.Backend
-	// harnessEnv builds the per-harness container environment from the fixture's
-	// run token.
-	harnessEnv func(runToken string) map[string][]string
 }
 
 // startSmokeServer creates the deterministic real-runtime smoke fixture.
@@ -681,6 +625,9 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 
 	// Set XDG_CONFIG_HOME so md can write its keys in isolation.
 	xdgDir := filepath.Join(tmpDir, "xdg")
+	if fx.mdConfigDir != "" {
+		xdgDir = fx.mdConfigDir
+	}
 	if err := os.MkdirAll(xdgDir, 0o700); err != nil {
 		t.Fatalf("mkdir xdg: %v", err)
 	}
@@ -798,6 +745,65 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 	}
 	s.start()
 	return s
+}
+
+func (s *smokeServer) close() {
+	s.stop()
+}
+
+func (s *smokeServer) restart() string {
+	s.stop()
+	s.start()
+	return s.baseURL
+}
+
+func (s *smokeServer) start() {
+	ctx, cancel := context.WithCancel(s.t.Context())
+	addr := s.addr
+	if addr == "" {
+		addr = "127.0.0.1:0"
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		cancel()
+		s.t.Fatalf("listen: %v", err)
+	}
+
+	// The fixture always logs at debug level to its server log; the failure dump
+	// set up by startServerFixture is what makes a host-dependent failure
+	// diagnosable.
+	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(s.serverLog, &slog.HandlerOptions{Level: slog.LevelDebug})), s.rootDir, s.cfg)
+	if err != nil {
+		cancel()
+		if closeErr := ln.Close(); closeErr != nil {
+			s.t.Fatalf("close listener after server.New failure: %v", closeErr)
+		}
+		s.t.Fatalf("server.New: %v", err)
+	}
+
+	s.addr = ln.Addr().String()
+	s.baseURL = "http://" + s.addr
+	s.cancel = cancel
+	s.group, ctx = errgroup.WithContext(ctx)
+	s.group.Go(func() error { return srv.Serve(ctx, ln) })
+	if err := waitForReady(ctx, s.baseURL); err != nil {
+		s.stop()
+		s.t.Fatalf("server not ready: %v", err)
+	}
+}
+
+func (s *smokeServer) stop() {
+	if s.cancel == nil {
+		return
+	}
+	s.cancel()
+	err := s.group.Wait()
+	s.cancel = nil
+	s.group = nil
+	if err != nil && !errors.Is(err, context.Canceled) {
+		s.t.Errorf("server.Serve: %v", err)
+	}
 }
 
 // smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.

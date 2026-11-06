@@ -333,6 +333,7 @@ Values must match harness.Name constants.
 | `antigravity` |  |
 | `claude` |  |
 | `codex` |  |
+| `dsh` |  |
 | `opencode` |  |
 | `pi` |  |
 

@@ -347,3 +347,35 @@ func TestRecorderAnswersNormalizedQuestion(t *testing.T) {
 		t.Fatalf("recorded answer = %#v", inputs[0])
 	}
 }
+
+func TestRecorderDSHPermissions(t *testing.T) {
+	t.Parallel()
+	backend := backends["dsh"]
+	protocol, ok := backend.(agent.MessageInterceptor)
+	if !ok {
+		t.Fatal("dsh backend has no reusable protocol interceptor")
+	}
+	observer := &recordObserver{protocol: protocol}
+	messages, err := backend.NewWire().ParseOutput([]byte(`{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"options":[{"kind":"allow_once","optionId":"native-approval"}]}}`))
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("permission messages = %#v, %v", messages, err)
+	}
+	response, handled, err := observer.HandleMessage(messages[0])
+	if err != nil || !handled {
+		t.Fatalf("permission handled = %t, error = %v", handled, err)
+	}
+	var got struct {
+		ID     string `json:"id"`
+		Result struct {
+			Outcome struct {
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "permission-1" || got.Result.Outcome.OptionID != "native-approval" {
+		t.Fatalf("recording permission response = %s", response)
+	}
+}

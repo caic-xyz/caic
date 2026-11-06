@@ -111,6 +111,18 @@ func TestNotificationFeed(t *testing.T) {
 				want:     true,
 			},
 			{
+				name:     "DSHOfficialDeepSeek",
+				task:     v1.Task{Harness: v1.HarnessDsh, ReportedModel: "deepseek-official/deepseek-v4-flash"},
+				provider: agent.QuotaProviderDeepSeek,
+				want:     true,
+			},
+			{
+				name:     "DSHOtherProviderDoesNotUseDeepSeekQuota",
+				task:     v1.Task{Harness: v1.HarnessDsh, ReportedModel: "openrouter/deepseek/deepseek-v4-pro"},
+				provider: agent.QuotaProviderDeepSeek,
+				want:     false,
+			},
+			{
 				name:     "PiXiaomi",
 				task:     v1.Task{Harness: v1.HarnessPi, ReportedModel: "xiaomi/mimo-v2.5"},
 				provider: agent.QuotaProviderXiaomi,

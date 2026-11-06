@@ -74,6 +74,7 @@ func TestQuotaProvider(t *testing.T) {
 			{"openai-codex/gpt-5.6-terra", QuotaProviderCodex},
 			{"openrouter/z-ai/glm-5.3-flash", QuotaProviderOpenRouter},
 			{"deepseek/deepseek-flash", QuotaProviderDeepSeek},
+			{"deepseek-official/deepseek-v4-flash", QuotaProviderDeepSeek},
 			{"groq/llama-4", QuotaProviderGroq},
 			{"claude-sonnet-4-5", ""},
 			{"", ""},

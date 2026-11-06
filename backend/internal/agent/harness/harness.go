@@ -9,6 +9,7 @@ const (
 	Antigravity Name = "antigravity"
 	Claude      Name = "claude"
 	Codex       Name = "codex"
+	Dsh         Name = "dsh"
 	OpenCode    Name = "opencode"
 	Pi          Name = "pi"
 )
@@ -17,7 +18,7 @@ const (
 // reconnect to an existing stateful agent session.
 func RequiresResumeSessionID(h Name) bool {
 	switch h {
-	case Codex, OpenCode:
+	case Codex, Dsh, OpenCode:
 		return true
 	default:
 		return false

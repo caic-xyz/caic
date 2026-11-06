@@ -286,7 +286,7 @@ func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
 		addProviderCandidate(candidates, agent.QuotaProviderCodex)
 	case v1.HarnessAntigravity:
 		return provider == agent.QuotaProviderAntigravity
-	case v1.HarnessOpenCode, v1.HarnessPi:
+	case v1.HarnessDsh, v1.HarnessOpenCode, v1.HarnessPi:
 		// These harnesses select the billing provider through the task model.
 	}
 	addModelProviderCandidate(candidates, task.ReportedModel)
@@ -318,6 +318,9 @@ func addModelProviderCandidate(candidates map[agent.QuotaProvider]struct{}, mode
 
 func addProviderCandidate(candidates map[agent.QuotaProvider]struct{}, value agent.QuotaProvider) {
 	value = agent.QuotaProvider(strings.ToLower(strings.TrimSpace(string(value))))
+	if !value.Valid() {
+		value = agent.QuotaProviderForModel(string(value) + "/")
+	}
 	if value.Valid() {
 		candidates[value] = struct{}{}
 	}

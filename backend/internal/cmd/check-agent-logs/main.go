@@ -108,7 +108,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 		} else {
 			dto, err = checkPi(message)
 		}
-	case "opencode":
+	case "dsh", "opencode":
 		dto, err = checkOpenCode(message, input, openCodeMethods)
 	default:
 		return &finding{
@@ -127,7 +127,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 
 func (f finding) String() string {
 	hint := f.hint
-	if hint == "" && f.harness == "opencode" {
+	if hint == "" && (f.harness == "opencode" || f.harness == "dsh") {
 		hint = "update: ~/src/genai/acp/dto.go"
 	}
 	if hint == "" {
@@ -848,6 +848,8 @@ func checkOpenCodeRequest(method acp.Method, params json.RawMessage, input bool)
 		dst = &acp.SessionNewParams{}
 	case acp.MethodSessionLoad:
 		dst = &acp.SessionLoadParams{}
+	case acp.MethodSessionResume:
+		dst = &acp.SessionResumeParams{}
 	case acp.MethodSessionPrompt:
 		dst = &acp.SessionPromptParams{}
 	case acp.MethodSessionSetModel:
@@ -905,8 +907,10 @@ func checkOpenCodeNotification(method acp.Method, params json.RawMessage) (strin
 		dst = &acp.CurrentModeUpdate{}
 	case acp.UpdateAvailableCommandsUpdate:
 		dst = &acp.AvailableCommandsUpdate{}
-	case acp.UpdateSessionInfoUpdate, acp.UpdateConfigOptionUpdate:
-		return "UpdateProbe", fmt.Errorf("OpenCode session update %q has no genai DTO; add its DTO and checker strict decode", probe.SessionUpdate)
+	case acp.UpdateSessionInfoUpdate:
+		dst = &acp.SessionInfoUpdate{}
+	case acp.UpdateConfigOptionUpdate:
+		dst = &acp.ConfigOptionUpdate{}
 	default:
 		return "UpdateProbe", fmt.Errorf("unrecognized OpenCode session update %q; add its DTO and checker dispatch", probe.SessionUpdate)
 	}
@@ -918,8 +922,12 @@ func checkOpenCodeResponse(method acp.Method, result json.RawMessage) (string, e
 	switch method {
 	case acp.MethodInitialize:
 		dst = &acp.InitializeResult{}
-	case acp.MethodSessionNew, acp.MethodSessionLoad:
+	case acp.MethodSessionNew:
 		dst = &acp.SessionNewResult{}
+	case acp.MethodSessionLoad:
+		dst = &acp.SessionLoadResult{}
+	case acp.MethodSessionResume:
+		dst = &acp.SessionResumeResult{}
 	case acp.MethodSessionPrompt:
 		dst = &acp.PromptResult{}
 	case acp.MethodSessionRequestPermission:

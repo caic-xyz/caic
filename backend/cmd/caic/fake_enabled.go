@@ -51,6 +51,12 @@ func fakeAgentBackends() agent.Backends {
 	pi.QuotaProviderID = ""
 	backends[harness.Codex] = &fakeModelBackend{FakeBackend: codex}
 	backends[harness.Pi] = &fakeModelBackend{FakeBackend: pi}
+	dsh := smoketest.NewFakeBackend()
+	dsh.HarnessID = harness.Dsh
+	dsh.QuotaProviderID = ""
+	dsh.Images = false
+	dsh.Compact = false
+	backends[harness.Dsh] = &fakeModelBackend{FakeBackend: dsh}
 	if os.Getenv(visualFixturesEnv) == "1" {
 		for h, b := range backends {
 			b.SetModelInventory(smoketest.VisualModelInventory(h))

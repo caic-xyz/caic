@@ -7,7 +7,9 @@ import (
 	"errors"
 	"iter"
 	"log/slog"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,6 +253,7 @@ type modelFetchBackend struct {
 	target       runtime.ConnectionTarget
 	env          []string
 	setInventory agent.ModelInventory
+	fetchErr     error
 }
 
 func (b *modelFetchBackend) Harness() harness.Name { return b.harness }
@@ -258,7 +261,7 @@ func (b *modelFetchBackend) Harness() harness.Name { return b.harness }
 func (b *modelFetchBackend) FetchModelInventory(_ context.Context, target runtime.ConnectionTarget, env []string) (agent.ModelInventory, error) {
 	b.target = target
 	b.env = append([]string(nil), env...)
-	return b.inventory, nil
+	return b.inventory, b.fetchErr
 }
 
 func (b *modelFetchBackend) SetModelInventory(inventory agent.ModelInventory) {
@@ -277,17 +280,26 @@ type modelRefreshRuntime struct {
 	runtimeName runtime.Name
 	harness     harness.Name
 	purgedIDs   []runtime.ID
+	launchErr   error
+	connectErr  error
+	purgeErr    error
 }
 
 func (r *modelRefreshRuntime) Launch(_ context.Context, _ []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	r.launches++
 	r.runtimeName = opts.RuntimeName
 	r.harness = opts.Harness
+	if r.launchErr != nil {
+		return "", r.launchErr
+	}
 	return runtime.NewID("test-runtime", runtime.InstanceID("refresh-"+string(opts.Harness))), nil
 }
 
 func (r *modelRefreshRuntime) Connect(_ context.Context, id runtime.ID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	r.connects++
+	if r.connectErr != nil {
+		return runtime.ConnectionInfo{}, r.connectErr
+	}
 	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id.InstanceID())}}, nil
 }
 
@@ -316,7 +328,7 @@ func (*modelRefreshRuntime) Stop(_ context.Context, _ runtime.ID) error { return
 func (r *modelRefreshRuntime) Purge(_ context.Context, id runtime.ID) error {
 	r.purges++
 	r.purgedIDs = append(r.purgedIDs, id)
-	return nil
+	return r.purgeErr
 }
 
 func (*modelRefreshRuntime) Revive(_ context.Context, _ runtime.ID) error { return nil }
@@ -360,4 +372,59 @@ func (i *modelRefreshInventory) Metadata(_ context.Context, id runtime.ID, key r
 
 func (*modelRefreshInventory) Inspect(context.Context, runtime.ID) (*runtime.InstanceInspect, error) {
 	return nil, errors.New("inspect not implemented")
+}
+
+func TestHarnessModels(t *testing.T) {
+	t.Parallel()
+	t.Run("Refresh", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, stage := range []string{"connect", "empty", "fetch", "launch", "purge"} {
+				t.Run(stage, func(t *testing.T) {
+					t.Parallel()
+					cached := agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}
+					cacheDir := t.TempDir()
+					agent.OpenHarnessCache(cacheDir+"/harnesses.json").SetModelInventory(harness.Dsh, cached, "")
+					backend := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{Inventory: cached}, harness: harness.Dsh, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
+					rt := &modelRefreshRuntime{}
+					failure := errors.New("native refresh " + stage + " failure")
+					switch stage {
+					case "connect":
+						rt.connectErr = failure
+					case "empty":
+						backend.inventory = agent.ModelInventory{}
+					case "fetch":
+						backend.fetchErr = failure
+					case "launch":
+						rt.launchErr = failure
+					case "purge":
+						rt.purgeErr = failure
+					}
+					router := newModelRefreshRouter(t, rt, &modelRefreshInventory{})
+					manager := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{harness.Dsh: backend})
+					refresher := &HarnessModels{Log: slog.New(slog.DiscardHandler), CacheDir: cacheDir, Router: router, TaskManager: manager}
+					err := refresher.Refresh(t.Context(), harness.Dsh)
+					if stage == "empty" {
+						if err == nil || !strings.Contains(err.Error(), "returned no models") {
+							t.Fatalf("empty catalog error=%v", err)
+						}
+					} else if !errors.Is(err, failure) {
+						t.Fatalf("refresh error=%v, want %v", err, failure)
+					}
+					wantPurges := 1
+					if stage == "launch" {
+						wantPurges = 0
+					}
+					if rt.purges != wantPurges {
+						t.Fatalf("temporary instance purges=%d, want %d", rt.purges, wantPurges)
+					}
+					stored, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(harness.Dsh, "")
+					if !fresh || !reflect.DeepEqual(stored, cached) || !reflect.DeepEqual(backend.ModelInventory(), cached) {
+						t.Fatalf("failed refresh replaced inventory: cached=%+v backend=%+v", stored, backend.ModelInventory())
+					}
+				})
+			}
+		})
+	})
 }

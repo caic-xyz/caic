@@ -852,7 +852,7 @@ def _configure_caic_mcp(harness: str, cmd_args: list[str]) -> list[str]:
             return [*cmd_args, "--add-dir", ANTIGRAVITY_CAIC_MCP_DIR]
         case "claude":
             _write_claude_code_caic_mcp_config()
-        case "codex" | "opencode":
+        case "codex" | "dsh" | "opencode":
             pass
         case "pi":
             _write_pi_caic_mcp_extension()
@@ -1339,7 +1339,7 @@ def main() -> int:
     sa = sub.add_parser("serve-attach")
     sa.add_argument("--dir", required=True, dest="work_dir")
     sa.add_argument("--no-log-stdin", action="store_true")
-    sa.add_argument("--harness", choices=("antigravity", "claude", "codex", "opencode", "pi"))
+    sa.add_argument("--harness", choices=("antigravity", "claude", "codex", "dsh", "opencode", "pi"))
     sa.add_argument("--caic-mcp", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
     sa.add_argument(

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,39 @@ func TestServerHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("refresh_harness_reports_fetch_failure_without_replacing_cache", func(t *testing.T) {
+		t.Parallel()
+		cached := agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}
+		backend := &modelFetchBackend{
+			FakeBackend: &agenttest.FakeBackend{Inventory: cached},
+			harness:     harness.Dsh,
+			fetchErr:    errors.New("native catalog unavailable"),
+		}
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Dsh: backend})
+		cacheDir := t.TempDir()
+		agent.OpenHarnessCache(cacheDir+"/harnesses.json").SetModelInventory(harness.Dsh, cached, "")
+		s.serverHandlers.harnessModels = &HarnessModels{Log: testLogger(), CacheDir: cacheDir, Router: s.serverHandlers.runtimes, TaskManager: s.taskMgr}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/server/harnesses/dsh/refresh", strings.NewReader("{}"))
+		s.serverHandlers.routes().ServeHTTP(w, r)
+		var got struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != http.StatusBadRequest || got.Error.Code != "BAD_REQUEST" || !strings.Contains(got.Error.Message, "native catalog unavailable") {
+			t.Fatalf("refresh failure: status=%d error=%+v", w.Code, got.Error)
+		}
+		stored, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(harness.Dsh, "")
+		if !fresh || !reflect.DeepEqual(stored, cached) || !reflect.DeepEqual(backend.ModelInventory(), cached) {
+			t.Fatalf("failed refresh replaced native inventory: cached=%+v backend=%+v", stored, backend.ModelInventory())
+		}
+	})
+
 	t.Run("preferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -318,6 +352,7 @@ func TestServerAPIV1EnumParity(t *testing.T) {
 		want := map[v1.Harness]harness.Name{
 			v1.HarnessClaude:   harness.Claude,
 			v1.HarnessCodex:    harness.Codex,
+			v1.HarnessDsh:      harness.Dsh,
 			v1.HarnessOpenCode: harness.OpenCode,
 			v1.HarnessPi:       harness.Pi,
 		}
@@ -328,7 +363,7 @@ func TestServerAPIV1EnumParity(t *testing.T) {
 			}
 			got[agentHarness] = struct{}{}
 		}
-		for _, agentHarness := range []harness.Name{harness.Claude, harness.Codex, harness.OpenCode, harness.Pi} {
+		for _, agentHarness := range []harness.Name{harness.Claude, harness.Codex, harness.Dsh, harness.OpenCode, harness.Pi} {
 			if _, ok := got[agentHarness]; !ok {
 				t.Errorf("agent harness %q is missing from the v1 API", agentHarness)
 			}

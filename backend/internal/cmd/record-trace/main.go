@@ -1,4 +1,4 @@
-// Records complete ordered agent journals through relay.py and validates golden evidence.
+// Records ordered single-turn, follow-up, and resumed agent journals through relay.py and validates golden evidence.
 //
 // Usage:
 //
@@ -10,6 +10,11 @@
 // API-key based recording. --local is for hosts where nested rootless podman is
 // unavailable: it still drives the harness through the production relay with
 // the harness's real wire format, but it cannot prove md container lifecycle.
+// Run from the owning harness package so its testdata remains independent.
+// For resume evidence, record session-turns with --local --work-dir pointing at
+// a retained checkout, then record session-resume with the same directory and
+// --resume-session taken from its session/new response. --effort selects the
+// requested native setting independently for each launch.
 package main
 
 import (
@@ -43,6 +48,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/dsh"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
@@ -56,11 +62,13 @@ var backends = map[string]agent.Backend{
 	string(harness.Pi):       pi.New("", nil),
 	string(harness.Claude):   claudecode.New(),
 	string(harness.Codex):    codex.New("", nil),
+	string(harness.Dsh):      dsh.New("", nil),
 	string(harness.OpenCode): opencode.New("", nil),
 }
 
 type scenario struct {
 	prompt    string
+	followup  string
 	askAnswer string
 	// wantNative marks a scenario that must record native subagent activity, so a
 	// regeneration that lost the delegation fails instead of publishing evidence
@@ -69,6 +77,16 @@ type scenario struct {
 }
 
 var scenarios = map[string]scenario{
+	"native-permission": {
+		prompt: `Run exactly printf 'permission-ok\n' with the bash tool, setting sandbox_permissions to danger-full-access and justification to "Exercise the native ACP permission exchange with a harmless command". Return its output.`,
+	},
+	"session-turns": {
+		prompt:   `Remember the marker cobalt-otter. Reply with exactly FIRST-TURN.`,
+		followup: `What marker did I ask you to remember? Reply with only that marker.`,
+	},
+	"session-resume": {
+		prompt: `What marker did I ask you to remember? Reply with only that marker.`,
+	},
 	"native-subagent-joke": {
 		prompt:     `Use a native subagent to tell a joke about README.md. Do not perform the task yourself; delegate it and return the subagent's result.`,
 		wantNative: true,
@@ -96,6 +114,9 @@ var credentialMounts = map[harness.Name][]credentialMount{
 	harness.Codex: {
 		{homeRelPath: ".codex", containerPath: "/home/user/.codex"},
 	},
+	harness.Dsh: {
+		{homeRelPath: ".dsh", containerPath: "/home/user/.dsh"},
+	},
 	harness.OpenCode: {
 		{homeRelPath: ".opencode", containerPath: "/home/user/.opencode"},
 		{homeRelPath: ".local/share/opencode", containerPath: "/home/user/.local/share/opencode"},
@@ -112,10 +133,13 @@ type credentialMount struct {
 }
 
 func mainImpl() error {
-	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, opencode)")
+	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, dsh, opencode)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for optional API key")
+	workDirFlag := flag.String("work-dir", "", "existing checkout to retain across recordings (local mode only)")
+	resumeFlag := flag.String("resume-session", "", "native session ID to restore in the retained checkout")
+	effortFlag := flag.String("effort", "", "native reasoning effort to select during handshake")
 	localFlag := flag.Bool("local", false, "run the harness on this machine instead of a container; requires the harness CLIs on PATH")
 	flag.Parse()
 
@@ -133,6 +157,12 @@ func mainImpl() error {
 	if !ok {
 		return fmt.Errorf("unknown scenario: %s", *scenarioFlag)
 	}
+	if *workDirFlag != "" && !*localFlag {
+		return errors.New("--work-dir requires --local")
+	}
+	if *resumeFlag != "" && *workDirFlag == "" {
+		return errors.New("--resume-session requires --work-dir to preserve workspace identity")
+	}
 	outputPath := filepath.Clean(filepath.Join("testdata", *scenarioFlag+".jsonl"))
 	if _, err := os.Stat(outputPath); err == nil {
 		// Skip if the golden file already exists (idempotent for go generate).
@@ -141,19 +171,32 @@ func mainImpl() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *modelFlag, *localFlag)
+	return recordTrace(ctx, b, *apiKeyEnv, sc, outputPath, *localFlag, &agent.Options{Dir: *workDirFlag, Model: *modelFlag, Effort: *effortFlag, ResumeSessionID: *resumeFlag})
 }
 
-func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool) (retErr error) {
-	workDir, err := setupCheckout()
-	if err != nil {
-		return err
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath string, local bool, opts *agent.Options) (retErr error) {
+	workDir := opts.Dir
+	var err error
+	if workDir == "" {
+		workDir, err = setupCheckout()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(workDir) }()
+	} else {
+		workDir, err = filepath.Abs(workDir)
+		if err != nil {
+			return err
+		}
 	}
-	defer func() { _ = os.RemoveAll(workDir) }()
 
 	// relayDir owns this recording's relay socket and output.jsonl. Keeping it
 	// distinct avoids disturbing a relay that is serving a live caic task.
-	relayDir := filepath.Join(workDir, "relay")
+	relayDir, err := os.MkdirTemp(workDir, ".caic-relay-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(relayDir) }()
 	ctr := ""
 	if local {
 		if err := deployLocalRelay(relayDir); err != nil {
@@ -213,7 +256,8 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	if err != nil {
 		return err
 	}
-	observer := &recordObserver{done: make(chan struct{}, 1), askAnswer: sc.askAnswer}
+	protocol, _ := b.(agent.MessageInterceptor)
+	observer := &recordObserver{done: make(chan struct{}, 1), askAnswer: sc.askAnswer, protocol: protocol}
 	records, err := agent.NewRecords(ctx, b.NewWire(), agent.NewRecordedLog(writer), observer)
 	if err != nil {
 		return errors.Join(err, writer.Close())
@@ -224,7 +268,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 			retErr = errors.Join(retErr, records.Close())
 		}
 	}()
-	cmd, stdin, stdoutPipe, err := startRelayAgent(ctx, ctr, workDir, relayDir, b, model, binDirs, local)
+	cmd, stdin, stdoutPipe, err := startRelayAgent(ctx, ctr, workDir, relayDir, b, opts.Model, binDirs, local)
 	if err != nil {
 		return err
 	}
@@ -238,16 +282,16 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	}()
 	var stdout io.Reader = stdoutPipe
 	if hs, ok := b.(agent.RecordHandshaker); ok {
-		stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, &agent.Options{
-			Dir: harnessWorkDir(local, workDir), Model: model, Records: records,
-		})
+		opts.Dir = harnessWorkDir(local, workDir)
+		opts.Records = records
+		stdout, err = hs.RecordHandshake(ctx, stdin, stdoutPipe, opts)
 		if err != nil {
 			return err
 		}
 	}
 	bootstrap = false
 	conn := agent.NewConn(ctx, slog.Default(), stdin, records, nil)
-	if err := waitAndShutdown(ctx, cmd, conn, agent.ContinuedReader{Reader: stdout, Closer: stdoutPipe}, observer, ctr, localOutputPath(relayDir, local), sc.prompt); err != nil {
+	if err := waitAndShutdown(ctx, cmd, conn, agent.ContinuedReader{Reader: stdout, Closer: stdoutPipe}, observer, ctr, localOutputPath(relayDir, local), sc.prompt, sc.followup); err != nil {
 		return err
 	}
 	ownerOpen = false
@@ -446,7 +490,7 @@ func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent
 
 // waitAndShutdown runs the regular transport owner, delivers the prompt, and
 // shuts down both transport producers before its caller closes the journal.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout io.ReadCloser, observer *recordObserver, ctr, localOutput, prompt string) error {
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout io.ReadCloser, observer *recordObserver, ctr, localOutput, prompt, followup string) error {
 	watchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(watchCtx, conn.Cancel)
@@ -455,14 +499,19 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout
 	var workers sync.WaitGroup
 	workers.Go(func() { readDone <- conn.ReadMessages(stdout, observer) })
 	var failure error
-	slog.InfoContext(ctx, "Sending prompt", "text", fmt.Sprintf("%.60s...", prompt))
-	if err := conn.SendPrompt(agent.Prompt{Text: prompt}, nil); err != nil {
-		failure = err
-	} else {
+	prompts := []string{prompt}
+	if followup != "" {
+		prompts = append(prompts, followup)
+	}
+	for _, text := range prompts {
+		slog.InfoContext(ctx, "Sending prompt", "text", fmt.Sprintf("%.60s...", text))
+		if err := conn.SendPrompt(agent.Prompt{Text: text}, nil); err != nil {
+			failure = err
+			break
+		}
 		slog.InfoContext(ctx, "Waiting for agent to finish")
 		select {
 		case <-observer.done:
-			conn.SendStop(watchCtx)
 		case failure = <-readDone:
 			if failure == nil {
 				failure = errors.New("agent stream ended without a result")
@@ -474,6 +523,12 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout
 		case <-watchCtx.Done():
 			failure = watchCtx.Err()
 		}
+		if failure != nil {
+			break
+		}
+	}
+	if failure == nil {
+		conn.SendStop(watchCtx)
 	}
 	conn.Cancel()
 	readErr := <-readDone
@@ -498,8 +553,10 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, conn agent.Conn, stdout
 }
 
 // recordObserver detects committed completion and encodes recorder-specific
-// Claude question answers; the transport queues and commits the returned bytes.
+// Claude question answers and native protocol replies; the transport queues
+// and commits the returned bytes.
 type recordObserver struct {
+	protocol  agent.MessageInterceptor
 	done      chan struct{}
 	askAnswer string
 }
@@ -522,6 +579,12 @@ func (o *recordObserver) ApplyRecords(_ context.Context, messages []agent.TimedM
 func (o *recordObserver) HandleMessage(m agent.Message) (response []byte, handled bool, err error) {
 	if provenance := m.Provenance(); provenance != nil && provenance.IsChild() {
 		return nil, false, nil
+	}
+	if o.protocol != nil {
+		response, handled, err := o.protocol.HandleMessage(m)
+		if response != nil || handled || err != nil {
+			return response, handled, err
+		}
 	}
 	if pending, ok := m.(*agent.PendingUserActionMessage); ok && pending.Action.Kind == agent.PendingUserActionAskUserQuestion {
 		if o.askAnswer == "" {

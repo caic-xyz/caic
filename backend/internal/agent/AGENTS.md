@@ -14,4 +14,5 @@ genai DTO and the command's type-dispatch registry.
 
 Keep provider wire fields, native subagent evidence, skill-read tools, and
 unexposed protocol capabilities in the relevant harness's `AGENTS.md`, beside
-the parser and provider DTOs: `claudecode/`, `codex/`, `opencode/`, or `pi/`.
+the parser and provider DTOs: `claudecode/`, `codex/`, `dsh/`, `opencode/`, or `pi/`.
+Shared ACP mechanics belong in `acp/`; keep both ACP harness packages independent.

@@ -36,6 +36,7 @@ func defaultConfig() data.Config {
 		Harness: map[string]data.Harness{
 			"claude":   {},
 			"codex":    {},
+			"dsh":      {},
 			"opencode": {},
 			"pi":       {},
 		},

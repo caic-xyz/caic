@@ -316,7 +316,7 @@ def test_harness_caic_mcp_integrations() -> None:
     env = _make_env(relay_dir)
 
     try:
-        for harness in ("claude", "codex", "opencode", "pi"):
+        for harness in ("claude", "codex", "dsh", "opencode", "pi"):
             env["OPENCODE_CONFIG_CONTENT"] = '{"model":"existing" /* user comment */, "mcp":{"user":{}},}'
             proc = subprocess.Popen(
                 [

@@ -353,7 +353,7 @@ func TestInitHarnessCache(t *testing.T) {
 	}
 
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
+	for _, h := range []harness.Name{harness.Codex, harness.Dsh, harness.Pi, harness.OpenCode} {
 		inventory, fresh := cache.ModelInventory(h, "")
 		if !fresh {
 			t.Errorf("ModelInventory(%q) = %#v fresh=%t, want fresh inventory", h, inventory, fresh)

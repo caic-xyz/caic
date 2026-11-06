@@ -2462,7 +2462,7 @@ func canRecoverImportedTask(t *taskrun.Task, lt *taskhistory.LoadedTask) bool {
 		return false
 	}
 	switch t.Harness {
-	case harness.Claude, harness.Codex, harness.OpenCode, harness.Pi:
+	case harness.Claude, harness.Codex, harness.Dsh, harness.OpenCode, harness.Pi:
 	default:
 		return false
 	}

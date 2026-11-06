@@ -395,6 +395,7 @@ public struct Harness: Codable, Equatable, Hashable {
     public static let Antigravity = Harness("antigravity")
     public static let Claude = Harness("claude")
     public static let Codex = Harness("codex")
+    public static let Dsh = Harness("dsh")
     public static let OpenCode = Harness("opencode")
     public static let Pi = Harness("pi")
 

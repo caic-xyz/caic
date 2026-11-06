@@ -38,6 +38,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/dsh"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
@@ -7155,6 +7156,8 @@ func (b *importedRecoveryBackend) NewWire() agent.WireFormat {
 		return claudecode.New().NewWire()
 	case harness.Codex:
 		return codex.New("", nil).NewWire()
+	case harness.Dsh:
+		return dsh.New("", nil).NewWire()
 	case harness.OpenCode:
 		return opencode.New("", nil).NewWire()
 	default:
@@ -7298,6 +7301,7 @@ func TestManagerImportedRecovery(t *testing.T) {
 			{name: "waiting_relay_crash", state: task.StateWaiting, recover: true},
 			{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: task.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
 			{name: "codex_relay_crash", harness: harness.Codex, state: task.StateRunning, recover: true},
+			{name: "dsh_runtime_exit", harness: harness.Dsh, runtimeState: "exited", state: task.StateRunning, recover: true},
 			{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: task.StateRunning, recover: true},
 			{name: "persisted_stop_intent", state: task.StateStopping},
 			{name: "live_persisted_stop_intent", alive: true, state: task.StateStopping},
@@ -7494,6 +7498,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 		{name: "missing_session", state: task.StateRunning, accepted: true, harness: harness.Pi},
 		{name: "unaccepted_input", state: task.StateRunning, session: "saved", harness: harness.Pi},
 		{name: "agent_exit", state: task.StateRunning, session: "saved", accepted: true, exit: true, harness: harness.Pi, want: true},
+		{name: "dsh_active", state: task.StateRunning, session: "saved", accepted: true, harness: harness.Dsh, want: true},
 		{name: "other_harness", state: task.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Codex, want: true},
 		{name: "unknown_harness", state: task.StateRunning, session: "saved", accepted: true, harness: "unknown"},
 	} {

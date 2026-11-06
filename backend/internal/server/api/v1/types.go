@@ -41,6 +41,7 @@ const (
 	HarnessAntigravity Harness = "antigravity"
 	HarnessClaude      Harness = "claude"
 	HarnessCodex       Harness = "codex"
+	HarnessDsh         Harness = "dsh"
 	HarnessOpenCode    Harness = "opencode"
 	HarnessPi          Harness = "pi"
 )

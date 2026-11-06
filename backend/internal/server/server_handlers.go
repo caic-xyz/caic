@@ -396,6 +396,9 @@ func harnessLogoURL(name v1.Harness) string {
 		// The Claude Code logo is shared with the claudecode quota provider.
 		logo = string(v1.QuotaProviderClaudeCode)
 	}
+	if name == v1.HarnessDsh {
+		logo = string(v1.QuotaProviderDeepSeek)
+	}
 	if file := frontend.LogoFile(logo); file != "" {
 		return "/logos/" + file
 	}

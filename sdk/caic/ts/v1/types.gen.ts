@@ -670,6 +670,7 @@ export type Harness =
   | "antigravity"
   | "claude"
   | "codex"
+  | "dsh"
   | "opencode"
   | "pi";
 /**
@@ -678,6 +679,7 @@ export type Harness =
 export const HarnessAntigravity = "antigravity";
 export const HarnessClaude = "claude";
 export const HarnessCodex = "codex";
+export const HarnessDsh = "dsh";
 export const HarnessOpenCode = "opencode";
 export const HarnessPi = "pi";
 

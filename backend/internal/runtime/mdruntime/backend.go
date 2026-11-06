@@ -1446,6 +1446,7 @@ var harnessMap = map[harness.Name]md.Harness{
 	harness.Antigravity: md.HarnessAntigravity,
 	harness.Claude:      md.HarnessClaude,
 	harness.Codex:       md.HarnessCodex,
+	harness.Dsh:         md.HarnessDsh,
 	harness.OpenCode:    md.HarnessOpencode,
 	harness.Pi:          md.HarnessPi,
 }
