@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"path/filepath"
@@ -86,6 +89,25 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 func TestTaskService(t *testing.T) {
 	t.Parallel()
+	t.Run("compactContext", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.OpenCode)
+		tk.SetState(task.StateWaiting)
+		insertTestTask(s, tk.ID, tk)
+		entry, _ := s.taskMgr.GetEntry(tk.ID)
+		session, _ := newGatedInputSession(t, tk, opencode.New("", nil).NewWire)
+		_, err := testTaskHandlers(s).taskSvc.compactContext(t.Context(), entry, &v1.CompactReq{Instructions: "preserve the failing test"})
+		apiError, ok := errors.AsType[*api.Error](err)
+		if !ok || apiError.Status != http.StatusBadRequest || apiError.Message != "compact context: custom compaction instructions are not supported" {
+			t.Fatalf("compact error=%v, want unsupported-instructions bad request", err)
+		}
+		select {
+		case <-session.Done():
+			t.Fatal("rejected instructions disconnected the session")
+		default:
+		}
+	})
 	t.Run("focusTask/userIsolation", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -149,7 +171,7 @@ func TestTaskService(t *testing.T) {
 				e, _ := s.taskMgr.GetEntry(tk.ID)
 				_, live, unsubscribe := tk.Subscribe(t.Context())
 				t.Cleanup(unsubscribe)
-				session, conn := newGatedInputSession(t, tk)
+				session, conn := newGatedInputSession(t, tk, claudecode.New().NewWire)
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
 				if when == "before_send" {
@@ -235,12 +257,12 @@ func (c *gatedInputConn) SendPrompt(p agent.Prompt, data []byte) error {
 	return c.Conn.SendPrompt(p, data)
 }
 
-func newGatedInputSession(t *testing.T, tk *taskrun.Task) (*agent.Session, *gatedInputConn) {
+func newGatedInputSession(t *testing.T, tk *taskrun.Task, wireFactory func() agent.WireFormat) (*agent.Session, *gatedInputConn) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}}
+	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: wireFactory}}
 	r := &taskrun.AgentRuntime{
-		Backends:         agent.Backends{harness.Claude: backend},
+		Backends:         agent.Backends{tk.Harness: backend},
 		LogStore:         taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
 		LogPath:          &taskslog.Path{},
 		Log:              testLogger(),

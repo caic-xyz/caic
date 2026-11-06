@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/maruel/genai/acp"
@@ -21,10 +23,77 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("RejectedCompactionKeepsConnectionUsable", func(t *testing.T) {
+		t.Parallel()
+		wire, ok := testBackend().NewWire().(*wireFormat)
+		if !ok {
+			t.Fatal("unexpected protocol wire")
+		}
+		wire.session.SessionID = "s"
+		sink := &agenttest.LogSink{}
+		records, err := agent.NewRecords(t.Context(), wire, sink, &agenttest.RecordHandler{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := records.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		stdin, writer := io.Pipe()
+		conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), writer, records, nil)
+		lines := make(chan string, 2)
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			reader := bufio.NewReader(stdin)
+			for range 2 {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				lines <- line
+			}
+		})
+		t.Cleanup(func() {
+			if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
+			if err := stdin.Close(); err != nil {
+				t.Error(err)
+			}
+			workers.Wait()
+		})
+		if err := conn.SendCompact("preserve the failing test"); !errors.Is(err, agent.ErrCompactInstructionsUnsupported) {
+			t.Fatalf("custom instruction error = %v", err)
+		}
+		if sink.Len() != 0 {
+			t.Fatalf("rejected input was recorded: %s", sink.String())
+		}
+		if err := conn.SendCompact(""); err != nil {
+			t.Fatalf("ordinary compact after rejection: %v", err)
+		}
+		if err := conn.SendPrompt(agent.Prompt{Text: "continue after rejection"}, nil); err != nil {
+			t.Fatalf("prompt after rejection: %v", err)
+		}
+		for _, want := range []string{"/compact", "continue after rejection"} {
+			var request acp.JSONRPCRequest
+			if err := json.Unmarshal([]byte(<-lines), &request); err != nil {
+				t.Fatal(err)
+			}
+			var prompt acp.SessionPromptParams
+			if err := json.Unmarshal(request.Params, &prompt); err != nil {
+				t.Fatal(err)
+			}
+			if len(prompt.Prompt) != 1 || prompt.Prompt[0].Text != want {
+				t.Fatalf("native prompt = %+v, want %q", prompt, want)
+			}
+		}
+	})
 	t.Run("RecordHandshake", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NativeRequestMethod", func(t *testing.T) {
@@ -76,6 +145,60 @@ func TestBackend(t *testing.T) {
 		if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"high", "low"}) {
 			t.Fatalf("ModelInventory() = %#v, want normalized inventory", got)
 		}
+	})
+}
+
+func TestWireFormat(t *testing.T) {
+	t.Parallel()
+	t.Run("EncodePrompt", func(t *testing.T) {
+		t.Parallel()
+		wire, ok := testBackend().NewWire().(*wireFormat)
+		if !ok {
+			t.Fatal("unexpected protocol wire")
+		}
+		wire.session.SessionID = "s"
+		data, err := wire.EncodePrompt(agent.Prompt{Text: "describe", Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}})
+		if err == nil || data != nil {
+			t.Fatalf("unsupported image: data=%s err=%v", data, err)
+		}
+	})
+	t.Run("EncodeCompact", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			wire, ok := testBackend().NewWire().(*wireFormat)
+			if !ok {
+				t.Fatal("unexpected protocol wire")
+			}
+			wire.session.SessionID = "s"
+			data, err := wire.EncodeCompact("preserve the failing test")
+			if !errors.Is(err, agent.ErrCompactInstructionsUnsupported) || data != nil {
+				t.Fatalf("unsupported compact instructions: data=%s err=%v", data, err)
+			}
+		})
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			wire, ok := testBackend().NewWire().(*wireFormat)
+			if !ok {
+				t.Fatal("unexpected protocol wire")
+			}
+			wire.session.SessionID = "s"
+			data, err := wire.EncodeCompact("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var request acp.JSONRPCRequest
+			if err := json.Unmarshal(data, &request); err != nil {
+				t.Fatal(err)
+			}
+			var prompt acp.SessionPromptParams
+			if err := json.Unmarshal(request.Params, &prompt); err != nil {
+				t.Fatal(err)
+			}
+			if request.Method != acp.MethodSessionPrompt || len(prompt.Prompt) != 1 || prompt.Prompt[0].Text != "/compact" {
+				t.Fatalf("compact request = %+v %+v", request, prompt)
+			}
+		})
 	})
 }
 

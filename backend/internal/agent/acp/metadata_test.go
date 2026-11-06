@@ -3,6 +3,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -11,6 +12,57 @@ import (
 
 func TestMetadataParser(t *testing.T) {
 	t.Parallel()
+	t.Run("ContextOccupancy", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, native, want string }{
+			{"nonzero", `,"used":45000`, "45000"},
+			{"zero", `,"used":0`, "0"},
+			{"unknown", "", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+						messages, err := parser.ParseOutput([]byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","size":200000` + tc.native + `}}}`))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if len(messages) != 1 {
+							t.Fatalf("messages = %#v", messages)
+						}
+						usage, ok := messages[0].(*agent.UsageMessage)
+						if !ok || !usage.Usage.Equal(agent.Usage{}) {
+							t.Fatalf("occupancy became billed usage: %+v", messages[0])
+						}
+						encoded, err := json.Marshal(messages[0])
+						if err != nil {
+							t.Fatal(err)
+						}
+						used, err := agent.JSONField(encoded, "context_used")
+						if err != nil {
+							t.Fatal(err)
+						}
+						if string(used) != tc.want {
+							t.Fatalf("context_used = %s, want %s", used, tc.want)
+						}
+					})
+				}
+			})
+		}
+	})
+	t.Run("InvalidContextOccupancy", func(t *testing.T) {
+		t.Parallel()
+		for _, value := range []string{"-1", "1.5", `"45000"`} {
+			t.Run(value, func(t *testing.T) {
+				t.Parallel()
+				parser := testBackend().NewMetadataParser()
+				if _, err := parser.ParseOutput([]byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":` + value + `}}}`)); err == nil {
+					t.Fatal("invalid native occupancy accepted")
+				}
+			})
+		}
+	})
 	t.Run("partial reports preserve session boundaries", func(t *testing.T) {
 		t.Parallel()
 		for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {

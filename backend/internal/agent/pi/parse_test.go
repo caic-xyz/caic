@@ -1,4 +1,4 @@
-// Tests for Pi CLI message parsing.
+// Tests and benchmarks for Pi CLI message parsing.
 
 package pi
 
@@ -1044,6 +1044,216 @@ func TestCommittedPromptBoundary(t *testing.T) {
 					if result, ok := message.(*agent.ResultMessage); ok && result.NumTurns != 1 {
 						t.Fatalf("result turns = %d, want 1", result.NumTurns)
 					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkParseMessageUpdateWithAccumulatedMessage(b *testing.B) {
+	line := benchmarkMessageUpdateLine(b, 256<<10)
+	parser := New("", nil).NewWire().ParseOutput
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			b.Fatalf("got %d messages, want 1", len(msgs))
+		}
+	}
+}
+
+// BenchmarkParseMessageToolExecEnd covers the ParseMessage path that used to
+// decode the event type twice: once in ParseMessage's own probe, once again
+// inside parseMessage's dispatch. tool_execution_end is representative of
+// the largest, most frequent lines on this path (full tool output).
+func BenchmarkParseMessageToolExecEnd(b *testing.B) {
+	line := benchmarkToolExecEndLine(b, 64<<10)
+	parser := New("", nil).NewWire().ParseOutput
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			b.Fatalf("got %d messages, want 1", len(msgs))
+		}
+	}
+}
+
+func BenchmarkParseTurnEndUsage(b *testing.B) {
+	line := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"cacheRead":2000,"cacheWrite":300,"cacheWrite1h":200,"reasoning":20,"totalTokens":2470}}}`)
+	parser := New("", nil).NewWire().ParseOutput
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			b.Fatalf("got %d messages, want 1", len(msgs))
+		}
+	}
+}
+
+func BenchmarkParseCompactionUsage(b *testing.B) {
+	line := []byte(`{"type":"compaction_end","reason":"threshold","result":{"summary":"summary","tokensBefore":450350,"estimatedTokensAfter":25283,"usage":{"input":349745,"output":5812,"cacheRead":0,"cacheWrite":0,"totalTokens":355557,"cost":{"input":0.1049235,"output":0.0069744,"total":0.1118979}}},"aborted":false,"willRetry":false}`)
+	parser := New("", nil).NewWire().ParseOutput
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) == 0 {
+			b.Fatal("compaction produced no messages")
+		}
+	}
+}
+
+func benchmarkToolExecEndLine(b *testing.B, outputBytes int) []byte {
+	ev := struct {
+		Type       pi.EventType `json:"type"`
+		ToolCallID string       `json:"toolCallId"`
+		ToolName   string       `json:"toolName"`
+		Result     struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		IsError bool `json:"isError"`
+	}{
+		Type:       pi.EventToolExecEnd,
+		ToolCallID: "call_1",
+		ToolName:   "bash",
+	}
+	ev.Result.Content = []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}{{Type: "text", Text: strings.Repeat("x", outputBytes)}}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return data
+}
+
+func benchmarkMessageUpdateLine(b *testing.B, accumulatedBytes int) []byte {
+	type contentBlock struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type agentMessage struct {
+		Role    string         `json:"role"`
+		Content []contentBlock `json:"content"`
+	}
+	line := struct {
+		Type                  pi.EventType `json:"type"`
+		AssistantMessageEvent struct {
+			Type  pi.DeltaType `json:"type"`
+			Delta string       `json:"delta"`
+		} `json:"assistantMessageEvent"`
+		Message agentMessage `json:"message"`
+	}{
+		Type: pi.EventMessageUpdate,
+		Message: agentMessage{
+			Role:    "assistant",
+			Content: []contentBlock{{Type: "text", Text: strings.Repeat("x", accumulatedBytes)}},
+		},
+	}
+	line.AssistantMessageEvent.Type = pi.DeltaTextDelta
+	line.AssistantMessageEvent.Delta = "x"
+	data, err := json.Marshal(line)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return data
+}
+
+// BenchmarkParseSubagentToolExecStart covers delegation classification, which
+// probes the extension-owned invocation shape before an orchestration is
+// recognized. A single spawn is the common case; a workflowScript spawn is the
+// current orchestration shape.
+func BenchmarkParseSubagentToolExecStart(b *testing.B) {
+	for _, test := range []struct {
+		name string
+		args string
+	}{
+		{"single", `{"agent":"delegate","task":"Tell a short joke about README.md."}`},
+		{"workflow", `{"workflowScript":"const r = await runs.run('joke', { agent: 'delegate', task: 'Tell a joke.' });"}`},
+		{"action", `{"action":"list"}`},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			line := []byte(`{"type":"tool_execution_start","toolCallId":"call_1","toolName":"subagent","args":` + test.args + `}`)
+			parser := New("", nil).NewWire().ParseOutput
+			b.ReportAllocs()
+			b.SetBytes(int64(len(line)))
+			b.ResetTimer()
+			for range b.N {
+				if _, err := parser(line); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseSubagentWaitEnd covers settling a delegated run from the
+// extension's completion list.
+func BenchmarkParseSubagentWaitEnd(b *testing.B) {
+	line := []byte(`{"type":"tool_execution_end","toolCallId":"call_2","toolName":"subagent_wait","result":{"content":[{"type":"text","text":"Waited for run test-run; done. Outcome: 1 complete."}],"isError":false,"details":{"mode":"management","results":[],"completions":[{"runId":"test-run","agent":"delegate","mode":"single","state":"complete","success":true,"results":[{"agent":"delegate","success":true,"outputState":"present","model":"openai-codex/gpt-5.6-terra"}]}]}}}`)
+	parser := New("", nil).NewWire().ParseOutput
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		if _, err := parser(line); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkParseMessageUpdateDelta covers the small deltas that dominate long
+// Pi logs, including tool-call deltas that intentionally emit no messages.
+func BenchmarkParseMessageUpdateDelta(b *testing.B) {
+	for _, tc := range []struct {
+		typ  string
+		want int
+	}{
+		{"thinking_delta", 1},
+		{"text_delta", 1},
+		{"toolcall_delta", 0},
+	} {
+		b.Run(tc.typ, func(b *testing.B) {
+			line := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"` + tc.typ + `","contentIndex":0,"delta":"a short streaming fragment"}}`)
+			parser := New("", nil).NewWire().ParseOutput
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				msgs, err := parser(line)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(msgs) != tc.want {
+					b.Fatalf("messages = %d, want %d", len(msgs), tc.want)
 				}
 			}
 		})

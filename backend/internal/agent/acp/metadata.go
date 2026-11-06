@@ -291,6 +291,18 @@ func usageUpdate(update []byte) ([]agent.Message, error) {
 		}
 	}
 	usage := &agent.UsageMessage{ContextWindow: size}
+	rawUsed, err := agent.JSONField(update, "used")
+	if err != nil {
+		return nil, err
+	}
+	if rawUsed != nil {
+		if err := json.Unmarshal(rawUsed, &usage.ContextUsed); err != nil {
+			return nil, fmt.Errorf("usage_update used: %w", err)
+		}
+		if usage.ContextUsed != nil && *usage.ContextUsed < 0 {
+			return nil, errors.New("usage_update used must not be negative")
+		}
+	}
 	currency, err := agent.JSONString(update, "cost", "currency")
 	if err != nil {
 		return nil, err

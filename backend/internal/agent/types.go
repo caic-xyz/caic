@@ -471,13 +471,16 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 	return time.Duration(m.DurationMs) * time.Millisecond, m.DurationMs > 0
 }
 
-// UsageMessage reports token consumption and per-call or cumulative harness costs.
+// UsageMessage reports token consumption, context occupancy, and per-call or cumulative harness costs.
 type UsageMessage struct {
 	MessageProvenance
 
 	Usage         Usage  `json:"usage"`
 	ReportedModel string `json:"model,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"` // Non-zero when the backend reports the active context window size.
+	// ContextUsed is native context occupancy, independent of billed tokens.
+	// A pointer distinguishes an explicit zero from an unknown occupancy.
+	ContextUsed *int `json:"context_used,omitempty"`
 	// CumulativeCostUSD is the harness-reported cost for its current session.
 	// A pointer distinguishes a reported zero from an absent cost.
 	CumulativeCostUSD *float64 `json:"cumulative_cost_usd,omitempty"`

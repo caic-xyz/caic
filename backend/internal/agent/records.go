@@ -205,9 +205,12 @@ func (r *Records) process(w *recordWork) recordResult {
 			return recordResult{err: errors.New("compact not supported by this backend"), nonfatal: true}
 		}
 		w.data, err = encoder.EncodeCompact(w.text)
-		if err == nil {
-			encoded, err = marshalInputRecords(w.data)
+		if err != nil {
+			// Encoding rejects a client request before any bytes are accepted.
+			// Keep the record owner available for subsequent input.
+			return recordResult{err: err, nonfatal: true}
 		}
+		encoded, err = marshalInputRecords(w.data)
 	}
 	if err != nil {
 		return recordResult{err: err}

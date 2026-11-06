@@ -28,7 +28,10 @@ func New(cacheDir string, envVars []string) *Backend {
 		// Md mounts it across containers; custom storage must also stay accessible.
 		// https://opencode.ai/docs/troubleshooting/#storage
 		ResumeMethod: acp.MethodSessionLoad,
-		EffortID:     opencode.ConfigOptionEffort, Images: true, CompactPrompt: "/compact", NewTools: newTools,
+		EffortID:     opencode.ConfigOptionEffort, Images: true, NewTools: newTools,
+		// Native ACP compact calls session.summarize without command arguments.
+		// https://github.com/anomalyco/opencode/blob/148842ef7cb1bc34192b3fff57d0f9721ab9c801/packages/opencode/src/acp/service.ts#L570-L584
+		CompactPrompt: "/compact",
 	})}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.OpenCode, envVars))
 	return b

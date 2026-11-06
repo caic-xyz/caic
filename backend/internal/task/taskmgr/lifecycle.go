@@ -240,7 +240,10 @@ func (r *Lifecycle) ClearContext() error {
 // Compact asks the active agent session to compact its context.
 func (r *Lifecycle) Compact(ctx context.Context, instructions string) error {
 	if err := r.entry.Task().SendCompact(ctx, instructions); err != nil {
-		return conflictErr(err, "no active session to compact")
+		if errors.Is(err, agent.ErrCompactInstructionsUnsupported) {
+			return &Error{Kind: KindBadRequest, Msg: "compact context", Err: err}
+		}
+		return conflictErr(err, "compact context")
 	}
 	return nil
 }

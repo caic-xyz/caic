@@ -60,12 +60,12 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // container. It performs the JSON-RPC handshake (initialize → session/new)
 // before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agent.Session, err error) {
-	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
+	agentArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 	relayArgs := []string{"--harness", string(b.Harness())}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 	}
-	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, ocArgs)
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, agentArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -351,23 +351,21 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 		w.mu.Unlock()
 		return nil, errors.New("ACP: no session ID (handshake not completed)")
 	}
-	if !w.config.Images && len(p.Images) > 0 {
+	if len(p.Images) > 0 && (!w.config.Images || !w.supportsImage) {
 		w.mu.Unlock()
 		return nil, errors.New("ACP harness does not support image prompts")
 	}
 	id := w.allocIDLocked()
-	sessionID, supportsImage := w.session.SessionID, w.supportsImage
+	sessionID := w.session.SessionID
 	w.mu.Unlock()
 	content := make([]acp.PromptContent, 0, 1+len(p.Images))
 	content = append(content, acp.PromptContent{Type: acp.ContentText, Text: p.Text})
-	if supportsImage {
-		for _, img := range p.Images {
-			content = append(content, acp.PromptContent{
-				Type:     acp.ContentImage,
-				Data:     img.Data,
-				MimeType: img.MediaType,
-			})
-		}
+	for _, img := range p.Images {
+		content = append(content, acp.PromptContent{
+			Type:     acp.ContentImage,
+			Data:     img.Data,
+			MimeType: img.MediaType,
+		})
 	}
 	params, err := marshalParams(acp.SessionPromptParams{SessionID: sessionID, Prompt: content})
 	if err != nil {
@@ -383,9 +381,12 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 }
 
 // EncodeCompact sends the harness-configured native command through session/prompt.
-func (w *wireFormat) EncodeCompact(_ string) ([]byte, error) {
+func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	if w.config.CompactPrompt == "" {
 		return nil, errors.New("ACP harness has no verified compaction command")
+	}
+	if instructions != "" {
+		return nil, agent.ErrCompactInstructionsUnsupported
 	}
 	return w.EncodePrompt(agent.Prompt{Text: w.config.CompactPrompt})
 }

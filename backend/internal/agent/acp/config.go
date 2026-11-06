@@ -20,6 +20,7 @@ type Config struct {
 	// Images permits image encoding when ACP also advertises image support.
 	Images bool
 	// CompactPrompt is the verified native compaction command; empty disables it.
+	// Custom compaction instructions are not supported.
 	CompactPrompt string
 	// Models translates native routes; nil leaves model IDs unchanged.
 	Models ModelCodec

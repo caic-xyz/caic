@@ -173,11 +173,15 @@ func ApplyRequestedEffort(wire WireFormat, effort string) WireFormat {
 }
 
 // CompactCommand is an optional interface for WireFormat implementations that
-// support context compaction. The server checks for this capability to
-// conditionally enable the compact button in the UI.
+// support context compaction. Encoding errors reject the request before recording
+// or writing native input; the connection remains usable for subsequent requests.
 type CompactCommand interface {
 	EncodeCompact(instructions string) ([]byte, error)
 }
+
+// ErrCompactInstructionsUnsupported reports that native compaction cannot honor
+// custom instructions. The request is rejected without sending a native command.
+var ErrCompactInstructionsUnsupported = errors.New("custom compaction instructions are not supported")
 
 // MessageInterceptor handles provider controls on the stdout reader. It must
 // never write stdin: returned response bytes are delivered by the reader's

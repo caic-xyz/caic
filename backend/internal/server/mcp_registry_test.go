@@ -51,7 +51,7 @@ func TestMCPRegistry(t *testing.T) {
 			target := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "target"}, harness.Claude)
 			target.SetState(task.StateAsking)
 			insertTestTask(s, target.ID, target)
-			session, gate := newGatedInputSession(t, target)
+			session, gate := newGatedInputSession(t, target, claudecode.New().NewWire)
 			executor := agent.NewMCPExecutor(t.Context())
 			ctx, cancel := context.WithCancel(t.Context())
 			stdin, input := io.Pipe()
