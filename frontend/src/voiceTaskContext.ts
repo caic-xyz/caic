@@ -1,4 +1,4 @@
-// Voice task context formats caic task changes for active browser voice sessions.
+// Formats caic CI failures for active browser voice sessions.
 
 import type { Task } from "@sdk/types.gen";
 
@@ -15,33 +15,5 @@ function taskLabel(task: Task, taskNumber: number, numbered: boolean): string {
 
 export function buildTaskCIContext(task: Task, taskNumber: number, numbered: boolean): string {
   const pr = task.forgePR ? ` PR #${task.forgePR}` : "";
-  return `[${taskLabel(task, taskNumber, numbered)}${pr} — CI: failure]`;
-}
-
-export function buildTaskStateContext(task: Task, taskNumber: number, numbered: boolean): string | null {
-  const label = taskLabel(task, taskNumber, numbered);
-  switch (task.state) {
-    case "asking":
-    case "waiting":
-    case "has_plan":
-      return `[${label} — ${task.state}]`;
-    case "purged":
-      return task.result ? `[${label} — completed: ${task.result}]` : null;
-    case "stopped":
-      return `[${label} — stopped]`;
-    case "crashed":
-      return `[${label} — crashed: ${task.error ?? "unknown"}]`;
-    case "failed":
-      return `[${label} — failed: ${task.error ?? "unknown"}]`;
-    case "pending":
-    case "branching":
-    case "provisioning":
-    case "starting":
-    case "running":
-    case "pulling":
-    case "pushing":
-    case "stopping":
-    case "purging":
-      return null;
-  }
+  return `[${taskLabel(task, taskNumber, numbered)}${pr} — CI: failure; taskID: ${task.id}]`;
 }

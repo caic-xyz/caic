@@ -324,8 +324,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	}
 	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{
-		Registry:   registry,
-		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
+		Registry:     registry,
+		SessionOwner: mcpSessionOwner,
+		ServerInfo:   mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 	}
 	// The webhook concern owns the forge webhook secrets and the GitHub App
 	// owner allowlist, and dispatches to the app-owned bot and CI service.

@@ -1,4 +1,4 @@
-// Adapts shared browser voice to caic task changes and explicit renumbering updates.
+// Adapts shared browser voice to caic task numbering and CI context.
 
 import { createEffect, onCleanup, Show, untrack, type Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
@@ -8,7 +8,7 @@ import type { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { useAppState } from "./AppState";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./voiceTaskState";
-import { buildTaskCIContext, buildTaskStateContext } from "./voiceTaskContext";
+import { buildTaskCIContext } from "./voiceTaskContext";
 
 export default function BrowserVoiceShell() {
   const s = useAppState();
@@ -34,8 +34,9 @@ export default function BrowserVoiceShell() {
 }
 
 export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]>; session: typeof voiceSession }) {
+  // Shared Go Mode owns MCP state/reference updates. This adapter owns UI
+  // numbering and CI fields that are absent from generic service items.
   const numberMap = new TaskNumberMap();
-  let prevStates = new Map<string, string>();
   let prevCIStatuses = new Map<string, string | undefined>();
   let wasConnected = false;
 
@@ -46,7 +47,6 @@ export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]>; session: type
     if (connected && !wasConnected) {
       const tasks = untrack(() => props.tasks());
       setVoiceTaskNumberMap(numberMap);
-      prevStates = new Map(tasks.map((t) => [t.id, t.state]));
       prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
     }
     wasConnected = connected;
@@ -54,35 +54,18 @@ export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]>; session: type
 
   createEffect(() => {
     const currentTasks = props.tasks();
-    const previousNumbers = currentTasks.map((task) => numberMap.toNumber(task.id));
     numberMap.update(currentTasks);
     if (props.session.state.connected) {
       setVoiceTaskNumberMap(numberMap);
-      const renumbered = currentTasks.flatMap((task, index) => {
-        const previous = previousNumbers[index];
-        const number = numberMap.toNumber(task.id);
-        return previous !== undefined && number !== undefined && previous !== number
-          ? [`- ${task.title || task.id} (${task.id}): #${previous} → #${number}`]
-          : [];
-      });
-      if (renumbered.length > 0) {
-        props.session.injectText(`[Task numbers changed:\n${renumbered.join("\n")}]`);
-      }
       const numbered = currentTasks.length > 1;
       for (const task of currentTasks) {
-        const prev = prevStates.get(task.id);
         const taskNumber = numberMap.toNumber(task.id);
-        if (prev !== undefined && prev !== task.state && taskNumber !== undefined) {
-          const notification = buildTaskStateContext(task, taskNumber, numbered);
-          if (notification !== null) props.session.injectText(notification);
-        }
         const prevCI = prevCIStatuses.get(task.id);
         if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
           props.session.injectText(buildTaskCIContext(task, taskNumber, numbered));
         }
       }
     }
-    prevStates = new Map(currentTasks.map((t) => [t.id, t.state]));
     prevCIStatuses = new Map(currentTasks.map((t) => [t.id, t.ciStatus]));
   });
 

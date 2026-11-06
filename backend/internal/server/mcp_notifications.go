@@ -174,6 +174,10 @@ func taskNotificationTitle(state v1.TaskState, number int) string {
 		return fmt.Sprintf("Task #%d is waiting", number)
 	case v1.TaskStateAsking:
 		return fmt.Sprintf("Task #%d has a question", number)
+	case v1.TaskStateCrashed:
+		return fmt.Sprintf("Task #%d crashed", number)
+	case v1.TaskStateFailed:
+		return fmt.Sprintf("Task #%d failed", number)
 	case v1.TaskStateHasPlan:
 		return fmt.Sprintf("Task #%d has a plan ready", number)
 	default:

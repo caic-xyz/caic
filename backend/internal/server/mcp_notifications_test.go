@@ -269,6 +269,8 @@ func TestNotificationFeed(t *testing.T) {
 		}{
 			{v1.TaskStateWaiting, "Task #1 is waiting"},
 			{v1.TaskStateAsking, "Task #1 has a question"},
+			{v1.TaskStateCrashed, "Task #1 crashed"},
+			{v1.TaskStateFailed, "Task #1 failed"},
 			{v1.TaskStateHasPlan, "Task #1 has a plan ready"},
 		} {
 			t.Run(string(tc.state), func(t *testing.T) {

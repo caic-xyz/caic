@@ -1,4 +1,4 @@
-// MCP HTTP handlers: protocol dispatch, origin validation, and rate limiting.
+// MCP HTTP handlers: protocol dispatch, subscription ownership, origin validation, and rate limiting.
 
 package server
 
@@ -76,6 +76,23 @@ func requestWithMCPPrincipal(r *http.Request) *http.Request {
 	return r.WithContext(newMCPPrincipalContext(r.Context(), principal))
 }
 
+// mcpSessionOwner binds released MCP subscription sessions to authenticated
+// identities rather than credentials, so refreshing a token preserves the
+// subscription while another user or task cannot reuse its session ID.
+func mcpSessionOwner(ctx context.Context) (string, error) {
+	principal, hasPrincipal := mcpPrincipalFromContext(ctx)
+	if hasPrincipal && principal.TaskID != 0 {
+		return "task:" + principal.TaskID.String(), nil
+	}
+	if user, ok := auth.UserFromContext(ctx); ok && user.ID != "" {
+		return "user:" + user.ID, nil
+	}
+	if hasPrincipal && principal.Remote {
+		return "", errors.New("authenticated MCP session is missing its user")
+	}
+	return "local", nil
+}
+
 func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
 	if h.rateLimiter == nil {
 		return true
@@ -132,6 +149,7 @@ func (h *mcpHandlers) endpointRoutes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("POST /api/caic/v1/mcp", h.handleMCP)
 	m.HandleFunc("GET /api/caic/v1/mcp", h.handleMCP)
+	m.HandleFunc("DELETE /api/caic/v1/mcp", h.handleMCP)
 	return m
 }
 

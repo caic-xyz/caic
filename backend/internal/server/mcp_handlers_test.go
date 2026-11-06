@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -32,7 +33,255 @@ import (
 	"github.com/maruel/gomode/oauth"
 )
 
+func TestMCPReleasedNotifications(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"2025-06-18", "2025-11-25"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			s, handler, owner, registered := newMCPOAuthLifecycleRouter(t)
+			ownerToken := authorizeMCPClient(t, s.authStore, handler, &owner, &registered)
+			other, err := s.authStore.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "2", Username: "bob"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherToken := authorizeMCPClient(t, s.authStore, handler, &other, &registered)
+			id := ksid.NewID()
+			tk := mustNewTask(t, id, agent.Prompt{Text: "Owned task"}, harness.Claude)
+			tk.OwnerID = owner.ID
+			tk.SetState(task.StateRunning)
+			insertTestTask(s, id, tk)
+			foreignID := ksid.NewID()
+			foreign := mustNewTask(t, foreignID, agent.Prompt{Text: "Private work"}, harness.Claude)
+			foreign.OwnerID = other.ID
+			insertTestTask(s, foreignID, foreign)
+			server := httptest.NewServer(handler)
+			t.Cleanup(server.Close)
+			client := server.Client()
+			request := func(method, token, session, body string) *http.Request {
+				req, err := http.NewRequestWithContext(t.Context(), method, server.URL+"/api/caic/v1/mcp", strings.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Host = "caic.example.com"
+				if token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+				req.Header.Set("Mcp-Protocol-Version", version)
+				if session != "" {
+					req.Header.Set("Mcp-Session-Id", session)
+				}
+				return req
+			}
+			post := func(token, session, method, params string) (http.Header, mcp.JSONRPCResponse, int) {
+				body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":` + params + `}`
+				req := request(http.MethodPost, token, session, body)
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := resp.Body.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				var out mcp.JSONRPCResponse
+				if resp.StatusCode == http.StatusOK {
+					if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return resp.Header, out, resp.StatusCode
+			}
+			_, _, status := post("", "", "initialize", `{"protocolVersion":"`+version+`"}`)
+			if status != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated initialize: HTTP %d", status)
+			}
+			headers, initialized, status := post(ownerToken.AccessToken, "", "initialize", `{"protocolVersion":"`+version+`","clientInfo":{"name":"shipped-client-fixture","version":"1"}}`)
+			if status != http.StatusOK || initialized.Error != nil {
+				t.Fatalf("initialize: HTTP %d, %#v", status, initialized)
+			}
+			session := headers.Get("Mcp-Session-Id")
+			if session == "" {
+				t.Fatal("initialize omitted the notification session")
+			}
+			for _, uri := range []string{"gomode://items", "gomode://notifications"} {
+				_, out, code := post(ownerToken.AccessToken, session, "resources/subscribe", `{"uri":"`+uri+`"}`)
+				if code != http.StatusOK || out.Error != nil {
+					t.Fatalf("subscribe %s: HTTP %d, %#v", uri, code, out)
+				}
+			}
+			_, denied, _ := post(ownerToken.AccessToken, session, "resources/subscribe", `{"uri":"caic://tasks/`+foreignID.String()+`"}`)
+			if denied.Error == nil {
+				t.Fatal("subscribed to another user's task")
+			}
+			_, _, code := post(otherToken.AccessToken, session, "ping", `{}`)
+			if code != http.StatusNotFound {
+				t.Fatalf("another user reused the session: HTTP %d", code)
+			}
+			for _, method := range []string{http.MethodGet, http.MethodDelete} {
+				for _, denied := range []struct {
+					token  string
+					status int
+				}{{"", http.StatusUnauthorized}, {otherToken.AccessToken, http.StatusNotFound}} {
+					req := request(method, denied.token, session, "")
+					req.Header.Set("Accept", "text/event-stream")
+					resp, err := client.Do(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := resp.Body.Close(); err != nil {
+						t.Fatal(err)
+					}
+					if resp.StatusCode != denied.status {
+						t.Fatalf("unauthorized %s: HTTP %d, want %d", method, resp.StatusCode, denied.status)
+					}
+				}
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			req := request(http.MethodGet, ownerToken.AccessToken, session, "").WithContext(ctx)
+			req.Header.Set("Accept", "text/event-stream")
+			stream, err := client.Do(req)
+			if err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				cancel()
+				if err := stream.Body.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if stream.StatusCode != http.StatusOK {
+				t.Fatalf("notification stream HTTP %d", stream.StatusCode)
+			}
+			events := make(chan string, 8)
+			ended := make(chan error, 1)
+			go func() {
+				scanner := bufio.NewScanner(stream.Body)
+				for scanner.Scan() {
+					data, ok := strings.CutPrefix(scanner.Text(), "data: ")
+					if !ok {
+						continue
+					}
+					var event struct {
+						Method string `json:"method"`
+						Params struct {
+							URI string `json:"uri"`
+						} `json:"params"`
+					}
+					if err := json.Unmarshal([]byte(data), &event); err != nil {
+						ended <- err
+						return
+					}
+					if event.Method == "notifications/resources/updated" {
+						select {
+						case events <- event.Params.URI:
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+				ended <- scanner.Err()
+			}()
+			readUpdates := func() {
+				var got []string
+				for range 2 {
+					select {
+					case uri := <-events:
+						got = append(got, uri)
+					case err := <-ended:
+						t.Fatalf("notification stream ended: %v", err)
+					case <-time.After(3 * time.Second):
+						t.Fatal("task update did not reach the MCP client")
+					}
+				}
+				slices.Sort(got)
+				if !slices.Equal(got, []string{"gomode://items", "gomode://notifications"}) {
+					t.Fatalf("resource notifications = %q", got)
+				}
+			}
+			readUpdates()
+			_, baseline, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
+			if baseline.Error != nil {
+				t.Fatalf("baseline notifications: %#v", baseline)
+			}
+			tk.SetState(task.StateWaiting)
+			s.taskMgr.NotifyTaskChange()
+			readUpdates()
+			_, updated, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
+			data, err := json.Marshal(updated.Result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var resource struct {
+				Contents []struct {
+					Text string `json:"text"`
+				} `json:"contents"`
+			}
+			if err := json.Unmarshal(data, &resource); err != nil || len(resource.Contents) != 1 {
+				t.Fatalf("notification resource = %s, err %v", data, err)
+			}
+			var alerts []serviceNotification
+			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil || len(alerts) != 1 || alerts[0].ItemID != id.String() || alerts[0].Title != "Task #1 is waiting" {
+				t.Fatalf("delivered alerts = %#v, err %v", alerts, err)
+			}
+			deleteReq := request(http.MethodDelete, ownerToken.AccessToken, session, "")
+			deleted, err := client.Do(deleteReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := deleted.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if deleted.StatusCode != http.StatusOK {
+				t.Fatalf("session DELETE HTTP %d", deleted.StatusCode)
+			}
+			select {
+			case err := <-ended:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("session deletion left the stream running")
+			}
+		})
+	}
+}
+
 var mcpSkillNameRE = regexp.MustCompile("`([a-z][a-z0-9_]*_[a-z0-9_]+)`")
+
+func TestMCPSessionOwner(t *testing.T) {
+	t.Parallel()
+	t.Run("credential-independent user identity and task isolation", func(t *testing.T) {
+		t.Parallel()
+		userCtx := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
+		cookieOwner, err := mcpSessionOwner(userCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bearerCtx := newMCPPrincipalContext(userCtx, &mcpPrincipal{Remote: true, Subject: "owner"})
+		bearerOwner, err := mcpSessionOwner(bearerCtx)
+		if err != nil || cookieOwner != bearerOwner || cookieOwner == "" {
+			t.Fatalf("cookie owner %q, bearer owner %q, err %v", cookieOwner, bearerOwner, err)
+		}
+		first, err := mcpSessionOwner(newMCPPrincipalContext(userCtx, &mcpPrincipal{TaskID: ksid.NewID(), Remote: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := mcpSessionOwner(newMCPPrincipalContext(userCtx, &mcpPrincipal{TaskID: ksid.NewID(), Remote: true}))
+		if err != nil || first == second || first == cookieOwner || second == cookieOwner {
+			t.Fatalf("task owners %q, %q; user owner %q; err %v", first, second, cookieOwner, err)
+		}
+	})
+	t.Run("missing remote identity cannot become local", func(t *testing.T) {
+		t.Parallel()
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true})
+		if owner, err := mcpSessionOwner(ctx); err == nil || owner != "" {
+			t.Fatalf("missing remote identity produced owner %q, err %v", owner, err)
+		}
+	})
+}
 
 func mcpRequestJSON(method, paramsFields string) string {
 	if paramsFields == "{}" || paramsFields == "" {
