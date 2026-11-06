@@ -138,12 +138,20 @@ func newMCPDiffstatRouter(t *testing.T) (*testRouter, *runtimetest.RepositorySpy
 	return s, spy, id
 }
 
-func taskDetailText(t *testing.T, v any) string {
+func toolTextOutput(t *testing.T, v any) string {
 	out, ok := v.(mcp.TextOutput)
 	if !ok {
 		t.Fatalf("result type=%T, want mcp.TextOutput", v)
 	}
 	return out.Result
+}
+
+func taskDetailOutput(t *testing.T, v any) v1.MCPTaskDetail {
+	out, ok := v.(v1.MCPTaskDetail)
+	if !ok {
+		t.Fatalf("result type=%T, want v1.MCPTaskDetail", v)
+	}
+	return out
 }
 
 func callTaskDetail(t *testing.T, reg mcp.Registry, a mcpTaskGetDetailArgs) mcp.RawToolResult {
@@ -167,7 +175,7 @@ type mcpTaskDetailWireResult struct {
 	Meta              mcp.MetaObject     `json:"_meta"`
 	IsError           bool               `json:"isError"`
 	Content           []mcp.ContentBlock `json:"content"`
-	StructuredContent mcp.TextOutput     `json:"structuredContent"`
+	StructuredContent v1.MCPTaskDetail   `json:"structuredContent"`
 }
 
 func taskDetailWire(t *testing.T, s *testRouter, a mcpTaskGetDetailArgs) mcpTaskDetailWireResponse {
@@ -197,6 +205,29 @@ func taskDetailWire(t *testing.T, s *testRouter, a mcpTaskGetDetailArgs) mcpTask
 
 func TestMCPTools(t *testing.T) {
 	t.Parallel()
+	t.Run("specs/structuredTaskDetail", func(t *testing.T) {
+		t.Parallel()
+		c := &mcpTools{}
+		for _, spec := range c.specs() {
+			if spec.Name != "task_get_detail" {
+				continue
+			}
+			id, ok := spec.OutputSchema.Properties.Get("taskID")
+			if !ok || id.Type != "string" {
+				t.Fatal("task detail schema must expose stable taskID")
+			}
+			pending, ok := spec.OutputSchema.Properties.Get("pendingInput")
+			if !ok || len(pending.OneOf) != 2 || pending.OneOf[0].Type != "object" || pending.OneOf[1].Type != "null" {
+				t.Fatalf("pendingInput schema must allow absent pending state: %+v", pending)
+			}
+			state, ok := pending.OneOf[0].Properties.Get("state")
+			if !ok || !reflect.DeepEqual(state.Enum, []any{"delivered", "delivering", "queued"}) {
+				t.Fatalf("pending delivery state schema = %+v", state)
+			}
+			return
+		}
+		t.Fatal("task_get_detail missing from catalog")
+	})
 	t.Run("handleTaskSendMessage", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid/queue_and_append", func(t *testing.T) {
@@ -213,7 +244,7 @@ func TestMCPTools(t *testing.T) {
 				if err != nil || res.IsError {
 					t.Fatalf("CallTool() = %+v, %v", res, err)
 				}
-				if got := taskDetailText(t, res.Structured); got != "Queued message for task #1 in append mode. Existing pending text and attachments are preserved. Delivery occurs when the agent is waiting." {
+				if got := toolTextOutput(t, res.Structured); got != "Queued message for task #1 in append mode. Existing pending text and attachments are preserved. Delivery occurs when the agent is waiting." {
 					t.Fatalf("result = %q", got)
 				}
 			}
@@ -226,7 +257,8 @@ func TestMCPTools(t *testing.T) {
 				t.Fatalf("task list = %+v", list)
 			}
 			detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
-			if detail.IsError || !strings.Contains(taskDetailText(t, detail.Structured), "Pending prompt text: first\nsecond") || !strings.Contains(taskDetailText(t, detail.Structured), "append preserves existing text") {
+			pending := taskDetailOutput(t, detail.Structured).PendingInput
+			if detail.IsError || pending == nil || pending.Text != "first\nsecond" || pending.State != v1.MCPPendingInputQueued || pending.ID != entry.PendingInput().ID.String() {
 				t.Fatalf("task detail = %+v", detail)
 			}
 			if err := entry.Lifecycle.CancelQueuedInput(entry.PendingInput().ID); err != nil {
@@ -238,7 +270,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatalf("task list after cancellation = %+v", list)
 			}
 			detail = c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
-			if detail.IsError || !strings.Contains(taskDetailText(t, detail.Structured), "Pending prompt: none") {
+			if detail.IsError || taskDetailOutput(t, detail.Structured).PendingInput != nil {
 				t.Fatalf("task detail after cancellation = %+v", detail)
 			}
 		})
@@ -290,7 +322,7 @@ func TestMCPTools(t *testing.T) {
 					if withPending {
 						want += " A pending prompt still exists; direct delivery does not clear it. Use task_get_detail to inspect it."
 					}
-					if got := taskDetailText(t, res.Structured); got != want {
+					if got := toolTextOutput(t, res.Structured); got != want {
 						t.Fatalf("result = %q", got)
 					}
 					select {
@@ -337,7 +369,7 @@ func TestMCPTools(t *testing.T) {
 				if err != nil || res.IsError {
 					t.Fatalf("CallTool() = %+v, %v", res, err)
 				}
-				if got := taskDetailText(t, res.Structured); got != "Queued message for task #1 in replace mode. Any prior pending prompt was canceled before submitting this message. Delivery occurs when the agent is waiting." {
+				if got := toolTextOutput(t, res.Structured); got != "Queued message for task #1 in replace mode. Any prior pending prompt was canceled before submitting this message. Delivery occurs when the agent is waiting." {
 					t.Fatalf("result = %q", got)
 				}
 				if p := entry.PendingInput(); p == nil || p.Prompt.Text != "replacement" || len(p.Prompt.Images) != 0 {
@@ -840,8 +872,8 @@ func TestMCPTools(t *testing.T) {
 			if detail.IsError {
 				t.Fatalf("task detail = %#v, want listed child detail", detail.Structured)
 			}
-			detailOutput, ok := detail.Structured.(mcp.TextOutput)
-			if !ok || !strings.Contains(detailOutput.Result, output.Tasks[0].Title) {
+			detailOutput, ok := detail.Structured.(v1.MCPTaskDetail)
+			if !ok || detailOutput.TaskID != output.Tasks[0].TaskID || detailOutput.Title != output.Tasks[0].Title {
 				t.Fatalf("task detail = %#v, want listed child %q", detail.Structured, output.Tasks[0].Title)
 			}
 			resources := &mcpResources{taskSvc: registry.taskSvc}
@@ -929,12 +961,12 @@ func TestMCPTools(t *testing.T) {
 			if result.IsError {
 				t.Fatalf("CallTool() result = %#v, want unrelated task detail", result.Structured)
 			}
-			output, ok := result.Structured.(mcp.TextOutput)
+			output, ok := result.Structured.(v1.MCPTaskDetail)
 			if !ok {
-				t.Fatalf("CallTool() result type = %T, want mcp.TextOutput", result.Structured)
+				t.Fatalf("CallTool() result type = %T, want v1.MCPTaskDetail", result.Structured)
 			}
-			if !strings.Contains(output.Result, "unrelated") {
-				t.Fatalf("task detail = %q, want unrelated task", output.Result)
+			if output.TaskID != targetID.String() || output.Title != "unrelated" {
+				t.Fatalf("task detail = %+v, want unrelated task", output)
 			}
 		})
 	})
@@ -1828,41 +1860,80 @@ func TestMCPTools(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			t.Run("pending prompt shares output budget", func(t *testing.T) {
+			t.Run("independent pending and diff budgets", func(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
 				ent, _ := s.taskMgr.GetEntry(id)
 				ent.Task().SetState(task.StateRunning)
-				prompt := " \n" + strings.Repeat("pending instructions \u754c\n", 2000) + "end of pending instructions"
+				prompt := strings.Repeat("pending \" \u754c\n", 5000) + "end of pending instructions"
 				if _, err := ent.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: prompt}); err != nil {
 					t.Fatal(err)
 				}
-				rt.RepositoryStatusValue.Commits[0].Subject = strings.Repeat("large commit subject", 10000)
+				rt.RepositoryStatusValue.Commits = nil
+				rt.RepositoryStatusValue.Uncommitted = nil
+				for i := range 80 {
+					rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: fmt.Sprintf("%03d-", i) + strings.Repeat("\u754c", 700), LinesAdded: 1})
+				}
 				for _, includeDiffstat := range []bool{false, true} {
 					got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: includeDiffstat})
-					if got.Result.IsError {
-						t.Fatal(got)
+					out := got.Result.StructuredContent
+					if got.Result.IsError || out.TaskID != id.String() || out.PendingInput == nil {
+						t.Fatalf("task detail = %+v", got)
 					}
-					txt := got.Result.StructuredContent.Result
-					_, pending, ok := strings.Cut(txt, "\nPending prompt text: ")
-					if !ok || !strings.HasPrefix(pending, prompt[:1024]) || strings.Contains(txt, "end of pending instructions") {
-						t.Fatalf("include_diffstat=%v: expected a pending prompt preview", includeDiffstat)
+					pending := out.PendingInput
+					if pending.ID != ent.PendingInput().ID.String() || pending.State != v1.MCPPendingInputQueued || pending.OriginalTextBytes != len(prompt) || !pending.TextTruncated || !strings.HasPrefix(pending.Text, prompt[:1024]) || strings.Contains(pending.Text, "end of pending instructions") {
+						t.Fatal("pending input metadata or preview is incorrect")
 					}
-					if len(txt) > 32768 || !utf8.ValidString(txt) {
-						t.Fatalf("include_diffstat=%v: invalid bounded output: %d bytes", includeDiffstat, len(txt))
+					encoded, err := json.Marshal(pending.Text)
+					if err != nil || len(encoded) > 32768 || !utf8.ValidString(pending.Text) {
+						t.Fatalf("pending text budget = %d bytes, err=%v", len(encoded), err)
 					}
-					if len(got.Result.Content) != 1 || got.Result.Content[0].Text != txt {
-						t.Fatal("text and structured output disagree")
+					if len(got.Result.Content) != 1 || got.Result.Content[0].Text != out.Result || len(out.Result) > 2048 {
+						t.Fatal("MCP text content should be the short summary")
+					}
+					registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+					if !ok {
+						t.Fatal("unexpected MCP registry")
+					}
+					args, err := json.Marshal(mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: includeDiffstat})
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := agent.MCPRequestResult(t.Context(), registry.ForTask(id), agent.MCPRequest{Method: mcp.MethodToolsCall, Name: "task_get_detail", Arguments: args})
+					if err != nil {
+						t.Fatal(err)
+					}
+					wire, err := agent.MCPResponseBytes("detail", result, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var bridged mcpTaskDetailWireResponse
+					if err := json.Unmarshal(wire, &bridged); err != nil {
+						t.Fatal(err)
+					}
+					if bridged.Result.IsError || len(bridged.Error) != 0 || bridged.Result.StructuredContent.TaskID != out.TaskID || !reflect.DeepEqual(bridged.Result.StructuredContent.PendingInput, pending) || !reflect.DeepEqual(bridged.Result.StructuredContent.Diffstat, out.Diffstat) {
+						t.Fatal("task-scoped bridge lost structured task details")
+					}
+					if len(bridged.Result.Content) != 1 || bridged.Result.Content[0].Text != out.Result {
+						t.Fatal("task-scoped text content should be the short summary")
 					}
 					if got.Result.Meta[mcpTruncatedMetaKey] != true {
 						t.Fatal("truncation metadata missing")
 					}
-					marker := "[Output truncated."
 					if includeDiffstat {
-						marker = "[Diffstat output truncated]"
-					}
-					if !strings.Contains(txt, marker) {
-						t.Fatal("truncation notice missing")
+						if out.Diffstat == nil || !out.Diffstat.Truncated || out.Diffstat.Totals != (v1.MCPDiffTotals{FileChanges: 80, Additions: 80}) || len(out.Diffstat.Repositories) != 1 || len(out.Diffstat.Repositories[0].Uncommitted) == 0 {
+							t.Fatalf("diffstat = %+v", out.Diffstat)
+						}
+						encoded, err = json.Marshal(out.Diffstat)
+						if err != nil || len(encoded) > 32768 {
+							t.Fatalf("diffstat budget = %d bytes, err=%v", len(encoded), err)
+						}
+						encoded, err = json.Marshal(out)
+						if err != nil || len(encoded) <= 32768 {
+							t.Fatalf("independent fields unexpectedly share a total budget: bytes=%d, err=%v", len(encoded), err)
+						}
+					} else if out.Diffstat != nil {
+						t.Fatal("default detail included diffstat")
 					}
 				}
 			})
@@ -1876,17 +1947,22 @@ func TestMCPTools(t *testing.T) {
 				if res.IsError {
 					t.Fatal(res)
 				}
-				txt := taskDetailText(t, res.Structured)
-				for _, exp := range []string{`Repository "repo": branch "caic-1", upstream "origin/main", ahead 1, behind 1`, `Repository "other"`, "Local commit", "Missing upstream commit", "Add API", "Missing upstream change", `"committed.go": +4 -1`, `"upstream.go": +1 -0`, `"old.go" -> "renamed.go": +2 -0`, `"image.png": binary (12 -> 24 bytes)`} {
-					if !strings.Contains(txt, exp) {
-						t.Errorf("missing %q in %s", exp, txt)
-					}
+				out := taskDetailOutput(t, res.Structured)
+				if out.Diffstat == nil || out.Diffstat.Truncated || len(out.Diffstat.Repositories) != 2 || out.Diffstat.Totals != (v1.MCPDiffTotals{FileChanges: 8, Additions: 14, Deletions: 2, BinaryFiles: 2}) {
+					t.Fatalf("diffstat = %+v", out.Diffstat)
+				}
+				r := out.Diffstat.Repositories[0]
+				if r.Name != "repo" || r.Branch != "caic-1" || r.Upstream != "origin/main" || r.Ahead != 1 || r.Behind != 1 || out.Diffstat.Repositories[1].Name != "other" {
+					t.Fatalf("repository metadata = %+v", r)
+				}
+				if len(r.Commits) != 2 || r.Commits[0].Subject != "Add API" || r.Commits[0].Behind || !r.Commits[1].Behind || r.Commits[1].Stat[0].Path != "upstream.go" || r.Commits[0].Stat[0].Path != "committed.go" {
+					t.Fatalf("commits = %+v", r.Commits)
+				}
+				if len(r.Uncommitted) != 2 || r.Uncommitted[0].OriginalPath != "old.go" || r.Uncommitted[0].Path != "renamed.go" || r.Uncommitted[1].OldSize != 12 || r.Uncommitted[1].NewSize != 24 {
+					t.Fatalf("uncommitted files = %+v", r.Uncommitted)
 				}
 				if rt.StatusReads.Load() != 2 || rt.PatchReads.Load() != 0 {
 					t.Fatalf("reads: %d status, %d patches", rt.StatusReads.Load(), rt.PatchReads.Load())
-				}
-				if !strings.HasSuffix(txt, "Total (all compared commits and working trees): 8 file changes, 14 insertions(+), 2 deletions(-), 2 binary file changes.\n") {
-					t.Fatalf("missing complete totals: %s", txt)
 				}
 			})
 			t.Run("default avoids repository reads", func(t *testing.T) {
@@ -1896,29 +1972,12 @@ func TestMCPTools(t *testing.T) {
 				if res.IsError || rt.StatusReads.Load() != 0 || rt.PatchReads.Load() != 0 {
 					t.Fatalf("default result=%+v, status=%d, patches=%d", res, rt.StatusReads.Load(), rt.PatchReads.Load())
 				}
-			})
-			t.Run("truncation retains complete rows", func(t *testing.T) {
-				t.Parallel()
-				s, rt, id := newMCPDiffstatRouter(t)
-				rt.RepositoryStatusValue.Commits = nil
-				rt.RepositoryStatusValue.Uncommitted = nil
-				for i := range 80 {
-					rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: fmt.Sprintf("%03d-", i) + strings.Repeat("\u754c", 700), LinesAdded: 1})
-				}
-				got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
-				txt := got.Result.StructuredContent.Result
-				if got.Result.IsError || len(txt) > 32768 || !utf8.ValidString(txt) {
-					t.Fatalf("invalid diffstat: error=%v, bytes=%d", got.Result.IsError, len(txt))
-				}
-				if !strings.Contains(txt, `  "000-`+strings.Repeat("\u754c", 700)+`": +1 -0`+"\n") {
-					t.Fatal("first file row was shortened")
-				}
-				before, after, ok := strings.Cut(txt, "[Diffstat output truncated]\n")
-				if !ok || !strings.HasSuffix(before, "\": +1 -0\n") || after != "\nTotal (all compared commits and working trees): 80 file changes, 80 insertions(+), 0 deletions(-), 0 binary file changes.\n" {
-					t.Fatal("truncation marker must replace complete rows before the totals")
+				out := taskDetailOutput(t, res.Structured)
+				if out.TaskID != id.String() || out.Diffstat != nil || out.PendingInput != nil || out.Harness != v1.HarnessClaude {
+					t.Fatalf("default task detail = %+v", out)
 				}
 			})
-			t.Run("serialized output remains bounded", func(t *testing.T) {
+			t.Run("oversized diff metadata retains totals", func(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
 				rt.RepositoryStatusValue.Commits[0].Subject = strings.Repeat("huge\xffsubject", 10000)
@@ -1928,24 +1987,19 @@ func TestMCPTools(t *testing.T) {
 					rt.RepositoryStatusValue.DiffStat = append(rt.RepositoryStatusValue.DiffStat, runtime.GitFileStat{Path: p, LinesAdded: 1})
 				}
 				got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
-				if got.Result.IsError {
-					t.Fatal(got)
+				out := got.Result.StructuredContent
+				if got.Result.IsError || out.Diffstat == nil || !out.Diffstat.Truncated || got.Result.Meta[mcpTruncatedMetaKey] != true || out.Diffstat.Totals != (v1.MCPDiffTotals{FileChanges: 503, Additions: 507, Deletions: 1}) {
+					t.Fatalf("bounded diffstat = %+v", out.Diffstat)
 				}
-				txt := got.Result.StructuredContent.Result
-				if len(txt) > 32768 || !utf8.ValidString(txt) || !strings.Contains(txt, "[Diffstat output truncated]") || got.Result.Meta[mcpTruncatedMetaKey] != true {
-					t.Fatalf("bad bounded output: %d bytes", len(txt))
+				encoded, err := json.Marshal(out.Diffstat)
+				if err != nil || len(encoded) > 32768 {
+					t.Fatalf("bounded diffstat bytes=%d, err=%v", len(encoded), err)
 				}
-				if len(got.Result.Content) != 1 || got.Result.Content[0].Text != txt {
-					t.Fatal("text and structured output disagree")
-				}
-				if !strings.Contains(txt, `Repository "repo"`) || !strings.HasSuffix(txt, "[Diffstat output truncated]\n\nTotal (all compared commits and working trees): 503 file changes, 507 insertions(+), 1 deletions(-), 0 binary file changes.\n") {
-					t.Fatal("middle truncation must preserve the beginning and complete totals")
-				}
-				// The live read updates cached paths, whose invalid bytes must also
-				// stay bounded when later serialized without a diffstat request.
 				got = taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String())})
-				if got.Result.IsError || len(got.Result.StructuredContent.Result) > 32768 {
-					t.Fatalf("cached output: error=%v, bytes=%d", got.Result.IsError, len(got.Result.StructuredContent.Result))
+				out = got.Result.StructuredContent
+				encoded, err = json.Marshal(out.ChangedPaths)
+				if got.Result.IsError || err != nil || len(encoded) > 32768 || !out.ChangedPathsTruncated {
+					t.Fatalf("cached changed paths bytes=%d, truncated=%v, err=%v", len(encoded), out.ChangedPathsTruncated, err)
 				}
 			})
 			for _, name := range []string{"owner", "self"} {

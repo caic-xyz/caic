@@ -475,7 +475,7 @@ func TestMCPToolResultResponse(t *testing.T) {
 		if got, want := string(response.StructuredContent), `{"result":"created"}`; got != want {
 			t.Errorf("StructuredContent = %s, want %s", got, want)
 		}
-		if got, want := response.Content[0].Text, string(response.StructuredContent); got != want {
+		if got, want := response.Content[0].Text, "created"; got != want {
 			t.Errorf("content text = %q, want %q", got, want)
 		}
 	})

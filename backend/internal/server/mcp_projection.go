@@ -1,4 +1,4 @@
-// Shared MCP task/repository projections, caller-local timestamps, pagination, and bounded output.
+// Shared MCP task/repository projections, structured details, caller-local timestamps, pagination, and field budgets.
 
 package server
 
@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -130,14 +131,7 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 		message = task.Error
 	default:
 	}
-	model := task.ReportedModel
-	if model == "" {
-		model = task.RequestedModel
-	}
-	effort := task.ReportedEffort
-	if effort == "" {
-		effort = task.RequestedEffort
-	}
+	model, effort := taskMCPModelAndEffort(task)
 	return mcpTaskSummary{
 		HasPendingInput: task.PendingInput != nil,
 		TaskNumber:      number,
@@ -158,6 +152,241 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 		CostUSD:         task.CostUSD,
 		CostKnown:       task.CostKnown,
 	}
+}
+
+// taskMCPDetail projects independently bounded fields without sharing mutable task data.
+func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
+	model, effort := taskMCPModelAndEffort(task)
+	out := v1.MCPTaskDetail{
+		TaskNumber: number, TaskID: task.ID.String(), State: task.State,
+		Harness: task.Harness, DurationSeconds: task.Duration, CostUSD: task.CostUSD,
+		CostKnown:    task.CostKnown,
+		ChangedFiles: len(task.DiffStat), ChangedPaths: []string{},
+	}
+	for _, field := range []mcpDetailTextField{
+		{"title", taskTitle(task), &out.Title, maxMCPTaskTitle},
+		{"model", model, &out.Model, maxTaskSummaryModel},
+		{"effort", effort, &out.Effort, maxTaskSummaryEffort},
+		{"runtimeName", task.Runtime.RuntimeName, &out.RuntimeName, maxTaskSummaryRuntime},
+		{"taskResult", task.Result, &out.TaskResult, mcpTextOutputMaxBytes},
+		{"error", task.Error, &out.Error, mcpTextOutputMaxBytes},
+	} {
+		value, cut, err := boundedMCPDetailText(field.src, field.limit)
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		*field.dst = value
+		if cut {
+			out.TruncatedFields = append(out.TruncatedFields, field.name)
+		}
+	}
+	budget := mcpJSONFieldBudget{remaining: mcpTextOutputMaxBytes - 2} // Empty array brackets.
+	for _, file := range task.DiffStat {
+		if len(out.ChangedPaths) == maxTaskDetailPaths || len(file.Path) > budget.remaining {
+			out.ChangedPathsTruncated = true
+			break
+		}
+		path := strings.ToValidUTF8(file.Path, "\ufffd")
+		ok, err := budget.take(path, len(out.ChangedPaths), len(path))
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		if !ok {
+			out.ChangedPathsTruncated = true
+			break
+		}
+		out.ChangedPaths = append(out.ChangedPaths, path)
+	}
+	if p := task.PendingInput; p != nil {
+		pending := &v1.MCPPendingInput{
+			ID: p.ID.String(), State: v1.MCPPendingInputQueued,
+			OriginalTextBytes: len(p.Prompt.Text), ImageCount: len(p.Prompt.Images),
+		}
+		if p.Delivered {
+			pending.State = v1.MCPPendingInputDelivered
+		} else if p.Delivering {
+			pending.State = v1.MCPPendingInputDelivering
+		}
+		var err error
+		pending.Text, pending.TextTruncated, err = boundedMCPDetailText(p.Prompt.Text, mcpTextOutputMaxBytes)
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		pending.Error, pending.ErrorTruncated, err = boundedMCPDetailText(p.Error, 4<<10)
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		out.PendingInput = pending
+	}
+	out.Result = fmt.Sprintf("Task %s: %s\nState: %s", out.TaskID, out.Title, out.State)
+	if number > 0 {
+		out.Result = fmt.Sprintf("Task #%d: %s\nState: %s", number, out.Title, out.State)
+	}
+	if out.PendingInput != nil {
+		out.Result += "\nPending input: " + string(out.PendingInput.State)
+	}
+	slices.Sort(out.TruncatedFields)
+	return out, nil
+}
+
+type mcpDetailTextField struct {
+	name  string
+	src   string
+	dst   *string
+	limit int
+}
+
+func taskMCPModelAndEffort(task *v1.Task) (model, effort string) {
+	model, effort = task.ReportedModel, task.ReportedEffort
+	if model == "" {
+		model = task.RequestedModel
+	}
+	if effort == "" {
+		effort = task.RequestedEffort
+	}
+	return model, effort
+}
+
+// boundedMCPDetailText limits the JSON-encoded string, including escaping and quotes.
+func boundedMCPDetailText(text string, limit int) (value string, truncated bool, err error) {
+	valid := strings.ToValidUTF8(truncateUTF8(text, limit-2), "\ufffd")
+	candidate := truncateUTF8(valid, limit-2)
+	encoded, err := json.Marshal(candidate)
+	if err != nil {
+		return "", false, err
+	}
+	if len(encoded) <= limit {
+		return candidate, candidate != text, nil
+	}
+	lo, hi := 0, len(candidate)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		end := mid
+		for end > 0 && end < len(candidate) && !utf8.RuneStart(candidate[end]) {
+			end--
+		}
+		encoded, err = json.Marshal(candidate[:end] + "…")
+		if err != nil {
+			return "", false, err
+		}
+		if len(encoded) <= limit {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	for lo > 0 && lo < len(candidate) && !utf8.RuneStart(candidate[lo]) {
+		lo--
+	}
+	return candidate[:lo] + "…", true, nil
+}
+
+// mcpJSONFieldBudget counts additions to JSON arrays, including separator bytes.
+type mcpJSONFieldBudget struct {
+	remaining int
+}
+
+func (b *mcpJSONFieldBudget) take(value any, count, textBytes int) (bool, error) {
+	// JSON cannot encode strings in fewer bytes than their raw contents.
+	if textBytes > b.remaining {
+		return false, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	size := len(encoded)
+	if count > 0 {
+		size++
+	}
+	if size > b.remaining {
+		return false, nil
+	}
+	b.remaining -= size
+	return true, nil
+}
+
+// taskMCPDiffstat limits serialized diff detail independently from other task fields.
+// Complete totals are computed before any rows are omitted.
+func taskMCPDiffstat(idx *v1.TaskDiffIndexResp) (*v1.MCPTaskDiffstat, error) {
+	out := &v1.MCPTaskDiffstat{Repositories: []v1.DiffIndexRepository{}}
+	for _, repo := range idx.Repositories {
+		for _, commit := range repo.Commits {
+			for _, file := range commit.Stat {
+				out.Totals.FileChanges++
+				out.Totals.Additions += file.LinesAdded
+				out.Totals.Deletions += file.LinesDeleted
+				if file.OldSize >= 0 || file.NewSize >= 0 {
+					out.Totals.BinaryFiles++
+				}
+			}
+		}
+		for _, file := range repo.Uncommitted {
+			out.Totals.FileChanges++
+			out.Totals.Additions += file.LinesAdded
+			out.Totals.Deletions += file.LinesDeleted
+			if file.OldSize >= 0 || file.NewSize >= 0 {
+				out.Totals.BinaryFiles++
+			}
+		}
+	}
+	base, err := json.Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	budget := mcpJSONFieldBudget{remaining: mcpTextOutputMaxBytes - len(base)}
+repositories:
+	for _, repo := range idx.Repositories {
+		r := repo
+		r.Commits, r.Uncommitted = []v1.DiffIndexCommit{}, []v1.DiffIndexFileStatus{}
+		ok, err := budget.take(r, len(out.Repositories), len(r.Name)+len(r.Branch)+len(r.Upstream))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			out.Truncated = true
+			break
+		}
+		out.Repositories = append(out.Repositories, r)
+		dst := &out.Repositories[len(out.Repositories)-1]
+		for _, commit := range repo.Commits {
+			c := commit
+			c.Stat = []v1.DiffIndexFileStat{}
+			ok, err := budget.take(c, len(dst.Commits), len(c.SHA)+len(c.Subject)+len(c.Decorations)+len(c.AuthoredDate))
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				out.Truncated = true
+				break repositories
+			}
+			dst.Commits = append(dst.Commits, c)
+			for _, file := range commit.Stat {
+				stat := &dst.Commits[len(dst.Commits)-1].Stat
+				ok, err := budget.take(file, len(*stat), len(file.Path))
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					out.Truncated = true
+					break repositories
+				}
+				*stat = append(*stat, file)
+			}
+		}
+		for _, file := range repo.Uncommitted {
+			ok, err := budget.take(file, len(dst.Uncommitted), len(file.Path)+len(file.OriginalPath)+len(file.IndexStatus)+len(file.WorktreeStatus))
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				out.Truncated = true
+				break repositories
+			}
+			dst.Uncommitted = append(dst.Uncommitted, file)
+		}
+	}
+	return out, nil
 }
 
 // taskTitle returns the display title, falling back to the stable task ID.

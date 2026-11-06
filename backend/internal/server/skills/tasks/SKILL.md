@@ -13,12 +13,13 @@ isolated container on its own Git branch.
 
 Use `tasks_list` to find a task and `task_get_detail` when the user asks about
 its recent activity, output, or state. To inspect Git changes, call
-`task_get_detail` with `include_diffstat: true`. The summary includes each
+`task_get_detail` with `include_diffstat: true`. Its structured `diffstat` includes each
 repository's branch, upstream, ahead/behind counts, local and missing upstream
-commits, and committed and uncommitted file diffstats. Binary files are marked.
-Output is limited to 32 KiB. Truncation replaces omitted detail rows with
-[Diffstat output truncated] and keeps complete totals at the end. Use your
-stable task ID to inspect your own workspace.
+commits, and committed and uncommitted file diffstats, including binary sizes.
+Check field truncation indicators before treating previews as complete;
+`diffstat.totals` includes omitted rows. `pendingInput` exposes the queued
+prompt's ID, text, and delivery status. The text `result` is only a short summary.
+Use your stable task ID to inspect your own workspace.
 
 Use `agent_last_message` to check what a
 waiting or asking agent needs. Send follow-up work with `task_send_message`,

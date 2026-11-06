@@ -27,6 +27,119 @@ import (
 	"github.com/maruel/ksid"
 )
 
+func TestTaskMCPDetail(t *testing.T) {
+	t.Parallel()
+	t.Run("cost provenance", func(t *testing.T) {
+		t.Parallel()
+		for _, known := range []bool{false, true} {
+			out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), CostKnown: known})
+			if err != nil || out.CostKnown != known || out.CostUSD != 0 {
+				t.Fatalf("zero cost with known=%v: detail=%+v, err=%v", known, out, err)
+			}
+		}
+	})
+	t.Run("independent text fields", func(t *testing.T) {
+		t.Parallel()
+		task := v1.Task{
+			ID: ksid.NewID(), Title: strings.Repeat("title", 1000), State: v1.TaskStateFailed,
+			Harness: v1.HarnessCodex, ReportedModel: strings.Repeat("model", 1000), RequestedModel: "unused",
+			ReportedEffort: "high", RequestedEffort: "low", Runtime: v1.RuntimeInstance{RuntimeName: "docker"},
+			Result: strings.Repeat("result \"\n", 10000), Error: strings.Repeat("error \"\n", 10000),
+		}
+		out, err := taskMCPDetail(3, &task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.TaskNumber != 3 || out.TaskID != task.ID.String() || out.State != v1.TaskStateFailed || out.Harness != v1.HarnessCodex || out.Effort != "high" || out.RuntimeName != "docker" {
+			t.Fatalf("task metadata = %+v", out)
+		}
+		if !slices.Equal(out.TruncatedFields, []string{"error", "model", "taskResult", "title"}) {
+			t.Fatalf("truncated fields = %v", out.TruncatedFields)
+		}
+		for _, text := range []string{out.TaskResult, out.Error} {
+			encoded, err := json.Marshal(text)
+			if err != nil || len(encoded) > 32768 || len(encoded) < 30000 || !utf8.ValidString(text) {
+				t.Fatalf("text field bytes=%d, err=%v", len(encoded), err)
+			}
+		}
+		encoded, err := json.Marshal(out)
+		if err != nil || len(encoded) < 60000 {
+			t.Fatalf("fields unexpectedly share a budget: bytes=%d, err=%v", len(encoded), err)
+		}
+	})
+	for _, state := range []v1.MCPPendingInputState{v1.MCPPendingInputDelivered, v1.MCPPendingInputDelivering, v1.MCPPendingInputQueued} {
+		t.Run("pending/"+string(state), func(t *testing.T) {
+			t.Parallel()
+			pending := &v1.PendingInput{
+				ID: ksid.NewID(), Prompt: v1.Prompt{Text: "exact text \n", Images: []v1.InputImage{{URL: "cid:image-0"}}},
+				Error:     strings.Repeat("error \"\n", 2000),
+				Delivered: state == v1.MCPPendingInputDelivered, Delivering: state == v1.MCPPendingInputDelivering,
+			}
+			out, err := taskMCPDetail(0, &v1.Task{ID: ksid.NewID(), PendingInput: pending})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := out.PendingInput
+			if p == nil || p.ID != pending.ID.String() || p.State != state || p.Text != pending.Prompt.Text || p.OriginalTextBytes != len(pending.Prompt.Text) || p.TextTruncated || p.ImageCount != 1 || !p.ErrorTruncated {
+				t.Fatalf("pending input = %+v", p)
+			}
+			encoded, err := json.Marshal(p.Error)
+			if err != nil || len(encoded) > 4096 {
+				t.Fatalf("pending error bytes=%d, err=%v", len(encoded), err)
+			}
+		})
+	}
+}
+
+func BenchmarkTaskMCPDetail(b *testing.B) {
+	for _, size := range []int{64 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("pending_%dKiB", size>>10), func(b *testing.B) {
+			task := v1.Task{
+				ID: ksid.NewID(), Title: "large pending prompt", State: v1.TaskStateRunning, Harness: v1.HarnessCodex,
+				PendingInput: &v1.PendingInput{ID: ksid.NewID(), Prompt: v1.Prompt{Text: strings.Repeat("a", size)}},
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				out, err := taskMCPDetail(1, &task)
+				if err != nil || out.PendingInput == nil || !out.PendingInput.TextTruncated {
+					b.Fatalf("projection = %+v, err=%v", out, err)
+				}
+			}
+		})
+	}
+}
+
+func TestBoundedMCPDetailText(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		text      string
+		limit     int
+		truncated bool
+	}{
+		{name: "short", text: "exact text \n", limit: 64},
+		{name: "ascii", text: strings.Repeat("a", 100), limit: 32, truncated: true},
+		{name: "multibyte", text: strings.Repeat("\u754c", 100), limit: 32, truncated: true},
+		{name: "JSON escaping", text: strings.Repeat("\"\n<>&\u2028", 100), limit: 128, truncated: true},
+		{name: "invalid UTF-8", text: strings.Repeat("\xffa", 100), limit: 64, truncated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			text, cut, err := boundedMCPDetailText(tc.text, tc.limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(text)
+			if err != nil || len(encoded) > tc.limit || !utf8.ValidString(text) || cut != tc.truncated {
+				t.Fatalf("bounded text = %q, cut=%v, bytes=%d, err=%v", text, cut, len(encoded), err)
+			}
+			if !tc.truncated && text != tc.text {
+				t.Fatalf("short text changed: %q", text)
+			}
+		})
+	}
+}
+
 func TestMCPProjection(t *testing.T) {
 	t.Parallel()
 	t.Run("repository pagination survives earlier insertion", func(t *testing.T) {

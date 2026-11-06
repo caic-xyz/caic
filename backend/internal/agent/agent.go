@@ -469,14 +469,25 @@ func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest
 }
 
 // MCPToolResultResponse translates a registry result to the standard MCP tool
-// response shape expected by the local relay clients.
+// response shape expected by the local relay clients, using a result summary
+// as text content when the structured result supplies one.
 func MCPToolResultResponse(result mcp.RawToolResult) (MCPToolResponse, error) {
 	data, err := json.Marshal(result.Structured)
 	if err != nil {
 		return MCPToolResponse{}, err
 	}
+	text := string(data)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err == nil {
+		if summary, ok := fields["result"]; ok {
+			var value *string
+			if err := json.Unmarshal(summary, &value); err == nil && value != nil {
+				text = *value
+			}
+		}
+	}
 	response := MCPToolResponse{
-		Content: []MCPTextContent{{Type: "text", Text: string(data)}},
+		Content: []MCPTextContent{{Type: "text", Text: text}},
 		IsError: result.IsError,
 	}
 	if !result.IsError {

@@ -1,4 +1,4 @@
-// MCP tool catalogs, schemas, execution, bounded task details, pending prompts, and message delivery modes.
+// MCP tool catalogs, schemas, execution, structured task details, pending prompts, and message delivery modes.
 
 package server
 
@@ -126,7 +126,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get task status and pending prompt text/delivery status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Total output, including pending prompt text, is limited to 32 KiB with an explicit truncation notice.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get structured task status and pending prompt identity, text, and delivery status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Fields have independent limits and explicit truncation indicators.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to an agent by task number. Choose steer for immediate delivery, append to preserve and extend pending input, or replace to overwrite the entire pending prompt. Queued input is delivered when waiting; append and replace are rejected once delivery starts.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's existing commits to GitHub. Push to task branch (default) or directly to main without rewriting commits.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
@@ -452,11 +452,11 @@ func (m *mcpTools) firstHarness(ctx context.Context) (v1.Harness, error) {
 	return (*harnesses)[0].Name, nil
 }
 
-func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolRequest[mcpTaskGetDetailArgs]) mcp.ToolResult[mcp.TextOutput] {
+func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolRequest[mcpTaskGetDetailArgs]) mcp.ToolResult[v1.MCPTaskDetail] {
 	keys, _ := taskKeys(ctx, m.taskSvc)
 	id, number, err := call.Arguments.Task.Decode(len(keys))
 	if err != nil {
-		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()})
+		return domainToolError[v1.MCPTaskDetail](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()})
 	}
 	var t v1.Task
 	if number != 0 {
@@ -465,73 +465,17 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 		t, err = m.taskByID(ctx, id)
 	}
 	if err != nil {
-		return domainToolError[mcp.TextOutput](err)
+		return domainToolError[v1.MCPTaskDetail](err)
 	}
-	title := fmt.Sprintf("## Task #%d: %s", number, taskTitle(&t))
-	if number == 0 {
-		title = fmt.Sprintf("## Task %s: %s", t.ID, taskTitle(&t))
-	}
-	cost := "unknown"
-	if t.CostKnown {
-		cost = formatCost(t.CostUSD)
-	}
-	lines := []string{
-		title,
-		"",
-		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), cost),
-	}
-	if p := t.PendingInput; p != nil {
-		status := "queued; append preserves existing text, replace overwrites the entire pending prompt"
-		switch {
-		case p.Delivered:
-			status = "already delivered; do not resend"
-		case p.Delivering:
-			status = "being delivered; cannot append or replace"
-		}
-		lines = append(lines, "Pending prompt: "+status)
-		if p.Error != "" {
-			lines = append(lines, "Pending prompt error: "+truncateUTF8(p.Error, 1024))
-		}
-	} else {
-		lines = append(lines, "Pending prompt: none")
-	}
-	if t.Runtime.RuntimeName != "" {
-		lines = append(lines, "Runtime: "+t.Runtime.RuntimeName)
-	}
-	if t.State == v1.TaskStatePurged && t.Result != "" {
-		lines = append(lines, "**Result:** "+t.Result)
-	}
-	if t.State == v1.TaskStateStopped {
-		lines = append(lines, "**Stopped:** container stopped")
-	}
-	if t.State == v1.TaskStateCrashed && t.Error != "" {
-		lines = append(lines, "**Crashed:** "+t.Error)
-	}
-	if t.State == v1.TaskStateFailed && t.Error != "" {
-		lines = append(lines, "**Error:** "+t.Error)
-	}
-	if len(t.DiffStat) > 0 {
-		pathCount := min(len(t.DiffStat), maxTaskDetailPaths)
-		paths := make([]string, pathCount)
-		for i, d := range t.DiffStat[:pathCount] {
-			paths[i] = d.Path
-		}
-		changed := "**Changed:** " + strings.Join(paths, ", ")
-		if omitted := len(t.DiffStat) - pathCount; omitted > 0 {
-			changed += fmt.Sprintf(" … and %d more files", omitted)
-		}
-		lines = append(lines, changed)
+	out, err := taskMCPDetail(number, &t)
+	if err != nil {
+		return domainToolError[v1.MCPTaskDetail](err)
 	}
 	// Repository probes happen only when explicitly requested.
-	txt := strings.ToValidUTF8(strings.TrimSpace(strings.Join(lines, "\n")), "\ufffd")
-	if p := t.PendingInput; p != nil {
-		txt += "\nPending prompt text: " + p.Prompt.Text
-	}
-	var truncated bool
 	if call.Arguments.IncludeDiffstat {
 		ent, ok := inspectableTaskEntry(ctx, m.taskSvc, t.ID)
 		if !ok {
-			return domainToolError[mcp.TextOutput](taskNotFoundError())
+			return domainToolError[v1.MCPTaskDetail](taskNotFoundError())
 		}
 		idx, err := m.taskSvc.taskDiffIndex(ctx, ent)
 		if err != nil {
@@ -540,23 +484,21 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 				msg, code = e.Error(), e.Code
 			}
 			msg, cut := truncateMCPText(strings.ToValidUTF8(msg, "\ufffd"))
-			res := mcp.ToolErrorWithMeta[mcp.TextOutput](msg, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(code)})
+			res := mcp.ToolErrorWithMeta[v1.MCPTaskDetail](msg, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(code)})
 			if cut {
 				res.Meta[mcpTruncatedMetaKey] = true
 			}
 			return res
 		}
-		d := mcpTaskDiffstat{}
-		d.out.WriteString(truncateUTF8(txt, 4<<10))
-		d.truncated = d.out.Len() != len(txt)
-		d.out.WriteString("\n\nDiffstat:\n")
-		d.append(idx)
-		txt, truncated = d.out.String(), d.truncated
-	} else {
-		txt, truncated = truncateMCPText(txt)
+		out.Diffstat, err = taskMCPDiffstat(idx)
+		if err != nil {
+			return domainToolError[v1.MCPTaskDetail](err)
+		}
 	}
-	res := mcp.TextToolResult(txt)
-	if truncated {
+	res := mcp.TypedToolResult(out)
+	if len(out.TruncatedFields) > 0 || out.ChangedPathsTruncated ||
+		(out.PendingInput != nil && (out.PendingInput.TextTruncated || out.PendingInput.ErrorTruncated)) ||
+		(out.Diffstat != nil && out.Diffstat.Truncated) {
 		res.Meta = mcp.MetaObject{mcpTruncatedMetaKey: true}
 	}
 	return res
@@ -1290,129 +1232,6 @@ func (id taskID) Decode(maxTaskNumber int) (ksid.ID, int, error) {
 type mcpTaskGetDetailArgs struct {
 	Task            taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list (for example 1 or #1) or stable task ID; use your stable task ID to inspect your own workspace"`
 	IncludeDiffstat bool   `json:"include_diffstat,omitempty" jsonschema_description:"Include committed and uncommitted file diffstats, branch, upstream, and ahead/behind counts"`
-}
-
-// mcpTaskDiffstat renders repository metadata and file counts within the MCP text budget.
-type mcpTaskDiffstat struct {
-	out       strings.Builder
-	limit     int
-	omitLine  bool
-	truncated bool
-}
-
-func (d *mcpTaskDiffstat) append(idx *v1.TaskDiffIndexResp) {
-	// Count the complete comparison before limiting the rendered detail rows.
-	var files, added, deleted, binaryFiles int
-	for i := range idx.Repositories {
-		r := &idx.Repositories[i]
-		for j := range r.Commits {
-			for _, f := range r.Commits[j].Stat {
-				files++
-				added += f.LinesAdded
-				deleted += f.LinesDeleted
-				if f.OldSize >= 0 || f.NewSize >= 0 {
-					binaryFiles++
-				}
-			}
-		}
-		for _, f := range r.Uncommitted {
-			files++
-			added += f.LinesAdded
-			deleted += f.LinesDeleted
-			if f.OldSize >= 0 || f.NewSize >= 0 {
-				binaryFiles++
-			}
-		}
-	}
-	footer := fmt.Sprintf("\nTotal (all compared commits and working trees): %d file changes, %d insertions(+), %d deletions(-), %d binary file changes.\n", files, added, deleted, binaryFiles)
-	const notice = "[Diffstat output truncated]\n"
-	d.limit = mcpTextOutputMaxBytes - len(footer) - len(notice)
-
-repositories:
-	for i := range idx.Repositories {
-		r := &idx.Repositories[i]
-		if !d.write("\nRepository %s: branch %s, upstream %s, ahead %d, behind %d\n", d.field(r.Name), d.field(r.Branch), d.field(r.Upstream), r.Ahead, r.Behind) {
-			break repositories
-		}
-		for j := range r.Commits {
-			c := &r.Commits[j]
-			label := "Local commit"
-			if c.Behind {
-				label = "Missing upstream commit"
-			}
-			if !d.write("%s %s: %s\n", label, d.field(c.SHA), d.field(c.Subject)) {
-				break repositories
-			}
-			for _, f := range c.Stat {
-				if !d.file(f.Path, "", f.LinesAdded, f.LinesDeleted, f.OldSize, f.NewSize) {
-					break repositories
-				}
-			}
-		}
-		if !d.write("Uncommitted files: %d\n", len(r.Uncommitted)) {
-			break repositories
-		}
-		for _, f := range r.Uncommitted {
-			if !d.file(f.Path, f.OriginalPath, f.LinesAdded, f.LinesDeleted, f.OldSize, f.NewSize) {
-				break repositories
-			}
-		}
-	}
-	if d.truncated {
-		d.out.WriteString(notice)
-	}
-	d.out.WriteString(footer)
-}
-
-func (d *mcpTaskDiffstat) file(p, prev string, add, del int, old, size int64) bool {
-	name := d.field(p)
-	if prev != "" {
-		name = d.field(prev) + " -> " + name
-	}
-	if old >= 0 || size >= 0 {
-		return d.write("  %s: binary (%d -> %d bytes)\n", name, old, size)
-	}
-	return d.write("  %s: +%d -%d\n", name, add, del)
-}
-
-// field quotes metadata and marks rows with oversized fields for omission.
-func (d *mcpTaskDiffstat) field(s string) string {
-	if len(s) > d.limit-d.out.Len() {
-		d.omitLine = true
-		return ""
-	}
-	s = strings.ToValidUTF8(s, "\ufffd")
-	return strconv.Quote(s)
-}
-
-func (d *mcpTaskDiffstat) write(format string, args ...any) bool {
-	s := fmt.Sprintf(format, args...)
-	if d.omitLine || d.out.Len()+len(s) > d.limit {
-		d.truncated = true
-		return false
-	}
-	d.out.WriteString(s)
-	return true
-}
-
-func formatElapsed(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-func formatCost(cost float64) string {
-	if cost == 0 {
-		return "$0"
-	}
-	if cost < 0.01 {
-		return fmt.Sprintf("$%.4f", cost)
-	}
-	return formatUSD(cost)
 }
 
 func formatUSD(v float64) string {
