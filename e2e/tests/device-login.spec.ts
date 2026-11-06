@@ -195,14 +195,22 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
     }),
   );
   await writeFile(path.join(extension, "background.js"), "chrome.runtime.onInstalled.addListener(() => {});");
-  const context = await browser.browserType().launchPersistentContext(testInfo.outputPath("browser-profile"), {
-    channel: "chromium",
+  // An empty profile path lets Playwright create and clean up a temporary profile.
+  const context = await browser.browserType().launchPersistentContext("", {
+    channel: "chrome",
     headless: true,
     baseURL: origin,
     viewport: { width: 1280, height: 960 },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    args: ["--enable-unsafe-extension-debugging"],
+    ignoreDefaultArgs: ["--disable-extensions"],
   });
   try {
+    // Chrome loads test extensions through DevTools rather than startup flags.
+    const persistentBrowser = context.browser();
+    if (!persistentBrowser) throw new Error("Missing persistent browser");
+    const cdp = await persistentBrowser.newBrowserCDPSession();
+    await cdp.send("Extensions.loadUnpacked", { path: extension });
+    await cdp.detach();
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const page = context.pages()[0];
     if (!page) throw new Error("Missing browser page");

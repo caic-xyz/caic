@@ -32,12 +32,14 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
   );
   await writeFile(path.join(extension, "background.js"), "chrome.runtime.onInstalled.addListener(() => {});");
 
-  const context = await chromium.launchPersistentContext(testInfo.outputPath("browser-profile"), {
-    channel: "chromium",
+  // An empty profile path lets Playwright create and clean up a temporary profile.
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chrome",
     headless: true,
     baseURL,
     viewport: { width: 960, height: 1200 },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    args: ["--enable-unsafe-extension-debugging"],
+    ignoreDefaultArgs: ["--disable-extensions"],
   });
   // Other workers create and update tasks on the shared backend. Keep this
   // layout fixture fixed while native zoom and scrolling are being asserted.
@@ -51,6 +53,12 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
     response.write(`data: ${JSON.stringify(snapshot)}\n\n`);
   });
   try {
+    // Chrome loads test extensions through DevTools rather than startup flags.
+    const browser = context.browser();
+    ok(browser);
+    const cdp = await browser.newBrowserCDPSession();
+    await cdp.send("Extensions.loadUnpacked", { path: extension });
+    await cdp.detach();
     await new Promise<void>((resolve) => events.listen(0, "127.0.0.1", resolve));
     const address = events.address();
     if (!address || typeof address === "string") throw new Error("Task event fixture did not start");
