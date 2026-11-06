@@ -296,6 +296,7 @@ export default function TaskList(props: TaskListProps) {
         costUSD={t().costUSD}
         duration={t().duration}
         numTurns={t().numTurns}
+        contextUsed={t().contextUsed}
         activeInputTokens={t().activeInputTokens}
         activeCacheReadTokens={t().activeCacheReadTokens}
         cumulativeInputTokens={t().cumulativeInputTokens}

@@ -3,6 +3,7 @@
 package apiconv
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -357,6 +358,33 @@ func TestTaskState(t *testing.T) {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("NativeContextOccupancy", func(t *testing.T) {
+		t.Parallel()
+		zero := 0
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+			&agent.UsageMessage{Usage: agent.Usage{InputTokens: 123, CacheReadInputTokens: 456}},
+			&agent.UsageMessage{ContextUsed: &zero},
+		}))
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ContextUsed == nil || *got.ContextUsed != 0 || got.ActiveInputTokens != 123 || got.ActiveCacheReadTokens != 456 {
+			t.Fatalf("context/usage = %+v", got)
+		}
+		encoded, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if string(fields["contextUsed"]) != "0" {
+			t.Fatalf("contextUsed = %s", fields["contextUsed"])
+		}
+	})
 	t.Run("CurrentPlanUsesCapturedSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})

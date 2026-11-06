@@ -1096,6 +1096,7 @@ Task is the JSON representation sent to the frontend.
 | `cacheTTLSeconds` | `int` | Effective cache TTL from last API call (seconds); 0 = unknown. |  |
 | `cacheExpiresAt` | `ISOTimestamp` | When the prompt cache expires. |  |
 | `stoppedDiskUsedBytes` | `int64` | Final writable-layer size retained by a stopped task, or -1 when unavailable. | yes |
+| `contextUsed` | `int` | Native context occupancy; absent when unknown; zero is a reported empty context. |  |
 | `contextWindowLimit` | `int` | Model context window limit (tokens). | yes |
 | `autoCompactTokenLimit` | `int` | Auto-compaction threshold (tokens), or zero if unknown. | yes |
 | `error` | `string` |  |  |
@@ -2059,7 +2060,7 @@ EventAsk is emitted when the agent asks the user a question.
 
 ### EventUsage
 
-EventUsage reports per-turn token usage.
+EventUsage reports token usage and independent native context occupancy.
 ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
 or reasoning summaries (Codex). Zero when the harness does not report it.
 
@@ -2071,6 +2072,8 @@ or reasoning summaries (Codex). Zero when the harness does not report it.
 | `cacheReadInputTokens` | `int` |  | yes |
 | `reasoningOutputTokens` | `int` |  |  |
 | `reportedModel` | `string` |  | yes |
+| `contextUsed` | `int` | Absent when native occupancy is unknown. |  |
+| `contextWindow` | `int` | Active model context capacity. |  |
 
 ### EventCost
 

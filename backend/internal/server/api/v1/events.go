@@ -198,7 +198,7 @@ type EventAsk struct {
 	Questions []AskQuestion `json:"questions"`
 }
 
-// EventUsage reports per-turn token usage.
+// EventUsage reports token usage and independent native context occupancy.
 // ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
 // or reasoning summaries (Codex). Zero when the harness does not report it.
 type EventUsage struct {
@@ -208,6 +208,8 @@ type EventUsage struct {
 	CacheReadInputTokens     int    `json:"cacheReadInputTokens"`
 	ReasoningOutputTokens    int    `json:"reasoningOutputTokens,omitempty"`
 	ReportedModel            string `json:"reportedModel"`
+	ContextUsed              *int   `json:"contextUsed,omitempty"`   // Absent when native occupancy is unknown.
+	ContextWindow            int    `json:"contextWindow,omitempty"` // Active model context capacity.
 }
 
 // EventResult is emitted when the task reaches a terminal state.

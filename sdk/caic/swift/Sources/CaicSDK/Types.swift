@@ -1223,6 +1223,8 @@ public struct Task: Codable {
     public let cacheExpiresAt: ISOTimestamp?
     /// Final writable-layer size retained by a stopped task, or -1 when unavailable.
     public let stoppedDiskUsedBytes: Int
+    /// Native context occupancy; absent when unknown; zero is a reported empty context.
+    public let contextUsed: Int?
     /// Model context window limit (tokens).
     public let contextWindowLimit: Int
     /// Auto-compaction threshold (tokens), or zero if unknown.
@@ -2041,7 +2043,7 @@ public struct EventAsk: Codable {
     public let questions: [AskQuestion]
 }
 
-/// EventUsage reports per-turn token usage.
+/// EventUsage reports token usage and independent native context occupancy.
 /// ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
 /// or reasoning summaries (Codex). Zero when the harness does not report it.
 public struct EventUsage: Codable {
@@ -2051,6 +2053,10 @@ public struct EventUsage: Codable {
     public let cacheReadInputTokens: Int
     public let reasoningOutputTokens: Int?
     public let reportedModel: String
+    /// Absent when native occupancy is unknown.
+    public let contextUsed: Int?
+    /// Active model context capacity.
+    public let contextWindow: Int?
 }
 
 /// EventCost is one completed turn's reported or API-equivalent estimated cost.

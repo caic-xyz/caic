@@ -239,7 +239,7 @@ export interface EventAsk {
 }
 
 /**
- * EventUsage reports per-turn token usage.
+ * EventUsage reports token usage and independent native context occupancy.
  * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
  * or reasoning summaries (Codex). Zero when the harness does not report it.
  */
@@ -250,6 +250,10 @@ export interface EventUsage {
   cacheReadInputTokens: number /* int */;
   reasoningOutputTokens?: number /* int */;
   reportedModel: string;
+  /** Absent when native occupancy is unknown. */
+  contextUsed?: number /* int */;
+  /** Active model context capacity. */
+  contextWindow?: number /* int */;
 }
 
 /** EventCost is one completed turn's reported or API-equivalent estimated cost. */
@@ -1426,6 +1430,8 @@ export interface Task {
   cacheExpiresAt?: ISOTimestamp;
   /** Final writable-layer size retained by a stopped task, or -1 when unavailable. */
   stoppedDiskUsedBytes: number /* int64 */;
+  /** Native context occupancy; absent when unknown; zero is a reported empty context. */
+  contextUsed?: number /* int */;
   /** Model context window limit (tokens). */
   contextWindowLimit: number /* int */;
   /** Auto-compaction threshold (tokens), or zero if unknown. */

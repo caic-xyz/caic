@@ -243,6 +243,8 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 				CacheReadInputTokens:     m.Usage.CacheReadInputTokens,
 				ReasoningOutputTokens:    m.Usage.ReasoningOutputTokens,
 				ReportedModel:            m.ReportedModel,
+				ContextUsed:              m.ContextUsed,
+				ContextWindow:            m.ContextWindow,
 			},
 		}}
 	case *agent.ResultMessage:

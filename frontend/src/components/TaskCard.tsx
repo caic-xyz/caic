@@ -51,6 +51,7 @@ export interface TaskCardProps {
   costUSD: number;
   duration: number;
   numTurns: number;
+  contextUsed?: number | null;
   activeInputTokens: number;
   activeCacheReadTokens: number;
   cumulativeInputTokens: number;
@@ -137,6 +138,7 @@ export default function TaskCard(props: TaskCardProps) {
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
+  const contextUsed = () => props.contextUsed ?? props.activeInputTokens + props.activeCacheReadTokens;
   const hasRepositoryRuntime = () => Boolean(props.runtime?.id) && props.state !== "purged";
   let cardRef: HTMLDivElement | undefined;
   let titleRef: HTMLElement | undefined;
@@ -551,22 +553,22 @@ export default function TaskCard(props: TaskCardProps) {
                   </Tooltip>
                 </>
               </Show>
-              <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
+              <Show when={typeof props.contextUsed === "number" || contextUsed() > 0}>
                 {" · "}
                 <Tooltip
-                  text={`${props.autoCompactTokenLimit > 0 ? `Configured auto-compact threshold: ${props.autoCompactTokenLimit.toLocaleString()} total active tokens. The effective limit may be lower; displayed input is approximate. ` : ""}${props.contextWindowLimit > 0 ? `Context window: ${formatTokens(props.contextWindowLimit)}. ` : ""}Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
+                  text={`${typeof props.contextUsed === "number" ? `Reported context usage: ${formatTokens(props.contextUsed)}. ` : "Displayed input is approximate. "}${props.autoCompactTokenLimit > 0 ? `Configured auto-compact threshold: ${props.autoCompactTokenLimit.toLocaleString()} total active tokens. The effective limit may be lower. ` : ""}${props.contextWindowLimit > 0 ? `Context window: ${formatTokens(props.contextWindowLimit)}. ` : ""}Accumulated API tokens: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
                 >
                   <span
                     class={styles.tokens}
                     data-testid="task-card-tokens"
                     style={{
                       "--tokens-color": tokenColor(
-                        props.activeInputTokens + props.activeCacheReadTokens,
+                        contextUsed(),
                         props.autoCompactTokenLimit || props.contextWindowLimit,
                       ),
                     }}
                   >
-                    {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}
+                    {formatTokens(contextUsed())}
                     <Show when={props.autoCompactTokenLimit || props.contextWindowLimit}>
                       /{formatTokens(props.autoCompactTokenLimit || props.contextWindowLimit)}
                     </Show>

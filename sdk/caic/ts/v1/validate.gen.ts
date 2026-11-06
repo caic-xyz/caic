@@ -207,6 +207,7 @@ export function validateTask(raw: ValidatorInput): Task {
     cacheTTLSeconds: (obj["cacheTTLSeconds"] === undefined || obj["cacheTTLSeconds"] === null ? undefined : asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds")),
     cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
     stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
+    contextUsed: (obj["contextUsed"] === undefined || obj["contextUsed"] === null ? undefined : asNumber(obj["contextUsed"], "Task.contextUsed")),
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
     autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
     error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
@@ -517,6 +518,8 @@ export function validateEventUsage(raw: ValidatorInput): EventUsage {
     cacheReadInputTokens: asNumber(obj["cacheReadInputTokens"], "EventUsage.cacheReadInputTokens"),
     reasoningOutputTokens: (obj["reasoningOutputTokens"] === undefined || obj["reasoningOutputTokens"] === null ? undefined : asNumber(obj["reasoningOutputTokens"], "EventUsage.reasoningOutputTokens")),
     reportedModel: asString(obj["reportedModel"], "EventUsage.reportedModel"),
+    contextUsed: (obj["contextUsed"] === undefined || obj["contextUsed"] === null ? undefined : asNumber(obj["contextUsed"], "EventUsage.contextUsed")),
+    contextWindow: (obj["contextWindow"] === undefined || obj["contextWindow"] === null ? undefined : asNumber(obj["contextWindow"], "EventUsage.contextWindow")),
   };
 }
 

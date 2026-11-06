@@ -1832,6 +1832,8 @@ data class Task(
     val cacheExpiresAt: Instant? = null,
     /** Final writable-layer size retained by a stopped task, or -1 when unavailable. */
     val stoppedDiskUsedBytes: Long,
+    /** Native context occupancy; absent when unknown; zero is a reported empty context. */
+    val contextUsed: Int? = null,
     /** Model context window limit (tokens). */
     val contextWindowLimit: Int,
     /** Auto-compaction threshold (tokens), or zero if unknown. */
@@ -2705,7 +2707,7 @@ data class EventAsk(
 )
 
 /**
- * EventUsage reports per-turn token usage.
+ * EventUsage reports token usage and independent native context occupancy.
  * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
  * or reasoning summaries (Codex). Zero when the harness does not report it.
  */
@@ -2717,6 +2719,10 @@ data class EventUsage(
     val cacheReadInputTokens: Int,
     val reasoningOutputTokens: Int? = null,
     val reportedModel: String,
+    /** Absent when native occupancy is unknown. */
+    val contextUsed: Int? = null,
+    /** Active model context capacity. */
+    val contextWindow: Int? = null,
 )
 
 /** EventCost is one completed turn's reported or API-equivalent estimated cost. */

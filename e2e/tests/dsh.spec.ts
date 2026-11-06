@@ -33,3 +33,39 @@ test("dsh task selection and follow-up survive browser reload", async ({ page, a
   await page.getByRole("button", { name: /1 message/ }).click();
   await expect(page.getByTestId("task-message-area")).toContainText("Lifecycle completed");
 });
+
+test("native context occupancy stays independent of billed input and preserves zero", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  const repos = await api.listRepos();
+  const repo = repos[0];
+  expect(repo).toBeTruthy();
+  const task = await api.createTask({
+    initialPrompt: { text: uniquePrompt("FAKE_CONTEXT_OCCUPANCY") },
+    repos: [{ name: repo!.path }],
+    harness: "dsh",
+  });
+  const initial = await waitForTaskState(api, task.id, "waiting");
+  expect(initial.contextUsed).toBe(45_000);
+  expect(initial.activeInputTokens).toBe(123);
+  expect(initial.activeCacheReadTokens).toBe(456);
+  await page.goto(`/task/@${task.id}`);
+  const meter = page.locator(`[data-task-id="${task.id}"]`).getByTestId("task-card-tokens");
+  await expect(meter).toHaveText("45kt/200kt");
+  await api.sendInput(task.id, { prompt: { text: "FAKE_CONTEXT_OCCUPANCY ZERO" } });
+  await expect(meter).toHaveText("0t/200kt");
+  const empty = await waitForTaskState(api, task.id, "waiting");
+  expect(empty.contextUsed).toBe(0);
+  expect(empty.activeInputTokens).toBe(123);
+  expect(empty.activeCacheReadTokens).toBe(456);
+  await page.reload();
+  await expect(meter).toHaveText("0t/200kt");
+  await api.sendInput(task.id, { prompt: { text: "FAKE_CONTEXT_OCCUPANCY RESET" } });
+  await expect(meter).toHaveText("579t/200kt");
+  const reset = await waitForTaskState(api, task.id, "waiting");
+  expect(reset.contextUsed).toBeUndefined();
+  await page.reload();
+  await expect(meter).toHaveText("579t/200kt");
+});

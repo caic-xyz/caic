@@ -133,6 +133,7 @@ type Task struct {
 	stateSeq               uint64            // Monotonic sequence of recorded state transitions.
 	stateTransitions       []StateTransition // Bounded journal of recent state transitions.
 	sessionMetadata        agent.SessionMetadata
+	contextUsed            *int                            // Latest native occupancy; nil means unknown.
 	reportedContextWindow  int                             // Context window size reported by the agent (0 = unknown).
 	planFile               string                          // Path to plan file inside instance, captured from Write tool_use.
 	planContent            string                          // Content of the plan file, captured from Write tool_use input.
@@ -665,7 +666,8 @@ type Snapshot struct {
 	Title              string
 	RequestedModel     string
 	RequestedEffort    string
-	ContextWindowLimit int // Non-zero when reported by the agent at runtime.
+	ContextWindowLimit int  // Non-zero when reported by the agent at runtime.
+	ContextUsed        *int // Native occupancy; nil means unknown.
 	InPlanMode         bool
 	PlanFile           string
 	PlanContent        string
@@ -952,6 +954,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			continue
 		}
 
+		t.observeContextLocked(msg, entry.ProducerTime, t.sessionMetadata.SessionID)
 		t.sessionMetadata.Apply(msg)
 		t.observeUsageLocked(msg)
 		if _, ok := msg.(*agent.ExitMessage); ok {
@@ -965,11 +968,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 				if m.Subtype == "context_cleared" {
 					t.clearContextLocked()
 				}
-				// Compaction replaces the conversation with a summary, so the
-				// pre-compaction usage no longer describes the live context.
-				if m.ContextTokensAfter > 0 {
-					t.lastAPIUsage = agent.Usage{InputTokens: int(m.ContextTokensAfter)}
-				}
 			}
 		case *agent.RateLimitMessage:
 			t.recordRateLimitLocked(m)
@@ -980,15 +978,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			t.backgroundCommands.Apply(&m.Command)
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
-		case *agent.UsageMessage:
-			t.lastAPIUsage = m.Usage
-			t.cacheExpiresAt = time.Time{}
-			if m.Usage.CacheTTLSeconds > 0 {
-				t.cacheExpiresAt = entry.ProducerTime.Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
-			}
-			if m.ContextWindow > 0 {
-				t.reportedContextWindow = m.ContextWindow
-			}
 		case *agent.DiffStatMessage:
 			if len(m.DiffStat) > 0 {
 				t.diffCreated = true
@@ -1641,6 +1630,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		RequestedModel:     t.RequestedModel,
 		RequestedEffort:    t.RequestedEffort,
 		ContextWindowLimit: t.reportedContextWindow,
+		ContextUsed:        t.contextUsed,
 		InPlanMode:         t.inPlanMode,
 		PlanFile:           t.planFile,
 		PlanContent:        t.planContent,
@@ -1713,6 +1703,44 @@ func (t *Task) setLiveRepoStatesLocked(states []v3.RepoState) {
 		return
 	}
 	t.liveRepoStates = states
+}
+
+// observeContextLocked folds root context snapshots independently from billing.
+// The caller holds t.mu.
+func (t *Task) observeContextLocked(msg agent.Message, at time.Time, priorSessionID string) bool {
+	switch m := msg.(type) {
+	case *agent.InitMessage:
+		if m.SessionID == priorSessionID {
+			return false
+		}
+		t.contextUsed = nil
+	case *agent.UsageMessage:
+		// Native occupancy alone does not replace the billed API-call snapshot.
+		if m.ContextUsed == nil || !m.Usage.Equal(agent.Usage{}) || m.PerCall {
+			t.lastAPIUsage = m.Usage
+			t.cacheExpiresAt = time.Time{}
+			if m.Usage.CacheTTLSeconds > 0 {
+				t.cacheExpiresAt = at.Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
+			}
+		}
+		if m.ContextUsed != nil {
+			t.contextUsed = m.ContextUsed
+		}
+		if m.ContextWindow > 0 {
+			t.reportedContextWindow = m.ContextWindow
+		}
+	case *agent.SystemMessage:
+		if m.Subtype != agent.SystemSubtypeCompactBoundary && m.Subtype != "context_cleared" {
+			return false
+		}
+		t.contextUsed = nil
+		if m.ContextTokensAfter > 0 {
+			t.lastAPIUsage = agent.Usage{InputTokens: int(m.ContextTokensAfter)}
+		}
+	default:
+		return false
+	}
+	return true
 }
 
 // observeUsageLocked accumulates root token contributions while leaving
@@ -1884,15 +1912,8 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	if tu, ok := m.(*agent.ToolUseMessage); ok && !child {
 		t.trackToolUse(tu)
 	}
-	if u, ok := m.(*agent.UsageMessage); ok && !child {
-		t.lastAPIUsage = u.Usage
-		t.cacheExpiresAt = time.Time{}
-		if u.Usage.CacheTTLSeconds > 0 {
-			t.cacheExpiresAt = at.Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
-		}
-		if u.ContextWindow > 0 {
-			t.reportedContextWindow = u.ContextWindow
-		}
+	if !child {
+		summaryChanged = t.observeContextLocked(m, at, priorMetadata.SessionID) || summaryChanged
 	}
 	// Transition to running when the agent starts producing output.
 	// Handles three cases:
@@ -1959,12 +1980,6 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
 		if sm.Subtype == "context_cleared" {
 			t.clearContextLocked()
-		}
-		// Compaction replaces the conversation with a summary, so the
-		// pre-compaction usage no longer describes the live context.
-		if sm.ContextTokensAfter > 0 {
-			t.lastAPIUsage = agent.Usage{InputTokens: int(sm.ContextTokensAfter)}
-			summaryChanged = true
 		}
 	}
 	// Transition to waiting/asking when a result arrives.

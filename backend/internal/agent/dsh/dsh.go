@@ -31,10 +31,8 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // capabilities and compaction are not yet verified for caic task sessions, so
 // neither capability is advertised by this backend.
 //
-// TODO: Project usage_update.used as independent canonical context occupancy,
-// preserving zero and billed usage across live/restored task and API views.
-// TODO: Enable images after verifying exact-route capabilities, durable
-// attachments, and native prompt/history behavior.
+// TODO: Enable images after selecting the exact route before initialize,
+// verifying its durable image store, and accepting native prompt/history behavior.
 // TODO: Enable compaction after proving a native ACP command and its context
 // boundary and accounting semantics.
 // TODO: Add native subagent cards only after retaining dsh-specific ownership

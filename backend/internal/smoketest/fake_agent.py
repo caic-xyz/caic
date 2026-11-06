@@ -945,6 +945,22 @@ def main() -> None:
         if line.startswith("FAKE_BACKGROUND_COMMANDS"):
             emit_background_commands_turn(turns)
             continue
+        if line.startswith("FAKE_CONTEXT_OCCUPANCY"):
+            if " RESET" in line:
+                emit({"type": "system", "subtype": "context_cleared"})
+            emit({"type": "usage", "usage": {"input_tokens": 123, "cache_read_input_tokens": 456}})
+            if " RESET" not in line:
+                emit(
+                    {
+                        "type": "usage",
+                        "usage": {},
+                        "context_used": 0 if " ZERO" in line else 45000,
+                        "context_window": 200000,
+                    }
+                )
+            emit_text("Native context occupancy reported")
+            emit_result(turns, "Context occupancy complete")
+            continue
         if line == "FAKE_LIFECYCLE" or line.startswith("FAKE_LIFECYCLE "):
             emit_lifecycle_turn(turns)
             continue

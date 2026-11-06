@@ -4,8 +4,7 @@ import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
 import userEvent from "@testing-library/user-event";
-import type { JSX } from "solid-js";
-import { createSignal } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import { expect, vi } from "@tests/expect";
 
 import type { ISOTimestamp } from "@sdk/types.gen";
@@ -61,6 +60,24 @@ function renderCard(card: () => JSX.Element) {
 }
 
 describe("TaskCard", () => {
+  it("uses native context occupancy instead of billed input and shows an explicit zero", () => {
+    const [used, setUsed] = createSignal<number | null>(45_000);
+    renderCard(() => (
+      <TaskCard {...props({ contextUsed: used(), activeInputTokens: 123, activeCacheReadTokens: 456 })} />
+    ));
+    const meter = screen.getByTestId("task-card-tokens");
+    expect(meter).toHaveTextContent("45kt/200kt");
+    const trigger = meter.parentElement;
+    if (!trigger) throw new Error("Missing token tooltip trigger");
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByText(/Reported context usage: 45kt/)).toHaveTextContent("Accumulated API tokens");
+    fireEvent.mouseLeave(trigger);
+    setUsed(0);
+    expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("0t/200kt");
+    setUsed(null);
+    expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("579t/200kt");
+  });
+
   it("shortens provider-qualified models and exposes the full name on hover", () => {
     renderCard(() => <TaskCard {...props({ harness: "pi", model: "openai-codex/gpt-6.1-sol", effort: "medium" })} />);
 

@@ -172,6 +172,171 @@ func recvType(ch <-chan TimelineMessage) string {
 }
 
 func TestTask(t *testing.T) {
+	t.Run("CodexZeroDeltaReplacesBilledFallback", func(t *testing.T) {
+		t.Parallel()
+		for _, mode := range []string{"live", "restored"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				parser, err := backends.Default("", nil).ResolveParser(harness.Codex)
+				if err != nil {
+					t.Fatal(err)
+				}
+				started, err := parser.ParseOutput([]byte(`{"method":"thread/started","params":{"thread":{"id":"root"}}}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				const usage = `{"method":"thread/tokenUsage/updated","params":{"threadId":"root","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`
+				if _, err := parser.ParseOutput([]byte(usage)); err != nil {
+					t.Fatal(err)
+				}
+				repeated, err := parser.ParseOutput([]byte(usage))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(repeated) != 1 {
+					t.Fatalf("repeated total messages = %#v", repeated)
+				}
+				zero, ok := repeated[0].(*agent.UsageMessage)
+				if !ok || !zero.Usage.Equal(agent.Usage{}) || zero.PerCall || zero.ContextUsed != nil || zero.Source.IsChild() {
+					t.Fatalf("repeated Codex total = %#v", repeated[0])
+				}
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "")
+				at := time.Unix(100, 0)
+				history := agenttest.TimedMessages(started)
+				// A retained cache snapshot must also clear when the native delta is zero.
+				history = append(history,
+					agent.TimedMessage{ProducerTime: at, Message: &agent.UsageMessage{Usage: agent.Usage{InputTokens: 80, CacheTTLSeconds: 300}}},
+					agent.TimedMessage{ProducerTime: at.Add(time.Second), Message: zero},
+				)
+				if mode == "restored" {
+					tk.SeedTimelineParts(nil, history)
+				} else {
+					for _, message := range history {
+						tk.addParsedMessage(message)
+					}
+				}
+				snap := tk.Snapshot()
+				if !snap.LastAPIUsage.Equal(agent.Usage{}) || !snap.CacheExpiresAt.IsZero() || snap.ContextUsed != nil {
+					t.Fatalf("zero-delta context=%v api=%+v expires=%s", snap.ContextUsed, snap.LastAPIUsage, snap.CacheExpiresAt)
+				}
+			})
+		}
+	})
+	t.Run("ContextBoundariesPreserveBilledFallback", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name     string
+			harness  harness.Name
+			boundary agent.Message
+			input    int
+		}{
+			{"codex_compact_without_size", harness.Codex, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, 123},
+			{"claude_clear", harness.Claude, agent.ContextCleared(), 123},
+			{"claude_new_session", harness.Claude, &agent.InitMessage{SessionID: "next"}, 123},
+			{"codex_compact_with_size", harness.Codex, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 12_000}, 12_000},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				for _, mode := range []string{"live", "restored"} {
+					t.Run(mode, func(t *testing.T) {
+						t.Parallel()
+						used := 45_000
+						at := time.Unix(100, 0)
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, tc.harness, "", "")
+						messages := []agent.TimedMessage{
+							{ProducerTime: at, Message: &agent.InitMessage{SessionID: "root"}},
+							{ProducerTime: at, Message: &agent.UsageMessage{ContextUsed: &used, Usage: agent.Usage{InputTokens: 123, CacheTTLSeconds: 300}}},
+							{ProducerTime: at, Message: tc.boundary},
+						}
+						if mode == "restored" {
+							tk.SeedTimelineParts(nil, messages)
+						} else {
+							for _, message := range messages {
+								tk.addParsedMessage(message)
+							}
+						}
+						snap := tk.Snapshot()
+						if snap.ContextUsed != nil || snap.LastAPIUsage.InputTokens != tc.input || !snap.CacheExpiresAt.Equal(at.Add(300*time.Second)) {
+							t.Fatalf("context=%v api=%+v expires=%s", snap.ContextUsed, snap.LastAPIUsage, snap.CacheExpiresAt)
+						}
+					})
+				}
+			})
+		}
+	})
+	t.Run("CompactionFollowedByUsageUpdatesMeter", func(t *testing.T) {
+		t.Parallel()
+		for _, mode := range []string{"live", "restored"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+				messages := []agent.Message{
+					&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 12_000},
+					&agent.UsageMessage{Usage: agent.Usage{InputTokens: 15_000}},
+				}
+				if mode == "restored" {
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				} else {
+					for _, message := range messages {
+						addTaskMessage(tk, message)
+					}
+				}
+				snap := tk.Snapshot()
+				if snap.ContextUsed != nil || snap.LastAPIUsage.InputTokens != 15_000 {
+					t.Fatalf("context=%v api=%+v", snap.ContextUsed, snap.LastAPIUsage)
+				}
+			})
+		}
+	})
+	t.Run("NativeContextOccupancy", func(t *testing.T) {
+		t.Parallel()
+		for _, mode := range []string{"live", "restored"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				used, zero, childUsed := 45_000, 0, 999
+				steps := []struct {
+					message agent.Message
+					used    *int
+					input   int
+				}{
+					{&agent.InitMessage{SessionID: "root"}, nil, 0},
+					{&agent.UsageMessage{Usage: agent.Usage{InputTokens: 100}, Additive: true}, nil, 100},
+					{&agent.UsageMessage{ContextUsed: &used, ContextWindow: 200_000}, &used, 100},
+					{&agent.UsageMessage{Source: agent.MessageSource{AgentID: "child"}, ContextUsed: &childUsed, Usage: agent.Usage{InputTokens: 999}}, &used, 100},
+					{&agent.UsageMessage{ContextUsed: &zero}, &zero, 100},
+					{&agent.UsageMessage{ContextWindow: 200_000}, &zero, 0},
+					{&agent.InitMessage{SessionID: "root"}, &zero, 0},
+					{&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100}}, &zero, 0},
+					{&agent.InitMessage{SessionID: "next"}, nil, 0},
+					{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
+					{&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, nil, 0},
+					{&agent.UsageMessage{ContextUsed: &used}, &used, 0},
+					{agent.ContextCleared(), nil, 0},
+					{&agent.UsageMessage{ContextUsed: &used, Usage: agent.Usage{InputTokens: 321}}, &used, 321},
+					{&agent.UsageMessage{ContextUsed: &zero, PerCall: true}, &zero, 0},
+				}
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
+				history := make([]agent.Message, 0, len(steps))
+				for i, step := range steps {
+					history = append(history, step.message)
+					tk := live
+					if mode == "restored" {
+						tk = mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
+						tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+					} else {
+						addTaskMessage(tk, step.message)
+					}
+					snap := tk.Snapshot()
+					if !reflect.DeepEqual(snap.ContextUsed, step.used) || snap.LastAPIUsage.InputTokens != step.input {
+						t.Fatalf("step %d: occupancy=%v api=%+v; want %v/%d", i, snap.ContextUsed, snap.LastAPIUsage, step.used, step.input)
+					}
+					if i == 5 && snap.Usage.InputTokens != 100 {
+						t.Fatalf("occupancy changed billed usage: %+v", snap.Usage)
+					}
+				}
+			})
+		}
+	})
 	t.Run("ExitAfterInputAttempt", func(t *testing.T) {
 		t.Parallel()
 		for _, outcome := range []string{"unresolved", "failed", "completed", "partial_output", "result_before_outcome", "historical"} {

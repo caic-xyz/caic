@@ -128,6 +128,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	out.CumulativeCacheCreationInputTokens = cumulativeUsage.CacheCreationInputTokens
 	out.CumulativeCacheReadInputTokens = cumulativeUsage.CacheReadInputTokens
 	// Active tokens = last API call's context window fill (not the per-query sum).
+	out.ContextUsed = snap.ContextUsed
 	out.ActiveInputTokens = snap.LastAPIUsage.InputTokens + snap.LastAPIUsage.CacheCreationInputTokens
 	out.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
 	out.CacheTTLSeconds = snap.LastAPIUsage.CacheTTLSeconds

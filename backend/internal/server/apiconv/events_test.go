@@ -32,6 +32,15 @@ func TestToolTimingTracker(t *testing.T) {
 	t.Parallel()
 	t.Run("ConvertMessage", func(t *testing.T) {
 		t.Parallel()
+		t.Run("NativeContextOccupancy", func(t *testing.T) {
+			t.Parallel()
+			zero := 0
+			tracker := NewToolTimingTracker("", harness.Dsh, "", nil)
+			events := tracker.ConvertMessage(1, 0, &agent.UsageMessage{ContextUsed: &zero, ContextWindow: 200_000}, time.Unix(10, 0))
+			if len(events) != 1 || events[0].Usage == nil || events[0].Usage.ContextUsed == nil || *events[0].Usage.ContextUsed != 0 || events[0].Usage.ContextWindow != 200_000 {
+				t.Fatalf("events = %+v", events)
+			}
+		})
 		t.Run("SessionRestorationUsesInitPresentation", func(t *testing.T) {
 			t.Parallel()
 			tracker := NewToolTimingTracker("", harness.Claude, "", nil)
