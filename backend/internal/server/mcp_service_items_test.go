@@ -19,6 +19,46 @@ import (
 func TestServiceItems(t *testing.T) {
 	t.Parallel()
 
+	t.Run("renumbered running tasks update native voice references", func(t *testing.T) {
+		t.Parallel()
+		tasks := []v1.Task{
+			{ID: ksid.NewID(), Title: "First work", State: v1.TaskStateRunning},
+			{ID: ksid.NewID(), Title: "Second work", State: v1.TaskStateRunning},
+			{ID: ksid.NewID(), Title: "Third work", State: v1.TaskStateRunning},
+		}
+		id := tasks[1].ID.String()
+		for _, tc := range []struct {
+			name      string
+			tasks     []v1.Task
+			reference string
+			number    int
+		}{
+			{"baseline", tasks, "Task #2", 2},
+			{"earlier task removed", tasks[1:], "Task #1", 1},
+			{"earlier task inactive", []v1.Task{tasks[1], tasks[2], {ID: tasks[0].ID, Title: tasks[0].Title, State: v1.TaskStateStopped}}, "Task #1", 1},
+			{"only remaining task", tasks[1:2], "", 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				out, err := boundedServiceItems(tc.tasks, mcpResourceJSONMaxBytes, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if out.ActiveTaskID != id || out.ActiveTaskNumber != tc.number {
+					t.Fatalf("active task = %q #%d, want %q #%d", out.ActiveTaskID, out.ActiveTaskNumber, id, tc.number)
+				}
+				i := slices.IndexFunc(out.Items, func(item serviceItem) bool { return item.ID == id })
+				if i < 0 {
+					t.Fatal("running task missing from native voice items")
+				}
+				item := out.Items[i]
+				if item.Reference != tc.reference || item.State != "running" || item.Title != "Second work" || !item.Active {
+					t.Fatalf("native voice item = %#v, want running Second work with reference %q", item, tc.reference)
+				}
+			})
+		}
+	})
+
 	t.Run("prioritizes attention while preserving references", func(t *testing.T) {
 		t.Parallel()
 		tasks := []v1.Task{

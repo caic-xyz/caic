@@ -1,4 +1,4 @@
-// Adapts shared browser voice to caic task updates and conversation numbering.
+// Adapts shared browser voice to caic task changes and explicit renumbering updates.
 
 import { createEffect, onCleanup, Show, untrack, type Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
@@ -54,9 +54,20 @@ export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]>; session: type
 
   createEffect(() => {
     const currentTasks = props.tasks();
+    const previousNumbers = currentTasks.map((task) => numberMap.toNumber(task.id));
     numberMap.update(currentTasks);
     if (props.session.state.connected) {
       setVoiceTaskNumberMap(numberMap);
+      const renumbered = currentTasks.flatMap((task, index) => {
+        const previous = previousNumbers[index];
+        const number = numberMap.toNumber(task.id);
+        return previous !== undefined && number !== undefined && previous !== number
+          ? [`- ${task.title || task.id} (${task.id}): #${previous} → #${number}`]
+          : [];
+      });
+      if (renumbered.length > 0) {
+        props.session.injectText(`[Task numbers changed:\n${renumbered.join("\n")}]`);
+      }
       const numbered = currentTasks.length > 1;
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
