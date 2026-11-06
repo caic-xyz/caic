@@ -1390,7 +1390,6 @@ a.ciStatus:hover {
   max-height: 12rem;
   padding: 0.5rem;
   overflow-y: auto;
-  border-top: 1px solid var(--color-border);
 }
 
 .queuedLabel {
