@@ -125,7 +125,7 @@ func TestCheckout(t *testing.T) {
 	t.Run("AllocateBranch", runAllocateBranchTests)
 	// These process-wide fixtures must run before parallel checkout cases.
 	t.Run("pushWorktree", func(t *testing.T) {
-		t.Run("OverallDeadlineIncludesCleanup", func(t *testing.T) {
+		t.Run("OverallCancellationIncludesCleanup", func(t *testing.T) {
 			if goruntime.GOOS == "windows" {
 				t.Skip("shell fixture requires Unix")
 			}
@@ -138,31 +138,57 @@ func TestCheckout(t *testing.T) {
 			}
 			bin := t.TempDir()
 			marker := filepath.Join(bin, "cleanup-started")
-			writePushFile(t, bin, "git", "#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then\n  printf started > '"+marker+"'\n  sleep 3\n  exit 1\nfi\nexec '"+realGit+"' \"$@\"\n", 0o700)
+			writePushFile(t, bin, "git", "#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then\n  printf started > '"+marker+"'\n  exec sleep 30\nfi\nexec '"+realGit+"' \"$@\"\n", 0o700)
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-			t.Cleanup(cancel)
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				done <- w.pushWorktree(ctx, logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "cancel-cleanup"}, false)
+			})
+			t.Cleanup(func() {
+				cancel()
+				wg.Wait()
+			})
+			// Setup and pushing can be slow on a busy runner. Cancel
+			// only once Git cleanup is blocked, so this exercises its parent context.
+			ready := time.NewTimer(10 * time.Second)
+			t.Cleanup(func() { ready.Stop() })
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					break
+				} else if !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("push returned before Git cleanup started: %v", err)
+				case <-ready.C:
+					t.Fatal("fixture never reached Git cleanup")
+				case <-time.After(time.Millisecond):
+				}
+			}
 			started := time.Now()
-			err = w.pushWorktree(ctx, logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "deadline"}, false)
-			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "retained") {
-				t.Fatalf("overall deadline or retention outcome lost: %v", err)
+			cancel()
+			select {
+			case err = <-done:
+			case <-time.After(1500 * time.Millisecond):
+				t.Fatal("cleanup ignored overall push cancellation")
 			}
-			if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
-				t.Fatalf("cleanup extended overall push deadline: %v", elapsed)
+			if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "retained") {
+				t.Fatalf("overall cancellation or retention outcome lost: %v", err)
 			}
-			if _, err := os.Stat(marker); err != nil {
-				t.Fatal("deadline fixture never reached Git cleanup", err)
-			}
+			t.Logf("cleanup returned %v after cancellation", time.Since(started))
 			dirs := pushOperationDirs(t, w)
 			if len(dirs) != 1 {
-				t.Fatal("timed-out cleanup lost operation directory")
+				t.Fatal("canceled cleanup lost operation directory")
 			}
 			owner, err := os.ReadFile(filepath.Join(dirs[0], "owner-v1"))
 			if err != nil || string(owner) != canonicalPath(t, filepath.Join(root, ".git")) {
-				t.Fatalf("timed-out cleanup lost ownership: %q, %v", owner, err)
+				t.Fatalf("canceled cleanup lost ownership: %q, %v", owner, err)
 			}
-			if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/deadline"); got == "" {
-				t.Fatal("push did not finish before cleanup deadline")
+			if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/cancel-cleanup"); got == "" {
+				t.Fatal("push did not finish before cleanup cancellation")
 			}
 		})
 		t.Run("CacheSystemd", func(t *testing.T) {
