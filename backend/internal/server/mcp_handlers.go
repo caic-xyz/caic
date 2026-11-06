@@ -182,6 +182,23 @@ func mcpPrincipalFromContext(ctx context.Context) (*mcpPrincipal, bool) {
 	return p, ok && p != nil
 }
 
+type mcpClientSessionContextKey struct{}
+
+// withMCPClientSession binds the optional MCP conversation session supplied as
+// openai/session. Tool calls and resource reads carry it independently of the
+// shared host login session, so tabs do not overwrite each other's focus.
+func withMCPClientSession(ctx context.Context, session string) context.Context {
+	if session == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, mcpClientSessionContextKey{}, session)
+}
+
+func mcpClientSessionFromContext(ctx context.Context) string {
+	session, _ := ctx.Value(mcpClientSessionContextKey{}).(string)
+	return session
+}
+
 func taskMCPTaskID(ctx context.Context) (ksid.ID, bool) {
 	p, ok := mcpPrincipalFromContext(ctx)
 	if !ok || p.TaskID == 0 {

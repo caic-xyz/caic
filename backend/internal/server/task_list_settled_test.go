@@ -284,3 +284,21 @@ func TestTaskListToolFocus(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskListSnapshotFocus(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	id := ksid.NewID()
+	insertTestTask(s, id, mustNewTask(t, id, agent.Prompt{Text: "snapshot focus target"}, harness.Claude))
+	testTaskHandlers(s).taskSvc.focusTask(t.Context(), id)
+	r := connectTaskListStream(t, s)
+	for {
+		ev := readNextTaskListEvent(t, r)
+		if ev.Kind == "snapshot" {
+			if ev.Focus != id.String() {
+				t.Fatalf("snapshot focus = %q, want %q", ev.Focus, id)
+			}
+			return
+		}
+	}
+}

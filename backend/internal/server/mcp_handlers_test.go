@@ -893,6 +893,47 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("subscriptionChangesSignalFocus", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		id := ksid.NewID()
+		insertTestTask(s, id, mustNewTask(t, id, agent.Prompt{Text: "focus subscription"}, harness.Claude))
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make(chan mcp.ResourceUpdate, 1)
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for update, err := range changes {
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				got <- update
+				return
+			}
+		})
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+		})
+		testTaskHandlers(s).taskSvc.focusTask(t.Context(), id)
+		select {
+		case update := <-got:
+			if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
+				t.Fatalf("focus update resource uris = %#v", update.ResourceURIs)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for focus subscription change")
+		}
+	})
+
 	t.Run("subscriptionDoesNotMissTaskChangeWhileDeliveringPreviousChange", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

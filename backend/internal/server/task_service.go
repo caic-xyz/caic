@@ -44,6 +44,13 @@ import (
 // TODO: Cleaner interface.
 type FakeCIHook func(ctx context.Context, t *taskrun.Task)
 
+// focusKey scopes a user-directed focus to one MCP conversation session. The
+// empty session keeps focus for local clients and older tool calls.
+type focusKey struct {
+	owner   string
+	session string
+}
+
 // taskService owns task command orchestration and API DTO assembly.
 //
 // HTTP handlers use it after route-level request decoding and task lookup, so
@@ -65,6 +72,7 @@ type taskService struct {
 
 	focusMu          sync.Mutex
 	focusSubscribers map[chan string]string
+	focusTasks       map[focusKey]ksid.ID
 }
 
 // subscribeTaskFocus delivers live user-directed tool focus changes. Only the
@@ -91,8 +99,13 @@ func (s *taskService) focusTask(ctx context.Context, id ksid.ID) {
 		return
 	}
 	ownerID := taskAccessFromContext(ctx).userID
+	session := mcpClientSessionFromContext(ctx)
 	s.focusMu.Lock()
 	defer s.focusMu.Unlock()
+	if s.focusTasks == nil {
+		s.focusTasks = make(map[focusKey]ksid.ID)
+	}
+	s.focusTasks[focusKey{owner: ownerID, session: session}] = id
 	for ch, owner := range s.focusSubscribers {
 		if owner != ownerID {
 			continue
@@ -103,6 +116,41 @@ func (s *taskService) focusTask(ctx context.Context, id ksid.ID) {
 		}
 		ch <- id.String()
 	}
+}
+
+// focusedTaskID returns the latest user-directed tool focus for ctx's owner and
+// MCP conversation. A session-bound request reads only its own focus. A request
+// without a session resolves the owner's focus only when every session agrees on
+// one task; ambiguous focus is omitted rather than leaking another tab's choice.
+func (s *taskService) focusedTaskID(ctx context.Context) (ksid.ID, bool) {
+	ownerID := taskAccessFromContext(ctx).userID
+	session := mcpClientSessionFromContext(ctx)
+	s.focusMu.Lock()
+	defer s.focusMu.Unlock()
+	if session != "" {
+		id, ok := s.focusTasks[focusKey{owner: ownerID, session: session}]
+		return id, ok && id != 0
+	}
+	var match ksid.ID
+	for key, id := range s.focusTasks {
+		if key.owner != ownerID || id == 0 {
+			continue
+		}
+		if match != 0 && match != id {
+			return 0, false
+		}
+		match = id
+	}
+	return match, match != 0
+}
+
+// focusedTaskIDString returns the focused task ID in snapshot form, or "".
+func (s *taskService) focusedTaskIDString(ctx context.Context) string {
+	id, ok := s.focusedTaskID(ctx)
+	if !ok {
+		return ""
+	}
+	return id.String()
 }
 
 func (s *taskService) runtimeNameForCreate(requested string, settings *preferences.Settings) runtime.Name {

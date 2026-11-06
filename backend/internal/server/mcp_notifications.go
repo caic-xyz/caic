@@ -15,6 +15,8 @@ import (
 )
 
 type serviceNotification struct {
+	v1.ServiceActiveTask
+
 	ID         string    `json:"id"`
 	ItemID     string    `json:"itemId"`
 	URL        string    `json:"url"`
@@ -50,7 +52,10 @@ func newNotificationFeed() *notificationFeed {
 	}
 }
 
-func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, usage v1.UsageResp) []serviceNotification {
+// notifications returns the current snapshot. The focused task ID is attached
+// to each alert so voice clients receive the active task with the same flat JSON
+// fields as the service-item baseline.
+func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, usage v1.UsageResp, activeTaskID string) []serviceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
@@ -153,7 +158,14 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	}
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)
-	return append(make([]serviceNotification, 0, len(f.events[owner])), f.events[owner]...)
+	events = append(make([]serviceNotification, 0, len(f.events[owner])), f.events[owner]...)
+	if len(events) > 0 {
+		active := newActiveTask(tasks, activeTaskID)
+		for i := range events {
+			events[i].ServiceActiveTask = active
+		}
+	}
+	return events
 }
 
 func taskNotificationTitle(state v1.TaskState, number int) string {

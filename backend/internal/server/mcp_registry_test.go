@@ -11,6 +11,7 @@ import (
 	"io"
 	"os/exec"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,26 @@ import (
 
 func TestMCPRegistry(t *testing.T) {
 	t.Parallel()
+	t.Run("Instructions/activeTask", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		id := ksid.NewID()
+		insertTestTask(s, id, mustNewTask(t, id, agent.Prompt{Text: "active instruction task"}, harness.Claude))
+		svc := testTaskHandlers(s).taskSvc
+		svc.focusTask(t.Context(), id)
+		registry := &mcpRegistry{
+			mcpTools:     &mcpTools{taskSvc: svc},
+			mcpResources: &mcpResources{taskSvc: svc},
+			prefs:        s.prefs,
+		}
+		instructions, err := registry.Instructions(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("[Active task: #1 (%s)]", id); !strings.Contains(instructions, want) {
+			t.Fatalf("instructions missing %q:\n%s", want, instructions)
+		}
+	})
 	t.Run("ForTask/denies_input_tools", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

@@ -94,6 +94,36 @@ func TestMCPResources(t *testing.T) {
 			t.Fatalf("ListResources() UTF-8 error = %v, want %v without a size diagnosis", err, errMCPRepositoryPathInvalidUTF8)
 		}
 	})
+	t.Run("SubscribeResourceUpdates/cancelsFocusWithoutIteration", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newTestRouter(t, nil)
+			registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+			if !ok {
+				t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			_, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc := testTaskHandlers(s).taskSvc
+			svc.focusMu.Lock()
+			registered := len(svc.focusSubscribers)
+			svc.focusMu.Unlock()
+			if registered != 1 {
+				t.Fatalf("focus subscribers = %d, want 1", registered)
+			}
+			cancel()
+			time.Sleep(time.Millisecond)
+			svc.focusMu.Lock()
+			registered = len(svc.focusSubscribers)
+			svc.focusMu.Unlock()
+			if registered != 0 {
+				t.Fatalf("focus subscribers after cancellation = %d, want 0", registered)
+			}
+		})
+	})
 	t.Run("SubscribeResourceUpdates/readScope", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {

@@ -760,14 +760,15 @@ func TestMCPTools(t *testing.T) {
 		running.SetState(task.StateRunning)
 		insertTestTask(s, runningID, running)
 		registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
+		testTaskHandlers(s).taskSvc.focusTask(t.Context(), runningID)
 
 		first := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Limit: 1}})
 		firstOutput, ok := first.Structured.(mcpTaskListOutput)
 		if first.IsError || !ok {
 			t.Fatalf("first page = %#v, want task-list output", first.Structured)
 		}
-		if len(firstOutput.Tasks) != 1 || firstOutput.Tasks[0].TaskNumber != 1 || firstOutput.Tasks[0].State != v1.TaskStateRunning || firstOutput.NextCursor == "" {
-			t.Fatalf("first page = %#v, want running task and a next cursor", firstOutput)
+		if len(firstOutput.Tasks) != 1 || firstOutput.Tasks[0].TaskNumber != 1 || firstOutput.Tasks[0].State != v1.TaskStateRunning || !firstOutput.Tasks[0].Active || firstOutput.NextCursor == "" {
+			t.Fatalf("first page = %#v, want focused running task and a next cursor", firstOutput)
 		}
 
 		second := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
@@ -775,8 +776,8 @@ func TestMCPTools(t *testing.T) {
 		if second.IsError || !ok {
 			t.Fatalf("second page = %#v, want task-list output", second.Structured)
 		}
-		if len(secondOutput.Tasks) != 1 || secondOutput.Tasks[0].TaskNumber != 2 || secondOutput.Tasks[0].State != v1.TaskStateStopped || secondOutput.NextCursor != "" {
-			t.Fatalf("second page = %#v, want stopped task without cursor", secondOutput)
+		if len(secondOutput.Tasks) != 1 || secondOutput.Tasks[0].TaskNumber != 2 || secondOutput.Tasks[0].State != v1.TaskStateStopped || secondOutput.Tasks[0].Active || secondOutput.NextCursor != "" {
+			t.Fatalf("second page = %#v, want unfocused stopped task without cursor", secondOutput)
 		}
 		stopped.SetState(task.StateRunning)
 		stale := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})

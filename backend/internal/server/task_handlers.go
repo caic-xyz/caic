@@ -137,6 +137,10 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		settledLoading, settledError := h.taskMgr.RestorationStatus()
 		complete := h.taskMgr.TaskListComplete()
 		out, replays, membership := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
+		focusID := ""
+		if id, ok := h.taskSvc.focusedTaskID(ctx); ok && taskNumberForID(out, id.String()) != 0 {
+			focusID = id.String()
+		}
 		currentIDs := make(map[string]struct{}, len(membership))
 		for _, id := range membership {
 			currentIDs[id] = struct{}{}
@@ -161,7 +165,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				h.log.WarnContext(ctx, "marshal settled status", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete, Focus: focusID}); err != nil {
 				h.log.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
@@ -291,7 +295,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// authoritative, a fresh full snapshot cleans missed disconnect deletes,
 		// including tasks that never produced a delta on this connection.
 		if !wasFirst && complete && !prevComplete {
-			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete, Focus: focusID}); err != nil {
 				h.log.WarnContext(ctx, "marshal complete task-list snapshot", "err", err)
 				return
 			}

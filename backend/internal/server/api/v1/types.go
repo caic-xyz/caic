@@ -539,6 +539,17 @@ type TaskInfoObservedRuntime struct {
 	Caches          []TaskInfoCacheMount `json:"caches,omitempty"`
 }
 
+// ServiceActive marks the user's focused task in a per-item Go Mode service snapshot.
+type ServiceActive struct {
+	Active bool `json:"active,omitempty"`
+}
+
+// ServiceActiveTask identifies the user's focused task in a Go Mode service snapshot.
+type ServiceActiveTask struct {
+	ActiveTaskID     string `json:"activeTaskId,omitempty"`
+	ActiveTaskNumber int    `json:"activeTaskNumber,omitempty"`
+}
+
 // TaskListEvent is a discriminated-union event for the task list SSE stream.
 // kind=="snapshot": Snapshot carries task data on connect and when restoration becomes complete.
 // Complete is present on snapshots only: false preserves prior membership and drafts;

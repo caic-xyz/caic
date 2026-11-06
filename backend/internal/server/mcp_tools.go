@@ -64,6 +64,7 @@ func (m *mcpTools) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 }
 
 func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (mcp.RawToolResult, error) {
+	ctx = withMCPClientSession(ctx, params.Meta.Session)
 	for _, s := range m.specs() {
 		if s.Name != params.Name {
 			continue
@@ -187,6 +188,10 @@ func (m *mcpTools) handleTasksList(ctx context.Context, call *mcp.ToolRequest[mc
 	tasks, err := taskSummaries(ctx, m.taskSvc, page, start, revision)
 	if err != nil {
 		return mcp.ToolErrorWithMeta[mcpTaskListOutput]("Task ordering changed while listing. Omit cursor to restart task listing.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeConflict)})
+	}
+	activeTaskID := m.taskSvc.focusedTaskIDString(ctx)
+	for i := range tasks {
+		tasks[i].Active = tasks[i].TaskID == activeTaskID
 	}
 	tasks, next, err = fitMCPJSONPage(tasks, next != "", mcpListJSONMaxBytes,
 		func(count int) (string, error) { return encodeMCPTaskCursor(revision, page[count-1].ID) },
@@ -997,6 +1002,8 @@ type mcpTaskListArgs struct {
 }
 
 type mcpTaskSummary struct {
+	v1.ServiceActive
+
 	HasPendingInput bool         `json:"hasPendingInput" jsonschema_description:"Whether a pending prompt record exists; task_get_detail shows its text and delivery status"`
 	TaskNumber      int          `json:"taskNumber"              jsonschema_description:"Current session task number used by other task tools"`
 	TaskID          string       `json:"taskID"                  jsonschema_description:"Stable task ID"`

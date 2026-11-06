@@ -137,18 +137,65 @@ func TestTaskService(t *testing.T) {
 		if got := <-ch; got != id.String() {
 			t.Fatalf("focus = %q, want latest %q", got, id)
 		}
+		if got, ok := svc.focusedTaskID(ctx); !ok || got != id {
+			t.Fatalf("focused task = %q, %t; want %q", got, ok, id)
+		}
 		svc.focusTask(newMCPPrincipalContext(ctx, &mcpPrincipal{TaskID: id}), id)
 		select {
 		case got := <-ch:
 			t.Fatalf("background task changed focus to %q", got)
 		default:
 		}
+		if got, ok := svc.focusedTaskID(ctx); !ok || got != id {
+			t.Fatalf("background task changed focused task = %q, %t; want %q", got, ok, id)
+		}
 		select {
 		case got := <-other:
 			t.Fatalf("other user's focus changed to %q", got)
 		default:
 		}
+		if got, ok := svc.focusedTaskID(t.Context()); ok {
+			t.Fatalf("other user's focused task = %q, want none", got)
+		}
 	})
+	t.Run("focusTask/sessionIsolation", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		svc := testTaskHandlers(s).taskSvc
+		owner := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
+		first := ksid.NewID()
+		second := ksid.NewID()
+		firstSession := withMCPClientSession(owner, "tab-a")
+		secondSession := withMCPClientSession(owner, "tab-b")
+
+		svc.focusTask(firstSession, first)
+		if got, ok := svc.focusedTaskID(firstSession); !ok || got != first {
+			t.Fatalf("first session focus = %q, %t; want %q", got, ok, first)
+		}
+		if got, ok := svc.focusedTaskID(secondSession); ok {
+			t.Fatalf("second session inherited focus %q", got)
+		}
+		if got, ok := svc.focusedTaskID(owner); !ok || got != first {
+			t.Fatalf("sole session focus = %q, %t; want %q", got, ok, first)
+		}
+
+		svc.focusTask(secondSession, second)
+		if got, ok := svc.focusedTaskID(firstSession); !ok || got != first {
+			t.Fatalf("first session focus changed to %q, %t", got, ok)
+		}
+		if got, ok := svc.focusedTaskID(secondSession); !ok || got != second {
+			t.Fatalf("second session focus = %q, %t; want %q", got, ok, second)
+		}
+		if got, ok := svc.focusedTaskID(owner); ok {
+			t.Fatalf("ambiguous session focus = %q, want none", got)
+		}
+
+		svc.focusTask(secondSession, first)
+		if got, ok := svc.focusedTaskID(owner); !ok || got != first {
+			t.Fatalf("agreed session focus = %q, %t; want %q", got, ok, first)
+		}
+	})
+
 	t.Run("taskListSnapshot/activeTasksFirst", func(t *testing.T) {
 		t.Parallel()
 

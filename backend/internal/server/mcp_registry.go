@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 
@@ -46,6 +47,11 @@ func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 	}
 	if prefs.Harness != "" {
 		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
+	}
+	if id, ok := m.mcpTools.taskSvc.focusedTaskID(ctx); ok {
+		if number := taskNumberForID(m.mcpTools.taskSvc.taskListSnapshot(ctx), id.String()); number > 0 {
+			parts = append(parts, fmt.Sprintf("[Active task: #%d (%s)]", number, id))
+		}
 	}
 	return strings.Join(parts, "\n")
 }

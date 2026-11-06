@@ -92,6 +92,7 @@ func (m *mcpResources) ResourceTemplates(context.Context) ([]mcp.ResourceTemplat
 }
 
 func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesReadParams) (mcp.ResourcesReadResult, error) {
+	ctx = withMCPClientSession(ctx, params.Meta.Session)
 	uri := params.URI
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
 		m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: authResult})
@@ -111,14 +112,14 @@ func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesRe
 		return m.resourceJSON(ctx, uri, mcpUsageInLocation(usage, mcpRequestLocation(&params.Meta)))
 	case uri == "gomode://items":
 		taskList := m.taskSvc.taskListSnapshot(ctx)
-		items, err := boundedServiceItems(taskList, mcpResourceJSONMaxBytes)
+		items, err := boundedServiceItems(taskList, mcpResourceJSONMaxBytes, m.taskSvc.focusedTaskIDString(ctx))
 		if err != nil {
 			return mcp.ResourcesReadResult{}, err
 		}
 		return m.resourceJSON(ctx, uri, items)
 	case uri == "gomode://notifications":
 		taskList := m.taskSvc.taskListSnapshot(ctx)
-		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx))
+		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx), m.taskSvc.focusedTaskIDString(ctx))
 		return m.resourceJSON(ctx, uri, mcpNotificationsInLocation(notifications, mcpRequestLocation(&params.Meta)))
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
@@ -163,11 +164,24 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, filter mcp.
 	if err != nil {
 		return nil, err
 	}
+	var focusC <-chan string
+	var stopFocus func() bool
+	var unsubscribeFocus func()
+	if len(sources.focusResourceURIs) > 0 {
+		focusC, unsubscribeFocus = m.taskSvc.subscribeTaskFocus(ctx)
+		stopFocus = context.AfterFunc(ctx, unsubscribeFocus)
+	}
 	taskC := sources.taskC
 	repoC := sources.repoC
 	repoStatusC := sources.repoStatusC
 	healthC := sources.healthC
 	return func(yield func(mcp.ResourceUpdate, error) bool) {
+		if unsubscribeFocus != nil {
+			defer func() {
+				stopFocus()
+				unsubscribeFocus()
+			}()
+		}
 		heartbeatTicker := time.NewTicker(subscriptionHeartbeatInterval)
 		defer heartbeatTicker.Stop()
 		var usageC <-chan time.Time
@@ -208,6 +222,10 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, filter mcp.
 					return
 				}
 				repoStatusC = m.serverConfig.repoStatus.Changed()
+			case <-focusC:
+				if !yield(mcp.ResourceUpdate{ResourceURIs: slices.Clone(sources.focusResourceURIs)}, nil) {
+					return
+				}
 			case <-usageC:
 				if !yield(sources.usageUpdate(), nil) {
 					return
@@ -251,9 +269,11 @@ func (m *mcpResources) subscriptionSources(ctx context.Context, filter mcp.Subsc
 		case uri == "gomode://items":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
+			sources.focusResourceURIs = append(sources.focusResourceURIs, uri)
 		case uri == "gomode://notifications":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
+			sources.focusResourceURIs = append(sources.focusResourceURIs, uri)
 			sources.usagePolling = true
 			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
 		default:
@@ -419,6 +439,7 @@ type subscriptionSources struct {
 	resourcesListChanged bool
 	taskResourceIDs      []ksid.ID
 	taskUpdateURIs       []string
+	focusResourceURIs    []string
 	repoResourceURIs     []string
 	usageResourceURIs    []string
 }
