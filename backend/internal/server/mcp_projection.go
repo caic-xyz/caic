@@ -156,6 +156,7 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 		CIStatus:        task.CIStatus,
 		DurationSeconds: task.Duration,
 		CostUSD:         task.CostUSD,
+		CostKnown:       task.CostKnown,
 	}
 }
 

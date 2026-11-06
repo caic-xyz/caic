@@ -1085,6 +1085,7 @@ Task is the JSON representation sent to the frontend.
 | `diffStat` | `DiffStat` |  |  |
 | `repoStates` | `GitRepositoryState[]` | Pushed compact per-repo Git state from the latest diff probe. |  |
 | `costUSD` | `float64` |  | yes |
+| `costKnown` | `boolean` |  | yes |
 | `duration` | `float64` | Seconds. | yes |
 | `numTurns` | `int` |  | yes |
 | `cumulativeInputTokens` | `int` |  | yes |

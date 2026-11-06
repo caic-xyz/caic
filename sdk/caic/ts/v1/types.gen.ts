@@ -1413,6 +1413,7 @@ export interface Task {
   /** Pushed compact per-repo Git state from the latest diff probe. */
   repoStates?: GitRepositoryState[];
   costUSD: number /* float64 */;
+  costKnown: boolean;
   /** Seconds. */
   duration: number /* float64 */;
   numTurns: number /* int */;

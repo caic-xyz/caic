@@ -471,10 +471,14 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 	if number == 0 {
 		title = fmt.Sprintf("## Task %s: %s", t.ID, taskTitle(&t))
 	}
+	cost := "unknown"
+	if t.CostKnown {
+		cost = formatCost(t.CostUSD)
+	}
 	lines := []string{
 		title,
 		"",
-		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD)),
+		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), cost),
 	}
 	if p := t.PendingInput; p != nil {
 		status := "queued; append preserves existing text, replace overwrites the entire pending prompt"
@@ -1021,6 +1025,7 @@ type mcpTaskSummary struct {
 	CIStatus        v1.CIStatus  `json:"ciStatus,omitempty"      jsonschema_description:"Continuous integration status"`
 	DurationSeconds float64      `json:"durationSeconds"         jsonschema_description:"Task duration in seconds"`
 	CostUSD         float64      `json:"costUSD"                 jsonschema_description:"Task cost in US dollars"`
+	CostKnown       bool         `json:"costKnown"               jsonschema_description:"Whether costUSD is measured; false means the harness supplied no cost or billable usage"`
 }
 
 type mcpTaskListOutput struct {

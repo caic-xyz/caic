@@ -35,8 +35,9 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // verifying its durable image store, and accepting native prompt/history behavior.
 // TODO: Enable compaction after proving a native ACP command and its context
 // boundary and accounting semantics.
-// TODO: Add native subagent cards only after retaining dsh-specific ownership
-// and lifecycle evidence; generic tool titles do not establish delegation.
+// TODO: Native usage_update reports only context occupancy and size. Billed
+// tokens or native cost remain unavailable, so task cost stays unknown until
+// upstream reports prompt usage or usage_update.cost.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.Dsh, &agentacp.Config{
 		Args: []string{"dsh", "--profile", "acp"}, ResumeMethod: acp.MethodSessionResume,
@@ -88,10 +89,50 @@ func (modelCodec) Select(requested, current string, options []acp.ConfigOptionVa
 }
 func (modelCodec) Decode(route string) (string, error) { return decodeDSHModel(route) }
 
-type toolParser struct{}
+const startedSubagentPrefix = "started subagent "
 
-func (toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
-	if tool != nil && tool.Status == acp.StatusInProgress {
+type subagentCall struct {
+	label  string
+	prompt string
+}
+
+type toolParser struct {
+	subagents map[string]subagentCall
+}
+
+func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
+	if tool == nil || tool.ToolCallID == "" {
+		return messages, nil
+	}
+	if pending, ok := p.subagents[tool.ToolCallID]; ok {
+		switch tool.Status {
+		case acp.StatusCompleted:
+			delete(p.subagents, tool.ToolCallID)
+			messages = dropToolMessages(messages, tool.ToolCallID)
+			// TODO: Attach the child's final message and a terminal status once
+			// DSH exposes them through ACP. The parent receives the child result
+			// internally, so the journal currently keeps only the spawn identity,
+			// label, and prompt.
+			if id, ok := startedSubagentID(agentacp.ToolOutput(tool)); ok {
+				messages = append(messages, &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
+					ToolUseID:  tool.ToolCallID,
+					Scope:      agent.NativeSubagentScopeAgent,
+					ID:         id,
+					Label:      pending.label,
+					Prompt:     pending.prompt,
+					Status:     agent.NativeSubagentStatusUnknown,
+					Background: true,
+				}})
+			}
+			return messages, nil
+		case acp.StatusFailed:
+			delete(p.subagents, tool.ToolCallID)
+			return dropToolMessages(messages, tool.ToolCallID), nil
+		default:
+			return dropToolMessages(messages, tool.ToolCallID), nil
+		}
+	}
+	if tool.Status == acp.StatusInProgress {
 		for i, message := range messages {
 			use, ok := message.(*agent.ToolUseMessage)
 			if !ok {
@@ -113,13 +154,25 @@ func (toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message
 					}
 					messages = slices.Insert(messages, i+1, insert...)
 				}
+			case strings.EqualFold(use.Name, "subagent"):
+				// The native subagent tool names the delegated task and returns
+				// the child identity on completion. Wait for that identity before
+				// projecting a native card; the generic tool call is machinery.
+				var in struct {
+					Description string `json:"description"`
+					Prompt      string `json:"prompt"`
+				}
+				if err := json.Unmarshal(tool.RawInput, &in); err == nil {
+					p.subagents[tool.ToolCallID] = subagentCall{label: in.Description, prompt: in.Prompt}
+				}
+				return dropToolMessages(messages, tool.ToolCallID), nil
 			default:
 				continue
 			}
 			break
 		}
 	}
-	if tool != nil && tool.Status == acp.StatusCompleted {
+	if tool.Status == acp.StatusCompleted {
 		if output := agentacp.ToolOutput(tool); output != "" {
 			messages = append([]agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: tool.ToolCallID, Delta: output}}, messages...)
 		}
@@ -127,7 +180,34 @@ func (toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message
 	return messages, nil
 }
 
-func newTools() agentacp.ToolParser { return toolParser{} }
+func startedSubagentID(output string) (string, bool) {
+	id, ok := strings.CutPrefix(strings.TrimSpace(output), startedSubagentPrefix)
+	if !ok {
+		return "", false
+	}
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, " \t\r\n") {
+		return "", false
+	}
+	return id, true
+}
+
+func dropToolMessages(messages []agent.Message, toolUseID string) []agent.Message {
+	return slices.DeleteFunc(messages, func(message agent.Message) bool {
+		switch m := message.(type) {
+		case *agent.ToolUseMessage:
+			return m.ToolUseID == toolUseID
+		case *agent.ToolResultMessage:
+			return m.ToolUseID == toolUseID
+		case *agent.ToolOutputDeltaMessage:
+			return m.ToolUseID == toolUseID
+		default:
+			return false
+		}
+	})
+}
+
+func newTools() agentacp.ToolParser { return &toolParser{subagents: make(map[string]subagentCall)} }
 
 func fetchDSHModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (inventory agent.ModelInventory, err error) {
 	if target.SSHHost == "" {

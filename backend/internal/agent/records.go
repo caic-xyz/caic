@@ -179,10 +179,16 @@ func (r *Records) process(w *recordWork) recordResult {
 	case recordHost, recordIntent:
 		encoded, err = marshalRecordMessages(w.messages)
 	case recordRelay:
+		// TODO: Bound or spool large relay frames (images and long command
+		// output) before appending. Native bytes are currently persisted
+		// verbatim because replay and previews need the exact payload.
 		encoded = w.data
 	case recordInput:
 		encoded, err = marshalInputRecords(w.data)
 	case recordPrompt:
+		// TODO: Stamp SessionID and a stable input UUID on the delivery
+		// controls. The record owner currently has neither at input acceptance,
+		// so those persisted fields stay empty.
 		data := w.data
 		if data == nil {
 			data, err = r.wire.EncodePrompt(w.prompt)

@@ -42,6 +42,7 @@ export default function TaskDetailPage() {
               harness={t()?.harness ?? ""}
               model={t()?.reportedModel || t()?.requestedModel}
               costUSD={t()?.costUSD}
+              costKnown={t()?.costKnown}
               cumulativeInputTokens={t()?.cumulativeInputTokens}
               cumulativeOutputTokens={t()?.cumulativeOutputTokens}
               cumulativeCacheCreationInputTokens={t()?.cumulativeCacheCreationInputTokens}

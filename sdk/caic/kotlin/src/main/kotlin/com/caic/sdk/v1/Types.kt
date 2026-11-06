@@ -1815,6 +1815,7 @@ data class Task(
     /** Pushed compact per-repo Git state from the latest diff probe. */
     val repoStates: List<GitRepositoryState>? = null,
     @SerialName("costUSD") val costUSD: Double,
+    val costKnown: Boolean,
     /** Seconds. */
     val duration: Double,
     val numTurns: Int,

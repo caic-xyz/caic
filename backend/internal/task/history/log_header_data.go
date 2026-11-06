@@ -223,7 +223,10 @@ func headerResultFromData(r *v11.Result) *task.Result {
 	if r.StartupFailure != nil {
 		failure = new(v3.StartupFailure(*r.StartupFailure))
 	}
-	return &task.Result{State: task.State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
+	// TODO: Persist CostKnown in the header cache (next schema version) so an
+	// exact reported zero survives cache-only loads. This fallback marks only a
+	// nonzero cost as known.
+	return &task.Result{State: task.State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, CostKnown: r.CostUSD != 0, Duration: r.Duration, NumTurns: r.NumTurns, Usage: headerUsageFromData(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }
 
 func headerUsageToData(u agent.Usage) v11.Usage {

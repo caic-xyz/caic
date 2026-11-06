@@ -19,6 +19,55 @@ import (
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
+func TestInputDeliveryTimestamp(t *testing.T) {
+	t.Parallel()
+	for name, message := range map[string]*SystemMessage{
+		"started":   InputDeliveryStarted(),
+		"completed": InputDeliveryCompleted(),
+		"failed":    InputDeliveryFailed(errors.New("closed")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if message.Ts == 0 {
+				t.Fatal("input delivery message has no timestamp")
+			}
+			encoded, err := MarshalLogMessage(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame, err := taskslog.DecodeFrame(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if frame.Kind != taskslog.KindInputDelivery && frame.Kind != taskslog.KindInputDeliveryFailed {
+				t.Fatalf("kind = %q", frame.Kind)
+			}
+			if frame.ProducerTime.IsZero() {
+				t.Fatal("input delivery timestamp was not decoded")
+			}
+		})
+	}
+}
+
+func TestHostDiffStatTimestamp(t *testing.T) {
+	t.Parallel()
+	msg := NewDiffStatMessage(logdata.DiffStat{{Path: "main.go", LinesAdded: 1}}, nil)
+	if msg.Ts == 0 {
+		t.Fatal("host Git summary has no timestamp")
+	}
+	encoded, err := MarshalLogMessage(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := taskslog.DecodeFrame(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Kind != taskslog.KindGitSummary || frame.ProducerTime.IsZero() {
+		t.Fatalf("frame = %+v", frame)
+	}
+}
+
 type v3AgentRecordFixture struct {
 	ReaderCases    []v3ReaderCase    `json:"reader_cases"`
 	EncoderVectors []v3EncoderVector `json:"encoder_vectors"`

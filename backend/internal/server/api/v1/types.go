@@ -392,6 +392,7 @@ type Task struct {
 	DiffStat                           DiffStat             `json:"diffStat,omitzero"`
 	RepoStates                         []GitRepositoryState `json:"repoStates,omitempty"` // Pushed compact per-repo Git state from the latest diff probe.
 	CostUSD                            float64              `json:"costUSD"`
+	CostKnown                          bool                 `json:"costKnown"`
 	Duration                           float64              `json:"duration"` // Seconds.
 	NumTurns                           int                  `json:"numTurns"`
 	CumulativeInputTokens              int                  `json:"cumulativeInputTokens"`

@@ -15,6 +15,7 @@ const usage: TaskUsageSummary = {
   cacheReadInputTokens: 7_000,
   cacheWriteInputTokens: 2_000,
   costUSD: 0.125,
+  costKnown: true,
   inputTokens: 1_000,
   outputTokens: 500,
 };
@@ -118,6 +119,14 @@ describe("StatsContent", () => {
 
     expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
     expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
+  });
+
+  it("shows an unavailable cost instead of zero when the harness reports none", () => {
+    const { getByTestId } = render(() => (
+      <StatsContent tools={[]} stats={[]} turns={[]} usage={{ ...usage, costKnown: false, costUSD: 0 }} />
+    ));
+
+    expect(getByTestId("task-usage-summary")).toHaveTextContent("Cost —");
   });
 
   it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {

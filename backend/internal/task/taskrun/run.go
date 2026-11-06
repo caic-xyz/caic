@@ -103,10 +103,11 @@ func (r *Run) PrepareRecords(_ context.Context, messages []agent.TimedMessage) (
 		t.mu.Lock()
 		valid := r.prepared.Read.InstanceID != "" && r.prepared.Read.InstanceID == t.runtimeInstanceID && r.prepared.Read.NewerThan(t.lastGitRead)
 		stats, states := r.prepared.Summary(t.liveDiffStat, t.liveRepoStates)
+		changed := !slices.Equal(t.liveDiffStat, stats) || len(states) > 0 && !slices.Equal(t.liveRepoStates, states)
 		t.mu.Unlock()
-		if valid {
-			derived = append([]agent.Message{&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: stats, Repos: states}}, derived...)
-		} else {
+		if valid && changed {
+			derived = append([]agent.Message{agent.NewDiffStatMessage(stats, states)}, derived...)
+		} else if !valid {
 			r.prepared = nil
 		}
 	}
@@ -203,7 +204,7 @@ func (i *repositoryIntent) PrepareRecords(context.Context) ([]agent.Message, err
 	if !i.changed {
 		return nil, nil
 	}
-	return []agent.Message{&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: stats, Repos: states}}, nil
+	return []agent.Message{agent.NewDiffStatMessage(stats, states)}, nil
 }
 func (i *repositoryIntent) ApplyRecords(context.Context) error {
 	if i.accepted {

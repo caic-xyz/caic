@@ -44,6 +44,7 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 	lt.LastTrailer = &task.Result{
 		State:          lt.State,
 		CostUSD:        mr.CostUSD,
+		CostKnown:      mr.CostKnown || mr.CostUSD != 0,
 		Duration:       time.Duration(mr.Duration * float64(time.Second)),
 		NumTurns:       mr.NumTurns,
 		Usage:          mr.TokenUsage(),
@@ -418,6 +419,7 @@ func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.Time
 func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
 	if loaded.LastTrailer != nil && loaded.LastTrailer.CostUSD == 0 && p.lastResult != nil && p.lastResult.TotalCostUSD > 0 {
 		loaded.LastTrailer.CostUSD = p.lastResult.TotalCostUSD
+		loaded.LastTrailer.CostKnown = true
 		loaded.LastTrailer.Duration = time.Duration(p.lastResult.DurationMs) * time.Millisecond
 		loaded.LastTrailer.NumTurns = p.lastResult.NumTurns
 		loaded.LastTrailer.Usage = p.lastResult.Usage

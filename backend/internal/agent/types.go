@@ -172,21 +172,26 @@ func ContextCleared() *SystemMessage {
 
 // InputDeliveryFailed makes a visible failure marker for the preceding input.
 func InputDeliveryFailed(err error) *SystemMessage {
-	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryFailed, Detail: "Input delivery failed: " + err.Error()}
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryFailed, Detail: "Input delivery failed: " + err.Error(), Ts: producerTimestamp()}
 }
 
 // InputDeliveryStarted creates the private beginning of an input attempt.
 func InputDeliveryStarted() *SystemMessage {
-	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryStarted}
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryStarted, Ts: producerTimestamp()}
 }
 
 // InputDeliveryCompleted creates the private successful delivery outcome.
 func InputDeliveryCompleted() *SystemMessage {
-	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryCompleted}
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeInputDeliveryCompleted, Ts: producerTimestamp()}
 }
 
 // Type implements Message.
 func (m *SystemMessage) Type() string { return messageTypeSystem }
+
+// producerTimestamp returns the current time in the task-log timestamp format.
+func producerTimestamp() float64 {
+	return float64(time.Now().UnixMilli()) / 1000
+}
 
 // TextMessage is emitted when the agent produces text output.
 type TextMessage v3.TextMessage
@@ -1090,6 +1095,11 @@ func (m *StrippedEnvMessage) Type() string { return messageTypeStrippedEnv }
 // and by the backend after mutating tool calls, with the current in-container
 // git diff stats.
 type DiffStatMessage v3.DiffStatMessage
+
+// NewDiffStatMessage creates a host-generated Git summary stamped at creation.
+func NewDiffStatMessage(stats v3.DiffStat, repos []v3.RepoState) *DiffStatMessage {
+	return &DiffStatMessage{MessageType: messageTypeDiffStat, DiffStat: stats, Repos: repos, Ts: producerTimestamp()}
+}
 
 // Type implements Message.
 func (m *DiffStatMessage) Type() string { return messageTypeDiffStat }

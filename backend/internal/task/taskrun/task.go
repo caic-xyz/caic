@@ -520,6 +520,14 @@ func (t *Task) LiveStats() (costUSD float64, numTurns int, duration time.Duratio
 	return t.costTracker.TotalUSD, t.liveNumTurns, t.liveDuration, t.liveUsage.Clone(), t.lastUsage.Clone()
 }
 
+// LiveCostKnown reports whether the live fold established a cost. False means
+// the harness supplied no billable usage or reported cost.
+func (t *Task) LiveCostKnown() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.costTracker.Known
+}
+
 // LastAgentResult returns the result text from the most recent ResultMessage,
 // falling back to the visible text of that turn when the agent reported
 // none, or "" if no result was received. Used by Cleanup/StopTask for the
@@ -673,6 +681,7 @@ type Snapshot struct {
 	PlanContent        string
 	PlanExitID         string
 	CostUSD            float64
+	CostKnown          bool
 	NumTurns           int
 	Duration           time.Duration
 	Usage              agent.Usage
@@ -1636,6 +1645,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		PlanContent:        t.planContent,
 		PlanExitID:         t.planExitID,
 		CostUSD:            t.costTracker.TotalUSD,
+		CostKnown:          t.costTracker.Known,
 		NumTurns:           t.liveNumTurns,
 		Duration:           t.liveDuration,
 		Usage:              t.liveUsage.Clone(),

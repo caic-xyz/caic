@@ -224,6 +224,12 @@ func DecodeFrame(line []byte) (Frame, error) {
 	if input, ok := control.(*v3.UserInputMessage); ok && input.Ts > 0 {
 		frame.ProducerTime = time.UnixMilli(int64(math.Round(input.Ts * 1000)))
 	}
+	if system, ok := control.(*v3.SystemMessage); ok && system.Ts > 0 {
+		frame.ProducerTime = time.UnixMilli(int64(math.Round(system.Ts * 1000)))
+	}
+	if diff, ok := control.(*v3.DiffStatMessage); ok && diff.Ts > 0 {
+		frame.ProducerTime = time.UnixMilli(int64(math.Round(diff.Ts * 1000)))
+	}
 	return frame, nil
 }
 
@@ -256,13 +262,13 @@ var v3ControlFields = map[logControlKind][]string{
 	logControlSession:             {"agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id"},
 	logControlModelInfo:           {"context_window"},
 	logControlPR:                  {"forge_owner", "forge_pr", "forge_repo"},
-	logControlResult:              {"agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title"},
+	logControlResult:              {"agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_known", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title"},
 	logControlTurnCommitSnapshot:  {"baseline", "change_stat", "repository_commits"},
 	logControlPendingUserAction:   {"action"},
 	logControlProvisioningLog:     {"line"},
-	logControlContextCleared:      {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
-	logControlInputDeliveryFailed: {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
-	logControlInputDelivery:       {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "uuid"},
+	logControlContextCleared:      {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
+	logControlInputDeliveryFailed: {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
+	logControlInputDelivery:       {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
 	logControlText:                {"phase", "text"},
 	logControlUserInput:           {"images", "text", "ts"},
 	logControlMCPRequest:          {"arguments", "id", "method", "name"},

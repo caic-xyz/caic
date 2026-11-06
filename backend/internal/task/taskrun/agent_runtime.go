@@ -376,12 +376,12 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 		State:       reason,
 		AgentResult: t.LastAgentResult(),
 	}
-	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > 0 {
-		res.CostUSD = liveCost
-		res.NumTurns = liveTurns
-		res.Duration = liveDur
-		res.Usage = liveUsage
-	}
+	liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats()
+	res.CostUSD = liveCost
+	res.CostKnown = t.LiveCostKnown()
+	res.NumTurns = liveTurns
+	res.Duration = liveDur
+	res.Usage = liveUsage
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
@@ -480,12 +480,12 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 	if diskUsed, ok := t.DiskUsage(); ok {
 		res.DiskUsedBytes = &diskUsed
 	}
-	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > 0 {
-		res.CostUSD = liveCost
-		res.NumTurns = liveTurns
-		res.Duration = liveDur
-		res.Usage = liveUsage
-	}
+	liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats()
+	res.CostUSD = liveCost
+	res.CostKnown = t.LiveCostKnown()
+	res.NumTurns = liveTurns
+	res.Duration = liveDur
+	res.Usage = liveUsage
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}

@@ -342,6 +342,35 @@ func TestSkillToolRead(t *testing.T) {
 	}
 }
 
+func TestSubagentTool(t *testing.T) {
+	t.Parallel()
+	wire := New("", nil).NewWire()
+	initial := []byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"subagent-call","title":"subagent","kind":"other","status":"in_progress","rawInput":{"description":"Silly duck task","cwd":"/tmp","prompt":"act as a rubber duck"}}}}`)
+	msgs, err := wire.ParseOutput(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("subagent spawn messages=%#v, want generic tool call suppressed", msgs)
+	}
+	completed := []byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"subagent-call","status":"completed","content":[{"type":"content","content":{"type":"text","text":"started subagent 77c5125c-db9e-4bb0-8bfe-97ac042d25c5"}}]}}}`)
+	msgs, err = wire.ParseOutput(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("subagent completion messages=%#v, want one native card", msgs)
+	}
+	m, ok := msgs[0].(*agent.NativeSubagentMessage)
+	if !ok {
+		t.Fatalf("subagent completion=%T, want *agent.NativeSubagentMessage", msgs[0])
+	}
+	got := m.Subagent
+	if got.ID != "77c5125c-db9e-4bb0-8bfe-97ac042d25c5" || got.ToolUseID != "subagent-call" || got.Label != "Silly duck task" || got.Prompt != "act as a rubber duck" || got.Status != agent.NativeSubagentStatusUnknown || !got.Background || got.Scope != agent.NativeSubagentScopeAgent {
+		t.Fatalf("native subagent=%+v", got)
+	}
+}
+
 // TestDSHNativeRecordings checks the complete production-relay journals, including
 // directional request ownership and terminal-only tool output, without a CLI or key.
 func TestDSHNativeRecordings(t *testing.T) {

@@ -1206,6 +1206,7 @@ public struct Task: Codable {
     /// Pushed compact per-repo Git state from the latest diff probe.
     public let repoStates: [GitRepositoryState]?
     public let costUSD: Double
+    public let costKnown: Bool
     /// Seconds.
     public let duration: Double
     public let numTurns: Int

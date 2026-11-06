@@ -125,6 +125,37 @@ func TestCostTracker(t *testing.T) {
 			t.Fatalf("reported cost = %+v/%v, total = %v", cost, ok, c.TotalUSD)
 		}
 	})
+	t.Run("DSHReportedSessionCostApplies", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Dsh, Model: "deepseek-flash"}
+		reported := 0.42
+		c.Observe(&agent.UsageMessage{CumulativeCostUSD: &reported}, at, prices)
+		cost, ok := c.Observe(&agent.ResultMessage{}, at, prices)
+		if !ok || cost.USD != 0.42 || cost.Source != CostReported || !c.Known {
+			t.Fatalf("reported cost = %+v/%v, known = %v, total = %v", cost, ok, c.Known, c.TotalUSD)
+		}
+	})
+
+	t.Run("DSHPromptUsageEstimatesAtBaseRates", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Dsh, Model: "gpt-6-sol"}
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}}, at, prices)
+		if !ok || math.Abs(cost.USD-12) > 1e-9 || cost.Source != CostEstimated || !c.Known {
+			t.Fatalf("estimated cost = %+v/%v, known = %v, total = %v", cost, ok, c.Known, c.TotalUSD)
+		}
+	})
+
+	t.Run("DSHContextOnlyUsageStaysUnknown", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Dsh, Model: "deepseek-flash"}
+		used := 1000
+		c.Observe(&agent.UsageMessage{ContextUsed: &used, ContextWindow: 1_000_000}, at, prices)
+		cost, ok := c.Observe(&agent.ResultMessage{}, at, prices)
+		if ok || cost.USD != 0 || c.Known || c.TotalUSD != 0 {
+			t.Fatalf("context-only cost = %+v/%v, known = %v, total = %v", cost, ok, c.Known, c.TotalUSD)
+		}
+	})
+
 	t.Run("OpenCodeAggregateOpenAIUsageKeepsBaseRates", func(t *testing.T) {
 		t.Parallel()
 		for _, model := range []string{"openai/gpt-6.1-sol", "openai-codex/gpt-6.1-sol"} {

@@ -35,13 +35,17 @@ type CostTracker struct {
 	Model string
 	// TotalUSD is the cumulative task cost after the latest observed message.
 	TotalUSD float64
+	// Known reports whether any observed message established a cost. A task
+	// with no billed tokens or reported cost leaves TotalUSD zero and Known
+	// false, so callers can distinguish unknown from an exact zero.
+	Known bool
 
-	priorUSD          float64
-	sessionPricedUSD  float64
-	opencodeReported  bool
-	lastTurnUSD       float64
-	pendingTurnSource CostSource
-	pricedUsage       agent.Usage // Request tokens already priced since the last root result/session exit.
+	priorUSD            float64
+	sessionPricedUSD    float64
+	sessionCostReported bool
+	lastTurnUSD         float64
+	pendingTurnSource   CostSource
+	pricedUsage         agent.Usage // Request tokens already priced since the last root result/session exit.
 }
 
 // Observe folds one agent message and returns a cost only at a result boundary.
@@ -76,12 +80,12 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 				c.Model = m.ReportedModel
 			}
 		case agent.SystemSubtypeCompactBoundary, "context_cleared":
-			if m.Subtype == "context_cleared" || (c.Harness != harness.Claude && c.Harness != harness.OpenCode) {
+			if m.Subtype == "context_cleared" || (c.Harness != harness.Claude && c.Harness != harness.OpenCode && !c.sessionCostReported) {
 				c.priorUSD = c.TotalUSD
 				c.sessionPricedUSD = 0
 			}
 			if m.Subtype == "context_cleared" {
-				c.opencodeReported = false
+				c.sessionCostReported = false
 				c.pricedUsage = agent.Usage{}
 			}
 		}
@@ -89,13 +93,14 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if m.ReportedModel != "" && !m.Source.IsChild() {
 			c.Model = m.ReportedModel
 		}
-		if c.Harness == harness.OpenCode && m.CumulativeCostUSD != nil && *m.CumulativeCostUSD > 0 {
-			c.opencodeReported = true
+		if m.CumulativeCostUSD != nil && *m.CumulativeCostUSD > 0 {
+			c.sessionCostReported = true
 			c.TotalUSD = c.priorUSD + *m.CumulativeCostUSD
 			c.pendingTurnSource = CostReported
+			c.Known = true
 		}
-		if c.Harness == harness.OpenCode && c.opencodeReported {
-			break // ACP's reported session cost supersedes token estimates.
+		if c.sessionCostReported {
+			break // A cumulative session cost supersedes per-request estimates.
 		}
 		// PerCall records establish request context independently of the harness.
 		// Older non-derived records carrying a model are also individual calls.
@@ -113,52 +118,64 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if !priced && c.Harness == harness.Pi && (m.PerCall || !m.ModelDerived) && m.ReportedCostUSD != nil {
 			c.priorUSD += *m.ReportedCostUSD
 			c.TotalUSD += *m.ReportedCostUSD
+			c.Known = true
 			c.markSource(CostReported)
 		}
 	case *agent.ResultMessage:
 		if m.Source.IsChild() {
 			break
 		}
-		switch c.Harness {
-		case harness.OpenCode, harness.Codex:
-			if c.Harness == harness.OpenCode && c.opencodeReported {
-				break
-			}
-			// Results sum every request, including child threads. Subtract calls
-			// already priced, then estimate only the remaining aggregate at base
-			// rates: missing per-call events do not establish request sizes.
-			writes := m.Usage.CacheWriteBuckets().Subtract(c.pricedUsage.CacheWriteBuckets())
-			remaining := agent.Usage{
-				InputTokens:              max(0, m.Usage.InputTokens-c.pricedUsage.InputTokens),
-				CacheCreationInputTokens: int(writes.Total()),
-				CacheReadInputTokens:     max(0, m.Usage.CacheReadInputTokens-c.pricedUsage.CacheReadInputTokens),
-				OutputTokens:             max(0, m.Usage.OutputTokens-c.pricedUsage.OutputTokens),
-				CacheWrites:              writes,
-			}
-			if !c.priceUsage(remaining, at, pricer) {
-				if remaining.InputTokens > 0 || remaining.CacheCreationInputTokens > 0 || remaining.CacheReadInputTokens > 0 || remaining.OutputTokens > 0 {
-					// Priced children do not establish the cost of unpriced
-					// parent usage. Do not present a partial turn as known.
-					c.pendingTurnSource = ""
+		if !c.sessionCostReported {
+			switch c.Harness {
+			case harness.OpenCode, harness.Codex:
+				// Results sum every request, including child threads. Subtract calls
+				// already priced, then estimate only the remaining aggregate at base
+				// rates: missing per-call events do not establish request sizes.
+				writes := m.Usage.CacheWriteBuckets().Subtract(c.pricedUsage.CacheWriteBuckets())
+				remaining := agent.Usage{
+					InputTokens:              max(0, m.Usage.InputTokens-c.pricedUsage.InputTokens),
+					CacheCreationInputTokens: int(writes.Total()),
+					CacheReadInputTokens:     max(0, m.Usage.CacheReadInputTokens-c.pricedUsage.CacheReadInputTokens),
+					OutputTokens:             max(0, m.Usage.OutputTokens-c.pricedUsage.OutputTokens),
+					CacheWrites:              writes,
 				}
-				c.applyResultReport(m.TotalCostUSD, false)
-			}
-		case harness.Claude:
-			if c.sessionPricedUSD == 0 {
-				c.applyResultReport(m.TotalCostUSD, true)
-			}
-		case harness.Pi:
-			// Pi results report per-invocation costs, rather than a session
-			// snapshot. Modern usage messages already account for each call.
-			// Retain a result-only fallback for older logs without per-call costs.
-			if c.pendingTurnSource == "" && m.TotalCostUSD > 0 {
-				c.priorUSD += m.TotalCostUSD
-				c.TotalUSD += m.TotalCostUSD
-				c.markSource(CostReported)
-			}
-		default:
-			if c.sessionPricedUSD == 0 {
-				c.applyResultReport(m.TotalCostUSD, false)
+				if !c.priceUsage(remaining, at, pricer) {
+					if remaining.InputTokens > 0 || remaining.CacheCreationInputTokens > 0 || remaining.CacheReadInputTokens > 0 || remaining.OutputTokens > 0 {
+						// Priced children do not establish the cost of unpriced
+						// parent usage. Do not present a partial turn as known.
+						c.pendingTurnSource = ""
+					}
+					c.applyResultReport(m.TotalCostUSD, false)
+				}
+			case harness.Claude:
+				if c.sessionPricedUSD == 0 {
+					c.applyResultReport(m.TotalCostUSD, true)
+				}
+			case harness.Dsh:
+				// DSH ACP prompt results carry aggregate prompt tokens. Price them
+				// at base rates when the harness reports them; context occupancy is
+				// not billed usage and never establishes a cost.
+				if !m.Usage.Equal(agent.Usage{}) {
+					if !c.priceUsage(m.Usage, at, pricer) {
+						c.applyResultReport(m.TotalCostUSD, false)
+					}
+				} else {
+					c.applyResultReport(m.TotalCostUSD, false)
+				}
+			case harness.Pi:
+				// Pi results report per-invocation costs, rather than a session
+				// snapshot. Modern usage messages already account for each call.
+				// Retain a result-only fallback for older logs without per-call costs.
+				if c.pendingTurnSource == "" && m.TotalCostUSD > 0 {
+					c.priorUSD += m.TotalCostUSD
+					c.TotalUSD += m.TotalCostUSD
+					c.Known = true
+					c.markSource(CostReported)
+				}
+			default:
+				if c.sessionPricedUSD == 0 {
+					c.applyResultReport(m.TotalCostUSD, false)
+				}
 			}
 		}
 		c.pricedUsage = agent.Usage{}
@@ -205,6 +222,7 @@ func (c *CostTracker) modelPrice(model string, at time.Time, pricer usage.ModelP
 func (c *CostTracker) addEstimatedCost(usd float64) {
 	c.sessionPricedUSD += usd
 	c.TotalUSD = c.priorUSD + c.sessionPricedUSD
+	c.Known = true
 	c.markSource(CostEstimated)
 }
 
@@ -213,6 +231,7 @@ func (c *CostTracker) applyResultReport(usd float64, zeroKnown bool) {
 		return
 	}
 	c.TotalUSD = c.priorUSD + usd
+	c.Known = true
 	c.markSource(CostReported)
 }
 

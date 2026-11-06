@@ -1666,6 +1666,29 @@ else:
 						if stub.fetched.Load() {
 							t.Error("Fetch was called for mutating tool result")
 						}
+
+						// A second mutating call with an unchanged snapshot must not
+						// append another Git summary.
+						secondID := "tool_edit_2"
+						if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":%q,"input":{}}]}}`, secondID, tool)); err != nil {
+							t.Fatal(err)
+						}
+						recvMsg(t, ch)
+						if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, secondID)); err != nil {
+							t.Fatal(err)
+						}
+						if msg := recvMsg(t, ch); msg == nil {
+							t.Fatal("missing second tool result")
+						} else if _, ok := msg.(*agent.ToolResultMessage); !ok {
+							t.Fatalf("second tool result = %T", msg)
+						}
+						select {
+						case msg := <-ch:
+							if _, ok := msg.Message.(*agent.DiffStatMessage); ok {
+								t.Fatal("unchanged snapshot appended another Git summary")
+							}
+						case <-time.After(time.Second):
+						}
 					})
 				}
 			})

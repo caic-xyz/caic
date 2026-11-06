@@ -150,6 +150,7 @@ func ResultMessage(title string, res *task.Result) *agent.MetaResultMessage {
 		State:          res.State.String(),
 		Title:          title,
 		CostUSD:        res.CostUSD,
+		CostKnown:      res.CostKnown,
 		Duration:       res.Duration.Seconds(),
 		NumTurns:       res.NumTurns,
 		DiffStat:       res.DiffStat,

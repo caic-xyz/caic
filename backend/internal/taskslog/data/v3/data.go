@@ -203,6 +203,9 @@ type SystemMessage struct {
 	UUID          string `json:"uuid"`
 	Detail        string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for SystemSubtypeModelRerouted).
 	ReportedModel string `json:"model,omitempty"`  // Active model after SystemSubtypeModelRerouted; used to update task.reportedModel.
+	// Ts is the producer time in Unix seconds for private delivery controls.
+	// Zero means the record predates delivery timestamps.
+	Ts float64 `json:"ts,omitempty"`
 	// ContextTokensBefore is the harness-reported context size before a
 	// SystemSubtypeCompactBoundary. Zero means the harness did not report it.
 	ContextTokensBefore int64 `json:"context_tokens_before,omitempty"`
@@ -324,6 +327,7 @@ type MetaResultMessage struct {
 	State                    string       `json:"state"`
 	Title                    string       `json:"title,omitempty"`
 	CostUSD                  float64      `json:"cost_usd,omitempty"`
+	CostKnown                bool         `json:"cost_known,omitempty"`
 	Duration                 float64      `json:"duration,omitempty"` // Seconds.
 	NumTurns                 int          `json:"num_turns,omitempty"`
 	InputTokens              int          `json:"input_tokens,omitempty"`

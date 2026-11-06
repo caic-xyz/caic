@@ -35,6 +35,13 @@ deduplication. The native `skill` tool reports the skill name in its `rawInput`;
 a successful completion confirms the inferred load. The `read-edit-bash`
 recording retains that tool call and its completion content.
 
+The native `subagent` tool names a delegated task in `description` and
+`prompt`, then returns `started subagent <id>` on completion. Project that as a
+native card with unknown status and `Background: true`; the generic tool call
+is machinery. The child's later result is not an ACP record, so it cannot be
+attached to the card. The parent model sees that result, but the journal does
+not.
+
 Successful read and command output arrives only in terminal tool updates;
 failed tool updates carry their error in content and still precede a normal
 terminal prompt response. Native permissions select an advertised option ID

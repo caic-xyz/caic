@@ -23,6 +23,7 @@ export interface TaskUsageSummary {
   cacheReadInputTokens: number;
   outputTokens: number;
   costUSD: number;
+  costKnown: boolean;
 }
 
 interface UsageDetails extends TaskUsageSummary {
@@ -49,7 +50,7 @@ function formatUSD(usd: number): string {
 }
 
 function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
-  const completeCost = turns.every((turn) => turn.cost !== undefined);
+  const completeCost = turns.length > 0 && turns.every((turn) => turn.cost !== undefined);
   return turns.reduce<UsageDetails>(
     (total, turn) => {
       const usage = turn.usage;
@@ -71,6 +72,7 @@ function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
       reasoningOutputTokens: 0,
       totalTokens: 0,
       costUSD: 0,
+      costKnown: completeCost,
     },
   );
 }
@@ -88,6 +90,7 @@ export function StatsContent(props: StatsContentProps) {
         props.usage.cacheWriteInputTokens +
         props.usage.cacheReadInputTokens +
         props.usage.outputTokens,
+      costKnown: props.usage.costKnown || fromTurns.costKnown,
     };
   });
   const cacheHitRate = () => {
@@ -136,11 +139,11 @@ export function StatsContent(props: StatsContentProps) {
               <span class={styles.usageLabel}>Cache hit </span>
               {Math.round(cacheHitRate() * 100)}%
             </span>
-            <Show when={usage().costUSD > 0}>
-              <span>
-                <span class={styles.usageLabel}>Cost </span>
-                {formatUSD(usage().costUSD)}
-              </span>
+            <span>
+              <span class={styles.usageLabel}>Cost </span>
+              {usage().costKnown ? formatUSD(usage().costUSD) : "—"}
+            </span>
+            <Show when={usage().costKnown && usage().costUSD > 0}>
               <span title="Reported cost divided by total token volume">
                 <span class={styles.usageLabel}>Effective </span>
                 {formatUSD(costPerMillionTokens())}/Mt

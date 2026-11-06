@@ -92,6 +92,7 @@ type Result struct {
 	// runtime could not provide a measurement.
 	DiskUsedBytes  *int64
 	CostUSD        float64
+	CostKnown      bool
 	Duration       time.Duration
 	NumTurns       int
 	Usage          agent.Usage

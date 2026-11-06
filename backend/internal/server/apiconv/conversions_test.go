@@ -385,6 +385,34 @@ func TestTask(t *testing.T) {
 			t.Fatalf("contextUsed = %s", fields["contextUsed"])
 		}
 	})
+	t.Run("CostKnown", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.CostKnown {
+			t.Fatal("unreported cost became known")
+		}
+		unknownZero := tk.Snapshot()
+		unknownZero.CostKnown = true
+		got, err = Task(&TaskInput{Task: tk, Snapshot: unknownZero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.CostKnown || got.CostUSD != 0 {
+			t.Fatalf("known zero cost = %+v", got)
+		}
+		result := &task.Result{State: task.StatePurged, CostKnown: true}
+		got, err = Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot(), Result: result})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.CostKnown {
+			t.Fatal("result-known cost was dropped")
+		}
+	})
 	t.Run("CurrentPlanUsesCapturedSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})

@@ -35,12 +35,16 @@ func Task(in *TaskInput) (v1.Task, error) {
 	// For purged tasks loaded from logs, snap stats may be zero because messages
 	// aren't restored. Fall back to the result trailer.
 	costUSD := snap.CostUSD
+	costKnown := snap.CostKnown
 	numTurns := snap.NumTurns
 	duration := snap.Duration
 	cumulativeUsage := snap.Usage
 	if result != nil {
 		if costUSD == 0 {
 			costUSD = result.CostUSD
+		}
+		if result.CostKnown {
+			costKnown = true
 		}
 		if numTurns == 0 {
 			numTurns = result.NumTurns
@@ -51,6 +55,9 @@ func Task(in *TaskInput) (v1.Task, error) {
 		if cumulativeUsage.Equal(agent.Usage{}) {
 			cumulativeUsage = result.Usage
 		}
+	}
+	if costUSD != 0 {
+		costKnown = true
 	}
 	state, err := TaskState(snap.State)
 	if err != nil {
@@ -99,6 +106,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		InPlanMode:      snap.InPlanMode,
 		GitHubToken:     snap.GitHubToken,
 		CostUSD:         costUSD,
+		CostKnown:       costKnown,
 		NumTurns:        numTurns,
 		Duration:        duration.Seconds(),
 	}

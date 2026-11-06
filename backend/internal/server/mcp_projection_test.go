@@ -240,6 +240,10 @@ func TestMCPProjection(t *testing.T) {
 		if resolved.Model != "reported-model" || resolved.Effort != "medium" {
 			t.Fatalf("resolved settings = %q/%q, want reported-model/medium", resolved.Model, resolved.Effort)
 		}
+		known := taskMCPSummary(1, &v1.Task{CostUSD: 0, CostKnown: true})
+		if !known.CostKnown {
+			t.Fatal("known zero cost was dropped")
+		}
 	})
 }
 

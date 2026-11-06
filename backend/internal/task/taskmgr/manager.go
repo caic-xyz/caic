@@ -2389,6 +2389,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			State:       t.GetState(),
 			DiffStat:    t.LiveDiffStat(),
 			CostUSD:     costUSD,
+			CostKnown:   t.LiveCostKnown(),
 			Duration:    duration,
 			NumTurns:    numTurns,
 			Usage:       usage,

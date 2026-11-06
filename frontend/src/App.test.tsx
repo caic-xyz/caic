@@ -32,6 +32,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     state: "branching",
     stateUpdatedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
     costUSD: 0,
+    costKnown: false,
     duration: 0,
     numTurns: 0,
     cumulativeInputTokens: 0,

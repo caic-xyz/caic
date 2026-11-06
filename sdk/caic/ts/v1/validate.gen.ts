@@ -196,6 +196,7 @@ export function validateTask(raw: ValidatorInput): Task {
     diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
     repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
     costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
+    costKnown: asBoolean(obj["costKnown"], "Task.costKnown"),
     duration: asNumber(obj["duration"], "Task.duration"),
     numTurns: asNumber(obj["numTurns"], "Task.numTurns"),
     cumulativeInputTokens: asNumber(obj["cumulativeInputTokens"], "Task.cumulativeInputTokens"),
