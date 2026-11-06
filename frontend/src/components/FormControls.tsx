@@ -8,6 +8,7 @@ import KeyboardArrowDown from "@material-symbols/svg-400/outlined/keyboard_arrow
 
 import SearchableSelect from "./SearchableSelect";
 import styles from "./FormControls.module.css";
+import { harnessLabel } from "../harnessLabels";
 
 type ControlSelectProps = JSX.SelectHTMLAttributes<HTMLSelectElement>;
 
@@ -93,7 +94,7 @@ export function HarnessControls(props: {
           <For each={props.harnesses}>
             {(h) => (
               <option value={h.name} selected={h.name === props.harness}>
-                {props.harnessOptionLabel?.(h) ?? h.name}
+                {props.harnessOptionLabel?.(h) ?? harnessLabel(h.name)}
               </option>
             )}
           </For>

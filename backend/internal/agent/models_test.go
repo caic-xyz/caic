@@ -1,4 +1,4 @@
-// Tests for model list sorting.
+// Tests for model and reasoning-effort ordering.
 
 package agent
 
@@ -97,6 +97,27 @@ func TestSortModels(t *testing.T) {
 		_ = SortModels(input)
 		if !slices.Equal(input, original) {
 			t.Errorf("input was corrupted:\n  before: %v\n  after:  %v", original, input)
+		}
+	})
+}
+
+func TestSortEfforts(t *testing.T) {
+	t.Parallel()
+	t.Run("orders by effort", func(t *testing.T) {
+		t.Parallel()
+		got := SortEfforts([]string{"max", "off", "high", "medium", "none", "minimal", "xhigh", "low"})
+		want := []string{"off", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
+		if !slices.Equal(got, want) {
+			t.Errorf("got  %v\nwant %v", got, want)
+		}
+	})
+
+	t.Run("deduplicates and appends unknown values", func(t *testing.T) {
+		t.Parallel()
+		got := SortEfforts([]string{"high", "ultra", "low", "high", "beta"})
+		want := []string{"low", "high", "beta", "ultra"}
+		if !slices.Equal(got, want) {
+			t.Errorf("got  %v\nwant %v", got, want)
 		}
 	})
 }

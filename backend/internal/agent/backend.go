@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -226,8 +227,13 @@ func (b *Base) ModelInventory() ModelInventory {
 	return *inv
 }
 
-// SetModelInventory implements Backend.
+// SetModelInventory implements Backend, ordering each model's effort choices.
 func (b *Base) SetModelInventory(inventory ModelInventory) {
+	models := slices.Clone(inventory.Models)
+	for i := range models {
+		models[i].EffortOptions = SortEfforts(models[i].EffortOptions)
+	}
+	inventory.Models = models
 	b.mu.Lock()
 	b.inventory = &inventory
 	b.mu.Unlock()

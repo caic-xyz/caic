@@ -54,6 +54,7 @@ import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
 import { ImageDraftOwner, type DraftImage } from "./images";
+import { harnessLabel } from "./harnessLabels";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -1226,9 +1227,9 @@ function createAppStore() {
   };
   const forkHarnesses = () => (forkQuotaRecovery() ? forkTargets().map((target) => target.harness) : harnesses());
   const forkHarnessLabel = (harness: HarnessInfo) => {
-    if (!forkQuotaRecovery()) return harness.name;
+    if (!forkQuotaRecovery()) return harnessLabel(harness.name);
     const target = forkTargets().find((candidate) => candidate.harness.name === harness.name);
-    return target ? `${harness.name} — ${target.label}` : harness.name;
+    return target ? `${harnessLabel(harness.name)} — ${target.label}` : harnessLabel(harness.name);
   };
   const forkSelectedTargetLabel = () =>
     forkTargets().find((target) => target.harness.name === forkHarness())?.label ?? "Quota status unknown";
@@ -1528,7 +1529,7 @@ function createAppStore() {
       const refreshed = await api.refreshHarness(harness, {});
       setHarnesses((prev) => prev.map((info) => (info.name === harness ? refreshed : info)));
       if (selectedHarness() === harness) selectHarness(harness);
-      setModelRefreshStatus({ state: "success", message: `${harness} models refreshed.` });
+      setModelRefreshStatus({ state: "success", message: `${harnessLabel(harness)} models refreshed.` });
     } catch (e: unknown) {
       setModelRefreshStatus({ state: "error", message: e instanceof Error ? e.message : "Could not refresh models" });
     } finally {

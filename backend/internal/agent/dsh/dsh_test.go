@@ -206,7 +206,7 @@ func TestDiscoverDSHModels(t *testing.T) {
 	for _, m := range inventory.Models {
 		byID[m.ID] = m.EffortOptions
 	}
-	if !slices.Equal(byID["deepseek-official/deepseek-v4-flash"], []string{"high", "off"}) || !slices.Equal(byID["deepseek-official/deepseek-v4-pro"], []string{"max"}) {
+	if !slices.Equal(byID["deepseek-official/deepseek-v4-flash"], []string{"off", "high"}) || !slices.Equal(byID["deepseek-official/deepseek-v4-pro"], []string{"max"}) {
 		t.Fatalf("model efforts = %#v", byID)
 	}
 	sc := bufio.NewScanner(&stdin)

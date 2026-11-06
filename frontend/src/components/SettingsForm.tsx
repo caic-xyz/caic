@@ -30,6 +30,7 @@ import ActionButton from "./ActionButton";
 import SettingsMappings, { containerSortPath } from "./SettingsMappings";
 
 import { formatDuration, parseDuration } from "../duration";
+import { harnessLabel } from "../harnessLabels";
 
 import styles from "./SettingsForm.module.css";
 
@@ -507,7 +508,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                       void props.refreshAvailableModels(harness.name);
                     }}
                   >
-                    {harness.name}
+                    {harnessLabel(harness.name)}
                   </Button>
                 )}
               </For>

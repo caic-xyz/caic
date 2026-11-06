@@ -28,7 +28,7 @@ func TestParseModels(t *testing.T) {
 		if got, want := (agent.ModelInventory{Models: models}).IDs(), []string{"anthropic/bravo", "opencode/alpha"}; !slices.Equal(got, want) {
 			t.Fatalf("models = %v, want %v", got, want)
 		}
-		if got, want := models[1].EffortOptions, []string{"high", "low"}; !slices.Equal(got, want) {
+		if got, want := models[1].EffortOptions, []string{"low", "high"}; !slices.Equal(got, want) {
 			t.Fatalf("effort options = %v, want %v", got, want)
 		}
 		if got, want := models[1].ContextWindow, 200_000; got != want {

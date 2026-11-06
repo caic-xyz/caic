@@ -104,6 +104,20 @@ describe("TaskCard", () => {
     expect(screen.getByText("codex")).toBeInTheDocument();
   });
 
+  it("shows the product name for harnesses with one", () => {
+    renderCard(() => (
+      <TaskCard
+        {...props({ harness: "dsh", harnessLogoUrl: "/logos/deepseek.svg", model: "deepseek-flash", effort: "low" })}
+      />
+    ));
+
+    const logo = screen.getByRole("img", { name: "DeepSeek Harness" });
+    const trigger = logo.parentElement;
+    if (!trigger) throw new Error("Missing harness tooltip trigger");
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByText("DeepSeek Harness")).toBeInTheDocument();
+  });
+
   it("uses the final model-name segment without a harness", () => {
     renderCard(() => <TaskCard {...props({ harness: undefined, model: "provider/family/model", effort: "high" })} />);
     expect(screen.getByText("model").closest("div")).toHaveTextContent(/^model · high$/);

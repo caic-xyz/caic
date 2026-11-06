@@ -9,6 +9,7 @@ import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskI
 import Table from "./Table";
 import styles from "./TaskInfo.module.css";
 import { api } from "../api";
+import { harnessLabel } from "../harnessLabels";
 
 interface Props {
   taskId: string;
@@ -257,7 +258,7 @@ export default function TaskInfo(props: Props) {
                   <Field label="Task ID" value={data.id} code />
                   <Field label="State" value={data.recorded.state} />
                   <Field label="Started" value={formatTime(data.recorded.startedAt)} />
-                  <Field label="Harness" value={data.recorded.harness} />
+                  <Field label="Harness" value={harnessLabel(data.recorded.harness)} />
                   <Field label="Requested model" value={data.recorded.requestedModel} code />
                   <Field label="Requested effort" value={data.recorded.requestedEffort} />
                   <Field label="Reported model" value={data.recorded.reportedModel} code />

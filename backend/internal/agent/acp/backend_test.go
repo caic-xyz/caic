@@ -142,7 +142,7 @@ func TestBackend(t *testing.T) {
 		b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "openai/gpt-5", EffortOptions: []string{"low", "high"}}}})
 
 		got := b.ModelInventory()
-		if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"high", "low"}) {
+		if len(got.Models) != 1 || !slices.Equal(got.Models[0].EffortOptions, []string{"low", "high"}) {
 			t.Fatalf("ModelInventory() = %#v, want normalized inventory", got)
 		}
 	})

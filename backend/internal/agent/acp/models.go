@@ -3,8 +3,6 @@
 package acp
 
 import (
-	"slices"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/maruel/genai/acp"
 )
@@ -20,9 +18,7 @@ func NormalizeModels(models []agent.Model) []agent.Model {
 		if _, ok := byID[model.ID]; !ok {
 			ids = append(ids, model.ID)
 		}
-		model.EffortOptions = slices.Clone(model.EffortOptions)
-		slices.Sort(model.EffortOptions)
-		model.EffortOptions = slices.Compact(model.EffortOptions)
+		model.EffortOptions = agent.SortEfforts(model.EffortOptions)
 		byID[model.ID] = model
 	}
 

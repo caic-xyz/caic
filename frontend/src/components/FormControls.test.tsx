@@ -43,6 +43,28 @@ it("preserves the selected harness when quota updates reorder its options", () =
   }
 });
 
+it("labels DeepSeek Harness with its product name", () => {
+  const choice = (name: HarnessInfo["name"]): HarnessInfo => ({
+    name,
+    models: [],
+    supportsImages: false,
+    supportsCompact: false,
+    supportsModelRefresh: false,
+  });
+  render(() => (
+    <HarnessControls
+      harnesses={[choice("codex"), choice("dsh")]}
+      harness="dsh"
+      model=""
+      effort=""
+      onHarness={() => {}}
+      onModel={() => {}}
+      onEffort={() => {}}
+    />
+  ));
+  expect(screen.getByRole("option", { name: "DeepSeek Harness" })).toHaveValue("dsh");
+});
+
 describe("ToggleChip", () => {
   it("toggles with Enter without submitting its form", () => {
     const onSubmit = vi.fn((event: SubmitEvent) => event.preventDefault());

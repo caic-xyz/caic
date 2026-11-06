@@ -33,6 +33,7 @@ import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
+import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
 import { api } from "../api";
 
@@ -134,6 +135,7 @@ export default function TaskCard(props: TaskCardProps) {
     if (h === "antigravity") return "Antigravity subscription";
     return "";
   };
+  const displayHarness = () => props.harness && harnessLabel(props.harness);
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
@@ -520,10 +522,10 @@ export default function TaskCard(props: TaskCardProps) {
         <Show when={props.harness || props.model}>
           <div class={styles.metaRow}>
             <span class={styles.meta}>
-              <Show when={props.harnessLogoUrl} fallback={props.harness}>
+              <Show when={props.harnessLogoUrl} fallback={displayHarness()}>
                 {(url) => (
-                  <Tooltip text={props.harness} stopActivationPropagation>
-                    <img class={styles.harnessLogo} src={url()} alt={props.harness} />
+                  <Tooltip text={displayHarness()} stopActivationPropagation>
+                    <img class={styles.harnessLogo} src={url()} alt={displayHarness()} />
                   </Tooltip>
                 )}
               </Show>

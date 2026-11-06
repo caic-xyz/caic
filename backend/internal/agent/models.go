@@ -1,8 +1,9 @@
-// Model list sorting: blacklist filtering, then variant-aware latest-version deduplication.
+// Model list and reasoning-effort ordering.
 
 package agent
 
 import (
+	"cmp"
 	"regexp"
 	"slices"
 	"strconv"
@@ -91,6 +92,39 @@ func SortModels(models []string) []string {
 
 	slices.Sort(out)
 	return out
+}
+
+// effortRanks orders known reasoning effort values from least to most.
+var effortRanks = map[string]int{
+	"off":     0,
+	"none":    1,
+	"minimal": 2,
+	"low":     3,
+	"medium":  4,
+	"high":    5,
+	"xhigh":   6,
+	"max":     7,
+}
+
+// SortEfforts returns deduplicated options ordered from least to most
+// reasoning effort. Unknown values follow known values alphabetically.
+func SortEfforts(options []string) []string {
+	options = slices.Clone(options)
+	slices.SortFunc(options, func(a, b string) int {
+		ra, aKnown := effortRanks[a]
+		rb, bKnown := effortRanks[b]
+		switch {
+		case aKnown && bKnown:
+			return cmp.Compare(ra, rb)
+		case aKnown:
+			return -1
+		case bKnown:
+			return 1
+		default:
+			return strings.Compare(a, b)
+		}
+	})
+	return slices.Compact(options)
 }
 
 // parseModelVersion extracts the effective provider, variant-aware family key,

@@ -49,7 +49,7 @@ test("desktop quota recovery continues in a fork and preserves the source", asyn
   await expect(harnessSelect.locator("option")).toHaveText([
     "codex — Available · Recommended",
     "antigravity — Quota status unknown",
-    "dsh — Quota status unknown",
+    "DeepSeek Harness — Quota status unknown",
     "pi — Quota status unknown",
     "claude — Same exhausted quota",
   ]);
@@ -86,7 +86,7 @@ test("mobile quota recovery opens from task detail and navigates to the fork", a
   await expect(harnessSelect.locator("option")).toHaveText([
     "codex — Available · Recommended",
     "antigravity — Quota status unknown",
-    "dsh — Quota status unknown",
+    "DeepSeek Harness — Quota status unknown",
     "pi — Quota status unknown",
     "claude — Same exhausted quota",
   ]);

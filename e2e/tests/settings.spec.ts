@@ -30,7 +30,7 @@ test("server model reload shows progress, success, and recoverable failure", asy
   await expect(codex).toBeVisible();
   await expect(pi).toBeVisible();
   await expect(models.getByRole("button", { name: "antigravity", exact: true })).toBeVisible();
-  await expect(models.getByRole("button", { name: "dsh", exact: true })).toBeVisible();
+  await expect(models.getByRole("button", { name: "DeepSeek Harness", exact: true })).toBeVisible();
   await expect(models.getByRole("button")).toHaveCount(4);
 
   const gate = Promise.withResolvers<void>();

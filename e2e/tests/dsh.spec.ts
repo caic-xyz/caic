@@ -11,7 +11,9 @@ test("dsh task selection and follow-up survive browser reload", async ({ page, a
   expect(dsh!.supportsModelRefresh).toBe(true);
 
   await page.goto("/");
-  await page.getByTestId("harness-select").selectOption("dsh");
+  const harnessSelect = page.getByTestId("harness-select");
+  await expect(harnessSelect.locator("option[value=dsh]")).toHaveText("DeepSeek Harness");
+  await harnessSelect.selectOption("dsh");
   const prompt = uniquePrompt("FAKE_LIFECYCLE dsh task");
   await page.getByTestId("prompt-input").fill(prompt);
   await page.getByTestId("submit-task").click();

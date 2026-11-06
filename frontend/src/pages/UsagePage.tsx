@@ -11,6 +11,7 @@ import ActionButton from "../components/ActionButton";
 import SectionControls from "../components/SectionControls";
 import Table from "../components/Table";
 import { formatCost, formatTokens } from "../formatting";
+import { harnessLabel } from "../harnessLabels";
 import {
   summarizeUsageDays,
   usageCacheHitRate,
@@ -76,7 +77,7 @@ export default function UsagePage() {
     if (!active) return "";
     const parts = [];
     if (active.model) parts.push(`model ${active.model}`);
-    if (active.harness) parts.push(`harness ${active.harness}`);
+    if (active.harness) parts.push(`harness ${harnessLabel(active.harness)}`);
     return parts.join(" in ");
   };
 
@@ -202,6 +203,7 @@ function Leaderboard(props: {
   kind?: "model" | "harness";
   onSelect?: (name: string) => void;
 }) {
+  const entryLabel = (name: string) => (props.kind === "harness" ? harnessLabel(name) : name);
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No usage in this range.</p>}>
       <Table class={styles.tableWrap} label="Usage leaderboard">
@@ -224,14 +226,14 @@ function Leaderboard(props: {
             {(entry) => (
               <tr>
                 <th scope="row">
-                  <Show when={props.kind && props.onSelect} fallback={entry.name}>
+                  <Show when={props.kind && props.onSelect} fallback={entryLabel(entry.name)}>
                     <button
                       type="button"
                       class={styles.rowButton}
-                      title={`Show only ${props.kind} ${entry.name}`}
+                      title={`Show only ${props.kind} ${entryLabel(entry.name)}`}
                       onClick={() => props.onSelect?.(entry.name)}
                     >
-                      {entry.name}
+                      {entryLabel(entry.name)}
                     </button>
                   </Show>
                 </th>
