@@ -1,4 +1,4 @@
-// Tests specialized image refresh selection, serialization, and status isolation.
+// Tests and benchmarks specialized image refresh selection, serialization, and status isolation.
 
 package server
 
@@ -176,5 +176,21 @@ func TestImageRefreshShutdown(t *testing.T) {
 	}
 	if _, err := r.Start(t.Context(), "alice", "docker"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("start after shutdown = %v, want cancellation", err)
+	}
+}
+
+func BenchmarkImageRefreshStatus(b *testing.B) {
+	r := &ImageRefresh{
+		Clients: map[string]ImageWarmer{"docker": &imageWarmerFake{}},
+		statuses: map[imageRefreshKey]v1.ImageRefreshStatus{
+			{userID: "alice", runtime: "docker"}: {State: v1.ImageRefreshRunning},
+		},
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		status, err := r.Status("alice", "docker")
+		if err != nil || status.State != v1.ImageRefreshRunning {
+			b.Fatalf("Status = %+v, %v", status, err)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-// Tests tool timing correlation and the distinction between measured and unknown durations.
+// Tests and benchmarks tool timing correlation and the distinction between measured and unknown durations.
 
 package usagedb
 
@@ -34,5 +34,15 @@ func TestToolTimingTracker(t *testing.T) {
 	tracker.Start("synthetic", "Read", time.Time{})
 	if _, _, ok := tracker.Finish("synthetic", at, 0); ok {
 		t.Error("server receipt time must not supply a producer duration")
+	}
+}
+
+func BenchmarkToolTimingTracker(b *testing.B) {
+	var tracker ToolTimingTracker
+	at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
+	b.ReportAllocs()
+	for range b.N {
+		tracker.Start("tool-1", "Read", at)
+		tracker.Finish("tool-1", at.Add(time.Second), 0)
 	}
 }

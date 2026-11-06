@@ -429,9 +429,11 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 
 // EncodeCompact implements agent.CompactCommand by sending a thread/compact/start
 // JSON-RPC request. Codex compacts the context window for the current thread.
-// TODO: Reject nonempty custom instructions with agent.ErrCompactInstructionsUnsupported;
-// thread/compact/start has no instruction field. Use the nonfatal input rejection path.
-func (w *wireFormat) EncodeCompact(_ string) ([]byte, error) {
+// Custom instructions are unsupported by thread/compact/start.
+func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
+	if instructions != "" {
+		return nil, agent.ErrCompactInstructionsUnsupported
+	}
 	w.mu.Lock()
 	threadID := w.threadID
 	w.mu.Unlock()

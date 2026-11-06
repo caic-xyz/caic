@@ -1,4 +1,4 @@
-// Tests for Backend's runtime.System logic using fake md seams.
+// Tests and benchmarks Backend runtime operations, file transfers, and disk-usage parsing through fake md seams.
 
 package mdruntime
 
@@ -1402,4 +1402,54 @@ func TestTurnSnapshotBackend(t *testing.T) {
 func TestMain(m *testing.M) {
 	gittest.Isolate()
 	os.Exit(m.Run())
+}
+
+func BenchmarkParseDiskUsage(b *testing.B) {
+	lines := make([]string, 0, 20)
+	for i := range 20 {
+		lines = append(lines, fmt.Sprintf("/md-caic-task-%d\t%d", i, 100_000_000+i))
+	}
+	out := strings.Join(lines, "\n")
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := parseDiskUsage(out, "docker"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReadFile(b *testing.B) {
+	if goruntime.GOOS != "linux" {
+		b.Skip("executes GNU dd from the Linux container locally")
+	}
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"1MiB", 1 << 20},
+		{"16MiB", 16 << 20},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			path := filepath.Join(b.TempDir(), "artifact")
+			if err := os.WriteFile(path, bytes.Repeat([]byte("x"), tc.size), 0o600); err != nil {
+				b.Fatal(err)
+			}
+			backend := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+			id := runtime.NewID("docker", "file-benchmark")
+			b.ReportAllocs()
+			b.SetBytes(int64(tc.size))
+			for b.Loop() {
+				n := 0
+				for data, err := range backend.ReadFile(b.Context(), id, path, 0, -1) {
+					if err != nil {
+						b.Fatal(err)
+					}
+					n += len(data)
+				}
+				if n != tc.size {
+					b.Fatalf("read %d bytes", n)
+				}
+			}
+		})
+	}
 }

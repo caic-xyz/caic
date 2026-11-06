@@ -1,4 +1,4 @@
-// Tests ordered recording, shutdown failures, task setup, session lifetimes, and Git-summary publication.
+// Tests and benchmarks ordered recording, task adoption, timeline restoration, session lifetimes, and Git-summary publication.
 
 package taskrun
 
@@ -33,6 +33,8 @@ import (
 	"github.com/maruel/gomode/mcp/mcptest"
 	"github.com/maruel/ksid"
 
+	"bufio"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -44,10 +46,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
+
+	// statusFailingRuntime fails the compact status probe, simulating the
+	// transient container probe failures the task card must survive.
+	"log/slog"
 )
 
-// statusFailingRuntime fails the compact status probe, simulating the
-// transient container probe failures the task card must survive.
 type statusFailingRuntime struct {
 	*runtimetest.FakeBackend
 }
@@ -3405,4 +3409,158 @@ func beginTestExecution(t testing.TB, r *AgentRuntime, tk *Task) *Run {
 		}
 	})
 	return run
+}
+
+func mustNewAdoptionTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *Task {
+	tk, err := NewTask(id, prompt, harness.Claude, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
+func BenchmarkTaskAdoption(b *testing.B) {
+	b.StopTimer()
+	dir := b.TempDir()
+	id := ksid.NewID()
+	name := id.String() + "-org-repo-caic-0.jsonl"
+	path := filepath.Join(dir, name)
+	writeProductionAdoptionFixture(b, path)
+	store := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(dir), agentbackends.Default("", nil))
+
+	b.ResetTimer()
+	b.StartTimer()
+	for range b.N {
+		logs, err := store.LoadForTaskIDs([]string{id.String()})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(logs) != 1 {
+			b.Fatalf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
+		}
+		lt := logs[0]
+
+		if err := lt.LoadMessages(); err != nil {
+			b.Fatal(err)
+		}
+		tk := mustNewAdoptionTask(b, id, agent.Prompt{Text: "benchmark adoption"})
+		tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
+		w, _, err := store.Reopen(name, tk.LogHeader())
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkSeedTimeline measures the replay pass that turns an adopted log
+// into task state. The message mix mirrors a long session: mostly text and
+// tool traffic punctuated by turn results, diff stats and context boundaries.
+//
+// The seeded entries contain no streaming deltas, so the in-place compaction
+// performed by SeedTimelineParts leaves the shared fixture unchanged.
+func BenchmarkSeedTimeline(b *testing.B) {
+	const turns = 500
+	entries := make([]agent.TimedMessage, 0, turns*8)
+	producerTime := time.Unix(1_700_000_000, 0)
+	appendMessage := func(message agent.Message) {
+		entries = append(entries, agent.TimedMessage{Message: message, ProducerTime: producerTime})
+		producerTime = producerTime.Add(time.Millisecond)
+	}
+	for turn := range turns {
+		appendMessage(&agent.TextMessage{Text: "Working on the next step."})
+		appendMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", turn), Name: "Read", Input: json.RawMessage(`{"file_path":"/src/main.go"}`)})
+		appendMessage(&agent.ToolResultMessage{ToolUseID: fmt.Sprintf("tool-%d", turn)})
+		appendMessage(&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1}}})
+		appendMessage(&agent.UsageMessage{Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheTTLSeconds: 300}, ContextWindow: 200000})
+		appendMessage(&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, NumTurns: 1, DurationMs: 1200,
+			Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheReadInputTokens: 4000}})
+		if turn%50 == 0 {
+			appendMessage(&agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"})
+		}
+	}
+	id := ksid.NewID()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		mustNewAdoptionTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimelineParts(nil, entries)
+	}
+}
+
+// BenchmarkBackwardMessagesLatestMatch measures the live request path when a
+// caller searches a long timeline newest first for its latest matching message.
+func BenchmarkBackwardMessagesLatestMatch(b *testing.B) {
+	const messageCount = 4000
+	msgs := make([]agent.Message, 0, messageCount)
+	for i := range messageCount - 1 {
+		msgs = append(msgs, &agent.TextMessage{Text: fmt.Sprintf("message %d", i)})
+	}
+	want := &agent.ToolUseMessage{ToolUseID: "target"}
+	msgs = append(msgs, want)
+	tk := mustNewAdoptionTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark lookup"})
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var got agent.Message
+		for message := range tk.BackwardMessages() {
+			if toolUse, ok := message.(*agent.ToolUseMessage); ok && toolUse.ToolUseID == "target" {
+				got = toolUse
+				break
+			}
+		}
+		if got != want {
+			b.Fatalf("latest matching message = %#v, want target", got)
+		}
+	}
+}
+
+func writeProductionAdoptionFixture(b *testing.B, path string) {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		b.Fatal(err)
+	}
+	writer := bufio.NewWriterSize(file, 1<<20)
+	meta, err := json.Marshal(v3.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV3),
+		Prompt:      "benchmark adoption",
+		Repos:       []v3.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Harness:     string(harness.Claude),
+		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	session, err := json.Marshal(v3.MetaSessionMessage{MessageType: "session", SessionID: "benchmark-session", AgentVersion: "2.1.0"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, line := range [][]byte{meta, session} {
+		if _, err := writer.Write(append(line, '\n')); err != nil {
+			b.Fatal(err)
+		}
+	}
+	const native = `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"Completed one adoption step."}]}}}` + "\n"
+	for written := len(meta) + len(session) + 2; written < 128<<20; written += len(native) {
+		if _, err := writer.WriteString(native); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		b.Fatal(err)
+	}
+	if err := file.Sync(); err != nil {
+		b.Fatal(fmt.Errorf("sync production adoption fixture: %w", err))
+	}
+	if err := file.Close(); err != nil {
+		b.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil {
+		b.Fatal(err)
+	} else if info.Size() < 128<<20 {
+		b.Fatalf("fixture size = %d, want at least %d", info.Size(), 128<<20)
+	}
 }

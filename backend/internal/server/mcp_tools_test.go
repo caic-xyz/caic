@@ -1,4 +1,4 @@
-// Tests MCP tool catalogs, authorization, task commands, schemas, and bounded task details.
+// Tests and benchmarks MCP tool catalogs, authorization, task commands, schemas, and bounded task details.
 
 package server
 
@@ -32,6 +32,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -2258,4 +2260,48 @@ func TestTaskID(t *testing.T) {
 			}
 		})
 	})
+}
+
+func BenchmarkMCPTaskListPage(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for range 100 {
+		id := ksid.NewID()
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		insertTestTask(s, id, tk)
+	}
+	registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
+	b.ReportAllocs()
+	b.ReportMetric(mcpTaskPageSizeDefault, "tasks/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := registry.handleTasksList(b.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{}})
+		output, ok := result.Structured.(mcpTaskListOutput)
+		if result.IsError || !ok || len(output.Tasks) != mcpTaskPageSizeDefault {
+			b.Fatal("task-list page has unexpected size")
+		}
+	}
+}
+
+func BenchmarkMCPRepoListPage(b *testing.B) {
+	s := newTestRouter(b, nil)
+	checks := make([]forge.Check, 100)
+	for i := range checks {
+		checks[i].Name = fmt.Sprintf("check-%03d", i)
+	}
+	for i := range mcpRepoPageSizeDefault {
+		path := fmt.Sprintf("repo-%03d", i)
+		registerRouterCheckout(b, s.checkouts, path, &repo.Checkout{BaseBranch: "main", Dir: b.TempDir()})
+		s.repoStatus.SetResultIfChanged(path, "sha", forgecache.Result{Status: forge.CIStatusSuccess, Checks: checks})
+	}
+	registry := &mcpTools{serverConfig: s.serverHandlers}
+	b.ReportAllocs()
+	b.ReportMetric(mcpRepoPageSizeDefault, "repos/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := registry.handleReposList(b.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
+		output, ok := result.Structured.(mcpRepoListOutput)
+		if result.IsError || !ok || len(output.Repositories) != mcpRepoPageSizeDefault {
+			b.Fatal("repository-list page has unexpected size")
+		}
+	}
 }

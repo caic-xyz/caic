@@ -1,10 +1,11 @@
-// Tests and benchmarks Codex backend handshakes, subprocess failures, and shell-safe task MCP launch arguments.
+// Tests and benchmarks Codex handshakes, recoverable compaction rejection, subprocess failures, and task MCP launch arguments.
 
 package codex
 
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -12,8 +13,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/maruel/genai/providers/codex"
 	"github.com/maruel/gomode/mcp/mcptest"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -22,6 +25,78 @@ import (
 )
 
 func TestBackend(t *testing.T) {
+	t.Run("RejectedCompactionKeepsConnectionUsable", func(t *testing.T) { //nolint:paralleltest // Other Backend cases change the process environment.
+		sink := &agenttest.LogSink{}
+		wire, records := protocolRecords(t, t.Context(), sink, &agenttest.RecordHandler{})
+		wire.threadID = "thread-1"
+		stdin := agenttest.NewStdinPipe()
+		conn := agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, records, nil)
+		lines := make(chan string, 2)
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			reader := bufio.NewReader(stdin.Reader)
+			for range 2 {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				lines <- line
+			}
+		})
+		t.Cleanup(func() {
+			if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
+			if err := stdin.Reader.Close(); err != nil {
+				t.Error(err)
+			}
+			workers.Wait()
+		})
+		if err := conn.SendCompact("preserve the failing test"); !errors.Is(err, agent.ErrCompactInstructionsUnsupported) {
+			t.Fatalf("custom instruction error = %v", err)
+		}
+		if sink.Len() != 0 {
+			t.Fatalf("rejected input was recorded: %s", sink.String())
+		}
+		select {
+		case <-stdin.Started:
+			t.Fatal("rejected input wrote native bytes")
+		default:
+		}
+		if err := conn.SendCompact(""); err != nil {
+			t.Fatalf("ordinary compact after rejection: %v", err)
+		}
+		if err := conn.SendPrompt(agent.Prompt{Text: "continue after rejection"}, nil); err != nil {
+			t.Fatalf("prompt after rejection: %v", err)
+		}
+		for i, method := range []string{"thread/compact/start", "turn/start"} {
+			var request codex.JSONRPCRequest
+			if err := json.Unmarshal([]byte(<-lines), &request); err != nil {
+				t.Fatal(err)
+			}
+			if request.Method != method || request.ID != int64(i+1) {
+				t.Fatalf("request = %+v, want method %q, id %d", request, method, i+1)
+			}
+			if i == 0 {
+				var params codex.ThreadCompactStartParams
+				if err := json.Unmarshal(request.Params, &params); err != nil {
+					t.Fatal(err)
+				}
+				if params.ThreadID != "thread-1" {
+					t.Fatalf("compact params = %+v", params)
+				}
+			} else {
+				var params codex.TurnStartParams
+				if err := json.Unmarshal(request.Params, &params); err != nil {
+					t.Fatal(err)
+				}
+				if params.ThreadID != "thread-1" || len(params.Input) != 1 || params.Input[0].Type != codex.TurnInputTypeText || params.Input[0].Text != "continue after rejection" {
+					t.Fatalf("prompt params = %+v", params)
+				}
+			}
+		}
+	})
+
 	t.Run("RecordHandshake", func(t *testing.T) { //nolint:paralleltest // Other Backend cases change the process environment.
 		t.Run("Continuation", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
 			const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}

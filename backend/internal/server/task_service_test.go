@@ -1,4 +1,4 @@
-// Tests task ordering, accepted input lifetime, and task metadata diagnostics.
+// Tests and benchmarks task ordering, recoverable compaction errors, input lifetime, and metadata diagnostics.
 
 package server
 
@@ -14,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -31,6 +32,7 @@ import (
 	"github.com/maruel/ksid"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
@@ -91,21 +93,33 @@ func TestTaskService(t *testing.T) {
 	t.Parallel()
 	t.Run("compactContext", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, nil)
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.OpenCode)
-		tk.SetState(task.StateWaiting)
-		insertTestTask(s, tk.ID, tk)
-		entry, _ := s.taskMgr.GetEntry(tk.ID)
-		session, _ := newGatedInputSession(t, tk, opencode.New("", nil).NewWire)
-		_, err := testTaskHandlers(s).taskSvc.compactContext(t.Context(), entry, &v1.CompactReq{Instructions: "preserve the failing test"})
-		apiError, ok := errors.AsType[*api.Error](err)
-		if !ok || apiError.Status != http.StatusBadRequest || apiError.Message != "compact context: custom compaction instructions are not supported" {
-			t.Fatalf("compact error=%v, want unsupported-instructions bad request", err)
-		}
-		select {
-		case <-session.Done():
-			t.Fatal("rejected instructions disconnected the session")
-		default:
+		for _, tc := range []struct {
+			harness     harness.Name
+			wireFactory func() agent.WireFormat
+		}{
+			{harness.OpenCode, opencode.New("", nil).NewWire},
+			{harness.Codex, codex.New("", nil).NewWire},
+		} {
+			t.Run(string(tc.harness), func(t *testing.T) {
+				t.Parallel()
+
+				s := newTestRouter(t, nil)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, tc.harness)
+				tk.SetState(task.StateWaiting)
+				insertTestTask(s, tk.ID, tk)
+				entry, _ := s.taskMgr.GetEntry(tk.ID)
+				session, _ := newGatedInputSession(t, tk, tc.wireFactory)
+				_, err := testTaskHandlers(s).taskSvc.compactContext(t.Context(), entry, &v1.CompactReq{Instructions: "preserve the failing test"})
+				apiError, ok := errors.AsType[*api.Error](err)
+				if !ok || apiError.Status != http.StatusBadRequest || apiError.Message != "compact context: custom compaction instructions are not supported" {
+					t.Fatalf("compact error=%v, want unsupported-instructions bad request", err)
+				}
+				select {
+				case <-session.Done():
+					t.Fatal("rejected instructions disconnected the session")
+				default:
+				}
+			})
 		}
 	})
 	t.Run("focusTask/userIsolation", func(t *testing.T) {
@@ -304,4 +318,55 @@ func (b *gatedInputBackend) Start(ctx context.Context, opts *agent.Options) (*ag
 	}
 	b.conn = &gatedInputConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), started: make(chan struct{}), release: make(chan struct{})}
 	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.Logger), nil
+}
+
+func BenchmarkTaskListSnapshot(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for i := range 10 {
+		id := ksid.NewID()
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		if i%2 == 0 {
+			tk.SetState(task.StateStopped)
+		}
+		insertTestTask(s, id, tk)
+	}
+
+	taskSvc := testTaskHandlers(s).taskSvc
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if got := len(taskSvc.taskListSnapshot(b.Context())); got != 10 {
+			b.Fatalf("task count = %d, want 10", got)
+		}
+	}
+}
+
+func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for i := range 10 {
+		id := ksid.NewID()
+		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		if i%2 == 0 {
+			tk.SetState(task.StateStopped)
+		}
+		insertTestTask(s, id, tk)
+	}
+
+	taskSvc := testTaskHandlers(s).taskSvc
+	// Seed every cursor to the current sequence so the benchmark measures the
+	// steady state where no task has pending transitions to replay.
+	cursors := map[string]uint64{}
+	s.taskMgr.Range(func(id ksid.ID, e *taskmgr.Entry) bool {
+		_, seq, _ := e.Task().SnapshotWithStateHistory(0)
+		cursors[id.String()] = seq
+		return true
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
+		if len(out) != 10 || len(replays) != 10 {
+			b.Fatalf("task count = %d, replay count = %d, want 10", len(out), len(replays))
+		}
+	}
 }

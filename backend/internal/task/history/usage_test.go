@@ -1,4 +1,4 @@
-// Usage rollup projection tests reconstruct retained logs and publish their rows.
+// Tests and benchmarks usage rollup projections from retained logs through publication.
 
 package history_test
 
@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"strconv"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
@@ -299,4 +301,77 @@ func writeUsageLog(t *testing.T, dir, id string, at, startedAt time.Time, extra 
 	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), encodedLog, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+const (
+	usageBenchmarkTasks   = 8
+	usageBenchmarkRecords = 64
+)
+
+// BenchmarkUsageBackfill measures the background path from a read-only scan
+// of retained v3 logs through publication of their neutral daily rows.
+func BenchmarkUsageBackfill(b *testing.B) {
+	b.StopTimer()
+	dir := b.TempDir()
+	logDir := filepath.Join(dir, "tasks")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		b.Fatal(err)
+	}
+	times := make([]time.Time, usageBenchmarkRecords)
+	for i := range times {
+		times[i] = time.Date(2026, time.February, 5, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Hour)
+	}
+	var bytes int
+	for range usageBenchmarkTasks {
+		bytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
+	}
+
+	logStore := history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(logDir), usageResolver())
+
+	b.SetBytes(int64(bytes))
+	b.ReportAllocs()
+	b.StartTimer()
+	for i := range b.N {
+		rollup, err := usagedb.New(b.Context(), usagedb.Config{
+			Log: slog.New(slog.DiscardHandler),
+			Dir: filepath.Join(dir, "rollups", strconv.Itoa(i)),
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := rollup.Backfill(b.Context(), logStore.UsageRows(b.Context())); err != nil {
+			b.Fatal(err)
+		}
+		if err := rollup.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func writeUsageBenchmarkLog(b *testing.B, dir, id string, times []time.Time) int {
+	meta := v3.MetaMessage{
+		MessageType:    "caic_meta",
+		Version:        3,
+		Prompt:         "backfill benchmark",
+		Repos:          []v3.MetaRepo{{Name: "org/repo"}},
+		Harness:        string(harness.Claude),
+		RequestedModel: "claude-test",
+	}
+	header, err := taskslog.EncodeHeader(&meta)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	buf := make([]byte, 0, len(header)+len(times)*128)
+	buf = append(buf, header...)
+	buf = append(buf, '\n')
+	native := `{"type":"result","duration_api_ms":3,"duration_ms":7,"num_turns":1,"usage":{"output_tokens":7}}`
+	for _, at := range times {
+		buf = append(buf, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
+		buf = append(buf, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), buf, 0o600); err != nil {
+		b.Fatal(err)
+	}
+	return len(buf)
 }

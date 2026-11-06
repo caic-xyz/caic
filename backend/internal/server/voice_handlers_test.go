@@ -1,4 +1,4 @@
-// Tests external voice gateway token minting.
+// Tests and benchmarks external voice gateway token minting.
 
 package server
 
@@ -103,5 +103,23 @@ func TestVoiceTokenHandlerScoped(t *testing.T) {
 	}
 	if len(claims.Capabilities) != 1 || claims.Capabilities[0] != voicegateway.DefaultVoiceScope {
 		t.Fatalf("capabilities = %v, want [%s]", claims.Capabilities, voicegateway.DefaultVoiceScope)
+	}
+}
+
+func BenchmarkExternalVoiceToken(b *testing.B) {
+	handler := voiceTokenHandler(&VoiceGatewayConfig{
+		Mode:       VoiceGatewayModeExternal,
+		Issuer:     "https://caic.example.com",
+		InstanceID: "caic-main",
+		SigningKey: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)),
+	}, nil)
+	r := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/voice/token", http.NoBody)
+	b.ReportAllocs()
+	for b.Loop() {
+		w := httptest.NewRecorder()
+		handler(w, r)
+		if w.Code != http.StatusOK {
+			b.Fatalf("status = %d", w.Code)
+		}
 	}
 }

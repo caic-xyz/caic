@@ -1,4 +1,4 @@
-// Tests for replaying short-lived task state transitions on the task-list SSE stream.
+// Tests and benchmarks for replaying short-lived task state transitions on the task-list SSE stream.
 
 package server
 
@@ -9,17 +9,22 @@ import (
 
 	"github.com/maruel/ksid"
 
+	"context"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+
+	// TestTaskListEventsReplayTransitions verifies that a task whose state advances
+	// twice between two snapshots still delivers the interrupted state. The
+	// handler reads a snapshot in which the state has already advanced to stopped,
+	// so only the per-task transition journal can recover stopping.
+	"fmt"
+	"log/slog"
 )
 
-// TestTaskListEventsReplayTransitions verifies that a task whose state advances
-// twice between two snapshots still delivers the interrupted state. The
-// handler reads a snapshot in which the state has already advanced to stopped,
-// so only the per-task transition journal can recover stopping.
 func TestTaskListEventsReplayTransitions(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)
@@ -97,5 +102,29 @@ func TestTaskListEventsReplayPurgeTransitions(t *testing.T) {
 	}
 	if states[0] != `"stopping"` || states[1] != `"stopped"` {
 		t.Fatalf("states = %v, want [\"stopping\" \"stopped\"]", states)
+	}
+}
+
+func BenchmarkTaskListStreamInitialBatch(b *testing.B) {
+	for _, count := range []int{1, 100} {
+		b.Run(fmt.Sprintf("tasks_%d", count), func(b *testing.B) {
+			s := newTestRouter(b, nil)
+			for range count {
+				id := ksid.NewID()
+				insertTestTask(s, id, mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude))
+			}
+			s.taskMgr.CompleteRestoration(nil)
+			ctx, cancel := context.WithCancel(context.WithValue(b.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler)))
+			cancel()
+			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/events", nil)
+			handler := testTaskHandlers(s)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				w := httptest.NewRecorder()
+				handler.handleTaskListEvents(w, req)
+				b.ReportMetric(float64(w.Body.Len()), "wire-B/op")
+			}
+		})
 	}
 }

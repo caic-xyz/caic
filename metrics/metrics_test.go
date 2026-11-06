@@ -1,4 +1,4 @@
-// Tests for measurement aggregation and recorder identity helpers.
+// Tests and benchmarks for measurement aggregation and recorder identity helpers.
 
 package metrics_test
 
@@ -393,4 +393,27 @@ func TestStore(t *testing.T) {
 			t.Fatalf("Max = %v, want %v", got[0].Max, atSeconds(time.Duration(total-1)*time.Millisecond))
 		}
 	})
+}
+
+func BenchmarkStoreRecord(b *testing.B) {
+	cases := []struct {
+		name  string
+		attrs []metrics.Attr
+	}{
+		{name: "no_attrs"},
+		{name: "one_attr", attrs: []metrics.Attr{{Key: "container.runtime", Value: "podman"}}},
+		{name: "two_attrs", attrs: []metrics.Attr{
+			{Key: "container.runtime", Value: "podman"},
+			{Key: "forge.name", Value: "github"},
+		}},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			store := metrics.NewStore(metrics.Resource{ServiceName: "caic"})
+			b.ReportAllocs()
+			for b.Loop() {
+				store.Record(b.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(1500*time.Millisecond), tc.attrs...)
+			}
+		})
+	}
 }

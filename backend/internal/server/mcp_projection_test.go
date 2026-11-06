@@ -1,4 +1,4 @@
-// Tests shared MCP projections, caller-local timestamp isolation, pagination, and bounded output.
+// Tests and benchmarks shared MCP projections, caller-local timestamp isolation, pagination, and bounded output.
 
 package server
 
@@ -424,5 +424,19 @@ func TestMCPSystemStatsTimezone(t *testing.T) {
 	}
 	if c.serverConfig.systemStats.snapshot().Samples[0].Time.Location() != time.UTC {
 		t.Fatal("shared system stats snapshot mutated")
+	}
+}
+
+func BenchmarkBoundedTextToolResult(b *testing.B) {
+	text := strings.Repeat("a", mcpTextOutputMaxBytes*2)
+	b.ReportAllocs()
+	b.ReportMetric(float64(len(text)), "input-B/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := boundedTextToolResult(text)
+		output, ok := result.Structured.(mcp.TextOutput)
+		if result.IsError || !ok || len(output.Result) != mcpTextOutputMaxBytes {
+			b.Fatal("bounded result has unexpected size")
+		}
 	}
 }
