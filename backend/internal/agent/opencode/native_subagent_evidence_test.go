@@ -1,4 +1,4 @@
-// Tests native OpenCode ACP task delegation and the absence of child streams in the recorded parent transport.
+// Tests and benchmarks native OpenCode ACP task delegation and the absence of child streams in the recorded parent transport.
 
 package opencode
 
@@ -238,6 +238,35 @@ func TestDelegationTransportOwnership(t *testing.T) {
 			}
 			if calls == 0 || results == 0 || outputs == 0 || cards == 0 {
 				t.Fatalf("lost exposed paths: calls=%d results=%d output=%d cards=%d", calls, results, outputs, cards)
+			}
+		})
+	}
+}
+
+func BenchmarkParseNativeSubagentUpdates(b *testing.B) {
+	for _, test := range []struct {
+		name string
+		line string
+	}{
+		{
+			name: "unrelated_tool_update",
+			line: `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress","kind":"execute","title":"bash","rawInput":{"command":"ls"}}}}`,
+		},
+		{
+			name: "delegation_completion",
+			line: `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","title":"README joke","content":[{"type":"content","content":{"type":"text","text":"<task id=\"child\" state=\"completed\"><task_result>a joke</task_result></task>"}}],"rawOutput":{"output":"<task id=\"child\" state=\"completed\"><task_result>a joke</task_result></task>","metadata":{"parentSessionId":"s","sessionId":"child"}}}}}`,
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			line := []byte(test.line)
+			wire := New("", nil).NewWire()
+			b.ReportAllocs()
+			b.SetBytes(int64(len(line)))
+			b.ResetTimer()
+			for range b.N {
+				if _, err := wire.ParseOutput(line); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

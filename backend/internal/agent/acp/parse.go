@@ -1,6 +1,6 @@
-// OpenCode ACP parser. Converts ACP's JSON-RPC session/update notifications into normalized agent.Message types.
+// ACP session-update parsing converts native content, tools, plans, and controls into normalized agent messages.
 
-package opencode
+package acp
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// parseMessage decodes a single line from the OpenCode ACP output into one or
+// parseMessage decodes a single line from the ACP output into one or
 // more typed agent.Messages.
 //
 // The line is one of:
@@ -161,7 +161,7 @@ func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 	case acp.StatusCompleted:
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}
 	case acp.StatusFailed:
-		errMsg := extractToolError(u)
+		errMsg := ToolError(u)
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}
 	case acp.StatusInProgress:
 		var msgs []agent.Message
@@ -175,12 +175,9 @@ func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 			}
 			addEditInputView(use)
 			msgs = append(msgs, use)
-			// The arguments arrive only here, so this is the one place a
-			// skill read can be recovered without counting it twice.
-			msgs = append(msgs, inferredSkillReads(name, u.RawInput, u.ToolCallID)...)
 		}
 		// Also emit output delta if content is available.
-		if delta := extractToolOutputDelta(u); delta != "" {
+		if delta := ToolOutput(u); delta != "" {
 			msgs = append(msgs, &agent.ToolOutputDeltaMessage{
 				ToolUseID: u.ToolCallID,
 				Delta:     delta,
@@ -190,31 +187,6 @@ func parseToolCallUpdate(u *acp.ToolCallUpdateUpdate) []agent.Message {
 	default:
 		return nil
 	}
-}
-
-// inferredSkillReads reports the skills an OpenCode tool call opens as files.
-// OpenCode has no Skill tool; it scans ~/.claude, ~/.agents, and its own
-// config directories, then the model opens the file it wants.
-func inferredSkillReads(name string, input json.RawMessage, sourceID string) []agent.Message {
-	switch name {
-	case "Read":
-		var in struct {
-			FilePath string `json:"filePath"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil {
-			return nil
-		}
-		return agent.InferredSkillReadFromPath(in.FilePath, sourceID)
-	case "Bash":
-		var in struct {
-			Command string `json:"command"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil {
-			return nil
-		}
-		return agent.InferredSkillReadsFromCommand(in.Command, "", sourceID)
-	}
-	return nil
 }
 
 func addEditInputView(use *agent.ToolUseMessage) {
@@ -245,9 +217,8 @@ type toolCallRawOutput struct {
 	Output string `json:"output"`
 }
 
-// extractToolError extracts the error message from a failed tool call update.
-// It checks rawOutput.error first (structured), then falls back to content text.
-func extractToolError(u *acp.ToolCallUpdateUpdate) string {
+// ToolError returns the native structured error or textual failure content.
+func ToolError(u *acp.ToolCallUpdateUpdate) string {
 	raw := decodeToolCallRawOutput(u.RawOutput)
 	if raw.Error != "" {
 		return raw.Error
@@ -260,9 +231,8 @@ func extractToolError(u *acp.ToolCallUpdateUpdate) string {
 	return "tool call failed"
 }
 
-// extractToolOutputDelta extracts streaming output from an in-progress tool call.
-// It checks rawOutput.output first (structured), then falls back to content text.
-func extractToolOutputDelta(u *acp.ToolCallUpdateUpdate) string {
+// ToolOutput returns native structured output or textual tool content.
+func ToolOutput(u *acp.ToolCallUpdateUpdate) string {
 	raw := decodeToolCallRawOutput(u.RawOutput)
 	if raw.Output != "" {
 		return raw.Output
@@ -300,7 +270,7 @@ func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
 	}}, nil
 }
 
-// normalizeToolName maps OpenCode tool titles and kinds to caic canonical names.
+// normalizeToolName maps native tool titles and kinds to caic canonical names.
 func normalizeToolName(title string, kind acp.ToolKind) string {
 	// Normalize to lowercase for matching.
 	lower := strings.ToLower(title)

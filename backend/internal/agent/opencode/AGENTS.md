@@ -1,33 +1,14 @@
-# OpenCode ACP Agent Backend
+# OpenCode ACP Backend
 
 Implements `agent.Backend` for OpenCode via ACP (Agent Client Protocol):
 JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 
-## Architecture
+## Package boundary
 
-- `opencode.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire_test.go` — Wire type unmarshaling tests (types from `github.com/maruel/genai/acp`)
-- `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
-- `parse_test.go` — Parser tests including wireFormat prompt response handling
-
-Wire types are provided by `github.com/maruel/genai/acp` (imported as `oc`).
-
-## Event → agent.Message Mapping
-
-| ACP session/update type | agent.Message type   |
-|-------------------------|----------------------|
-| `agent_message_chunk`   | TextDeltaMessage     |
-| `agent_thought_chunk`   | ThinkingDeltaMessage |
-| `tool_call`             | ToolUseMessage / WidgetMessage |
-| `tool_call_update` (completed/failed) | ToolResultMessage |
-| `tool_call_update` (in_progress) | ToolOutputDeltaMessage |
-| `plan`                  | TodoMessage          |
-| `usage_update`          | UsageMessage         |
-| `user_message_chunk`    | UserInputMessage     |
-| `current_mode_update`   | SystemMessage (with mode detail) |
-| `session_info_update`   | (skipped)            |
-| `available_commands_update` | (skipped)        |
-| `config_option_update`  | SessionMetadataMessage (reported model and effort) |
+This package owns OpenCode launch settings, model discovery, native delegation,
+and inferred skill reads. Shared transport, handshake, wire parsing, and
+metadata live in [`../acp/`](../acp/). Keep harness-specific interpretation here;
+shared ACP code must not depend on an individual harness package.
 
 ## Upstream Source
 
@@ -129,7 +110,7 @@ may alter or reject that request.
 
 ## Skill Reads
 
-OpenCode has no Skill tool. `parse.go` infers a read from the `read` tool's
+OpenCode has no Skill tool. `tools.go` infers a read from the `read` tool's
 `filePath` and the `shell` tool's `command`. The first `tool_call` carries an
 empty `rawInput`, and the arguments arrive on an `in_progress` update. OpenCode
 can repeat that update with the same input; the wire parser emits the read and

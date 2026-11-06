@@ -5,6 +5,7 @@ package agenttest
 import (
 	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,4 +64,15 @@ func AppendInputNativeRecord(log agent.LogSink, data []byte) error {
 		return err
 	}
 	return log.AppendRecord(agent.PhysicalRecord{Encoded: append(record, '\n')})
+}
+
+// ACPRecords wraps native ACP lines in directional physical agent records.
+func ACPRecords(native string) string {
+	var records strings.Builder
+	for line := range strings.SplitSeq(strings.TrimSpace(native), "\n") {
+		records.WriteString(`{"t":"agent","ts":1.000,"msg":`)
+		records.WriteString(line)
+		records.WriteString("}\n")
+	}
+	return records.String()
 }

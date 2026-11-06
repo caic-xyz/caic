@@ -9,6 +9,7 @@ import (
 	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	agentacp "github.com/caic-xyz/caic/backend/internal/agent/acp"
 )
 
 // Its correlation maps are allocated with the wire, created once per session,
@@ -66,10 +67,10 @@ func (n *nativeSubagents) parse(toolCall *acp.ToolCallUpdateUpdate) ([]agent.Mes
 		s.Status = agent.NativeSubagentStatusRunning
 	case acp.StatusCompleted:
 		s.Status = agent.NativeSubagentStatusCompleted
-		s.Result = taskResultText(extractToolOutputDelta(toolCall))
+		s.Result = taskResultText(agentacp.ToolOutput(toolCall))
 	case acp.StatusFailed:
 		s.Status = agent.NativeSubagentStatusFailed
-		s.Result = extractToolError(toolCall)
+		s.Result = agentacp.ToolError(toolCall)
 	}
 	return n.timeline.Observe(&s), nil
 }

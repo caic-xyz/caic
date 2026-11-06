@@ -1,20 +1,19 @@
 // Tests ordered ACP metadata and accounting parity without persisted session controls.
 
-package opencode
+package acp
 
 import (
 	"reflect"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
 
 func TestMetadataParser(t *testing.T) {
 	t.Parallel()
 	t.Run("partial reports preserve session boundaries", func(t *testing.T) {
 		t.Parallel()
-		for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+		for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				var metadata agent.SessionMetadata
@@ -61,26 +60,10 @@ func TestMetadataParser(t *testing.T) {
 			})
 		}
 	})
-	t.Run("recorded native handshake", func(t *testing.T) {
-		t.Parallel()
-		backend := New("", nil)
-		for name, parser := range map[string]agent.MessageParser{"full": backend.NewWire(), "metadata": backend.NewMetadataParser()} {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-				var got agent.SessionMetadata
-				for _, msg := range agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", parser) {
-					got.Apply(msg)
-				}
-				want := agent.SessionMetadata{SessionID: "ses_18effbc8effePX3MNj9OckdALX", ReportedModel: "opencode/big-pickle", AgentVersion: "1.15.10"}
-				if got != want {
-					t.Fatalf("session metadata = %+v, want %+v", got, want)
-				}
-			})
-		}
-	})
+
 	t.Run("ordered replies and native updates", func(t *testing.T) {
 		t.Parallel()
-		for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+		for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				records := []struct {
@@ -123,7 +106,7 @@ func TestMetadataParser(t *testing.T) {
 	})
 	t.Run("request ownership and usage", func(t *testing.T) {
 		t.Parallel()
-		for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+		for name, parser := range map[string]agent.MessageParser{"full": testBackend().NewWire(), "metadata": testBackend().NewMetadataParser()} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				input := func(raw string) {
@@ -204,7 +187,7 @@ func TestMetadataParser(t *testing.T) {
 			{`{"id":1,"method":"session/set_config_option","params":{}}`, `{"id":1,"result":{"configOptions":[{"id":"model","currentValue":5}]}}`},
 			{`{"id":1,"method":"session/prompt","params":{}}`, `{"id":1,"result":{"stopReason":"end_turn","usage":{"inputTokens":"invalid"}}}`},
 		} {
-			for _, parser := range []agent.MessageParser{New("", nil).NewWire(), New("", nil).NewMetadataParser()} {
+			for _, parser := range []agent.MessageParser{testBackend().NewWire(), testBackend().NewMetadataParser()} {
 				if _, err := parser.ParseInput([]byte(tc.input)); err != nil {
 					t.Fatal(err)
 				}

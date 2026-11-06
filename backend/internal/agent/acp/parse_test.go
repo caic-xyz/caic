@@ -1,6 +1,6 @@
-// Tests for OpenCode CLI message parsing.
+// Tests and benchmarks shared ACP content, tools, prompt correlation, replay ownership, and bounded final messages.
 
-package opencode
+package acp
 
 import (
 	"encoding/json"
@@ -10,7 +10,6 @@ import (
 	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
 
 func TestParseMessage(t *testing.T) {
@@ -139,47 +138,6 @@ func TestParseMessage(t *testing.T) {
 		}
 		if tr.Error != "" {
 			t.Errorf("Error = %q, want empty", tr.Error)
-		}
-	})
-
-	t.Run("ToolCallUpdateInProgressInfersSkillRead", func(t *testing.T) {
-		t.Parallel()
-		// OpenCode has no Skill tool. Its read tool names the file in
-		// filePath, and the arguments arrive only on the in-progress update.
-		input := mustJSON(t, map[string]any{
-			"jsonrpc": "2.0",
-			"method":  "session/update",
-			"params": map[string]any{
-				"sessionId": "ses_1",
-				"update": map[string]any{
-					"sessionUpdate": "tool_call_update",
-					"toolCallId":    "call_2",
-					"status":        "in_progress",
-					"title":         "read",
-					"rawInput":      map[string]any{"filePath": "/home/user/.config/opencode/skill/customize-opencode/SKILL.md"},
-				},
-			},
-		})
-		msgs, err := parseTestMessage(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 3 {
-			t.Fatalf("msgs = %d, want 3", len(msgs))
-		}
-		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
-			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
-		}
-		read, ok := msgs[1].(*agent.SkillReadMessage)
-		if !ok {
-			t.Fatalf("msgs[1] = %T, want *agent.SkillReadMessage", msgs[1])
-		}
-		if read.Skill != "customize-opencode" || !read.Inferred || read.ToolUseID != "" {
-			t.Errorf("SkillReadMessage = %+v", read)
-		}
-		wantLoad := agent.SkillLoadMessage{Skill: "customize-opencode", Path: "/home/user/.config/opencode/skill/customize-opencode/SKILL.md", SourceToolUseID: "call_2"}
-		if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || *load != wantLoad {
-			t.Errorf("msgs[2] = %#v, want %#v", msgs[2], wantLoad)
 		}
 	})
 
@@ -354,7 +312,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, err := New("", nil).NewWire().ParseOutput(input)
+		msgs, err := testBackend().NewWire().ParseOutput(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -606,34 +564,6 @@ func TestParseMessage(t *testing.T) {
 	})
 }
 
-func TestWireFormatSkillReadOncePerToolCall(t *testing.T) {
-	t.Parallel()
-	w := &wireFormat{}
-	line := mustJSON(t, map[string]any{
-		"jsonrpc": "2.0", "method": "session/update",
-		"params": map[string]any{"sessionId": "ses_1", "update": map[string]any{
-			"sessionUpdate": "tool_call_update", "toolCallId": "call_1",
-			"title": "bash", "kind": "execute", "status": "in_progress",
-			"rawInput": map[string]any{"command": "cat ~/.agents/skills/code-quality/SKILL.md"},
-		}},
-	})
-	reads := 0
-	for range 3 {
-		msgs, err := w.ParseOutput(line)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, msg := range msgs {
-			if _, ok := msg.(*agent.SkillReadMessage); ok {
-				reads++
-			}
-		}
-	}
-	if reads != 1 {
-		t.Errorf("skill reads = %d, want 1", reads)
-	}
-}
-
 func TestNormalizeToolName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -678,7 +608,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	t.Parallel()
 	t.Run("ReconnectDirectionalState", func(t *testing.T) {
 		t.Parallel()
-		w := New("", nil).NewWire()
+		w := testBackend().NewWire()
 		parser, err := agent.NewLogRecordParser(w)
 		if err != nil {
 			t.Fatal(err)
@@ -711,7 +641,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -757,7 +687,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("Cancelled", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":7,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -789,7 +719,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("CacheOnlyUsage", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":8,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -822,7 +752,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("Error", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":9,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -855,7 +785,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("EmptyPromptUsageStaysEmpty", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -881,7 +811,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("NonPromptResponse", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -904,7 +834,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("UncorrelatedPromptShapedResponse", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{}
+		w := &wireFormat{config: testBackend().Config}
 		msgs, err := w.ParseOutput([]byte(`{"jsonrpc":"2.0","id":42,"result":{"stopReason":"end_turn"}}`))
 		if err != nil {
 			t.Fatal(err)
@@ -919,7 +849,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("ReplayPromptErrorAfterRecordedRequest", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{}
+		w := &wireFormat{config: testBackend().Config}
 		req := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      11,
@@ -955,7 +885,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("RecordedPromptRestoresUserInput", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{}
+		w := &wireFormat{config: testBackend().Config}
 		req := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      12,
@@ -989,7 +919,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("SyntheticFinalMessages", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{session: agent.SessionMetadata{SessionID: "ses_1"}}
+		w := &wireFormat{config: testBackend().Config, session: agent.SessionMetadata{SessionID: "ses_1"}}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -1063,7 +993,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 
 	t.Run("AccumulationOverflowKeepsStreamingHistoryAuthoritative", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{}
+		w := &wireFormat{config: testBackend().Config}
 		if _, err := w.ParseInput([]byte(`{"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -1116,6 +1046,32 @@ func mustJSON(t *testing.T, v any) []byte {
 	return data
 }
 
+func parseTestMessage(line []byte) ([]agent.Message, error) {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, err
+	}
+	msgs, _, err := parseMessage(line, &probe)
+	return msgs, err
+}
+
+func TestReplayBufferOwnership(t *testing.T) {
+	t.Parallel()
+	wire := testBackend().NewWire()
+	line := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call","title":"read","kind":"read","rawInput":{"filePath":"hello.txt"}}}}`)
+	msgs, err := wire.ParseOutput(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range line {
+		line[i] = 'x'
+	}
+	msg, ok := msgs[0].(*agent.ToolUseMessage)
+	if !ok || string(msg.Input) != `{"filePath":"hello.txt"}` {
+		t.Fatalf("message = %#v", msgs)
+	}
+}
+
 func TestAddEditInputView(t *testing.T) {
 	t.Parallel()
 	t.Run("edit tool display", func(t *testing.T) {
@@ -1140,59 +1096,18 @@ func TestAddEditInputView(t *testing.T) {
 			t.Fatalf("file change = %#v", file)
 		}
 	})
-	t.Run("read edit bash fixture normalizes edit", func(t *testing.T) {
-		t.Parallel()
-
-		msgs := agenttest.ParseJSONL(t, "testdata/read-edit-bash.jsonl", New("", nil).NewWire())
-		var use *agent.ToolUseMessage
-		for _, msg := range msgs {
-			candidate, ok := msg.(*agent.ToolUseMessage)
-			if ok && candidate.Name == "Edit" && candidate.InputView.Kind == agent.ToolInputFileChanges {
-				use = candidate
-				break
-			}
-		}
-		if use == nil {
-			t.Fatal("no normalized Edit tool use found")
-		}
-		if use.Detail != "main.go" {
-			t.Fatalf("detail = %q, want main.go", use.Detail)
-		}
-		if use.InputView.Kind != agent.ToolInputFileChanges {
-			t.Fatalf("input view kind = %q, want fileChanges", use.InputView.Kind)
-		}
-		if len(use.InputView.Files) != 1 {
-			t.Fatalf("files = %#v, want one file", use.InputView.Files)
-		}
-		file := use.InputView.Files[0]
-		if file.Path != "/workspace/main.go" || !strings.Contains(file.Patch, "-Hello") || !strings.Contains(file.Patch, "+Hi") {
-			t.Fatalf("file change = %#v", file)
-		}
-	})
 }
 
-func parseTestMessage(line []byte) ([]agent.Message, error) {
-	probe, err := agent.ParseJSONRPCEnvelope(line)
-	if err != nil {
-		return nil, err
-	}
-	msgs, _, err := parseMessage(line, &probe)
-	return msgs, err
-}
-
-func TestReplayBufferOwnership(t *testing.T) {
-	t.Parallel()
-	wire := New("", nil).NewWire()
-	line := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call","title":"read","kind":"read","rawInput":{"filePath":"hello.txt"}}}}`)
-	msgs, err := wire.ParseOutput(line)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range line {
-		line[i] = 'x'
-	}
-	msg, ok := msgs[0].(*agent.ToolUseMessage)
-	if !ok || string(msg.Input) != `{"filePath":"hello.txt"}` {
-		t.Fatalf("message = %#v", msgs)
+func BenchmarkParseToolCallUpdateRawOutput(b *testing.B) {
+	line := []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress","rawOutput":{"output":"streaming output"}}}}`)
+	b.ReportAllocs()
+	for b.Loop() {
+		msgs, err := parseTestMessage(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			b.Fatalf("parseMessage returned %d messages, want 1", len(msgs))
+		}
 	}
 }

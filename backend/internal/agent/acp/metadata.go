@@ -1,6 +1,6 @@
-// OpenCode directional metadata projection correlates ACP requests and shares native configuration and accounting normalization.
+// Directional ACP metadata correlates native requests and normalizes session configuration and accounting.
 
-package opencode
+package acp
 
 import (
 	"encoding/json"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/maruel/genai/providers/opencode"
 )
 
 type pendingRequest struct {
@@ -22,6 +21,8 @@ type pendingRequest struct {
 
 // metadataState is the shared response owner for transport and metadata-only replay.
 type metadataState struct {
+	config *Config
+
 	mu       sync.Mutex
 	session  agent.SessionMetadata
 	requests map[int64]pendingRequest
@@ -48,7 +49,7 @@ func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
 	// A reused request ID replaces the old request, including with an unrelated method.
 	delete(w.requests, id)
 	switch method {
-	case acp.MethodSessionPrompt, acp.MethodInitialize, acp.MethodSessionNew, acp.MethodSessionLoad, acp.MethodSessionSetConfigOption:
+	case acp.MethodSessionPrompt, acp.MethodInitialize, acp.MethodSessionNew, acp.MethodSessionLoad, acp.MethodSessionResume, acp.MethodSessionSetConfigOption:
 		sid, err := agent.JSONString(probe.Params, "sessionId")
 		if err != nil {
 			return nil, err
@@ -114,7 +115,10 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		if err != nil {
 			return nil, true, err
 		}
-		metadata, err := sessionResultMetadata(request.method, request.sessionID, result)
+		metadata, err := sessionResultMetadata(request.method, request.sessionID, result, w.config.EffortID)
+		if err == nil {
+			err = w.normalizeMetadata(&metadata)
+		}
 		if err != nil {
 			return nil, true, err
 		}
@@ -122,7 +126,7 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		w.session.Update(metadata)
 		known := w.session
 		w.mu.Unlock()
-		if request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad {
+		if request.method == acp.MethodSessionNew || request.method == acp.MethodSessionLoad || request.method == acp.MethodSessionResume {
 			return []agent.Message{&agent.InitMessage{SessionID: known.SessionID, ReportedModel: known.ReportedModel, ReportedEffort: known.ReportedEffort, Version: known.AgentVersion}}, true, nil
 		}
 		report := &agent.SessionMetadataMessage{SessionMetadata: metadata}
@@ -156,7 +160,10 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		return msgs, true, err
 	case acp.UpdateConfigOptionUpdate:
 		metadata := agent.SessionMetadata{SessionID: sid}
-		if err := parseConfigOptions(update, &metadata); err != nil {
+		if err := parseConfigOptions(update, &metadata, w.config.EffortID); err != nil {
+			return nil, true, err
+		}
+		if err := w.normalizeMetadata(&metadata); err != nil {
 			return nil, true, err
 		}
 		w.mu.Lock()
@@ -169,7 +176,7 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 	return nil, false, nil
 }
 
-func sessionResultMetadata(method acp.Method, requestedSession string, result []byte) (agent.SessionMetadata, error) {
+func sessionResultMetadata(method acp.Method, requestedSession string, result []byte, effortID acp.ConfigOptionID) (agent.SessionMetadata, error) {
 	if err := requireMetadataObject(result); err != nil {
 		return agent.SessionMetadata{}, err
 	}
@@ -185,13 +192,13 @@ func sessionResultMetadata(method acp.Method, requestedSession string, result []
 		}
 		metadata.AgentVersion, err = agent.JSONString(info, "version")
 		return metadata, err
-	case acp.MethodSessionNew, acp.MethodSessionLoad:
+	case acp.MethodSessionNew, acp.MethodSessionLoad, acp.MethodSessionResume:
 		var err error
 		metadata.SessionID, err = agent.JSONString(result, "sessionId")
 		if err != nil {
 			return agent.SessionMetadata{}, err
 		}
-		if metadata.SessionID == "" && method == acp.MethodSessionLoad {
+		if metadata.SessionID == "" && (method == acp.MethodSessionLoad || method == acp.MethodSessionResume) {
 			metadata.SessionID = requestedSession
 		}
 		if metadata.SessionID == "" {
@@ -208,11 +215,11 @@ func sessionResultMetadata(method acp.Method, requestedSession string, result []
 		if err != nil {
 			return agent.SessionMetadata{}, err
 		}
-		err = parseConfigOptions(result, &metadata)
+		err = parseConfigOptions(result, &metadata, effortID)
 		return metadata, err
 	case acp.MethodSessionSetConfigOption:
 		metadata.SessionID = requestedSession
-		err := parseConfigOptions(result, &metadata)
+		err := parseConfigOptions(result, &metadata, effortID)
 		return metadata, err
 	default:
 		// The request owner calls this only for initialization and configuration.
@@ -220,7 +227,7 @@ func sessionResultMetadata(method acp.Method, requestedSession string, result []
 	}
 }
 
-func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata) error {
+func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata, effortID acp.ConfigOptionID) error {
 	options, err := agent.JSONField(raw, "configOptions")
 	if err != nil || options == nil || string(options) == "null" {
 		return err
@@ -248,7 +255,7 @@ func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata) error {
 			parseErr = err
 			return
 		}
-		parseErr = applyConfigValue(metadata, acp.ConfigOptionID(id), current)
+		parseErr = applyConfigValue(metadata, acp.ConfigOptionID(id), current, effortID)
 	})
 	if err != nil {
 		return err
@@ -256,13 +263,13 @@ func parseConfigOptions(raw []byte, metadata *agent.SessionMetadata) error {
 	return parseErr
 }
 
-func applyConfigValue(metadata *agent.SessionMetadata, id acp.ConfigOptionID, value []byte) error {
+func applyConfigValue(metadata *agent.SessionMetadata, id acp.ConfigOptionID, value []byte, effortID acp.ConfigOptionID) error {
 	switch id {
 	case acp.ConfigOptionModel:
 		if err := json.Unmarshal(value, &metadata.ReportedModel); err != nil {
 			return fmt.Errorf("decode current model configuration: %w", err)
 		}
-	case opencode.ConfigOptionEffort:
+	case effortID:
 		if err := json.Unmarshal(value, &metadata.ReportedEffort); err != nil {
 			return fmt.Errorf("decode current effort configuration: %w", err)
 		}
@@ -363,4 +370,13 @@ func requireMetadataObject(raw []byte) error {
 		return fmt.Errorf("metadata field is %v, want object or null", kind)
 	}
 	return nil
+}
+
+func (w *metadataState) normalizeMetadata(m *agent.SessionMetadata) error {
+	if w.config.Models == nil || m.ReportedModel == "" {
+		return nil
+	}
+	var err error
+	m.ReportedModel, err = w.config.Models.Decode(m.ReportedModel)
+	return err
 }
