@@ -197,6 +197,191 @@ func taskDetailWire(t *testing.T, s *testRouter, a mcpTaskGetDetailArgs) mcpTask
 
 func TestMCPTools(t *testing.T) {
 	t.Parallel()
+	t.Run("handleTaskSendMessage", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid/queue_and_append", func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+			tk.SetState(task.StateRunning)
+			insertTestTask(s, tk.ID, tk)
+			entry, _ := s.taskMgr.GetEntry(tk.ID)
+			c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+			for _, message := range []string{"first", "second"} {
+				args := fmt.Sprintf(`{"task_number":%q,"message":%q,"delivery_mode":"append"}`, tk.ID.String(), message)
+				res, err := c.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_send_message", Arguments: json.RawMessage(args)})
+				if err != nil || res.IsError {
+					t.Fatalf("CallTool() = %+v, %v", res, err)
+				}
+				if got := taskDetailText(t, res.Structured); got != "Queued message for task #1 in append mode. Existing pending text and attachments are preserved. Delivery occurs when the agent is waiting." {
+					t.Fatalf("result = %q", got)
+				}
+			}
+			if pending := entry.PendingInput(); pending == nil || pending.Prompt.Text != "first\nsecond" {
+				t.Fatalf("pending input = %+v", pending)
+			}
+			list := c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{})
+			output, ok := list.Structured.(mcpTaskListOutput)
+			if list.IsError || !ok || len(output.Tasks) != 1 || !output.Tasks[0].HasPendingInput {
+				t.Fatalf("task list = %+v", list)
+			}
+			detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+			if detail.IsError || !strings.Contains(taskDetailText(t, detail.Structured), "Pending prompt text: first\nsecond") || !strings.Contains(taskDetailText(t, detail.Structured), "append preserves existing text") {
+				t.Fatalf("task detail = %+v", detail)
+			}
+			if err := entry.Lifecycle.CancelQueuedInput(entry.PendingInput().ID); err != nil {
+				t.Fatal(err)
+			}
+			list = c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{})
+			output, ok = list.Structured.(mcpTaskListOutput)
+			if list.IsError || !ok || len(output.Tasks) != 1 || output.Tasks[0].HasPendingInput {
+				t.Fatalf("task list after cancellation = %+v", list)
+			}
+			detail = c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+			if detail.IsError || !strings.Contains(taskDetailText(t, detail.Structured), "Pending prompt: none") {
+				t.Fatalf("task detail after cancellation = %+v", detail)
+			}
+		})
+		t.Run("schema", func(t *testing.T) {
+			t.Parallel()
+			c := &mcpTools{}
+			for _, spec := range c.specs() {
+				if spec.Name != "task_send_message" {
+					continue
+				}
+				mode, ok := spec.InputSchema.Properties.Get("delivery_mode")
+				if !ok || !reflect.DeepEqual(mode.Enum, []any{"append", "replace", "steer"}) || slices.Contains(spec.InputSchema.Required, "delivery_mode") {
+					t.Fatalf("delivery_mode schema = %+v, required = %v", mode, spec.InputSchema.Required)
+				}
+				return
+			}
+			t.Fatal("task_send_message missing from catalog")
+		})
+		for _, mode := range []string{"", "append", "replace", "steer"} {
+			for _, state := range []task.State{task.StateRunning, task.StateWaiting} {
+				if (mode == "append" || mode == "replace") && state == task.StateRunning {
+					continue // Covered by the queue/append case without a live session.
+				}
+				t.Run("valid/direct/"+mode+"/"+string(state), func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+					tk.SetState(state)
+					insertTestTask(s, tk.ID, tk)
+					entry, _ := s.taskMgr.GetEntry(tk.ID)
+					withPending := mode == "steer" && state == task.StateRunning
+					if withPending {
+						if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "already queued"}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					_, conn := newGatedInputSession(t, tk, claudecode.New().NewWire)
+					close(conn.release)
+					args := fmt.Sprintf(`{"task_number":%q,"message":"follow up"}`, tk.ID.String())
+					if mode != "" {
+						args = fmt.Sprintf(`{"task_number":%q,"message":"follow up","delivery_mode":%q}`, tk.ID.String(), mode)
+					}
+					c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+					res, err := c.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_send_message", Arguments: json.RawMessage(args)})
+					if err != nil || res.IsError {
+						t.Fatalf("CallTool() = %+v, %v", res, err)
+					}
+					want := "Sent message to task #1."
+					if withPending {
+						want += " A pending prompt still exists; direct delivery does not clear it. Use task_get_detail to inspect it."
+					}
+					if got := taskDetailText(t, res.Structured); got != want {
+						t.Fatalf("result = %q", got)
+					}
+					select {
+					case <-conn.started:
+					default:
+						t.Fatal("message was not sent to the session")
+					}
+					pending := entry.PendingInput()
+					if withPending {
+						if pending == nil || pending.Prompt.Text != "already queued" {
+							t.Fatalf("direct delivery changed pending input: %+v", pending)
+						}
+					} else if pending != nil {
+						t.Fatalf("direct delivery left a pending prompt: %+v", pending)
+					}
+				})
+			}
+		}
+		t.Run("error/invalid_mode", func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+			insertTestTask(s, tk.ID, tk)
+			c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
+			res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpTaskSendMessageArgs]{Arguments: mcpTaskSendMessageArgs{TaskNumber: "1", Message: "hello", DeliveryMode: "invalid"}})
+			assertMCPToolErrorCode(t, res, api.CodeBadRequest)
+		})
+		for _, existing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("valid/replace/existing=%v", existing), func(t *testing.T) {
+				t.Parallel()
+				s := newTestRouter(t, nil)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+				tk.SetState(task.StateRunning)
+				insertTestTask(s, tk.ID, tk)
+				entry, _ := s.taskMgr.GetEntry(tk.ID)
+				if existing {
+					if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "old", Images: []logdata.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+				args := fmt.Sprintf(`{"task_number":%q,"message":"replacement","delivery_mode":"replace"}`, tk.ID.String())
+				res, err := c.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_send_message", Arguments: json.RawMessage(args)})
+				if err != nil || res.IsError {
+					t.Fatalf("CallTool() = %+v, %v", res, err)
+				}
+				if got := taskDetailText(t, res.Structured); got != "Queued message for task #1 in replace mode. Any prior pending prompt was canceled before submitting this message. Delivery occurs when the agent is waiting." {
+					t.Fatalf("result = %q", got)
+				}
+				if p := entry.PendingInput(); p == nil || p.Prompt.Text != "replacement" || len(p.Prompt.Images) != 0 {
+					t.Fatalf("pending prompt = %+v", p)
+				}
+			})
+		}
+		for _, tc := range []struct {
+			name    string
+			message string
+			state   task.State
+			code    api.ErrorCode
+		}{
+			{name: "empty_message_preserves_pending", state: task.StateRunning, code: api.CodeBadRequest},
+			{name: "enqueue_failure_reports_canceled_prompt", message: "replacement", state: task.StateStopped, code: api.CodeConflict},
+		} {
+			t.Run("error/replace/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				s := newTestRouter(t, nil)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+				tk.SetState(task.StateRunning)
+				insertTestTask(s, tk.ID, tk)
+				entry, _ := s.taskMgr.GetEntry(tk.ID)
+				if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "old"}); err != nil {
+					t.Fatal(err)
+				}
+				old := entry.PendingInput()
+				tk.SetState(tc.state)
+				c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
+				res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpTaskSendMessageArgs]{Arguments: mcpTaskSendMessageArgs{TaskNumber: taskID(tk.ID.String()), Message: tc.message, DeliveryMode: inputReplace}})
+				assertMCPToolErrorCode(t, res, tc.code)
+				if tc.message == "" {
+					if entry.PendingInput() != old {
+						t.Fatal("invalid replacement canceled pending input")
+					}
+				} else {
+					out, ok := res.Structured.(mcp.ErrorOutput)
+					if entry.PendingInput() != nil || !ok || !strings.HasPrefix(out.Error, "Pending prompt canceled, but sending its replacement failed: ") {
+						t.Fatalf("replacement failure = %+v, pending = %+v", res, entry.PendingInput())
+					}
+				}
+			})
+		}
+	})
 	t.Run("handleGetSystemStats", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
@@ -1642,6 +1827,44 @@ func TestMCPTools(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
+			t.Run("pending prompt shares output budget", func(t *testing.T) {
+				t.Parallel()
+				s, rt, id := newMCPDiffstatRouter(t)
+				ent, _ := s.taskMgr.GetEntry(id)
+				ent.Task().SetState(task.StateRunning)
+				prompt := " \n" + strings.Repeat("pending instructions \u754c\n", 2000) + "end of pending instructions"
+				if _, err := ent.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: prompt}); err != nil {
+					t.Fatal(err)
+				}
+				rt.RepositoryStatusValue.Commits[0].Subject = strings.Repeat("large commit subject", 10000)
+				for _, includeDiffstat := range []bool{false, true} {
+					got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: includeDiffstat})
+					if got.Result.IsError {
+						t.Fatal(got)
+					}
+					txt := got.Result.StructuredContent.Result
+					_, pending, ok := strings.Cut(txt, "\nPending prompt text: ")
+					if !ok || !strings.HasPrefix(pending, prompt[:1024]) || strings.Contains(txt, "end of pending instructions") {
+						t.Fatalf("include_diffstat=%v: expected a pending prompt preview", includeDiffstat)
+					}
+					if len(txt) > 32768 || !utf8.ValidString(txt) {
+						t.Fatalf("include_diffstat=%v: invalid bounded output: %d bytes", includeDiffstat, len(txt))
+					}
+					if len(got.Result.Content) != 1 || got.Result.Content[0].Text != txt {
+						t.Fatal("text and structured output disagree")
+					}
+					if got.Result.Meta[mcpTruncatedMetaKey] != true {
+						t.Fatal("truncation metadata missing")
+					}
+					marker := "[Output truncated."
+					if includeDiffstat {
+						marker = "[Diffstat output truncated]"
+					}
+					if !strings.Contains(txt, marker) {
+						t.Fatal("truncation notice missing")
+					}
+				}
+			})
 			t.Run("repository and file summaries", func(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)

@@ -1,4 +1,4 @@
-// MCP tool catalogs, schemas, execution, bounded task details, and task command adapters.
+// MCP tool catalogs, schemas, execution, bounded task details, pending prompts, and message delivery modes.
 
 package server
 
@@ -125,8 +125,8 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get task status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Output is limited to 32 KiB with an explicit truncation notice.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get task status and pending prompt text/delivery status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Total output, including pending prompt text, is limited to 32 KiB with an explicit truncation notice.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to an agent by task number. Choose steer for immediate delivery, append to preserve and extend pending input, or replace to overwrite the entire pending prompt. Queued input is delivered when waiting; append and replace are rejected once delivery starts.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's existing commits to GitHub. Push to task branch (default) or directly to main without rewriting commits.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", m.handleTaskStop), mcp.ToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
@@ -471,6 +471,21 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 		"",
 		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD)),
 	}
+	if p := t.PendingInput; p != nil {
+		status := "queued; append preserves existing text, replace overwrites the entire pending prompt"
+		switch {
+		case p.Delivered:
+			status = "already delivered; do not resend"
+		case p.Delivering:
+			status = "being delivered; cannot append or replace"
+		}
+		lines = append(lines, "Pending prompt: "+status)
+		if p.Error != "" {
+			lines = append(lines, "Pending prompt error: "+truncateUTF8(p.Error, 1024))
+		}
+	} else {
+		lines = append(lines, "Pending prompt: none")
+	}
 	if t.Runtime.RuntimeName != "" {
 		lines = append(lines, "Runtime: "+t.Runtime.RuntimeName)
 	}
@@ -500,40 +515,46 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 	}
 	// Repository probes happen only when explicitly requested.
 	txt := strings.ToValidUTF8(strings.TrimSpace(strings.Join(lines, "\n")), "\ufffd")
-	if !call.Arguments.IncludeDiffstat {
-		return boundedTextToolResult(txt)
+	if p := t.PendingInput; p != nil {
+		txt += "\nPending prompt text: " + p.Prompt.Text
 	}
-	ent, ok := inspectableTaskEntry(ctx, m.taskSvc, t.ID)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNotFoundError())
-	}
-	idx, err := m.taskSvc.taskDiffIndex(ctx, ent)
-	if err != nil {
-		msg, code := err.Error(), api.CodeInternalError
-		if e, ok := errors.AsType[*api.Error](err); ok {
-			msg, code = e.Error(), e.Code
+	var truncated bool
+	if call.Arguments.IncludeDiffstat {
+		ent, ok := inspectableTaskEntry(ctx, m.taskSvc, t.ID)
+		if !ok {
+			return domainToolError[mcp.TextOutput](taskNotFoundError())
 		}
-		msg, cut := truncateMCPText(strings.ToValidUTF8(msg, "\ufffd"))
-		res := mcp.ToolErrorWithMeta[mcp.TextOutput](msg, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(code)})
-		if cut {
-			res.Meta[mcpTruncatedMetaKey] = true
+		idx, err := m.taskSvc.taskDiffIndex(ctx, ent)
+		if err != nil {
+			msg, code := err.Error(), api.CodeInternalError
+			if e, ok := errors.AsType[*api.Error](err); ok {
+				msg, code = e.Error(), e.Code
+			}
+			msg, cut := truncateMCPText(strings.ToValidUTF8(msg, "\ufffd"))
+			res := mcp.ToolErrorWithMeta[mcp.TextOutput](msg, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(code)})
+			if cut {
+				res.Meta[mcpTruncatedMetaKey] = true
+			}
+			return res
 		}
-		return res
+		d := mcpTaskDiffstat{}
+		d.out.WriteString(truncateUTF8(txt, 4<<10))
+		d.truncated = d.out.Len() != len(txt)
+		d.out.WriteString("\n\nDiffstat:\n")
+		d.append(idx)
+		txt, truncated = d.out.String(), d.truncated
+	} else {
+		txt, truncated = truncateMCPText(txt)
 	}
-	d := mcpTaskDiffstat{}
-	d.out.WriteString(truncateUTF8(txt, 4<<10))
-	d.truncated = d.out.Len() != len(txt)
-	d.out.WriteString("\n\nDiffstat:\n")
-	d.append(idx)
-	res := mcp.TextToolResult(d.out.String())
-	if d.truncated {
+	res := mcp.TextToolResult(txt)
+	if truncated {
 		res.Meta = mcp.MetaObject{mcpTruncatedMetaKey: true}
 	}
 	return res
 }
 
 func (m *mcpTools) handleTaskSendMessage(ctx context.Context, call *mcp.ToolRequest[mcpTaskSendMessageArgs]) mcp.ToolResult[mcp.TextOutput] {
-	return m.sendTaskInput(ctx, mcpTaskInputArgs(call.Arguments), "message", "Sent message to task #%d.")
+	return m.sendTaskInput(ctx, mcpTaskInputArgs{TaskNumber: call.Arguments.TaskNumber, Message: call.Arguments.Message, DeliveryMode: call.Arguments.DeliveryMode}, "message", "Sent message to task #%d.")
 }
 
 func (m *mcpTools) handleTaskAnswerQuestion(ctx context.Context, call *mcp.ToolRequest[mcpTaskAnswerQuestionArgs]) mcp.ToolResult[mcp.TextOutput] {
@@ -838,9 +859,39 @@ func (m *mcpTools) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, fie
 	if args.Message == "" {
 		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: " + field})
 	}
-	_, err = m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}}, nil)
+	canceled := false
+	switch args.DeliveryMode {
+	case "", inputSteer, inputAppend:
+	case inputReplace:
+		// Match the client edit flow: withdraw the pending prompt by identity,
+		// then submit the replacement through the normal queued-input API.
+		if p := entry.PendingInput(); p != nil {
+			if p.Delivered {
+				return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "pending prompt was already sent"})
+			}
+			if _, err := m.taskSvc.cancelQueuedInput(ctx, entry, &v1.CancelQueuedInputReq{ID: p.ID}); err != nil {
+				return domainToolError[mcp.TextOutput](err)
+			}
+			canceled = true
+		}
+	default:
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delivery_mode must be append, replace, or steer"})
+	}
+	resp, err := m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}, Queue: args.DeliveryMode == inputAppend || args.DeliveryMode == inputReplace}, nil)
 	if err != nil {
+		if canceled {
+			return mcp.ToolErrorWithMeta[mcp.TextOutput]("Pending prompt canceled, but sending its replacement failed: "+err.Error(), domainToolError[mcp.TextOutput](err).Meta)
+		}
 		return domainToolError[mcp.TextOutput](err)
+	}
+	if resp.Status == "queued" {
+		if args.DeliveryMode == inputReplace {
+			return mcp.TextToolResult(fmt.Sprintf("Queued message for task #%d in replace mode. Any prior pending prompt was canceled before submitting this message. Delivery occurs when the agent is waiting.", num))
+		}
+		return mcp.TextToolResult(fmt.Sprintf("Queued message for task #%d in append mode. Existing pending text and attachments are preserved. Delivery occurs when the agent is waiting.", num))
+	}
+	if entry.PendingInput() != nil {
+		return mcp.TextToolResult(fmt.Sprintf(format, num) + " A pending prompt still exists; direct delivery does not clear it. Use task_get_detail to inspect it.")
 	}
 	return mcp.TextToolResult(fmt.Sprintf(format, num))
 }
@@ -946,6 +997,7 @@ type mcpTaskListArgs struct {
 }
 
 type mcpTaskSummary struct {
+	HasPendingInput bool         `json:"hasPendingInput" jsonschema_description:"Whether a pending prompt record exists; task_get_detail shows its text and delivery status"`
 	TaskNumber      int          `json:"taskNumber"              jsonschema_description:"Current session task number used by other task tools"`
 	TaskID          string       `json:"taskID"                  jsonschema_description:"Stable task ID"`
 	Title           string       `json:"title"                   jsonschema_description:"Task title"`
@@ -1033,9 +1085,18 @@ type mcpTaskCreateArgs struct {
 	GitHubToken bool     `json:"gitHubToken,omitempty" jsonschema_description:"Enable GitHub token injection for this task"`
 }
 
+type inputDeliveryMode string
+
+const (
+	inputAppend  inputDeliveryMode = "append"
+	inputReplace inputDeliveryMode = "replace"
+	inputSteer   inputDeliveryMode = "steer"
+)
+
 type mcpTaskSendMessageArgs struct {
-	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string"                    jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
-	Message    string `json:"message"     jsonschema_description:"The message to send to the agent"`
+	TaskNumber   taskID            `json:"task_number" jsonschema:"oneof_type=integer;string"                    jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
+	Message      string            `json:"message"     jsonschema_description:"The message to send to the agent"`
+	DeliveryMode inputDeliveryMode `json:"delivery_mode,omitempty" jsonschema:"enum=append,enum=replace,enum=steer" jsonschema_description:"steer (default) delivers immediately without clearing pending input; append preserves and extends pending input; replace cancels pending input by ID, including attachments, then queues new text. Cancellation and sending are separate operations: if sending fails, the old prompt remains canceled; concurrent queued messages may append. Both queued modes send immediately when waiting with no pending prompt. Changes are rejected once delivery starts. Use tasks_list or task_get_detail to inspect pending input"`
 }
 
 type mcpTaskAnswerQuestionArgs struct {
@@ -1075,8 +1136,9 @@ type mcpBotFixCIArgs struct {
 }
 
 type mcpTaskInputArgs struct {
-	TaskNumber taskID
-	Message    string
+	TaskNumber   taskID
+	Message      string
+	DeliveryMode inputDeliveryMode
 }
 
 func taskNotFoundError() *api.Error {

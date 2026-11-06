@@ -139,6 +139,7 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 		effort = task.RequestedEffort
 	}
 	return mcpTaskSummary{
+		HasPendingInput: task.PendingInput != nil,
 		TaskNumber:      number,
 		TaskID:          task.ID.String(),
 		Title:           truncateUTF8(taskTitle(task), maxMCPTaskTitle),
