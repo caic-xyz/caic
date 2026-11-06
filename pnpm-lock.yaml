@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@maruel/gomode':
-        specifier: github:maruel/gomode#4b121c93f8fa9268e5d3ca533ac09c1c12bba5c5
-        version: https://codeload.github.com/maruel/gomode/tar.gz/4b121c93f8fa9268e5d3ca533ac09c1c12bba5c5(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
+        specifier: github:maruel/gomode#9dfc74f4429c71c28b3fb31fe0670ed4f3ad4164
+        version: https://codeload.github.com/maruel/gomode/tar.gz/9dfc74f4429c71c28b3fb31fe0670ed4f3ad4164(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
       '@material-symbols/svg-400':
         specifier: 0.47.4
         version: 0.47.4
@@ -791,8 +791,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/4b121c93f8fa9268e5d3ca533ac09c1c12bba5c5':
-    resolution: {gitHosted: true, integrity: sha512-SQX6emdAoW9DlEdLkwiEuO/v4yd7OPn4BEHBaQizWdSTzi6U7JEe50aUB5aNxZFL+uQHxZaoYEdio/CWkWZTDg==, tarball: https://codeload.github.com/maruel/gomode/tar.gz/4b121c93f8fa9268e5d3ca533ac09c1c12bba5c5}
+  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/9dfc74f4429c71c28b3fb31fe0670ed4f3ad4164':
+    resolution: {gitHosted: true, integrity: sha512-0Bq12H2WRgSHQ8geALnrdQ2whMPbFMKYRWpqrsBq91Bq4ECNw+CXF4s41tDhfYGtsgSB3bjWsKYQvEiKr3QcaQ==, tarball: https://codeload.github.com/maruel/gomode/tar.gz/9dfc74f4429c71c28b3fb31fe0670ed4f3ad4164}
     version: 0.1.0
     engines: {node: '>=26 <27', pnpm: '>=12.5.1'}
     peerDependencies:
@@ -3750,7 +3750,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/4b121c93f8fa9268e5d3ca533ac09c1c12bba5c5(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
+  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/9dfc74f4429c71c28b3fb31fe0670ed4f3ad4164(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
     dependencies:
       '@material-symbols/svg-400': 0.48.2
       '@solidjs/router': 1.0.0(solid-js@1.9.15)
