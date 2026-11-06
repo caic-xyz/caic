@@ -1,4 +1,4 @@
-// End-to-end browser test configuration using a fake backend server.
+// End-to-end browser tests using a fake backend, local Chrome detection, and pinned CI/visual Chromium.
 //
 // The fake server (scripts/run-dev.py --fake) replaces containers, runtime
 // inventory, runtime events, CI, usage providers, VNC, and agent processes
@@ -18,14 +18,18 @@
 // `pnpm playwright test` bypasses it. For a targeted run keep the explicit
 // configuration:
 //   pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/account-menu.spec.ts
+// Local behavioral tests detect installed Chrome on Linux, macOS, and Windows.
+// CI and screenshot generation always use bundled Chromium for consistent rendering.
 //
 // The webServer dynamically allocates a port for the fake backend and verifies
 // it before running instrumented tests.
 
 import { defineConfig } from "@playwright/test";
+import { chromeExecutable } from "./browser";
 
 const seed = process.env.CAIC_E2E_SEED ?? Date.now().toString(36);
 const includeVisuals = process.env.CAIC_E2E_VISUALS === "1";
+const executablePath = chromeExecutable();
 const serverHost = process.env.CAIC_E2E_HOST ?? "127.0.0.1";
 if (serverHost !== "127.0.0.1") {
   throw new Error(`CAIC_E2E_HOST must be 127.0.0.1, got ${serverHost}`);
@@ -55,6 +59,7 @@ const serverURL = `http://${serverHost}:${serverPort}`;
 process.env.CAIC_E2E_SEED = seed;
 if (process.env.TEST_WORKER_INDEX === undefined) {
   console.log(`E2E seed: ${seed} (replay with CAIC_E2E_SEED=${seed})`);
+  console.log(`E2E browser: ${executablePath ? `Chrome (${executablePath})` : "bundled Chromium"}`);
 }
 
 export default defineConfig({
@@ -102,7 +107,7 @@ export default defineConfig({
             "--disable-font-subpixel-positioning",
           ],
         }
-      : undefined,
+      : { executablePath },
     locale: "en-US",
     timezoneId: "UTC",
     trace: "retain-on-failure",

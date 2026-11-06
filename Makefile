@@ -5,7 +5,7 @@
 
 HTTP?=:2242
 
-FRONTEND_TEST = pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
+FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
 
 help:
@@ -65,7 +65,8 @@ build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 verify: custom-gcl frontend-deps git-hooks
-	@./scripts/run-concurrently.sh sdk,workflows,go,js,ts,eslint,python,shell,misc \
+	@./scripts/run-concurrently.sh \
+		sdk,workflows,go,js,ts,eslint,python,shell,misc \
 		'cd ./backend/internal/server/api/v1 && go run ../../../cmd/gen-api-sdk -check' \
 		'go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12' \
 		'./custom-gcl run --show-stats=false ./... && go mod tidy -diff' \
@@ -106,7 +107,11 @@ fake-dev: frontend-build
 
 # Independent Go, frontend, and Python suites run after dependency installation.
 test: frontend-deps
-	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' '$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)' 'uv run --locked python scripts/run_python_tests.py'
+	@./scripts/run-concurrently.sh \
+		go,frontend,python \
+		'go test -cover ./...' \
+		'$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)' \
+		'uv run --locked python scripts/run_python_tests.py'
 
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
@@ -173,8 +178,13 @@ git-hooks:
 frontend-dev: frontend-deps
 	@pnpm --silent dev
 
+# Local behavioral tests reuse installed Chrome; CI and visuals use pinned
+# Chromium. Download only its headless shell when the shared detector needs it.
 playwright-browser: frontend-deps
-	@pnpm --silent exec playwright install chromium
+	@pnpm --silent exec tsx e2e/browser.ts --install
+
+# Browser setup and screenshot rendering must both select the bundled shell.
+screenshots-check screenshots-generate-frontend screenshots-update: export CAIC_E2E_VISUALS := 1
 
 # Slow, maintainer-only: renders frontend visuals twice and
 # compares decoded pixels against tracked baselines that encode the

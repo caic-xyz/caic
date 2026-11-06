@@ -67,6 +67,13 @@ for (const mobile of [false, true]) {
       )
       .toBe(true);
     await page.screenshot({ path: testInfo.outputPath("queue.png") });
+    // Keep a short pending prompt and its attachments in a compact row.
+    expect(await queue.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(80);
+    for (const link of await queue.getByRole("link").all()) {
+      const box = await link.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
     await queue.getByRole("link", { name: "Open queued attachment 1" }).click();
     await expect(page).toHaveURL(new RegExp(`/task/@${id}/view\\?image=`));
     const full = page.getByRole("img", { name: "attachment", exact: true });

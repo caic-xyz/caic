@@ -1,4 +1,4 @@
-// Shared e2e fixtures: isolated browser task choices, typed API client, and utilities.
+// Shared e2e fixtures: browser version diagnostics, isolated task choices, typed API client, and utilities.
 import { ok } from "node:assert/strict";
 import { test as base, expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
@@ -147,6 +147,10 @@ export const test = base.extend<{
   uniquePrompt: UniquePrompt;
   taskPreferences: TaskPreferences | null;
 }>({
+  browser: async ({ browser }, use) => {
+    process.stdout.write(`E2E browser version: ${browser.version()}\n`);
+    await use(browser);
+  },
   taskPreferences: [{ repositories: [], harness: "claude", models: {}, efforts: {} }, { option: true }],
   page: async ({ page, taskPreferences }, use) => {
     if (taskPreferences) {
