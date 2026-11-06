@@ -31,8 +31,9 @@ but disappears after changing to an actual catalog route; the live catalog
 offers `deepseek-flash` and `deepseek-v4-pro`. Preserve those actual route IDs.
 
 Bash skill reads use the native `command` field and the shared ACP per-call
-deduplication. The native skill tool needs its own retained evidence before
-projection.
+deduplication. The native `skill` tool reports the skill name in its `rawInput`;
+a successful completion confirms the inferred load. The `read-edit-bash`
+recording retains that tool call and its completion content.
 
 Successful read and command output arrives only in terminal tool updates;
 failed tool updates carry their error in content and still precede a normal

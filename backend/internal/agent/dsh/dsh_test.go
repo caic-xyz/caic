@@ -320,6 +320,28 @@ func TestDSHCompletedToolOutput(t *testing.T) {
 	}
 }
 
+func TestSkillToolRead(t *testing.T) {
+	t.Parallel()
+	wire := New("", nil).NewWire()
+	line := []byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"skill-call","title":"skill","kind":"other","status":"in_progress","rawInput":{"name":"code-quality"}}}}`)
+	msgs, err := wire.ParseOutput(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("native skill messages=%#v, want use/read/load", msgs)
+	}
+	if use, ok := msgs[0].(*agent.ToolUseMessage); !ok || use.Name != "skill" {
+		t.Fatalf("skill tool use=%#v", msgs[0])
+	}
+	if read, ok := msgs[1].(*agent.SkillReadMessage); !ok || read.Skill != "code-quality" || read.ToolUseID != "skill-call" || read.Inferred {
+		t.Fatalf("skill read=%#v", msgs[1])
+	}
+	if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || load.Skill != "code-quality" || load.SourceToolUseID != "skill-call" {
+		t.Fatalf("skill load=%#v", msgs[2])
+	}
+}
+
 // TestDSHNativeRecordings checks the complete production-relay journals, including
 // directional request ownership and terminal-only tool output, without a CLI or key.
 func TestDSHNativeRecordings(t *testing.T) {
@@ -337,7 +359,7 @@ func TestDSHNativeRecordings(t *testing.T) {
 			}
 			var inputs, text []string
 			var metadata agent.SessionMetadata
-			var results, failedTools, readOutputs, commandOutputs, edits int
+			var results, failedTools, readOutputs, commandOutputs, edits, skillReads, skillLoads int
 			for line := range bytes.SplitSeq(bytes.TrimSpace(data), []byte{'\n'}) {
 				record, err := parser.ParseRecord(line)
 				if err != nil {
@@ -370,6 +392,14 @@ func TestDSHNativeRecordings(t *testing.T) {
 						if m.Name == "Edit" {
 							edits++
 						}
+					case *agent.SkillReadMessage:
+						if m.Skill == "code-quality" {
+							skillReads++
+						}
+					case *agent.SkillLoadMessage:
+						if m.Skill == "code-quality" {
+							skillLoads++
+						}
 					case *agent.UsageMessage:
 						if !m.Usage.Equal(agent.Usage{}) || m.PerCall || m.Additive || m.ContextWindow != 1000000 {
 							t.Fatalf("occupancy became billed usage: %+v", m)
@@ -395,8 +425,8 @@ func TestDSHNativeRecordings(t *testing.T) {
 			if results != wantResults || len(inputs) != wantResults || metadata.ReportedModel != "deepseek-official/deepseek-v4-flash" || metadata.ReportedEffort != wantEffort {
 				t.Fatalf("results=%d inputs=%q metadata=%+v", results, inputs, metadata)
 			}
-			if name == "read-edit-bash" && (readOutputs != 1 || commandOutputs != 1 || edits != 1) {
-				t.Fatalf("read outputs=%d command outputs=%d edits=%d", readOutputs, commandOutputs, edits)
+			if name == "read-edit-bash" && (readOutputs != 1 || commandOutputs != 1 || edits != 1 || skillReads != 1 || skillLoads != 1) {
+				t.Fatalf("read outputs=%d command outputs=%d edits=%d skill reads=%d loads=%d", readOutputs, commandOutputs, edits, skillReads, skillLoads)
 			}
 			if name == "tool-error" && failedTools != 1 {
 				t.Fatalf("failed tools = %d", failedTools)

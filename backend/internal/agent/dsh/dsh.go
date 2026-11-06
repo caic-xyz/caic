@@ -37,8 +37,6 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // boundary and accounting semantics.
 // TODO: Add native subagent cards only after retaining dsh-specific ownership
 // and lifecycle evidence; generic tool titles do not establish delegation.
-// TODO: Project native skill-tool reads after retaining dsh-specific evidence;
-// shell skill reads use the native bash command field.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.Dsh, &agentacp.Config{
 		Args: []string{"dsh", "--profile", "acp"}, ResumeMethod: acp.MethodSessionResume,
@@ -95,13 +93,30 @@ type toolParser struct{}
 func (toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
 	if tool != nil && tool.Status == acp.StatusInProgress {
 		for i, message := range messages {
-			if use, ok := message.(*agent.ToolUseMessage); ok && use.Name == "Bash" {
+			use, ok := message.(*agent.ToolUseMessage)
+			if !ok {
+				continue
+			}
+			switch {
+			case use.Name == "Bash":
 				// A malformed or differently shaped input does not prove a skill read.
 				if command, err := agent.JSONString(tool.RawInput, "command"); err == nil {
 					messages = slices.Insert(messages, i+1, agent.InferredSkillReadsFromCommand(command, "", tool.ToolCallID)...)
 				}
-				break
+			case strings.EqualFold(use.Name, "skill"):
+				// The native skill tool names the loaded skill. Its successful
+				// completion confirms the inferred load through the shared tracker.
+				if name, err := agent.JSONString(tool.RawInput, "name"); err == nil && name != "" {
+					insert := []agent.Message{
+						&agent.SkillReadMessage{ToolUseID: tool.ToolCallID, Skill: name},
+						&agent.SkillLoadMessage{Skill: name, SourceToolUseID: tool.ToolCallID},
+					}
+					messages = slices.Insert(messages, i+1, insert...)
+				}
+			default:
+				continue
 			}
+			break
 		}
 	}
 	if tool != nil && tool.Status == acp.StatusCompleted {
