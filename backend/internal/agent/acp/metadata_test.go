@@ -12,6 +12,30 @@ import (
 
 func TestMetadataParser(t *testing.T) {
 	t.Parallel()
+	t.Run("PayloadFreeTurnBoundaries", func(t *testing.T) {
+		t.Parallel()
+		parser := testBackend().NewMetadataParser()
+		messages, err := parser.ParseInput([]byte(`{"id":1,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"private prompt"},{"type":"image","data":"private image","mimeType":"image/png"}]}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) != 1 {
+			t.Fatalf("input messages = %+v", messages)
+		}
+		if input, ok := messages[0].(*agent.UserInputMessage); !ok || input.Text != "" || len(input.Images) != 0 {
+			t.Fatalf("payload retained: %+v", messages[0])
+		}
+		messages, err = parser.ParseOutput([]byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"private response"}}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) != 1 {
+			t.Fatalf("output messages = %+v", messages)
+		}
+		if output, ok := messages[0].(*agent.TextDeltaMessage); !ok || output.Text != "" {
+			t.Fatalf("payload retained: %+v", messages[0])
+		}
+	})
 	t.Run("ContextOccupancy", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct{ name, native, want string }{

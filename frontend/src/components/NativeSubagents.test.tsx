@@ -22,7 +22,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-const lifecycle = (recordID: number, status: "running" | "completed", result: string): HistoryEvent => ({
+const lifecycle = (recordID: number, status: "running" | "completed" | "unknown", result: string): HistoryEvent => ({
   recordID,
   index: 0,
   message: {
@@ -76,6 +76,27 @@ function actorFixture(events: HistoryEvent[]) {
   return { view, requests, advance, checkpoint, publish };
 }
 describe("native disclosures", () => {
+  it("explains an unreported result while preserving identity and prompt", async () => {
+    actorFixture([lifecycle(1, "unknown", "")]);
+    const card = screen.getByTestId("native-subagent-card");
+    expect(card).toHaveTextContent("Completion not reported");
+    expect(screen.queryByTestId("native-subagent-duration")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(defined(card.querySelector(":scope > summary")));
+    await waitFor(() => expect(card).toHaveTextContent("Review the change"));
+    expect(card).toHaveTextContent("child");
+    expect(card).toHaveTextContent("No result reported by the harness.");
+  });
+
+  it("preserves reported text when completion is unreported", async () => {
+    actorFixture([lifecycle(1, "unknown", "Partial progress")]);
+    const card = screen.getByTestId("native-subagent-card");
+    expect(card).toHaveTextContent("Completion not reported");
+    const user = userEvent.setup();
+    await user.click(defined(card.querySelector(":scope > summary")));
+    await waitFor(() => expect(card).toHaveTextContent("Partial progress"));
+    expect(card).not.toHaveTextContent("No result reported by the harness.");
+  });
   it("keeps an open transcript while own output and unrelated routing grow in one manifest", async () => {
     const fixture = actorFixture([
       lifecycle(1, "running", ""),

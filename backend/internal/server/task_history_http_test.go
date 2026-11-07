@@ -777,6 +777,46 @@ func BenchmarkHistorySwitchViews(b *testing.B) {
 	}
 }
 
+func TestHistoryNativeZeroCost(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, field, source string
+		usd                 float64
+	}{
+		{"reported zero", `,"total_cost_usd":0`, "reported", 0},
+		{"omitted cost", "", "estimated", 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, tk, p := historyHTTPFixture(t)
+			price := &historyPricerSpy{}
+			price.rate.Store(10)
+			tk.Pricer = price
+			raw := `{"t":"caic_meta","version":3,"harness":"claude","model":"priced-model","prompt":"history"}` + "\n" + `{"t":"agent","ts":1.000,"msg":{"type":"result","subtype":"success","usage":{"input_tokens":1000000}` + tc.field + `}}` + "\n"
+			if err := os.WriteFile(p, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			b := historyBootstrap(t, s, tk, "")
+			url := "/tasks/" + tk.ID.String() + "/history/costs?generation=" + b.Generation + "&through=2"
+			for attempt := range 2 {
+				if attempt == 1 {
+					s.taskHandlers.taskSvc.history.prune(true)
+					b = historyBootstrap(t, s, tk, "")
+					url = "/tasks/" + tk.ID.String() + "/history/costs?generation=" + b.Generation + "&through=2"
+				}
+				response := historyRequest(t, s, url, "")
+				var estimates []v1.HistoryTurnEstimate
+				if err := json.Unmarshal(response.Body.Bytes(), &estimates); err != nil {
+					t.Fatal(err)
+				}
+				if response.Code != http.StatusOK || len(estimates) != 1 || estimates[0].Cost.USD != tc.usd || string(estimates[0].Cost.Source) != tc.source {
+					t.Fatalf("cost endpoint = %d %s, want %v %s", response.Code, response.Body, tc.usd, tc.source)
+				}
+			}
+		})
+	}
+}
+
 func TestHistoryMutablePrices(t *testing.T) {
 	t.Parallel()
 	s, tk, p := historyHTTPFixture(t)
@@ -785,7 +825,7 @@ func TestHistoryMutablePrices(t *testing.T) {
 	tk.Pricer = price
 	data := `{"t":"caic_meta","version":3,"harness":"claude","model":"priced-model","prompt":"history"}` + "\n" +
 		`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"model":"priced-model","content":[{"type":"tool_use","id":"exit","name":"ExitPlanMode","input":{}}],"usage":{"input_tokens":1000000}}}}` + "\n" +
-		`{"t":"agent","ts":2.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1.25,"usage":{"input_tokens":1000000}}}` + "\n"
+		`{"t":"agent","ts":2.000,"msg":{"type":"result","subtype":"success","usage":{"input_tokens":1000000}}}` + "\n"
 	if err := os.WriteFile(filepath.Clean(p), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}

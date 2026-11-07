@@ -15,6 +15,7 @@ const usage: TaskUsageSummary = {
   cacheWriteInputTokens: 2_000,
   costUSD: 0.125,
   costKnown: true,
+  costComplete: true,
   inputTokens: 1_000,
   outputTokens: 500,
 };

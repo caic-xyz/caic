@@ -328,6 +328,7 @@ type MetaResultMessage struct {
 	Title                    string       `json:"title,omitempty"`
 	CostUSD                  float64      `json:"cost_usd,omitempty"`
 	CostKnown                bool         `json:"cost_known,omitempty"`
+	CostComplete             bool         `json:"cost_complete,omitempty"`
 	Duration                 float64      `json:"duration,omitempty"` // Seconds.
 	NumTurns                 int          `json:"num_turns,omitempty"`
 	InputTokens              int          `json:"input_tokens,omitempty"`
@@ -358,7 +359,8 @@ type MetaPRMessage struct {
 type TurnCommitSnapshotMessage struct {
 	MessageProvenance
 
-	MessageType string `json:"t"`
+	MessageType string  `json:"t"`
+	Ts          float64 `json:"ts,omitempty"` // Producer time in Unix seconds; zero means unknown.
 	// Baseline marks the snapshot taken before a newly started agent session.
 	Baseline bool `json:"baseline,omitempty"`
 	// RepositoryCommits contains the immutable Git branch tips fetched from

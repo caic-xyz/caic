@@ -46,6 +46,7 @@ func (s *backfillStaging) append(row *data.UsageRow) error {
 			aggregate:     newDayAggregate(),
 			watermarks:    make(map[string]time.Time),
 			costs:         make(map[string]float64),
+			provenance:    make(map[string]data.CostProvenance),
 			reportedCosts: make(map[string]struct{}),
 		}
 		s.days[row.Day] = day
@@ -66,7 +67,10 @@ func (s *backfillStaging) append(row *data.UsageRow) error {
 			}
 		}
 		day.costs[row.TaskID] += row.CostUSD
-		if row.CostUSD != 0 && !row.CostEstimated {
+		cost := day.provenance[row.TaskID]
+		cost.Add(row.CostProvenance())
+		day.provenance[row.TaskID] = cost
+		if protectsTaskCost(row) {
 			day.reportedCosts[row.TaskID] = struct{}{}
 		}
 	}
@@ -115,6 +119,7 @@ type backfillDay struct {
 	aggregate     *dayAggregate
 	watermarks    map[string]time.Time
 	costs         map[string]float64
+	provenance    map[string]data.CostProvenance
 	reportedCosts map[string]struct{}
 }
 
@@ -168,10 +173,10 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 		if !decoded {
 			return line, nil
 		}
-		if row.Kind != rowKindUsage || row.CostUSD != 0 || row.CostEstimated {
+		if row.Kind != rowKindUsage || row.CostUSD != 0 || row.CostEstimated || protectsTaskCost(&row) {
 			return line, nil
 		}
-		if _, reported := s.reportedCostTasks[row.TaskID]; reported {
+		if _, reported := s.costProtectedTasks[row.TaskID]; reported {
 			return line, nil
 		}
 		if pending := s.pending[row.TaskID]; pending != nil && pending.costInFlight != 0 {
@@ -191,13 +196,26 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 		}
 		fields["cost_usd"] = costBytes
 		fields["cost_estimated"] = json.RawMessage("true")
+		previous := row.CostProvenance()
+		estimated := data.CostProvenance{EstimatedUSD: cost, EstimatedParts: 1}
+		if row.Cost != nil {
+			encodedCost, err := json.Marshal(estimated)
+			if err != nil {
+				return nil, err
+			}
+			fields["cost"] = encodedCost
+		}
 		encoded, err := json.Marshal(fields)
 		if err != nil {
 			return nil, fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
 		}
 		changed = true
-		changes.addUsageRow(&data.UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost})
+		movement := estimated.Difference(previous)
+		changes.addUsageRow(&data.UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost, Cost: &movement, CostEstimated: true})
 		changes.flushedCost[row.TaskID] += cost
+		current := changes.flushedProvenance[row.TaskID]
+		current.Add(movement)
+		changes.flushedProvenance[row.TaskID] = current
 		if bytes.HasSuffix(line, []byte{'\n'}) {
 			encoded = append(encoded, '\n')
 		}

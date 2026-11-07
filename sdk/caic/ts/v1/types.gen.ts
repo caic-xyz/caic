@@ -1424,7 +1424,10 @@ export interface Task {
   /** Pushed compact per-repo Git state from the latest diff probe. */
   repoStates?: GitRepositoryState[];
   costUSD: number /* float64 */;
+  /** True when any cost is known; costUSD may be a subtotal. */
   costKnown: boolean;
+  /** True when costUSD covers all observed billed usage. */
+  costComplete: boolean;
   /** Seconds. */
   duration: number /* float64 */;
   numTurns: number /* int */;
@@ -2012,6 +2015,8 @@ export interface LocalWindow {
   /** "1h", "6h", "24h" */
   duration: string;
   costUSD: number /* float64 */;
+  /** True when all included billed usage has known cost; otherwise costUSD is a known subtotal. */
+  costKnown: boolean;
   inputTokens: number /* int */;
   outputTokens: number /* int */;
 }
@@ -2049,6 +2054,19 @@ export interface UsageDashboardTokens {
   cacheReadTokens: number /* int64 */;
   outputTokens: number /* int64 */;
   reasoningTokens: number /* int64 */;
+}
+
+/**
+ * UsageDashboardCost preserves additive cost provenance across range filters.
+ * Signed parts retain known zeros and cancel estimates replaced by reports.
+ * UnknownParts also marks amounts in rows whose source cannot be proven.
+ */
+export interface UsageDashboardCost {
+  reportedUSD: number /* float64 */;
+  estimatedUSD: number /* float64 */;
+  reportedParts: number /* int */;
+  estimatedParts: number /* int */;
+  unknownParts: number /* int */;
 }
 
 /** UsageDashboardCount is a named counter such as a skill read or tool call. */
@@ -2102,6 +2120,7 @@ export interface UsageDashboardModel {
   compactions: number /* int */;
   subagentSpawns: number /* int */;
   costUSD: number /* float64 */;
+  cost: UsageDashboardCost;
   contextWindow: number /* int */;
   tools: UsageDashboardCount[];
   toolTimings: UsageDashboardToolTiming[];
@@ -2124,6 +2143,7 @@ export interface UsageDashboardHarness {
   compactions: number /* int */;
   subagentSpawns: number /* int */;
   costUSD: number /* float64 */;
+  cost: UsageDashboardCost;
   tools: UsageDashboardCount[];
   toolTimings: UsageDashboardToolTiming[];
   skills: UsageDashboardCount[];
@@ -2146,6 +2166,7 @@ export interface UsageDashboardDay {
   subagentSpawns: number /* int */;
   subagentSpawnsBackground: number /* int */;
   costUSD: number /* float64 */;
+  cost: UsageDashboardCost;
   models: UsageDashboardModel[];
   harnesses: UsageDashboardHarness[];
   repos: UsageDashboardRepo[];

@@ -92,8 +92,8 @@ func taskKeys(ctx context.Context, svc *taskService) (keys []mcpTaskKey, revisio
 // taskSummaries projects a page of visible tasks using one-based numbers offset
 // by start. It rejects disappeared tasks or a changed ordering revision so a page
 // cannot silently mix incompatible task-number assignments.
-func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, start int, revision string) ([]mcpTaskSummary, error) {
-	summaries := make([]mcpTaskSummary, len(keys))
+func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, start int, revision string) ([]v1.MCPTaskSummary, error) {
+	summaries := make([]v1.MCPTaskSummary, len(keys))
 	for i, key := range keys {
 		entry, ok := visibleTaskEntry(ctx, svc, key.ID)
 		if !ok {
@@ -114,7 +114,7 @@ func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, sta
 
 // taskMCPSummary builds the bounded task-list view, preferring reported model
 // and effort over requested values and aggregating diff counts without paths.
-func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
+func taskMCPSummary(number int, task *v1.Task) v1.MCPTaskSummary {
 	var additions int
 	var deletions int
 	for _, file := range task.DiffStat {
@@ -132,7 +132,7 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 	default:
 	}
 	model, effort := taskMCPModelAndEffort(task)
-	return mcpTaskSummary{
+	return v1.MCPTaskSummary{
 		HasPendingInput: task.PendingInput != nil,
 		TaskNumber:      number,
 		TaskID:          task.ID.String(),
@@ -151,6 +151,7 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 		DurationSeconds: task.Duration,
 		CostUSD:         task.CostUSD,
 		CostKnown:       task.CostKnown,
+		CostComplete:    task.CostComplete,
 	}
 }
 
@@ -159,8 +160,9 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 	model, effort := taskMCPModelAndEffort(task)
 	out := v1.MCPTaskDetail{
 		TaskNumber: number, TaskID: task.ID.String(), State: task.State,
-		Harness: task.Harness, DurationSeconds: task.Duration, CostUSD: task.CostUSD,
+		Harness: task.Harness, NumTurns: task.NumTurns, DurationSeconds: task.Duration, CostUSD: task.CostUSD,
 		CostKnown:    task.CostKnown,
+		CostComplete: task.CostComplete,
 		ChangedFiles: len(task.DiffStat), ChangedPaths: []string{},
 	}
 	for _, field := range []mcpDetailTextField{

@@ -152,7 +152,9 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 						&agent.SkillReadMessage{ToolUseID: tool.ToolCallID, Skill: name},
 						&agent.SkillLoadMessage{Skill: name, SourceToolUseID: tool.ToolCallID},
 					}
-					messages = slices.Insert(messages, i+1, insert...)
+					// Report the skill identity before its machinery so presentation
+					// can suppress the tool without changing analytics or its outcome.
+					messages = slices.Insert(messages, i, insert...)
 				}
 			case strings.EqualFold(use.Name, "subagent"):
 				// The native subagent tool names the delegated task and returns

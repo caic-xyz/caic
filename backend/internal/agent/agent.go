@@ -240,8 +240,11 @@ func (c *conn) RecordInputFailure(p Prompt, err error) error {
 	if _, ok := errors.AsType[*inputDeliveryError](err); ok {
 		return err
 	}
-	recordErr := c.records.AppendMessages(c.ctx, []Message{InputDeliveryStarted(), &UserInputMessage{Text: p.Text, Images: p.Images, Ts: float64(time.Now().UnixMilli()) / 1000}, InputDeliveryFailed(err)})
-	return &inputDeliveryError{Err: errors.Join(err, recordErr)}
+	result := c.records.submit(c.ctx, &recordWork{op: recordPrompt, prompt: p, failure: err})
+	if !errors.Is(result.err, err) {
+		return &inputDeliveryError{Err: errors.Join(err, result.err)}
+	}
+	return &inputDeliveryError{Err: result.err}
 }
 
 func (c *conn) SendRaw(data []byte) error {
@@ -400,7 +403,7 @@ func (c *conn) writeInputs() {
 					if err != nil {
 						outcome = InputDeliveryFailed(err)
 					}
-					err = errors.Join(err, c.records.AppendMessage(context.WithoutCancel(c.ctx), outcome))
+					err = errors.Join(err, c.records.AppendMessage(context.WithoutCancel(c.ctx), result.delivery.stamp(outcome)))
 				}
 			}
 			if w.op == inputPrompt && err != nil {

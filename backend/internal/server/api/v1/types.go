@@ -392,8 +392,9 @@ type Task struct {
 	DiffStat                           DiffStat             `json:"diffStat,omitzero"`
 	RepoStates                         []GitRepositoryState `json:"repoStates,omitempty"` // Pushed compact per-repo Git state from the latest diff probe.
 	CostUSD                            float64              `json:"costUSD"`
-	CostKnown                          bool                 `json:"costKnown"`
-	Duration                           float64              `json:"duration"` // Seconds.
+	CostKnown                          bool                 `json:"costKnown"`    // True when any cost is known; costUSD may be a subtotal.
+	CostComplete                       bool                 `json:"costComplete"` // True when costUSD covers all observed billed usage.
+	Duration                           float64              `json:"duration"`     // Seconds.
 	NumTurns                           int                  `json:"numTurns"`
 	CumulativeInputTokens              int                  `json:"cumulativeInputTokens"`
 	CumulativeOutputTokens             int                  `json:"cumulativeOutputTokens"`
@@ -989,6 +990,7 @@ const (
 type LocalWindow struct {
 	Duration     string  `json:"duration"` // "1h", "6h", "24h"
 	CostUSD      float64 `json:"costUSD"`
+	CostKnown    bool    `json:"costKnown"` // True when all included billed usage has known cost; otherwise costUSD is a known subtotal.
 	InputTokens  int     `json:"inputTokens"`
 	OutputTokens int     `json:"outputTokens"`
 }
@@ -1025,6 +1027,17 @@ type UsageDashboardTokens struct {
 	Reasoning    int64 `json:"reasoningTokens"`
 }
 
+// UsageDashboardCost preserves additive cost provenance across range filters.
+// Signed parts retain known zeros and cancel estimates replaced by reports.
+// UnknownParts also marks amounts in rows whose source cannot be proven.
+type UsageDashboardCost struct {
+	ReportedUSD    float64 `json:"reportedUSD"`
+	EstimatedUSD   float64 `json:"estimatedUSD"`
+	ReportedParts  int     `json:"reportedParts"`
+	EstimatedParts int     `json:"estimatedParts"`
+	UnknownParts   int     `json:"unknownParts"`
+}
+
 // UsageDashboardModel is one model's totals within a UTC day. It carries the
 // full delta fold so clients can drill every dashboard panel down to the
 // model; skills and repos keep the day leaderboards' distinct-task counts.
@@ -1038,6 +1051,7 @@ type UsageDashboardModel struct {
 	Compactions    int                        `json:"compactions"`
 	SubagentSpawns int                        `json:"subagentSpawns"`
 	CostUSD        float64                    `json:"costUSD"`
+	Cost           UsageDashboardCost         `json:"cost"`
 	ContextWindow  int                        `json:"contextWindow"`
 	Tools          []UsageDashboardCount      `json:"tools"`
 	ToolTimings    []UsageDashboardToolTiming `json:"toolTimings"`
@@ -1058,6 +1072,7 @@ type UsageDashboardHarness struct {
 	Compactions    int                        `json:"compactions"`
 	SubagentSpawns int                        `json:"subagentSpawns"`
 	CostUSD        float64                    `json:"costUSD"`
+	Cost           UsageDashboardCost         `json:"cost"`
 	Tools          []UsageDashboardCount      `json:"tools"`
 	ToolTimings    []UsageDashboardToolTiming `json:"toolTimings"`
 	Skills         []UsageDashboardCount      `json:"skills"`
@@ -1108,6 +1123,7 @@ type UsageDashboardDay struct {
 	SubagentSpawns           int                        `json:"subagentSpawns"`
 	SubagentSpawnsBackground int                        `json:"subagentSpawnsBackground"`
 	CostUSD                  float64                    `json:"costUSD"`
+	Cost                     UsageDashboardCost         `json:"cost"`
 	Models                   []UsageDashboardModel      `json:"models"`
 	Harnesses                []UsageDashboardHarness    `json:"harnesses"`
 	Repos                    []UsageDashboardRepo       `json:"repos"`

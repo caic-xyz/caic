@@ -61,5 +61,6 @@ type Fact struct {
 	ModelDerived      bool      `json:"modelDerived,omitempty"`
 	CumulativeCostUSD *float64  `json:"cumulativeCostUSD,omitempty"`
 	ReportedCostUSD   *float64  `json:"reportedCostUSD,omitempty"`
+	CostReported      bool      `json:"costReported,omitempty"`
 	TotalCostUSD      float64   `json:"totalCostUSD,omitempty"`
 }

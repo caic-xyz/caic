@@ -55,6 +55,50 @@ test("purged-only repos disclose inline while mixed repos keep their task sectio
   await page.screenshot({ path: "test-results/compact-purged-mobile.png", fullPage: true });
 });
 
+test("task-card fixtures distinguish known zero from unknown cost", async ({ page, api, uniquePrompt }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const knownID = await createTaskAPI(api, uniquePrompt("known zero cost"));
+  const unknownID = await createTaskAPI(api, uniquePrompt("unknown cost"));
+  const partialID = await createTaskAPI(api, uniquePrompt("partial zero cost"));
+  const known = await waitForTaskState(api, knownID, "waiting");
+  const unknown = await waitForTaskState(api, unknownID, "waiting");
+  const partial = await waitForTaskState(api, partialID, "waiting");
+  // Fix card values independently of fake-agent accounting so the browser
+  // verifies the provenance presentation contract, including an exact zero.
+  const snapshot = {
+    kind: "snapshot",
+    snapshot: [
+      { ...known, costUSD: 0, costKnown: true, costComplete: true },
+      { ...unknown, costUSD: 0, costKnown: false, costComplete: false },
+      { ...partial, costUSD: 0, costKnown: true, costComplete: false, cumulativeInputTokens: 30 },
+    ],
+    complete: true,
+  } satisfies TaskListEvent;
+  await page.route("**/api/caic/v1/tasks/events", (route) =>
+    route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+  );
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    const knownCard = page.locator(`[data-task-id="${knownID}"]`);
+    const unknownCard = page.locator(`[data-task-id="${unknownID}"]`);
+    const partialCard = page.locator(`[data-task-id="${partialID}"]`);
+    await expect(knownCard.getByTestId("task-card-cost")).toContainText("$0.00");
+    await expect(knownCard.getByTestId("task-card-cost")).not.toContainText("subtotal");
+    await expect(unknownCard.getByTestId("task-card-cost")).toHaveCount(0);
+    await expect(partialCard.getByTestId("task-card-cost")).toContainText("$0.00 known subtotal");
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`cost-provenance-${width}.png`) });
+    await page.goto(`/task/@${partialID}`);
+    await page.getByTestId("conversation-pane").getByRole("link", { name: "Task statistics", exact: true }).click();
+    await expect(page.getByTestId("task-usage-summary")).toContainText("Cost $0 known subtotal");
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`cost-subtotal-stats-${width}.png`) });
+  }
+  expect(errors).toEqual([]);
+});
+
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();
   const firstRepo = repos[0];

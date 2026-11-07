@@ -610,7 +610,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 					t.Fatal("accepted replaced instance")
 				}
 			}
-			if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, current) {
+			if got := tk.Snapshot().DiffStat; !reflect.DeepEqual(got, current) {
 				t.Fatalf("summary = %+v", got)
 			}
 		})
@@ -628,7 +628,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 					t.Fatal(err)
 				}
 			}
-			if got := tk.LiveDiffStat(); len(got) != 2 || got[0].Path != "one/fresh.go" || got[1].Path != "two/old.go" {
+			if got := tk.Snapshot().DiffStat; len(got) != 2 || got[0].Path != "one/fresh.go" || got[1].Path != "two/old.go" {
 				t.Fatalf("stats = %+v", got)
 			}
 			states := tk.Snapshot().RepoStates
@@ -648,7 +648,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 			}
 			restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "restored"}, "", "", "")
 			restored.SeedTimelineParts(nil, rows[0].Timeline)
-			if !reflect.DeepEqual(tk.LiveDiffStat(), restored.LiveDiffStat()) || !reflect.DeepEqual(tk.Snapshot().RepoStates, restored.Snapshot().RepoStates) {
+			if !reflect.DeepEqual(tk.Snapshot().DiffStat, restored.Snapshot().DiffStat) || !reflect.DeepEqual(tk.Snapshot().RepoStates, restored.Snapshot().RepoStates) {
 				t.Fatal("replay lost partial summary")
 			}
 		})
@@ -1465,7 +1465,7 @@ else:
 				if err := run.records.AppendMessage(t.Context(), &agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "restored.go", LinesAdded: 1}}}); err != nil {
 					t.Fatal(err)
 				}
-				if changed, err := r.RecordRepositorySummary(t.Context(), tk, &latest); err != nil || changed || tk.LiveDiffStat()[0].Path != "restored.go" {
+				if changed, err := r.RecordRepositorySummary(t.Context(), tk, &latest); err != nil || changed || tk.Snapshot().DiffStat[0].Path != "restored.go" {
 					t.Fatalf("completed read replaced later native refresh changed=%v err=%v", changed, err)
 				}
 			})
@@ -1507,7 +1507,7 @@ else:
 						if replaced {
 							want = prior
 						}
-						if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, want) {
+						if got := tk.Snapshot().DiffStat; !reflect.DeepEqual(got, want) {
 							t.Errorf("live stats = %+v, want %+v", got, want)
 						}
 						if replaced {
@@ -1566,7 +1566,7 @@ else:
 				case <-timeout:
 					t.Fatal("timed out waiting for message")
 				}
-				if got := tk.LiveDiffStat(); len(got) != 1 || got[0].Path != "main.go" {
+				if got := tk.Snapshot().DiffStat; len(got) != 1 || got[0].Path != "main.go" {
 					t.Errorf("result did not update live stats without a newer read: %+v", got)
 				}
 
@@ -2567,11 +2567,11 @@ else:
 
 	t.Run("Cleanup", func(t *testing.T) {
 		t.Parallel()
-		t.Run("NoSessionUsesLiveStats", func(t *testing.T) {
+		t.Run("NoSessionPreservesAccounting", func(t *testing.T) {
 			t.Parallel()
 			// Simulate an adopted task after server restart: no active session, but
-			// live stats were restored from log messages. Cleanup should fall back to
-			// LiveStats for the result cost.
+			// accounting was restored from log messages. Cleanup must preserve it
+			// in the settled result.
 			clone := initTestRepo(t, "main")
 			checkout := newTestCheckout(t, "main", clone, nil)
 			r := newTestAgentRuntime(t, checkout, "", nil)
@@ -2656,7 +2656,7 @@ else:
 			}
 		})
 
-		t.Run("UsesLiveDiffStat", func(t *testing.T) {
+		t.Run("UsesDiffStat", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
 			checkout := newTestCheckout(t, "main", clone, nil)
@@ -2827,8 +2827,8 @@ else:
 
 			r.recordStoppedDiskUsage(t.Context(), tk, tk.RuntimeInstanceID(), logtest.Logger(t))
 
-			if diskUsed, ok := tk.DiskUsage(); !ok || diskUsed != 700 {
-				t.Fatalf("DiskUsage() = (%d, %t), want (700, true)", diskUsed, ok)
+			if snapshot := tk.Snapshot(); !snapshot.DiskKnown || snapshot.DiskUsed != 700 {
+				t.Fatalf("disk usage = (%d, %t), want (700, true)", snapshot.DiskUsed, snapshot.DiskKnown)
 			}
 		})
 	})

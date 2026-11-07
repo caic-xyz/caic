@@ -371,18 +371,19 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 		tlog.DebugContext(ctx, "cleanup: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
+	snapshot := t.Snapshot()
 	res := task.Result{
-		Err:         summaryErr,
-		State:       reason,
-		AgentResult: t.LastAgentResult(),
+		Err:          summaryErr,
+		State:        reason,
+		AgentResult:  t.LastAgentResult(),
+		CostUSD:      snapshot.CostUSD,
+		CostKnown:    snapshot.CostKnown,
+		CostComplete: snapshot.CostComplete,
+		NumTurns:     snapshot.NumTurns,
+		Duration:     snapshot.Duration,
+		Usage:        snapshot.Usage,
 	}
-	liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats()
-	res.CostUSD = liveCost
-	res.CostKnown = t.LiveCostKnown()
-	res.NumTurns = liveTurns
-	res.Duration = liveDur
-	res.Usage = liveUsage
-	if ds := t.LiveDiffStat(); len(ds) > 0 {
+	if ds := snapshot.DiffStat; len(ds) > 0 {
 		res.DiffStat = ds
 	}
 	if reason == task.StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
@@ -476,17 +477,22 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 
 	// Write log trailer so the task reloads as "stopped" (not "failed")
 	// after a server restart, preserving live stats for the UI.
-	res := task.Result{State: task.StateStopped, AgentResult: t.LastAgentResult()}
-	if diskUsed, ok := t.DiskUsage(); ok {
+	snapshot := t.Snapshot()
+	res := task.Result{
+		State:        task.StateStopped,
+		AgentResult:  t.LastAgentResult(),
+		CostUSD:      snapshot.CostUSD,
+		CostKnown:    snapshot.CostKnown,
+		CostComplete: snapshot.CostComplete,
+		NumTurns:     snapshot.NumTurns,
+		Duration:     snapshot.Duration,
+		Usage:        snapshot.Usage,
+	}
+	if snapshot.DiskKnown {
+		diskUsed := snapshot.DiskUsed
 		res.DiskUsedBytes = &diskUsed
 	}
-	liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats()
-	res.CostUSD = liveCost
-	res.CostKnown = t.LiveCostKnown()
-	res.NumTurns = liveTurns
-	res.Duration = liveDur
-	res.Usage = liveUsage
-	if ds := t.LiveDiffStat(); len(ds) > 0 {
+	if ds := snapshot.DiffStat; len(ds) > 0 {
 		res.DiffStat = ds
 	}
 	var recordErr error

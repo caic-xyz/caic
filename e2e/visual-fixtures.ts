@@ -1,4 +1,5 @@
 // Deterministic API fixtures for documentation resource charts and usage trends.
+import { reportedUsageCost } from "../frontend/tests/usage";
 import { ok } from "node:assert/strict";
 import type {
   EventStats,
@@ -130,6 +131,7 @@ export function usageHistory(): UsageDashboardResp {
       compactions: index % 3,
       subagentSpawns: count,
       costUSD: count * 0.37,
+      cost: reportedUsageCost(count * 0.37),
       tools,
       toolTimings,
       skills: [{ name: "code-review", count }],

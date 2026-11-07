@@ -1,4 +1,4 @@
-// Local task cost aggregation for usage reporting.
+// Local task cost aggregation preserves completeness separately from known subtotals.
 
 package apiconv
 
@@ -21,9 +21,10 @@ var localUsageWindows = []struct {
 
 // LocalUsageInput is a task's resolved local-usage contribution.
 type LocalUsageInput struct {
-	StartedAt time.Time
-	CostUSD   float64
-	Usage     agent.Usage
+	StartedAt    time.Time
+	CostUSD      float64
+	CostComplete bool
+	Usage        agent.Usage
 }
 
 // LocalUsage aggregates resolved task cost and token usage within rolling time
@@ -33,7 +34,7 @@ func LocalUsage(inputs []LocalUsageInput, now time.Time) v1.LocalUsage {
 		Windows: make([]v1.LocalWindow, len(localUsageWindows)),
 	}
 	for i, w := range localUsageWindows {
-		out.Windows[i] = v1.LocalWindow{Duration: w.label}
+		out.Windows[i] = v1.LocalWindow{Duration: w.label, CostKnown: true}
 	}
 	for _, input := range inputs {
 		if input.StartedAt.IsZero() {
@@ -44,6 +45,7 @@ func LocalUsage(inputs []LocalUsageInput, now time.Time) v1.LocalUsage {
 		for i, w := range localUsageWindows {
 			if input.StartedAt.After(now.Add(-w.duration)) {
 				out.Windows[i].CostUSD += input.CostUSD
+				out.Windows[i].CostKnown = out.Windows[i].CostKnown && input.CostComplete
 				out.Windows[i].InputTokens += totalInput
 				out.Windows[i].OutputTokens += usage.OutputTokens
 			}

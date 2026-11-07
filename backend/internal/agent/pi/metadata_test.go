@@ -12,6 +12,36 @@ import (
 
 func TestMetadataParser(t *testing.T) {
 	t.Parallel()
+	t.Run("native zero and absent cost", func(t *testing.T) {
+		t.Parallel()
+		for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				for _, tc := range []struct {
+					cost  string
+					known bool
+				}{{`,"cost":{"total":0}`, true}, {"", false}} {
+					msgs, err := parser.ParseOutput([]byte(`{"type":"turn_end","message":{"role":"assistant","usage":{"input":10,"totalTokens":10` + tc.cost + `}}}`))
+					if err != nil {
+						t.Fatal(err)
+					}
+					usage, ok := msgs[0].(*agent.UsageMessage)
+					if !ok || (usage.ReportedCostUSD != nil) != tc.known {
+						t.Fatalf("native cost presence = %+v, want known %v", msgs, tc.known)
+					}
+					msgs, err = parser.ParseOutput([]byte(`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":10,"totalTokens":10` + tc.cost + `}}]}`))
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, ok := msgs[0].(*agent.ResultMessage)
+					if !ok || result.CostReported != tc.known || result.TotalCostUSD != 0 {
+						t.Fatalf("result cost presence = %+v, want known %v", msgs, tc.known)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("recorded served model", func(t *testing.T) {
 		t.Parallel()
 		for name, parser := range map[string]agent.MessageParser{"full": New("", nil).NewWire(), "metadata": New("", nil).NewMetadataParser()} {

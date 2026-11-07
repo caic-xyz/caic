@@ -1,4 +1,4 @@
-// Tests and benchmarks skill-name inference from the paths and commands each harness records.
+// Tests and benchmarks skill inference, confirmation, and native tool presentation correlation.
 
 package agent_test
 
@@ -290,4 +290,40 @@ func BenchmarkSkillReadTrackerConfirm(b *testing.B) {
 			b.Fatal("lost confirmed read")
 		}
 	}
+}
+
+func TestSkillToolTracker(t *testing.T) {
+	t.Parallel()
+	t.Run("Observe", func(t *testing.T) {
+		t.Parallel()
+		var tracker agent.SkillToolTracker
+		child := &agent.ToolUseMessage{ToolUseID: "shared", Name: "Read"}
+		child.Source.AgentID = "child"
+		for i, tc := range []struct {
+			message agent.Message
+			hidden  bool
+		}{
+			{&agent.SkillReadMessage{ToolUseID: "shared", Skill: "review"}, false},
+			{child, false},
+			{&agent.ToolUseMessage{ToolUseID: "shared", Name: "skill"}, true},
+			{&agent.ToolOutputDeltaMessage{ToolUseID: "shared", Delta: "contents"}, true},
+			{&agent.ToolResultMessage{ToolUseID: "shared", Error: "failed"}, true},
+			{&agent.ToolUseMessage{ToolUseID: "shared", Name: "Read"}, false},
+			{&agent.SkillReadMessage{ToolUseID: "pending", Skill: "review"}, false},
+			{&agent.ResultMessage{}, false},
+			{&agent.ToolUseMessage{ToolUseID: "pending", Name: "Read"}, false},
+		} {
+			if hidden := tracker.Observe(tc.message); hidden != tc.hidden {
+				t.Fatalf("event %d (%T) hidden=%v; want %v", i, tc.message, hidden, tc.hidden)
+			}
+		}
+		for _, msg := range agent.InferredSkillReadFromPath("/home/user/.agents/skills/review/SKILL.md", "file") {
+			if tracker.Observe(msg) {
+				t.Fatalf("inferred skill metadata hidden: %T", msg)
+			}
+		}
+		if tracker.Observe(&agent.ToolUseMessage{ToolUseID: "file", Name: "Read"}) {
+			t.Fatal("inferred skill file read was hidden")
+		}
+	})
 }

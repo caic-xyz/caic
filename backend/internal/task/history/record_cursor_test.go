@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 
@@ -25,6 +26,208 @@ func TestRecordCursor(t *testing.T) {
 	t.Parallel()
 	t.Run("Read", func(t *testing.T) {
 		t.Parallel()
+		t.Run("delivery timestamps and early stop", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+					t.Parallel()
+					path := writePhysicalTestLog(t, compressed,
+						`{"t":"caic_meta","version":3,"harness":"dsh","prompt":"test"}`,
+						`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"s","uuid":"i"}`,
+						`{"t":"input","ts":100.125,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`,
+						`{"t":"input_delivery","subtype":"input_delivery_completed","session_id":"s","uuid":"i"}`)
+					before, err := os.ReadFile(path) //nolint:gosec // The path is a fixture created beneath t.TempDir.
+					if err != nil {
+						t.Fatal(err)
+					}
+					resolver := backends.Default("", nil)
+					cursor, err := OpenRecordCursor(path, resolver)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := cursor.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					var got []agent.TimedMessage
+					for record, err := range cursor.Read(t.Context()) {
+						if err != nil {
+							t.Fatal(err)
+						}
+						got = append(got, record.Messages...)
+						if record.ID == 2 {
+							break
+						}
+					}
+					var remaining []uint64
+					for record, err := range cursor.Read(t.Context()) {
+						if err != nil {
+							t.Fatal(err)
+						}
+						remaining = append(remaining, record.ID)
+						got = append(got, record.Messages...)
+					}
+					if !slices.Equal(remaining, []uint64{3, 4}) {
+						t.Fatalf("remaining physical IDs = %v", remaining)
+					}
+					loaded, err := loadSemanticTask(path, resolver)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(got, loaded.Timeline) || len(got) != 4 {
+						t.Fatalf("cursor/timeline mismatch: %#v %#v", got, loaded.Timeline)
+					}
+					for _, i := range []int{0, 3} {
+						m, ok := got[i].Message.(*agent.SystemMessage)
+						if !ok || m.Ts != 100.125 || !got[i].ProducerTime.Equal(time.UnixMilli(100125)) {
+							t.Fatalf("delivery time = %+v", got[i])
+						}
+					}
+					after, err := os.ReadFile(path) //nolint:gosec // Compare the owned temporary fixture after read-only loading.
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !slices.Equal(before, after) {
+						t.Fatal("historical log changed")
+					}
+				})
+			}
+		})
+		t.Run("delivery pending across polling and cancellation", func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, false,
+				`{"t":"caic_meta","version":3,"harness":"claude","prompt":"test"}`,
+				`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"s","uuid":"i"}`)
+			cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := cursor.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			var ids []uint64
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, record.ID)
+			}
+			if !slices.Equal(ids, []uint64{1}) {
+				t.Fatalf("pending IDs = %v", ids)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			for _, err := range cursor.Read(ctx) {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancellation = %v", err)
+				}
+			}
+			writer, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, writeErr := writer.WriteString(`{"t":"user_input","ts":42.125,"text":"later"}` + "\n")
+			if err := errors.Join(writeErr, writer.Close()); err != nil {
+				t.Fatal(err)
+			}
+			var times []time.Time
+			ids = nil
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, record.ID)
+				for _, timed := range record.Messages {
+					times = append(times, timed.ProducerTime)
+				}
+			}
+			if !slices.Equal(ids, []uint64{2, 3}) || len(times) != 2 || !times[0].Equal(time.UnixMilli(42125)) || !times[1].Equal(time.UnixMilli(42125)) {
+				t.Fatalf("appended records = %v %v", ids, times)
+			}
+		})
+		t.Run("cancellation between buffered delivery records", func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, false,
+				`{"t":"caic_meta","version":3,"harness":"claude","prompt":"test"}`,
+				`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"s","uuid":"i"}`,
+				`{"t":"user_input","ts":42.125,"text":"accepted"}`)
+			cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := cursor.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			var ids []uint64
+			var stopped bool
+			for record, err := range cursor.Read(ctx) {
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						t.Fatal(err)
+					}
+					stopped = true
+					break
+				}
+				ids = append(ids, record.ID)
+				if record.ID == 2 {
+					cancel()
+				}
+			}
+			cancel()
+			if !stopped || !slices.Equal(ids, []uint64{1, 2}) {
+				t.Fatalf("canceled records = %v, stopped=%t", ids, stopped)
+			}
+			ids = nil
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, record.ID)
+			}
+			if !slices.Equal(ids, []uint64{3}) {
+				t.Fatalf("resumed records = %v", ids)
+			}
+		})
+		t.Run("sealed unmatched delivery retains unknown time", func(t *testing.T) {
+			t.Parallel()
+			path := writePhysicalTestLog(t, true,
+				`{"t":"caic_meta","version":3,"harness":"claude","prompt":"test"}`,
+				`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"","uuid":""}`)
+			cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := cursor.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			var ids []uint64
+			var messages []agent.TimedMessage
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, record.ID)
+				messages = append(messages, record.Messages...)
+			}
+			if !slices.Equal(ids, []uint64{1, 2}) || len(messages) != 1 || !messages[0].ProducerTime.IsZero() {
+				t.Fatalf("unmatched records=%v %+v", ids, messages)
+			}
+			loaded, err := loadSemanticTask(path, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(messages, loaded.Timeline) {
+				t.Fatalf("unmatched cursor/full mismatch: %+v %+v", messages, loaded.Timeline)
+			}
+		})
 		t.Run("controls", func(t *testing.T) {
 			t.Parallel()
 			path := writePhysicalTestLog(t, false,
@@ -97,6 +300,64 @@ func TestRecordCursor(t *testing.T) {
 			}
 		})
 		t.Run("error", func(t *testing.T) {
+			t.Run("pending delivery precedes terminal decode failure", func(t *testing.T) {
+				t.Parallel()
+				for _, stopEarly := range []bool{false, true} {
+					t.Run(fmt.Sprintf("stopEarly=%t", stopEarly), func(t *testing.T) {
+						t.Parallel()
+						path := writePhysicalTestLog(t, false,
+							`{"t":"caic_meta","version":3,"harness":"opencode","prompt":"test"}`,
+							`{"t":"input","ts":1.000,"msg":{"jsonrpc":"2.0","id":17,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"test"}]}}}`,
+							`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"s","uuid":"i"}`,
+							`{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":17,"result":{"stopReason":42}}}`)
+						cursor, err := OpenRecordCursor(path, backends.Default("", nil))
+						if err != nil {
+							t.Fatal(err)
+						}
+						t.Cleanup(func() {
+							if err := cursor.Close(); err != nil {
+								t.Error(err)
+							}
+						})
+						var ids []uint64
+						var failure error
+						for record, err := range cursor.Read(t.Context()) {
+							if err != nil {
+								failure = err
+								break
+							}
+							ids = append(ids, record.ID)
+							if record.ID == 3 {
+								if len(record.Messages) != 1 || !record.Messages[0].ProducerTime.IsZero() {
+									t.Fatalf("pending = %+v", record)
+								}
+								if stopEarly {
+									break
+								}
+							}
+						}
+						if !slices.Equal(ids, []uint64{1, 2, 3}) {
+							t.Fatalf("valid records before failure = %v", ids)
+						}
+						if stopEarly {
+							for record, err := range cursor.Read(t.Context()) {
+								if err == nil || record.ID != 0 {
+									t.Fatalf("resumed error = %+v %v", record, err)
+								}
+								failure = err
+							}
+						}
+						if failure == nil {
+							t.Fatal("missing terminal decode error")
+						}
+						for _, err := range cursor.Read(t.Context()) {
+							if !errors.Is(err, failure) {
+								t.Fatalf("terminal error changed: %v", err)
+							}
+						}
+					})
+				}
+			})
 			for _, compressed := range []bool{false, true} {
 				t.Run(fmt.Sprintf("terminal native decode compressed=%t", compressed), func(t *testing.T) {
 					t.Parallel()

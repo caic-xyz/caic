@@ -212,7 +212,7 @@ func TestSourceSections(t *testing.T) {
 					total += cost.Cost.USD
 					turns++
 				}
-				if turns != 2 || math.Abs(total-0.00012) > 1e-9 {
+				if turns != 2 || total != 0.5 {
 					t.Fatalf("repriced session turns=%d total=%v", turns, total)
 				}
 			})

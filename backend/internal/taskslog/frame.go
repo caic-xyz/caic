@@ -230,6 +230,9 @@ func DecodeFrame(line []byte) (Frame, error) {
 	if diff, ok := control.(*v3.DiffStatMessage); ok && diff.Ts > 0 {
 		frame.ProducerTime = time.UnixMilli(int64(math.Round(diff.Ts * 1000)))
 	}
+	if snapshot, ok := control.(*v3.TurnCommitSnapshotMessage); ok && snapshot.Ts > 0 {
+		frame.ProducerTime = time.UnixMilli(int64(math.Round(snapshot.Ts * 1000)))
+	}
 	return frame, nil
 }
 
@@ -262,8 +265,8 @@ var v3ControlFields = map[logControlKind][]string{
 	logControlSession:             {"agent_version", "auto_compact_token_limit", "model", "reported_effort", "session_id"},
 	logControlModelInfo:           {"context_window"},
 	logControlPR:                  {"forge_owner", "forge_pr", "forge_repo"},
-	logControlResult:              {"agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_known", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title"},
-	logControlTurnCommitSnapshot:  {"baseline", "change_stat", "repository_commits"},
+	logControlResult:              {"agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_writes", "cost_complete", "cost_known", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title"},
+	logControlTurnCommitSnapshot:  {"baseline", "change_stat", "repository_commits", "ts"},
 	logControlPendingUserAction:   {"action"},
 	logControlProvisioningLog:     {"line"},
 	logControlContextCleared:      {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
@@ -489,6 +492,10 @@ func decodeControl(kind logControlKind, line []byte) (any, error) {
 	case *v3.ModelInfoMessage:
 		if m.ContextWindow > 0 && int64(int(m.ContextWindow)) != m.ContextWindow {
 			return nil, errors.New("context_window out of range")
+		}
+	case *v3.TurnCommitSnapshotMessage:
+		if m.Ts < 0 || m.Ts > float64(math.MaxInt64)/1000 {
+			return nil, errors.New("invalid commit snapshot producer timestamp")
 		}
 	case *v3.UserInputMessage:
 		if m.Ts < 0 || m.Ts > float64(math.MaxInt64)/1000 {

@@ -1,4 +1,4 @@
-// Pi metadata projection shares native session normalization and usage accounting without decoding transcript content.
+// Pi metadata projects payload-free prompt timing, session normalization, and usage accounting.
 
 package pi
 
@@ -39,6 +39,7 @@ func (w *piMetadata) ParseInput(line []byte) ([]agent.Message, error) {
 	typ, err := decodeEventType(line)
 	if err == nil && typ == pi.CmdPrompt {
 		w.beginPrompt()
+		return []agent.Message{&agent.UserInputMessage{}}, nil
 	}
 	return nil, err
 }
@@ -80,6 +81,12 @@ func (w *piMetadata) ParseOutput(line []byte) ([]agent.Message, error) {
 		kind, decodeErr := agent.JSONString(line, "assistantMessageEvent", "type")
 		if decodeErr != nil {
 			return nil, decodeErr
+		}
+		switch pi.DeltaType(kind) {
+		case pi.DeltaTextDelta, pi.DeltaThinkDelta, pi.DeltaToolEnd:
+			msgs = []agent.Message{&agent.TextDeltaMessage{}}
+		default:
+			// Other deltas carry no accepted content boundary.
 		}
 		if pi.DeltaType(kind) == pi.DeltaError || pi.DeltaType(kind) == pi.DeltaDone {
 			if pi.DeltaType(kind) == pi.DeltaError {
@@ -236,6 +243,8 @@ func (w *piMetadata) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	// decode only the assistant role and usage needed by accounting.
 	var usage agent.Usage
 	var totalCostUSD float64
+	reported := true
+	assistant := false
 	var decodeErr error
 	_, err := jsonparser.ArrayEach(line, func(raw []byte, _ jsonparser.ValueType, _ int, err error) {
 		if decodeErr != nil {
@@ -251,8 +260,15 @@ func (w *piMetadata) handleAgentEnd(line []byte) ([]agent.Message, error) {
 			return
 		}
 		if msg.Role == pi.RoleAssistant {
+			assistant = true
 			usage = toAgentUsage(&msg.Usage)
 			totalCostUSD += msg.Usage.Cost.Total
+			cost, err := reportedUsageCost(raw)
+			if err != nil {
+				decodeErr = err
+				return
+			}
+			reported = reported && cost != nil
 		}
 	}, "messages")
 	if err != nil {
@@ -278,6 +294,7 @@ func (w *piMetadata) handleAgentEnd(line []byte) ([]agent.Message, error) {
 		DurationMs:   durationMs,
 		NumTurns:     numTurns,
 		TotalCostUSD: totalCostUSD,
+		CostReported: assistant && reported,
 		Usage:        usage,
 	}}, nil
 }
@@ -297,15 +314,31 @@ func (w *piMetadata) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	window := w.modelCtxWindow
 	w.mu.Unlock()
 	if msg.Role == pi.RoleAssistant && msg.Usage.TotalTokens > 0 {
+		cost, err := reportedUsageCost(line, "message")
+		if err != nil {
+			return nil, err
+		}
 		return []agent.Message{&agent.UsageMessage{
 			PerCall:         true,
 			Usage:           toAgentUsage(&msg.Usage),
-			ReportedCostUSD: &msg.Usage.Cost.Total,
+			ReportedCostUSD: cost,
 			ReportedModel:   resolvedModel(msg.Provider, msg.ResponseModel, msg.Model),
 			ContextWindow:   int(window),
 		}}, nil
 	}
 	return nil, nil
+}
+
+func reportedUsageCost(line []byte, keys ...string) (*float64, error) {
+	raw, err := agent.JSONField(line, append(keys, "usage", "cost", "total")...)
+	if err != nil || raw == nil || string(raw) == "null" {
+		return nil, err
+	}
+	var cost float64
+	if err := json.Unmarshal(raw, &cost); err != nil {
+		return nil, err
+	}
+	return &cost, nil
 }
 
 type metadataStringField struct {

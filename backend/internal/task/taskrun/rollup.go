@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
@@ -15,8 +16,9 @@ import (
 //
 // Adapters identify additive usage and context-only result snapshots so live
 // and restored rollups count the same token contributions for every harness.
-func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, costUSD float64) (usagedb.Event, bool) {
-	e := usagedb.Event{At: at, Replayed: replayed, Model: model, Effort: effort, CostUSD: costUSD}
+func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, cost task.CostSnapshot) (usagedb.Event, bool) {
+	e := usagedb.Event{At: at, Replayed: replayed, Model: model, Effort: effort, CostUSD: cost.USD,
+		CostProvenance: data.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if m.Additive {

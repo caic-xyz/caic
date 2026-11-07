@@ -5,7 +5,8 @@ import * as Plot from "@observablehq/plot";
 
 import { basePlot, crosshairMarks } from "../chartPlot";
 import { formatCost, formatTokens } from "../formatting";
-import type { UsageDailyPoint } from "../usageDashboard";
+import { formatUsageCost, usageCostSource, type UsageDailyPoint } from "../usageDashboard";
+import type { UsageDashboardCost } from "@sdk/types.gen";
 import PlotHost from "./PlotHost";
 import styles from "./UsageCharts.module.css";
 
@@ -14,6 +15,7 @@ interface TrendSeries {
   value: (item: UsageDailyPoint) => number;
   color: string;
   format: (value: number) => string;
+  detail?: (item: UsageDailyPoint) => string;
 }
 
 interface TrendOptions {
@@ -109,7 +111,9 @@ function readoutLabel(series: readonly TrendSeries[], item: UsageDailyPoint): st
   const values = series
     .map((entry) =>
       series.length === 1
-        ? entry.format(entry.value(item))
+        ? entry.detail
+          ? entry.detail(item)
+          : entry.format(entry.value(item))
         : `${entry.format(entry.value(item))} ${entry.label.toLowerCase()}`,
     )
     .join(" · ");
@@ -194,7 +198,7 @@ function formatDayTick(value: Date): string {
 export default function UsageCharts(props: {
   points: readonly UsageDailyPoint[];
   // The totals the page sums over the same range, shown beside each title.
-  totals: { tokens: number; costUSD: number; turns: number; subagentSpawns: number };
+  totals: { tokens: number; costUSD: number; cost: UsageDashboardCost; turns: number; subagentSpawns: number };
   subject?: string;
 }) {
   const data = () => props.points;
@@ -213,9 +217,10 @@ export default function UsageCharts(props: {
   };
   const cost: TrendSeries = {
     label: "Cost",
-    value: (item) => item.costUSD,
+    value: (item) => (usageCostSource(item.cost) === "unknown" && item.costUSD === 0 ? NaN : item.costUSD),
     color: "var(--color-plan)",
     format: formatCost,
+    detail: (item) => formatUsageCost(item.costUSD, item.cost),
   };
   const turns: TrendSeries[] = [
     { label: "Turns", value: (item) => item.turns, color: "var(--color-primary)", format: count },
@@ -247,13 +252,18 @@ export default function UsageCharts(props: {
         <section class={styles.figure}>
           <header class={styles.header}>
             <h2>Cost per day</h2>
-            <strong aria-label={`Total ${formatCost(props.totals.costUSD)}`} title="Total over the selected range">
-              {formatCost(props.totals.costUSD)}
+            <strong
+              aria-label={`Total ${formatUsageCost(props.totals.costUSD, props.totals.cost)}`}
+              title="Cost over the selected range; incomplete totals exclude unknown costs"
+            >
+              {formatUsageCost(props.totals.costUSD, props.totals.cost)}
             </strong>
           </header>
           <PlotHost
-            label="Reported cost per day in US dollars"
-            description={description("Reported cost in US dollars")}
+            label="Cost per day in US dollars"
+            description={description(
+              "Cost in US dollars; readouts distinguish reports, estimates, and incomplete subtotals, and unknown costs are gaps",
+            )}
             draw={(width) => drawDailyTrend(data(), width, { area: false, series: [cost], y: "USD" })}
           />
         </section>

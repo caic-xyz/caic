@@ -936,6 +936,46 @@ func TestToolTimingTracker(t *testing.T) {
 			}
 		})
 
+		t.Run("reported skill tools show only a confirmed load", func(t *testing.T) {
+			t.Parallel()
+			tracker := NewToolTimingTracker("", harness.Dsh, "", nil)
+			at := time.Unix(1, 0)
+			for _, msg := range []agent.Message{
+				&agent.SkillReadMessage{ToolUseID: "skill", Skill: "review"},
+				&agent.SkillLoadMessage{Skill: "review", SourceToolUseID: "skill"},
+				&agent.ToolUseMessage{ToolUseID: "skill", Name: "skill", Input: json.RawMessage(`{"name":"review"}`)},
+				&agent.ToolOutputDeltaMessage{ToolUseID: "skill", Delta: "raw skill contents"},
+			} {
+				if got := tracker.ConvertMessage(1, 0, msg, at); len(got) != 0 {
+					t.Fatalf("unconfirmed skill %T events = %+v", msg, got)
+				}
+			}
+			other := &agent.ToolUseMessage{ToolUseID: "skill", Name: "Read"}
+			other.Source.AgentID = "child"
+			if got := tracker.ConvertMessage(1, 0, other, at); len(got) != 1 || got[0].Kind != v1.EventKindToolUse {
+				t.Fatalf("foreign tool = %+v", got)
+			}
+			got := tracker.ConvertMessage(2, 0, &agent.ToolResultMessage{ToolUseID: "skill"}, at.Add(time.Second))
+			if len(got) != 1 || got[0].Kind != v1.EventKindSkillLoad || got[0].SkillLoad.Skill != "review" {
+				t.Fatalf("confirmed skill events = %+v", got)
+			}
+			other.Source.AgentID = ""
+			if got := tracker.ConvertMessage(3, 0, other, at); len(got) != 1 || got[0].Kind != v1.EventKindToolUse {
+				t.Fatalf("reused tool identity = %+v", got)
+			}
+		})
+		t.Run("failed skill does not produce a load", func(t *testing.T) {
+			t.Parallel()
+			tracker := NewToolTimingTracker("", harness.Dsh, "", nil)
+			at := time.Unix(1, 0)
+			tracker.ConvertMessage(1, 0, &agent.SkillReadMessage{ToolUseID: "skill", Skill: "missing"}, at)
+			tracker.ConvertMessage(1, 1, &agent.SkillLoadMessage{Skill: "missing", SourceToolUseID: "skill"}, at)
+			got := tracker.ConvertMessage(2, 0, &agent.ToolResultMessage{ToolUseID: "skill", Error: "skill unavailable"}, at)
+			if len(got) != 0 {
+				t.Fatalf("failed skill events = %+v", got)
+			}
+		})
+
 		t.Run("inferred skill load follows a successful tool result", func(t *testing.T) {
 			t.Parallel()
 			tracker := NewToolTimingTracker("", harness.Codex, "", nil)

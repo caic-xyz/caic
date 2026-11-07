@@ -43,6 +43,7 @@ export default function TaskDetailPage() {
               model={t()?.reportedModel || t()?.requestedModel}
               costUSD={t()?.costUSD}
               costKnown={t()?.costKnown}
+              costComplete={t()?.costComplete}
               cumulativeInputTokens={t()?.cumulativeInputTokens}
               cumulativeOutputTokens={t()?.cumulativeOutputTokens}
               cumulativeCacheCreationInputTokens={t()?.cumulativeCacheCreationInputTokens}

@@ -56,14 +56,15 @@ type Store struct {
 	// flushedCost is the durable reported-or-estimated cost baseline.
 	// pending.costInFlight is the movement assigned to unflushed buckets;
 	// a later live snapshot reconciles any estimate in that baseline.
-	flushedCost       map[string]float64
-	reportedCostTasks map[string]struct{}           // tasks with a recorded non-estimated cost row
-	pending           map[string]*taskPending       // task id -> unflushed deltas
-	toolTimings       map[string]*ToolTimingTracker // task id -> unmatched tool starts
-	lastQuota         map[quotaKey]quotaSeen        // provider window -> last written quota state
-	closed            bool
-	cancelMaintenance context.CancelFunc
-	maintenance       *errgroup.Group
+	flushedCost        map[string]float64
+	flushedProvenance  map[string]data.CostProvenance
+	costProtectedTasks map[string]struct{}           // tasks with a recorded non-estimated cost row
+	pending            map[string]*taskPending       // task id -> unflushed deltas
+	toolTimings        map[string]*ToolTimingTracker // task id -> unmatched tool starts
+	lastQuota          map[quotaKey]quotaSeen        // provider window -> last written quota state
+	closed             bool
+	cancelMaintenance  context.CancelFunc
+	maintenance        *errgroup.Group
 }
 
 // New opens the rollup store: it recovers aggregates and watermarks from any
@@ -80,16 +81,17 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("create usage rollup directory: %w", err)
 	}
 	s := &Store{
-		log:               cfg.Log,
-		dir:               cfg.Dir,
-		files:             make(map[string]*os.File),
-		days:              make(map[string]*dayAggregate),
-		watermarks:        make(map[string]time.Time),
-		flushedCost:       make(map[string]float64),
-		reportedCostTasks: make(map[string]struct{}),
-		pending:           make(map[string]*taskPending),
-		toolTimings:       make(map[string]*ToolTimingTracker),
-		lastQuota:         make(map[quotaKey]quotaSeen),
+		log:                cfg.Log,
+		dir:                cfg.Dir,
+		files:              make(map[string]*os.File),
+		days:               make(map[string]*dayAggregate),
+		watermarks:         make(map[string]time.Time),
+		flushedCost:        make(map[string]float64),
+		flushedProvenance:  make(map[string]data.CostProvenance),
+		costProtectedTasks: make(map[string]struct{}),
+		pending:            make(map[string]*taskPending),
+		toolTimings:        make(map[string]*ToolTimingTracker),
+		lastQuota:          make(map[quotaKey]quotaSeen),
 	}
 	s.recover(ctx)
 	if err := ctx.Err(); err != nil {
@@ -194,6 +196,7 @@ func (s *Store) Discard(meta TaskMeta) {
 	delete(s.toolTimings, id)
 	delete(s.watermarks, id)
 	delete(s.flushedCost, id)
+	delete(s.flushedProvenance, id)
 }
 
 // ObserveQuota records a provider quota-window status change; rows are
@@ -250,7 +253,7 @@ func (s *Store) Days() []DayRollup {
 	return out
 }
 
-// Backfill streams neutral usage rows into missing daily files once.
+// Backfill streams reconstructed usage into missing daily files once.
 // It creates only missing day files, so a completed or interrupted pass cannot
 // duplicate an append-only rollup. rows is iterated only after checking the
 // done sentinel, so callers can defer expensive source-specific loading and
@@ -449,13 +452,21 @@ func (s *Store) mergeRecoveryState(staged *recoveryState) {
 			s.flushedCost[id] += cost
 		}
 	}
-	maps.Copy(s.reportedCostTasks, staged.reportedCostTasks)
+	for id, cost := range staged.flushedProvenance {
+		current := s.flushedProvenance[id]
+		current.Add(cost)
+		s.flushedProvenance[id] = current
+	}
+	maps.Copy(s.costProtectedTasks, staged.costProtectedTasks)
 	maps.Copy(s.lastQuota, staged.lastQuota)
 }
 
 // foldUsageRow adds row to one day's aggregate.
 func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
-	day.Add(&row.Delta)
+	cost := row.CostProvenance()
+	delta := row.Delta
+	delta.Cost = &cost
+	day.Add(&delta)
 	if row.TaskID != "" {
 		for _, repo := range row.Repos {
 			if day.repos[repo] == nil {
@@ -480,19 +491,38 @@ func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
 	model := ModelLabel(row.Model, "")
 	if model != "" {
 		b := day.modelBucket(model)
-		b.Add(&row.Delta)
+		b.Add(&delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 	if row.Harness != "" {
 		b := day.harnessBucket(row.Harness)
-		b.Add(&row.Delta)
+		b.Add(&delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 	if row.Harness != "" && model != "" {
 		b := day.crossBucket(row.Harness, model)
-		b.Add(&row.Delta)
+		b.Add(&delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
+}
+
+func protectsTaskCost(row *data.UsageRow) bool {
+	if row.CostEstimated {
+		return false
+	}
+	if row.Cost != nil {
+		return row.Cost.ReportedParts != 0 || row.Cost.EstimatedParts != 0
+	}
+	// An unclassified recorded amount is still evidence against adding a second
+	// token estimate for the same task; its source remains unknown.
+	return row.CostUSD != 0
+}
+
+func bucketCost(b *bucket) data.CostProvenance {
+	if b.Cost == nil {
+		return data.CostProvenance{}
+	}
+	return *b.Cost
 }
 
 func (s *Store) dayAggregate(day string) *dayAggregate {
@@ -558,17 +588,24 @@ func (s *Store) flushTaskLocked(id string) {
 	// Attribute the cost movement since the last flush to the delta's newest
 	// model (the active one at flush time). The movement lands on disk with
 	// that row: flushedCost advances only when its append succeeds.
-	var costKey bucketKey
-	if delta := p.costUSD - s.flushedCost[id] - p.costInFlight; delta != 0 {
+	amount := p.costUSD - s.flushedCost[id] - p.costInFlight
+	provenance := p.costProvenance.Difference(s.flushedProvenance[id])
+	provenance = provenance.Difference(p.provenanceInFlight)
+	if amount != 0 || !provenance.IsZero() {
 		var newest *bucket
-		for key, b := range p.buckets {
+		for _, b := range p.buckets {
 			if newest == nil || b.ts > newest.ts {
-				newest, costKey = b, key
+				newest = b
 			}
 		}
 		if newest != nil {
-			newest.CostUSD += delta
-			p.costInFlight += delta
+			newest.CostUSD += amount
+			p.costInFlight += amount
+			if newest.Cost == nil {
+				newest.Cost = &data.CostProvenance{}
+			}
+			newest.Cost.Add(provenance)
+			p.provenanceInFlight.Add(provenance)
 		}
 	}
 
@@ -600,13 +637,18 @@ func (s *Store) flushTaskLocked(id string) {
 			continue
 		}
 		s.applyUsageRow(&row)
-		if row.CostUSD != 0 {
-			s.reportedCostTasks[id] = struct{}{}
+		if protectsTaskCost(&row) {
+			s.costProtectedTasks[id] = struct{}{}
 		}
-		if key == costKey {
-			s.flushedCost[id] += p.costInFlight
-			p.costInFlight = 0
+		s.flushedCost[id] += row.CostUSD
+		p.costInFlight -= row.CostUSD
+		current := s.flushedProvenance[id]
+		current.Add(row.CostProvenance())
+		s.flushedProvenance[id] = current
+		if row.Cost != nil {
+			p.provenanceInFlight = p.provenanceInFlight.Difference(*row.Cost)
 		}
+
 		if !b.synthetic {
 			if ts := b.ts.AsTime(); ts.After(dayWatermark) {
 				dayWatermark = ts
@@ -770,6 +812,7 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 		SubagentSpawns:           d.Spawns,
 		SubagentSpawnsBackground: d.SpawnsBackground,
 		CostUSD:                  d.CostUSD,
+		Cost:                     bucketCost(&d.bucket),
 		Models:                   make(map[string]ModelRollup, len(d.models)),
 		Harnesses:                make(map[string]HarnessRollup, len(d.harnesses)),
 		Repos:                    make(map[string]int, len(d.repos)),
@@ -848,8 +891,13 @@ func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
 	for id, cost := range staged.costs {
 		s.flushedCost[id] += cost
 	}
+	for id, cost := range staged.provenance {
+		current := s.flushedProvenance[id]
+		current.Add(cost)
+		s.flushedProvenance[id] = current
+	}
 	for id := range staged.reportedCosts {
-		s.reportedCostTasks[id] = struct{}{}
+		s.costProtectedTasks[id] = struct{}{}
 	}
 	return nil
 }
@@ -1042,9 +1090,11 @@ func (s *Store) restoreDayFile(path string) error {
 // taskPending holds one task's unflushed deltas. It persists for the task's
 // lifetime so cost bookkeeping survives flushes.
 type taskPending struct {
-	meta    TaskMeta
-	buckets map[bucketKey]*bucket
-	costUSD float64 // newest observed task cost snapshot
+	meta               TaskMeta
+	buckets            map[bucketKey]*bucket
+	costUSD            float64 // newest observed task cost snapshot
+	costProvenance     data.CostProvenance
+	provenanceInFlight data.CostProvenance
 	// costInFlight is cost movement already folded into pending rows but not
 	// yet confirmed written; it is never re-added on a flush retry. See the
 	// flushedCost invariant on Store.
@@ -1067,6 +1117,10 @@ func (p *taskPending) fold(e *Event, synthetic bool) {
 	}
 	b.Add(&e.Delta)
 	p.costUSD = e.CostUSD
+	p.costProvenance = e.CostProvenance
+	if b.Cost == nil {
+		b.Cost = &data.CostProvenance{}
+	}
 }
 
 // hasDay reports whether p retains an unflushed bucket for day.
@@ -1237,6 +1291,7 @@ func newModelRollup(b *bucket) ModelRollup {
 		Compactions:    b.Compactions,
 		SubagentSpawns: b.Spawns,
 		CostUSD:        b.CostUSD,
+		Cost:           bucketCost(b),
 		ContextWindow:  b.ContextWindow,
 		ToolCalls:      cloneCounts(b.ToolCalls),
 		ToolTimings:    cloneToolTimings(b.ToolTimings),
@@ -1257,6 +1312,7 @@ func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) H
 		Compactions:    b.Compactions,
 		SubagentSpawns: b.Spawns,
 		CostUSD:        b.CostUSD,
+		Cost:           bucketCost(b),
 		ToolCalls:      cloneCounts(b.ToolCalls),
 		ToolTimings:    cloneToolTimings(b.ToolTimings),
 		Skills:         countTaskSets(b.skillTasks),
@@ -1275,11 +1331,12 @@ func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) H
 // recoveryState holds aggregate contributions until a whole day reads successfully.
 // Required metadata grows with task and aggregate cardinality, never row count.
 type recoveryState struct {
-	days              map[string]*dayAggregate
-	watermarks        map[string]time.Time
-	flushedCost       map[string]float64
-	reportedCostTasks map[string]struct{}
-	lastQuota         map[quotaKey]quotaSeen
+	days               map[string]*dayAggregate
+	watermarks         map[string]time.Time
+	flushedCost        map[string]float64
+	flushedProvenance  map[string]data.CostProvenance
+	costProtectedTasks map[string]struct{}
+	lastQuota          map[quotaKey]quotaSeen
 }
 
 // newRecoveryState stages aggregates and resume metadata, never individual rows.
@@ -1287,7 +1344,7 @@ type recoveryState struct {
 func newRecoveryState() *recoveryState {
 	return &recoveryState{
 		days: make(map[string]*dayAggregate), watermarks: make(map[string]time.Time),
-		flushedCost: make(map[string]float64), reportedCostTasks: make(map[string]struct{}),
+		flushedCost: make(map[string]float64), flushedProvenance: make(map[string]data.CostProvenance), costProtectedTasks: make(map[string]struct{}),
 		lastQuota: make(map[quotaKey]quotaSeen),
 	}
 }
@@ -1311,8 +1368,11 @@ func (s *recoveryState) addUsageRow(row *data.UsageRow) {
 		}
 	}
 	s.flushedCost[row.TaskID] += row.CostUSD
-	if row.CostUSD != 0 && !row.CostEstimated {
-		s.reportedCostTasks[row.TaskID] = struct{}{}
+	cost := s.flushedProvenance[row.TaskID]
+	cost.Add(row.CostProvenance())
+	s.flushedProvenance[row.TaskID] = cost
+	if protectsTaskCost(row) {
+		s.costProtectedTasks[row.TaskID] = struct{}{}
 	}
 }
 

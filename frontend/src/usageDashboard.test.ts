@@ -4,9 +4,60 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
+import { reportedUsageCost } from "../tests/usage";
 import type { UsageDashboardDay } from "@sdk/types.gen";
 
-import { summarizeUsageDays, usageCacheHitRate, usageDailySeries, usageDaysForRange } from "./usageDashboard";
+import {
+  formatUsageCost,
+  summarizeUsageDays,
+  usageCacheHitRate,
+  usageCostSource,
+  usageDailySeries,
+  usageDaysForRange,
+} from "./usageDashboard";
+
+describe("cost provenance", () => {
+  it("keeps known zero, unknown, estimates, and incomplete amounts distinct", () => {
+    expect(formatUsageCost(0, reportedUsageCost(0))).toBe("$0 · reported");
+    const unknown = { reportedUSD: 0, estimatedUSD: 0, reportedParts: 0, estimatedParts: 0, unknownParts: 1 };
+    expect(formatUsageCost(0, unknown)).toBe("Unknown");
+    expect(formatUsageCost(0.25, unknown)).toBe("$0.25 · source unknown");
+    expect(formatUsageCost(0.75, { ...reportedUsageCost(0.25), unknownParts: 1 })).toBe(
+      "$0.75 · incomplete ($0.25 known)",
+    );
+    expect(formatUsageCost(0.25, { ...unknown, ...reportedUsageCost(0.25), unknownParts: 1 })).toBe(
+      "$0.25 known subtotal · incomplete",
+    );
+    expect(formatUsageCost(0.25, { ...unknown, estimatedUSD: 0.25, estimatedParts: 1, unknownParts: 0 })).toBe(
+      "$0.25 · estimated",
+    );
+  });
+
+  it("cancels a replaced estimate across the selected days", () => {
+    const days = [
+      day("2026-01-24", {
+        costUSD: 0.2,
+        cost: { reportedUSD: 0, estimatedUSD: 0.2, reportedParts: 0, estimatedParts: 1, unknownParts: 0 },
+      }),
+      day("2026-01-25", {
+        costUSD: 0.1,
+        cost: { reportedUSD: 0.3, estimatedUSD: -0.2, reportedParts: 1, estimatedParts: -1, unknownParts: 0 },
+      }),
+    ];
+    const summary = summarizeUsageDays(days, null);
+    expect(summary.costUSD).toBeCloseTo(0.3);
+    expect(summary.cost).toEqual({
+      reportedUSD: 0.3,
+      estimatedUSD: 0,
+      reportedParts: 1,
+      estimatedParts: 0,
+      unknownParts: 0,
+    });
+    expect(usageCostSource(summary.cost)).toBe("reported");
+    assert.ok(days[0]);
+    expect(usageCostSource(summarizeUsageDays([days[0]], null).cost)).toBe("estimated");
+  });
+});
 
 function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDashboardDay {
   return {
@@ -27,6 +78,7 @@ function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDa
     subagentSpawns: 0,
     subagentSpawnsBackground: 0,
     costUSD: 0.1,
+    cost: reportedUsageCost(0.1),
     models: [
       {
         model: "model-a",
@@ -40,6 +92,7 @@ function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDa
         },
         turns: 1,
         costUSD: 0.1,
+        cost: reportedUsageCost(0.1),
         contextWindow: 100,
         erroredTurns: 0,
         apiMs: 0,
@@ -65,6 +118,7 @@ function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDa
         },
         turns: 1,
         costUSD: 0.1,
+        cost: reportedUsageCost(0.1),
         erroredTurns: 0,
         apiMs: 0,
         wallMs: 0,
@@ -116,6 +170,7 @@ describe("summarizeUsageDays", () => {
           },
         ],
         costUSD: 0.2,
+        cost: reportedUsageCost(0.2),
         repos: [{ repo: "caic", tasks: 2 }],
         skills: [{ name: "review", count: 3 }],
       }),
@@ -208,6 +263,7 @@ describe("summarizeUsageDays drill-down", () => {
       compactions: 1,
       subagentSpawns: 3,
       costUSD: 0.2,
+      cost: reportedUsageCost(0.2),
       contextWindow: 200,
       tools: [{ name: "Read", count: 4 }],
       toolTimings: [{ name: "Read", count: 2, durationMs: 1200, buckets: [] }],
@@ -218,6 +274,7 @@ describe("summarizeUsageDays drill-down", () => {
       tokens,
       turns: 9,
       costUSD: 0.9,
+      cost: reportedUsageCost(0.9),
       models: [
         pair,
         {
@@ -230,6 +287,7 @@ describe("summarizeUsageDays drill-down", () => {
           compactions: 0,
           subagentSpawns: 0,
           costUSD: 0.7,
+          cost: reportedUsageCost(0.7),
           contextWindow: 100,
           tools: [],
           toolTimings: [],
@@ -248,6 +306,7 @@ describe("summarizeUsageDays drill-down", () => {
           compactions: 1,
           subagentSpawns: 3,
           costUSD: 0.2,
+          cost: reportedUsageCost(0.2),
           tools: [{ name: "Read", count: 4 }],
           toolTimings: [{ name: "Read", count: 2, durationMs: 1200, buckets: [] }],
           skills: [{ name: "review", count: 1 }],
@@ -334,13 +393,49 @@ describe("summarizeUsageDays drill-down", () => {
     const days = [drillDay("2026-01-24"), drillDay("2026-01-25")];
 
     expect(usageDailySeries(days, "all", null)).toEqual([
-      { day: "2026-01-24", tokens: 100, costUSD: 0.9, turns: 9, compactions: 0, subagentSpawns: 0, inProgress: false },
-      { day: "2026-01-25", tokens: 100, costUSD: 0.9, turns: 9, compactions: 0, subagentSpawns: 0, inProgress: false },
+      {
+        day: "2026-01-24",
+        tokens: 100,
+        costUSD: 0.9,
+        cost: reportedUsageCost(0.9),
+        turns: 9,
+        compactions: 0,
+        subagentSpawns: 0,
+        inProgress: false,
+      },
+      {
+        day: "2026-01-25",
+        tokens: 100,
+        costUSD: 0.9,
+        cost: reportedUsageCost(0.9),
+        turns: 9,
+        compactions: 0,
+        subagentSpawns: 0,
+        inProgress: false,
+      },
     ]);
     // The drill-down narrows every per-day count, not just the money.
     expect(usageDailySeries(days, "all", { harness: "claude" })).toEqual([
-      { day: "2026-01-24", tokens: 100, costUSD: 0.2, turns: 2, compactions: 1, subagentSpawns: 3, inProgress: false },
-      { day: "2026-01-25", tokens: 100, costUSD: 0.2, turns: 2, compactions: 1, subagentSpawns: 3, inProgress: false },
+      {
+        day: "2026-01-24",
+        tokens: 100,
+        costUSD: 0.2,
+        cost: reportedUsageCost(0.2),
+        turns: 2,
+        compactions: 1,
+        subagentSpawns: 3,
+        inProgress: false,
+      },
+      {
+        day: "2026-01-25",
+        tokens: 100,
+        costUSD: 0.2,
+        cost: reportedUsageCost(0.2),
+        turns: 2,
+        compactions: 1,
+        subagentSpawns: 3,
+        inProgress: false,
+      },
     ]);
   });
 

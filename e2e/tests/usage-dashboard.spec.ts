@@ -1,6 +1,8 @@
 // End-to-end coverage for the cross-task usage dashboard and mobile containment.
 
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
+import { usageHistory } from "../visual-fixtures";
+import type { UsageDashboardCost } from "../../sdk/caic/ts/v1/types.gen";
 
 test("usage dashboard shows rollup activity and stays contained on mobile", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Seed the usage dashboard");
@@ -69,4 +71,52 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await page.goBack();
   await expect(page.getByText("Showing usage for")).toContainText("model fake-model");
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
+});
+
+test("usage cost distinguishes native zero, estimates, and unknown coverage", async ({ page }, testInfo) => {
+  const dashboard = usageHistory();
+  const costs: UsageDashboardCost[] = [
+    { reportedUSD: 0, estimatedUSD: 0, reportedParts: 1, estimatedParts: 0, unknownParts: 0 },
+    { reportedUSD: 0, estimatedUSD: 0, reportedParts: 0, estimatedParts: 0, unknownParts: 1 },
+    { reportedUSD: 0, estimatedUSD: 0.25, reportedParts: 0, estimatedParts: 1, unknownParts: 0 },
+    { reportedUSD: 0.5, estimatedUSD: 0.25, reportedParts: 1, estimatedParts: 1, unknownParts: 1 },
+  ];
+  dashboard.days = dashboard.days.slice(0, 4);
+  for (const [index, day] of dashboard.days.entries()) {
+    const cost = costs[index];
+    expect(cost).toBeDefined();
+    if (!cost) throw new Error("Missing cost fixture");
+    day.cost = cost;
+    day.costUSD = cost.reportedUSD + cost.estimatedUSD;
+    for (const model of day.models) {
+      model.cost = cost;
+      model.costUSD = day.costUSD;
+    }
+    for (const harness of day.harnesses) {
+      harness.cost = cost;
+      harness.costUSD = day.costUSD;
+      for (const model of harness.models) {
+        model.cost = cost;
+        model.costUSD = day.costUSD;
+      }
+    }
+  }
+  await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: dashboard }));
+  await page.goto("/monitoring?range=all");
+  const daily = page.getByRole("region", { name: "Daily usage totals" });
+  await expect(daily.getByText("$0 · reported", { exact: true })).toBeVisible();
+  await expect(daily.getByText("Unknown", { exact: true })).toBeVisible();
+  await expect(daily.getByText("$0.25 · estimated", { exact: true })).toBeVisible();
+  await expect(daily.getByText("$0.75 known subtotal · incomplete", { exact: true })).toBeVisible();
+  const chart = page.getByRole("img", { name: "Cost per day in US dollars" });
+  await expect(chart).toBeVisible();
+  // A native zero is a plotted point; a missing cost is a gap.
+  await expect(chart.locator('g[aria-label="dot"] circle')).toHaveCount(3);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page
+      .getByTestId("usage-charts")
+      .screenshot({ path: testInfo.outputPath(`cost-provenance-charts-${width}.png`) });
+  }
 });

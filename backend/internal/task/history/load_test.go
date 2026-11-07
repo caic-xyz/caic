@@ -173,6 +173,276 @@ func claudeInit(t *testing.T, sessionID string) string {
 
 func TestLoadLogHeader(t *testing.T) {
 	t.Parallel()
+	t.Run("NativeSkillWithoutDatedInput", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+			`{"t":"agent","ts":100.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"skill","name":"Skill","input":{"skill":"review"}}]}}}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success"}}`,
+			`{"t":"result","state":"purged"}`)
+		resolver := backends.Default("", nil)
+		for range 2 {
+			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := loaded.LastTrailer; r == nil || r.Duration != 2*time.Second || r.NumTurns != 1 {
+				t.Fatalf("inventory metrics = %+v", r)
+			}
+			if err := loadMessagesForTest(loaded, resolver); err != nil {
+				t.Fatal(err)
+			}
+			var full task.TurnMetrics
+			for _, entry := range loaded.Timeline {
+				full.Observe(entry.Message, entry.ProducerTime)
+			}
+			if full.Duration != 2*time.Second || full.NumTurns != 1 {
+				t.Fatalf("full metrics = %+v; want 1 turn, 2s", full)
+			}
+			if loaded.LastTrailer.Duration != full.Duration || loaded.LastTrailer.NumTurns != full.NumTurns {
+				t.Fatal("full and inventory totals differ")
+			}
+		}
+	})
+	t.Run("NativeInputTimingAcrossHarnesses", func(t *testing.T) {
+		t.Parallel()
+		type activity struct {
+			name, raw string
+			duration  time.Duration
+		}
+		for _, tc := range []struct {
+			harness, input, result string
+			activities             []activity
+		}{
+			{"claude", `{"type":"user","message":{"role":"user","content":"first"}}`, `{"type":"result","subtype":"success"}`, []activity{
+				{"assistant text", `{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`, 2 * time.Second},
+				{"tool only", `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call","name":"Bash","input":{"command":"pwd"}}]}}`, 2 * time.Second},
+				{"text start", `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`, 0},
+				{"thinking start", `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`, 0},
+				{"tool start", `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call","name":"Bash","input":{}}}}`, 0},
+				{"text delta", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working"}}}`, 2 * time.Second},
+				{"thinking delta", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"working"}}}`, 2 * time.Second},
+				{"empty delta", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""}}}`, 0},
+				{"tool JSON delta", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}}`, 0},
+				{"empty assistant text", `{"type":"assistant","message":{"content":[{"type":"text","text":""}]}}`, 0},
+				{"null assistant content", `{"type":"assistant","message":{"content":null}}`, 0},
+				{"empty assistant content", `{"type":"assistant","message":{"content":[]}}`, 0},
+				{"server tool block", `{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"server","name":"search"}]}}`, 0},
+			}},
+			{"codex", `{"id":1,"method":"turn/start","params":{"threadId":"root","input":[{"type":"text","text":"first"}]}}`, `{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}`, []activity{
+				{"text delta", `{"method":"item/agentMessage/delta","params":{"threadId":"root","turnId":"turn","itemId":"text","delta":"working"}}`, 2 * time.Second},
+				{"command start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"commandExecution","command":"pwd","cwd":"/workspace","status":"inProgress"}}}`, 2 * time.Second},
+				{"file start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"fileChange","changes":[]}}}`, 2 * time.Second},
+				{"MCP start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"mcpToolCall","server":"tools","tool":"read","arguments":{}}}}`, 2 * time.Second},
+				{"dynamic start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"dynamicToolCall","tool":"read","arguments":{}}}}`, 2 * time.Second},
+				{"image start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"imageGeneration"}}}`, 2 * time.Second},
+				{"command completion", `{"method":"item/completed","params":{"threadId":"root","turnId":"turn","item":{"id":"call","type":"commandExecution","command":"pwd","cwd":"/workspace","status":"completed"}}}`, 2 * time.Second},
+				{"agent start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"text","type":"agentMessage","text":""}}}`, 0},
+				{"reasoning start", `{"method":"item/started","params":{"threadId":"root","turnId":"turn","item":{"id":"think","type":"reasoning","summary":[]}}}`, 0},
+			}},
+			{"antigravity", `{"event":"user","message":{"content":[{"type":"text","text":"first"}]}}`, `{"event":"result","result":{"conversation_id":"root","status":"SUCCESS"}}`, []activity{
+				{"text delta", `{"event":"step_update","step_update":{"conversation_id":"root","step_index":0,"state":"RUNNING","step_type":"agent_response","text_delta":"working"}}`, 2 * time.Second},
+				{"tool only", `{"event":"step_update","step_update":{"conversation_id":"root","step_index":0,"state":"RUNNING","step_type":"tool","tool_name":"read"}}`, 2 * time.Second},
+				{"tool done", `{"event":"step_update","step_update":{"conversation_id":"root","step_index":0,"state":"DONE","step_type":"tool","tool_name":"read"}}`, 2 * time.Second},
+				{"system text", `{"event":"step_update","step_update":{"conversation_id":"root","step_index":0,"state":"RUNNING","step_type":"system_message","text_delta":"working"}}`, 0},
+			}},
+			{"pi", `{"type":"prompt","message":"first"}`, `{"type":"agent_end","messages":[]}`, []activity{
+				{"text delta", `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"working"}}`, 2 * time.Second},
+			}},
+		} {
+			t.Run(tc.harness, func(t *testing.T) {
+				t.Parallel()
+				for _, act := range tc.activities {
+					t.Run(act.name, func(t *testing.T) {
+						t.Parallel()
+						path := writePhysicalTestLog(t, false,
+							fmt.Sprintf(`{"t":"caic_meta","version":3,"harness":%q,"prompt":"task","repos":[]}`, tc.harness),
+							`{"t":"input","ts":100.000,"msg":`+tc.input+`}`,
+							`{"t":"agent","ts":101.000,"msg":`+act.raw+`}`,
+							mustJSON(t, agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeInputDeliveryFailed, Ts: 101.5}),
+							`{"t":"agent","ts":102.000,"msg":`+tc.result+`}`,
+							`{"t":"result","state":"purged"}`)
+						resolver := backends.Default("", nil)
+						for range 2 {
+							loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if r := loaded.LastTrailer; r == nil || r.Duration != act.duration || r.NumTurns != 1 {
+								t.Fatalf("inventory metrics = %+v; want 1 turn, %v", r, act.duration)
+							}
+							if err := loadMessagesForTest(loaded, resolver); err != nil {
+								t.Fatal(err)
+							}
+							var live task.TurnMetrics
+							for _, entry := range loaded.Timeline {
+								live.Observe(entry.Message, entry.ProducerTime)
+							}
+							if live.Duration != act.duration || live.NumTurns != 1 {
+								t.Fatalf("live metrics = %+v; want 1 turn, %v", live, act.duration)
+							}
+							if r := loaded.LastTrailer; r.Duration != live.Duration || r.NumTurns != live.NumTurns {
+								t.Fatalf("restored metrics %+v differ from live %+v", r, live)
+							}
+						}
+					})
+				}
+			})
+		}
+	})
+	t.Run("NativeWidgetActivityTiming", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+			`{"t":"input","ts":100.000,"msg":{"type":"user","message":{"role":"user","content":"first"}}}`,
+			`{"t":"agent","ts":100.500,"msg":{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"widget","name":"show_widget"}}}}`,
+			`{"t":"agent","ts":101.000,"msg":{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"widget_code\":\"<h1>Hi"}}}}`,
+			mustJSON(t, agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeInputDeliveryFailed, Ts: 101.5}),
+			`{"t":"agent","ts":101.600,"msg":{"type":"stream_event","event":{"type":"content_block_stop","index":0}}}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success"}}`,
+			`{"t":"result","state":"purged"}`)
+		resolver := backends.Default("", nil)
+		for range 2 {
+			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := loaded.LastTrailer; r == nil || r.Duration != 2*time.Second || r.NumTurns != 1 {
+				t.Fatalf("inventory metrics = %+v", r)
+			}
+			if err := loadMessagesForTest(loaded, resolver); err != nil {
+				t.Fatal(err)
+			}
+			var live task.TurnMetrics
+			for _, entry := range loaded.Timeline {
+				live.Observe(entry.Message, entry.ProducerTime)
+			}
+			if live.Duration != 2*time.Second || live.NumTurns != 1 {
+				t.Fatalf("live metrics = %+v", live)
+			}
+		}
+	})
+	t.Run("MixedNativeAndFallbackMetrics", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+			`{"t":"input","ts":100.000,"msg":{"type":"user","message":{"role":"user","content":"first"}}}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1}}`,
+			`{"t":"input","ts":200.000,"msg":{"type":"user","message":{"role":"user","content":"second"}}}`,
+			`{"t":"agent","ts":202.000,"msg":{"type":"result","subtype":"success","total_cost_usd":2,"num_turns":4,"duration_ms":7000}}`,
+			`{"t":"result","state":"purged"}`,
+		)
+		resolver := backends.Default("", nil)
+		for range 2 {
+			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := loaded.LastTrailer; r == nil || r.Duration != 9*time.Second || r.NumTurns != 5 {
+				t.Fatalf("inventory metrics = %+v", r)
+			}
+			if err := loadMessagesForTest(loaded, resolver); err != nil {
+				t.Fatal(err)
+			}
+			var live task.TurnMetrics
+			for _, entry := range loaded.Timeline {
+				live.Observe(entry.Message, entry.ProducerTime)
+			}
+			if r := loaded.LastTrailer; r.Duration != live.Duration || r.NumTurns != live.NumTurns {
+				t.Fatalf("restored metrics %+v differ from live %+v", r, live)
+			}
+		}
+	})
+	t.Run("NativeDSHMetricsColdCacheAndFull", func(t *testing.T) {
+		t.Parallel()
+		raw, err := os.ReadFile("../../agent/dsh/testdata/session-turns.jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, raw, 0o600); err != nil { //nolint:gosec // G703: Fixed filename inside t.TempDir; only payload bytes come from the fixture.
+			t.Fatal(err)
+		}
+		resolver := backends.Default("", nil)
+		for range 2 {
+			loaded, err := loadLogHeader(testLogger(), path, true, resolver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := loaded.LastTrailer; r == nil || r.NumTurns != 2 || r.Duration != 2079*time.Millisecond {
+				t.Fatalf("inventory metrics = %+v; want 2 turns, 2.079s", r)
+			}
+			if loaded.Timeline != nil {
+				t.Fatal("inventory retained a transcript")
+			}
+			if _, ok := readHeaderCache(path); !ok {
+				t.Fatal("missing cache")
+			}
+			if err := loadMessagesForTest(loaded, resolver); err != nil {
+				t.Fatal(err)
+			}
+			if r := loaded.LastTrailer; r.NumTurns != 2 || r.Duration != 2079*time.Millisecond {
+				t.Fatalf("full metrics = %+v; want 2 turns, 2.079s", r)
+			}
+		}
+	})
+	t.Run("PositiveCostWithOmittedMetrics", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, metrics string
+			turns         int
+			duration      time.Duration
+		}{
+			{"duration", `,"num_turns":3`, 3, 2 * time.Second},
+			{"turns", `,"duration_ms":7000`, 1, 7 * time.Second},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, false,
+					`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+					`{"t":"input","ts":100.000,"msg":{"type":"user","message":{"role":"user","content":"first"}}}`,
+					`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1`+tc.metrics+`}}`,
+					`{"t":"result","state":"purged"}`,
+				)
+				loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r := loaded.LastTrailer; r == nil || r.CostUSD != 1 || r.NumTurns != tc.turns || r.Duration != tc.duration {
+					t.Fatalf("metrics = %+v; want cost 1, %d turns, %v", r, tc.turns, tc.duration)
+				}
+				if err := loadMessagesForTest(loaded, backends.Default("", nil)); err != nil {
+					t.Fatal(err)
+				}
+				if r := loaded.LastTrailer; r.CostUSD != 1 || r.NumTurns != tc.turns || r.Duration != tc.duration {
+					t.Fatalf("replayed metrics = %+v; want cost 1, %d turns, %v", r, tc.turns, tc.duration)
+				}
+			})
+		}
+	})
+	t.Run("MissingNativeMetricsSurviveCache", func(t *testing.T) {
+		t.Parallel()
+		path := writePhysicalTestLog(t, false,
+			`{"t":"caic_meta","version":3,"harness":"claude","prompt":"task","repos":[]}`,
+			`{"t":"user_input","ts":100.000,"text":"first"}`,
+			`{"t":"agent","ts":102.000,"msg":{"type":"result","subtype":"success"}}`,
+			`{"t":"user_input","ts":200.000,"text":"second"}`,
+			`{"t":"agent","ts":203.000,"msg":{"type":"result","subtype":"success"}}`,
+			`{"t":"result","state":"purged"}`,
+		)
+		for range 2 {
+			loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := loaded.LastTrailer; got == nil || got.NumTurns != 2 || got.Duration != 5*time.Second {
+				t.Fatalf("metrics = %+v; want 2 turns, 5s", got)
+			}
+			if _, ok := readHeaderCache(path); !ok {
+				t.Fatal("missing header cache")
+			}
+		}
+	})
 	t.Run("RecordedClaudeReasoningLifecycle", func(t *testing.T) {
 		t.Parallel()
 		// This retained trace reports 58, 237 and 43 thinking tokens in usage
@@ -238,11 +508,11 @@ func TestLoadLogHeader(t *testing.T) {
 			turns                   int
 			usage                   agent.Usage
 		}{
-			{"interrupted revival", "running", "", 1.25, 2500 * time.Millisecond, 3,
+			{"interrupted revival", "running", "", 1.25, 3500 * time.Millisecond, 4,
 				agent.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationInputTokens: 12,
 					CacheWrites:          tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 4}, {TTL: time.Hour, Tokens: 8}},
 					CacheReadInputTokens: 14, ReasoningOutputTokens: 9, CacheTTLSeconds: 300}},
-			{"failed revival", "failed", "", 1.25, 2500 * time.Millisecond, 3,
+			{"failed revival", "failed", "", 1.25, 3500 * time.Millisecond, 4,
 				agent.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationInputTokens: 12,
 					CacheWrites:          tokens.CacheWrites{{TTL: 5 * time.Minute, Tokens: 4}, {TTL: time.Hour, Tokens: 8}},
 					CacheReadInputTokens: 14, ReasoningOutputTokens: 9, CacheTTLSeconds: 300}},

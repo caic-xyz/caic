@@ -71,3 +71,47 @@ test("native context occupancy stays independent of billed input and preserves z
   await page.reload();
   await expect(meter).toHaveText("579t/200kt");
 });
+
+for (const width of [390, 1280]) {
+  test(`native skill has one presentation at ${width}px`, async ({ page, api, uniquePrompt }, testInfo) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("response", (response) => {
+      if (response.status() >= 400 && response.url().includes("/api/"))
+        errors.push(`${response.status()} ${response.url()}`);
+    });
+    await page.setViewportSize({ width, height: 900 });
+    const task = await api.createTask({ initialPrompt: { text: uniquePrompt("FAKE_NATIVE_SKILL") }, harness: "dsh" });
+    await waitForTaskState(api, task.id, "waiting");
+    await page.goto(`/task/@${task.id}`);
+    for (const reload of [false, true]) {
+      if (reload) await page.reload();
+      const skills = page.getByRole("navigation", { name: "Loaded skills", exact: true });
+      await expect(skills).toHaveCount(1);
+      await expect(skills).toHaveText("code-quality");
+      await expect(page.getByTestId("task-message-area")).toContainText("Native skill loaded.");
+      await expect(page.getByTestId("task-message-area")).not.toContainText("Native skill contents");
+      await expect(page.getByTestId("task-message-area").getByText("skill", { exact: true })).toHaveCount(0);
+      expect(await skills.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
+      const card = page.getByTestId("native-subagent-card");
+      await expect(card.locator("summary")).toContainText("Completion not reported");
+      await expect(card.getByTestId("native-subagent-duration")).toHaveCount(0);
+      await card.locator("summary").press("Enter");
+      await expect(card.getByText("dsh-child", { exact: true })).toBeVisible();
+      await expect(card.getByText("Inspect code-quality integration", { exact: true })).toBeVisible();
+      await expect(card.getByText("No result reported by the harness.", { exact: true })).toBeVisible();
+      expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
+    }
+    await page.screenshot({ path: testInfo.outputPath("native-skill.png") });
+    await page.addStyleTag({ content: "html { font-size: 125%; }" });
+    const card = page.getByTestId("native-subagent-card");
+    await expect(card.getByText("No result reported by the harness.", { exact: true })).toBeVisible();
+    expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("native-skill-larger-font.png") });
+    expect(errors).toEqual([]);
+  });
+}

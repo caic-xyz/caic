@@ -1,4 +1,4 @@
-// Projects Claude session metadata and normalizes ordered token accounting without retaining transcript content.
+// Projects payload-free Claude input/activity timing, session metadata, and ordered token accounting.
 
 package claudecode
 
@@ -52,9 +52,11 @@ func (r *reasoning) observe(source *agent.MessageSource, estimate, actual int) {
 }
 
 // metadataParser projects ordered native metadata for inventory. It borrows usage
-// fields and never decodes assistant content, tools or streamed thinking text.
+// fields, retaining only bounded native widget fragments until their block stops.
 type metadataParser struct {
 	metadataState
+
+	widgets *WidgetTracker // Bounded partial widget input, released by native block stops.
 }
 
 // ParseOutput returns session reports, assistant model reports and normalized results.
@@ -75,7 +77,66 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		if string(typ) != "message_delta" {
-			return nil, nil
+			if string(typ) == "content_block_start" {
+				name, err := agent.JSONString(line, "event", "content_block", "name")
+				if err != nil {
+					return nil, err
+				}
+				if _, widget := agent.WidgetToolNames[name]; widget && p.widgets == nil {
+					p.widgets = newWidgetTracker()
+				}
+			}
+			if string(typ) != "content_block_delta" {
+				if p.widgets != nil {
+					_, err := parseStreamEvent(line, p.widgets)
+					if len(p.widgets.activeWidgets) == 0 {
+						p.widgets = nil
+					}
+					return nil, err
+				}
+				return nil, nil
+			}
+			kind, err := borrowedString(line, "event", "delta", "type")
+			if err != nil {
+				return nil, err
+			}
+			var field string
+			switch string(kind) {
+			case "text_delta":
+				field = "text"
+			case "thinking_delta":
+				field = "thinking"
+			case "input_json_delta":
+				if p.widgets == nil {
+					return nil, nil
+				}
+				messages, err := parseStreamEvent(line, p.widgets)
+				if err != nil || len(messages) == 0 {
+					return nil, err
+				}
+				source, err := parseSource(line)
+				if err != nil {
+					return nil, err
+				}
+				if source.ThreadID == "" {
+					source.ThreadID = p.sessionID
+				}
+				return []agent.Message{&agent.TextDeltaMessage{Source: source}}, nil
+			default:
+				return nil, nil
+			}
+			content, err := borrowedString(line, "event", "delta", field)
+			if err != nil || len(content) == 0 {
+				return nil, err
+			}
+			source, err := parseSource(line)
+			if err != nil {
+				return nil, err
+			}
+			if source.ThreadID == "" {
+				source.ThreadID = p.sessionID
+			}
+			return []agent.Message{&agent.TextDeltaMessage{Source: source}}, nil
 		}
 		usagePath = []string{"event", "usage"}
 	case claudecode.OutputSystem:
@@ -87,6 +148,9 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 			msg, err := parseInit(line)
 			if err != nil {
 				return nil, err
+			}
+			if !msg.Source.IsChild() {
+				p.widgets = nil
 			}
 			messages := []agent.Message{msg}
 			p.apply(msg.Provenance(), 0, messages, line)
@@ -104,6 +168,9 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !msg.Source.IsChild() {
+			p.widgets = nil
+		}
 		messages := []agent.Message{msg}
 		p.apply(msg.Provenance(), 0, messages, line)
 		return messages, nil
@@ -117,13 +184,23 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 	if source.ThreadID == "" {
 		source.ThreadID = p.sessionID
 	}
+	var messages []agent.Message
+	if claudecode.OutputType(typ) == claudecode.OutputAssistant {
+		activity, err := assistantActivity(line)
+		if err != nil {
+			return nil, err
+		}
+		if activity {
+			messages = append(messages, &agent.TextDeltaMessage{Source: source})
+		}
+	}
 	if len(usagePath) != 0 {
 		raw, err := agent.JSONField(line, usagePath...)
 		if err != nil {
 			return nil, err
 		}
 		if len(raw) == 0 {
-			return nil, nil
+			return messages, nil
 		}
 		var usage claudecode.MsgUsage
 		if err := json.Unmarshal(raw, &usage); err != nil {
@@ -143,15 +220,72 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 			message = &agent.UsageMessage{Usage: normalized}
 		}
 		if message == nil {
-			return nil, nil
+			return messages, nil
 		}
 		message.Source = source
-		messages := []agent.Message{message}
+		messages = append(messages, message)
 		p.apply(&source, estimate, messages, line)
 		return messages, nil
 	}
 	p.reasoning.observe(&source, estimate, 0)
 	return nil, nil
+}
+
+// assistantActivity recognizes only blocks the full parser publishes as accepted
+// output. Fields are borrowed; prompt, tool-input, and response payloads are not retained.
+func assistantActivity(line []byte) (bool, error) {
+	var activity bool
+	var parseErr error
+	_, err := jsonparser.ArrayEach(line, func(raw []byte, _ jsonparser.ValueType, _ int, err error) {
+		if parseErr != nil {
+			return
+		}
+		if err != nil {
+			parseErr = err
+			return
+		}
+		typ, err := borrowedString(raw, "type")
+		if err != nil {
+			parseErr = err
+			return
+		}
+		var field string
+		switch string(typ) {
+		case "text":
+			field = "text"
+		case "thinking":
+			field = "thinking"
+		case "tool_use":
+			name, err := borrowedString(raw, "name")
+			if err != nil {
+				parseErr = err
+				return
+			}
+			if string(name) == "Skill" {
+				skill, err := borrowedString(raw, "input", "skill")
+				parseErr = err
+				activity = activity || len(skill) > 0
+			} else {
+				activity = true
+			}
+			return
+		default:
+			return
+		}
+		content, err := borrowedString(raw, field)
+		parseErr = err
+		activity = activity || len(content) > 0
+	}, "message", "content")
+	if errors.Is(err, jsonparser.MalformedArrayError) {
+		_, kind, _, fieldErr := jsonparser.Get(line, "message", "content")
+		if fieldErr == nil && kind == jsonparser.Null {
+			err = nil
+		}
+	}
+	if errors.Is(err, jsonparser.KeyPathNotFoundError) {
+		err = nil
+	}
+	return activity, errors.Join(err, parseErr)
 }
 
 // borrowedString dispatches native discriminators without copying the common
@@ -208,6 +342,7 @@ func parseInit(line []byte) (*agent.InitMessage, error) {
 // The ordered reasoning fold supplies usage omitted from this record.
 func parseResult(line []byte) (*agent.ResultMessage, error) {
 	var w claudecode.OutputResultMsg
+	reported := false
 	if err := jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
 		var dst any
 		switch string(key) {
@@ -226,6 +361,7 @@ func parseResult(line []byte) (*agent.ResultMessage, error) {
 		case "session_id":
 			dst = &w.SessionID
 		case "total_cost_usd":
+			reported = kind != jsonparser.Null
 			dst = &w.TotalCostUSD
 		case "usage":
 			dst = &w.Usage
@@ -255,6 +391,7 @@ func parseResult(line []byte) (*agent.ResultMessage, error) {
 		NumTurns:      w.NumTurns,
 		SessionID:     w.SessionID,
 		TotalCostUSD:  w.TotalCostUSD,
+		CostReported:  reported,
 		Usage:         normalizeUsage(&w.Usage),
 		UUID:          w.UUID,
 	}, nil
@@ -306,8 +443,20 @@ func normalizeUsage(u *claudecode.MsgUsage) agent.Usage {
 	return usage
 }
 
-// ParseInput ignores client content; Claude initialization is reported on stdout.
-func (*metadataParser) ParseInput([]byte) ([]agent.Message, error) { return nil, nil }
+// ParseInput preserves native prompt timing and ownership without decoding content.
+func (p *metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
+	typ, source, err := parseRecordHeader(line)
+	if err != nil {
+		return nil, err
+	}
+	if claudecode.InputType(typ) != claudecode.InputUser {
+		return nil, nil
+	}
+	if source.ThreadID == "" {
+		source.ThreadID = p.sessionID
+	}
+	return []agent.Message{&agent.UserInputMessage{Source: source}}, nil
+}
 
 // metadataState owns model attribution and turn accounting in both projections.
 type metadataState struct {

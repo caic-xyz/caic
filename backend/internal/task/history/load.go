@@ -45,6 +45,7 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 		State:          lt.State,
 		CostUSD:        mr.CostUSD,
 		CostKnown:      mr.CostKnown || mr.CostUSD != 0,
+		CostComplete:   mr.CostComplete,
 		Duration:       time.Duration(mr.Duration * float64(time.Second)),
 		NumTurns:       mr.NumTurns,
 		Usage:          mr.TokenUsage(),
@@ -286,8 +287,9 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedM
 
 // UsageRows streams this task's durable usage by producer day and model.
 //
-// Costs and quota snapshots require live task state, so reconstruction leaves
-// both absent. Task-ID-less logs yield no rows. A non-nil error
+// Native reported costs are reconstructed without mutable model pricing.
+// Quota snapshots require live state and remain absent. Task-ID-less logs yield
+// no rows. A non-nil error
 // is yielded at most once and terminates the sequence.
 func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[data.UsageRow, error] {
 	return taskUsageRows(lt, ctx)
@@ -335,13 +337,21 @@ func scanSemanticLog(path string, resolver ParserResolver, visit func(agent.Pars
 		}
 		visit(record)
 		for scanner.Scan() {
-			record, err := parser.DecodeFrame(scanner.Frame())
+			records, err := parser.DecodeHistoryFrame(scanner.Frame(), 0)
+			for _, record := range records {
+				visit(record)
+			}
 			if err != nil {
 				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+		for _, record := range parser.FlushHistory() {
 			visit(record)
 		}
-		return scanner.Err()
+		return nil
 	})
 	return retErr
 }
@@ -380,15 +390,20 @@ func ExportDiscussion(path string, resolver ParserResolver) (string, error) {
 // Claude accounting survives a zero-cost revival trailer until EOF, when the
 // latest authoritative trailer and last completed root result are both known.
 type taskMetadataProjection struct {
-	lastResult *agent.ResultMessage
+	lastResult  *agent.ResultMessage
+	turnMetrics task.TurnMetrics
+	costs       task.CostTracker
 }
 
 func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.TimedMessage) {
 	for _, parsed := range messages {
+		p.turnMetrics.Observe(parsed.Message, parsed.ProducerTime)
 		loaded.Apply(parsed.Message)
 		switch msg := parsed.Message.(type) {
 		case *agent.MetaMessage:
 			loaded.Harness = harness.Name(msg.Harness)
+			p.costs.Harness = loaded.Harness
+			p.costs.Model = loaded.RequestedModel
 		case *agent.ResultMessage:
 			// Claude's native result is the inventory accounting source. Other
 			// harnesses preserve accounting in task completion trailers.
@@ -413,16 +428,32 @@ func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.Time
 				}
 			}
 		}
+		p.costs.Observe(parsed.Message, parsed.ProducerTime, nil)
 	}
 }
 
 func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
-	if loaded.LastTrailer != nil && loaded.LastTrailer.CostUSD == 0 && p.lastResult != nil && p.lastResult.TotalCostUSD > 0 {
-		loaded.LastTrailer.CostUSD = p.lastResult.TotalCostUSD
-		loaded.LastTrailer.CostKnown = true
-		loaded.LastTrailer.Duration = time.Duration(p.lastResult.DurationMs) * time.Millisecond
-		loaded.LastTrailer.NumTurns = p.lastResult.NumTurns
-		loaded.LastTrailer.Usage = p.lastResult.Usage
+	if loaded.LastTrailer == nil {
+		return
+	}
+	r := loaded.LastTrailer
+	if r.Duration == 0 {
+		r.Duration = p.turnMetrics.Duration
+	}
+	if r.NumTurns == 0 {
+		r.NumTurns = p.turnMetrics.NumTurns
+	}
+	if r.CostUSD == 0 && p.lastResult != nil && p.lastResult.TotalCostUSD > 0 {
+		r.CostUSD = p.lastResult.TotalCostUSD
+		r.CostKnown = true
+		r.Usage = p.lastResult.Usage
+	}
+	// Native metadata can certify an older summary only when its complete
+	// amount agrees with the authoritative stored amount. Missing proof never
+	// turns a known subtotal into a complete total.
+	if p.costs.Complete() && p.costs.TotalUSD == r.CostUSD {
+		r.CostKnown = true
+		r.CostComplete = true
 	}
 }
 
@@ -699,14 +730,19 @@ func scanInventoryRecords(path string, scanner *taskslog.Scanner, lt *LoadedTask
 	var projection taskMetadataProjection
 	projection.apply(lt, bootstrap.Messages)
 	for scanner.Scan() {
-		record, err := parser.DecodeFrame(scanner.Frame())
+		records, err := parser.DecodeHistoryFrame(scanner.Frame(), 0)
+		for _, record := range records {
+			projection.apply(lt, record.Messages)
+		}
 		if err != nil {
 			return fmt.Errorf("parse task log %s: %w", path, err)
 		}
-		projection.apply(lt, record.Messages)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
+	}
+	for _, record := range parser.FlushHistory() {
+		projection.apply(lt, record.Messages)
 	}
 	projection.finish(lt)
 	return nil

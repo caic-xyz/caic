@@ -421,6 +421,15 @@ func TestTask(t *testing.T) {
 		if !got.CostKnown || got.CostUSD != 0 {
 			t.Fatalf("known zero cost = %+v", got)
 		}
+		zeroProof := unknownZero
+		zeroProof.CostKnown = true
+		zeroProof.CostComplete = true
+		conflicting := &task.Result{State: task.StatePurged, CostKnown: true, CostUSD: .25}
+		projected, err := Task(&TaskInput{Task: tk, Snapshot: zeroProof, Result: conflicting})
+		if err != nil || !projected.CostKnown || projected.CostUSD != .25 || projected.CostComplete {
+			t.Fatalf("zero proof certified a different stored amount: %+v %v", projected, err)
+		}
+
 		result := &task.Result{State: task.StatePurged, CostKnown: true}
 		got, err = Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot(), Result: result})
 		if err != nil {

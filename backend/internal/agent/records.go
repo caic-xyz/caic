@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/maruel/ksid"
 )
 
 // RecordHandler applies accepted records to a production consumer. Preparation
@@ -174,6 +175,7 @@ func (r *Records) process(w *recordWork) recordResult {
 	}
 	var encoded []byte
 	var operationErr error
+	var delivery inputDelivery
 	var err error
 	switch w.op { //nolint:exhaustive // Replay and close are handled before encoding.
 	case recordHost, recordIntent:
@@ -186,19 +188,18 @@ func (r *Records) process(w *recordWork) recordResult {
 	case recordInput:
 		encoded, err = marshalInputRecords(w.data)
 	case recordPrompt:
-		// TODO: Stamp SessionID and a stable input UUID on the delivery
-		// controls. The record owner currently has neither at input acceptance,
-		// so those persisted fields stay empty.
+		delivery = inputDelivery{sessionID: r.parser.session.SessionID, uuid: ksid.NewID().String()}
 		data := w.data
-		if data == nil {
+		err = w.failure
+		if err == nil && data == nil {
 			data, err = r.wire.EncodePrompt(w.prompt)
 		}
 		if err != nil {
 			operationErr = err
-			encoded, err = marshalRecordMessages([]Message{InputDeliveryStarted(), &UserInputMessage{Text: w.prompt.Text, Images: w.prompt.Images, Ts: float64(time.Now().UnixMilli()) / 1000}, InputDeliveryFailed(operationErr)})
+			encoded, err = marshalRecordMessages([]Message{delivery.stamp(InputDeliveryStarted()), &UserInputMessage{Text: w.prompt.Text, Images: w.prompt.Images, Ts: float64(time.Now().UnixMilli()) / 1000}, delivery.stamp(InputDeliveryFailed(operationErr))})
 			break
 		}
-		encoded, err = marshalRecordMessages([]Message{InputDeliveryStarted()})
+		encoded, err = marshalRecordMessages([]Message{delivery.stamp(InputDeliveryStarted())})
 		if err == nil {
 			var native []byte
 			native, err = marshalInputRecords(data)
@@ -293,7 +294,7 @@ func (r *Records) process(w *recordWork) recordResult {
 			return recordResult{err: err}
 		}
 	}
-	result := recordResult{messages: observed, data: w.data, err: operationErr, nonfatal: operationErr != nil}
+	result := recordResult{delivery: delivery, messages: observed, data: w.data, err: operationErr, nonfatal: operationErr != nil}
 	if w.op == recordRelay {
 		result.data = nil
 		if frames[0].Kind == taskslog.KindAgent {
@@ -360,15 +361,29 @@ type recordWork struct {
 	data        []byte
 	messages    []Message
 	prompt      Prompt
+	failure     error
 	text        string
 	disposition func(TimedMessage) (bool, error)
 	ack         chan recordResult
 }
 type recordResult struct {
+	delivery inputDelivery
 	data     []byte
 	messages []TimedMessage
 	err      error
 	nonfatal bool
+}
+
+// inputDelivery is the identity captured at one ordered prompt admission.
+// Transport completion retains it even if the active native session changes.
+type inputDelivery struct {
+	sessionID string
+	uuid      string
+}
+
+func (d *inputDelivery) stamp(m *SystemMessage) *SystemMessage {
+	m.SessionID, m.UUID = d.sessionID, d.uuid
+	return m
 }
 
 func marshalRecordMessages(messages []Message) ([]byte, error) {

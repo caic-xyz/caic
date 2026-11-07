@@ -1,4 +1,4 @@
-// Renders parsed task discussion data as markdown.
+// Renders parsed task discussions as markdown with confirmed skills and reported native activity.
 
 package agent
 
@@ -88,9 +88,24 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 
 	b.WriteString("\n---\n\n")
 
+	// Reported skill reads precede their machinery. Inferred file reads remain
+	// ordinary visible tools, even when their contents confirm a loaded skill.
+	var skillTools SkillToolTracker
+	var skills SkillReadTracker
 	// Conversation
 	seenTools := make(map[ToolKey]struct{}) // Track tool IDs to skip duplicates.
 	for _, msg := range msgs {
+		countable, confirmed := skills.Confirm(msg)
+		if _, load := msg.(*SkillLoadMessage); load && !countable {
+			continue
+		}
+		hidden := skillTools.Observe(msg)
+		if hidden {
+			for _, load := range confirmed {
+				renderMsg(&b, load)
+			}
+			continue
+		}
 		if tu, ok := msg.(*ToolUseMessage); ok && !isInputEmpty(tu.Input) {
 			key := ToolKeyForSource(tu.Provenance(), tu.ToolUseID)
 			if _, seen := seenTools[key]; seen {
@@ -99,6 +114,9 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 			seenTools[key] = struct{}{}
 		}
 		renderMsg(&b, msg)
+		for _, load := range confirmed {
+			renderMsg(&b, load)
+		}
 	}
 
 	return b.String()
@@ -168,6 +186,9 @@ func renderMsg(b *strings.Builder, msg Message) {
 			fmt.Fprintf(b, "⚠️ Tool error: %s\n\n", m.Error)
 		}
 
+	case *SkillLoadMessage:
+		fmt.Fprintf(b, "**Loaded skill**: `%s`\n\n", m.Skill)
+
 	case *NativeSubagentMessage:
 		// Canonical native activity carries the harness-reported facts; render
 		// the observed status, not an inferred outcome.
@@ -179,9 +200,21 @@ func renderMsg(b *strings.Builder, msg Message) {
 		if label == "" {
 			label = m.Subagent.ID
 		}
-		fmt.Fprintf(b, "### 🤖 Native %s: %s — %s\n\n", kind, label, m.Subagent.Status)
+		status := string(m.Subagent.Status)
+		if m.Subagent.Status == NativeSubagentStatusUnknown {
+			status = "completion not reported"
+		}
+		fmt.Fprintf(b, "### 🤖 Native %s: %s — %s\n\n", kind, label, status)
+		if m.Subagent.Status == NativeSubagentStatusUnknown {
+			fmt.Fprintf(b, "**Identity**: `%s`\n\n", m.Subagent.ID)
+			if m.Subagent.Prompt != "" {
+				fmt.Fprintf(b, "**Prompt**: %s\n\n", m.Subagent.Prompt)
+			}
+		}
 		if m.Subagent.Result != "" {
 			fmt.Fprintf(b, "%s\n\n", m.Subagent.Result)
+		} else if m.Subagent.Status == NativeSubagentStatusUnknown {
+			b.WriteString("No result reported by the harness.\n\n")
 		}
 
 	case *SystemMessage:

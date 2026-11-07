@@ -1,4 +1,4 @@
-// Usage rollup projections stream neutral aggregate rows from retained task logs.
+// Usage rollup projections preserve native cost provenance from retained task logs.
 
 package history
 
@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
@@ -163,14 +164,19 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 		for i, repo := range lt.Repos {
 			repos[i] = repo.Name
 		}
+		costs := task.CostTracker{Harness: lt.Harness, Model: lt.RequestedModel}
+		previousCost := costs.Snapshot()
 		var skillReads agent.SkillReadTracker
 		var toolTimings usagedb.ToolTimingTracker
-		add := func(confirmed agent.Message, at time.Time) {
-			// Claude records carry per-call model attribution. Codex, Pi, and
-			// OpenCode logs only preserve a reliable session-level model.
-			if lt.Harness == harness.Claude && !confirmed.Provenance().IsChild() {
-				model = usageClaudeModel(model, confirmed)
+		observe := func(timed agent.TimedMessage) {
+			costs.Observe(timed.Message, timed.ProducerTime, nil)
+			// Claude records carry per-call model attribution. Model controls
+			// also apply before dated accounting, even without their own date.
+			if lt.Harness == harness.Claude && !timed.Message.Provenance().IsChild() {
+				model = usageClaudeModel(model, timed.Message)
 			}
+		}
+		add := func(confirmed agent.Message, at time.Time, cost task.CostSnapshot) {
 			attributedModel := model
 			attributedEffort := effort
 			if confirmed.Provenance().IsChild() {
@@ -211,6 +217,12 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				}
 				buckets[k] = row
 			}
+			provenance := data.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}
+			prior := data.CostProvenance{ReportedUSD: previousCost.ReportedUSD, EstimatedUSD: previousCost.EstimatedUSD, ReportedParts: previousCost.ReportedParts, EstimatedParts: previousCost.EstimatedParts, UnknownParts: previousCost.UnknownParts}
+			movement := provenance.Difference(prior)
+			delta.Cost = &movement
+			delta.CostUSD = cost.USD - previousCost.USD
+			previousCost = cost
 			row.Add(&delta)
 			if ts := data.NewTime(at); ts > row.Ts {
 				row.Ts = ts
@@ -222,14 +234,22 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				return
 			}
 			if timed.ProducerTime.IsZero() {
+				// Replay controls change session/model state without belonging to
+				// a producer day. Undated numeric messages remain unaccounted;
+				// carrying them to a later row would invent their attribution.
+				switch timed.Message.(type) {
+				case *agent.ExitMessage, *agent.InitMessage, *agent.SessionMetadataMessage, *agent.SystemMessage:
+					observe(timed)
+				}
 				continue
 			}
+			observe(timed)
 			count, confirmed := skillReads.Confirm(timed.Message)
 			if count {
-				add(timed.Message, timed.ProducerTime)
+				add(timed.Message, timed.ProducerTime, costs.Snapshot())
 			}
 			for _, c := range confirmed {
-				add(c, timed.ProducerTime)
+				add(c, timed.ProducerTime, costs.Snapshot())
 			}
 		}
 		keys := make([]key, 0, len(buckets))

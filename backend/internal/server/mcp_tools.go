@@ -195,7 +195,7 @@ func (m *mcpTools) handleTasksList(ctx context.Context, call *mcp.ToolRequest[mc
 	}
 	tasks, next, err = fitMCPJSONPage(tasks, next != "", mcpListJSONMaxBytes,
 		func(count int) (string, error) { return encodeMCPTaskCursor(revision, page[count-1].ID) },
-		func(page []mcpTaskSummary, cursor string) any {
+		func(page []v1.MCPTaskSummary, cursor string) any {
 			return mcpTaskListOutput{Tasks: page, NextCursor: cursor}
 		},
 	)
@@ -682,7 +682,13 @@ func (m *mcpTools) handleGetUsage(ctx context.Context, call *mcp.ToolRequest[str
 	usage := m.usage.buildResp(ctx)
 	var lines []string
 	for _, w := range usage.Local.Windows {
-		lines = append(lines, fmt.Sprintf("%s cost: %s (%d tokens)", w.Duration, formatUSD(w.CostUSD), w.InputTokens+w.OutputTokens))
+		cost := "unknown"
+		if w.CostKnown {
+			cost = formatUSD(w.CostUSD)
+		} else if w.CostUSD != 0 {
+			cost = formatUSD(w.CostUSD) + " known subtotal; total unknown"
+		}
+		lines = append(lines, fmt.Sprintf("%s cost: %s (%d tokens)", w.Duration, cost, w.InputTokens+w.OutputTokens))
 	}
 	for i := range usage.Providers {
 		pq := &usage.Providers[i]
@@ -947,32 +953,9 @@ type mcpTaskListArgs struct {
 	Limit  int    `json:"limit,omitempty"  jsonschema:"minimum=1,maximum=50"                                    jsonschema_description:"Maximum tasks to return; defaults to 20, cannot exceed 50, and a response-size limit may shorten the page"`
 }
 
-type mcpTaskSummary struct {
-	v1.ServiceActive
-
-	HasPendingInput bool         `json:"hasPendingInput" jsonschema_description:"Whether a pending prompt record exists; task_get_detail shows its text and delivery status"`
-	TaskNumber      int          `json:"taskNumber"              jsonschema_description:"Current session task number used by other task tools"`
-	TaskID          string       `json:"taskID"                  jsonschema_description:"Stable task ID"`
-	Title           string       `json:"title"                   jsonschema_description:"Task title"`
-	State           v1.TaskState `json:"state"                   jsonschema_description:"Current task lifecycle state"`
-	Harness         v1.Harness   `json:"harness"                 jsonschema_description:"Coding-agent harness"`
-	Model           string       `json:"model,omitempty"         jsonschema_description:"Configured model, or absent for the harness default"`
-	Effort          string       `json:"effort,omitempty"        jsonschema_description:"Configured reasoning effort, or absent for the harness default"`
-	RuntimeName     string       `json:"runtimeName,omitempty"   jsonschema_description:"Runtime backend name"`
-	StatusMessage   string       `json:"statusMessage,omitempty" jsonschema_description:"Bounded result or failure context for terminal tasks"`
-	ChangedFiles    int          `json:"changedFiles"            jsonschema_description:"Number of changed files"`
-	Additions       int          `json:"additions"               jsonschema_description:"Added lines"`
-	Deletions       int          `json:"deletions"               jsonschema_description:"Deleted lines"`
-	ForgePR         int          `json:"forgePR,omitempty"       jsonschema_description:"Pull request number"`
-	CIStatus        v1.CIStatus  `json:"ciStatus,omitempty"      jsonschema_description:"Continuous integration status"`
-	DurationSeconds float64      `json:"durationSeconds"         jsonschema_description:"Task duration in seconds"`
-	CostUSD         float64      `json:"costUSD"                 jsonschema_description:"Task cost in US dollars"`
-	CostKnown       bool         `json:"costKnown"               jsonschema_description:"Whether costUSD is measured; false means the harness supplied no cost or billable usage"`
-}
-
 type mcpTaskListOutput struct {
-	Tasks      []mcpTaskSummary `json:"tasks"                jsonschema_description:"Tasks in this page"`
-	NextCursor string           `json:"nextCursor,omitempty" jsonschema_description:"Opaque cursor for the next page"`
+	Tasks      []v1.MCPTaskSummary `json:"tasks"                jsonschema_description:"Tasks in this page"`
+	NextCursor string              `json:"nextCursor,omitempty" jsonschema_description:"Opaque cursor for the next page"`
 }
 
 type mcpRepoListArgs struct {

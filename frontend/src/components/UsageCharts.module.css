@@ -16,6 +16,7 @@
 
 .header {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: baseline;
   justify-content: space-between;
@@ -33,9 +34,10 @@
 }
 
 .header strong {
+  max-width: 100%;
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 @media (width <= 700px) {

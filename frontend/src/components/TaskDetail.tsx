@@ -150,6 +150,7 @@ interface Props {
   model?: string;
   costUSD?: number;
   costKnown?: boolean;
+  costComplete?: boolean;
   cumulativeInputTokens?: number;
   cumulativeOutputTokens?: number;
   cumulativeCacheCreationInputTokens?: number;
@@ -1328,6 +1329,7 @@ export default function TaskDetail(props: Props) {
               outputTokens: props.cumulativeOutputTokens ?? 0,
               costUSD: props.costUSD ?? 0,
               costKnown: props.costKnown ?? false,
+              costComplete: props.costComplete ?? false,
             }}
           />
           <Show when={timeline.loading() && !timeline.error()}>

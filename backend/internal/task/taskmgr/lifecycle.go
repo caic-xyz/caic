@@ -794,8 +794,8 @@ func (r *Lifecycle) watchSession(h *taskrun.SessionHandle) {
 					if exitErr := t.LastExitError(); exitErr != "" {
 						err = errors.Join(errors.New(exitErr), finishErr)
 					}
-					costUSD, numTurns, duration, usage, _ := t.LiveStats()
-					r.entry.Finish(&task.Result{State: state, DiffStat: t.LiveDiffStat(), CostUSD: costUSD, CostKnown: t.LiveCostKnown(), Duration: duration, NumTurns: numTurns, Usage: usage, AgentResult: t.LastAgentResult(), Err: err})
+					snapshot := t.Snapshot()
+					r.entry.Finish(&task.Result{State: state, DiffStat: snapshot.DiffStat, CostUSD: snapshot.CostUSD, CostKnown: snapshot.CostKnown, CostComplete: snapshot.CostComplete, Duration: snapshot.Duration, NumTurns: snapshot.NumTurns, Usage: snapshot.Usage, AgentResult: t.LastAgentResult(), Err: err})
 				}
 			} else {
 				r.manager.log.InfoContext(ctx, "session exited", attrs...)

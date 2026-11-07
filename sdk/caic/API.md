@@ -1116,7 +1116,8 @@ Task is the JSON representation sent to the frontend.
 | `diffStat` | `DiffStat` |  |  |
 | `repoStates` | `GitRepositoryState[]` | Pushed compact per-repo Git state from the latest diff probe. |  |
 | `costUSD` | `float64` |  | yes |
-| `costKnown` | `boolean` |  | yes |
+| `costKnown` | `boolean` | True when any cost is known; costUSD may be a subtotal. | yes |
+| `costComplete` | `boolean` | True when costUSD covers all observed billed usage. | yes |
 | `duration` | `float64` | Seconds. | yes |
 | `numTurns` | `int` |  | yes |
 | `cumulativeInputTokens` | `int` |  | yes |
@@ -1735,6 +1736,7 @@ LocalWindow is the aggregated local cost for a rolling time window.
 |-------|------|-------------|----------|
 | `duration` | `string` | "1h", "6h", "24h" | yes |
 | `costUSD` | `float64` |  | yes |
+| `costKnown` | `boolean` | True when all included billed usage has known cost; otherwise costUSD is a known subtotal. | yes |
 | `inputTokens` | `int` |  | yes |
 | `outputTokens` | `int` |  | yes |
 
@@ -1780,6 +1782,20 @@ prompt context consumed by the model.
 | `cacheReadTokens` | `int64` |  | yes |
 | `outputTokens` | `int64` |  | yes |
 | `reasoningTokens` | `int64` |  | yes |
+
+### UsageDashboardCost
+
+UsageDashboardCost preserves additive cost provenance across range filters.
+Signed parts retain known zeros and cancel estimates replaced by reports.
+UnknownParts also marks amounts in rows whose source cannot be proven.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `reportedUSD` | `float64` |  | yes |
+| `estimatedUSD` | `float64` |  | yes |
+| `reportedParts` | `int` |  | yes |
+| `estimatedParts` | `int` |  | yes |
+| `unknownParts` | `int` |  | yes |
 
 ### UsageDashboardCount
 
@@ -1840,6 +1856,7 @@ model; skills and repos keep the day leaderboards' distinct-task counts.
 | `compactions` | `int` |  | yes |
 | `subagentSpawns` | `int` |  | yes |
 | `costUSD` | `float64` |  | yes |
+| `cost` | `UsageDashboardCost` |  | yes |
 | `contextWindow` | `int` |  | yes |
 | `tools` | `UsageDashboardCount[]` |  | yes |
 | `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
@@ -1863,6 +1880,7 @@ harness filter can still list the models used under it.
 | `compactions` | `int` |  | yes |
 | `subagentSpawns` | `int` |  | yes |
 | `costUSD` | `float64` |  | yes |
+| `cost` | `UsageDashboardCost` |  | yes |
 | `tools` | `UsageDashboardCount[]` |  | yes |
 | `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
 | `skills` | `UsageDashboardCount[]` |  | yes |
@@ -1886,6 +1904,7 @@ cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
 | `subagentSpawns` | `int` |  | yes |
 | `subagentSpawnsBackground` | `int` |  | yes |
 | `costUSD` | `float64` |  | yes |
+| `cost` | `UsageDashboardCost` |  | yes |
 | `models` | `UsageDashboardModel[]` |  | yes |
 | `harnesses` | `UsageDashboardHarness[]` |  | yes |
 | `repos` | `UsageDashboardRepo[]` |  | yes |

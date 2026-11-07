@@ -1,5 +1,5 @@
-// Package v11 defines the independent version 11 task-header cache schema.
-package v11
+// Package v12 defines the independent version 12 task-header cache schema.
+package v12
 
 import "time"
 
@@ -19,7 +19,7 @@ type Task struct {
 	Repos                 []Repo       `json:"repos"`
 	Harness               string       `json:"harness"`
 	StartedAt             time.Time    `json:"started_at"`
-	LastStateUpdateAt     time.Time    `json:"last_state_update_at"`
+	LastActivityAt        time.Time    `json:"last_activity_at"`
 	State                 string       `json:"state"`
 	ForgeIssue            int          `json:"forge_issue"`
 	OwnerID               string       `json:"owner_id"`
@@ -118,6 +118,8 @@ type Result struct {
 	DiffStat       []DiffFileStat  `json:"diff_stat"`
 	DiskUsedBytes  *int64          `json:"disk_used_bytes,omitempty"`
 	CostUSD        float64         `json:"cost_usd"`
+	CostKnown      bool            `json:"cost_known"`
+	CostComplete   bool            `json:"cost_complete"`
 	Duration       time.Duration   `json:"duration"`
 	NumTurns       int             `json:"num_turns"`
 	Usage          Usage           `json:"usage"`

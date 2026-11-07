@@ -22,7 +22,8 @@ export function formatMoney(amount: number, decimals: number): string {
 
 export function formatCost(usd: number): string {
   if (usd === 0) return "$0";
-  return usd < 0.01 ? "<$0.01" : `$${formatMoney(usd, 2)}`;
+  if (Math.abs(usd) < 0.01) return usd < 0 ? ">-$0.01" : "<$0.01";
+  return usd < 0 ? `-$${formatMoney(-usd, 2)}` : `$${formatMoney(usd, 2)}`;
 }
 
 // tokenUnits lists the scaled token magnitudes, largest first. Counts below one

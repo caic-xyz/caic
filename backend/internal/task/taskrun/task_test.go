@@ -2391,25 +2391,25 @@ func TestTask(t *testing.T) {
 				MessageType: "caic_diff_stat",
 				DiffStat:    ds,
 			})
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 2 {
-				t.Fatalf("LiveDiffStat len = %d, want 2", len(got))
+				t.Fatalf("DiffStat len = %d, want 2", len(got))
 			}
 			if got[0].Path != "main.go" || got[0].LinesAdded != 10 {
-				t.Errorf("LiveDiffStat[0] = %+v", got[0])
+				t.Errorf("DiffStat[0] = %+v", got[0])
 			}
 			// Update with new diff stat.
 			addTaskMessage(tk, &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
 				DiffStat:    v3.DiffStat{{Path: "new.go", LinesAdded: 1, LinesDeleted: 0}},
 			})
-			got = tk.LiveDiffStat()
+			got = tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "new.go" {
-				t.Errorf("LiveDiffStat after update = %+v", got)
+				t.Errorf("DiffStat after update = %+v", got)
 			}
 		})
 
-		t.Run("ResultMessageUpdatesLiveDiffStat", func(t *testing.T) {
+		t.Run("ResultMessageUpdatesDiffStat", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(task.StateRunning)
@@ -2417,9 +2417,9 @@ func TestTask(t *testing.T) {
 				MessageType: "result",
 				DiffStat:    v3.DiffStat{{Path: "a.go", LinesAdded: 5, LinesDeleted: 2}},
 			})
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "a.go" || got[0].LinesAdded != 5 {
-				t.Errorf("LiveDiffStat = %+v, want [{a.go 5 2}]", got)
+				t.Errorf("DiffStat = %+v, want [{a.go 5 2}]", got)
 			}
 		})
 	})
@@ -2441,9 +2441,9 @@ func TestTask(t *testing.T) {
 					DiffStat:    v3.DiffStat{{Path: "latest.go", LinesAdded: 5}},
 				},
 			}))
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "latest.go" {
-				t.Errorf("LiveDiffStat = %+v, want latest.go", got)
+				t.Errorf("DiffStat = %+v, want latest.go", got)
 			}
 		})
 
@@ -2461,9 +2461,9 @@ func TestTask(t *testing.T) {
 					DiffStat:    v3.DiffStat{{Path: "authoritative.go", LinesAdded: 10}},
 				},
 			}))
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "authoritative.go" {
-				t.Errorf("LiveDiffStat = %+v, want authoritative.go", got)
+				t.Errorf("DiffStat = %+v, want authoritative.go", got)
 			}
 		})
 
@@ -2481,9 +2481,9 @@ func TestTask(t *testing.T) {
 					DiffStat:    v3.DiffStat{{Path: "relay.go", LinesAdded: 3}},
 				},
 			}))
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "relay.go" {
-				t.Errorf("LiveDiffStat = %+v, want relay.go", got)
+				t.Errorf("DiffStat = %+v, want relay.go", got)
 			}
 		})
 
@@ -2510,9 +2510,9 @@ func TestTask(t *testing.T) {
 					DiffStat:    v3.DiffStat{},
 				},
 			}))
-			got := tk.LiveDiffStat()
+			got := tk.Snapshot().DiffStat
 			if len(got) != 0 {
-				t.Fatalf("LiveDiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
+				t.Fatalf("DiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
 			}
 			// Adoption records the branch diff from a fresh host snapshot.
 			tk.SetRuntimeConnectionInfo("test-runtime:adopted", runtime.ConnectionTarget{}, "", "", 0)
@@ -2523,9 +2523,9 @@ func TestTask(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			got = tk.LiveDiffStat()
+			got = tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "main.go" {
-				t.Errorf("LiveDiffStat after set = %+v, want main.go", got)
+				t.Errorf("DiffStat after set = %+v, want main.go", got)
 			}
 		})
 	})
@@ -2542,7 +2542,8 @@ func TestTask(t *testing.T) {
 			MessageType: "result",
 			Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 30, ReasoningOutputTokens: 11},
 		})
-		_, _, _, usage, lastUsage := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		usage, lastUsage := snapshot.Usage, snapshot.LastUsage
 		if usage.InputTokens != 300 {
 			t.Errorf("InputTokens = %d, want 300", usage.InputTokens)
 		}
@@ -2585,7 +2586,8 @@ func TestTask(t *testing.T) {
 				Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, ReasoningOutputTokens: 11},
 			},
 		}))
-		_, _, _, usage, lastUsage := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		usage, lastUsage := snapshot.Usage, snapshot.LastUsage
 		if usage.InputTokens != 300 {
 			t.Errorf("InputTokens = %d, want 300", usage.InputTokens)
 		}
@@ -2604,6 +2606,64 @@ func TestTask(t *testing.T) {
 		}
 		if lastUsage.ReasoningOutputTokens != 11 {
 			t.Errorf("lastUsage.ReasoningOutputTokens = %d, want 11", lastUsage.ReasoningOutputTokens)
+		}
+	})
+
+	t.Run("NativeSkillWithoutDatedInput", func(t *testing.T) {
+		t.Parallel()
+		parser := claudecode.New().NewWire()
+		var entries []agent.TimedMessage
+		for _, record := range []struct {
+			line string
+			at   int64
+		}{
+			{`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"skill","name":"Skill","input":{"skill":"review"}}]}}`, 100},
+			{`{"type":"result","subtype":"success"}`, 102},
+		} {
+			messages, err := parser.ParseOutput([]byte(record.line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, message := range messages {
+				entries = append(entries, agent.TimedMessage{Message: message, ProducerTime: time.Unix(record.at, 0)})
+			}
+		}
+		live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		for _, entry := range entries {
+			live.addParsedMessage(entry)
+		}
+		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		replayed.SeedTimelineParts(nil, entries)
+		for _, tk := range []*Task{live, replayed} {
+			if snap := tk.Snapshot(); snap.Duration != 2*time.Second || snap.NumTurns != 1 {
+				t.Fatalf("duration = %v, turns = %d; want 2s, 1", snap.Duration, snap.NumTurns)
+			}
+		}
+	})
+	t.Run("MissingNativeTurnMetricsLiveAndReplay", func(t *testing.T) {
+		t.Parallel()
+		start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+		messages := []agent.TimedMessage{
+			{ProducerTime: start, Message: &agent.UserInputMessage{Text: "first"}},
+			{ProducerTime: start.Add(2 * time.Second), Message: &agent.ResultMessage{}},
+			{ProducerTime: start.Add(time.Hour), Message: &agent.UserInputMessage{Text: "second"}},
+			{ProducerTime: start.Add(time.Hour + 3*time.Second), Message: &agent.ResultMessage{}},
+			{ProducerTime: start.Add(time.Hour + 4*time.Second), Message: &agent.ResultMessage{Source: agent.MessageSource{DelegationToolUseID: "child"}, NumTurns: 99, DurationMs: 99000}},
+			{ProducerTime: start.Add(2 * time.Hour), Message: &agent.UserInputMessage{Text: "native"}},
+			{ProducerTime: start.Add(2*time.Hour + time.Minute), Message: &agent.ResultMessage{NumTurns: 4, DurationMs: 7000}},
+		}
+		live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		for _, message := range messages {
+			live.addParsedMessage(message)
+		}
+		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		replayed.SeedTimelineParts(nil, messages)
+		for _, tk := range []*Task{live, replayed} {
+			snapshot := tk.Snapshot()
+			turns, duration := snapshot.NumTurns, snapshot.Duration
+			if turns != 6 || duration != 12*time.Second {
+				t.Errorf("turns = %d, duration = %v; want 6, 12s", turns, duration)
+			}
 		}
 	})
 
@@ -2629,7 +2689,8 @@ func TestTask(t *testing.T) {
 			NumTurns:     2,
 			DurationMs:   3000,
 		})
-		costUSD, numTurns, duration, _, _ := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 		if costUSD != 15.0 {
 			t.Errorf("costUSD = %v, want 15.0", costUSD)
 		}
@@ -2662,7 +2723,8 @@ func TestTask(t *testing.T) {
 			NumTurns:    1,
 			DurationMs:  214500,
 		})
-		_, numTurns, duration, _, _ := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		numTurns, duration := snapshot.NumTurns, snapshot.Duration
 		if numTurns != 3 {
 			t.Errorf("numTurns = %d, want 3", numTurns)
 		}
@@ -2700,7 +2762,8 @@ func TestTask(t *testing.T) {
 			TotalCostUSD: 75.0,
 			NumTurns:     1,
 		})
-		costUSD, numTurns, _, _, _ := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		costUSD, numTurns := snapshot.CostUSD, snapshot.NumTurns
 		if costUSD != 225.0 {
 			t.Errorf("costUSD = %v, want 225.0 (three sessions × $75)", costUSD)
 		}
@@ -2720,7 +2783,8 @@ func TestTask(t *testing.T) {
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 5278},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 214500},
 		}))
-		_, numTurns, duration, _, _ := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		numTurns, duration := snapshot.NumTurns, snapshot.Duration
 		if numTurns != 3 {
 			t.Errorf("numTurns = %d, want 3", numTurns)
 		}
@@ -2753,7 +2817,8 @@ func TestTask(t *testing.T) {
 				DurationMs:   3000,
 			},
 		}))
-		costUSD, numTurns, duration, _, _ := tk.LiveStats()
+		snapshot := tk.Snapshot()
+		costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 		if costUSD != 15.0 {
 			t.Errorf("costUSD = %v, want 15.0", costUSD)
 		}
@@ -2778,7 +2843,7 @@ func TestTask(t *testing.T) {
 				CacheReadInputTokens: 10_000_000,
 			},
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if costUSD != 1.50 {
 			t.Errorf("costUSD = %v, want reported 1.50", costUSD)
 		}
@@ -2810,7 +2875,8 @@ func TestTask(t *testing.T) {
 			for _, m := range newMsgs() {
 				addTaskMessage(tk, m)
 			}
-			costUSD, numTurns, duration, _, _ := tk.LiveStats()
+			snapshot := tk.Snapshot()
+			costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
 			}
@@ -2827,7 +2893,8 @@ func TestTask(t *testing.T) {
 			tk := newTask()
 			tk.SetState(task.StatePurged)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMsgs()))
-			costUSD, numTurns, duration, _, _ := tk.LiveStats()
+			snapshot := tk.Snapshot()
+			costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
 			}
@@ -4348,8 +4415,8 @@ func TestTask(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "", "")
 		tk.UpdateDiskUsage(700)
 
-		if diskUsed, ok := tk.DiskUsage(); !ok || diskUsed != 700 {
-			t.Fatalf("DiskUsage() = (%d, %t), want (700, true)", diskUsed, ok)
+		if snapshot := tk.Snapshot(); !snapshot.DiskKnown || snapshot.DiskUsed != 700 {
+			t.Fatalf("disk usage = (%d, %t), want (700, true)", snapshot.DiskUsed, snapshot.DiskKnown)
 		}
 		history, _, unsub := tk.SubscribeStats(t.Context())
 		unsub()
@@ -4668,7 +4735,8 @@ func TestPricedCost(t *testing.T) {
 						addTaskMessage(tk, m)
 					}
 				}
-				_, _, _, total, last := tk.LiveStats()
+				snapshot := tk.Snapshot()
+				total, last := snapshot.Usage, snapshot.LastUsage
 				if total.InputTokens != 107 || last.InputTokens != 7 {
 					t.Fatalf("%s replay %v: total=%+v, context=%+v", h, replay, total, last)
 				}
@@ -4694,7 +4762,8 @@ func TestPricedCost(t *testing.T) {
 					addTaskMessage(tk, msg)
 				}
 			}
-			_, _, _, total, last := tk.LiveStats()
+			snapshot := tk.Snapshot()
+			total, last := snapshot.Usage, snapshot.LastUsage
 			want := agent.Usage{CacheCreationInputTokens: 117, CacheWrites: tokens.CacheWrites{{Tokens: 7}, {TTL: 5 * time.Minute, Tokens: 10}, {TTL: time.Hour, Tokens: 100}}}
 			if !total.Equal(want) || last.CacheCreationInputTokens != 7 {
 				t.Fatalf("replay %v: total=%+v, last=%+v", replay, total, last)
@@ -4747,7 +4816,8 @@ func TestPricedCost(t *testing.T) {
 						addTaskMessage(tk, msg)
 					}
 				}
-				cost, _, _, tokenCounts, _ := tk.LiveStats()
+				snapshot := tk.Snapshot()
+				cost, tokenCounts := snapshot.CostUSD, snapshot.Usage
 				if math.Abs(cost-wantCost) > 1e-9 || tokenCounts.InputTokens != resultUsage.InputTokens || tokenCounts.OutputTokens != resultUsage.OutputTokens {
 					t.Fatalf("exited %v/replay %v: cost=%v, tokens=%+v", exited, replay, cost, tokenCounts)
 				}
@@ -4779,7 +4849,7 @@ func TestPricedCost(t *testing.T) {
 			if first.TotalCostUSD != 0 || second.TotalCostUSD != 0 {
 				t.Errorf("replay=%v raw result costs = %v, %v; want 0, 0", replay, first.TotalCostUSD, second.TotalCostUSD)
 			}
-			if got, _, _, _, _ := tk.LiveStats(); got != 0.7 {
+			if got := tk.Snapshot().CostUSD; got != 0.7 {
 				t.Errorf("replay=%v task cost = %v, want 0.7", replay, got)
 			}
 		}
@@ -4813,12 +4883,12 @@ func TestPricedCost(t *testing.T) {
 					addTaskMessage(tk, m)
 				}
 			}
-			if got, _, _, _, _ := tk.LiveStats(); got != 0.95 {
+			if got := tk.Snapshot().CostUSD; got != 0.95 {
 				t.Errorf("replay=%v cost = %v, want 0.95", replay, got)
 			}
 		}
 	})
-	t.Run("OpenCodeZeroReportedCostUsesPricer", func(t *testing.T) {
+	t.Run("OpenCodeZeroReportedCostRemainsKnown", func(t *testing.T) {
 		t.Parallel()
 		const model = "zai-coding-plan/glm-4.7"
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, model, "")
@@ -4827,8 +4897,8 @@ func TestPricedCost(t *testing.T) {
 		zero := 0.0
 		addTaskMessage(tk, &agent.UsageMessage{CumulativeCostUSD: &zero})
 		addTaskMessage(tk, &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}})
-		if got, _, _, _, _ := tk.LiveStats(); got != 0.15 {
-			t.Errorf("cost = %v, want 0.15 API-equivalent pricing", got)
+		if snapshot := tk.Snapshot(); snapshot.CostUSD != 0 || !snapshot.CostKnown {
+			t.Errorf("cost = %v, want known zero", snapshot.CostUSD)
 		}
 	})
 
@@ -4865,8 +4935,8 @@ func TestPricedCost(t *testing.T) {
 						addTaskMessage(tk, m)
 					}
 				}
-				if cost, _, _, total, _ := tk.LiveStats(); math.Abs(cost-0.45) > 1e-9 || total.InputTokens != 3_000_000 {
-					t.Errorf("costUSD = %v, input = %d; want 0.45 and 3000000 including compaction", cost, total.InputTokens)
+				if snapshot := tk.Snapshot(); math.Abs(snapshot.CostUSD-0.45) > 1e-9 || snapshot.Usage.InputTokens != 3_000_000 {
+					t.Errorf("costUSD = %v, input = %d; want 0.45 and 3000000 including compaction", snapshot.CostUSD, snapshot.Usage.InputTokens)
 				}
 			})
 		}
@@ -4888,7 +4958,7 @@ func TestPricedCost(t *testing.T) {
 			ReportedModel: "zai/glm-5.3-flash",
 			Usage:         agent.Usage{InputTokens: 2_000_000, CacheReadInputTokens: 1_000_000},
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		want := 0.15 + 0.50 + 2*0.15 + 0.03
 		if costUSD != want {
 			t.Fatalf("costUSD = %v, want %v", costUSD, want)
@@ -4899,7 +4969,7 @@ func TestPricedCost(t *testing.T) {
 			TotalCostUSD:    0.01, // Last call only.
 			NumTurns:        2,
 		})
-		if costUSD, _, _, _, _ = tk.LiveStats(); costUSD != want {
+		if costUSD = tk.Snapshot().CostUSD; costUSD != want {
 			t.Errorf("costUSD after result = %v, want %v (must keep accumulated value)", costUSD, want)
 		}
 	})
@@ -4922,7 +4992,7 @@ func TestPricedCost(t *testing.T) {
 			Usage:       agent.Usage{InputTokens: 2_000_000, CacheReadInputTokens: 1_000_000},
 			NumTurns:    1,
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		want := 0.15 + 0.50 + 2*0.15 + 0.03
 		if costUSD != want {
 			t.Errorf("costUSD = %v, want %v", costUSD, want)
@@ -4943,7 +5013,7 @@ func TestPricedCost(t *testing.T) {
 			Usage:       agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
 			NumTurns:    1,
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if want := 2.0 + 0.20; costUSD != want {
 			t.Errorf("costUSD = %v, want %v", costUSD, want)
 		}
@@ -4969,7 +5039,7 @@ func TestPricedCost(t *testing.T) {
 			Usage:       agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
 			NumTurns:    1,
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if want := 2.0 + 0.20; costUSD != want {
 			t.Errorf("costUSD = %v, want %v (per-turn pricing only)", costUSD, want)
 		}
@@ -4994,7 +5064,7 @@ func TestPricedCost(t *testing.T) {
 			Usage:         agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
 		})
 		addTaskMessage(tk, &agent.ResultMessage{MessageType: "result", NumTurns: 1})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if want := 0.15 + 0.50; costUSD != want {
 			t.Errorf("costUSD = %v, want %v (assistant-record pricing only)", costUSD, want)
 		}
@@ -5013,7 +5083,7 @@ func TestPricedCost(t *testing.T) {
 			Usage:        agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
 			NumTurns:     1,
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if want := 10.0; costUSD != want {
 			t.Errorf("costUSD = %v, want %v (reported total)", costUSD, want)
 		}
@@ -5035,7 +5105,7 @@ func TestPricedCost(t *testing.T) {
 			ReportedModel: "zai/glm-5.3-flash",
 			Usage:         agent.Usage{InputTokens: 1_000_000},
 		})
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if costUSD != 0.30 {
 			t.Errorf("costUSD = %v, want 0.30", costUSD)
 		}
@@ -5051,7 +5121,7 @@ func TestPricedCost(t *testing.T) {
 			&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1},
 		}))
-		costUSD, _, _, _, _ := tk.LiveStats()
+		costUSD := tk.Snapshot().CostUSD
 		if costUSD != 0.15 {
 			t.Errorf("costUSD = %v, want 0.15", costUSD)
 		}

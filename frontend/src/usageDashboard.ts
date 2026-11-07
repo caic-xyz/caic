@@ -1,6 +1,40 @@
-// Usage dashboard range filtering and rollup aggregation for the web UI.
+// Usage dashboard aggregation preserves additive cost provenance across ranges and drill-downs.
 
-import type { UsageDashboardCount, UsageDashboardDay, UsageDashboardTokens } from "@sdk/types.gen";
+import type { UsageDashboardCost, UsageDashboardCount, UsageDashboardDay, UsageDashboardTokens } from "@sdk/types.gen";
+import { formatCost } from "./formatting";
+
+function emptyUsageCost(): UsageDashboardCost {
+  return { reportedUSD: 0, estimatedUSD: 0, reportedParts: 0, estimatedParts: 0, unknownParts: 0 };
+}
+
+function addUsageCost(total: UsageDashboardCost, cost: UsageDashboardCost): void {
+  total.reportedUSD += cost.reportedUSD;
+  total.estimatedUSD += cost.estimatedUSD;
+  total.reportedParts += cost.reportedParts;
+  total.estimatedParts += cost.estimatedParts;
+  total.unknownParts += cost.unknownParts;
+}
+
+export function usageCostSource(cost: UsageDashboardCost): "estimated" | "mixed" | "partial" | "reported" | "unknown" {
+  const reported = cost.reportedParts !== 0;
+  const estimated = cost.estimatedParts !== 0;
+  if (cost.unknownParts !== 0) return reported || estimated ? "partial" : "unknown";
+  if (reported && estimated) return "mixed";
+  if (reported) return "reported";
+  return estimated ? "estimated" : "unknown";
+}
+
+export function formatUsageCost(usd: number, cost: UsageDashboardCost): string {
+  const source = usageCostSource(cost);
+  if (source === "unknown") return usd === 0 ? "Unknown" : `${formatCost(usd)} · source unknown`;
+  if (source === "partial") {
+    const known = cost.reportedUSD + cost.estimatedUSD;
+    // Old rows can retain numeric amounts without proving their source.
+    if (Math.abs(usd - known) > 1e-9) return `${formatCost(usd)} · incomplete (${formatCost(known)} known)`;
+    return `${formatCost(usd)} known subtotal · incomplete`;
+  }
+  return `${formatCost(usd)} · ${source === "mixed" ? "reported + estimated" : source}`;
+}
 
 export type UsageRange = "7" | "30" | "90" | "all";
 
@@ -10,6 +44,7 @@ export interface UsageLeaderboardEntry {
   turns: number;
   compactions: number;
   costUSD: number;
+  cost: UsageDashboardCost;
   cacheHitRate?: number; // populated for harness entries
 }
 
@@ -32,6 +67,7 @@ export interface UsageDashboardSummary {
   compactions: number;
   subagentSpawns: number;
   costUSD: number;
+  cost: UsageDashboardCost;
   skills: UsageDashboardCount[];
   models: UsageLeaderboardEntry[];
   harnesses: UsageLeaderboardEntry[];
@@ -52,6 +88,7 @@ export interface UsageDailyPoint {
   day: string;
   tokens: number;
   costUSD: number;
+  cost: UsageDashboardCost;
   turns: number;
   compactions: number;
   subagentSpawns: number;
@@ -70,6 +107,7 @@ type DayView = Pick<
   | "compactions"
   | "subagentSpawns"
   | "costUSD"
+  | "cost"
   | "skills"
   | "repos"
   | "tools"
@@ -178,12 +216,14 @@ function addLeaderboard(
   turns: number,
   compactions: number,
   costUSD: number,
+  cost: UsageDashboardCost,
 ): void {
-  const entry = entries.get(name) ?? { name, tokens: 0, turns: 0, compactions: 0, costUSD: 0 };
+  const entry = entries.get(name) ?? { name, tokens: 0, turns: 0, compactions: 0, costUSD: 0, cost: emptyUsageCost() };
   entry.tokens += tokenTotal(tokens);
   entry.turns += turns;
   entry.compactions += compactions;
   entry.costUSD += costUSD;
+  addUsageCost(entry.cost, cost);
   entries.set(name, entry);
 }
 
@@ -246,6 +286,7 @@ export function summarizeUsageDays(
   let compactions = 0;
   let subagentSpawns = 0;
   let costUSD = 0;
+  const cost = emptyUsageCost();
 
   for (const day of days) {
     const view = dayView(day, drilldown);
@@ -258,6 +299,7 @@ export function summarizeUsageDays(
     compactions += view.compactions;
     subagentSpawns += view.subagentSpawns;
     costUSD += view.costUSD;
+    addUsageCost(cost, view.cost);
     for (const skill of view.skills) skills.set(skill.name, (skills.get(skill.name) ?? 0) + skill.count);
     for (const repo of view.repos) repos.set(repo.repo, (repos.get(repo.repo) ?? 0) + repo.tasks);
     // Both leaderboards stay visible under any filter by reading the
@@ -268,19 +310,19 @@ export function summarizeUsageDays(
       const harness = day.harnesses.find((entry) => entry.harness === drilldown.harness);
       for (const model of harness?.models ?? []) {
         if (drilldown.model && model.model !== drilldown.model) continue;
-        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD);
+        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD, model.cost);
       }
     } else {
       for (const model of day.models) {
         if (drilldown?.model && model.model !== drilldown.model) continue;
-        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD);
+        addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD, model.cost);
       }
     }
     if (drilldown?.model) {
       for (const harness of day.harnesses) {
         const pair = harness.models.find((entry) => entry.model === drilldown.model);
         if (!pair) continue;
-        addLeaderboard(harnesses, harness.harness, pair.tokens, pair.turns, pair.compactions, pair.costUSD);
+        addLeaderboard(harnesses, harness.harness, pair.tokens, pair.turns, pair.compactions, pair.costUSD, pair.cost);
         const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
         addTokens(combined, pair.tokens);
         harnessTokens.set(harness.harness, combined);
@@ -288,7 +330,15 @@ export function summarizeUsageDays(
     } else {
       for (const harness of day.harnesses) {
         if (drilldown?.harness && harness.harness !== drilldown.harness) continue;
-        addLeaderboard(harnesses, harness.harness, harness.tokens, harness.turns, harness.compactions, harness.costUSD);
+        addLeaderboard(
+          harnesses,
+          harness.harness,
+          harness.tokens,
+          harness.turns,
+          harness.compactions,
+          harness.costUSD,
+          harness.cost,
+        );
         const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
         addTokens(combined, harness.tokens);
         harnessTokens.set(harness.harness, combined);
@@ -326,6 +376,7 @@ export function summarizeUsageDays(
     compactions,
     subagentSpawns,
     costUSD,
+    cost,
     skills: counts([...skills].map(([name, count]) => ({ name, count }))),
     models: leaderboard(models),
     harnesses: leaderboard(harnesses).map((entry) => ({
@@ -361,6 +412,7 @@ export function usageDailySeries(
       inProgress: key === today,
       tokens: view ? tokenTotal(view.tokens) : 0,
       costUSD: view ? view.costUSD : 0,
+      cost: view ? view.cost : emptyUsageCost(),
       turns: view ? view.turns : 0,
       compactions: view ? view.compactions : 0,
       subagentSpawns: view ? view.subagentSpawns : 0,

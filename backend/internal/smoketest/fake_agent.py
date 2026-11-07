@@ -923,6 +923,29 @@ def main() -> None:
         if line.startswith("FAKE_CONCURRENT_STREAMS"):
             emit_concurrent_streams_turn(turns)
             continue
+        if line.startswith("FAKE_NATIVE_SKILL"):
+            # Canonical DSH tool projection, not native protocol evidence.
+            emit({"type": "skill_read", "id": "native-skill", "skill": "code-quality"})
+            emit({"type": "skill_load", "skill": "code-quality", "source_tool_use_id": "native-skill"})
+            emit({"type": "tool_use", "id": "native-skill", "name": "skill", "input": {"name": "code-quality"}})
+            emit({"type": "tool_output_delta", "tool_use_id": "native-skill", "delta": "Native skill contents"})
+            emit({"type": "tool_result", "tool_use_id": "native-skill"})
+            emit(
+                {
+                    "type": "native_subagent",
+                    "subagent": {
+                        "id": "dsh-child",
+                        "tool_use_id": "native-subagent",
+                        "label": "Review skill integration",
+                        "prompt": "Inspect code-quality integration",
+                        "status": "unknown",
+                        "background": True,
+                    },
+                }
+            )
+            emit_text("Native skill loaded.")
+            emit_result(turns, "Native skill complete")
+            continue
         if line.startswith("FAKE_SKILLS"):
             if "compact" in line:
                 emit({"type": "system", "subtype": "compact_boundary"})

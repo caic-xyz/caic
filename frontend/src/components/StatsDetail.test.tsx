@@ -16,6 +16,7 @@ const usage: TaskUsageSummary = {
   cacheWriteInputTokens: 2_000,
   costUSD: 0.125,
   costKnown: true,
+  costComplete: true,
   inputTokens: 1_000,
   outputTokens: 500,
 };
@@ -104,6 +105,19 @@ function readoutCenter(chart: Element): number {
 }
 
 describe("StatsContent", () => {
+  it("keeps partial zero qualified despite fully priced visible turns", () => {
+    const view = render(() => (
+      <StatsContent
+        tools={[]}
+        stats={[]}
+        turns={turns}
+        usage={{ ...usage, costUSD: 0, costKnown: true, costComplete: false }}
+      />
+    ));
+    expect(view.getByText("$0 known subtotal")).toBeInTheDocument();
+    expect(view.queryByText("Effective")).not.toBeInTheDocument();
+  });
+
   it("separates token categories and reports cache efficiency", async () => {
     const { findByTestId, getByTestId } = render(() => (
       <StatsContent tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]} stats={[]} turns={turns} usage={usage} />
@@ -123,7 +137,12 @@ describe("StatsContent", () => {
 
   it("shows an unavailable cost instead of zero when the harness reports none", () => {
     const { getByTestId } = render(() => (
-      <StatsContent tools={[]} stats={[]} turns={[]} usage={{ ...usage, costKnown: false, costUSD: 0 }} />
+      <StatsContent
+        tools={[]}
+        stats={[]}
+        turns={[]}
+        usage={{ ...usage, costKnown: false, costComplete: false, costUSD: 0 }}
+      />
     ));
 
     expect(getByTestId("task-usage-summary")).toHaveTextContent("Cost —");

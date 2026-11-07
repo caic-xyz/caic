@@ -37,6 +37,7 @@ func usageDashboardDay(day *usagedb.DayRollup) v1.UsageDashboardDay {
 		SubagentSpawns:           day.SubagentSpawns,
 		SubagentSpawnsBackground: day.SubagentSpawnsBackground,
 		CostUSD:                  day.CostUSD,
+		Cost:                     usageDashboardCost(day.Cost),
 		Models:                   usageDashboardModels(day.Models),
 		Harnesses:                usageDashboardHarnesses(day.Harnesses),
 		Repos:                    usageDashboardRepos(day.Repos),
@@ -92,6 +93,7 @@ func usageDashboardModels(models map[string]usagedb.ModelRollup) []v1.UsageDashb
 			Compactions:    model.Compactions,
 			SubagentSpawns: model.SubagentSpawns,
 			CostUSD:        model.CostUSD,
+			Cost:           usageDashboardCost(model.Cost),
 			ContextWindow:  model.ContextWindow,
 			Tools:          usageDashboardCounts(model.ToolCalls),
 			ToolTimings:    usageDashboardToolTimings(model.ToolTimings),
@@ -117,6 +119,7 @@ func usageDashboardHarnesses(harnesses map[string]usagedb.HarnessRollup) []v1.Us
 			Compactions:    harness.Compactions,
 			SubagentSpawns: harness.SubagentSpawns,
 			CostUSD:        harness.CostUSD,
+			Cost:           usageDashboardCost(harness.Cost),
 			Tools:          usageDashboardCounts(harness.ToolCalls),
 			ToolTimings:    usageDashboardToolTimings(harness.ToolTimings),
 			Skills:         usageDashboardCounts(harness.Skills),
@@ -125,6 +128,10 @@ func usageDashboardHarnesses(harnesses map[string]usagedb.HarnessRollup) []v1.Us
 		}
 	}
 	return out
+}
+
+func usageDashboardCost(cost data.CostProvenance) v1.UsageDashboardCost {
+	return v1.UsageDashboardCost{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}
 }
 
 func usageDashboardRepos(repos map[string]int) []v1.UsageDashboardRepo {

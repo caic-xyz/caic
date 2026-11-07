@@ -3717,7 +3717,7 @@ func TestManager(t *testing.T) {
 			if result.Status != "synced" || len(result.DiffStat) != 2 {
 				t.Fatalf("sync must preserve its pre-push report: %+v", result)
 			}
-			if got := tk.LiveDiffStat(); len(got) != 1 || got[0].Path != "pending.go" {
+			if got := tk.Snapshot().DiffStat; len(got) != 1 || got[0].Path != "pending.go" {
 				t.Fatalf("post-push stats must retain only pending edits: %+v", got)
 			}
 			if got := tk.Snapshot().RepoStates; len(got) != 1 || got[0].Ahead != 0 || got[0].LinesAdded != 1 {
@@ -5470,8 +5470,8 @@ func TestManager(t *testing.T) {
 				{Path: "frontend/src/App.tsx", LinesAdded: 10, LinesDeleted: 2},
 				{Path: "frontend/src/App.test.tsx", LinesAdded: 5, LinesDeleted: 1},
 			}
-			if got := adopted[0].Task().LiveDiffStat(); !slices.Equal(got, want) {
-				t.Fatalf("LiveDiffStat = %+v, want %+v", got, want)
+			if got := adopted[0].Task().Snapshot().DiffStat; !slices.Equal(got, want) {
+				t.Fatalf("DiffStat = %+v, want %+v", got, want)
 			}
 			wantStates := []logdata.RepoState{{
 				RepoIndex:        0,

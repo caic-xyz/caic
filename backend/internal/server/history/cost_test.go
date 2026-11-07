@@ -359,7 +359,7 @@ func testSourceCachePricing(t *testing.T) {
 		path := writeFixture(t,
 			`{"t":"caic_meta","version":3,"harness":"claude","model":"priced","prompt":"pricing"}`,
 			`{"t":"agent","ts":2.125,"msg":{"type":"assistant","message":{"model":"priced","id":"request","role":"assistant","content":[],"usage":{"cache_creation_input_tokens":350000,"cache_creation":{"ephemeral_5m_input_tokens":100000,"ephemeral_1h_input_tokens":200000}}}}}`,
-			`{"t":"agent","ts":3.000,"msg":{"type":"result","subtype":"success","total_cost_usd":99,"usage":{"cache_creation_input_tokens":350000}}}`,
+			`{"t":"agent","ts":3.000,"msg":{"type":"result","subtype":"success","usage":{"cache_creation_input_tokens":350000}}}`,
 		)
 		source, err := NewSource(t.Context(), path, "", backends.Default("", nil))
 		if err != nil {

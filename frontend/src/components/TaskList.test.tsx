@@ -20,6 +20,7 @@ function task(id: string): Task {
     stateUpdatedAt: "2026-09-03T00:00:00Z" as Task["stateUpdatedAt"],
     costUSD: 0,
     costKnown: false,
+    costComplete: false,
     duration: 0,
     numTurns: 0,
     cumulativeInputTokens: 0,
@@ -184,6 +185,18 @@ describe("TaskList", () => {
     expect(getByRole("button", { name: "Stopped (1)" })).toBeTruthy();
     expect(getByRole("button", { name: "archive: Purged (1)" })).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelector("[data-task-id='5']")).toBeTruthy();
+  });
+
+  it("distinguishes a reported zero from unknown cost across task updates", () => {
+    const [tasks, setTasks] = createSignal([{ ...task("1"), costKnown: true, costComplete: true }, task("2")]);
+    const { container } = render(() => <TaskList {...taskListProps([])} tasks={tasks} selectedId={null} />);
+    const first = container.querySelector('[data-task-id="1"]');
+    const second = container.querySelector('[data-task-id="2"]');
+    expect(first?.querySelector('[data-testid="task-card-cost"]')).toHaveTextContent("$0.00");
+    expect(second?.querySelector('[data-testid="task-card-cost"]')).toBeNull();
+    setTasks([task("1"), { ...task("2"), costKnown: true, costComplete: true }]);
+    expect(first?.querySelector('[data-testid="task-card-cost"]')).toBeNull();
+    expect(second?.querySelector('[data-testid="task-card-cost"]')).toHaveTextContent("$0.00");
   });
 
   it("reorders repositories when their last active task stops or revives without replacing other cards", () => {

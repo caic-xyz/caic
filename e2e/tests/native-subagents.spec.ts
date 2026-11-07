@@ -2,7 +2,7 @@
 import { test, expect } from "../helpers";
 
 for (const width of [390, 1280]) {
-  test(`native activity survives reload at ${width}px`, async ({ page, uniquePrompt }) => {
+  test(`native activity survives reload at ${width}px`, async ({ page, uniquePrompt }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
@@ -29,8 +29,9 @@ for (const width of [390, 1280]) {
     await expect(cards).toHaveCount(4);
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
-    await expect(page.getByText("Status unknown", { exact: true })).toBeVisible();
+    await expect(page.getByText("Completion not reported", { exact: true })).toBeVisible();
     await expect(page.getByText("Paused", { exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("native-subagents.png") });
   });
 }
 

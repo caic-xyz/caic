@@ -24,6 +24,7 @@ export interface TaskUsageSummary {
   outputTokens: number;
   costUSD: number;
   costKnown: boolean;
+  costComplete: boolean;
 }
 
 interface UsageDetails extends TaskUsageSummary {
@@ -61,7 +62,7 @@ function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
       total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
       total.totalTokens +=
         usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
-      if (completeCost) total.costUSD += turn.cost?.usd ?? 0;
+      if (turn.cost !== undefined) total.costUSD += turn.cost.usd;
       return total;
     },
     {
@@ -72,7 +73,8 @@ function sumTurnUsage(turns: readonly HistoryTurn[]): UsageDetails {
       reasoningOutputTokens: 0,
       totalTokens: 0,
       costUSD: 0,
-      costKnown: completeCost,
+      costKnown: turns.some((turn) => turn.cost !== undefined),
+      costComplete: completeCost,
     },
   );
 }
@@ -91,6 +93,7 @@ export function StatsContent(props: StatsContentProps) {
         props.usage.cacheReadInputTokens +
         props.usage.outputTokens,
       costKnown: props.usage.costKnown || fromTurns.costKnown,
+      costUSD: props.usage.costKnown ? props.usage.costUSD : fromTurns.costUSD,
     };
   });
   const cacheHitRate = () => {
@@ -141,9 +144,11 @@ export function StatsContent(props: StatsContentProps) {
             </span>
             <span>
               <span class={styles.usageLabel}>Cost </span>
-              {usage().costKnown ? formatUSD(usage().costUSD) : "—"}
+              {usage().costKnown
+                ? `${formatUSD(usage().costUSD)}${usage().costComplete ? "" : " known subtotal"}`
+                : "—"}
             </span>
-            <Show when={usage().costKnown && usage().costUSD > 0}>
+            <Show when={usage().costComplete && usage().costUSD > 0}>
               <span title="Reported cost divided by total token volume">
                 <span class={styles.usageLabel}>Effective </span>
                 {formatUSD(costPerMillionTokens())}/Mt

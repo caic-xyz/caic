@@ -257,6 +257,94 @@ func (r *closeErrorReader) Close() error { return r.err }
 
 func TestNewConn(t *testing.T) {
 	t.Parallel()
+	t.Run("SendPrompt", func(t *testing.T) {
+		t.Parallel()
+		sink := &testLogSink{}
+		owner := newTestRecordsWithHandler(t, t.Context(), sink, &testMessageParser{}, &testRecordHandler{})
+		if err := owner.AppendMessage(t.Context(), &MetaSessionMessage{SessionID: "session-1"}); err != nil {
+			t.Fatal(err)
+		}
+		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil)
+		if err := conn.SendPrompt(Prompt{Text: "first"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := owner.AppendMessage(t.Context(), ContextCleared()); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.SendPrompt(Prompt{Text: "second"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil {
+			t.Fatal(err)
+		}
+		var controls []*v3.SystemMessage
+		for line := range bytes.SplitSeq(bytes.TrimSpace(sink.Bytes()), []byte{'\n'}) {
+			frame, err := taskslog.DecodeFrame(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if frame.Kind == taskslog.KindInputDelivery {
+				m, ok := frame.Control.(*v3.SystemMessage)
+				if !ok {
+					t.Fatalf("control = %T", frame.Control)
+				}
+				if frame.ProducerTime.IsZero() {
+					t.Fatal("delivery has no producer time")
+				}
+				controls = append(controls, m)
+			}
+		}
+		if len(controls) != 4 {
+			t.Fatalf("controls = %+v", controls)
+		}
+		for i, session := range []string{"session-1", ""} {
+			start, completed := controls[i*2], controls[i*2+1]
+			if start.UUID == "" || completed.UUID != start.UUID || start.SessionID != session || completed.SessionID != session {
+				t.Fatalf("attempt identity = %+v %+v", start, completed)
+			}
+		}
+		if controls[0].UUID == controls[2].UUID {
+			t.Fatal("attempt identities reused")
+		}
+	})
+	t.Run("RecordInputFailure", func(t *testing.T) {
+		t.Parallel()
+		sink := &testLogSink{}
+		owner := newTestRecordsWithHandler(t, t.Context(), sink, &testMessageParser{}, &testRecordHandler{})
+		if err := owner.AppendMessage(t.Context(), &MetaSessionMessage{SessionID: "rejected-session"}); err != nil {
+			t.Fatal(err)
+		}
+		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil)
+		err := conn.RecordInputFailure(Prompt{Text: "rejected"}, io.ErrClosedPipe)
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("failure = %v", err)
+		}
+		if err := conn.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil {
+			t.Fatal(err)
+		}
+		parser, err := NewLogRecordParser(&testMessageParser{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var controls []*SystemMessage
+		for line := range bytes.SplitSeq(bytes.TrimSpace(sink.Bytes()), []byte{'\n'}) {
+			record, err := parser.ParseRecord(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, timed := range record.Messages {
+				if m, ok := timed.Message.(*SystemMessage); ok {
+					if timed.ProducerTime.IsZero() {
+						t.Fatal("missing producer timestamp")
+					}
+					controls = append(controls, m)
+				}
+			}
+		}
+		if len(controls) != 2 || controls[0].UUID == "" || controls[1].UUID != controls[0].UUID || controls[0].SessionID != "rejected-session" || controls[1].SessionID != "rejected-session" {
+			t.Fatalf("failure identity = %+v", controls)
+		}
+	})
 	t.Run("SendRaw", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
@@ -1153,10 +1241,12 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	}
 
 	var messages []Message
+	var producerAt time.Time
 	owner := newTestRecordsWithHandler(t, t.Context(), DiscardLogSink{}, &testMessageParser{output: func([]byte) ([]Message, error) {
 		return nil, nil
 	}}, &testRecordHandler{publish: func(parsed TimedMessage) error {
 		messages = append(messages, parsed.Message)
+		producerAt = parsed.ProducerTime
 		return nil
 	}})
 	err = NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(string(snapshot)+"\n")), nil)
@@ -1169,6 +1259,9 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	got, ok := messages[0].(*TurnCommitSnapshotMessage)
 	if !ok {
 		t.Fatalf("message = %T, want *TurnCommitSnapshotMessage", messages[0])
+	}
+	if producerAt.IsZero() {
+		t.Fatal("snapshot has no producer timestamp")
 	}
 	if !reflect.DeepEqual(got.RepositoryCommits, []v3.RepositoryCommit{commit}) {
 		t.Fatalf("snapshot = %+v, want commits %+v", got, []v3.RepositoryCommit{commit})
@@ -1493,6 +1586,88 @@ func TestRelayGenerationCommand(t *testing.T) {
 }
 
 func TestLogRecordParser(t *testing.T) {
+	t.Run("DecodeHistoryFrame", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			middle string
+			want   float64
+		}{
+			{"adjacent_input", `{"t":"input","ts":100.125,"msg":{"type":"user_input","text":"hello"}}`, 100.125},
+			{"intervening_record", `{"t":"log","line":"unrelated"}`, 0},
+			{"child_input", `{"t":"user_input","ts":100.125,"text":"child","source":{"agentID":"child"}}`, 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				parser, err := NewLogRecordParser(&testMessageParser{input: func([]byte) ([]Message, error) { return []Message{&UserInputMessage{Text: "hello"}}, nil }})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got []ParsedRecord
+				for i, line := range []string{
+					`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"s","uuid":"i"}`,
+					tc.middle,
+					`{"t":"input_delivery","subtype":"input_delivery_completed","session_id":"s","uuid":"i"}`,
+				} {
+					frame, err := taskslog.DecodeFrame([]byte(line))
+					if err != nil {
+						t.Fatal(err)
+					}
+					records, err := parser.DecodeHistoryFrame(&frame, uint64(i+1))
+					if err != nil {
+						t.Fatal(err)
+					}
+					got = append(got, records...)
+				}
+				got = append(got, parser.FlushHistory()...)
+				if len(got) != 3 {
+					t.Fatalf("records = %+v", got)
+				}
+				for _, expected := range []struct {
+					index int
+					id    uint64
+				}{{0, 1}, {2, 3}} {
+					index := expected.index
+					m, ok := got[index].Messages[0].Message.(*SystemMessage)
+					if !ok || m.Ts != tc.want || m.SessionID != "s" || m.UUID != "i" {
+						t.Fatalf("control = %+v", m)
+					}
+					if got[index].ID != expected.id {
+						t.Fatalf("record ID = %d", got[index].ID)
+					}
+					at := got[index].Messages[0].ProducerTime
+					if tc.want == 0 && !at.IsZero() || tc.want != 0 && at != time.UnixMilli(100125).UTC() {
+						t.Fatalf("time = %s", at)
+					}
+				}
+			})
+		}
+		t.Run("unmatched_start", func(t *testing.T) {
+			t.Parallel()
+			parser, err := NewLogRecordParser(&testMessageParser{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame, err := taskslog.DecodeFrame([]byte(`{"t":"input_delivery","subtype":"input_delivery_started","session_id":"","uuid":""}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			records, err := parser.DecodeHistoryFrame(&frame, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 0 {
+				t.Fatal("untimed start was not deferred")
+			}
+			records = parser.FlushHistory()
+			if len(records) != 1 || records[0].ID != 7 || !records[0].Messages[0].ProducerTime.IsZero() {
+				t.Fatalf("unmatched = %+v", records)
+			}
+			if len(parser.FlushHistory()) != 0 {
+				t.Fatal("flush duplicated record")
+			}
+		})
+	})
 	t.Run("ResultCacheLifetimeBuckets", func(t *testing.T) {
 		t.Parallel()
 		parser, err := NewLogRecordParser(&testMessageParser{input: testParseFn, output: testParseFn})

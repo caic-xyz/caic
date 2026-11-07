@@ -157,8 +157,7 @@ type Task struct {
 	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
 	turnStartedAt   time.Time       // when the current running turn started; zero when not running
 	costTracker     task.CostTracker
-	liveNumTurns    int
-	liveDuration    time.Duration
+	turnMetrics     task.TurnMetrics
 	liveUsage       agent.Usage
 	lastUsage       agent.Usage  // Most recent ResultMessage usage (active context).
 	lastAPIUsage    agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
@@ -512,22 +511,6 @@ func (t *Task) HasSession() bool {
 	return t.handle != nil
 }
 
-// LiveStats returns the latest cost, turn count, duration, cumulative token
-// usage, and the most recent turn's usage (active context).
-func (t *Task) LiveStats() (costUSD float64, numTurns int, duration time.Duration, cumulativeUsage, lastTurnUsage agent.Usage) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.costTracker.TotalUSD, t.liveNumTurns, t.liveDuration, t.liveUsage.Clone(), t.lastUsage.Clone()
-}
-
-// LiveCostKnown reports whether the live fold established a cost. False means
-// the harness supplied no billable usage or reported cost.
-func (t *Task) LiveCostKnown() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.costTracker.Known
-}
-
 // LastAgentResult returns the result text from the most recent ResultMessage,
 // falling back to the visible text of that turn when the agent reported
 // none, or "" if no result was received. Used by Cleanup/StopTask for the
@@ -556,13 +539,6 @@ func (t *Task) LastExitError() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.exitStatus.Error
-}
-
-// LiveDiffStat returns the latest diff stat from the relay's periodic polling.
-func (t *Task) LiveDiffStat() v3.DiffStat {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.liveDiffStat
 }
 
 // DiffCreated reports whether any non-empty diff was observed for the task.
@@ -682,6 +658,7 @@ type Snapshot struct {
 	PlanExitID         string
 	CostUSD            float64
 	CostKnown          bool
+	CostComplete       bool
 	NumTurns           int
 	Duration           time.Duration
 	Usage              agent.Usage
@@ -943,10 +920,11 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// supersedes it so only the latest plan is visible.
 	//
 	// Live stats: Claude's TotalCostUSD is cumulative until context_cleared.
-	// DurationMs and NumTurns are per-invocation, so they always accumulate.
+	// Completed root metrics preserve native values or measure producer time.
 	// Token usage is always summed.
 	for _, entry := range view.Forward() {
 		msg := entry.Message
+		t.turnMetrics.Observe(msg, entry.ProducerTime)
 		t.exitStatus.Observe(msg)
 		if msg.Provenance().IsChild() {
 			switch m := msg.(type) {
@@ -1002,8 +980,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 				t.diffCreated = true
 			}
 			t.lastUsage = m.Usage
-			t.liveNumTurns += m.NumTurns
-			t.liveDuration += time.Duration(m.DurationMs) * time.Millisecond
 		}
 		t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 		// Forward the folded message to the usage rollup with the cost
@@ -1344,13 +1320,6 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 	t.mu.Unlock()
 }
 
-// DiskUsage returns the latest writable-layer measurement, when one is known.
-func (t *Task) DiskUsage() (int64, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.diskUsed, t.diskKnown
-}
-
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that
 // receives only live stats arriving after the snapshot. Cancellation or
 // unsubscribing closes the channel and removes the subscriber.
@@ -1651,8 +1620,9 @@ func (t *Task) snapshotLocked() Snapshot {
 		PlanExitID:         t.planExitID,
 		CostUSD:            t.costTracker.TotalUSD,
 		CostKnown:          t.costTracker.Known,
-		NumTurns:           t.liveNumTurns,
-		Duration:           t.liveDuration,
+		CostComplete:       t.costTracker.Complete(),
+		NumTurns:           t.turnMetrics.NumTurns,
+		Duration:           t.turnMetrics.Duration,
 		Usage:              t.liveUsage.Clone(),
 		LastUsage:          t.lastUsage.Clone(),
 		LastAPIUsage:       t.lastAPIUsage.Clone(),
@@ -1886,6 +1856,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	}
 	parsed.ProducerTime = at
 	t.timeline = append(t.timeline, parsed)
+	t.turnMetrics.Observe(m, producerAt)
 	visible := t.exitStatus.Observe(m)
 	if sm, ok := m.(*agent.SystemMessage); ok && !child {
 		switch sm.Subtype {
@@ -2005,8 +1976,6 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
 		t.lastUsage = rm.Usage
-		t.liveNumTurns += rm.NumTurns
-		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
 		if rm.ContextWindow > 0 {
 			t.reportedContextWindow = rm.ContextWindow
 		}
@@ -2241,7 +2210,7 @@ func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.T
 		return
 	}
 	model, effort := t.rollupAttributionLocked(m)
-	e, ok := rollupEvent(m, at, producerAt, replayed, model, effort, t.costTracker.TotalUSD)
+	e, ok := rollupEvent(m, at, producerAt, replayed, model, effort, t.costTracker.Snapshot())
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}

@@ -247,7 +247,7 @@ describe("NativeActivityTracker", () => {
     assert.ok(folded[1] !== undefined);
     expect(folded[1].status).toBe("running");
     expect(nativeActivityStatus(folded[1], true)).toBe("Last observed running · outcome unknown");
-    expect(nativeActivityStatus(folded[0], false)).toBe("Status unknown");
+    expect(nativeActivityStatus(folded[0], false)).toBe("Completion not reported");
   });
 
   it("keeps a detached launch marked after later foreground observations", () => {

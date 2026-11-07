@@ -104,6 +104,51 @@ func TestStore(t *testing.T) {
 
 	t.Run("Observe", func(t *testing.T) {
 		t.Parallel()
+		t.Run("cost provenance replaces estimates after restart", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			meta := testMeta(ksid.NewID())
+			s := newTestStore(t, dir)
+			estimated := Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostUSD: 2, CostProvenance: data.CostProvenance{EstimatedUSD: 2, EstimatedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1}}
+			s.Observe(meta, &estimated)
+			if got := s.Days()[0]; got.CostUSD != 2 || got.Cost.EstimatedUSD != 2 || got.Cost.EstimatedParts != 1 {
+				t.Fatalf("estimate = %+v", got)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restored := newTestStore(t, dir)
+			estimated.Replayed = true
+			restored.Observe(meta, &estimated)
+			restored.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.25, CostProvenance: data.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			want := data.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}
+			if got := restored.Days()[0]; got.CostUSD != 0.25 || got.Cost != want || got.Turns != 2 {
+				t.Fatalf("reported replacement = %+v", got)
+			}
+			rows := readRows(t, dir, "2026-02-05")
+			if len(rows) != 2 || rows[1].Cost == nil || rows[1].Cost.EstimatedUSD != -2 || rows[1].Cost.EstimatedParts != -1 {
+				t.Fatalf("correction rows = %+v", rows)
+			}
+			restored.Discard(meta)
+			if err := restored.Close(); err != nil {
+				t.Fatal(err)
+			}
+			purged := newTestStore(t, dir)
+			if got := purged.Days()[0]; got.CostUSD != 0.25 || got.Cost != want {
+				t.Fatalf("purged cost = %+v", got)
+			}
+		})
+		t.Run("reported zero is not backfilled", func(t *testing.T) {
+			t.Parallel()
+			s := newTestStore(t, t.TempDir())
+			s.Observe(testMeta(ksid.NewID()), &Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostProvenance: data.CostProvenance{ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1, TokenBuckets: data.TokenBuckets{Input: 100}}})
+			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { t.Error("reported zero reached estimator"); return 99, true }); err != nil {
+				t.Fatal(err)
+			}
+			if got := s.Days()[0]; got.CostUSD != 0 || got.Cost != (data.CostProvenance{ReportedParts: 1}) {
+				t.Fatalf("known zero = %+v", got)
+			}
+		})
 
 		t.Run("turn flush", func(t *testing.T) {
 			t.Parallel()
@@ -292,7 +337,7 @@ func TestStore(t *testing.T) {
 			}
 			s := newTestStore(t, dir)
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, CostProvenance: data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
 			if len(s.pending[meta.TaskID.String()].buckets) != 1 {
 				t.Fatalf("failed delta must stay pending")
 			}
@@ -302,7 +347,7 @@ func TestStore(t *testing.T) {
 			if err := os.Remove(dayDir); err != nil {
 				t.Fatal(err)
 			}
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, CostProvenance: data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
 			rows := readRows(t, s.dir, "2026-02-05")
 			if len(rows) != 1 {
 				t.Fatalf("rows = %d, want 1", len(rows))
@@ -310,7 +355,7 @@ func TestStore(t *testing.T) {
 			if rows[0].CostUSD != 0.50 {
 				t.Errorf("costUSD = %v, want 0.50 written exactly once", rows[0].CostUSD)
 			}
-			if days := s.Days(); days[0].CostUSD != 0.50 {
+			if days := s.Days(); days[0].CostUSD != 0.50 || days[0].Cost != (data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}) {
 				t.Errorf("aggregate costUSD = %v, want 0.50", days[0].CostUSD)
 			}
 		})
@@ -596,6 +641,38 @@ func TestStore(t *testing.T) {
 
 	t.Run("BackfillMissingCosts", func(t *testing.T) {
 		t.Parallel()
+		t.Run("published numeric costs keep their recorded source", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "2026-02-05.jsonl")
+			original := []byte(`{"kind":"usage","day":"2026-02-05","task_id":"ambiguous","model":"old","cost_usd":0.4,"turns":1}` + "\n" + `{"kind":"usage","day":"2026-02-05","task_id":"estimate","model":"old","cost_usd":0.2,"cost_estimated":true,"turns":1}` + "\n")
+			if err := os.WriteFile(path, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s := newTestStore(t, dir)
+			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) {
+				t.Error("published numeric row reached estimator")
+				return 99, true
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
+				yield(data.UsageRow{Day: "2026-02-05", Model: "old", CostUSD: 99, Cost: &data.CostProvenance{ReportedUSD: 99, ReportedParts: 1}}, nil)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			days := s.Days()
+			if len(days) != 1 || math.Abs(days[0].CostUSD-.6) > 1e-12 || days[0].Cost != (data.CostProvenance{EstimatedUSD: .2, EstimatedParts: 1, UnknownParts: 1}) {
+				t.Fatalf("published totals/source changed = %+v", days)
+			}
+			after, err := os.ReadFile(path) //nolint:gosec // owned test fixture.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, original) {
+				t.Fatal("historical numeric rows were rewritten")
+			}
+		})
 
 		t.Run("prices compressed day without unpacking it", func(t *testing.T) {
 			t.Parallel()
@@ -640,12 +717,26 @@ func TestStore(t *testing.T) {
 		t.Run("reconciles estimated and reported costs", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			s := newTestStore(t, dir)
 			missing := testMeta(ksid.NewID())
 			reported := testMeta(ksid.NewID())
-			s.Observe(missing, &Event{At: atUTC(5, 10, 0, 0), Model: "missing", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
-			s.Observe(reported, &Event{At: atUTC(5, 10, 0, 0), Model: "reported", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
-			s.Observe(reported, &Event{At: atUTC(5, 10, 0, 1), Model: "reported", CostUSD: 0.4, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 20}}})
+			// Published legacy rows have no provenance object. Recover them from
+			// disk rather than weakening the live cumulative snapshot contract.
+			originalRows := []data.UsageRow{
+				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: missing.TaskID.String(), Harness: "claude", Model: "missing", Output: 10},
+				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: reported.TaskID.String(), Harness: "claude", Model: "reported", Output: 5},
+				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: reported.TaskID.String(), Harness: "claude", Model: "reported", Output: 20, CostUSD: .4},
+			}
+			var fixture bytes.Buffer
+			for _, row := range originalRows {
+				if err := json.NewEncoder(&fixture).Encode(row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "2026-02-05.jsonl"), fixture.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s := newTestStore(t, dir)
+
 			s.ObserveQuota(&QuotaChange{At: atUTC(5, 10, 0, 2), Provider: "codex", Window: "5h", Status: "available"})
 			day := "2026-02-05"
 			path := filepath.Join(dir, day+".jsonl")
@@ -894,6 +985,7 @@ func BenchmarkObserveTurnFlush(b *testing.B) {
 			e.At = at.Add(time.Duration(turn*4+stage+1) * time.Millisecond)
 			costs[i] += .01
 			e.CostUSD = costs[i]
+			e.CostProvenance = data.CostProvenance{ReportedUSD: costs[i], ReportedParts: turn/tasks*4 + stage + 1}
 			e.TurnBoundary = stage == 3
 			e.Delta.Turns = 0
 			if e.TurnBoundary {

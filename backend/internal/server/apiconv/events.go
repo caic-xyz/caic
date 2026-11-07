@@ -1,4 +1,4 @@
-// Agent event conversions to API v1 SSE DTOs, excluding private input-delivery controls.
+// Agent event conversions to API v1 SSE DTOs, excluding private delivery controls and reported skill machinery.
 
 package apiconv
 
@@ -40,6 +40,7 @@ type ToolTimingTracker struct {
 	pending          map[agent.ToolKey]time.Time
 	window           task.ResultTextWindow
 	skillReads       agent.SkillReadTracker // Confirms inferred skill loads.
+	skillTools       agent.SkillToolTracker // Hides reported skill machinery after accounting.
 	presentedSession string                 // Root session start already projected by native init or restoration.
 }
 
@@ -58,7 +59,21 @@ func NewToolTimingTracker(taskID string, h harness.Name, model string, pricer us
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
 // The physical record ID and zero-based parsed message index address its images.
 func (tt *ToolTimingTracker) ConvertMessage(recordID uint64, messageIndex int, msg agent.Message, now time.Time) []v1.EventMessage {
+	hidden := tt.skillTools.Observe(msg)
+	// Fold timing and skill confirmation even when the generic tool is hidden.
 	events := tt.convertMessage(recordID, messageIndex, msg, now)
+	if hidden {
+		filtered := events[:0]
+		for i := range events {
+			switch events[i].Kind {
+			case v1.EventKindToolUse, v1.EventKindToolResult, v1.EventKindToolOutputDelta:
+				continue
+			default:
+				filtered = append(filtered, events[i])
+			}
+		}
+		events = filtered
+	}
 	for i := range events {
 		events[i].Source = v1.EventMessageSource(*msg.Provenance())
 	}

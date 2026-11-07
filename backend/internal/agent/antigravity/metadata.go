@@ -1,4 +1,4 @@
-// Projects Antigravity conversation metadata and deduplicated DONE-step accounting without transcript payloads.
+// Projects payload-free Antigravity input/activity timing, conversation metadata, and deduplicated DONE-step accounting.
 
 package antigravity
 
@@ -107,7 +107,17 @@ type metadataField struct {
 
 type metadataParser struct{ accounting }
 
-func (*metadataParser) ParseInput([]byte) ([]agent.Message, error) { return nil, nil }
+// ParseInput preserves a native prompt boundary without retaining its content.
+func (*metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
+	typ, err := agent.JSONString(line, "event")
+	if err != nil {
+		return nil, err
+	}
+	if antigravity.EventType(typ) == antigravity.EventUser {
+		return []agent.Message{&agent.UserInputMessage{}}, nil
+	}
+	return nil, nil
+}
 
 func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 	event, err := agent.JSONString(line, "event")
@@ -136,6 +146,11 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		step.State = antigravity.StepState(state)
+		typ, err := agent.JSONString(line, "step_update", "step_type")
+		if err != nil {
+			return nil, err
+		}
+		step.StepType = antigravity.StepType(typ)
 		for _, field := range []metadataField{
 			{"step_index", &step.StepIndex}, {"usage", &step.Usage},
 		} {
@@ -178,7 +193,14 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 			}
 		}
 		p.observeRelationships(&step)
-		messages, _ := p.observeStep(&step)
+		messages, accepted := p.observeStep(&step)
+		text, err := agent.JSONField(line, "step_update", "text_delta")
+		if err != nil {
+			return nil, err
+		}
+		if accepted && (step.StepType == antigravity.StepTool || step.StepType == antigravity.StepAgentResponse && len(text) > 2 && string(text) != "null") {
+			messages = append(messages, &agent.TextDeltaMessage{Source: p.conversationSource(step.ConversationID)})
+		}
 		return messages, nil
 	case antigravity.EventResult:
 		id, err := agent.JSONString(line, "result", "conversation_id")

@@ -1872,7 +1872,10 @@ data class Task(
     /** Pushed compact per-repo Git state from the latest diff probe. */
     val repoStates: List<GitRepositoryState>? = null,
     @SerialName("costUSD") val costUSD: Double,
+    /** True when any cost is known; costUSD may be a subtotal. */
     val costKnown: Boolean,
+    /** True when costUSD covers all observed billed usage. */
+    val costComplete: Boolean,
     /** Seconds. */
     val duration: Double,
     val numTurns: Int,
@@ -2469,6 +2472,8 @@ data class LocalWindow(
     /** "1h", "6h", "24h" */
     val duration: String,
     @SerialName("costUSD") val costUSD: Double,
+    /** True when all included billed usage has known cost; otherwise costUSD is a known subtotal. */
+    val costKnown: Boolean,
     val inputTokens: Int,
     val outputTokens: Int,
 )
@@ -2502,6 +2507,20 @@ data class UsageDashboardTokens(
     val cacheReadTokens: Long,
     val outputTokens: Long,
     val reasoningTokens: Long,
+)
+
+/**
+ * UsageDashboardCost preserves additive cost provenance across range filters.
+ * Signed parts retain known zeros and cancel estimates replaced by reports.
+ * UnknownParts also marks amounts in rows whose source cannot be proven.
+ */
+@Serializable
+data class UsageDashboardCost(
+    @SerialName("reportedUSD") val reportedUSD: Double,
+    @SerialName("estimatedUSD") val estimatedUSD: Double,
+    val reportedParts: Int,
+    val estimatedParts: Int,
+    val unknownParts: Int,
 )
 
 /** UsageDashboardCount is a named counter such as a skill read or tool call. */
@@ -2551,6 +2570,7 @@ data class UsageDashboardModel(
     val compactions: Int,
     val subagentSpawns: Int,
     @SerialName("costUSD") val costUSD: Double,
+    val cost: UsageDashboardCost,
     val contextWindow: Int,
     val tools: List<UsageDashboardCount>,
     val toolTimings: List<UsageDashboardToolTiming>,
@@ -2574,6 +2594,7 @@ data class UsageDashboardHarness(
     val compactions: Int,
     val subagentSpawns: Int,
     @SerialName("costUSD") val costUSD: Double,
+    val cost: UsageDashboardCost,
     val tools: List<UsageDashboardCount>,
     val toolTimings: List<UsageDashboardToolTiming>,
     val skills: List<UsageDashboardCount>,
@@ -2597,6 +2618,7 @@ data class UsageDashboardDay(
     val subagentSpawns: Int,
     val subagentSpawnsBackground: Int,
     @SerialName("costUSD") val costUSD: Double,
+    val cost: UsageDashboardCost,
     val models: List<UsageDashboardModel>,
     val harnesses: List<UsageDashboardHarness>,
     val repos: List<UsageDashboardRepo>,

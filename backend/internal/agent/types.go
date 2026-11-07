@@ -259,10 +259,9 @@ type ToolUseMessage struct {
 // Type implements Message.
 func (m *ToolUseMessage) Type() string { return "tool_use" }
 
-// SkillReadMessage records that the harness loaded a skill into the
-// conversation context (Claude Code's Skill tool). It is usage metadata for
-// analytics and is never rendered in the visible timeline; the tool call and
-// its result stay out of the transcript.
+// SkillReadMessage records a harness-reported or inferred skill read.
+// Reported skill calls are hidden from the visible transcript; inferred file
+// reads keep their ordinary tool presentation.
 //
 // A reported read counts the invocation at its timestamp, whatever its
 // outcome and whichever agent made it; SkillLoadMessage reports what entered
@@ -274,12 +273,14 @@ func (m *ToolUseMessage) Type() string { return "tool_use" }
 type SkillReadMessage struct {
 	MessageProvenance
 
+	// ToolUseID identifies reported skill machinery hidden from presentation.
+	// This read precedes any generic tool messages retained for that invocation.
 	ToolUseID string `json:"id"`
 	Skill     string `json:"skill"`
 	Args      string `json:"args,omitempty"`
 	// SourceToolUseID links an inferred read to the file-opening tool's
-	// outcome. It is separate from ToolUseID, which suppresses Claude's
-	// reported Skill tool result in the timeline.
+	// outcome. It is separate from ToolUseID, which suppresses reported native
+	// skill machinery in the timeline.
 	SourceToolUseID string `json:"source_tool_use_id,omitempty"`
 	// Inferred marks a read recovered from the path a tool opened rather than
 	// reported by the harness. An inferred read accompanies its tool call
@@ -598,6 +599,7 @@ type TurnCommitSnapshotMessage v3.TurnCommitSnapshotMessage
 func NewTurnCommitSnapshotMessage(commits []v3.RepositoryCommit, baseline bool, changeStat *v3.ChangeStat) *TurnCommitSnapshotMessage {
 	return &TurnCommitSnapshotMessage{
 		MessageType:       messageTypeTurnCommitSnapshot,
+		Ts:                producerTimestamp(),
 		Baseline:          baseline,
 		RepositoryCommits: append([]v3.RepositoryCommit(nil), commits...),
 		ChangeStat:        changeStat,
@@ -626,7 +628,9 @@ type ResultMessage struct {
 	// Claude reports a cumulative session total, while Codex omits it.
 	// Derived per-turn costs belong to the task projection, not persisted logs.
 	TotalCostUSD float64 `json:"total_cost_usd"`
-	Usage        Usage   `json:"usage"`
+	// CostReported preserves an explicit native zero; absent fields remain unknown.
+	CostReported bool  `json:"-"`
+	Usage        Usage `json:"usage"`
 	// ContextWindow is the active model's context window size in tokens. It is
 	// set by harnesses that report the window with the turn result (Claude Code)
 	// and is 0 when they do not.

@@ -6,20 +6,167 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/maruel/gomode/mcp"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
 )
+
+func TestLocalUsage(t *testing.T) {
+	t.Parallel()
+	t.Run("within-task coverage survives terminal and cached reload", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name     string
+			reported float64
+			mixed    bool
+		}{{"complete zero", 0, false}, {"partial zero", 0, true}, {"partial positive", .25, true}} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "coverage"}, harness.Pi)
+				messages := []agent.TimedMessage{{Message: &agent.UsageMessage{Additive: true, PerCall: true, ReportedCostUSD: &tc.reported, Usage: agent.Usage{InputTokens: 10}}}}
+				if tc.mixed {
+					messages = append(messages, agent.TimedMessage{Message: &agent.UsageMessage{Additive: true, PerCall: true, Usage: agent.Usage{InputTokens: 20}}})
+				}
+				messages = append(messages, agent.TimedMessage{Message: &agent.ResultMessage{}})
+				live.SeedTimelineParts(nil, messages)
+				snapshot := live.Snapshot()
+				result := &task.Result{State: task.StatePurged, CostUSD: snapshot.CostUSD, CostKnown: snapshot.CostKnown, CostComplete: snapshot.CostComplete, Usage: snapshot.Usage}
+				dir := t.TempDir()
+				trailer := taskhistory.ResultMessage("", result)
+				trailer.MessageType = "result"
+				encoded, err := json.Marshal(trailer)
+				if err != nil {
+					t.Fatal(err)
+				}
+				header, err := taskslog.EncodeHeader(&v3.MetaMessage{MessageType: "caic_meta", Version: 3, Harness: "pi", Prompt: "coverage", StartedAt: live.StartedAt})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, live.ID.String()+".jsonl"), append(append(header, '\n'), append(encoded, '\n')...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				logs := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(dir), backends.Default("", nil))
+				for _, phase := range []string{"live", "terminal", "cold", "cached"} {
+					t.Run(phase, func(t *testing.T) { //nolint:paralleltest // Ordered cold/cache reloads exercise one retained task.
+						s := newTestRouter(t, nil)
+						tk := live
+						if phase == "cold" || phase == "cached" {
+							loaded, err := logs.LoadForTaskIDs([]string{live.ID.String()})
+							if err != nil {
+								t.Fatal(err)
+							}
+							if len(loaded) != 1 || loaded[0].LastTrailer == nil {
+								t.Fatalf("restored=%+v", loaded)
+							}
+							result = loaded[0].LastTrailer
+							tk = mustNewTask(t, live.ID, agent.Prompt{Text: "restored"}, harness.Pi)
+							tk.StartedAt = loaded[0].StartedAt
+						}
+						insertTestTask(s, tk.ID, tk)
+						if phase != "live" {
+							entry, _ := s.taskMgr.GetEntry(tk.ID)
+							entry.Finish(result)
+						}
+						w := httptest.NewRecorder()
+						s.buildAPIHandler().ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+tk.ID.String(), nil))
+						var dto v1.Task
+						if err := json.Unmarshal(w.Body.Bytes(), &dto); err != nil {
+							t.Fatal(err)
+						}
+						if w.Code != 200 || !dto.CostKnown || dto.CostComplete == tc.mixed || dto.CostUSD != tc.reported {
+							t.Fatalf("task subtotal/completeness lost: %d %+v", w.Code, dto)
+						}
+						for _, window := range localUsage(s.taskMgr, time.Now()).Windows {
+							if window.CostKnown == tc.mixed || window.CostUSD != tc.reported {
+								t.Fatalf("local coverage=%+v", window)
+							}
+						}
+						summary := taskMCPSummary(1, &dto)
+						detail, err := taskMCPDetail(1, &dto)
+						if err != nil || !summary.CostKnown || !detail.CostKnown || summary.CostComplete == tc.mixed || detail.CostComplete == tc.mixed {
+							t.Fatalf("MCP coverage lost: %+v %+v %v", summary, detail, err)
+						}
+						tools := &mcpTools{usage: s.usageHandlers}
+						text := toolTextOutput(t, tools.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{}).Structured)
+						if tc.mixed && tc.reported == 0 && !strings.HasPrefix(text, "1h cost: unknown (") {
+							t.Fatalf("partial zero looks free: %s", text)
+						}
+						if tc.mixed && tc.reported > 0 && !strings.HasPrefix(text, "1h cost: $0.25 known subtotal; total unknown (") {
+							t.Fatalf("subtotal hidden: %s", text)
+						}
+						if !tc.mixed && !strings.HasPrefix(text, "1h cost: $0.00 (") {
+							t.Fatalf("known zero lost: %s", text)
+						}
+					})
+				}
+			})
+		}
+	})
+
+	for _, terminal := range []bool{false, true} {
+		name := "live"
+		if terminal {
+			name = "completed"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, known := range []bool{false, true} {
+				name := "unpriced DSH"
+				h := harness.Dsh
+				if known {
+					name, h = "reported zero", harness.Claude
+				}
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, h)
+					tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{CostReported: known}}})
+					insertTestTask(s, tk.ID, tk)
+					if terminal {
+						entry, _ := s.taskMgr.GetEntry(tk.ID)
+						entry.Finish(&task.Result{State: task.StatePurged, CostKnown: known, CostComplete: known})
+					}
+					w := httptest.NewRecorder()
+					s.usageHandlers.handleGetUsage(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/usage", nil))
+					var got v1.UsageResp
+					if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+						t.Fatal(err)
+					}
+					if len(got.Local.Windows) != 3 {
+						t.Fatalf("windows = %+v", got.Local.Windows)
+					}
+					for _, window := range got.Local.Windows {
+						if window.CostKnown != known || window.CostUSD != 0 {
+							t.Fatalf("window = %+v; want costKnown=%v and zero USD", window, known)
+						}
+					}
+				})
+			}
+		})
+	}
+}
 
 type quotaUpdateWriter struct {
 	*httptest.ResponseRecorder
@@ -152,10 +299,11 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 		Harness: "claude",
 		Repos:   []string{"caic", "sdk"},
 	}, &usagedb.Event{
-		At:           at,
-		Model:        "claude-opus",
-		CostUSD:      0.12,
-		TurnBoundary: true,
+		At:             at,
+		Model:          "claude-opus",
+		CostUSD:        0.12,
+		CostProvenance: data.CostProvenance{ReportedUSD: .12, ReportedParts: 1},
+		TurnBoundary:   true,
 		Delta: data.Delta{
 			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheWrites: []data.CacheWrite{{TTLSeconds: 7200, Tokens: 50}}, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
@@ -200,12 +348,16 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	if model.Repos[0].Repo != "caic" || model.Repos[1].Repo != "sdk" || model.Repos[0].Tasks != 1 {
 		t.Errorf("model repos = %#v", model.Repos)
 	}
-	harness := day.Harnesses[0]
-	if harness.Tools[0] != (v1.UsageDashboardCount{Name: "Read", Count: 2}) || harness.ToolTimings[0].DurationMs != 1250 || harness.Skills[0].Count != 1 {
-		t.Errorf("harness drill-down = %#v / %#v / %#v", harness.Tools, harness.ToolTimings, harness.Skills)
+	wantCost := v1.UsageDashboardCost{ReportedUSD: .12, ReportedParts: 1}
+	if day.Cost != wantCost || model.Cost != wantCost || day.Harnesses[0].Cost != wantCost || day.Harnesses[0].Models[0].Cost != wantCost {
+		t.Errorf("API source components lost: %+v", day)
 	}
-	if len(harness.Models) != 1 || harness.Models[0].Model != "claude-opus" || harness.Models[0].Tokens.Output != 40 {
-		t.Errorf("harness-by-model cross = %#v", harness.Models)
+	hr := day.Harnesses[0]
+	if hr.Tools[0] != (v1.UsageDashboardCount{Name: "Read", Count: 2}) || hr.ToolTimings[0].DurationMs != 1250 || hr.Skills[0].Count != 1 {
+		t.Errorf("harness drill-down = %#v / %#v / %#v", hr.Tools, hr.ToolTimings, hr.Skills)
+	}
+	if len(hr.Models) != 1 || hr.Models[0].Model != "claude-opus" || hr.Models[0].Tokens.Output != 40 {
+		t.Errorf("harness-by-model cross = %#v", hr.Models)
 	}
 	if len(day.Repos) != 2 || day.Repos[0].Repo != "caic" || day.Repos[1].Repo != "sdk" {
 		t.Errorf("repos = %#v", day.Repos)

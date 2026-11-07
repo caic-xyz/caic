@@ -126,7 +126,7 @@ func (*Backend) NewWire() agent.WireFormat {
 	return newWireFormat()
 }
 
-// NewMetadataParser creates an independent content-free session/accounting parser.
+// NewMetadataParser creates a session/accounting parser with bounded native stream state.
 func (*Backend) NewMetadataParser() agent.MessageParser {
 	return &metadataParser{childModels: make(map[agent.ToolKey]string)}
 }

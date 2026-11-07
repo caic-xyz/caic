@@ -1,4 +1,4 @@
-// Reconstructs Codex session metadata and accounting without decoding transcript payloads.
+// Reconstructs payload-free Codex input/activity timing, session metadata, and accounting.
 
 package codex
 
@@ -27,7 +27,19 @@ func (p *metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, p.wire.rememberRequest(&probe)
+	if err := p.wire.rememberRequest(&probe); err != nil {
+		return nil, err
+	}
+	if probe.Method != "turn/start" {
+		return nil, nil
+	}
+	threadID, err := agent.JSONString(probe.Params, "threadId")
+	if err != nil {
+		return nil, err
+	}
+	input := &agent.UserInputMessage{Source: agent.MessageSource{ThreadID: threadID}}
+	p.wire.scopeSource(input.Provenance())
+	return []agent.Message{input}, nil
 }
 
 func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
@@ -130,6 +142,16 @@ func parseMetadataMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Me
 		return nil, decodedItem{}, nil
 	}
 	switch codex.Method(probe.Method) {
+	case codex.MethodItemDelta, codex.MethodReasoningSummaryTextDelta, codex.MethodCommandOutputDelta, codex.MethodMcpToolCallProgress:
+		threadID, err := agent.JSONString(probe.Params, "threadId")
+		if err != nil {
+			return nil, decodedItem{}, err
+		}
+		turnID, err := agent.JSONString(probe.Params, "turnId")
+		if err != nil {
+			return nil, decodedItem{}, err
+		}
+		return []agent.Message{&agent.TextDeltaMessage{Source: agent.MessageSource{ThreadID: threadID, TurnID: turnID}}}, decodedItem{}, nil
 	case codex.MethodThreadStarted, codex.MethodTurnStarted, codex.MethodTurnCompleted,
 		codex.MethodModelRerouted, codex.MethodErrorNotification, codex.MethodThreadStatusChanged:
 		return parseMessage(line, probe)
@@ -171,12 +193,25 @@ func parseMetadataMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Me
 				}
 			}
 			r.collaboration = &c
+		case codex.ItemTypeCommandExecution, codex.ItemTypeFileChange, codex.ItemTypeMCPToolCall, codex.ItemTypeDynamicToolCall, codex.ItemTypeImageGeneration:
+			return []agent.Message{&agent.TextDeltaMessage{Source: r.source}}, r, nil
+		case codex.ItemTypeAgentMessage, codex.ItemTypeReasoning, codex.ItemTypePlan, codex.ItemTypeWebSearch:
+			if codex.Method(probe.Method) == codex.MethodItemCompleted {
+				return []agent.Message{&agent.TextDeltaMessage{Source: r.source}}, r, nil
+			}
+		case codex.ItemTypeUserMessage:
+			if codex.Method(probe.Method) == codex.MethodItemStarted {
+				return []agent.Message{&agent.UserInputMessage{Source: r.source}}, r, nil
+			}
 		case codex.ItemTypeContextCompaction:
 			if codex.Method(probe.Method) == codex.MethodItemCompleted {
 				return []agent.Message{&agent.SystemMessage{Source: r.source, MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary}}, r, nil
 			}
 		default:
 			return nil, decodedItem{}, nil
+		}
+		if typ == codex.ItemTypeCollabAgentToolCall {
+			return []agent.Message{&agent.TextDeltaMessage{Source: r.source}}, r, nil
 		}
 		return nil, r, nil
 	default:

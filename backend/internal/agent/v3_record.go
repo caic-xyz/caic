@@ -1,4 +1,4 @@
-// Converts validated v3 frames to ordered agent events and relay provenance.
+// Converts validated v3 frames to ordered events, adjacent delivery timing, and relay provenance.
 
 package agent
 
@@ -29,8 +29,13 @@ func FrameProvenance(frame *taskslog.Frame) RecordProvenance {
 // ParseRecord also performs physical validation for live relay readers.
 // A parser is not safe for concurrent use.
 type LogRecordParser struct {
-	native        MessageParser
-	contextWindow int
+	native          MessageParser
+	contextWindow   int
+	session         SessionMetadata
+	adjacentInputAt time.Time
+	pendingHistory  ParsedRecord
+	pendingDelivery *SystemMessage
+	historyRecords  [2]ParsedRecord
 }
 
 // NewLogRecordParser constructs a v3 task-log parser.
@@ -55,6 +60,8 @@ func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
 
 // DecodeFrame interprets a validated frame with this scan's ordered native state.
 func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, error) {
+	previousInputAt := p.adjacentInputAt
+	p.adjacentInputAt = time.Time{}
 	record := ParsedRecord{Provenance: FrameProvenance(frame), Control: frame.Control != nil}
 	if !record.Control {
 		if timed, ok := p.native.(timedParser); ok {
@@ -62,9 +69,11 @@ func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, erro
 		}
 		msgs, err := p.parseAndApplyNative(frame.Native, frame.Kind == taskslog.KindInput)
 		record.Messages = wrapParsedMessages(msgs, frame.ProducerTime)
+		p.observeInputTime(&record)
 		return record, err
 	}
 	var msgs []Message
+	at := frame.ProducerTime
 	switch m := frame.Control.(type) {
 	case *v3.MetaMessage:
 		msgs = []Message{new(MetaMessage(*m))}
@@ -124,12 +133,69 @@ func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, erro
 		} else {
 			msg.MessageType = messageTypeSystem
 		}
+		if !msg.Provenance().IsChild() && msg.Ts == 0 && !previousInputAt.IsZero() && (msg.Subtype == SystemSubtypeInputDeliveryCompleted || msg.Subtype == SystemSubtypeInputDeliveryFailed) {
+			msg.Ts = float64(previousInputAt.UnixMilli()) / 1000
+			at = previousInputAt
+		}
 		msgs = []Message{&msg}
 	}
 	var err error
 	msgs, err = p.applyMessageState(msgs)
-	record.Messages = wrapParsedMessages(msgs, frame.ProducerTime)
+	record.Messages = wrapParsedMessages(msgs, at)
+	p.observeInputTime(&record)
 	return record, err
+}
+
+// DecodeHistoryFrame preserves physical identity while waiting for the adjacent
+// input of an untimed delivery-start control. Timestamped records are immediate.
+// Returned storage belongs to the parser until its next history decode or flush;
+// the caller must consume each record before that call, including records
+// returned alongside an error.
+func (p *LogRecordParser) DecodeHistoryFrame(frame *taskslog.Frame, id uint64) ([]ParsedRecord, error) {
+	record, err := p.DecodeFrame(frame)
+	if err != nil {
+		return p.FlushHistory(), err
+	}
+	record.ID = id
+	p.historyRecords = [2]ParsedRecord{}
+	n := 0
+	if p.pendingDelivery != nil {
+		if !p.adjacentInputAt.IsZero() {
+			p.pendingDelivery.Ts = float64(p.adjacentInputAt.UnixMilli()) / 1000
+			p.pendingHistory.Messages[0].ProducerTime = p.adjacentInputAt
+		}
+		p.historyRecords[n] = p.pendingHistory
+		n++
+		p.pendingHistory, p.pendingDelivery = ParsedRecord{}, nil
+	}
+	if frame.Kind == taskslog.KindInputDelivery && len(record.Messages) == 1 {
+		if m, ok := record.Messages[0].Message.(*SystemMessage); ok && !m.Provenance().IsChild() && m.Subtype == SystemSubtypeInputDeliveryStarted && m.Ts == 0 {
+			p.pendingHistory, p.pendingDelivery = record, m
+			return p.historyRecords[:n], nil
+		}
+	}
+	p.historyRecords[n] = record
+	return p.historyRecords[:n+1], nil
+}
+
+// FlushHistory emits an unmatched delivery start with unknown time at complete
+// EOF. Incremental readers retain pending state across temporary EOF instead.
+func (p *LogRecordParser) FlushHistory() []ParsedRecord {
+	p.historyRecords = [2]ParsedRecord{}
+	if p.pendingDelivery == nil {
+		return nil
+	}
+	p.historyRecords[0] = p.pendingHistory
+	p.pendingHistory, p.pendingDelivery = ParsedRecord{}, nil
+	return p.historyRecords[:1]
+}
+
+func (p *LogRecordParser) observeInputTime(record *ParsedRecord) {
+	for _, timed := range record.Messages {
+		if m, ok := timed.Message.(*UserInputMessage); ok && !m.Provenance().IsChild() {
+			p.adjacentInputAt = timed.ProducerTime
+		}
+	}
 }
 
 func (p *LogRecordParser) parseAndApplyNative(line []byte, input bool) ([]Message, error) {
@@ -168,6 +234,7 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 	}
 	out := make([]Message, 0, len(msgs))
 	for _, msg := range msgs {
+		p.session.Apply(msg)
 		if m, ok := msg.(*UsageMessage); ok && !m.Source.IsChild() && m.ContextWindow == 0 && p.contextWindow > 0 {
 			m.ContextWindow = p.contextWindow
 		}
@@ -179,6 +246,7 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 // ParsedRecord is a parser-owned semantic task-log record. Control reports
 // whether the physical discriminator identifies a caic-owned control.
 type ParsedRecord struct {
+	ID         uint64 // Physical ordinal supplied by a history cursor; zero when not assigned.
 	Messages   []TimedMessage
 	Provenance RecordProvenance
 	Control    bool

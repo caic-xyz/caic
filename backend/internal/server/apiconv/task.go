@@ -36,12 +36,20 @@ func Task(in *TaskInput) (v1.Task, error) {
 	// aren't restored. Fall back to the result trailer.
 	costUSD := snap.CostUSD
 	costKnown := snap.CostKnown
+	costComplete := snap.CostComplete
 	numTurns := snap.NumTurns
 	duration := snap.Duration
 	cumulativeUsage := snap.Usage
 	if result != nil {
 		if costUSD == 0 {
 			costUSD = result.CostUSD
+		}
+		if !snap.CostKnown {
+			costComplete = result.CostComplete
+		} else {
+			// A live proof cannot certify a different amount selected from the
+			// authoritative trailer by the existing numeric fallback.
+			costComplete = costComplete && costUSD == snap.CostUSD
 		}
 		if result.CostKnown {
 			costKnown = true
@@ -107,6 +115,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		GitHubToken:     snap.GitHubToken,
 		CostUSD:         costUSD,
 		CostKnown:       costKnown,
+		CostComplete:    costComplete,
 		NumTurns:        numTurns,
 		Duration:        duration.Seconds(),
 	}

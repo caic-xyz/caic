@@ -133,9 +133,13 @@ func localUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
 		input := apiconv.LocalUsageInput{StartedAt: t.StartedAt}
 		if result := e.Result(); result != nil {
 			input.CostUSD = result.CostUSD
+			input.CostComplete = result.CostComplete
 			input.Usage = result.Usage
 		} else {
-			input.CostUSD, _, _, input.Usage, _ = t.LiveStats()
+			snapshot := t.Snapshot()
+			input.CostUSD = snapshot.CostUSD
+			input.CostComplete = snapshot.CostComplete
+			input.Usage = snapshot.Usage
 		}
 		inputs = append(inputs, input)
 		return true

@@ -1,4 +1,4 @@
-// Directional ACP metadata correlates native requests and normalizes session configuration and accounting.
+// Directional ACP metadata tracks payload-free turn activity, native requests, session settings, and accounting.
 
 package acp
 
@@ -61,6 +61,11 @@ func (w *metadataState) ParseInput(line []byte) ([]agent.Message, error) {
 			return nil, errors.New("too many pending ACP metadata requests")
 		}
 		w.requests[id] = pendingRequest{method: method, sessionID: sid}
+		if method == acp.MethodSessionPrompt && (sid == "" || w.session.SessionID == "" || sid == w.session.SessionID) {
+			// Preserve the prompt's producer-time boundary without decoding or
+			// retaining its text, images, or embedded resources.
+			return []agent.Message{&agent.UserInputMessage{}}, nil
+		}
 	default:
 		// Other ACP requests do not carry session metadata or turn accounting.
 	}
@@ -72,8 +77,22 @@ func (w *metadataState) ParseOutput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	msgs, _, err := w.parseOutput(line, &probe)
-	return msgs, err
+	msgs, handled, err := w.parseOutput(line, &probe)
+	if err != nil || handled || acp.Method(probe.Method) != acp.MethodSessionUpdate {
+		return msgs, err
+	}
+	typ, err := agent.JSONString(probe.Params, "update", "sessionUpdate")
+	if err != nil {
+		return nil, err
+	}
+	switch acp.UpdateType(typ) {
+	case acp.UpdateAgentMessageChunk, acp.UpdateAgentThoughtChunk, acp.UpdateToolCall, acp.UpdateToolCallUpdate, acp.UpdatePlan:
+		// Only the metadata parser projects empty activity: the shared full
+		// parser must still decode and preserve native content and tool data.
+		return []agent.Message{&agent.TextDeltaMessage{}}, nil
+	default:
+		return msgs, nil
+	}
 }
 
 func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, bool, error) {
@@ -317,8 +336,8 @@ func usageUpdate(update []byte) ([]agent.Message, error) {
 			if err := json.Unmarshal(rawAmount, &amount); err != nil {
 				return nil, fmt.Errorf("usage_update cost: %w", err)
 			}
+			usage.CumulativeCostUSD = &amount
 		}
-		usage.CumulativeCostUSD = &amount
 	}
 	return []agent.Message{usage}, nil
 }

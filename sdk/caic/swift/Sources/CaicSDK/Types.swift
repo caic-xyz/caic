@@ -1251,7 +1251,10 @@ public struct Task: Codable {
     /// Pushed compact per-repo Git state from the latest diff probe.
     public let repoStates: [GitRepositoryState]?
     public let costUSD: Double
+    /// True when any cost is known; costUSD may be a subtotal.
     public let costKnown: Bool
+    /// True when costUSD covers all observed billed usage.
+    public let costComplete: Bool
     /// Seconds.
     public let duration: Double
     public let numTurns: Int
@@ -1815,6 +1818,8 @@ public struct LocalWindow: Codable {
     /// "1h", "6h", "24h"
     public let duration: String
     public let costUSD: Double
+    /// True when all included billed usage has known cost; otherwise costUSD is a known subtotal.
+    public let costKnown: Bool
     public let inputTokens: Int
     public let outputTokens: Int
 }
@@ -1848,6 +1853,17 @@ public struct UsageDashboardTokens: Codable {
     public let cacheReadTokens: Int
     public let outputTokens: Int
     public let reasoningTokens: Int
+}
+
+/// UsageDashboardCost preserves additive cost provenance across range filters.
+/// Signed parts retain known zeros and cancel estimates replaced by reports.
+/// UnknownParts also marks amounts in rows whose source cannot be proven.
+public struct UsageDashboardCost: Codable {
+    public let reportedUSD: Double
+    public let estimatedUSD: Double
+    public let reportedParts: Int
+    public let estimatedParts: Int
+    public let unknownParts: Int
 }
 
 /// UsageDashboardCount is a named counter such as a skill read or tool call.
@@ -1893,6 +1909,7 @@ public struct UsageDashboardModel: Codable {
     public let compactions: Int
     public let subagentSpawns: Int
     public let costUSD: Double
+    public let cost: UsageDashboardCost
     public let contextWindow: Int
     public let tools: [UsageDashboardCount]
     public let toolTimings: [UsageDashboardToolTiming]
@@ -1913,6 +1930,7 @@ public struct UsageDashboardHarness: Codable {
     public let compactions: Int
     public let subagentSpawns: Int
     public let costUSD: Double
+    public let cost: UsageDashboardCost
     public let tools: [UsageDashboardCount]
     public let toolTimings: [UsageDashboardToolTiming]
     public let skills: [UsageDashboardCount]
@@ -1933,6 +1951,7 @@ public struct UsageDashboardDay: Codable {
     public let subagentSpawns: Int
     public let subagentSpawnsBackground: Int
     public let costUSD: Double
+    public let cost: UsageDashboardCost
     public let models: [UsageDashboardModel]
     public let harnesses: [UsageDashboardHarness]
     public let repos: [UsageDashboardRepo]

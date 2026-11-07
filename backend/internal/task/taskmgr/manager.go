@@ -2384,17 +2384,18 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		if exitErr := t.LastExitError(); exitErr != "" {
 			resultErr = errors.New(exitErr)
 		}
-		costUSD, numTurns, duration, usage, _ := t.LiveStats()
+		snapshot := t.Snapshot()
 		result := &task.Result{
-			State:       t.GetState(),
-			DiffStat:    t.LiveDiffStat(),
-			CostUSD:     costUSD,
-			CostKnown:   t.LiveCostKnown(),
-			Duration:    duration,
-			NumTurns:    numTurns,
-			Usage:       usage,
-			AgentResult: t.LastAgentResult(),
-			Err:         resultErr,
+			State:        snapshot.State,
+			DiffStat:     snapshot.DiffStat,
+			CostUSD:      snapshot.CostUSD,
+			CostKnown:    snapshot.CostKnown,
+			CostComplete: snapshot.CostComplete,
+			Duration:     snapshot.Duration,
+			NumTurns:     snapshot.NumTurns,
+			Usage:        snapshot.Usage,
+			AgentResult:  t.LastAgentResult(),
+			Err:          resultErr,
 		}
 		entry.Finish(result)
 		if !recoverImported {

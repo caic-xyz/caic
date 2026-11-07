@@ -39,6 +39,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
+	case "skill_read":
+		var m agent.SkillReadMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	case "skill_load":
 		var m agent.SkillLoadMessage
 		if err := json.Unmarshal(line, &m); err != nil {

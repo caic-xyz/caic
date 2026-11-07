@@ -52,6 +52,7 @@ type Event struct {
 	Model                string
 	Effort               string
 	CostUSD              float64
+	CostProvenance       data.CostProvenance
 	TurnBoundary         bool   // a completed turn; the store flushes on it
 	ToolStartID          string // tool-use correlation; not persisted in a usage row
 	ToolName             string
@@ -83,6 +84,7 @@ type ModelRollup struct {
 	Compactions    int
 	SubagentSpawns int
 	CostUSD        float64
+	Cost           data.CostProvenance
 	ContextWindow  int
 	ToolCalls      map[string]int
 	ToolTimings    map[string]data.ToolTiming
@@ -102,6 +104,7 @@ type HarnessRollup struct {
 	Compactions    int
 	SubagentSpawns int
 	CostUSD        float64
+	Cost           data.CostProvenance
 	ToolCalls      map[string]int
 	ToolTimings    map[string]data.ToolTiming
 	Skills         map[string]int // distinct tasks that read the skill under this harness
@@ -122,6 +125,7 @@ type DayRollup struct {
 	SubagentSpawns           int
 	SubagentSpawnsBackground int
 	CostUSD                  float64
+	Cost                     data.CostProvenance
 	Models                   map[string]ModelRollup
 	Harnesses                map[string]HarnessRollup
 	Repos                    map[string]int // distinct tasks that touched the repo that day

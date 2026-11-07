@@ -25,7 +25,7 @@ export function nativeTerminal(status: string): boolean {
 // incomplete historical window makes a running observation stale, not terminal.
 export function nativeActivityStatus(activity: { status: string }, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
-  if (activity.status === "unknown") return "Status unknown";
+  if (activity.status === "unknown") return "Completion not reported";
   return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
 }
 

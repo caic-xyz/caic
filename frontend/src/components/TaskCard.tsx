@@ -52,6 +52,8 @@ export interface TaskCardProps {
   model?: string;
   effort?: string;
   costUSD: number;
+  costKnown: boolean;
+  costComplete: boolean;
   duration: number;
   numTurns: number;
   contextUsed?: number | null;
@@ -512,12 +514,18 @@ export default function TaskCard(props: TaskCardProps) {
             <div class={styles.metaRow}>
               <span class={styles.timingSummary}>
                 {timePair()}
-                <Show when={props.costUSD > 0}>
+                <Show when={props.costKnown}>
                   <span class={`${styles.meta} ${styles.cost}`} data-testid="task-card-cost">
                     <Show when={hasTime()}>· </Show>
-                    <Show when={subscriptionLabel()} fallback={`$${props.costUSD.toFixed(2)}`}>
+                    <Show
+                      when={subscriptionLabel()}
+                      fallback={`$${props.costUSD.toFixed(2)}${props.costComplete ? "" : " known subtotal"}`}
+                    >
                       <Tooltip text={`API-equivalent cost — ${subscriptionLabel()}`}>
-                        <span>${props.costUSD.toFixed(2)}</span>
+                        <span>
+                          ${props.costUSD.toFixed(2)}
+                          {props.costComplete ? "" : " known subtotal"}
+                        </span>
                       </Tooltip>
                     </Show>
                   </span>

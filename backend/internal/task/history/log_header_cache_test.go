@@ -86,14 +86,16 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		LogSize:               1,
 		DiffCreated:           true,
 		LastTrailer: &task.Result{
-			State:       task.StatePurged,
-			DiffStat:    diffStat,
-			CostUSD:     1,
-			Duration:    time.Second,
-			NumTurns:    1,
-			Usage:       agent.Usage{InputTokens: 1, OutputTokens: 1, ReasoningOutputTokens: 1},
-			AgentResult: "result",
-			Err:         pinError{},
+			State:        task.StatePurged,
+			DiffStat:     diffStat,
+			CostUSD:      1,
+			CostKnown:    true,
+			CostComplete: true,
+			Duration:     time.Second,
+			NumTurns:     1,
+			Usage:        agent.Usage{InputTokens: 1, OutputTokens: 1, ReasoningOutputTokens: 1},
+			AgentResult:  "result",
+			Err:          pinError{},
 		},
 	}
 }
@@ -104,10 +106,75 @@ type pinError struct{}
 func (pinError) Error() string { return "pin" }
 
 // pinnedHeaderTask pins the current persisted task snapshot independently of runtime types.
-const pinnedHeaderTask = `{"task_id":"task","prompt":"prompt","title":"title","repos":[{"name":"repo","base_branch":"main","branch":"caic-0","git_root":"/git","container_path":"/work"}],"harness":"claude","started_at":"2026-01-01T00:00:00.123Z","last_state_update_at":"2026-01-01T00:00:00.123Z","state":"purged","forge_issue":1,"owner_id":"user-1","forked_from_task_id":"fork","parent_task_id":"parent","caic_mcp":true,"forge_owner":"owner","forge_repo":"repo","forge_pr":1,"tailscale":true,"usb":true,"display":true,"sudo":true,"github_token":true,"runtime_name":"runtime","base_image":"image","container_platform":"platform","max_cpus":1,"cache_mounts":[{"name":"cache","description":"desc","host_path":"/host","container_path":"/container","read_only":true,"shallow":true}],"mounts":[{"host_path":"/host","container_path":"/container","read_only":true}],"model":"model","effort":"effort","reported_model":"reported-model","reported_effort":"reported-effort","session_id":"session","agent_version":"version","auto_compact_token_limit":244800,"log_size":1,"diff_created":true,"result":{"state":"purged","diff_stat":[{"path":"file","added":1,"deleted":1,"binary":true}],"cost_usd":1,"duration":1000000000,"num_turns":1,"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_output_tokens":1},"agent_result":"result","error":"pin"}}`
+const pinnedHeaderTask = `{"task_id":"task","prompt":"prompt","title":"title","repos":[{"name":"repo","base_branch":"main","branch":"caic-0","git_root":"/git","container_path":"/work"}],"harness":"claude","started_at":"2026-01-01T00:00:00.123Z","last_activity_at":"2026-01-01T00:00:00.123Z","state":"purged","forge_issue":1,"owner_id":"user-1","forked_from_task_id":"fork","parent_task_id":"parent","caic_mcp":true,"forge_owner":"owner","forge_repo":"repo","forge_pr":1,"tailscale":true,"usb":true,"display":true,"sudo":true,"github_token":true,"runtime_name":"runtime","base_image":"image","container_platform":"platform","max_cpus":1,"cache_mounts":[{"name":"cache","description":"desc","host_path":"/host","container_path":"/container","read_only":true,"shallow":true}],"mounts":[{"host_path":"/host","container_path":"/container","read_only":true}],"model":"model","effort":"effort","reported_model":"reported-model","reported_effort":"reported-effort","session_id":"session","agent_version":"version","auto_compact_token_limit":244800,"log_size":1,"diff_created":true,"result":{"state":"purged","diff_stat":[{"path":"file","added":1,"deleted":1,"binary":true}],"cost_usd":1,"cost_known":true,"cost_complete":true,"duration":1000000000,"num_turns":1,"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_output_tokens":1},"agent_result":"result","error":"pin"}}`
 
 func TestHeaderCache(t *testing.T) {
 	t.Parallel()
+	t.Run("CostProvenance", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			result string
+			known  bool
+			cost   float64
+		}{
+			{"reported zero", `{"t":"result","state":"purged","cost_known":true}`, true, 0},
+			{"unpriced DSH", `{"t":"result","state":"purged"}`, false, 0},
+			{"reported positive", `{"t":"result","state":"purged","cost_usd":0.25}`, true, 0.25},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, false,
+					`{"t":"caic_meta","version":3,"harness":"dsh","prompt":"test"}`, tc.result)
+				cold, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cached, ok := readHeaderCache(path)
+				if !ok {
+					t.Fatal("cache missed after cold scan")
+				}
+				for _, loaded := range []*LoadedTask{cold, cached} {
+					if r := loaded.LastTrailer; r == nil || r.CostKnown != tc.known || r.CostUSD != tc.cost {
+						t.Fatalf("cost provenance = %+v; want known=%v cost=%v", r, tc.known, tc.cost)
+					}
+				}
+			})
+		}
+	})
+	t.Run("MetadataCompletenessProof", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, native, trailer string
+			complete              bool
+		}{
+			{"native zero", `{"type":"result","total_cost_usd":0}`, `{"t":"result","state":"purged"}`, true},
+			{"native amount matches", `{"type":"result","total_cost_usd":0.25}`, `{"t":"result","state":"purged","cost_usd":0.25}`, true},
+			{"native amount differs", `{"type":"result","total_cost_usd":0.5}`, `{"t":"result","state":"purged","cost_usd":0.25}`, false},
+			{"no native report", `{"type":"result","usage":{"input_tokens":100}}`, `{"t":"result","state":"purged","cost_usd":0.25,"cost_known":true}`, false},
+			{"terminal priced proof", `{"type":"result","usage":{"input_tokens":100}}`, `{"t":"result","state":"purged","cost_usd":0.25,"cost_known":true,"cost_complete":true}`, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writePhysicalTestLog(t, false, `{"t":"caic_meta","version":3,"harness":"claude","prompt":"proof"}`, `{"t":"agent","ts":1.000,"msg":`+tc.native+`}`, tc.trailer)
+				cold, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cached, ok := readHeaderCache(path)
+				if !ok {
+					t.Fatal("cache missed")
+				}
+				for _, loaded := range []*LoadedTask{cold, cached} {
+					r := loaded.LastTrailer
+					if r == nil || !r.CostKnown || r.CostComplete != tc.complete {
+						t.Fatalf("proof lost/misclassified: %+v, want complete=%v", r, tc.complete)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("RebuildsSessionProjectionFromVersion9", func(t *testing.T) {
 		t.Parallel()
 		path := writePhysicalTestLog(t, false,
@@ -148,7 +215,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, version := range []int{6, 7, 8, 9, 10} {
+		for _, version := range []int{6, 7, 8, 9, 10, 11} {
 			body := fmt.Sprintf(`{"version":%d,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, version, info.ModTime().UnixNano(), pinnedHeaderTask)
 			if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -169,7 +236,7 @@ func TestHeaderCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"version":11,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
+		body := fmt.Sprintf(`{"version":12,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), pinnedHeaderTask)
 		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +316,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":11,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":12,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -278,7 +345,7 @@ func TestHeaderCache(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					body := fmt.Sprintf(`{"version":11,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					body := fmt.Sprintf(`{"version":12,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
 					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}

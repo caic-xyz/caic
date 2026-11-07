@@ -135,6 +135,7 @@ type Delta struct {
 	SpawnsBackground int                   `json:"subagent_spawns_background,omitzero"`
 	ContextWindow    int                   `json:"context_window,omitzero"`
 	CostUSD          float64               `json:"cost_usd,omitzero"`
+	Cost             *CostProvenance       `json:"cost,omitempty"` // Nil means a row predates explicit provenance; {} is a neutral contribution.
 }
 
 // Add merges one delta into the accumulator: counters sum, maps merge, and
@@ -152,6 +153,12 @@ func (d *Delta) Add(o *Delta) {
 		d.ContextWindow = o.ContextWindow
 	}
 	d.CostUSD += o.CostUSD
+	if o.Cost != nil {
+		if d.Cost == nil {
+			d.Cost = &CostProvenance{}
+		}
+		d.Cost.Add(*o.Cost)
+	}
 	for name, n := range o.SkillReads {
 		if d.SkillReads == nil {
 			d.SkillReads = make(map[string]int)
@@ -249,6 +256,20 @@ type UsageRow struct {
 	Repos         []string `json:"repos,omitzero"`
 	Model         string   `json:"model,omitempty"`
 	CostEstimated bool     `json:"cost_estimated,omitempty"`
+}
+
+// CostProvenance normalizes released rows without inventing their cost source.
+func (r *UsageRow) CostProvenance() CostProvenance {
+	if r.Cost != nil {
+		return *r.Cost
+	}
+	if r.CostEstimated {
+		return CostProvenance{EstimatedUSD: r.CostUSD, EstimatedParts: 1}
+	}
+	if r.CostUSD != 0 || r.Turns != 0 || r.TotalInput() != 0 || r.Output != 0 || r.Reasoning != 0 {
+		return CostProvenance{UnknownParts: 1}
+	}
+	return CostProvenance{}
 }
 
 // QuotaRow records a provider quota-window status change.

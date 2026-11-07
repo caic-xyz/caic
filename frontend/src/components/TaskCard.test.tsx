@@ -24,6 +24,8 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     harness: "claude",
     model: "claude-sonnet-4",
     costUSD: 0,
+    costKnown: true,
+    costComplete: true,
     duration: 0,
     numTurns: 0,
     activeInputTokens: 0,
@@ -233,8 +235,18 @@ describe("TaskCard", () => {
     expect(screen.getByTestId("task-card-cost").parentElement).toHaveTextContent(/^\$0\.01$/);
   });
 
-  it("omits zero cost", () => {
-    renderCard(() => <TaskCard {...props({ costUSD: 0 })} />);
+  it("shows reported zero cost", () => {
+    renderCard(() => <TaskCard {...props({ costUSD: 0, costKnown: true })} />);
+    expect(screen.getByTestId("task-card-cost")).toHaveTextContent("$0.00");
+  });
+
+  it("qualifies a reported-zero subtotal when another call is unpriced", () => {
+    renderCard(() => <TaskCard {...props({ costUSD: 0, costKnown: true, costComplete: false })} />);
+    expect(screen.getByTestId("task-card-cost")).toHaveTextContent("$0.00 known subtotal");
+  });
+
+  it("omits unknown cost", () => {
+    renderCard(() => <TaskCard {...props({ costUSD: 0, costKnown: false, costComplete: false })} />);
     expect(screen.queryByTestId("task-card-cost")).not.toBeInTheDocument();
   });
 

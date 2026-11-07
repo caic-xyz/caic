@@ -228,6 +228,36 @@ func TestMCPTools(t *testing.T) {
 		}
 		t.Fatal("task_get_detail missing from catalog")
 	})
+	t.Run("handleTaskGetDetail/missing native metrics", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first"}, harness.Dsh)
+		start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{
+			{ProducerTime: start, Message: &agent.UserInputMessage{Text: "first"}},
+			{ProducerTime: start.Add(2 * time.Second), Message: &agent.ResultMessage{}},
+			{ProducerTime: start.Add(time.Hour), Message: &agent.UserInputMessage{Text: "second"}},
+			{ProducerTime: start.Add(time.Hour + 3*time.Second), Message: &agent.ResultMessage{}},
+		})
+		insertTestTask(s, tk.ID, tk)
+		c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+		entry, _ := s.taskMgr.GetEntry(tk.ID)
+		apiTask, err := taskDTO(t.Context(), entry, c.taskSvc.taskMgr, c.taskSvc.checkouts, c.taskSvc.authStore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if apiTask.NumTurns != 2 || apiTask.Duration != 5 {
+			t.Fatalf("API metrics = %d turns, %vs; want 2, 5s", apiTask.NumTurns, apiTask.Duration)
+		}
+		detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+		if detail.IsError {
+			t.Fatal(detail)
+		}
+		out := taskDetailOutput(t, detail.Structured)
+		if out.NumTurns != 2 || out.DurationSeconds != 5 || out.CostKnown {
+			t.Fatalf("MCP detail metrics = %+v", out)
+		}
+	})
 	t.Run("handleTaskSendMessage", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid/queue_and_append", func(t *testing.T) {
@@ -521,12 +551,36 @@ func TestMCPTools(t *testing.T) {
 			t.Fatalf("get_usage result type = %T, want mcp.TextOutput", result.Structured)
 		}
 		for _, want := range []string{
+			"1h cost: $0.00 (0 tokens)",
 			"Anthropic: 5h: 88% remaining (resets at 2099-10-19T13:30:00+00:00), 7d: 75% remaining (resets at 2099-10-25T00:00:00+00:00)",
 			"OpenAI: 5h: 0% remaining",
 		} {
 			if !slices.Contains(strings.Split(output.Result, "\n"), want) {
 				t.Errorf("get_usage result = %q, want %q", output.Result, want)
 			}
+		}
+	})
+	t.Run("handleGetUsage/unknown local cost", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "unpriced"}, harness.Dsh)
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{}}})
+		insertTestTask(s, tk.ID, tk)
+		c := &mcpTools{usage: s.usageHandlers}
+		result := c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{})
+		got := strings.Split(toolTextOutput(t, result.Structured), "\n")
+		want := []string{"1h cost: unknown (0 tokens)", "6h cost: unknown (0 tokens)", "24h cost: unknown (0 tokens)"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("local usage lines = %q; want %q", got, want)
+		}
+		priced := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "reported"}, harness.Claude)
+		priced.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{TotalCostUSD: 0.25}}})
+		insertTestTask(s, priced.ID, priced)
+		result = c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{})
+		got = strings.Split(toolTextOutput(t, result.Structured), "\n")
+		want = []string{"1h cost: $0.25 known subtotal; total unknown (0 tokens)", "6h cost: $0.25 known subtotal; total unknown (0 tokens)", "24h cost: $0.25 known subtotal; total unknown (0 tokens)"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mixed local usage lines = %q; want %q", got, want)
 		}
 	})
 	t.Run("handleGetUsage/timezone", func(t *testing.T) {

@@ -19,11 +19,7 @@ Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat mai
 
 **File**: `main.go`
 
-### 🔧 Tool: `skill`
-
-```json
-{"name":"code-quality"}
-```
+**Loaded skill**: `code-quality`
 
 ### 🔧 Tool: `Read`
 

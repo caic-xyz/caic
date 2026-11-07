@@ -10,9 +10,10 @@ import { api } from "../api";
 import ActionButton from "../components/ActionButton";
 import SectionControls from "../components/SectionControls";
 import Table from "../components/Table";
-import { formatCost, formatTokens } from "../formatting";
+import { formatTokens } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import {
+  formatUsageCost,
   summarizeUsageDays,
   usageCacheHitRate,
   usageDailySeries,
@@ -150,6 +151,7 @@ export default function UsagePage() {
               totals={{
                 tokens: summary().totalTokens,
                 costUSD: summary().costUSD,
+                cost: summary().cost,
                 turns: summary().turns,
                 subagentSpawns: summary().subagentSpawns,
               }}
@@ -241,7 +243,7 @@ function Leaderboard(props: {
                 <td>{entry.turns}</td>
                 <td>{entry.compactions}</td>
                 <Show when={props.showCost}>
-                  <td>{formatCost(entry.costUSD)}</td>
+                  <td>{formatUsageCost(entry.costUSD, entry.cost)}</td>
                 </Show>
                 <Show when={props.showCache}>
                   <td>{entry.cacheHitRate === undefined ? "—" : `${(entry.cacheHitRate * 100).toFixed(1)}%`}</td>
@@ -271,7 +273,7 @@ function DailyTotals(props: { points: readonly UsageDailyPoint[] }) {
             <tr>
               <th scope="row">{point.inProgress ? `${point.day} (in progress)` : point.day}</th>
               <td>{formatTokens(point.tokens)}</td>
-              <td>{formatCost(point.costUSD)}</td>
+              <td>{formatUsageCost(point.costUSD, point.cost)}</td>
             </tr>
           )}
         </For>

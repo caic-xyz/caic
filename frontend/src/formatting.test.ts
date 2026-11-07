@@ -41,6 +41,10 @@ describe("formatCost", () => {
     expect(formatCost(30.3)).toBe("$30.30");
     expect(formatCost(30.34)).toBe("$30.34");
   });
+  it("preserves negative cost corrections", () => {
+    expect(formatCost(-0.004)).toBe(">-$0.01");
+    expect(formatCost(-1.75)).toBe("-$1.75");
+  });
 });
 
 describe("formatBytes", () => {

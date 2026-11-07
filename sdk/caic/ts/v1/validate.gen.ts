@@ -217,6 +217,7 @@ export function validateTask(raw: ValidatorInput): Task {
     repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
     costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
     costKnown: asBoolean(obj["costKnown"], "Task.costKnown"),
+    costComplete: asBoolean(obj["costComplete"], "Task.costComplete"),
     duration: asNumber(obj["duration"], "Task.duration"),
     numTurns: asNumber(obj["numTurns"], "Task.numTurns"),
     cumulativeInputTokens: asNumber(obj["cumulativeInputTokens"], "Task.cumulativeInputTokens"),
@@ -397,6 +398,7 @@ export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
   return {
     duration: asString(obj["duration"], "LocalWindow.duration"),
     costUSD: asNumber(obj["costUSD"], "LocalWindow.costUSD"),
+    costKnown: asBoolean(obj["costKnown"], "LocalWindow.costKnown"),
     inputTokens: asNumber(obj["inputTokens"], "LocalWindow.inputTokens"),
     outputTokens: asNumber(obj["outputTokens"], "LocalWindow.outputTokens"),
   };

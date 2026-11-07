@@ -92,7 +92,8 @@ type Result struct {
 	// runtime could not provide a measurement.
 	DiskUsedBytes  *int64
 	CostUSD        float64
-	CostKnown      bool
+	CostKnown      bool // Whether any cost is known; CostUSD may be a subtotal.
+	CostComplete   bool // Whether CostUSD covers all observed billed usage.
 	Duration       time.Duration
 	NumTurns       int
 	Usage          agent.Usage

@@ -55,8 +55,10 @@ function StatsPane(props: { taskId: string }) {
         cacheWriteInputTokens: task()?.cumulativeCacheCreationInputTokens ?? 0,
         cacheReadInputTokens: task()?.cumulativeCacheReadInputTokens ?? 0,
         outputTokens: task()?.cumulativeOutputTokens ?? 0,
-        costUSD: task()?.costUSD ?? (analytics.snapshot().costComplete ? analytics.snapshot().costUSD : 0),
-        costKnown: task()?.costKnown ?? analytics.snapshot().costComplete,
+        costUSD: task()?.costUSD ?? analytics.snapshot().costUSD,
+        costKnown: task()?.costKnown ?? analytics.snapshot().turns.some((turn) => turn.cost !== undefined),
+        costComplete:
+          task()?.costComplete ?? (analytics.snapshot().turns.length > 0 && analytics.snapshot().costComplete),
       }}
     />
   );

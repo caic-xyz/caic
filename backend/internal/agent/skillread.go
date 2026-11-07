@@ -1,4 +1,4 @@
-// Skill-read inference and confirmation recover analytics reads and confirmed loads from harness tools.
+// Skill-read inference, confirmation, and presentation distinguish native machinery from loaded skills.
 
 package agent
 
@@ -300,8 +300,8 @@ func literal(word *syntax.Word) (string, bool) {
 // or nil when the path names no installed skill: an analytics read and, when
 // sourceID can confirm it, a load carrying the opened SKILL.md.
 //
-// Only Claude Code reports a skill load directly, through its Skill tool. The
-// other harnesses open the file, so the path is the only evidence they give.
+// Native skill tools report skill identity directly. File-reading tools
+// instead identify a skill through its installed SKILL.md path.
 func InferredSkillReadFromPath(p, sourceID string) []Message {
 	f := SkillFromPath(p)
 	if f.Name == "" {
@@ -377,3 +377,60 @@ func (t *SkillReadTracker) Confirm(m Message) (bool, []Message) {
 	t.pending[source] = append(t.pending[source], m)
 	return false, nil
 }
+
+// SkillToolTracker identifies generic reported-skill tool messages hidden by
+// presentation. It leaves the messages available to accounting and analytics.
+// The zero value is ready to observe an ordered stream.
+type SkillToolTracker struct {
+	pending map[ToolKey]struct{}
+}
+
+// Observe reports whether a generic tool message belongs to reported skill
+// machinery. A SkillReadMessage must precede the generic invocation. Results
+// release that identity, and turn boundaries discard uncompleted invocations.
+func (t *SkillToolTracker) Observe(msg Message) bool {
+	var id string
+	switch m := msg.(type) {
+	case *SkillReadMessage:
+		if m.ToolUseID == "" {
+			return false
+		}
+		key := ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		_, exists := t.pending[key]
+		if t.pending == nil || (!exists && len(t.pending) == maxPendingSkillTools) {
+			t.pending = make(map[ToolKey]struct{})
+		}
+		t.pending[key] = struct{}{}
+		return false
+	case *ToolUseMessage:
+		id = m.ToolUseID
+	case *ToolResultMessage:
+		id = m.ToolUseID
+	case *ToolOutputDeltaMessage:
+		id = m.ToolUseID
+	case *ResultMessage:
+		scope := ToolKeyForSource(m.Provenance(), "")
+		for key := range t.pending {
+			owner := key
+			owner.ToolUseID = ""
+			if owner == scope {
+				delete(t.pending, key)
+			}
+		}
+		return false
+	default:
+		return false
+	}
+	if id == "" {
+		return false
+	}
+	key := ToolKeyForSource(msg.Provenance(), id)
+	_, hidden := t.pending[key]
+	if _, terminal := msg.(*ToolResultMessage); terminal {
+		delete(t.pending, key)
+	}
+	return hidden
+}
+
+// maxPendingSkillTools bounds unmatched native skill invocations in a stream.
+const maxPendingSkillTools = 1024

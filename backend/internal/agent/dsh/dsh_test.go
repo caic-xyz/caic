@@ -331,14 +331,14 @@ func TestSkillToolRead(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("native skill messages=%#v, want use/read/load", msgs)
 	}
-	if use, ok := msgs[0].(*agent.ToolUseMessage); !ok || use.Name != "skill" {
-		t.Fatalf("skill tool use=%#v", msgs[0])
+	if use, ok := msgs[2].(*agent.ToolUseMessage); !ok || use.Name != "skill" {
+		t.Fatalf("skill tool use=%#v", msgs[2])
 	}
-	if read, ok := msgs[1].(*agent.SkillReadMessage); !ok || read.Skill != "code-quality" || read.ToolUseID != "skill-call" || read.Inferred {
-		t.Fatalf("skill read=%#v", msgs[1])
+	if read, ok := msgs[0].(*agent.SkillReadMessage); !ok || read.Skill != "code-quality" || read.ToolUseID != "skill-call" || read.Inferred {
+		t.Fatalf("skill read=%#v", msgs[0])
 	}
-	if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || load.Skill != "code-quality" || load.SourceToolUseID != "skill-call" {
-		t.Fatalf("skill load=%#v", msgs[2])
+	if load, ok := msgs[1].(*agent.SkillLoadMessage); !ok || load.Skill != "code-quality" || load.SourceToolUseID != "skill-call" {
+		t.Fatalf("skill load=%#v", msgs[1])
 	}
 }
 

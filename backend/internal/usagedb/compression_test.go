@@ -182,7 +182,7 @@ func TestDayRecords(t *testing.T) {
 				}
 				s := newTestStore(t, dir)
 				days := s.Days()
-				if len(days) != 1 || days[0].CostUSD != 2 || days[0].Tokens.Output != 3 || s.watermarks["bad"] != (time.Time{}) || s.flushedCost["bad"] != 0 || len(s.lastQuota) != 0 || len(s.reportedCostTasks) != 1 {
+				if len(days) != 1 || days[0].CostUSD != 2 || days[0].Tokens.Output != 3 || s.watermarks["bad"] != (time.Time{}) || s.flushedCost["bad"] != 0 || len(s.lastQuota) != 0 || len(s.costProtectedTasks) != 1 {
 					t.Fatalf("partial recovery published: days=%+v, watermarks=%v, costs=%v, quotas=%v", days, s.watermarks, s.flushedCost, s.lastQuota)
 				}
 				if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return .25, true }); err == nil {

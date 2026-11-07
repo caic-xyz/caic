@@ -78,7 +78,7 @@ func costFactFor(message agent.TimedMessage, position Position) *data.Fact {
 	case *agent.UsageMessage:
 		fact = &data.Fact{Kind: data.KindUsage, Model: m.ReportedModel, Usage: usageToData(m.Usage), PerCall: m.PerCall, ModelDerived: m.ModelDerived, CumulativeCostUSD: m.CumulativeCostUSD, ReportedCostUSD: m.ReportedCostUSD}
 	case *agent.ResultMessage:
-		fact = &data.Fact{Kind: data.KindResult, Usage: usageToData(m.Usage), TotalCostUSD: m.TotalCostUSD}
+		fact = &data.Fact{Kind: data.KindResult, Usage: usageToData(m.Usage), TotalCostUSD: m.TotalCostUSD, CostReported: m.CostReported}
 	default:
 		return nil
 	}
@@ -103,7 +103,7 @@ func factMessage(f *data.Fact) (agent.Message, error) {
 	case data.KindUsage:
 		return &agent.UsageMessage{MessageProvenance: p, Usage: usageFromData(f.Usage), ReportedModel: f.Model, PerCall: f.PerCall, ModelDerived: f.ModelDerived, CumulativeCostUSD: f.CumulativeCostUSD, ReportedCostUSD: f.ReportedCostUSD}, nil
 	case data.KindResult:
-		return &agent.ResultMessage{MessageProvenance: p, Usage: usageFromData(f.Usage), TotalCostUSD: f.TotalCostUSD}, nil
+		return &agent.ResultMessage{MessageProvenance: p, Usage: usageFromData(f.Usage), TotalCostUSD: f.TotalCostUSD, CostReported: f.CostReported}, nil
 	default:
 		return nil, fmt.Errorf("unknown history cost fact kind %q", f.Kind)
 	}

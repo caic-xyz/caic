@@ -115,6 +115,15 @@ func TestRenderDiscussion(t *testing.T) {
 		assertContains(t, md, "awaiting input")
 	})
 
+	t.Run("unreported_native_result", func(t *testing.T) {
+		t.Parallel()
+		md := RenderDiscussion(&MetaMessage{Prompt: "delegate", Harness: "dsh", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{
+			&NativeSubagentMessage{Subagent: NativeSubagent{ID: "child-1", Label: "analyze logs", Prompt: "Find the failure", Status: NativeSubagentStatusUnknown, Background: true}},
+			&NativeSubagentMessage{Subagent: NativeSubagent{ID: "child-2", Label: "partial report", Status: NativeSubagentStatusUnknown, Result: "Work is still in progress"}},
+		})
+		assertDiscussionGolden(t, "unreported-native-result.md", md)
+	})
+
 	t.Run("compaction_boundary", func(t *testing.T) {
 		t.Parallel()
 		md := RenderDiscussion(&MetaMessage{Prompt: "task", Harness: "pi", StartedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)}, nil, nil, []Message{

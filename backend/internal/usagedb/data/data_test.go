@@ -38,6 +38,28 @@ func TestTime(t *testing.T) {
 func TestUsageRow(t *testing.T) {
 	t.Parallel()
 
+	t.Run("CostProvenance", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			row  UsageRow
+			want CostProvenance
+		}{
+			{"old numeric ambiguity", UsageRow{CostUSD: .5}, CostProvenance{UnknownParts: 1}},
+			{"old explicit estimate", UsageRow{CostUSD: .5, CostEstimated: true}, CostProvenance{EstimatedUSD: .5, EstimatedParts: 1}},
+			{"old zero ambiguity", UsageRow{Turns: 1}, CostProvenance{UnknownParts: 1}},
+			{"explicit native zero", UsageRow{Turns: 1, Cost: &CostProvenance{ReportedParts: 1}}, CostProvenance{ReportedParts: 1}},
+			{"new neutral contribution", UsageRow{Turns: 1, Cost: &CostProvenance{}}, CostProvenance{}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got := tc.row.CostProvenance(); got != tc.want {
+					t.Errorf("cost = %+v, want %+v", got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("zero and empty distinctions", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct {

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { render } from "@solidjs/testing-library";
 import { expect } from "@tests/expect";
 
+import { reportedUsageCost } from "../../tests/usage";
 import type { UsageDashboardDay } from "@sdk/types.gen";
 
 import { usageDailySeries, type UsageDailyPoint } from "../usageDashboard";
@@ -14,6 +15,7 @@ function day(dayKey: string, tokens: number, costUSD: number): UsageDashboardDay
     apiMs: 0,
     compactions: 0,
     costUSD,
+    cost: reportedUsageCost(costUSD),
     day: dayKey,
     erroredTurns: 0,
     harnesses: [],
@@ -74,6 +76,7 @@ function renderCharts(points: UsageDailyPoint[], subject?: string) {
   const totals = {
     tokens: points.reduce((sum, point) => sum + point.tokens, 0),
     costUSD: points.reduce((sum, point) => sum + point.costUSD, 0),
+    cost: reportedUsageCost(points.reduce((sum, point) => sum + point.costUSD, 0)),
     turns: points.reduce((sum, point) => sum + point.turns, 0),
     subagentSpawns: points.reduce((sum, point) => sum + point.subagentSpawns, 0),
   };

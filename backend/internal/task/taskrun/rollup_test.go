@@ -140,7 +140,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		// its fold (the harness-reported total).
 		if cost := sink.Observes[2].Event.CostUSD; cost <= 0 {
 			t.Errorf("result cost snapshot = %v, want the folded live cost", cost)
-		} else if live, _, _, _, _ := tk.LiveStats(); cost != live {
+		} else if live := tk.Snapshot().CostUSD; cost != live {
 			t.Errorf("result cost snapshot = %v, want live cost %v", cost, live)
 		}
 		if sink.Closed != 0 {
@@ -251,7 +251,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 		}
 		var total data.Delta
 		for _, m := range claude {
-			e, ok := rollupEvent(m, at, at, false, "claude-opus", "", 0)
+			e, ok := rollupEvent(m, at, at, false, "claude-opus", "", task.CostSnapshot{})
 			if !ok {
 				t.Fatalf("%T must translate", m)
 			}
@@ -264,17 +264,17 @@ func TestTaskRollupTranslation(t *testing.T) {
 
 		// Pi's turn total arrives as the turn-end usage; its result carries
 		// only the last call and must not add tokens.
-		e, ok := rollupEvent(&agent.UsageMessage{Additive: true, ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, at, false, "zai/glm-5.3", "", 0)
+		e, ok := rollupEvent(&agent.UsageMessage{Additive: true, ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, at, false, "zai/glm-5.3", "", task.CostSnapshot{})
 		if !ok || e.Delta.Output != 30 {
 			t.Fatalf("pi usage tokens = %+v, ok = %v", e.Delta.TokenBuckets, ok)
 		}
-		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", UsageIsSnapshot: true, Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, at, false, "zai/glm-5.3", "", 0)
+		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", UsageIsSnapshot: true, Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, at, false, "zai/glm-5.3", "", task.CostSnapshot{})
 		if !ok || !reflect.DeepEqual(e.Delta.TokenBuckets, data.TokenBuckets{}) {
 			t.Errorf("pi result must carry no tokens, got %+v", e.Delta.TokenBuckets)
 		}
 
 		// OpenCode has no per-call records; its result is the only source.
-		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, at, false, "m", "", 0)
+		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, at, false, "m", "", task.CostSnapshot{})
 		if !reflect.DeepEqual(e.Delta.TokenBuckets, data.TokenBuckets{Input: 7, Output: 9}) {
 			t.Errorf("opencode result tokens = %+v", e.Delta.TokenBuckets)
 		}
@@ -285,7 +285,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 		for _, ttl := range []time.Duration{0, 5 * time.Minute, time.Hour, 2 * time.Hour} {
 			t.Run(ttl.String(), func(t *testing.T) {
 				t.Parallel()
-				e, ok := rollupEvent(&agent.UsageMessage{Additive: true, Usage: agent.Usage{CacheCreationInputTokens: 400, CacheTTLSeconds: int(ttl / time.Second)}}, at, at, false, "m", "", 0)
+				e, ok := rollupEvent(&agent.UsageMessage{Additive: true, Usage: agent.Usage{CacheCreationInputTokens: 400, CacheTTLSeconds: int(ttl / time.Second)}}, at, at, false, "m", "", task.CostSnapshot{})
 				if !ok || e.Delta.CacheWriteCount(ttl) != 400 || e.Delta.TotalInput() != 400 {
 					t.Fatalf("duration lost: %+v", e.Delta)
 				}
@@ -304,7 +304,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{Background: true}},
 		}
 		for _, m := range interesting {
-			if _, ok := rollupEvent(m, at, at, false, "m", "", 0); !ok {
+			if _, ok := rollupEvent(m, at, at, false, "m", "", task.CostSnapshot{}); !ok {
 				t.Errorf("%T must translate", m)
 			}
 		}
@@ -315,7 +315,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.SkillReadMessage{},
 		}
 		for _, m := range skipped {
-			if _, ok := rollupEvent(m, at, at, false, "m", "", 0); ok {
+			if _, ok := rollupEvent(m, at, at, false, "m", "", task.CostSnapshot{}); ok {
 				t.Errorf("%T must be skipped", m)
 			}
 		}

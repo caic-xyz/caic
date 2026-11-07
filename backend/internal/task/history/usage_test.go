@@ -3,6 +3,7 @@
 package history_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,124 @@ func TestStore(t *testing.T) {
 
 	t.Run("UsageRows", func(t *testing.T) {
 		t.Parallel()
+		for _, tc := range []struct {
+			name     string
+			native   string
+			wantUSD  float64
+			want     data.CostProvenance
+			estimate bool
+		}{
+			{"reported", `{"type":"result","total_cost_usd":0.25,"num_turns":1,"usage":{"output_tokens":100}}`, .25, data.CostProvenance{ReportedUSD: .25, ReportedParts: 1}, false},
+			{"reported zero", `{"type":"result","total_cost_usd":0,"num_turns":1,"usage":{"output_tokens":100}}`, 0, data.CostProvenance{ReportedParts: 1}, false},
+			{"estimated", `{"type":"result","num_turns":1,"usage":{"output_tokens":100}}`, .5, data.CostProvenance{EstimatedUSD: .5, EstimatedParts: 1}, true},
+			{"unknown", `{"type":"result","num_turns":1}`, 0, data.CostProvenance{UnknownParts: 1}, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				usageDir, logStore, rollup := newUsageStores(t)
+				id := ksid.NewID().String()
+				writeUsageLog(t, logStore.Journal.LogDir, id, usageAt(5), usageAt(5))
+				path := filepath.Join(logStore.Journal.LogDir, id+".jsonl")
+				raw, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Replace the helper's native result rather than appending an extra turn.
+				lines := strings.Split(string(raw), "\n")
+				lines[1] = fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`, usageAt(5).Unix(), tc.native)
+				original := []byte(strings.Join(lines, "\n"))
+				if err := os.WriteFile(path, original, 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
+					t.Fatal(err)
+				}
+				if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context())); err != nil {
+					t.Fatal(err)
+				}
+				if err := rollup.BackfillMissingCosts(t.Context(), func(row *data.UsageRow) (float64, bool) {
+					if tc.want.ReportedParts != 0 {
+						t.Error("reported cost reached mutable estimator")
+					}
+					return .5, tc.estimate
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := rollup.Close(); err != nil {
+					t.Fatal(err)
+				}
+				restored, err := usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = restored.Close() })
+				days := restored.Days()
+				if len(days) != 1 || days[0].CostUSD != tc.wantUSD || days[0].Cost != tc.want {
+					t.Fatalf("restored cost = %+v; want %v %+v", days, tc.wantUSD, tc.want)
+				}
+				after, err := os.ReadFile(path) //nolint:gosec // owned test fixture.
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(after, original) {
+					t.Fatal("backfill modified immutable native log")
+				}
+			})
+		}
+
+		t.Run("undated controls preserve reported session totals", func(t *testing.T) {
+			t.Parallel()
+			usageDir, logStore, rollup := newUsageStores(t)
+			id := ksid.NewID().String()
+			writeUsageLog(t, logStore.Journal.LogDir, id, usageAt(5), usageAt(5))
+			path := filepath.Join(logStore.Journal.LogDir, id+".jsonl")
+			raw, err := os.ReadFile(path) //nolint:gosec // owned test fixture.
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, _, _ := strings.Cut(string(raw), "\n")
+			original := []byte(header + "\n" +
+				fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":{"type":"system","subtype":"init","model":"first-session"}}`+"\n", usageAt(5).Unix()) +
+				fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":{"type":"result","total_cost_usd":2,"num_turns":1}}`+"\n", usageAt(5).Unix()) +
+				`{"t":"context_cleared"}` + "\n" +
+				`{"t":"exit","exit_code":0}` + "\n" +
+				fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":{"type":"system","subtype":"init","model":"second-session"}}`+"\n", usageAt(6).Unix()) +
+				fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":{"type":"result","total_cost_usd":0.5,"num_turns":1}}`+"\n", usageAt(6).Unix()))
+			if err := os.WriteFile(path, original, 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
+				t.Fatal(err)
+			}
+			if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context())); err != nil {
+				t.Fatal(err)
+			}
+			if err := rollup.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restored, err := usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = restored.Close() })
+			days := restored.Days()
+			if len(days) != 2 || days[0].Day != "2026-02-05" || days[1].Day != "2026-02-06" {
+				t.Fatalf("dated rows=%+v", days)
+			}
+			for i, want := range []struct {
+				usd   float64
+				model string
+			}{{2, "first-session"}, {.5, "second-session"}} {
+				day := days[i]
+				if day.CostUSD != want.usd || day.Cost != (data.CostProvenance{ReportedUSD: want.usd, ReportedParts: 1}) || day.Turns != 1 || len(day.Models) != 1 || day.Models[want.model].CostUSD != want.usd {
+					t.Fatalf("session day=%+v, want reported %v on %s", day, want.usd, want.model)
+				}
+			}
+			if days[0].CostUSD+days[1].CostUSD != 2.5 {
+				t.Fatalf("session reports were replaced: %+v", days)
+			}
+			after, err := os.ReadFile(path) //nolint:gosec // owned test fixture.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, original) {
+				t.Fatal("backfill modified immutable native log")
+			}
+		})
 
 		t.Run("Pi contributions survive native replay", func(t *testing.T) {
 			t.Parallel()
@@ -321,14 +440,14 @@ func BenchmarkUsageBackfill(b *testing.B) {
 	for i := range times {
 		times[i] = time.Date(2026, time.February, 5, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Hour)
 	}
-	var bytes int
+	var logBytes int
 	for range usageBenchmarkTasks {
-		bytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
+		logBytes += writeUsageBenchmarkLog(b, logDir, ksid.NewID().String(), times)
 	}
 
 	logStore := history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(logDir), usageResolver())
 
-	b.SetBytes(int64(bytes))
+	b.SetBytes(int64(logBytes))
 	b.ReportAllocs()
 	b.StartTimer()
 	for i := range b.N {
