@@ -1,4 +1,4 @@
-// Tests for task-list active-first repository ordering, selection visibility, and navigation.
+// Tests task-list repository ordering, compact purged disclosures, selection visibility, and navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
@@ -126,11 +126,53 @@ describe("TaskList", () => {
       "repo1",
       "repo2",
       "repo3",
-      "repo4",
-      "repo5",
-      "repo6",
+      "repo4 (1)",
+      "repo5 (1)",
+      "repo6 (1)",
       "Other",
     ]);
+  });
+
+  it("uses the repo name to disclose purged-only tasks, including Other", () => {
+    const tasks: Task[] = [
+      { ...task("1"), state: "purged", repos: [{ name: "archive", branch: "work" }] },
+      { ...task("2"), state: "failed", repos: [{ name: "archive", branch: "work" }] },
+      { ...task("3"), state: "purged" },
+    ];
+    const { container, getByRole, queryByRole } = render(() => (
+      <TaskList {...taskListProps(tasks)} selectedId={null} />
+    ));
+    const disclosure = getByRole("button", { name: "archive: Purged (2)" });
+    expect(disclosure).toHaveTextContent("archive (2)");
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(queryByRole("button", { name: /^Purged/ })).toBeNull();
+    expect(container.querySelector("[data-task-id='1']")).toBeNull();
+
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector("[data-task-id='1']")).toBeTruthy();
+    expect(container.querySelector("[data-task-id='2']")).toBeTruthy();
+
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector("[data-task-id='1']")).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Other: Purged (1)" }));
+    expect(container.querySelector("[data-task-id='3']")).toBeTruthy();
+  });
+
+  it("preserves separate purged rows for running or stopped repos and expands selected purged tasks", () => {
+    const tasks: Task[] = [
+      { ...task("1"), repos: [{ name: "running", branch: "work" }] },
+      { ...task("2"), state: "purged", repos: [{ name: "running", branch: "work" }] },
+      { ...task("3"), state: "stopped", repos: [{ name: "stopped", branch: "work" }] },
+      { ...task("4"), state: "purged", repos: [{ name: "stopped", branch: "work" }] },
+      { ...task("5"), state: "purged", repos: [{ name: "archive", branch: "work" }] },
+    ];
+    const { container, getAllByRole, getByRole } = render(() => <TaskList {...taskListProps(tasks)} selectedId="5" />);
+    expect(getAllByRole("button", { name: "Purged (1)" })).toHaveLength(2);
+    expect(getByRole("button", { name: "Stopped (1)" })).toBeTruthy();
+    expect(getByRole("button", { name: "archive: Purged (1)" })).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector("[data-task-id='5']")).toBeTruthy();
   });
 
   it("reorders repositories when their last active task stops or revives without replacing other cards", () => {

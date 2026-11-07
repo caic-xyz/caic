@@ -9,6 +9,7 @@ declare const classes: {
   readonly "list": string;
   readonly "narrow": string;
   readonly "placeholder": string;
+  readonly "repoDisclosure": string;
   readonly "repoGroup": string;
   readonly "repoGroupHeader": string;
   readonly "scrolledFromTop": string;

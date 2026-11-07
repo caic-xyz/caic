@@ -1,4 +1,4 @@
-// Sidebar task list with collapsible panel, grouped by repo with active repositories first.
+// Sidebar task list with active repositories first and inline disclosures for purged-only repos.
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -384,10 +384,24 @@ export default function TaskList(props: TaskListProps) {
             const selectedInStopped = () =>
               !!props.selectedId && group().stopped.some((t) => t.id === props.selectedId);
             const selectedInPurged = () => !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
+            const purgedOnly = () => group().active.length === 0 && group().stopped.length === 0;
+            const purgedExpanded = () => expanded().has(purgedKey) || selectedInPurged();
             return (
               <div class={styles.repoGroup}>
                 <div class={styles.repoGroupHeader}>
-                  {repo || "Other"}
+                  <Show when={purgedOnly()} fallback={repo || "Other"}>
+                    <button
+                      class={styles.repoDisclosure}
+                      aria-label={`${repo || "Other"}: Purged (${group().purged.length})`}
+                      aria-expanded={purgedExpanded()}
+                      onClick={() => toggleExpanded(purgedKey)}
+                    >
+                      <Show when={purgedExpanded()} fallback={<ArrowRight width={18} height={18} aria-hidden="true" />}>
+                        <ArrowDropDown width={18} height={18} aria-hidden="true" />
+                      </Show>
+                      {repo || "Other"} ({group().purged.length})
+                    </button>
+                  </Show>
                   <Show when={repoMeta()} keyed>
                     {(meta) => (
                       <Show when={meta.ci} keyed>
@@ -434,15 +448,21 @@ export default function TaskList(props: TaskListProps) {
                 </Show>
 
                 <Show when={group().purged.length > 0}>
-                  <button class={styles.subGroupHeader} onClick={() => toggleExpanded(purgedKey)}>
-                    {expanded().has(purgedKey) || selectedInPurged() ? (
-                      <ArrowDropDown width={18} height={18} />
-                    ) : (
-                      <ArrowRight width={18} height={18} />
-                    )}
-                    Purged ({group().purged.length})
-                  </button>
-                  <Show when={expanded().has(purgedKey) || selectedInPurged()}>
+                  <Show when={!purgedOnly()}>
+                    <button
+                      class={styles.subGroupHeader}
+                      aria-expanded={purgedExpanded()}
+                      onClick={() => toggleExpanded(purgedKey)}
+                    >
+                      {purgedExpanded() ? (
+                        <ArrowDropDown width={18} height={18} />
+                      ) : (
+                        <ArrowRight width={18} height={18} />
+                      )}
+                      Purged ({group().purged.length})
+                    </button>
+                  </Show>
+                  <Show when={purgedExpanded()}>
                     <For each={group().purged.map((task) => task.id)}>{renderTask}</For>
                   </Show>
                 </Show>

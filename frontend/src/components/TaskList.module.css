@@ -118,6 +118,31 @@
   background: var(--color-bg-hover);
 }
 
+.repoDisclosure {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+}
+
+.repoDisclosure > svg {
+  flex-shrink: 0;
+}
+
+.repoDisclosure:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
 .fixCIBtn {
   flex-shrink: 0;
   padding: 1px 5px;

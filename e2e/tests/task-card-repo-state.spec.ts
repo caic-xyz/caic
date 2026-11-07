@@ -4,6 +4,57 @@ import { ok } from "node:assert/strict";
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
 
+test("purged-only repos disclose inline while mixed repos keep their task sections", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  const created = await api.createTask({
+    initialPrompt: { text: uniquePrompt("compact purged repos") },
+    harness: "claude",
+  });
+  await waitForTaskState(api, created.id, "waiting");
+  const task = await api.getTask(created.id);
+  const snapshot = {
+    kind: "snapshot",
+    snapshot: [
+      { ...task, id: "A1", state: "purged", repos: [{ name: "archive", branch: "work" }] },
+      { ...task, id: "A2", state: "purged", repos: [{ name: "archive", branch: "work" }] },
+      { ...task, id: "B1", state: "running", repos: [{ name: "running", branch: "work" }] },
+      { ...task, id: "B2", state: "purged", repos: [{ name: "running", branch: "work" }] },
+      { ...task, id: "C1", state: "stopped", repos: [{ name: "stopped", branch: "work" }] },
+      { ...task, id: "C2", state: "purged", repos: [{ name: "stopped", branch: "work" }] },
+    ],
+  } satisfies TaskListEvent;
+  await page.route(
+    (url) => url.pathname === "/api/caic/v1/tasks/events",
+    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+  );
+  await page.goto("/");
+  const list = page.getByTestId("task-list");
+  const disclosure = list.getByRole("button", { name: "archive: Purged (2)" });
+  await expect(disclosure).toHaveText("archive (2)");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(list.getByRole("button", { name: "Purged (1)", exact: true })).toHaveCount(2);
+  await expect(list.getByRole("button", { name: "Stopped (1)", exact: true })).toBeVisible();
+  await disclosure.focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(list.locator('[data-task-id="A1"]')).toBeVisible();
+  await expect(list.locator('[data-task-id="A2"]')).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(list.locator('[data-task-id="A1"]')).toHaveCount(0);
+  await expect(disclosure).toBeFocused();
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await disclosure.click();
+  await expect(list.locator('[data-task-id="A1"]')).toBeVisible();
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await page.screenshot({ path: "test-results/compact-purged-mobile.png", fullPage: true });
+});
+
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();
   const firstRepo = repos[0];
