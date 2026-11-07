@@ -1,4 +1,4 @@
-// Tests task-scoped MCP capabilities and accepted work across stream shutdown.
+// Tests conversation-scoped MCP focus, session bounds, task capabilities, and accepted work across stream shutdown.
 
 package server
 
@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -34,6 +36,130 @@ import (
 
 func TestMCPRegistry(t *testing.T) {
 	t.Parallel()
+	t.Run("oversizedConversation", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type=%T", s.mcpHandlers.protocol.Registry)
+		}
+		meta := mcp.RequestMeta{Session: strings.Repeat("x", maxMCPClientSessionBytes+1)}
+		for _, operation := range []struct {
+			name string
+			run  func() error
+		}{
+			{"instructions", func() error { _, err := registry.Instructions(t.Context(), &meta); return err }},
+			{"tools", func() error {
+				_, err := registry.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "tasks_list", Arguments: json.RawMessage(`{}`), Meta: meta})
+				return err
+			}},
+			{"resources", func() error {
+				_, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://items", Meta: meta})
+				return err
+			}},
+			{"subscriptions", func() error {
+				_, err := registry.SubscribeResourceUpdates(t.Context(), &mcp.SubscriptionsListenParams{
+					Meta: meta, Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}},
+				})
+				return err
+			}},
+		} {
+			t.Run(operation.name, func(t *testing.T) {
+				t.Parallel()
+				if err := operation.run(); err == nil || !strings.Contains(err.Error(), "session") {
+					t.Fatalf("oversized session error=%v, want validation rejection", err)
+				}
+			})
+		}
+	})
+	t.Run("conversationFocus", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		first := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first conversation"}, harness.Claude)
+		second := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "second conversation"}, harness.Claude)
+		insertTestTask(s, first.ID, first)
+		insertTestTask(s, second.ID, second)
+		registry := s.mcpHandlers.protocol.Registry
+		meta := func(session string) mcp.RequestMeta {
+			return mcp.RequestMeta{Session: session}
+		}
+		focus := func(session string, id ksid.ID) {
+			result, err := registry.CallTool(t.Context(), &mcp.ToolsCallParams{
+				Name: "task_get_detail", Arguments: fmt.Appendf(nil, `{"task":%q}`, id), Meta: meta(session),
+			})
+			if err != nil || result.IsError {
+				t.Fatalf("focus %s: result=%+v, err=%v", session, result, err)
+			}
+		}
+		focus("tab-a", first.ID)
+		focus("tab-b", second.ID)
+		if _, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://notifications"}); err != nil {
+			t.Fatal(err)
+		}
+		first.SetState(task.StateWaiting)
+		check := func(session string, want ksid.ID) {
+			requestMeta := meta(session)
+			instructions, err := registry.Instructions(t.Context(), &requestMeta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want == 0 {
+				if strings.Contains(instructions, "[Active task:") {
+					t.Fatalf("%q inherited active instructions: %s", session, instructions)
+				}
+			} else {
+				number := taskNumberForID(testTaskHandlers(s).taskSvc.taskListSnapshot(t.Context()), want.String())
+				if !strings.Contains(instructions, fmt.Sprintf("[Active task: #%d (%s)]", number, want)) {
+					t.Fatalf("%q instructions omit focused task %s", session, want)
+				}
+			}
+			wantID := ""
+			if want != 0 {
+				wantID = want.String()
+			}
+			items, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://items", Meta: requestMeta})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output mcpschema.ServiceItemsOutput
+			if err := json.Unmarshal([]byte(items.Contents[0].Text), &output); err != nil {
+				t.Fatal(err)
+			}
+			if output.ActiveTaskID != wantID {
+				t.Fatalf("%q items focus=%q, want %q", session, output.ActiveTaskID, wantID)
+			}
+			alerts, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://notifications", Meta: requestMeta})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var notifications []mcpschema.ServiceNotification
+			if err := json.Unmarshal([]byte(alerts.Contents[0].Text), &notifications); err != nil {
+				t.Fatal(err)
+			}
+			if len(notifications) != 1 || notifications[0].ActiveTaskID != wantID {
+				t.Fatalf("%q alert focus=%+v, want %q", session, notifications, wantID)
+			}
+			result, err := registry.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "tasks_list", Arguments: json.RawMessage(`{}`), Meta: requestMeta})
+			if err != nil || result.IsError {
+				t.Fatalf("tasks_list: result=%+v, err=%v", result, err)
+			}
+			listed, ok := result.Structured.(mcpschema.TaskListOutput)
+			if !ok {
+				t.Fatalf("tasks_list output type=%T", result.Structured)
+			}
+			for _, item := range listed.Tasks {
+				if item.Active != (item.TaskID == wantID) {
+					t.Fatalf("%q task %s active=%t, want focus %q", session, item.TaskID, item.Active, wantID)
+				}
+			}
+		}
+		check("tab-a", first.ID)
+		check("tab-b", second.ID)
+		check("tab-c", 0)
+		check("", 0)
+		focus("tab-b", first.ID)
+		check("", first.ID)
+	})
 	t.Run("Instructions/activeTask", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -46,7 +172,7 @@ func TestMCPRegistry(t *testing.T) {
 			mcpResources: &mcpResources{taskSvc: svc},
 			prefs:        s.prefs,
 		}
-		instructions, err := registry.Instructions(t.Context())
+		instructions, err := registry.Instructions(t.Context(), &mcp.RequestMeta{})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -25,6 +26,66 @@ import (
 
 func TestMCPResources(t *testing.T) {
 	t.Parallel()
+	t.Run("SubscribeResourceUpdates/conversationFocus", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newTestRouter(t, nil)
+			registry, ok := s.mcpHandlers.protocol.Registry.(mcp.SubscriptionRegistry)
+			if !ok {
+				t.Fatalf("registry type=%T", s.mcpHandlers.protocol.Registry)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			var workers sync.WaitGroup
+			updates := make(map[string]chan mcp.ResourceUpdate)
+			for _, session := range []string{"tab-a", "tab-b"} {
+				changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{
+					Meta:          mcp.RequestMeta{OpenAIRequestMeta: mcp.OpenAIRequestMeta{Session: session}},
+					Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ch := make(chan mcp.ResourceUpdate, 1)
+				updates[session] = ch
+				workers.Go(func() {
+					for update, err := range changes {
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						ch <- update
+						return
+					}
+				})
+			}
+			t.Cleanup(func() { cancel(); workers.Wait() })
+			synctest.Wait()
+			testTaskHandlers(s).taskSvc.focusTask(withMCPClientSession(ctx, "tab-a"), ksid.NewID())
+			synctest.Wait()
+			select {
+			case update := <-updates["tab-a"]:
+				if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
+					t.Fatalf("conversation focus update=%+v", update)
+				}
+			default:
+				t.Fatal("tab-a did not receive its focus update")
+			}
+			select {
+			case update := <-updates["tab-b"]:
+				t.Fatalf("tab-b received another conversation's focus update: %+v", update)
+			default:
+			}
+			cancel()
+			workers.Wait()
+			synctest.Wait()
+			svc := testTaskHandlers(s).taskSvc
+			svc.focusMu.Lock()
+			defer svc.focusMu.Unlock()
+			if len(svc.focusSubscribers) != 0 {
+				t.Fatalf("focus subscribers after cancellation=%d", len(svc.focusSubscribers))
+			}
+		})
+	})
 	t.Run("collection resources are represented by tools and individual resources", func(t *testing.T) {
 		t.Parallel()
 
@@ -103,7 +164,7 @@ func TestMCPResources(t *testing.T) {
 				t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 			}
 			ctx, cancel := context.WithCancel(t.Context())
-			_, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}})
+			_, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +237,7 @@ func TestMCPResources(t *testing.T) {
 				if h := read(); !h.Time.IsZero() || h.Error == "" {
 					t.Fatalf("warmup=%+v", h)
 				}
-				changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}})
+				changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -242,7 +303,7 @@ func TestMCPResources(t *testing.T) {
 				if _, err := registry.ReadResource(ctx, &mcp.ResourcesReadParams{URI: uri}); err == nil {
 					t.Fatalf("read allowed for %+v", p)
 				}
-				if _, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}}); err == nil {
+				if _, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}}}); err == nil {
 					t.Fatalf("subscribe allowed for %+v", p)
 				}
 				resources, err := registry.ListResources(ctx, "")

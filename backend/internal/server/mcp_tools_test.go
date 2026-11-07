@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
@@ -154,7 +156,7 @@ func taskDetailOutput(t *testing.T, v any) v1.MCPTaskDetail {
 	return out
 }
 
-func callTaskDetail(t *testing.T, reg mcp.Registry, a mcpTaskGetDetailArgs) mcp.RawToolResult {
+func callTaskDetail(t *testing.T, reg mcp.Registry, a mcpschema.TaskGetDetailArgs) mcp.RawToolResult {
 	buf, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +180,7 @@ type mcpTaskDetailWireResult struct {
 	StructuredContent v1.MCPTaskDetail   `json:"structuredContent"`
 }
 
-func taskDetailWire(t *testing.T, s *testRouter, a mcpTaskGetDetailArgs) mcpTaskDetailWireResponse {
+func taskDetailWire(t *testing.T, s *testRouter, a mcpschema.TaskGetDetailArgs) mcpTaskDetailWireResponse {
 	buf, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +251,7 @@ func TestMCPTools(t *testing.T) {
 		if apiTask.NumTurns != 2 || apiTask.Duration != 5 {
 			t.Fatalf("API metrics = %d turns, %vs; want 2, 5s", apiTask.NumTurns, apiTask.Duration)
 		}
-		detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+		detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(tk.ID.String())}})
 		if detail.IsError {
 			t.Fatal(detail)
 		}
@@ -281,12 +283,12 @@ func TestMCPTools(t *testing.T) {
 			if pending := entry.PendingInput(); pending == nil || pending.Prompt.Text != "first\nsecond" {
 				t.Fatalf("pending input = %+v", pending)
 			}
-			list := c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{})
-			output, ok := list.Structured.(mcpTaskListOutput)
+			list := c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{})
+			output, ok := list.Structured.(mcpschema.TaskListOutput)
 			if list.IsError || !ok || len(output.Tasks) != 1 || !output.Tasks[0].HasPendingInput {
 				t.Fatalf("task list = %+v", list)
 			}
-			detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+			detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(tk.ID.String())}})
 			pending := taskDetailOutput(t, detail.Structured).PendingInput
 			if detail.IsError || pending == nil || pending.Text != "first\nsecond" || pending.State != v1.MCPPendingInputQueued || pending.ID != entry.PendingInput().ID.String() {
 				t.Fatalf("task detail = %+v", detail)
@@ -294,12 +296,12 @@ func TestMCPTools(t *testing.T) {
 			if err := entry.Lifecycle.CancelQueuedInput(entry.PendingInput().ID); err != nil {
 				t.Fatal(err)
 			}
-			list = c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{})
-			output, ok = list.Structured.(mcpTaskListOutput)
+			list = c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{})
+			output, ok = list.Structured.(mcpschema.TaskListOutput)
 			if list.IsError || !ok || len(output.Tasks) != 1 || output.Tasks[0].HasPendingInput {
 				t.Fatalf("task list after cancellation = %+v", list)
 			}
-			detail = c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(tk.ID.String())}})
+			detail = c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(tk.ID.String())}})
 			if detail.IsError || taskDetailOutput(t, detail.Structured).PendingInput != nil {
 				t.Fatalf("task detail after cancellation = %+v", detail)
 			}
@@ -377,7 +379,7 @@ func TestMCPTools(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
 			insertTestTask(s, tk.ID, tk)
 			c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
-			res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpTaskSendMessageArgs]{Arguments: mcpTaskSendMessageArgs{TaskNumber: "1", Message: "hello", DeliveryMode: "invalid"}})
+			res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskSendMessageArgs]{Arguments: mcpschema.TaskSendMessageArgs{TaskNumber: "1", Message: "hello", DeliveryMode: "invalid"}})
 			assertMCPToolErrorCode(t, res, api.CodeBadRequest)
 		})
 		for _, existing := range []bool{false, true} {
@@ -429,7 +431,7 @@ func TestMCPTools(t *testing.T) {
 				old := entry.PendingInput()
 				tk.SetState(tc.state)
 				c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
-				res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpTaskSendMessageArgs]{Arguments: mcpTaskSendMessageArgs{TaskNumber: taskID(tk.ID.String()), Message: tc.message, DeliveryMode: inputReplace}})
+				res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskSendMessageArgs]{Arguments: mcpschema.TaskSendMessageArgs{TaskNumber: mcpschema.TaskReference(tk.ID.String()), Message: tc.message, DeliveryMode: mcpschema.InputReplace}})
 				assertMCPToolErrorCode(t, res, tc.code)
 				if tc.message == "" {
 					if entry.PendingInput() != old {
@@ -783,13 +785,13 @@ func TestMCPTools(t *testing.T) {
 		registerRouterCheckout(t, s.checkouts, "repo2", &repo.Checkout{BaseBranch: "develop", Dir: t.TempDir()})
 		c := &mcpTools{serverConfig: s.serverHandlers}
 
-		result := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
+		result := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpschema.RepoListArgs]{Arguments: mcpschema.RepoListArgs{}})
 		if result.IsError {
 			t.Fatalf("handleReposList() returned tool error: %+v", result.Structured)
 		}
-		output, ok := result.Structured.(mcpRepoListOutput)
+		output, ok := result.Structured.(mcpschema.RepoListOutput)
 		if !ok {
-			t.Fatalf("result type = %T, want mcpRepoListOutput", result.Structured)
+			t.Fatalf("result type = %T, want mcpschema.RepoListOutput", result.Structured)
 		}
 		got := output.Repositories
 		if len(got) != 2 {
@@ -801,7 +803,7 @@ func TestMCPTools(t *testing.T) {
 		if got[1].Path != "repo2" || got[1].BaseBranch.Name != "develop" {
 			t.Errorf("repositories[1] = %+v, want repo2 on develop", got[1])
 		}
-		invalid := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{Limit: mcpRepoPageSizeMax + 1}})
+		invalid := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpschema.RepoListArgs]{Arguments: mcpschema.RepoListArgs{Limit: mcpRepoPageSizeMax + 1}})
 		if !invalid.IsError || invalid.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
 			t.Fatalf("invalid limit result = %#v, meta = %#v, want bad request", invalid.Structured, invalid.Meta)
 		}
@@ -816,9 +818,9 @@ func TestMCPTools(t *testing.T) {
 		if result.IsError {
 			t.Fatalf("handleHarnessesList() returned tool error: %+v", result.Structured)
 		}
-		output, ok := result.Structured.(mcpHarnessListOutput)
+		output, ok := result.Structured.(mcpschema.HarnessListOutput)
 		if !ok {
-			t.Fatalf("result type = %T, want mcpHarnessListOutput", result.Structured)
+			t.Fatalf("result type = %T, want mcpschema.HarnessListOutput", result.Structured)
 		}
 		if len(output.Harnesses) != 2 {
 			t.Fatalf("harnesses = %+v, want claude and pi", output.Harnesses)
@@ -848,8 +850,8 @@ func TestMCPTools(t *testing.T) {
 		registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 		testTaskHandlers(s).taskSvc.focusTask(t.Context(), runningID)
 
-		first := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Limit: 1}})
-		firstOutput, ok := first.Structured.(mcpTaskListOutput)
+		first := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{Limit: 1}})
+		firstOutput, ok := first.Structured.(mcpschema.TaskListOutput)
 		if first.IsError || !ok {
 			t.Fatalf("first page = %#v, want task-list output", first.Structured)
 		}
@@ -857,8 +859,8 @@ func TestMCPTools(t *testing.T) {
 			t.Fatalf("first page = %#v, want focused running task and a next cursor", firstOutput)
 		}
 
-		second := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
-		secondOutput, ok := second.Structured.(mcpTaskListOutput)
+		second := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
+		secondOutput, ok := second.Structured.(mcpschema.TaskListOutput)
 		if second.IsError || !ok {
 			t.Fatalf("second page = %#v, want task-list output", second.Structured)
 		}
@@ -866,18 +868,18 @@ func TestMCPTools(t *testing.T) {
 			t.Fatalf("second page = %#v, want unfocused stopped task without cursor", secondOutput)
 		}
 		stopped.SetState(task.StateRunning)
-		stale := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
+		stale := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
 		if !stale.IsError {
 			t.Fatal("tasks_list accepted a cursor after another task changed ordering partition")
 		}
 
-		for name, args := range map[string]mcpTaskListArgs{
+		for name, args := range map[string]mcpschema.TaskListArgs{
 			"cursor": {Cursor: "invalid"},
 			"limit":  {Limit: mcpTaskPageSizeMax + 1},
 		} {
 			t.Run("invalid "+name, func(t *testing.T) {
 				t.Parallel()
-				result := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: args})
+				result := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: args})
 				if !result.IsError || result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
 					t.Fatalf("result = %#v, meta = %#v, want bad-request tool error", result.Structured, result.Meta)
 				}
@@ -906,8 +908,8 @@ func TestMCPTools(t *testing.T) {
 			insertTestTask(s, grandchildID, grandchild)
 
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
-			result := registry.handleTasksList(ctx, &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{}})
-			output, ok := result.Structured.(mcpTaskListOutput)
+			result := registry.handleTasksList(ctx, &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{}})
+			output, ok := result.Structured.(mcpschema.TaskListOutput)
 			if result.IsError || !ok {
 				t.Fatalf("task-scoped list = %#v, want task-list output", result.Structured)
 			}
@@ -922,7 +924,7 @@ func TestMCPTools(t *testing.T) {
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("task-scoped task IDs = %#v, want %#v", got, want)
 			}
-			detail := registry.handleTaskGetDetail(ctx, &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(strconv.Itoa(output.Tasks[0].TaskNumber))}})
+			detail := registry.handleTaskGetDetail(ctx, &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(strconv.Itoa(output.Tasks[0].TaskNumber))}})
 			if detail.IsError {
 				t.Fatalf("task detail = %#v, want listed child detail", detail.Structured)
 			}
@@ -968,26 +970,26 @@ func TestMCPTools(t *testing.T) {
 			insertTestTask(s, unrelatedID, unrelated)
 
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
-			_, self, err := registry.entryByTaskRef(ctx, taskID("0"), true)
+			_, self, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference("0"), true)
 			if err != nil || self.Task().ID != parentID {
 				t.Fatalf("self fork source = %#v, %v; want parent", self, err)
 			}
-			_, childEntry, err := registry.entryByTaskRef(ctx, taskID("1"), false)
+			_, childEntry, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference("1"), false)
 			if err != nil || childEntry.Task().ID != childID {
 				t.Fatalf("child control target = %#v, %v; want child", childEntry, err)
 			}
-			_, hashtagEntry, err := registry.entryByTaskRef(ctx, taskID("#1"), false)
+			_, hashtagEntry, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference("#1"), false)
 			if err != nil || hashtagEntry.Task().ID != childID {
 				t.Fatalf("hashtag control target = %#v, %v; want child", hashtagEntry, err)
 			}
-			_, stableEntry, err := registry.entryByTaskRef(ctx, taskID(childID.String()), false)
+			_, stableEntry, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference(childID.String()), false)
 			if err != nil || stableEntry.Task().ID != childID {
 				t.Fatalf("stable control target = %#v, %v; want child", stableEntry, err)
 			}
-			if _, _, err := registry.entryByTaskRef(ctx, taskID("0"), false); err == nil {
+			if _, _, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference("0"), false); err == nil {
 				t.Fatal("task-scoped stop resolved the calling task")
 			}
-			if _, _, err := registry.entryByTaskRef(ctx, taskID("2"), false); err == nil {
+			if _, _, err := registry.entryByTaskRef(ctx, mcpschema.TaskReference("2"), false); err == nil {
 				t.Fatal("task-scoped control resolved an unrelated task")
 			}
 		})
@@ -1079,7 +1081,7 @@ func TestMCPTools(t *testing.T) {
 
 			s := newMCPTaskCreateTestRouter(t)
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "delegate the review", Repos: []string{"myrepo"}}})
+			result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Prompt: "delegate the review", Repos: []string{"myrepo"}}})
 			if result.IsError {
 				t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
 			}
@@ -1093,11 +1095,11 @@ func TestMCPTools(t *testing.T) {
 
 			s := newMCPTaskCreateTestRouter(t)
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt: strings.Repeat("€", maxMCPTaskTitle),
 				Repos:  []string{"myrepo"},
 			}})
-			output, ok := result.Structured.(mcpTaskCreatedOutput)
+			output, ok := result.Structured.(mcpschema.TaskCreatedOutput)
 			if result.IsError || !ok {
 				t.Fatalf("handleTaskCreate() result = %#v", result)
 			}
@@ -1129,7 +1131,7 @@ func TestMCPTools(t *testing.T) {
 			}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt:  "do the task",
 				Repos:   []string{"myrepo"},
 				Harness: string(harness.Pi),
@@ -1170,7 +1172,7 @@ func TestMCPTools(t *testing.T) {
 			}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt: "do the task",
 				Repos:  []string{"myrepo"},
 			}})
@@ -1247,7 +1249,7 @@ func TestMCPTools(t *testing.T) {
 			}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt:  "do the task",
 				Repos:   []string{"myrepo"},
 				Harness: string(harness.Pi),
@@ -1296,7 +1298,7 @@ func TestMCPTools(t *testing.T) {
 				ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
 				ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
 
-				result := c.handleTaskCreate(ctx, &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"mistyped"}}})
+				result := c.handleTaskCreate(ctx, &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"mistyped"}}})
 				if !result.IsError {
 					t.Fatal("handleTaskCreate() did not return a tool error")
 				}
@@ -1341,7 +1343,7 @@ func TestMCPTools(t *testing.T) {
 				ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
 				ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
 
-				result := c.handleBotFixCI(ctx, &mcp.ToolRequest[mcpBotFixCIArgs]{Arguments: mcpBotFixCIArgs{Repo: "mistyped"}})
+				result := c.handleBotFixCI(ctx, &mcp.ToolRequest[mcpschema.BotFixCIArgs]{Arguments: mcpschema.BotFixCIArgs{Repo: "mistyped"}})
 				if !result.IsError {
 					t.Fatal("handleBotFixCI() did not return a tool error")
 				}
@@ -1366,25 +1368,25 @@ func TestMCPTools(t *testing.T) {
 
 			tests := []struct {
 				name     string
-				args     mcpTaskCreateArgs
+				args     mcpschema.TaskCreateArgs
 				want     string
 				wantCode api.ErrorCode
 			}{
 				{
 					name:     "unknown harness",
-					args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "mistyped"},
+					args:     mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "mistyped"},
 					want:     `unsupported harness "mistyped". Omit harness to use caic's default harness, then retry task_create.`,
 					wantCode: api.CodeUnknownHarness,
 				},
 				{
 					name:     "unsupported model",
-					args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
+					args:     mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
 					want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to use the selected harness's default model, then retry task_create.",
 					wantCode: api.CodeUnsupportedModel,
 				},
 				{
 					name:     "unknown runtime",
-					args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", RuntimeName: "mistyped"},
+					args:     mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", RuntimeName: "mistyped"},
 					want:     "unknown runtime: mistyped. Omit runtimeName to use caic's default runtime, then retry task_create.",
 					wantCode: api.CodeUnknownRuntime,
 				},
@@ -1395,7 +1397,7 @@ func TestMCPTools(t *testing.T) {
 
 					s := newMCPTaskCreateTestRouter(t)
 					c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-					result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: tt.args})
+					result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: tt.args})
 					if !result.IsError {
 						t.Fatal("handleTaskCreate() did not return a tool error")
 					}
@@ -1418,7 +1420,7 @@ func TestMCPTools(t *testing.T) {
 
 			s := newMCPTaskCreateTestRouter(t)
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt:  "do the task",
 				Repos:   []string{"myrepo"},
 				Harness: "mistyped",
@@ -1445,7 +1447,7 @@ func TestMCPTools(t *testing.T) {
 			s := newMCPTaskCreateTestRouter(t)
 			s.taskMgr.Runtimes = &runtime.Router{}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{
 				Prompt:      "do the task",
 				Repos:       []string{"myrepo"},
 				Harness:     "claude",
@@ -1476,7 +1478,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
 			if !result.IsError {
 				t.Fatal("handleTaskCreate() did not return a tool error")
 			}
@@ -1502,7 +1504,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
 			if !result.IsError {
 				t.Fatal("handleTaskCreate() did not return a tool error")
 			}
@@ -1526,25 +1528,25 @@ func TestMCPTools(t *testing.T) {
 		t.Run("malformed task request", func(t *testing.T) {
 			t.Parallel()
 
-			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Repos: []string{"myrepo"}}})
+			result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Repos: []string{"myrepo"}}})
 			assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 		})
 		t.Run("invalid task number", func(t *testing.T) {
 			t.Parallel()
 
-			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID("-1")}})
+			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference("-1")}})
 			assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 		})
 		t.Run("invalid task reference", func(t *testing.T) {
 			t.Parallel()
 
-			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID("!")}})
+			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference("!")}})
 			assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 		})
 		t.Run("missing task", func(t *testing.T) {
 			t.Parallel()
 
-			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(ksid.NewID().String())}})
+			result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(ksid.NewID().String())}})
 			assertMCPToolErrorCode(t, result, api.CodeNotFound)
 		})
 		t.Run("unclassified failure", func(t *testing.T) {
@@ -1559,19 +1561,19 @@ func TestMCPTools(t *testing.T) {
 
 		tests := []struct {
 			name     string
-			args     mcpTaskForkArgs
+			args     mcpschema.TaskForkArgs
 			want     string
 			wantCode api.ErrorCode
 		}{
 			{
 				name:     "unknown override harness",
-				args:     mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"},
+				args:     mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "mistyped"},
 				want:     `unsupported harness "mistyped". Omit harness to inherit the source task's harness, then retry task_fork.`,
 				wantCode: api.CodeUnknownHarness,
 			},
 			{
 				name:     "unsupported override model",
-				args:     mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "claude", Model: "mistyped"},
+				args:     mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "claude", Model: "mistyped"},
 				want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to inherit the source task's model, then retry task_fork.",
 				wantCode: api.CodeUnsupportedModel,
 			},
@@ -1588,7 +1590,7 @@ func TestMCPTools(t *testing.T) {
 				insertTestTask(s, tk.ID, tk)
 				c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-				result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: tt.args})
+				result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: tt.args})
 				if !result.IsError {
 					t.Fatal("handleTaskFork() did not return a tool error")
 				}
@@ -1615,7 +1617,7 @@ func TestMCPTools(t *testing.T) {
 		tk.SetState(task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"}})
+		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"}})
 		if !result.IsError {
 			t.Fatal("handleTaskFork() did not return a tool error")
 		}
@@ -1641,7 +1643,7 @@ func TestMCPTools(t *testing.T) {
 		tk.SetState(task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"}})
+		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "mistyped"}})
 		if !result.IsError {
 			t.Fatal("handleTaskFork() did not return a tool error")
 		}
@@ -1667,7 +1669,7 @@ func TestMCPTools(t *testing.T) {
 		tk.SetState(task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"}})
+		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"}})
 		if !result.IsError {
 			t.Fatal("handleTaskFork() did not return a tool error")
 		}
@@ -1692,7 +1694,7 @@ func TestMCPTools(t *testing.T) {
 		s := newCheckoutConstructionTestServer(t, root).server
 		registry := &mcpTools{serverConfig: s.serverHandlers}
 
-		result := registry.handleCloneRepo(t.Context(), &mcp.ToolRequest[mcpCloneRepoArgs]{Arguments: mcpCloneRepoArgs{URL: "https://example.com/repo.git", Path: "taken"}})
+		result := registry.handleCloneRepo(t.Context(), &mcp.ToolRequest[mcpschema.CloneRepoArgs]{Arguments: mcpschema.CloneRepoArgs{URL: "https://example.com/repo.git", Path: "taken"}})
 		if !result.IsError {
 			t.Fatal("handleCloneRepo() did not return a tool error")
 		}
@@ -1929,7 +1931,7 @@ func TestMCPTools(t *testing.T) {
 					rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: fmt.Sprintf("%03d-", i) + strings.Repeat("\u754c", 700), LinesAdded: 1})
 				}
 				for _, includeDiffstat := range []bool{false, true} {
-					got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: includeDiffstat})
+					got := taskDetailWire(t, s, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: includeDiffstat})
 					out := got.Result.StructuredContent
 					if got.Result.IsError || out.TaskID != id.String() || out.PendingInput == nil {
 						t.Fatalf("task detail = %+v", got)
@@ -1949,7 +1951,7 @@ func TestMCPTools(t *testing.T) {
 					if !ok {
 						t.Fatal("unexpected MCP registry")
 					}
-					args, err := json.Marshal(mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: includeDiffstat})
+					args, err := json.Marshal(mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: includeDiffstat})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1997,7 +1999,7 @@ func TestMCPTools(t *testing.T) {
 				rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: "image.png", Binary: true, OldSize: 12, NewSize: 24})
 				ent, _ := s.taskMgr.GetEntry(id)
 				ent.Task().Repos = append(ent.Task().Repos, repo.Mount{Name: "other", Branch: "other-work", ContainerPath: "/workspace/other"})
-				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: true})
 				if res.IsError {
 					t.Fatal(res)
 				}
@@ -2022,7 +2024,7 @@ func TestMCPTools(t *testing.T) {
 			t.Run("default avoids repository reads", func(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
-				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String())})
+				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String())})
 				if res.IsError || rt.StatusReads.Load() != 0 || rt.PatchReads.Load() != 0 {
 					t.Fatalf("default result=%+v, status=%d, patches=%d", res, rt.StatusReads.Load(), rt.PatchReads.Load())
 				}
@@ -2040,7 +2042,7 @@ func TestMCPTools(t *testing.T) {
 					rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: p, LinesAdded: 1})
 					rt.RepositoryStatusValue.DiffStat = append(rt.RepositoryStatusValue.DiffStat, runtime.GitFileStat{Path: p, LinesAdded: 1})
 				}
-				got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+				got := taskDetailWire(t, s, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: true})
 				out := got.Result.StructuredContent
 				if got.Result.IsError || out.Diffstat == nil || !out.Diffstat.Truncated || got.Result.Meta[mcpTruncatedMetaKey] != true || out.Diffstat.Totals != (v1.MCPDiffTotals{FileChanges: 503, Additions: 507, Deletions: 1}) {
 					t.Fatalf("bounded diffstat = %+v", out.Diffstat)
@@ -2049,7 +2051,7 @@ func TestMCPTools(t *testing.T) {
 				if err != nil || len(encoded) > 32768 {
 					t.Fatalf("bounded diffstat bytes=%d, err=%v", len(encoded), err)
 				}
-				got = taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String())})
+				got = taskDetailWire(t, s, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String())})
 				out = got.Result.StructuredContent
 				encoded, err = json.Marshal(out.ChangedPaths)
 				if got.Result.IsError || err != nil || len(encoded) > 32768 || !out.ChangedPathsTruncated {
@@ -2081,7 +2083,7 @@ func TestMCPTools(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
 				rt.StatusErr = errors.New(strings.Repeat("bad\xffrecord", 20000))
-				got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+				got := taskDetailWire(t, s, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: true})
 				if !got.Result.IsError || got.Result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeInternalError) || got.Result.Meta[mcpTruncatedMetaKey] != true {
 					t.Fatalf("missing bounded error metadata: %+v", got.Result.Meta)
 				}
@@ -2097,7 +2099,7 @@ func TestMCPTools(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
 				rt.StatusErr = errors.New("status unavailable")
-				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+				res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(id.String()), IncludeDiffstat: true})
 				if !res.IsError || res.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeInternalError) {
 					t.Fatalf("missing repository error: %+v", res)
 				}
@@ -2214,7 +2216,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatal("missing owner fell back to another tool")
 			}
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: svc}
-			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 			out, ok := result.Structured.(mcp.TextOutput)
 			if result.IsError || !ok || out.Result != "Last message from task #1: root answer" {
 				t.Fatalf("last message = %#v", result.Structured)
@@ -2262,7 +2264,7 @@ func TestMCPTools(t *testing.T) {
 			}
 
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 			if result.IsError {
 				t.Fatalf("agent_last_message error = %#v", result.Structured)
 			}
@@ -2304,7 +2306,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatal(err)
 			}
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 			output, ok := result.Structured.(mcp.TextOutput)
 			if result.IsError || !ok || output.Result != "Task #1 result: recorded final answer" {
 				t.Fatalf("agent_last_message = %#v", result.Structured)
@@ -2368,7 +2370,7 @@ func TestMCPTools(t *testing.T) {
 					}
 				}
 				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: svc}
-				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 				output, ok := result.Structured.(mcp.TextOutput)
 				if result.IsError || !ok || output.Result != "Last message from task #1: root answer" {
 					t.Fatalf("native root message = %#v", result.Structured)
@@ -2399,7 +2401,7 @@ func TestMCPTools(t *testing.T) {
 				entry.LogPath.Set(path)
 				s.taskMgr.Insert(id, entry)
 				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 				output, ok := result.Structured.(mcp.TextOutput)
 				if result.IsError || !ok || output.Result != "Task #1 result: offline prompt rejected" {
 					t.Fatalf("correlated result = %#v", result.Structured)
@@ -2446,7 +2448,7 @@ func TestMCPTools(t *testing.T) {
 					}
 				}
 				registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: svc}
-				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+				result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 				if !result.IsError {
 					t.Fatalf("last-message query accepted uninterpretable history: %#v", result.Structured)
 				}
@@ -2475,7 +2477,7 @@ func TestMCPTools(t *testing.T) {
 			}
 
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 			output, ok := result.Structured.(mcp.TextOutput)
 			if result.IsError || !ok || output.Result != "Last message from task #1: live result" {
 				t.Fatalf("agent_last_message = %#v", result.Structured)
@@ -2497,7 +2499,7 @@ func TestMCPTools(t *testing.T) {
 			}
 
 			registry := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+			result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskNumberArgs]{Arguments: mcpschema.TaskNumberArgs{TaskNumber: mcpschema.TaskReference("1")}})
 			if !result.IsError || !strings.Contains(fmt.Sprint(result.Structured), "history is unavailable") {
 				t.Fatalf("agent_last_message = %#v, want explicit history-unavailable error", result.Structured)
 			}
@@ -2505,92 +2507,53 @@ func TestMCPTools(t *testing.T) {
 	})
 }
 
-func TestTaskID(t *testing.T) {
+func TestDecodeTaskReference(t *testing.T) {
 	t.Parallel()
-	t.Run("Decode", func(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			stableID := ksid.NewID()
-			for _, tc := range []struct {
-				name       string
-				ref        taskID
-				max        int
-				wantID     ksid.ID
-				wantNumber int
-			}{
-				{name: "task number", ref: "2", max: 2, wantNumber: 2},
-				{name: "hashtag task number", ref: taskID("#2"), max: 2, wantNumber: 2},
-				{name: "stable ID", ref: taskID(stableID.String()), max: 2, wantID: stableID},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					gotID, gotNumber, err := tc.ref.Decode(tc.max)
-					if err != nil {
-						t.Fatalf("Decode() error: %v", err)
-					}
-					if gotID != tc.wantID || gotNumber != tc.wantNumber {
-						t.Fatalf("Decode() = (%q, %d), want (%q, %d)", gotID, gotNumber, tc.wantID, tc.wantNumber)
-					}
-				})
-			}
-		})
-
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			for _, tc := range []struct {
-				name string
-				ref  taskID
-				max  int
-			}{
-				{name: "out of range number", ref: "3", max: 2},
-				{name: "out of range hashtag number", ref: taskID("#3"), max: 2},
-				{name: "invalid reference", ref: "not a task", max: 2},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					if _, _, err := tc.ref.Decode(tc.max); err == nil {
-						t.Fatal("Decode() error = nil, want error")
-					}
-				})
-			}
-		})
+		stableID := ksid.NewID()
+		for _, tc := range []struct {
+			name       string
+			ref        mcpschema.TaskReference
+			max        int
+			wantID     ksid.ID
+			wantNumber int
+		}{
+			{name: "task number", ref: "2", max: 2, wantNumber: 2},
+			{name: "hashtag task number", ref: mcpschema.TaskReference("#2"), max: 2, wantNumber: 2},
+			{name: "stable ID", ref: mcpschema.TaskReference(stableID.String()), max: 2, wantID: stableID},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				gotID, gotNumber, err := decodeTaskReference(tc.ref, tc.max)
+				if err != nil {
+					t.Fatalf("decodeTaskReference() error: %v", err)
+				}
+				if gotID != tc.wantID || gotNumber != tc.wantNumber {
+					t.Fatalf("decodeTaskReference() = (%q, %d), want (%q, %d)", gotID, gotNumber, tc.wantID, tc.wantNumber)
+				}
+			})
+		}
 	})
-	t.Run("UnmarshalJSON", func(t *testing.T) {
+
+	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			for _, tc := range []struct {
-				name string
-				raw  string
-				want taskID
-			}{
-				{name: "integer", raw: "3", want: "3"},
-				{name: "number string", raw: `"3"`, want: "3"},
-				{name: "hashtag string", raw: `"#3"`, want: "#3"},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					var got taskID
-					if err := json.Unmarshal([]byte(tc.raw), &got); err != nil {
-						t.Fatalf("Unmarshal() error: %v", err)
-					}
-					if got != tc.want {
-						t.Fatalf("Unmarshal() = %q, want %q", got, tc.want)
-					}
-				})
-			}
-		})
-
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			var got taskID
-			if err := json.Unmarshal([]byte(`{}`), &got); err == nil {
-				t.Fatal("Unmarshal() error = nil, want error")
-			}
-		})
+		for _, tc := range []struct {
+			name string
+			ref  mcpschema.TaskReference
+			max  int
+		}{
+			{name: "out of range number", ref: "3", max: 2},
+			{name: "out of range hashtag number", ref: mcpschema.TaskReference("#3"), max: 2},
+			{name: "invalid reference", ref: "not a task", max: 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if _, _, err := decodeTaskReference(tc.ref, tc.max); err == nil {
+					t.Fatal("decodeTaskReference() error = nil, want error")
+				}
+			})
+		}
 	})
 }
 
@@ -2606,8 +2569,8 @@ func BenchmarkMCPTaskListPage(b *testing.B) {
 	b.ReportMetric(mcpTaskPageSizeDefault, "tasks/op")
 	b.ResetTimer()
 	for b.Loop() {
-		result := registry.handleTasksList(b.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{}})
-		output, ok := result.Structured.(mcpTaskListOutput)
+		result := registry.handleTasksList(b.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{}})
+		output, ok := result.Structured.(mcpschema.TaskListOutput)
 		if result.IsError || !ok || len(output.Tasks) != mcpTaskPageSizeDefault {
 			b.Fatal("task-list page has unexpected size")
 		}
@@ -2630,8 +2593,8 @@ func BenchmarkMCPRepoListPage(b *testing.B) {
 	b.ReportMetric(mcpRepoPageSizeDefault, "repos/op")
 	b.ResetTimer()
 	for b.Loop() {
-		result := registry.handleReposList(b.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
-		output, ok := result.Structured.(mcpRepoListOutput)
+		result := registry.handleReposList(b.Context(), &mcp.ToolRequest[mcpschema.RepoListArgs]{Arguments: mcpschema.RepoListArgs{}})
+		output, ok := result.Structured.(mcpschema.RepoListOutput)
 		if result.IsError || !ok || len(output.Repositories) != mcpRepoPageSizeDefault {
 			b.Fatal("repository-list page has unexpected size")
 		}

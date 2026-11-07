@@ -1,4 +1,4 @@
-// Browser coverage for voice choices, microphone recovery, native focus, and mobile task navigation.
+// Browser coverage for voice setup focus, choices, microphone recovery, native focus, and mobile task navigation.
 
 import {
   createTaskAPI,
@@ -27,6 +27,86 @@ async function enableBrowserVoice(page: Page) {
     }),
   );
 }
+
+test("browser voice setup receives the conversation's active task from service items", async ({ page, api }) => {
+  const id = await createTaskAPI(api, "Review the voice setup focus context");
+  await waitForTaskState(api, id, "waiting", 30_000);
+  await page.addInitScript(() => {
+    localStorage.setItem("gomode.voiceMode", "browser");
+    // Use a real silent audio track, so the production meter and stream cleanup
+    // run without requiring a microphone or speech service in the test runner.
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      value: async () => new AudioContext().createMediaStreamDestination().stream,
+    });
+  });
+  await page.route("**/api/caic/v1/server/config", async (route) => {
+    const response = await route.fetch();
+    const config: Config = await response.json();
+    await route.fulfill({ response, json: { ...config, voiceGateway: { mode: "embedded" } } satisfies Config });
+  });
+  await page.route("**/.well-known/gomode.json", async (route) => {
+    const response = await route.fetch();
+    const manifest = await response.json();
+    manifest.webShell.voiceGateway = { url: "/" };
+    await route.fulfill({ response, json: manifest });
+  });
+  await page.route("**/api/voicegateway/v2/voice/choices", (route) =>
+    route.fulfill({
+      json: {
+        choices: [{ id: "test-text", label: "Test text voice", transports: ["text"] }],
+        defaults: [{ transport: "text", id: "test-text" }],
+      },
+    }),
+  );
+  await page.route("**/api/voicegateway/v2/voice/text/ticket", (route) =>
+    route.fulfill({ json: { ticket: "test-ticket" } }),
+  );
+  let conversation = "";
+  await page.route("**/api/caic/v1/mcp", async (route) => {
+    const request = route.request().postDataJSON();
+    if (request.method !== "resources/read" || request.params.uri !== "gomode://items") {
+      await route.continue();
+      return;
+    }
+    conversation = request.params._meta["openai/session"];
+    expect(conversation).toMatch(/^[0-9a-f]{32}$/);
+    const response = await route.fetch();
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    expect(body.error).toBeUndefined();
+    const contents = body.result.contents[0];
+    const items = JSON.parse(contents.text);
+    const tasks = await api.listTasks();
+    const taskNumber = tasks.findIndex((task) => task.id === id) + 1;
+    expect(taskNumber).toBeGreaterThan(0);
+    // Overlay advisory focus on the actual projection. A real focus tool call
+    // would broadcast owner-scoped SSE navigation to other parallel test pages.
+    items.activeTaskId = id;
+    items.activeTaskNumber = taskNumber;
+    items.items = items.items.map((item: { id: string }) => ({ ...item, active: item.id === id }));
+    contents.text = JSON.stringify(items);
+    await route.fulfill({ response, json: body });
+  });
+  const setup = Promise.withResolvers<{ kind: string; context: { text: string } }>();
+  await page.routeWebSocket("**/api/voicegateway/v2/voice/text/browser", (socket) => {
+    socket.onMessage((message) => {
+      const value = JSON.parse(String(message));
+      if (value.kind === "session.setup") setup.resolve(value);
+    });
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  const overlay = page.getByTestId("voice-overlay");
+  await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();
+  const message = await setup.promise;
+  expect(message.kind).toBe("session.setup");
+  expect(message.context.text.split("\n")[0]).toMatch(/^Active service item: /);
+  expect(message.context.text.split("\n")[0]).toContain(id);
+  expect(message.context.text.length).toBeLessThanOrEqual(4000);
+  expect(conversation).not.toBe("");
+  expect(errors).toEqual([]);
+});
 
 test("browser voice selects a text choice on mobile and displays a failed choice once", async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 851 });

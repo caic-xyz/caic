@@ -1,4 +1,4 @@
-// Tests and benchmarks task ordering, recoverable compaction errors, input lifetime, and metadata diagnostics.
+// Tests and benchmarks task ordering, bounded conversation focus, recoverable compaction errors, input lifetime, and metadata diagnostics.
 
 package server
 
@@ -91,6 +91,70 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 func TestTaskService(t *testing.T) {
 	t.Parallel()
+	t.Run("focusTask/boundedSessions", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		svc := testTaskHandlers(s).taskSvc
+		recent := withMCPClientSession(t.Context(), "recent")
+		victim := withMCPClientSession(t.Context(), "victim")
+		id := ksid.NewID()
+		svc.focusTask(recent, id)
+		svc.focusTask(victim, id)
+		for i := range maxRetainedTaskFocus - 2 {
+			svc.focusTask(withMCPClientSession(t.Context(), fmt.Sprintf("flood-%d", i)), id)
+		}
+		if _, ok := svc.focusedTaskID(recent); !ok {
+			t.Fatal("recent focus disappeared before reaching the bound")
+		}
+		evicted, stop := svc.subscribeTaskFocus(victim)
+		t.Cleanup(stop)
+		svc.focusTask(withMCPClientSession(t.Context(), "overflow"), id)
+		if _, ok := svc.focusedTaskID(victim); ok {
+			t.Fatal("least recently used session retained its focus")
+		}
+		if got, ok := svc.focusedTaskID(recent); !ok || got != id {
+			t.Fatalf("recent focus=%s,%t, want %s", got, ok, id)
+		}
+		select {
+		case got := <-evicted:
+			if got != "" {
+				t.Fatalf("eviction event=%q, want cleared focus", got)
+			}
+		default:
+			t.Fatal("evicted session subscriber was not invalidated")
+		}
+		for i := range maxRetainedTaskFocus {
+			svc.focusTask(withMCPClientSession(t.Context(), fmt.Sprintf("more-%d", i)), id)
+		}
+		svc.focusMu.Lock()
+		defer svc.focusMu.Unlock()
+		if len(svc.focusTasks) > maxRetainedTaskFocus {
+			t.Fatalf("retained focus sessions=%d, cap=%d", len(svc.focusTasks), maxRetainedTaskFocus)
+		}
+	})
+	t.Run("focusTask/concurrentSessions", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		svc := testTaskHandlers(s).taskSvc
+		var workers sync.WaitGroup
+		for i := range 32 {
+			workers.Go(func() {
+				ctx := withMCPClientSession(t.Context(), fmt.Sprintf("concurrent-%d", i))
+				id := ksid.NewID()
+				for range 20 {
+					_, stop := svc.subscribeTaskFocus(ctx)
+					svc.focusTask(ctx, id)
+					if got, ok := svc.focusedTaskID(ctx); !ok || got != id {
+						t.Errorf("concurrent session focus=%s,%t, want %s", got, ok, id)
+					}
+					_ = svc.focusedTaskIDString(t.Context())
+					_ = svc.taskListSnapshot(ctx)
+					stop()
+				}
+			})
+		}
+		workers.Wait()
+	})
 	t.Run("compactContext", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {

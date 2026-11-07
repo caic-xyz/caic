@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
 
@@ -47,7 +49,7 @@ func TestServiceItems(t *testing.T) {
 				if out.ActiveTaskID != id || out.ActiveTaskNumber != tc.number {
 					t.Fatalf("active task = %q #%d, want %q #%d", out.ActiveTaskID, out.ActiveTaskNumber, id, tc.number)
 				}
-				i := slices.IndexFunc(out.Items, func(item serviceItem) bool { return item.ID == id })
+				i := slices.IndexFunc(out.Items, func(item mcpschema.ServiceItem) bool { return item.ID == id })
 				if i < 0 {
 					t.Fatal("running task missing from native voice items")
 				}
@@ -189,7 +191,7 @@ func TestBoundedServiceItems(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		candidate := serviceItemsOutput{Items: full.Items[:2], MoreItemsHint: full.MoreItemsHint, OmittedCount: 1}
+		candidate := mcpschema.ServiceItemsOutput{Items: full.Items[:2], MoreItemsHint: full.MoreItemsHint, OmittedCount: 1}
 		data, err := json.Marshal(candidate)
 		if err != nil {
 			t.Fatal(err)
@@ -219,7 +221,7 @@ func TestServiceItemsResourceFocus(t *testing.T) {
 	if len(result.Contents) != 1 {
 		t.Fatalf("contents = %d, want 1", len(result.Contents))
 	}
-	var output serviceItemsOutput
+	var output mcpschema.ServiceItemsOutput
 	if err := json.Unmarshal([]byte(result.Contents[0].Text), &output); err != nil {
 		t.Fatalf("decode items: %v", err)
 	}
@@ -242,7 +244,7 @@ func TestServiceItemsResourceSessionFocus(t *testing.T) {
 	svc.focusTask(withMCPClientSession(t.Context(), "tab-a"), first)
 	svc.focusTask(withMCPClientSession(t.Context(), "tab-b"), second)
 
-	read := func(session string) serviceItemsOutput {
+	read := func(session string) mcpschema.ServiceItemsOutput {
 		result, err := s.mcpHandlers.protocol.Registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{
 			URI:  "gomode://items",
 			Meta: mcp.RequestMeta{OpenAIRequestMeta: mcp.OpenAIRequestMeta{Session: session}},
@@ -250,7 +252,7 @@ func TestServiceItemsResourceSessionFocus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var output serviceItemsOutput
+		var output mcpschema.ServiceItemsOutput
 		if err := json.Unmarshal([]byte(result.Contents[0].Text), &output); err != nil {
 			t.Fatalf("decode items: %v", err)
 		}

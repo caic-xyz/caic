@@ -1,4 +1,4 @@
-// MCP registry composition, voice instructions, task scoping, and scope authorization.
+// MCP registry composition, conversation-scoped voice instructions, task scoping, and scope authorization.
 
 package server
 
@@ -23,7 +23,11 @@ type mcpRegistry struct {
 	prefs *preferences.Store
 }
 
-func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
+func (m *mcpRegistry) Instructions(ctx context.Context, meta *mcp.RequestMeta) (string, error) {
+	ctx, err := mcpRequestSession(ctx, meta.Session)
+	if err != nil {
+		return "", err
+	}
 	out := caicVoiceSystemInstruction
 	if defaults := m.voiceSessionDefaults(ctx); defaults != "" {
 		out += "\n\n" + defaults
@@ -139,8 +143,8 @@ type scopedMCPRegistry struct {
 	principal *mcpPrincipal
 }
 
-func (r scopedMCPRegistry) Instructions(ctx context.Context) (string, error) {
-	return r.Registry.Instructions(r.scopedContext(ctx))
+func (r scopedMCPRegistry) Instructions(ctx context.Context, meta *mcp.RequestMeta) (string, error) {
+	return r.Registry.Instructions(r.scopedContext(ctx), meta)
 }
 
 func (r scopedMCPRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
@@ -183,12 +187,12 @@ func (r scopedMCPRegistry) ReadResource(ctx context.Context, params *mcp.Resourc
 	return r.Registry.ReadResource(r.scopedContext(ctx), params)
 }
 
-func (r scopedMCPRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
+func (r scopedMCPRegistry) SubscribeResourceUpdates(ctx context.Context, params *mcp.SubscriptionsListenParams) (iter.Seq2[mcp.ResourceUpdate, error], error) {
 	registry, ok := r.Registry.(mcp.SubscriptionRegistry)
 	if !ok {
 		return nil, errors.New("MCP resource subscriptions are unavailable")
 	}
-	return registry.SubscribeResourceUpdates(r.scopedContext(ctx), filter)
+	return registry.SubscribeResourceUpdates(r.scopedContext(ctx), params)
 }
 
 func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {

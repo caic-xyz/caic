@@ -1,4 +1,4 @@
-// MCP skill and resource catalogs, reads, subscriptions, and keepalives.
+// MCP skill and resource catalogs, conversation-scoped reads and subscriptions, and keepalives.
 
 package server
 
@@ -92,7 +92,10 @@ func (m *mcpResources) ResourceTemplates(context.Context) ([]mcp.ResourceTemplat
 }
 
 func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesReadParams) (mcp.ResourcesReadResult, error) {
-	ctx = withMCPClientSession(ctx, params.Meta.Session)
+	ctx, err := mcpRequestSession(ctx, params.Meta.Session)
+	if err != nil {
+		return mcp.ResourcesReadResult{}, err
+	}
 	uri := params.URI
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
 		m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: authResult})
@@ -159,8 +162,12 @@ func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesRe
 	}
 }
 
-func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
-	sources, err := m.subscriptionSources(ctx, filter)
+func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, params *mcp.SubscriptionsListenParams) (iter.Seq2[mcp.ResourceUpdate, error], error) {
+	ctx, err := mcpRequestSession(ctx, params.Meta.Session)
+	if err != nil {
+		return nil, err
+	}
+	sources, err := m.subscriptionSources(ctx, params.Notifications)
 	if err != nil {
 		return nil, err
 	}

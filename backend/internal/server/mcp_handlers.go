@@ -202,8 +202,19 @@ func mcpPrincipalFromContext(ctx context.Context) (*mcpPrincipal, bool) {
 
 type mcpClientSessionContextKey struct{}
 
+// Conversation IDs are opaque client input; cap their bytes before retaining
+// them in focus or subscriber state.
+const maxMCPClientSessionBytes = 256
+
+func mcpRequestSession(ctx context.Context, session string) (context.Context, error) {
+	if len(session) > maxMCPClientSessionBytes {
+		return nil, mcp.ErrInvalidParams("openai/session exceeds the %d-byte limit", maxMCPClientSessionBytes)
+	}
+	return withMCPClientSession(ctx, session), nil
+}
+
 // withMCPClientSession binds the optional MCP conversation session supplied as
-// openai/session. Tool calls and resource reads carry it independently of the
+// openai/session. Instructions, tools, resources, and subscriptions carry it independently of the
 // shared host login session, so tabs do not overwrite each other's focus.
 func withMCPClientSession(ctx context.Context, session string) context.Context {
 	if session == "" {

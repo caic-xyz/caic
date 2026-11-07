@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -181,13 +183,13 @@ func TestMCPProjection(t *testing.T) {
 		t.Parallel()
 
 		paths := []string{"a", "b", "c", "d"}
-		repositories := make([]mcpRepoSummary, len(paths))
+		repositories := make([]mcpschema.RepoSummary, len(paths))
 		for i, path := range paths {
-			repositories[i] = mcpRepoSummary{Path: path, RemoteURL: strings.Repeat(path, 40)}
+			repositories[i] = mcpschema.RepoSummary{Path: path, RemoteURL: strings.Repeat(path, 40)}
 		}
 		cursorForCount := func(count int) (string, error) { return mcpKeyCursor(paths[count-1]), nil }
-		outputForPage := func(page []mcpRepoSummary, cursor string) any {
-			return mcpRepoListOutput{Repositories: page, NextCursor: cursor}
+		outputForPage := func(page []mcpschema.RepoSummary, cursor string) any {
+			return mcpschema.RepoListOutput{Repositories: page, NextCursor: cursor}
 		}
 		twoItems, err := json.Marshal(outputForPage(repositories[:2], mcpKeyCursor(paths[1])))
 		if err != nil {
@@ -251,8 +253,8 @@ func TestMCPProjection(t *testing.T) {
 		}
 		registerRouterCheckout(t, s.checkouts, "bounded-repo", checkout)
 		registry := &mcpTools{serverConfig: s.serverHandlers}
-		result := registry.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
-		output, ok := result.Structured.(mcpRepoListOutput)
+		result := registry.handleReposList(t.Context(), &mcp.ToolRequest[mcpschema.RepoListArgs]{Arguments: mcpschema.RepoListArgs{}})
+		output, ok := result.Structured.(mcpschema.RepoListOutput)
 		if result.IsError || !ok || len(output.Repositories) != 1 {
 			t.Fatalf("handleReposList() result = %#v", result)
 		}
@@ -510,7 +512,7 @@ func TestMCPUsageInLocation(t *testing.T) {
 func TestMCPNotificationsInLocation(t *testing.T) {
 	t.Parallel()
 	stamp := time.Date(2099, 1, 19, 13, 30, 0, 0, time.UTC)
-	input := []serviceNotification{{ID: "ready-2099-01-19T13:30:00Z", OccurredAt: stamp, ExpiresAt: stamp.Add(time.Hour)}}
+	input := []mcpschema.ServiceNotification{{ID: "ready-2099-01-19T13:30:00Z", OccurredAt: stamp, ExpiresAt: stamp.Add(time.Hour)}}
 	loc := mcpRequestLocation(&mcp.RequestMeta{UserLocation: mcp.OpenAIUserLocation{Timezone: "America/Toronto"}})
 	got := mcpNotificationsInLocation(input, loc)
 	if got[0].ID != input[0].ID || got[0].OccurredAt.Format(time.RFC3339) != "2099-01-19T08:30:00-05:00" || got[0].ExpiresAt.Format(time.RFC3339) != "2099-01-19T09:30:00-05:00" || input[0].OccurredAt.Location() != time.UTC {

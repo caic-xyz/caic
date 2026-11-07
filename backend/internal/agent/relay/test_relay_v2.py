@@ -1182,6 +1182,22 @@ def main() -> int:
         help="print one progress line per test",
     )
     args = parser.parse_args()
+    # Exercise the real launcher in a child: never change the runner's OOM
+    # score, and report a sandbox restriction before lifecycle tests time out.
+    prerequisite = subprocess.run(
+        _load_relay()._oom_adjusted_command([sys.executable, "-c", "pass"]),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if prerequisite.returncode != 0:
+        print(
+            "Relay test prerequisite failed: child processes must be allowed to "
+            "increase /proc/self/oom_score_adj. Allow this write in the sandbox "
+            "and rerun make test.\n" + prerequisite.stderr,
+            file=sys.stderr,
+        )
+        return 1
     if not args.verbose:
         # The relay logs expected warnings (for example, dropping a partial
         # trailing record); silence them unless progress is requested.

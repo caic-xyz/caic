@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	repodomain "github.com/caic-xyz/caic/backend/internal/repo"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
@@ -92,8 +94,8 @@ func taskKeys(ctx context.Context, svc *taskService) (keys []mcpTaskKey, revisio
 // taskSummaries projects a page of visible tasks using one-based numbers offset
 // by start. It rejects disappeared tasks or a changed ordering revision so a page
 // cannot silently mix incompatible task-number assignments.
-func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, start int, revision string) ([]v1.MCPTaskSummary, error) {
-	summaries := make([]v1.MCPTaskSummary, len(keys))
+func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, start int, revision string) ([]mcpschema.TaskSummary, error) {
+	summaries := make([]mcpschema.TaskSummary, len(keys))
 	for i, key := range keys {
 		entry, ok := visibleTaskEntry(ctx, svc, key.ID)
 		if !ok {
@@ -114,7 +116,7 @@ func taskSummaries(ctx context.Context, svc *taskService, keys []mcpTaskKey, sta
 
 // taskMCPSummary builds the bounded task-list view, preferring reported model
 // and effort over requested values and aggregating diff counts without paths.
-func taskMCPSummary(number int, task *v1.Task) v1.MCPTaskSummary {
+func taskMCPSummary(number int, task *v1.Task) mcpschema.TaskSummary {
 	var additions int
 	var deletions int
 	for _, file := range task.DiffStat {
@@ -132,7 +134,7 @@ func taskMCPSummary(number int, task *v1.Task) v1.MCPTaskSummary {
 	default:
 	}
 	model, effort := taskMCPModelAndEffort(task)
-	return v1.MCPTaskSummary{
+	return mcpschema.TaskSummary{
 		HasPendingInput: task.PendingInput != nil,
 		TaskNumber:      number,
 		TaskID:          task.ID.String(),
@@ -419,15 +421,6 @@ var (
 	errMCPRepositoryPathInvalidUTF8 = errors.New("repository path is not valid UTF-8; rename the configured path")
 )
 
-// mcpRepoSummary is the compact repository view shared by tools and resources.
-type mcpRepoSummary struct {
-	Path       string        `json:"path"                jsonschema_description:"Repository path used by task_create"`
-	BaseBranch v1.BranchInfo `json:"baseBranch"          jsonschema_description:"Configured base branch"`
-	Forge      v1.Forge      `json:"forge,omitempty"     jsonschema_description:"Repository forge provider"`
-	RemoteURL  string        `json:"remoteURL,omitempty" jsonschema_description:"HTTPS remote URL"`
-	CI         v1.CIStatus   `json:"ci,omitempty"        jsonschema_description:"Aggregate continuous integration status"`
-}
-
 // repositoryPaths returns configured checkout paths in ascending lexical order.
 func repositoryPaths(config *serverHandlers) []string {
 	var paths []string
@@ -440,8 +433,8 @@ func repositoryPaths(config *serverHandlers) []string {
 
 // repositorySummaries projects paths in their supplied order, reporting whether
 // any display fields were shortened. Missing checkouts invalidate the page.
-func repositorySummaries(config *serverHandlers, paths []string) (summaries []mcpRepoSummary, fieldsTruncated bool, err error) {
-	summaries = make([]mcpRepoSummary, len(paths))
+func repositorySummaries(config *serverHandlers, paths []string) (summaries []mcpschema.RepoSummary, fieldsTruncated bool, err error) {
+	summaries = make([]mcpschema.RepoSummary, len(paths))
 	for i, path := range paths {
 		checkout, ok := config.checkouts.Checkout(path)
 		if !ok {
@@ -459,9 +452,9 @@ func repositorySummaries(config *serverHandlers, paths []string) (summaries []mc
 
 // repositorySummary validates the identifying path and bounds display fields.
 // Its boolean reports repaired UTF-8 or truncated branch/remote text.
-func repositorySummary(config *serverHandlers, checkout *repodomain.Checkout) (mcpRepoSummary, bool, error) {
+func repositorySummary(config *serverHandlers, checkout *repodomain.Checkout) (mcpschema.RepoSummary, bool, error) {
 	if err := validateMCPRepositoryPath(checkout.RelPath); err != nil {
-		return mcpRepoSummary{}, false, err
+		return mcpschema.RepoSummary{}, false, err
 	}
 	var remote string
 	var forgeKind v1.Forge
@@ -486,7 +479,7 @@ func repositorySummary(config *serverHandlers, checkout *repodomain.Checkout) (m
 	baseBranch, baseBranchTruncated := truncateMCPRepoField(checkout.BaseBranch)
 	baseBranchRemote, baseBranchRemoteTruncated := truncateMCPRepoField(checkout.BaseBranchRemote)
 	remoteURL, remoteURLTruncated := truncateMCPRepoField(git.RemoteToHTTPS(remote))
-	return mcpRepoSummary{
+	return mcpschema.RepoSummary{
 		Path:       checkout.RelPath,
 		BaseBranch: v1.BranchInfo{Name: baseBranch, Remote: baseBranchRemote},
 		Forge:      forgeKind,
@@ -557,12 +550,6 @@ func paginateMCPRepositories(paths []string, cursor string, pageSize int) (page 
 	return paths[start:end], next, nil
 }
 
-// mcpTaskCursor binds the last emitted task ID to a task-ordering revision.
-type mcpTaskCursor struct {
-	Revision string `json:"revision"`
-	TaskID   string `json:"taskID"`
-}
-
 // mcpResourceKind selects the descriptor projection used for a resource key.
 type mcpResourceKind uint8
 
@@ -631,7 +618,7 @@ func paginateMCPTaskKeys(keys []mcpTaskKey, revision, cursor string, pageSize in
 		if decodeErr != nil {
 			return nil, "", 0, errors.New("invalid cursor")
 		}
-		var anchor mcpTaskCursor
+		var anchor mcpschema.TaskCursor
 		if json.Unmarshal(data, &anchor) != nil || anchor.Revision != revision {
 			return nil, "", 0, errors.New("invalid cursor")
 		}
@@ -668,7 +655,7 @@ func paginateMCPTaskKeys(keys []mcpTaskKey, revision, cursor string, pageSize in
 // encodeMCPTaskCursor encodes the ordering revision and last emitted task ID
 // as unpadded base64url JSON.
 func encodeMCPTaskCursor(revision string, id ksid.ID) (string, error) {
-	data, err := json.Marshal(mcpTaskCursor{Revision: revision, TaskID: id.String()})
+	data, err := json.Marshal(mcpschema.TaskCursor{Revision: revision, TaskID: id.String()})
 	if err != nil {
 		return "", err
 	}
@@ -899,7 +886,7 @@ func mcpTaskInLocation(source *v1.Task, loc *time.Location) v1.Task {
 
 // mcpNotificationsInLocation clones notification events before converting
 // their timestamps, preserving the shared feed's timestamps.
-func mcpNotificationsInLocation(events []serviceNotification, loc *time.Location) []serviceNotification {
+func mcpNotificationsInLocation(events []mcpschema.ServiceNotification, loc *time.Location) []mcpschema.ServiceNotification {
 	events = slices.Clone(events)
 	for i := range events {
 		events[i].OccurredAt = mcpTimeInLocation(events[i].OccurredAt, loc)

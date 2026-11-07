@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
@@ -20,40 +22,17 @@ func newActiveTask(tasks []v1.Task, activeTaskID string) v1.ServiceActiveTask {
 	return v1.ServiceActiveTask{ActiveTaskID: activeTaskID, ActiveTaskNumber: number}
 }
 
-// serviceItem is a task entry in the host-neutral baseline for native clients.
-// References identify positions in the original task snapshot, independently
-// of the priority order in which items are delivered.
-type serviceItem struct {
-	v1.ServiceActive
-
-	ID             string `json:"id"`
-	Reference      string `json:"reference,omitempty"`
-	Title          string `json:"title"`
-	State          string `json:"state,omitempty"`
-	NeedsAttention bool   `json:"needsAttention"`
-}
-
-// serviceItemsOutput carries a bounded baseline, the focused task, and guidance
-// for fetching tasks omitted by either the item-count or encoded-byte limit.
-type serviceItemsOutput struct {
-	v1.ServiceActiveTask
-
-	Items         []serviceItem `json:"items"`
-	MoreItemsHint string        `json:"moreItemsHint"`
-	OmittedCount  int           `json:"omittedCount,omitempty"`
-}
-
 // serviceItems projects tasks with bounded titles and snapshot-based references.
 // The newest ID comes first, followed by other attention-needed tasks, preserving
 // snapshot order within each remaining priority group. A lone task has no reference.
 // The focused task ID marks its item without changing the priority order.
-func serviceItems(tasks []v1.Task, activeTaskID string) []serviceItem {
+func serviceItems(tasks []v1.Task, activeTaskID string) []mcpschema.ServiceItem {
 	// The service owns ordering, stable references, and attention priority; see
 	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
 	// Number tasks only when more than one is visible: a lone task needs no
 	// disambiguating reference in voice context.
 	numbered := len(tasks) > 1
-	items := make([]serviceItem, len(tasks))
+	items := make([]mcpschema.ServiceItem, len(tasks))
 	for i := range tasks {
 		task := &tasks[i]
 		title, _ := truncateMCPTaskTitle(taskTitle(task))
@@ -61,7 +40,7 @@ func serviceItems(tasks []v1.Task, activeTaskID string) []serviceItem {
 		if numbered {
 			reference = fmt.Sprintf("Task #%d", i+1)
 		}
-		items[i] = serviceItem{
+		items[i] = mcpschema.ServiceItem{
 			ID:             task.ID.String(),
 			Reference:      reference,
 			Title:          title,
@@ -73,8 +52,8 @@ func serviceItems(tasks []v1.Task, activeTaskID string) []serviceItem {
 	if len(items) == 0 {
 		return items
 	}
-	newestID := slices.MaxFunc(items, func(a, b serviceItem) int { return strings.Compare(a.ID, b.ID) }).ID
-	slices.SortStableFunc(items, func(a, b serviceItem) int {
+	newestID := slices.MaxFunc(items, func(a, b mcpschema.ServiceItem) int { return strings.Compare(a.ID, b.ID) }).ID
+	slices.SortStableFunc(items, func(a, b mcpschema.ServiceItem) int {
 		switch {
 		case a.ID == newestID && b.ID == newestID:
 			return 0
@@ -96,24 +75,24 @@ func serviceItems(tasks []v1.Task, activeTaskID string) []serviceItem {
 // boundedServiceItems caps the prioritized baseline by item count and encoded
 // JSON bytes, including the focused task, paging hint, and omitted count in the
 // byte budget. It fails if even the empty response cannot fit maxBytes.
-func boundedServiceItems(tasks []v1.Task, maxBytes int, activeTaskID string) (serviceItemsOutput, error) {
+func boundedServiceItems(tasks []v1.Task, maxBytes int, activeTaskID string) (mcpschema.ServiceItemsOutput, error) {
 	items := serviceItems(tasks, activeTaskID)
 	if len(items) > mcpServiceItemMaxCount {
 		items = items[:mcpServiceItemMaxCount]
 	}
-	outputForItems := func(items []serviceItem) serviceItemsOutput {
-		return serviceItemsOutput{
+	outputForItems := func(items []mcpschema.ServiceItem) mcpschema.ServiceItemsOutput {
+		return mcpschema.ServiceItemsOutput{
 			ServiceActiveTask: newActiveTask(tasks, activeTaskID),
 			Items:             items,
 			MoreItemsHint:     "For fuller or current detail, call tasks_list and follow nextCursor until it is absent.",
 			OmittedCount:      len(tasks) - len(items),
 		}
 	}
-	fitted, err := fitMCPJSONPrefix(items, maxBytes, func(items []serviceItem) (any, error) {
+	fitted, err := fitMCPJSONPrefix(items, maxBytes, func(items []mcpschema.ServiceItem) (any, error) {
 		return outputForItems(items), nil
 	})
 	if err != nil {
-		return serviceItemsOutput{}, err
+		return mcpschema.ServiceItemsOutput{}, err
 	}
 	return outputForItems(fitted), nil
 }

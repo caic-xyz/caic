@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -434,7 +436,7 @@ func TestMCPHandlers(t *testing.T) {
 		registry := &mcpResources{serverConfig: s.serverHandlers, taskSvc: s.taskHandlers.taskSvc}
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
-		updates, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://repos/repo"}})
+		updates, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://repos/repo"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -949,7 +951,7 @@ func TestMCPHandlers(t *testing.T) {
 		if len(initial.Contents) != 1 {
 			t.Fatalf("initial state contents = %d, want 1", len(initial.Contents))
 		}
-		var streamItems serviceItemsOutput
+		var streamItems mcpschema.ServiceItemsOutput
 		if err := json.Unmarshal([]byte(initial.Contents[0].Text), &streamItems); err != nil {
 			t.Fatalf("decode delivered items: %v", err)
 		}
@@ -1063,7 +1065,7 @@ func TestMCPHandlers(t *testing.T) {
 		if len(initial.Contents) != 1 {
 			t.Fatalf("initial state contents = %d, want 1", len(initial.Contents))
 		}
-		var streamItems serviceItemsOutput
+		var streamItems mcpschema.ServiceItemsOutput
 		if err := json.Unmarshal([]byte(initial.Contents[0].Text), &streamItems); err != nil {
 			t.Fatalf("decode delivered items: %v", err)
 		}
@@ -1102,7 +1104,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1152,7 +1154,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1194,7 +1196,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}})
 		if err != nil {
 			t.Fatal(err)
 		}

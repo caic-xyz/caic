@@ -14,6 +14,36 @@ From the repository root:
 make build
 ```
 
+## Verification environment
+
+Run `make fix`, `make verify`, and `make test` from the repository root.
+The first run downloads the pinned Go, Node, pnpm, and Python dependencies;
+`make test-e2e` also installs Playwright's pinned Chromium. Caches must be
+writable by the current user. In a sandbox with a read-only home cache, use
+the tools' standard overrides before running the same Make targets:
+
+```bash
+export XDG_CACHE_HOME="$(mktemp -d)"
+export PNPM_CONFIG_CACHE_DIR="$XDG_CACHE_HOME/pnpm"
+export PNPM_CONFIG_STORE_DIR="$XDG_CACHE_HOME/pnpm-store"
+export UV_CACHE_DIR="$XDG_CACHE_HOME/uv"
+export PLAYWRIGHT_BROWSERS_PATH="$XDG_CACHE_HOME/ms-playwright"
+make verify
+make test
+make test-e2e
+```
+
+Keep the same environment for installation and execution so Playwright can
+find its downloaded browser. The cache directory is disposable and must not
+be committed. The checkout itself must also be writable for `node_modules`,
+the Python virtual environment, generated assets, and test results.
+
+The Python relay tests launch real subprocesses. On Linux, the sandbox must
+allow those children to increase `/proc/self/oom_score_adj`; making `/proc`
+read-only prevents the relay's agent command from starting. The test runner
+checks this prerequisite before running the relay suite and fails explicitly
+rather than skipping lifecycle coverage.
+
 ## Frontend design
 
 [The frontend design direction](frontend/docs/DESIGN.md) defines caic's brand,

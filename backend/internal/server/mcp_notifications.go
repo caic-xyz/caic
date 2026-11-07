@@ -1,4 +1,4 @@
-// MCP notification feed generates bounded, service-authored alerts for Go Mode clients.
+// MCP notification feed retains bounded per-owner alerts and projects conversation focus for Go Mode clients.
 
 package server
 
@@ -12,18 +12,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 )
 
 type serviceNotification struct {
-	v1.ServiceActiveTask
-
-	ID         string    `json:"id"`
-	ItemID     string    `json:"itemId"`
-	URL        string    `json:"url"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	OccurredAt time.Time `json:"occurredAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	mcpschema.ServiceNotification
 
 	state         v1.TaskState
 	quotaRecovery bool
@@ -34,12 +27,17 @@ type observedTaskState struct {
 	seen  uint64
 }
 
+// Bound inactive owners together with every correlated notification-feed map.
+const maxNotificationOwners = 256
+
 type notificationFeed struct {
 	mu sync.Mutex
 
 	blockedTaskIDs map[string]map[string]struct{}
 	states         map[string]map[string]observedTaskState
 	generations    map[string]uint64
+	owners         map[string]uint64
+	ownerClock     uint64
 	events         map[string][]serviceNotification
 }
 
@@ -48,6 +46,7 @@ func newNotificationFeed() *notificationFeed {
 		blockedTaskIDs: make(map[string]map[string]struct{}),
 		states:         make(map[string]map[string]observedTaskState),
 		generations:    make(map[string]uint64),
+		owners:         make(map[string]uint64),
 		events:         make(map[string][]serviceNotification),
 	}
 }
@@ -55,7 +54,7 @@ func newNotificationFeed() *notificationFeed {
 // notifications returns the current snapshot. The focused task ID is attached
 // to each alert so voice clients receive the active task with the same flat JSON
 // fields as the service-item baseline.
-func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, usage v1.UsageResp, activeTaskID string) []serviceNotification {
+func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
@@ -77,6 +76,7 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.retainOwnerLocked(owner)
 	previouslyBlocked := f.blockedTaskIDs[owner]
 	// Unknown quota neither proves recovery nor erases a prior blocked observation.
 	for id := range unknownTaskIDs {
@@ -158,14 +158,34 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	}
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)
-	events = append(make([]serviceNotification, 0, len(f.events[owner])), f.events[owner]...)
-	if len(events) > 0 {
+	output := make([]mcpschema.ServiceNotification, len(f.events[owner]))
+	if len(output) > 0 {
 		active := newActiveTask(tasks, activeTaskID)
-		for i := range events {
-			events[i].ServiceActiveTask = active
+		for i := range output {
+			output[i] = f.events[owner][i].ServiceNotification
+			output[i].ServiceActiveTask = active
 		}
 	}
-	return events
+	return output
+}
+
+func (f *notificationFeed) retainOwnerLocked(owner string) {
+	if _, exists := f.owners[owner]; !exists && len(f.owners) >= maxNotificationOwners {
+		oldest := ""
+		var used uint64
+		for candidate, lastUsed := range f.owners {
+			if used == 0 || lastUsed < used {
+				oldest, used = candidate, lastUsed
+			}
+		}
+		delete(f.blockedTaskIDs, oldest)
+		delete(f.states, oldest)
+		delete(f.generations, oldest)
+		delete(f.events, oldest)
+		delete(f.owners, oldest)
+	}
+	f.ownerClock++
+	f.owners[owner] = f.ownerClock
 }
 
 func taskNotificationTitle(state v1.TaskState, number int) string {

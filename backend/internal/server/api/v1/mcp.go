@@ -64,28 +64,3 @@ type MCPDiffTotals struct {
 	Deletions   int `json:"deletions"`
 	BinaryFiles int `json:"binaryFiles"`
 }
-
-// MCPTaskSummary is one bounded task-list entry exposed through MCP.
-type MCPTaskSummary struct {
-	ServiceActive
-
-	HasPendingInput bool      `json:"hasPendingInput" jsonschema_description:"Whether a pending prompt record exists; task_get_detail shows its text and delivery status"`
-	TaskNumber      int       `json:"taskNumber"              jsonschema_description:"Current session task number used by other task tools"`
-	TaskID          string    `json:"taskID"                  jsonschema_description:"Stable task ID"`
-	Title           string    `json:"title"                   jsonschema_description:"Task title"`
-	State           TaskState `json:"state"                   jsonschema_description:"Current task lifecycle state"`
-	Harness         Harness   `json:"harness"                 jsonschema_description:"Coding-agent harness"`
-	Model           string    `json:"model,omitempty"         jsonschema_description:"Configured model, or absent for the harness default"`
-	Effort          string    `json:"effort,omitempty"        jsonschema_description:"Configured reasoning effort, or absent for the harness default"`
-	RuntimeName     string    `json:"runtimeName,omitempty"   jsonschema_description:"Runtime backend name"`
-	StatusMessage   string    `json:"statusMessage,omitempty" jsonschema_description:"Bounded result or failure context for terminal tasks"`
-	ChangedFiles    int       `json:"changedFiles"            jsonschema_description:"Number of changed files"`
-	Additions       int       `json:"additions"               jsonschema_description:"Added lines"`
-	Deletions       int       `json:"deletions"               jsonschema_description:"Deleted lines"`
-	ForgePR         int       `json:"forgePR,omitempty"       jsonschema_description:"Pull request number"`
-	CIStatus        CIStatus  `json:"ciStatus,omitempty"      jsonschema_description:"Continuous integration status"`
-	DurationSeconds float64   `json:"durationSeconds"         jsonschema_description:"Task duration in seconds"`
-	CostUSD         float64   `json:"costUSD"                 jsonschema_description:"Task cost in US dollars"`
-	CostKnown       bool      `json:"costKnown"               jsonschema_description:"Whether any cost is known; costUSD may be a subtotal"`
-	CostComplete    bool      `json:"costComplete" jsonschema_description:"Whether costUSD covers all observed billed usage"`
-}

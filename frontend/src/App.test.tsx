@@ -2095,7 +2095,9 @@ describe("App repo chips: No repository", () => {
     expect(normal).toHaveAttribute("aria-hidden", "true");
     const link = within(voiceView).getByRole("link", { name: "Task 1, waiting: Review output" });
     expect(link).toHaveAttribute("href", "/task/@task1");
-    expect(await executeFrontendVoiceTool("focus_task", { task_number: "#1" })).toEqual({ task_id: "task1" });
+    expect(await executeFrontendVoiceTool("focus_task", { task_number: "#1" }, "test-conversation")).toEqual({
+      task_id: "task1",
+    });
     expect(history.get()).toBe("/");
     expect(link).toHaveAttribute("aria-current", "true");
     window.goModeHost = { isVoiceConnected: () => false };
@@ -2118,9 +2120,13 @@ describe("App repo chips: No repository", () => {
     const { history } = renderApp();
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "task1", title: "Review output", state: "waiting" })] });
-    expect(await executeFrontendVoiceTool("focus_task", { task_number: "missing" })).toHaveProperty("error");
+    expect(
+      await executeFrontendVoiceTool("focus_task", { task_number: "missing" }, "test-conversation"),
+    ).toHaveProperty("error");
     expect(history.get()).toBe("/");
-    expect(await executeFrontendVoiceTool("focus_task", { task_number: 1 })).toEqual({ task_id: "task1" });
+    expect(await executeFrontendVoiceTool("focus_task", { task_number: 1 }, "test-conversation")).toEqual({
+      task_id: "task1",
+    });
     await waitFor(() => expect(history.get()).toContain("@task1"));
     expect(screen.getByTestId("detail-pane")).toBeInTheDocument();
   });

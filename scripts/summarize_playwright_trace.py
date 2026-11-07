@@ -187,11 +187,23 @@ def describe_request(request: Request) -> str:
 def report(path: Path, log_limit: int) -> None:
     """Print the summary of one trace archive."""
     error, pages = group_traces(trace_files(path))
-    if not pages:
+    if not pages and not error:
         print(f"{path}: no trace members", file=sys.stderr)
         return
     print(f"=== {path}")
     if error:
+        if "browserType.launch" in error and re.search(
+            r"FATAL:[^\n]*\bextensions/|(?:failed to|cannot|unable to) initialize extensions"
+            r"|extensions? initialization failed",
+            error,
+            re.IGNORECASE,
+        ):
+            print(
+                "environment: Chromium failed during extension initialization, before product assertions. "
+                "The sandbox must permit Playwright Chromium to start with its extension support. "
+                "Verify the pinned browser and OS dependencies with "
+                "`pnpm exec playwright install --with-deps chromium`; see DEV.md."
+            )
         for line in [line for line in error.splitlines() if line.strip()][:ERROR_LINES]:
             print(f"error: {line}")
     for page in sorted(pages.values(), key=lambda p: p.start):

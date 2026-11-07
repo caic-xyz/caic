@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
@@ -85,6 +87,36 @@ func TestAntigravityTaskQuotaBlocked(t *testing.T) {
 
 func TestNotificationFeed(t *testing.T) {
 	t.Parallel()
+	t.Run("boundedOwners", func(t *testing.T) {
+		t.Parallel()
+		feed := newNotificationFeed()
+		owner := func(id string) {
+			feed.notifications(auth.NewContext(t.Context(), &auth.User{ID: id}), nil, v1.UsageResp{}, "")
+		}
+		owner("recent")
+		owner("victim")
+		for i := range maxNotificationOwners - 2 {
+			owner(fmt.Sprintf("owner-%d", i))
+		}
+		owner("recent")
+		owner("overflow")
+		feed.mu.Lock()
+		defer feed.mu.Unlock()
+		for name, size := range map[string]int{
+			"blocked": len(feed.blockedTaskIDs), "states": len(feed.states),
+			"generations": len(feed.generations), "events": len(feed.events),
+		} {
+			if size > maxNotificationOwners {
+				t.Fatalf("%s owners=%d, cap=%d", name, size, maxNotificationOwners)
+			}
+		}
+		if _, ok := feed.states["recent"]; !ok {
+			t.Fatal("recent owner evicted")
+		}
+		if _, ok := feed.states["victim"]; ok {
+			t.Fatal("least recently used owner retained")
+		}
+	})
 	t.Run("MatchesTaskModelProvider", func(t *testing.T) {
 		t.Parallel()
 		for _, tt := range []struct {

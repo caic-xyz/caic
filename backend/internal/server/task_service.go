@@ -1,4 +1,4 @@
-// Task commands, durable prompt queue APIs, accepted input delivery, prompt image inputs, frontend focus, artifacts, DTOs, and Git summaries.
+// Task commands, durable prompt queues, accepted input delivery, images, bounded conversation focus, artifacts, DTOs, and Git summaries.
 
 package server
 
@@ -51,6 +51,15 @@ type focusKey struct {
 	session string
 }
 
+// Bound ephemeral conversation focus across all owners; stale sessions are
+// evicted least-recently-used without persisting focus across server restarts.
+const maxRetainedTaskFocus = 1024
+
+type retainedTaskFocus struct {
+	id   ksid.ID
+	used uint64
+}
+
 // taskService owns task command orchestration and API DTO assembly.
 //
 // HTTP handlers use it after route-level request decoding and task lookup, so
@@ -71,20 +80,21 @@ type taskService struct {
 	history   *taskHistory
 
 	focusMu          sync.Mutex
-	focusSubscribers map[chan string]string
-	focusTasks       map[focusKey]ksid.ID
+	focusSubscribers map[chan string]focusKey
+	focusTasks       map[focusKey]retainedTaskFocus
+	focusClock       uint64
 }
 
 // subscribeTaskFocus delivers live user-directed tool focus changes. Only the
 // latest pending selection matters; focus is never replayed on reconnect.
 func (s *taskService) subscribeTaskFocus(ctx context.Context) (events <-chan string, unsubscribe func()) {
 	ch := make(chan string, 1)
-	ownerID := taskAccessFromContext(ctx).userID
+	key := focusKey{owner: taskAccessFromContext(ctx).userID, session: mcpClientSessionFromContext(ctx)}
 	s.focusMu.Lock()
 	if s.focusSubscribers == nil {
-		s.focusSubscribers = make(map[chan string]string)
+		s.focusSubscribers = make(map[chan string]focusKey)
 	}
-	s.focusSubscribers[ch] = ownerID
+	s.focusSubscribers[ch] = key
 	s.focusMu.Unlock()
 	return ch, func() {
 		s.focusMu.Lock()
@@ -103,18 +113,43 @@ func (s *taskService) focusTask(ctx context.Context, id ksid.ID) {
 	s.focusMu.Lock()
 	defer s.focusMu.Unlock()
 	if s.focusTasks == nil {
-		s.focusTasks = make(map[focusKey]ksid.ID)
+		s.focusTasks = make(map[focusKey]retainedTaskFocus)
 	}
-	s.focusTasks[focusKey{owner: ownerID, session: session}] = id
-	for ch, owner := range s.focusSubscribers {
-		if owner != ownerID {
+	key := focusKey{owner: ownerID, session: session}
+	if _, exists := s.focusTasks[key]; !exists && len(s.focusTasks) >= maxRetainedTaskFocus {
+		var oldest focusKey
+		var used uint64
+		for candidate, focus := range s.focusTasks {
+			if used == 0 || focus.used < used {
+				oldest, used = candidate, focus.used
+			}
+		}
+		delete(s.focusTasks, oldest)
+		s.publishTaskFocusLocked(oldest, 0)
+	}
+	s.focusClock++
+	s.focusTasks[key] = retainedTaskFocus{id: id, used: s.focusClock}
+	s.publishTaskFocusLocked(key, id)
+}
+
+func (s *taskService) publishTaskFocusLocked(changed focusKey, id ksid.ID) {
+	for ch, key := range s.focusSubscribers {
+		if key.owner != changed.owner || (key.session != "" && key.session != changed.session) {
 			continue
+		}
+		focus := id
+		if focus == 0 && key.session == "" {
+			focus, _ = s.ownerFocusedTaskIDLocked(key.owner)
+		}
+		value := ""
+		if focus != 0 {
+			value = focus.String()
 		}
 		select {
 		case <-ch:
 		default:
 		}
-		ch <- id.String()
+		ch <- value
 	}
 }
 
@@ -122,24 +157,36 @@ func (s *taskService) focusTask(ctx context.Context, id ksid.ID) {
 // MCP conversation. A session-bound request reads only its own focus. A request
 // without a session resolves the owner's focus only when every session agrees on
 // one task; ambiguous focus is omitted rather than leaking another tab's choice.
+// Only session-bound reads refresh recency, so aggregate snapshots do not keep
+// disconnected conversations ahead of recently used sessions during eviction.
 func (s *taskService) focusedTaskID(ctx context.Context) (ksid.ID, bool) {
 	ownerID := taskAccessFromContext(ctx).userID
 	session := mcpClientSessionFromContext(ctx)
 	s.focusMu.Lock()
 	defer s.focusMu.Unlock()
 	if session != "" {
-		id, ok := s.focusTasks[focusKey{owner: ownerID, session: session}]
-		return id, ok && id != 0
+		key := focusKey{owner: ownerID, session: session}
+		focus, ok := s.focusTasks[key]
+		if ok {
+			s.focusClock++
+			focus.used = s.focusClock
+			s.focusTasks[key] = focus
+		}
+		return focus.id, ok && focus.id != 0
 	}
+	return s.ownerFocusedTaskIDLocked(ownerID)
+}
+
+func (s *taskService) ownerFocusedTaskIDLocked(owner string) (ksid.ID, bool) {
 	var match ksid.ID
-	for key, id := range s.focusTasks {
-		if key.owner != ownerID || id == 0 {
+	for key, focus := range s.focusTasks {
+		if key.owner != owner || focus.id == 0 {
 			continue
 		}
-		if match != 0 && match != id {
+		if match != 0 && match != focus.id {
 			return 0, false
 		}
-		match = id
+		match = focus.id
 	}
 	return match, match != 0
 }
