@@ -49,16 +49,27 @@ func TestContribConfigDefaults(t *testing.T) {
 		t.Fatalf("%s documents a key caic rejects, or a malformed default: %v", contribPath, err)
 	}
 	pipeline := &got.VoiceGateway.Config
-	if err := pipeline.ValidateEmbedded(); err != nil {
+	if _, err := pipeline.Resolve(); err != nil {
 		t.Fatalf("sample pipelines are invalid: %v", err)
 	}
-	if len(pipeline.Realtime) == 0 || len(pipeline.Chat) == 0 {
-		t.Fatal("sample must document explicit realtime and chat pipelines")
+	if len(pipeline.Realtime) == 0 || len(pipeline.LLM) == 0 {
+		t.Fatal("sample must document explicit realtime and named LLM choices")
 	}
 	got.VoiceGateway.Config = voicegateway.Config{}
 	want := defaultConfig()
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("uncommenting %s does not reproduce the defaults:\n got = %+v\nwant = %+v", contribPath, got, want)
+	}
+}
+
+func TestContribVoiceGatewayConfig(t *testing.T) {
+	t.Parallel()
+	cfg, err := voicegateway.LoadConfig("../../../contrib/voice-gateway-config.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.Resolve(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -269,12 +280,11 @@ OPENROUTER_API_KEY = "sk-or-test"
 		content := `
 [voice-gateway]
 mode = "embedded"
+webrtc_udp_port = 3478
 [[voice-gateway.config.realtime]]
 label = "Test live"
 provider = "gemini"
 model = "gemini-live-test"
-[voice-gateway.config.server]
-webrtc_udp_port = 3478
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
@@ -293,8 +303,8 @@ webrtc_udp_port = 3478
 		if cfg.Voice.Gateway.Config.Realtime[0].Model != "gemini-live-test" {
 			t.Errorf("Voice.Gateway.Config.Model = %q, want gemini-live-test", cfg.Voice.Gateway.Config.Realtime[0].Model)
 		}
-		if cfg.Voice.Gateway.Config.Server.WebRTCUDPPort != 3478 {
-			t.Errorf("Voice.Gateway.Config.Server.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.Config.Server.WebRTCUDPPort)
+		if cfg.Voice.Gateway.WebRTCUDPPort != 3478 {
+			t.Errorf("Voice.Gateway.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.WebRTCUDPPort)
 		}
 	})
 
@@ -312,7 +322,7 @@ http = ":3479"
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !strings.Contains(err.Error(), "voice-gateway.config.server.http") {
+		if !strings.Contains(err.Error(), "missing in the target struct") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -683,11 +693,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		t.Parallel()
 		tc := defaultConfig()
 		tc.VoiceGateway.Mode = "embedded"
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := cfg.Voice.Gateway.Validate(); err == nil {
+		_, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
+		if err == nil {
 			t.Fatal("empty embedded pipeline accepted")
 		}
 	})
@@ -930,7 +937,6 @@ func TestVoiceGatewayConfig(t *testing.T) {
 	t.Parallel()
 	const fixture = `[voice-gateway]
 mode="embedded"
-[voice-gateway.config.server]
 webrtc_udp_port=3478
 [voice-gateway.config.local_stack_runtime]
 idle_timeout_seconds=120
@@ -945,34 +951,46 @@ threads=4
 slots=2
 context_size=65536
 max_output_tokens=2048
-[[voice-gateway.config.chat]]
+[[voice-gateway.config.llm]]
+id = "remote"
 label="Remote chat"
 provider="openaicompatible"
 remote="https://llm.example/v1/chat/completions"
 model="chat-model"
 api_key_name="CHAT_KEY"
-[[voice-gateway.config.local_stack]]
-label="Speech stack"
-text_only=false
-[voice-gateway.config.local_stack.asr]
-engine="genai"
+[[voice-gateway.config.asr]]
+id = "local"
 provider="llamacpp"
 remote="http://localhost:8081"
 model="asr-model"
-[voice-gateway.config.local_stack.llm]
+[[voice-gateway.config.asr]]
+id="alternate"
+provider="llamacpp"
+remote="http://localhost:8083"
+model="alternate-asr"
+[[voice-gateway.config.llm]]
+id = "local"
+label="Local model"
 provider="llamacpp"
 llamacppsrv=true
 model="local-model"
-[voice-gateway.config.local_stack.tts]
+[[voice-gateway.config.tts]]
+id = "local"
 engine="openai-audio"
 remote="http://localhost:8082"
 model="tts-model"
 voice="voice-name"
-[[voice-gateway.config.trusted_issuers]]
-service="caic"
-issuer="https://caic.example"
-oauth=true
-scope="voice.session"
+[[voice-gateway.config.tts]]
+id="alternate"
+engine="openai-audio"
+remote="http://localhost:8084"
+model="alternate-tts"
+voice="alternate-voice"
+[[voice-gateway.config.voice]]
+label="Speech stack"
+asr="local"
+llm="local"
+tts="local"
 `
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fixture), 0o600); err != nil {
@@ -989,13 +1007,25 @@ scope="voice.session"
 	if err := cfg.Voice.Gateway.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	want := voicegateway.Config{
-		LocalStackRuntime: voicegateway.LocalStackRuntimeConfig{IdleTimeoutSeconds: 120, MaxInstances: 2},
-		Server:            voicegateway.ServerConfig{WebRTCUDPPort: 3478},
-		Realtime:          []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048}},
-		Chat:              []voicegateway.ChatConfig{{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"}},
-		LocalStack:        []voicegateway.LocalStackConfig{{Label: "Speech stack", ASR: voicegateway.LocalStackASRConfig{Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.LocalStackTTSConfig{Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
-		TrustedIssuers:    []voicegateway.TrustedIssuerConfig{{Service: "caic", Issuer: "https://caic.example", OAuth: true, Scope: "voice.session"}},
+	if cfg.Voice.Gateway.WebRTCUDPPort != 3478 {
+		t.Fatalf("UDP port = %d", cfg.Voice.Gateway.WebRTCUDPPort)
+	}
+	want := voicegateway.ResolvedConfig{
+		Runtime:  voicegateway.RuntimeConfig{IdleTimeoutSeconds: 120, MaxInstances: 2},
+		Realtime: []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048}},
+		LLM: []voicegateway.LLMConfig{
+			{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"},
+			{Label: "Local model", Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"},
+		},
+		Recognition: []voicegateway.ASRConfig{
+			{Label: "asr-model", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"},
+			{Label: "alternate-asr", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8083", Model: "alternate-asr"},
+		},
+		Synthesis: []voicegateway.TTSConfig{
+			{Label: "tts-model", Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"},
+			{Label: "alternate-tts", Engine: "openai-audio", Remote: "http://localhost:8084", Model: "alternate-tts", Voice: "alternate-voice"},
+		},
+		Pipelines: []voicegateway.PipelineConfig{{Label: "Speech stack", ASR: voicegateway.ASRConfig{Label: "asr-model", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.TTSConfig{Label: "tts-model", Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
 	}
 	if !reflect.DeepEqual(cfg.Voice.Gateway.Config, want) {
 		t.Fatalf("voice config = %#v, want %#v", cfg.Voice.Gateway.Config, want)

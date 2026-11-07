@@ -1,4 +1,4 @@
-// Browser coverage for voice choice compatibility, shared errors, native focus, and mobile task navigation.
+// Browser coverage for voice choices, microphone recovery, native focus, and mobile task navigation.
 
 import {
   createTaskAPI,
@@ -7,14 +7,11 @@ import {
   waitForTaskState,
   installNativeVoiceBridge,
   invokeFrontendTool,
+  type Page,
 } from "../helpers";
 import type { Config } from "../../sdk/caic/ts/v1/types.gen";
 
-test("browser voice selects a text choice on mobile and displays a failed choice once", async ({ page }) => {
-  await page.setViewportSize({ width: 393, height: 851 });
-  await page.addInitScript(() => {
-    localStorage.setItem(`gomode.voiceChoice.${location.origin}`, "gemini");
-  });
+async function enableBrowserVoice(page: Page) {
   await page.route("**/api/caic/v1/server/config", async (route) => {
     const response = await route.fetch();
     const config = (await response.json()) as Config;
@@ -29,13 +26,31 @@ test("browser voice selects a text choice on mobile and displays a failed choice
       },
     }),
   );
+}
+
+test("browser voice selects a text choice on mobile and displays a failed choice once", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  await page.addInitScript(() => {
+    localStorage.setItem(`gomode.voiceChoice.${location.origin}`, "gemini");
+  });
+  await enableBrowserVoice(page);
   let includeTextChoice = true;
   await page.route("**/api/voicegateway/v2/voice/choices", (route) =>
     route.fulfill({
       json: {
         choices: [
           { id: "gemini", label: "Gemini Live", transports: ["webrtc"] },
-          ...(includeTextChoice ? [{ id: "text", label: "Text model", transports: ["text"] }] : []),
+          ...(includeTextChoice
+            ? [
+                {
+                  id: "text",
+                  label: "Text model",
+                  composable: true,
+                  transports: ["text"],
+                  speechModes: [{ input: "client", output: "client" }],
+                },
+              ]
+            : []),
         ],
         defaults: [
           { transport: "webrtc", id: "gemini" },
@@ -50,9 +65,25 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   const overlay = page.getByTestId("voice-overlay");
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
   await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
-  await overlay.getByRole("radio", { name: "Browser speech", exact: true }).check();
-  const choice = overlay.getByRole("combobox", { name: "LLM", exact: true });
+  await overlay.getByRole("tab", { name: "Select parts", exact: true }).click();
+  const choice = overlay.getByRole("combobox", { name: "Language model", exact: true });
   await expect(choice).toBeEnabled();
+  await expect(choice).toHaveValue("text");
+  await overlay.getByRole("combobox", { name: "Recognition", exact: true }).selectOption("browser");
+  await overlay.getByRole("combobox", { name: "Speech", exact: true }).selectOption("browser");
+  await expect(overlay.getByRole("combobox", { name: "Recognition", exact: true })).toHaveValue("browser");
+  await expect(overlay.getByRole("combobox", { name: "Speech", exact: true })).toHaveValue("browser");
+  await page.screenshot({ path: test.info().outputPath("voice-parts-mobile.png") });
+  await page.reload();
+  await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
+  await expect(overlay.getByRole("tab", { name: "Select parts", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(choice).toHaveValue("text");
+  await overlay.getByRole("tab", { name: "All-in-one model", exact: true }).click();
+  await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
+  await overlay.getByRole("tab", { name: "Select parts", exact: true }).click();
   await expect(choice).toHaveValue("text");
   await expect(overlay.getByRole("alert")).toBeEmpty();
   await overlay.getByRole("button", { name: "Close voice settings", exact: true }).click();
@@ -64,6 +95,38 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   await expect(failure.filter({ visible: true })).toHaveCount(1);
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
   await expect(failure.filter({ visible: true })).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test("browser voice explains an unavailable microphone without starting a connection", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "mediaDevices", { value: undefined }));
+  await enableBrowserVoice(page);
+  await page.route("**/api/voicegateway/v2/voice/choices", (route) =>
+    route.fulfill({
+      json: {
+        choices: [{ id: "gemini", label: "Gemini Live", transports: ["webrtc"] }],
+        defaults: [{ transport: "webrtc", id: "gemini" }],
+      },
+    }),
+  );
+  let offers = 0;
+  await page.route("**/api/voicegateway/v2/voice/rtc/offer", (route) => {
+    offers++;
+    return route.abort();
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  const overlay = page.getByTestId("voice-overlay");
+  const microphone = overlay.getByRole("button", { name: "Enable microphone", exact: true });
+  await expect(microphone).toBeVisible();
+  await microphone.click();
+  await expect(
+    overlay.getByRole("status").filter({ hasText: "Microphone requires HTTPS or a supported browser." }),
+  ).toBeVisible();
+  await expect(microphone).toHaveAccessibleDescription("Microphone requires HTTPS or a supported browser.");
+  await expect(microphone).toBeVisible();
+  expect(offers).toBe(0);
   expect(errors).toEqual([]);
 });
 

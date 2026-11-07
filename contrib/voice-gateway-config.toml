@@ -8,7 +8,7 @@
 #
 # At standalone startup, unavailable providers are hidden with a warning.
 #
-# Set effort on [[realtime]], [[chat]], or [local_stack.llm]:
+# Set effort on [[realtime]] or [[llm]] definitions:
 # Omit effort to send no effort option; "off" requests minimal thinking;
 # "low", "medium", "high", "xhigh", and "max" request increasing effort.
 # Supported levels depend on the model. Omit it for models that reject effort.
@@ -21,10 +21,11 @@ http = "127.0.0.1:3479"
 # The WebRTC UDP port must be reachable by clients (directly or through NAT).
 webrtc_udp_port = 3480
 
-# Local-stack, chat, and native llama.cpp audio load on first use. A choice counts as
-# one instance, including its ASR/LLM/TTS workers. Active sessions pin instances;
-# another choice waits when all instances are busy. Idle choices are evicted
-# first when capacity is needed. External servers remain operator-owned.
+# Managed LLMs, speech stages, and native llama.cpp audio load on first use.
+# A choice counts as one instance, including its ASR/LLM/TTS workers. Active
+# sessions pin instances; another choice waits when all instances are busy.
+# Idle choices are evicted first when capacity is needed. External servers
+# remain operator-owned.
 [local_stack_runtime]
 idle_timeout_seconds = 3600
 max_instances = 1
@@ -88,129 +89,241 @@ effort = "medium"
 context_size = 65536
 
 # Remote LLMs
-# Clients transcribe and speak for all chat choices. Credentials are listed in
-# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example,
-# using genai's provider environment variables.
+# Select recognition and synthesis independently for named LLMs. Credentials are listed in
+# https://github.com/maruel/gomode/blob/main/contrib/voice-gateway.env.example, using genai's provider environment variables.
 
-[[chat]]
+[[llm]]
+id = "gpt_luna_codex"
+label = "GPT 6 Luna (Codex)"
+# Uses the existing Codex login and subscription quota.
+provider = "openai"
+auth = "codex"
+model = "gpt-6-luna"
+effort = "low"
+
+[[llm]]
+id = "gpt_luna"
+label = "GPT 6 Luna (API)"
 # https://developers.openai.com/api/docs/models/gpt-6-luna
 # $0.10/MTok in, $0.50/MTok out; prompts >272K tokens: $0.20/MTok in, $0.75/MTok out.
-label = "GPT 6 Luna"
+# Uses OPENAI_API_KEY and API billing, independently of the Codex login.
 provider = "openai"
 model = "gpt-6-luna"
 effort = "low"
 
-[[chat]]
+[[llm]]
+id = "claude_haiku_5_5"
+label = "Claude Haiku 5.5"
 # https://platform.claude.com/docs/en/models/haiku-5-5/overview
 # $0.10/MTok in, $0.50/MTok out; prompts >100K tokens: $0.50/MTok in, $2.50/MTok out.
-label = "Claude Haiku 5.5"
 provider = "anthropic"
 model = "claude-haiku-5-5"
 effort = "low"
 
-[[chat]]
+[[llm]]
+id = "gemini_flash_3_8"
+label = "Gemini Flash 3.8"
 # https://aistudio.google.com/docs/pricing#gemini-3.8-flash
 # $0.75/MTok in, $3.75/MTok out through 2026-12-31; then $1.50/MTok in, $7.50/MTok out.
-label = "Gemini Flash 3.8"
 provider = "gemini"
 model = "gemini-3.8-flash"
 effort = "low"
 
-[[chat]]
+[[llm]]
+id = "gemini_flash_lite"
+label = "Gemini Flash Lite"
 # https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite
 # $0.30/MTok in, $2.50/MTok out.
-label = "Gemini Flash Lite"
 provider = "gemini"
 model = "gemini-flash-lite-latest"
 effort = "low"
 
-[[chat]]
+[[llm]]
+id = "deepseek_flash"
+label = "DeepSeek Flash"
 # https://api-docs.deepseek.com/quick_start/pricing/
 # Off-peak: $0.15/MTok in, $0.60/MTok out. Peak: $0.30/MTok in, $1.20/MTok out.
-label = "DeepSeek Flash"
 provider = "deepseek"
 model = "deepseek-flash"
 effort = "low"
 
-[[chat]]
+[[llm]]
+id = "openrouter_minimax_m3_1_flash"
+label = "Openrouter Minimax M3.1 Flash"
 # https://openrouter.ai/minimax/minimax-m3.1-flash
 # From $0.1125/MTok in, $0.45/MTok out (25% promotion); list: $0.15/MTok in, $0.60/MTok out.
-label = "Openrouter Minimax M3.1 Flash"
 provider = "openrouter"
 model = "minimax/minimax-m3.1-flash"
 # Optional: "latency" (lowest), "price" (lowest), or "throughput" (highest).
-# Omit to use OpenRouter's default routing. Also supported in [local_stack.llm].
+# Omit to use OpenRouter's default routing.
 openrouter_sort = "latency"
 
-[[chat]]
+[[llm]]
+id = "openrouter_mimo_v2_6_flash"
+label = "Openrouter MiMo-V2.6-Flash"
 # https://openrouter.ai/xiaomi/mimo-v2.6-flash
 # From $0.10/MTok in, $0.28/MTok out.
-label = "Openrouter MiMo-V2.6-Flash"
 provider = "openrouter"
 model = "xiaomi/mimo-v2.6-flash"
 openrouter_sort = "latency"
 
-[[chat]]
+[[llm]]
+id = "openrouter_ministral_3_14b"
+label = "Openrouter Ministral 3 14B"
 # https://openrouter.ai/mistralai/ministral-14b-2512
 # $0.20/MTok in, $0.20/MTok out
-label = "Openrouter Ministral 3 14B"
 provider = "openrouter"
 model = "mistralai/ministral-14b-2512"
 openrouter_sort = "latency"
 
-[[chat]]
+[[llm]]
+id = "mistral_ministral_3_14b"
+label = "Mistral Ministral 3 14B"
 # https://docs.mistral.ai/models/ministral-3-14b-25-12
 # $0.20/MTok in, $0.20/MTok out.
-label = "Mistral Ministral 3 14B"
 provider = "mistral"
 model = "ministral-14b-2512"
 
-[[chat]]
+[[llm]]
+id = "alibaba_qwen3_8_flash"
+label = "Alibaba Qwen3.8 Flash"
 # https://www.qwencloud.com/models/qwen3.8-flash?region=us-east-1
 # Global scope: $0.113/MTok in, $0.382/MTok out. US scope: $0.15/MTok in, $0.47/MTok out.
-label = "Alibaba Qwen3.8 Flash"
 provider = "alibaba"
 model = "qwen3.8-flash"
 effort = "low"
 
 # An arbitrary OpenAI-compatible chat endpoint:
-# [[chat]]
+# [[llm]]
+# id = "remote"
 # label = "Remote compatible LLM"
 # provider = "openaicompatible"
 # remote = "https://llm.example/v1/chat/completions"
 # model = "your-model"
 # api_key_name = "REMOTE_LLM_API_KEY"
 
-# Local GGUF LLMs with client speech.
-[[local_stack]]
+# Local GGUF LLM.
+[[llm]]
+id = "gemma_4_26b"
 label = "Gemma 4 26B A4B"
-text_only = true
-[local_stack.llm]
 provider = "llamacpp"
 llamacppsrv = true
 model = "unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q4_K_XL"
 effort = "low"
 
-# Local ASR/LLM/TTS stack. Prerequisites: https://github.com/maruel/gomode/blob/main/docs/VOICE_LOCAL_STACK.md.
-# Set text_only = true on the local_stack entry and omit ASR/TTS to use client speech.
-# [[local_stack]]
-# label = "Local stack"
-# [local_stack.llm]
-# provider = "llamacpp"
-# llamacppsrv = true
-# model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
-# effort = "low"
-# [local_stack.asr]
+# Reusable ASR/LLM/TTS stages. Prerequisites: https://github.com/maruel/gomode/blob/main/docs/VOICE_LOCAL_STACK.md.
+# Define each stage once and compose named choices with [[voice]].
+# Each named LLM can use independently selected gateway or browser speech.
+[[llm]]
+id = "gemma_4_e2b"
+label = "Gemma 4 E2B"
+provider = "llamacpp"
+llamacppsrv = true
+model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+effort = "low"
+
+# External speech server (start separately):
+# [[asr]]
+# id = "parakeet"
 # engine = "openai-audio"
 # remote = "http://127.0.0.1:8000"
 # model = "mlx-community/parakeet-tdt-0.6b-v3"
-# [local_stack.tts]
-# engine = "kittentts"
-# model = "KittenML/kitten-tts-2"
-# voice = "Luna"
-# Alternatively, use an existing speech server (started separately):
-# [local_stack.tts]
+
+[[tts]]
+id = "kitten"
+label = "Kitten TTS"
+engine = "kittentts"
+model = "KittenML/kitten-tts-2"
+voice = "Luna"
+
+# External speech server (start separately):
+# [[tts]]
+# id = "kokoro"
 # engine = "openai-audio"
 # remote = "http://127.0.0.1:8000"
 # model = "mlx-community/Kokoro-82M-bf16"
 # voice = "af_heart"
+
+# Provider speech uses its native endpoint. Omit remote to start a managed model.
+[[asr]]
+id = "qwen"
+label = "Qwen3 ASR"
+provider = "llamacpp"
+model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
+
+[[asr]]
+id = "voxtral"
+label = "Voxtral Realtime"
+provider = "llamacpp"
+model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
+streaming = true
+
+[[asr]]
+id = "gemini_live"
+label = "Gemini Live Transcribe"
+provider = "gemini"
+model = "gemini-3.5-transcribe-live"
+streaming = true
+
+[[asr]]
+id = "whisper"
+label = "Groq Whisper"
+provider = "groq"
+model = "whisper-large-v3-turbo"
+# GROQ_API_KEY authenticates recognition. whisper-large-v3 is also supported.
+[[asr]]
+id = "gemini"
+label = "Gemini Transcribe"
+provider = "gemini"
+model = "gemini-3.5-transcribe"
+
+[[tts]]
+id = "gemini"
+label = "Gemini TTS"
+provider = "gemini"
+model = "gemini-3.8-flash-lite-tts"
+voice = "Kore"
+# GEMINI_API_KEY authenticates these independent speech stages.
+[[tts]]
+id = "lfm3"
+label = "LFM3 TTS"
+provider = "llamacpp"
+model = "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M"
+voice = "female"
+
+[[voice]]
+label = "llama.cpp speech with GPT 6 Luna"
+asr = "qwen"
+llm = "gpt_luna"
+tts = "lfm3"
+
+[[voice]]
+label = "Groq Whisper with GPT 6 Luna and local speech"
+asr = "whisper"
+llm = "gpt_luna"
+tts = "lfm3"
+
+[[voice]]
+label = "Gemini speech with GPT 6 Luna"
+asr = "gemini"
+llm = "gpt_luna"
+tts = "gemini"
+
+[[voice]]
+label = "Groq Whisper with GPT 6 Luna and Gemini speech"
+asr = "whisper"
+llm = "gpt_luna"
+tts = "gemini"
+
+# Choices requiring the external Parakeet server above:
+# [[voice]]
+# label = "Local speech and reasoning"
+# asr = "parakeet"
+# llm = "gemma_4_e2b"
+# tts = "kitten"
+
+# [[voice]]
+# label = "Local speech with GPT 6 Luna"
+# asr = "parakeet"
+# llm = "gpt_luna"
+# tts = "kitten"

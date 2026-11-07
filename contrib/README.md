@@ -95,12 +95,8 @@ The probe waits at most six seconds. On failure, caic logs a warning and keeps i
 inherited environment. It does not log shell output or exported values. Config
 location selection, `--version`, and `--print-url` do not load the shell.
 
-To use only the service or terminal environment, set this in `config.toml`:
-
-```toml
-[core]
-shell_env = false
-```
+To use only the service or terminal environment, disable `core.shell_env` in
+[config.toml](config.toml).
 
 Shell loading finds tools such as Git and npm when startup scripts export their
 paths. It does not import aliases or functions, refresh version-manager settings

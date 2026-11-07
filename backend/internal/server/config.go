@@ -263,13 +263,14 @@ const (
 
 // VoiceGatewayConfig is caic's effective reference to a voice gateway.
 type VoiceGatewayConfig struct {
-	Mode       VoiceGatewayMode
-	URL        string
-	Issuer     string
-	InstanceID string
-	TokenMode  VoiceTokenMode
-	SigningKey ed25519.PrivateKey
-	Config     voicegateway.Config
+	Mode          VoiceGatewayMode
+	URL           string
+	Issuer        string
+	InstanceID    string
+	TokenMode     VoiceTokenMode
+	SigningKey    ed25519.PrivateKey
+	Config        voicegateway.ResolvedConfig
+	WebRTCUDPPort int
 }
 
 // Validate returns an error if the voice gateway configuration is invalid.
@@ -308,10 +309,10 @@ func (c *VoiceGatewayConfig) Validate() error {
 		}
 		return nil
 	case VoiceGatewayModeEmbedded:
-		if c.Config.Server.WebRTCUDPPort < 0 {
-			return errors.New("voice-gateway.config.server.webrtc_udp_port must be nonnegative; use mode disabled to disable voice")
+		if c.WebRTCUDPPort < 0 || c.WebRTCUDPPort > 65535 {
+			return errors.New("voice-gateway.webrtc_udp_port must be between 0 and 65535; use mode disabled to disable voice")
 		}
-		return c.Config.ValidateEmbedded()
+		return c.Config.Validate()
 	default:
 		return fmt.Errorf("voice gateway mode must be %q, %q, or %q, got %q", VoiceGatewayModeDisabled, VoiceGatewayModeEmbedded, VoiceGatewayModeExternal, c.Mode)
 	}

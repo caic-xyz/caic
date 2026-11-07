@@ -45,22 +45,8 @@ make test-e2e-repeat SPEC=e2e/tests/device-login.spec.ts ROUNDS=5
 
 ## Profiling
 
-Enable profiling by adding a `[debug]` section to `~/.config/caic/config.toml`:
-
-```toml
-[debug]
-# Expose /debug/pprof/* endpoints (CPU, heap, goroutines, trace).
-pprof = true
-
-# Write a CPU profile to file on shutdown.
-cpuprofile = "~/.cache/caic/cpu.prof"
-
-# Write an execution trace to file on shutdown.
-trace = "~/.cache/caic/trace.out"
-
-# Write a heap profile to file on shutdown.
-memprofile = "~/.cache/caic/mem.prof"
-```
+Enable profiling with the `[debug]` settings documented in
+[contrib/config.toml](contrib/config.toml).
 
 Analyze the output:
 

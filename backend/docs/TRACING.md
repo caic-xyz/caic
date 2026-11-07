@@ -6,24 +6,13 @@ and session management.
 
 ## Enabling
 
-Set `trace` in the `[debug]` section of `config.toml` to a file path:
-
-```toml
-[debug]
-trace = "/tmp/caic-trace.out"
-```
+Set `trace` in the `[debug]` section of `config.toml` to a file path. See
+[the configuration file](../../contrib/config.toml) for the profiling settings.
 
 The server writes a binary trace on startup that captures all activity until
 shutdown. On SIGINT the trace is finalized via `defer trace.Stop()`.
 
-CPU and heap profiles use the companion keys `cpuprofile` and `memprofile`:
-
-```toml
-[debug]
-cpuprofile = "/tmp/caic-cpu.prof"
-memprofile = "/tmp/caic-mem.prof"
-trace      = "/tmp/caic-trace.out"
-```
+CPU and heap profiles use the companion keys `cpuprofile` and `memprofile`.
 
 ## Viewing
 

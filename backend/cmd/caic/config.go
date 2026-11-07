@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/maruel/gomode/voicegateway"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
@@ -65,9 +66,6 @@ func loadTOMLConfig(cfgDir string) (data.Config, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tc); err != nil {
 		return data.Config{}, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if tc.VoiceGateway.Config.Server.HTTP != "" {
-		return data.Config{}, fmt.Errorf("parse %s: voice-gateway.config.server.http is not supported; use server.http", path)
 	}
 	slog.Info("loaded config", "path", path)
 	return tc, nil
@@ -126,6 +124,14 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 	voiceGatewayMode := server.VoiceGatewayMode(tc.VoiceGateway.Mode)
 	if voiceGatewayMode == "" {
 		voiceGatewayMode = server.VoiceGatewayModeDisabled
+	}
+
+	var voiceConfig voicegateway.ResolvedConfig
+	if voiceGatewayMode == server.VoiceGatewayModeEmbedded {
+		voiceConfig, err = tc.VoiceGateway.Config.Resolve()
+		if err != nil {
+			return nil, "", "", "", fmt.Errorf("voice-gateway.config: %w", err)
+		}
 	}
 
 	var voiceTokenMode server.VoiceTokenMode
@@ -213,13 +219,14 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 		},
 		Voice: server.VoiceConfig{
 			Gateway: server.VoiceGatewayConfig{
-				Mode:       voiceGatewayMode,
-				URL:        tc.VoiceGateway.URL,
-				Issuer:     tc.Server.ExternalURL,
-				InstanceID: tc.VoiceGateway.InstanceID,
-				TokenMode:  voiceTokenMode,
-				SigningKey: voiceSigningKey,
-				Config:     tc.VoiceGateway.Config,
+				Mode:          voiceGatewayMode,
+				URL:           tc.VoiceGateway.URL,
+				Issuer:        tc.Server.ExternalURL,
+				InstanceID:    tc.VoiceGateway.InstanceID,
+				TokenMode:     voiceTokenMode,
+				SigningKey:    voiceSigningKey,
+				Config:        voiceConfig,
+				WebRTCUDPPort: tc.VoiceGateway.WebRTCUDPPort,
 			},
 		},
 		Debug: server.DebugConfig{

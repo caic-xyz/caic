@@ -6,8 +6,6 @@ import (
 	"crypto/ed25519"
 	"strings"
 	"testing"
-
-	"github.com/maruel/gomode/voicegateway"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {
@@ -101,18 +99,13 @@ func TestVoiceGatewayConfig(t *testing.T) {
 			}
 		})
 
-		t.Run("embedded validates static config", func(t *testing.T) {
+		t.Run("embedded validates listener bounds", func(t *testing.T) {
 			t.Parallel()
-			gatewayConfig := voicegateway.DefaultConfig()
-			gatewayConfig.Server.HTTP = ""
-			gatewayConfig.Server.WebRTCUDPPort = -2
-			cfg := VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded, Config: gatewayConfig}
-			err := cfg.Validate()
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !strings.Contains(err.Error(), "server.webrtc_udp_port") {
-				t.Fatalf("unexpected error: %v", err)
+			for _, port := range []int{-2, 65536} {
+				cfg := VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded, WebRTCUDPPort: port}
+				if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "voice-gateway.webrtc_udp_port") {
+					t.Fatalf("Validate() for port %d = %v, want listener bound error", port, err)
+				}
 			}
 		})
 	})
