@@ -1,7 +1,7 @@
 // Groups one server-selected root context into completed turns and incrementally updated live output.
 import type { EventMessage } from "@sdk/types.gen";
 import {
-  aggregateToolGroups,
+  aggregateMessageGroups,
   groupTurns,
   IncrementalMessageGrouper,
   isChildEvent,
@@ -57,14 +57,14 @@ export class RootConversationProjection {
     this.first = messages[0] ?? null;
     this.last = messages.at(-1) ?? null;
     const turns = committed
-      ? groupTurns(aggregateToolGroups(this.completedGrouper.group(this.completed)))
+      ? groupTurns(aggregateMessageGroups(this.completedGrouper.group(this.completed)))
       : this.snapshot.turns;
     if (committed) {
       this.liveGrouper.reset(this.warnings);
       this.grouped = null;
     }
     const grouped = this.liveGrouper.group(this.pending);
-    const groups = grouped === this.grouped ? this.snapshot.groups : aggregateToolGroups(grouped);
+    const groups = grouped === this.grouped ? this.snapshot.groups : aggregateMessageGroups(grouped);
     this.grouped = grouped;
     if (turns !== this.snapshot.turns || groups !== this.snapshot.groups) this.snapshot = { turns, groups };
     return this.snapshot;

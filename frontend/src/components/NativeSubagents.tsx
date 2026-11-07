@@ -12,7 +12,7 @@ import { formatTimingDuration } from "../timing";
 import { createLiveDuration } from "../liveDuration";
 import styles from "./NativeSubagents.module.css";
 import type { MessageGroup } from "../grouping";
-import { aggregateToolGroups, IncrementalMessageGrouper } from "../grouping";
+import { aggregateMessageGroups, IncrementalMessageGrouper } from "../grouping";
 
 type TranscriptRenderer = (groups: () => MessageGroup[]) => JSX.Element;
 
@@ -93,7 +93,7 @@ function NativeAgentDetails(props: { activity: HistoryActivity; renderTranscript
     const grouped = grouper.group(
       body.messages().filter((event) => event.kind !== "nativeSubagent" && event.kind !== "backgroundCommand"),
     );
-    return aggregateToolGroups(nativeTerminal(activity.status) ? grouper.finish() : grouped);
+    return aggregateMessageGroups(nativeTerminal(activity.status) ? grouper.finish() : grouped);
   });
   const showResult = createMemo(() => {
     if (!groups().length) return true;

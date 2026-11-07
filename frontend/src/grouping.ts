@@ -146,11 +146,59 @@ function appendScopedTool(group: MessageGroup, event: EventMessage, key: string,
     : [];
 }
 
-// Display aggregates retain compact summaries while each invocation owns its bounded stream state.
-export function aggregateToolGroups(groups: MessageGroup[]): MessageGroup[] {
+// Display aggregates combine thinking runs and tools while source items own their stream state.
+export function aggregateMessageGroups(groups: MessageGroup[]): MessageGroup[] {
   const result: MessageGroup[] = [];
   const aggregates = new Map<string, MessageGroup>();
+  let thinking: MessageGroup | null = null;
+  let thinkingIndex = -1;
+  let thinkingScope: string | null = null;
+  let parts: string[] = [];
+  const finishThinking = () => {
+    if (thinking?.content && parts.length > 1) thinking.content.text = parts.filter((part) => part !== "").join("\n\n");
+    thinking = null;
+    thinkingIndex = -1;
+    thinkingScope = null;
+    parts = [];
+  };
   for (const group of groups) {
+    if (group.messageKey && group.content && group.kind === "action" && !group.tool && group.toolCalls.length === 0) {
+      const messageScope = toolIdentity(group.events[0]?.source, "");
+      if (thinking?.content && messageScope === thinkingScope) {
+        if (!thinking.timingSegments) {
+          const copy: MessageGroup = {
+            ...thinking,
+            content: { ...thinking.content },
+            timingSegments: [thinking.events],
+            events: [...thinking.events],
+          };
+          thinking = copy;
+          result[thinkingIndex] = thinking;
+        }
+        thinking.timingSegments?.push(group.events);
+        thinking.events.push(...group.events);
+        parts.push(group.content.text);
+        const content = thinking.content;
+        if (!content) throw new Error("Missing thinking content");
+        content.complete &&= group.content.complete;
+        const range = group.content.range;
+        if (range)
+          content.range = {
+            start: Math.min(content.range?.start ?? range.start, range.start),
+            end: Math.max(content.range?.end ?? range.end, range.end),
+          };
+      } else {
+        finishThinking();
+        thinking = group;
+        thinkingIndex = result.length;
+        thinkingScope = messageScope;
+        parts = [group.content.text];
+        result.push(thinking);
+      }
+      continue;
+    }
+    const usageOnly = group.events.length > 0 && group.events.every((event) => event.kind === "usage");
+    if (!group.tool && !usageOnly && !(group.kind === "text" && group.content?.text.trim() === "")) finishThinking();
     if (!group.tool?.use) {
       result.push(group);
       continue;
@@ -170,6 +218,7 @@ export function aggregateToolGroups(groups: MessageGroup[]): MessageGroup[] {
       };
     if (aggregate.events.length === 0) aggregate.events = group.events;
   }
+  finishThinking();
   return result;
 }
 

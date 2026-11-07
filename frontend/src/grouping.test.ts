@@ -7,6 +7,7 @@ import { expect } from "@tests/expect";
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 import {
+  aggregateMessageGroups,
   IncrementalMessageGrouper,
   toolIdentity,
   childAgentID,
@@ -18,6 +19,80 @@ import {
   toolCallDurations,
   buildTurnItems,
 } from "./grouping";
+
+describe("thinking display runs", () => {
+  it("omits empty reasoning items from combined text and preserves untouched group identity", () => {
+    const source = { threadID: "root", turnID: "turn" };
+    const events: EventMessage[] = ["", "A", "", "B", ""].map((text, index) => ({
+      kind: "thinking",
+      ts: index + 1,
+      source: { ...source, itemID: String(index) },
+      thinking: { text },
+    }));
+    const groups = groupMessages(events);
+    expect(aggregateMessageGroups(groups)[0]?.content?.text).toBe("A\n\nB");
+    expect(groups[0]?.content?.text).toBe("");
+    const single = groupMessages(events.slice(1, 2));
+    expect(aggregateMessageGroups(single)[0]).toBe(single[0]);
+  });
+
+  it("keeps a run across invisible usage and blank identified text", () => {
+    const source = { threadID: "root", turnID: "turn", itemID: "first" };
+    const groups = aggregateMessageGroups(
+      groupMessages([
+        { kind: "thinking", ts: 100, source, thinking: { text: "First thought." } },
+        usageEvent(),
+        { kind: "text", ts: 200, source: { ...source, itemID: "blank" }, text: { text: "\n" } },
+        { kind: "thinking", ts: 300, source: { ...source, itemID: "second" }, thinking: { text: "Latest thought." } },
+      ]),
+    );
+    expect(groups.filter((group) => group.kind === "action")).toHaveLength(1);
+    expect(groups[0]?.content?.text).toBe("First thought.\n\nLatest thought.");
+    expect(groups.flatMap((group) => group.events).filter((event) => event.kind === "usage")).toHaveLength(1);
+  });
+
+  it("combines scoped items across tools without changing their streaming snapshots", () => {
+    const source = { threadID: "root", turnID: "turn", itemID: "first" };
+    const events: EventMessage[] = [
+      { kind: "thinkingDelta", ts: 100, source, thinkingDelta: { text: "First " } },
+      { kind: "thinkingDelta", ts: 200, source, thinkingDelta: { text: "thought." } },
+      { ...toolUseEvent("read", "Read"), ts: 300, source },
+      { ...toolResultEvent("read"), ts: 400, source },
+      { kind: "thinkingDelta", ts: 500, source: { ...source, itemID: "second" }, thinkingDelta: { text: "Latest" } },
+      { kind: "thinkingDelta", ts: 600, source: { ...source, itemID: "second" }, thinkingDelta: { text: " thought." } },
+    ];
+    const grouper = new IncrementalMessageGrouper();
+    const before = aggregateMessageGroups(grouper.group(events.slice(0, 5)));
+    const displayed = aggregateMessageGroups(grouper.group(events));
+    expect(displayed).toHaveLength(2);
+    expect(displayed[0]?.content?.text).toBe("First thought.\n\nLatest thought.");
+    expect(displayed[0]?.timingSegments?.map((segment) => segment.map((event) => event.ts))).toEqual([
+      [100, 200],
+      [500, 600],
+    ]);
+    expect(before[0]?.content?.text).toBe("First thought.\n\nLatest");
+    expect(displayed).toEqual(aggregateMessageGroups(groupMessages(events)));
+    expect(grouper.group(events)).toHaveLength(3);
+  });
+
+  it("keeps commentary, turns, and concurrent threads as thinking boundaries", () => {
+    const source = { threadID: "root", turnID: "turn", itemID: "a" };
+    const thought = (itemID: string, threadID: string, turnID: string): EventMessage => ({
+      kind: "thinking",
+      ts: 1,
+      source: { ...source, itemID, threadID, turnID },
+      thinking: { text: itemID },
+    });
+    const events: EventMessage[] = [
+      thought("a", "root", "turn"),
+      { kind: "text", ts: 2, source: { ...source, itemID: "comment" }, text: { text: "Progress report." } },
+      thought("b", "root", "turn"),
+      thought("c", "child", "turn"),
+      thought("d", "root", "later"),
+    ];
+    expect(aggregateMessageGroups(groupMessages(events))).toHaveLength(5);
+  });
+});
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };

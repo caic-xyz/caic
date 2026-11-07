@@ -2232,6 +2232,53 @@ describe("streamed conversation", () => {
     vi.useRealTimers();
   });
 
+  it("combines Codex thinking and previews the latest sentence without bold markers", async () => {
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock([], capturedCb);
+    await renderTaskDetail();
+    assert.ok(capturedCb.value);
+    const cb = capturedCb.value;
+    const source = { threadID: "root", turnID: "turn", itemID: "first" };
+    cb({ kind: "thinking", ts: 100, source, thinking: { text: "**Checking editor font metrics**" } });
+    cb({
+      kind: "thinking",
+      ts: 200,
+      source: { ...source, itemID: "second" },
+      thinking: { text: "Checked the metrics. **Updating timing evidence.**\n\n" },
+    });
+    vi.advanceTimersByTime(100);
+    const summaries = () => screen.getAllByText(/^Thinking/).filter((el) => el.tagName === "SUMMARY");
+    expect(summaries()).toHaveLength(1);
+    expect(summaries()[0]).toHaveTextContent("Updating timing evidence.");
+    expect(summaries()[0]).not.toHaveTextContent("**");
+    const details = summaries()[0]?.closest("details");
+    assert.ok(details);
+    const summary = summaries()[0];
+    assert.ok(summary);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(details.querySelector("pre")).toHaveTextContent("**Checking editor font metrics**");
+    cb({
+      kind: "thinkingDelta",
+      ts: 300,
+      source: { ...source, itemID: "third" },
+      thinkingDelta: { text: "**Preparing native benchmark**" },
+    });
+    vi.advanceTimersByTime(100);
+    expect(summaries()).toHaveLength(1);
+    expect(summaries()[0]).toHaveTextContent("Preparing native benchmark");
+    expect(summaries()[0]?.closest("details")?.open).toBe(true);
+    cb({ kind: "text", ts: 400, source: { ...source, itemID: "comment" }, text: { text: "The benchmark is ready." } });
+    cb({
+      kind: "thinking",
+      ts: 500,
+      source: { ...source, itemID: "fourth" },
+      thinking: { text: "**Writing contract triage**" },
+    });
+    vi.advanceTimersByTime(100);
+    expect(summaries()).toHaveLength(2);
+  });
+
   it("multiple thinking blocks across tool calls are both visible", async () => {
     // Regression: ThinkingCard used findLast, so when thinking-1 → tool-1 → thinking-2 → tool-2
     // merged into one action group, only thinking-2 was rendered and thinking-1 was dropped.

@@ -2,7 +2,7 @@
 import type { EventMessage } from "@sdk/types.gen";
 import {
   groupTurns,
-  aggregateToolGroups,
+  aggregateMessageGroups,
   groupMessages,
   isChildEvent,
   isSessionBoundary,
@@ -95,7 +95,7 @@ export class SessionGrouper {
       this.active.boundaryEvent === (this.boundary ?? undefined)
     )
       return this.active;
-    const turns = groupTurns(aggregateToolGroups(groupMessages(this.segment)));
+    const turns = groupTurns(aggregateMessageGroups(groupMessages(this.segment)));
     let toolCount = 0;
     let textCount = 0;
     let durationMs = 0;

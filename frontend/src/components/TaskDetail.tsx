@@ -66,7 +66,7 @@ import {
   isSessionBoundary,
   buildTurnItems,
   groupMessages,
-  aggregateToolGroups,
+  aggregateMessageGroups,
   groupTurns,
   rateLimitPercentage,
   toolCallDurationMs,
@@ -1943,7 +1943,7 @@ function ArchivedSessionBody(props: {
   const turns = createMemo(() => {
     routingRevision();
     return groupTurns(
-      aggregateToolGroups(
+      aggregateMessageGroups(
         groupMessages(
           body
             .events()
@@ -2637,6 +2637,8 @@ function ToolMessageGroup(props: {
   );
 }
 
+const thinkingSentences = new Intl.Segmenter(undefined, { granularity: "sentence" });
+
 // Renders a thinking group, collapsed by default like a ToolCallCard.
 function ThinkingCard(props: { events: EventMessage[]; text?: string }) {
   const text = createMemo(() => {
@@ -2658,8 +2660,12 @@ function ThinkingCard(props: { events: EventMessage[]; text?: string }) {
     return parts.join("\n\n");
   });
   const excerpt = createMemo(() => {
-    const t = text();
-    return t ? (t.split("\n", 1)[0] ?? "").trim() : "";
+    const line = text().replaceAll("**", "").trim().split("\n").at(-1)?.trim() ?? "";
+    let latest = "";
+    for (const sentence of thinkingSentences.segment(line)) {
+      if (sentence.segment.trim()) latest = sentence.segment.trim();
+    }
+    return latest;
   });
   const key = () => "thinking:" + (props.events[0] ? (messageIdentity(props.events[0]) ?? props.events[0].ts) : 0);
   const isOpen = () => detailsOpenState.get(key()) ?? false;
