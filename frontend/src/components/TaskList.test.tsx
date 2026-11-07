@@ -189,7 +189,7 @@ describe("TaskList", () => {
 
   it("distinguishes a reported zero from unknown cost across task updates", () => {
     const [tasks, setTasks] = createSignal([{ ...task("1"), costKnown: true, costComplete: true }, task("2")]);
-    const { container } = render(() => <TaskList {...taskListProps([])} tasks={tasks} selectedId={null} />);
+    const { container } = renderList(() => <TaskList {...taskListProps([])} tasks={tasks} selectedId={null} />);
     const first = container.querySelector('[data-task-id="1"]');
     const second = container.querySelector('[data-task-id="2"]');
     expect(first?.querySelector('[data-testid="task-card-cost"]')).toHaveTextContent("$0.00");

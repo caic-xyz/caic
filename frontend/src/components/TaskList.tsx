@@ -295,7 +295,6 @@ export default function TaskList(props: TaskListProps) {
         effort={t().reportedEffort || t().requestedEffort}
         costUSD={t().costUSD}
         costKnown={t().costKnown}
-        costComplete={t().costComplete}
         duration={t().duration}
         numTurns={t().numTurns}
         contextUsed={t().contextUsed}

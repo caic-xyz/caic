@@ -87,7 +87,7 @@ test("task-card fixtures distinguish known zero from unknown cost", async ({ pag
     await expect(knownCard.getByTestId("task-card-cost")).toContainText("$0.00");
     await expect(knownCard.getByTestId("task-card-cost")).not.toContainText("subtotal");
     await expect(unknownCard.getByTestId("task-card-cost")).toHaveCount(0);
-    await expect(partialCard.getByTestId("task-card-cost")).toContainText("$0.00 known subtotal");
+    await expect(partialCard.getByTestId("task-card-cost")).toHaveText(/^(?:· )?\$0\.00$/);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`cost-provenance-${width}.png`) });
     await page.goto(`/task/@${partialID}`);
