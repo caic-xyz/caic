@@ -1,9 +1,45 @@
-// Browser coverage for resource-chart snapshots, controlled live samples, and crosshair readings.
+// Browser coverage for task-card resource levels, resource-chart snapshots, and live crosshair readings.
 
 import { createServer, type ServerResponse } from "node:http";
 import { createTaskAPI, expect, test } from "../helpers";
 import type { EventStats } from "../../sdk/caic/ts/v1/types.gen";
 import { validateEventStats, validateHistoryStats } from "../../sdk/caic/ts/v1/validate.gen";
+
+test("task-card resources open performance from either icon and the keyboard", async ({ page, api }) => {
+  const id = await createTaskAPI(api, "Monitor container resource limits");
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const histories: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes(`/tasks/${id}/history/`)) histories.push(request.url());
+  });
+  await page.goto("/");
+  const card = page.locator(`[data-task-id="${id}"]`);
+  const levels = card.getByTestId("task-resource-levels");
+  await expect(levels).toHaveAccessibleName(/% of configured ceiling/);
+  await expect(levels).toHaveAccessibleName(/% of limit/);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(levels).toBeVisible();
+    const link = card.getByRole("link", { name: /^Task performance:/ });
+    await expect(link).toHaveAttribute("href", `/task/@${id}/stats`);
+    await expect(link).toHaveAttribute("title", /Inherited CPU limits and process affinity are unreported/);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await link.focus();
+    await expect(link).toBeFocused();
+    await page.screenshot({ path: `test-results/task-card-resources-${width}.png` });
+    expect(histories).toEqual([]);
+    await card.getByTestId(width === 1280 ? "task-cpu-level" : "task-memory-level").click();
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
+    await expect(page.getByTestId("resource-charts")).toBeVisible();
+    await page.goto("/");
+    histories.length = 0;
+  }
+  await levels.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
+  expect(errors).toEqual([]);
+});
 
 test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Inspect fractional CPU constraints");

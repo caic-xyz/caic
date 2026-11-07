@@ -1068,6 +1068,27 @@ RuntimeInstance holds per-task runtime metadata.
 | `sudoPassword` | `string` | SudoPassword is the random sudo password, only populated when Sudo is true. |  |
 | `vncPort` | `int` |  |  |
 
+### EventStats
+
+EventStats is a runtime resource usage snapshot emitted periodically.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `ts` | `int64` |  | yes |
+| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
+| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
+| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
+| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
+| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
+| `memUsed` | `uint64` |  | yes |
+| `memLimit` | `uint64` |  | yes |
+| `memPerc` | `float64` |  | yes |
+| `netRx` | `uint64` |  | yes |
+| `netTx` | `uint64` |  | yes |
+| `blockRead` | `uint64` |  | yes |
+| `blockWrite` | `uint64` |  | yes |
+| `diskUsed` | `int64` |  | yes |
+
 ### TaskRateLimit
 
 TaskRateLimit is the current quota block resolved by the backend for one task.
@@ -1136,6 +1157,7 @@ Task is the JSON representation sent to the frontend.
 | `inPlanMode` | `boolean` |  |  |
 | `currentPlan` | `TaskPlan` |  |  |
 | `runtime` | `RuntimeInstance` |  | yes |
+| `resourceUsage` | `EventStats` | Latest runtime sample; absent before sampling. Not persisted. |  |
 | `rateLimit` | `TaskRateLimit` | Current quota block resolved by the backend. |  |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
@@ -2533,27 +2555,6 @@ cursor query on reconnect. Named stats events never replace this raw cursor.
 |-------|------|-------------|----------|
 | `cursor` | `string` |  | yes |
 | `through` | `uint64` |  | yes |
-
-### EventStats
-
-EventStats is a runtime resource usage snapshot emitted periodically.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `ts` | `int64` |  | yes |
-| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
-| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
-| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
-| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
-| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
-| `memUsed` | `uint64` |  | yes |
-| `memLimit` | `uint64` |  | yes |
-| `memPerc` | `float64` |  | yes |
-| `netRx` | `uint64` |  | yes |
-| `netTx` | `uint64` |  | yes |
-| `blockRead` | `uint64` |  | yes |
-| `blockWrite` | `uint64` |  | yes |
-| `diskUsed` | `int64` |  | yes |
 
 ### HistoryStats
 

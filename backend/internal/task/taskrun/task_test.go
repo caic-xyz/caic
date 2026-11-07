@@ -4295,6 +4295,9 @@ func TestTask(t *testing.T) {
 		t.Run("RingOverflow", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			if tk.Snapshot().ResourceUsage != nil {
+				t.Fatal("resource usage present before first sample")
+			}
 			for i := range 65 {
 				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
@@ -4310,6 +4313,14 @@ func TestTask(t *testing.T) {
 			}
 			if history[len(history)-1].CPUPerc != 64.0 {
 				t.Errorf("history[last].CPUPerc = %v, want 64.0", history[len(history)-1].CPUPerc)
+			}
+			snap := tk.Snapshot()
+			if snap.ResourceUsage == nil || snap.ResourceUsage.CPUPerc != 64 {
+				t.Fatalf("latest resource usage = %+v", snap.ResourceUsage)
+			}
+			tk.PushStats(&runtime.Stats{CPUPerc: 99})
+			if snap.ResourceUsage.CPUPerc != 64 || tk.Snapshot().ResourceUsage.CPUPerc != 99 {
+				t.Fatal("snapshot must retain its sample independently of subsequent updates")
 			}
 		})
 	})

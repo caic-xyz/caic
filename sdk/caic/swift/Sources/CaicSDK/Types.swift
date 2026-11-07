@@ -1206,6 +1206,29 @@ public struct RuntimeInstance: Codable {
     public let vncPort: Int?
 }
 
+/// EventStats is a runtime resource usage snapshot emitted periodically.
+public struct EventStats: Codable {
+    public let ts: Int
+    /// 100% is one fully busy logical CPU.
+    public let cpuPerc: Double
+    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
+    public let cpuCeiling: Double?
+    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
+    public let cpuQuota: Double?
+    /// Owning runtime's logical CPU count; null when unknown.
+    public let runtimeCPUs: Int?
+    /// Runtime CPU metadata observation failure; usage samples remain usable.
+    public let cpuError: String?
+    public let memUsed: Int
+    public let memLimit: Int
+    public let memPerc: Double
+    public let netRx: Int
+    public let netTx: Int
+    public let blockRead: Int
+    public let blockWrite: Int
+    public let diskUsed: Int
+}
+
 /// TaskRateLimit is the current quota block resolved by the backend for one task.
 public struct TaskRateLimit: Codable {
     public let blocked: Bool
@@ -1282,6 +1305,8 @@ public struct Task: Codable {
     public let inPlanMode: Bool?
     public let currentPlan: TaskPlan?
     public let runtime: RuntimeInstance
+    /// Latest runtime sample; absent before sampling. Not persisted.
+    public let resourceUsage: EventStats?
     /// Current quota block resolved by the backend.
     public let rateLimit: TaskRateLimit?
     /// Per-task feature flags.
@@ -2451,29 +2476,6 @@ public struct HistoryTurnEstimate: Codable {
 public struct HistoryCheckpoint: Codable {
     public let cursor: String
     public let through: Int
-}
-
-/// EventStats is a runtime resource usage snapshot emitted periodically.
-public struct EventStats: Codable {
-    public let ts: Int
-    /// 100% is one fully busy logical CPU.
-    public let cpuPerc: Double
-    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
-    public let cpuCeiling: Double?
-    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
-    public let cpuQuota: Double?
-    /// Owning runtime's logical CPU count; null when unknown.
-    public let runtimeCPUs: Int?
-    /// Runtime CPU metadata observation failure; usage samples remain usable.
-    public let cpuError: String?
-    public let memUsed: Int
-    public let memLimit: Int
-    public let memPerc: Double
-    public let netRx: Int
-    public let netTx: Int
-    public let blockRead: Int
-    public let blockWrite: Int
-    public let diskUsed: Int
 }
 
 /// HistoryStats contains the bounded 60-sample runtime ring, oldest first.

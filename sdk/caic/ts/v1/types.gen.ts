@@ -131,6 +131,29 @@ export const ToolOutputText = "text";
 export const ToolOutputJSON = "json";
 export const ToolOutputMarkdown = "markdown";
 
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+export interface EventStats {
+  ts: number /* int64 */;
+  /** 100% is one fully busy logical CPU. */
+  cpuPerc: number /* float64 */;
+  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+  cpuCeiling?: number /* float64 */;
+  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+  cpuQuota?: number /* float64 */;
+  /** Owning runtime's logical CPU count; null when unknown. */
+  runtimeCPUs?: number /* int */;
+  /** Runtime CPU metadata observation failure; usage samples remain usable. */
+  cpuError?: string;
+  memUsed: number /* uint64 */;
+  memLimit: number /* uint64 */;
+  memPerc: number /* float64 */;
+  netRx: number /* uint64 */;
+  netTx: number /* uint64 */;
+  blockRead: number /* uint64 */;
+  blockWrite: number /* uint64 */;
+  diskUsed: number /* int64 */;
+}
+
 /**
  * EventMessageSource identifies the provider origin of any normalized event.
  * AgentID and DelegationToolUseID identify child ownership independently of native
@@ -509,29 +532,6 @@ export interface EventMessage {
   rateLimit?: EventRateLimit;
   commitSnapshot?: EventCommitSnapshot;
   skillLoad?: EventSkillLoad;
-}
-
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-export interface EventStats {
-  ts: number /* int64 */;
-  /** 100% is one fully busy logical CPU. */
-  cpuPerc: number /* float64 */;
-  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-  cpuCeiling?: number /* float64 */;
-  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-  cpuQuota?: number /* float64 */;
-  /** Owning runtime's logical CPU count; null when unknown. */
-  runtimeCPUs?: number /* int */;
-  /** Runtime CPU metadata observation failure; usage samples remain usable. */
-  cpuError?: string;
-  memUsed: number /* uint64 */;
-  memLimit: number /* uint64 */;
-  memPerc: number /* float64 */;
-  netRx: number /* uint64 */;
-  netTx: number /* uint64 */;
-  blockRead: number /* uint64 */;
-  blockWrite: number /* uint64 */;
-  diskUsed: number /* int64 */;
 }
 
 /** TaskHistoryStreamError reports that task history could not be replayed. */
@@ -1478,6 +1478,8 @@ export interface Task {
   inPlanMode?: boolean;
   currentPlan?: TaskPlan;
   runtime: RuntimeInstance;
+  /** Latest runtime sample; absent before sampling. Not persisted. */
+  resourceUsage?: EventStats;
   /** Current quota block resolved by the backend. */
   rateLimit?: TaskRateLimit;
   /** Per-task feature flags. */

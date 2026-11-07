@@ -2,7 +2,8 @@
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
+import { MemoryRouter, Route } from "@solidjs/router";
 import { expect, vi } from "@tests/expect";
 
 import type { Task } from "@sdk/types.gen";
@@ -62,6 +63,14 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
   };
 }
 
+function renderList(component: () => JSX.Element) {
+  return render(() => (
+    <MemoryRouter>
+      <Route path="*" component={component} />
+    </MemoryRouter>
+  ));
+}
+
 describe("TaskList", () => {
   const scrollIntoView = vi.fn();
   const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -118,7 +127,7 @@ describe("TaskList", () => {
       { ...task("9"), state: "stopped", repos: [{ name: "repo8", branch: "old" }] },
       task("A"),
     );
-    const { container } = render(() => <TaskList {...taskListProps(tasks)} selectedId={null} />);
+    const { container } = renderList(() => <TaskList {...taskListProps(tasks)} selectedId={null} />);
 
     expect(Array.from(container.querySelectorAll(`.${styles.repoGroupHeader}`), (el) => el.textContent)).toEqual([
       "repo8",
@@ -139,7 +148,7 @@ describe("TaskList", () => {
       { ...task("2"), state: "failed", repos: [{ name: "archive", branch: "work" }] },
       { ...task("3"), state: "purged" },
     ];
-    const { container, getByRole, queryByRole } = render(() => (
+    const { container, getByRole, queryByRole } = renderList(() => (
       <TaskList {...taskListProps(tasks)} selectedId={null} />
     ));
     const disclosure = getByRole("button", { name: "archive: Purged (2)" });
@@ -168,7 +177,9 @@ describe("TaskList", () => {
       { ...task("4"), state: "purged", repos: [{ name: "stopped", branch: "work" }] },
       { ...task("5"), state: "purged", repos: [{ name: "archive", branch: "work" }] },
     ];
-    const { container, getAllByRole, getByRole } = render(() => <TaskList {...taskListProps(tasks)} selectedId="5" />);
+    const { container, getAllByRole, getByRole } = renderList(() => (
+      <TaskList {...taskListProps(tasks)} selectedId="5" />
+    ));
     expect(getAllByRole("button", { name: "Purged (1)" })).toHaveLength(2);
     expect(getByRole("button", { name: "Stopped (1)" })).toBeTruthy();
     expect(getByRole("button", { name: "archive: Purged (1)" })).toHaveAttribute("aria-expanded", "true");
@@ -179,7 +190,7 @@ describe("TaskList", () => {
     const running = { ...task("1"), repos: [{ name: "repo2", branch: "work" }] };
     const other = { ...task("2"), repos: [{ name: "repo10", branch: "work" }] };
     let updateTasks: (tasks: Task[]) => void = () => undefined;
-    const { container } = render(() => {
+    const { container } = renderList(() => {
       const [tasks, setTasks] = createSignal([running, other]);
       updateTasks = setTasks;
       return <TaskList {...taskListProps([])} tasks={tasks} selectedId="2" />;
@@ -208,7 +219,7 @@ describe("TaskList", () => {
     let selectTask: (id: string) => void = () => undefined;
     const tasks = [task("1"), task("2")];
 
-    render(() => {
+    renderList(() => {
       const [selectedId, setSelectedId] = createSignal("1");
       selectTask = setSelectedId;
       return <TaskList {...taskListProps(tasks)} selectedId={selectedId()} />;
@@ -224,7 +235,7 @@ describe("TaskList", () => {
   });
 
   it("keeps the selected task visible when the open sidebar resizes", async () => {
-    render(() => <TaskList {...taskListProps([task("1"), task("2")])} selectedId="2" />);
+    renderList(() => <TaskList {...taskListProps([task("1"), task("2")])} selectedId="2" />);
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     scrollIntoView.mockClear();
@@ -237,7 +248,7 @@ describe("TaskList", () => {
 
   it("preserves task card DOM identity across live task updates and insertions", () => {
     let updateTasks: (tasks: Task[]) => void = () => undefined;
-    render(() => {
+    renderList(() => {
       const [tasks, setTasks] = createSignal([task("1")]);
       updateTasks = setTasks;
       return <TaskList {...taskListProps([])} tasks={tasks} selectedId="1" />;
@@ -255,7 +266,7 @@ describe("TaskList", () => {
   });
 
   it("previews purge while Shift is held, including in an editing control", () => {
-    const { getByTestId } = render(() => (
+    const { getByTestId } = renderList(() => (
       <>
         <textarea data-testid="editor" />
         <TaskList {...taskListProps([task("1")])} selectedId="1" />

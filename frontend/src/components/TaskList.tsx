@@ -313,6 +313,7 @@ export default function TaskList(props: TaskListProps) {
         error={t().error}
         inPlanMode={t().inPlanMode}
         runtime={t().runtime}
+        resourceUsage={t().resourceUsage}
         gitHubToken={t().gitHubToken}
         forgePR={t().forgePR}
         ciStatus={t().ciStatus}

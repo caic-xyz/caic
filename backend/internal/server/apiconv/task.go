@@ -114,6 +114,9 @@ func Task(in *TaskInput) (v1.Task, error) {
 		out.CurrentPlan = &v1.TaskPlan{ToolUseID: snap.PlanExitID, Content: snap.PlanContent}
 	}
 	out.StartedAt = t.StartedAt
+	if snap.ResourceUsage != nil {
+		out.ResourceUsage = new(Stats(snap.ResourceUsage))
+	}
 	out.TurnStartedAt = snap.TurnStartedAt
 	if snap.RateLimit.Status == "rejected" && !snap.RateLimit.IsUsingOverage && snap.RateLimit.ResetsAt.After(time.Now()) {
 		quotaGroup, err := QuotaProvider(snap.RateLimit.QuotaProvider)

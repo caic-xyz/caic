@@ -1,4 +1,4 @@
-// Compact sidebar task card with per-repository Git and change-state markers.
+// Compact sidebar task card with container resource levels and per-repository Git markers.
 
 import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -14,6 +14,7 @@ import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 
 import type {
   DiffStat,
+  EventStats,
   CIStatus,
   ForgeCheck,
   GitRepositoryState,
@@ -28,6 +29,7 @@ import { SyncTargetDefault } from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import TaskActionsMenu from "./TaskActionsMenu";
+import TaskResourceIndicator from "./TaskResourceIndicator";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
@@ -69,6 +71,7 @@ export interface TaskCardProps {
   error?: string;
   inPlanMode?: boolean;
   runtime?: RuntimeInstance;
+  resourceUsage?: EventStats;
   gitHubToken?: boolean;
   forgePR?: number;
   ciStatus?: CIStatus;
@@ -447,7 +450,7 @@ export default function TaskCard(props: TaskCardProps) {
           )}
         </Show>
 
-        {/* Line 2: [timer times] [cost] [PR] [CI] [state badge] */}
+        {/* Line 2: [timer times] [cost] [PR] [CI] [state badge] [resources] */}
         {(() => {
           const hasTime = () => (!isTerminal() && props.stateUpdatedAt) || props.duration > 0;
           const timePair = () => (
@@ -496,6 +499,13 @@ export default function TaskCard(props: TaskCardProps) {
                   {props.state}
                 </span>
               </Tooltip>
+              <Show when={props.runtime?.id && !isTerminal()}>
+                <TaskResourceIndicator
+                  href={`/task/@${props.id}/stats`}
+                  sample={props.resourceUsage ?? null}
+                  now={props.now()}
+                />
+              </Show>
             </>
           );
           return (

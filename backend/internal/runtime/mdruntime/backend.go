@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/containers"
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 
@@ -44,6 +45,10 @@ const (
 	//
 	// TODO: Probably move to md.
 	containerPIDsLimit = "4096"
+
+	// Reserve runtime RAM headroom for processes outside each task container.
+	// TODO: Make the container memory percentage configurable per user.
+	containerMaxMemoryPercent = 75
 )
 
 // mdClient is the subset of *md.Client that Backend needs. Production wraps a
@@ -52,6 +57,7 @@ const (
 // Docker or SSH.
 type mdClient interface {
 	Runtime() string
+	Info(ctx context.Context) (containers.Info, error)
 	Container(repos ...md.Repo) (mdContainer, error)
 	Get(ctx context.Context, name string) (mdContainer, error)
 	List(ctx context.Context) ([]runtime.Instance, error)
@@ -98,6 +104,11 @@ type mdClientAdapter struct {
 
 // Runtime returns the underlying container runtime name ("docker" or "podman").
 func (a mdClientAdapter) Runtime() string { return a.c.Runtime.Name() }
+
+// Info reports resource capacity from the owning runtime server.
+func (a mdClientAdapter) Info(ctx context.Context) (containers.Info, error) {
+	return a.c.Runtime.Info(ctx)
+}
 
 // Container constructs a container handle for the given repos.
 func (a mdClientAdapter) Container(repos ...md.Repo) (mdContainer, error) {
@@ -457,6 +468,10 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 		return "", err
 	}
 	mdOpts, err := b.mdStartOpts(c, opts)
+	if err != nil {
+		return "", err
+	}
+	mdOpts.MaxMemory, err = b.containerMemoryLimit(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -1460,6 +1475,19 @@ func (b *Backend) baseExtraEnv(h harness.Name) []string {
 	env := make([]string, 0, 2+len(harnessEnv))
 	env = append(env, "EDITOR=true", "GIT_EDITOR=true")
 	return append(env, harnessEnv...)
+}
+
+// containerMemoryLimit reserves runtime RAM headroom outside each task container.
+func (b *Backend) containerMemoryLimit(ctx context.Context) (uint64, error) {
+	info, err := b.client.Info(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("query runtime memory: %w", err)
+	}
+	limit := info.MemTotal/100*containerMaxMemoryPercent + info.MemTotal%100*containerMaxMemoryPercent/100
+	if limit == 0 {
+		return 0, errors.New("runtime physical memory is unavailable or too small")
+	}
+	return limit, nil
 }
 
 // mdStartOpts builds the md.StartOpts for a given harness and task options.

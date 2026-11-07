@@ -692,6 +692,7 @@ type Snapshot struct {
 	RepoStates         []v3.RepoState // Compact per-repo git state from the latest diff probe.
 	DiskUsed           int64
 	DiskKnown          bool
+	ResourceUsage      *runtime.Stats // Latest sample from the bounded resource ring; nil before sampling.
 	ForgeOwner         string
 	ForgeRepo          string
 	ForgePR            int
@@ -1617,6 +1618,10 @@ func (t *Task) clearContextLocked() {
 
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
 func (t *Task) snapshotLocked() Snapshot {
+	var sample *runtime.Stats
+	if t.statsLen > 0 {
+		sample = new(t.statsRing[(t.statsHead+t.statsLen-1)%statsRingSize])
+	}
 	return Snapshot{
 		SessionMetadata:    t.sessionMetadata,
 		State:              t.state,
@@ -1656,6 +1661,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		RepoStates:         t.liveRepoStates,
 		DiskUsed:           t.diskUsed,
 		DiskKnown:          t.diskKnown,
+		ResourceUsage:      sample,
 		ForgeOwner:         t.forgeOwner,
 		ForgeRepo:          t.forgeRepo,
 		ForgePR:            t.forgePR,

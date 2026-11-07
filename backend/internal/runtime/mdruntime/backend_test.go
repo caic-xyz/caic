@@ -39,6 +39,7 @@ type fakeMDContainer struct {
 	repo    []md.Repo
 	diffIdx int
 
+	launchOpts  *md.StartOpts
 	launchErr   error
 	connectRes  *md.StartResult
 	connectErr  error
@@ -73,7 +74,8 @@ func (f *fakeMDContainer) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error
 	return slices.Clone(f.agentMounts), nil
 }
 
-func (f *fakeMDContainer) Launch(_ context.Context, _, _ io.Writer, _ *md.StartOpts) error {
+func (f *fakeMDContainer) Launch(_ context.Context, _, _ io.Writer, opts *md.StartOpts) error {
+	f.launchOpts = opts
 	f.calls = append(f.calls, "Launch")
 	return f.launchErr
 }
@@ -142,6 +144,9 @@ type fakeMDClient struct {
 	runtime      string
 	container    mdContainer // returned by Container()
 	containerErr error
+	info         *containers.Info
+	infoErr      error
+	infoCalls    int
 	getResult    mdContainer // returned by Get()
 	getErr       error
 
@@ -159,6 +164,14 @@ func (f *fakeMDClient) Runtime() string {
 		return "docker"
 	}
 	return f.runtime
+}
+
+func (f *fakeMDClient) Info(context.Context) (containers.Info, error) {
+	f.infoCalls++
+	if f.info != nil {
+		return *f.info, f.infoErr
+	}
+	return containers.Info{MemTotal: 16 << 30}, f.infoErr
 }
 
 func (f *fakeMDClient) Container(repos ...md.Repo) (mdContainer, error) {
@@ -411,6 +424,84 @@ func TestMDClientAdapter(t *testing.T) {
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("MemoryLimit", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name         string
+				total, limit uint64
+			}{
+				{"runtime_RAM", 16 << 30, 12 << 30},
+				{"fractional_bytes", 16_000_000_001, 12_000_000_000},
+				{"largest_total", ^uint64(0), 13_835_058_055_282_163_711},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					c := &fakeMDContainer{name: "task", forkResult: &fakeMDContainer{name: "fork"}}
+					client := &fakeMDClient{container: c, getResult: c, info: &containers.Info{MemTotal: tc.total}}
+					b := newTestBackend(client)
+					opts := &runtime.StartOptions{Harness: harness.Claude}
+					id, err := b.Launch(t.Context(), nil, opts)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if c.launchOpts == nil || c.launchOpts.MaxMemory != tc.limit {
+						t.Fatalf("launch opts = %+v, want memory %d", c.launchOpts, tc.limit)
+					}
+					if _, _, err = b.Fork(t.Context(), id, &runtime.ForkOptions{Harness: harness.Claude}); err != nil {
+						t.Fatal(err)
+					}
+					if c.forkOpts == nil || c.forkOpts.MaxMemory != nil {
+						t.Fatalf("fork opts = %+v, want inherited memory", c.forkOpts)
+					}
+					calls := client.infoCalls
+					client.infoErr = errors.New("memory metadata unavailable during provisioning")
+					if _, err = b.Connect(t.Context(), id, opts); err != nil {
+						t.Fatal(err)
+					}
+					if client.infoCalls != calls {
+						t.Fatal("Connect queried runtime RAM after container creation")
+					}
+					if _, _, err = b.Fork(t.Context(), id, &runtime.ForkOptions{Harness: harness.Claude}); err != nil {
+						t.Fatal(err)
+					}
+					if client.infoCalls != calls || c.forkOpts == nil || c.forkOpts.MaxMemory != nil {
+						t.Fatal("Fork queried runtime RAM or overrode inherited memory")
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name  string
+				total uint64
+				err   error
+			}{
+				{name: "unknown_RAM"},
+				{name: "tiny_RAM", total: 1},
+				{name: "runtime_failure", err: errors.New("runtime unavailable")},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					c := &fakeMDContainer{name: "task"}
+					client := &fakeMDClient{container: c, getResult: c, info: &containers.Info{MemTotal: tc.total}, infoErr: tc.err}
+					b := newTestBackend(client)
+					_, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude})
+					if err == nil || !strings.Contains(err.Error(), "memory") {
+						t.Fatalf("launch error = %v", err)
+					}
+					if tc.err != nil && !errors.Is(err, tc.err) {
+						t.Fatalf("launch lost runtime error: %v", err)
+					}
+					if slices.Contains(c.calls, "Launch") || slices.Contains(c.calls, "Fork") {
+						t.Fatalf("mutated runtime with unavailable RAM: %v", c.calls)
+					}
+				})
+			}
+		})
+	})
 	t.Run("WatchEvents cancellation closes an idle stream", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(t.Context())

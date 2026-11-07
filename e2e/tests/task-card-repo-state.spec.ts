@@ -171,10 +171,10 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
     .toBeLessThan(1);
   await expect
     .poll(async () => {
-      const badge = await singleCard.getByTestId("state-badge").boundingBox();
+      const resources = await singleCard.getByTestId("task-resource-levels").boundingBox();
       const stats = await singleCard.getByTestId("task-card-repo-state").getByRole("img").boundingBox();
-      if (!badge || !stats) return Number.POSITIVE_INFINITY;
-      return Math.abs(badge.x + badge.width - stats.x - stats.width);
+      if (!resources || !stats) return Number.POSITIVE_INFINITY;
+      return Math.abs(resources.x + resources.width - stats.x - stats.width);
     })
     .toBeLessThan(1);
   await expect

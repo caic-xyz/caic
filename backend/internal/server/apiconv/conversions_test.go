@@ -358,6 +358,23 @@ func TestTaskState(t *testing.T) {
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("ResourceUsage", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil || got.ResourceUsage != nil {
+			t.Fatalf("unsampled resource usage = %+v, %v", got.ResourceUsage, err)
+		}
+		tk.PushStats(&runtime.Stats{Ts: time.Unix(123, 0), CPUPerc: 160, CPUCeiling: 2, MemUsed: 900, MemLimit: 1000})
+		got, err = Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := got.ResourceUsage
+		if s == nil || s.Ts != 123000 || s.CPUPerc != 160 || s.CPUCeiling == nil || *s.CPUCeiling != 2 || s.MemUsed != 900 || s.MemLimit != 1000 {
+			t.Fatalf("resource usage = %+v", s)
+		}
+	})
 	t.Run("NativeContextOccupancy", func(t *testing.T) {
 		t.Parallel()
 		zero := 0

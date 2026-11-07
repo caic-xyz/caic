@@ -1824,6 +1824,30 @@ data class RuntimeInstance(
     val vncPort: Int? = null,
 )
 
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+@Serializable
+data class EventStats(
+    val ts: Long,
+    /** 100% is one fully busy logical CPU. */
+    val cpuPerc: Double,
+    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+    val cpuCeiling: Double? = null,
+    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+    val cpuQuota: Double? = null,
+    /** Owning runtime's logical CPU count; null when unknown. */
+    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
+    /** Runtime CPU metadata observation failure; usage samples remain usable. */
+    val cpuError: String? = null,
+    val memUsed: Long,
+    val memLimit: Long,
+    val memPerc: Double,
+    val netRx: Long,
+    val netTx: Long,
+    val blockRead: Long,
+    val blockWrite: Long,
+    val diskUsed: Long,
+)
+
 /** TaskRateLimit is the current quota block resolved by the backend for one task. */
 @Serializable
 data class TaskRateLimit(
@@ -1902,6 +1926,8 @@ data class Task(
     val inPlanMode: Boolean? = null,
     val currentPlan: TaskPlan? = null,
     val runtime: RuntimeInstance,
+    /** Latest runtime sample; absent before sampling. Not persisted. */
+    val resourceUsage: EventStats? = null,
     /** Current quota block resolved by the backend. */
     val rateLimit: TaskRateLimit? = null,
     /** Per-task feature flags. */
@@ -3188,30 +3214,6 @@ data class HistoryTurnEstimate(
  */
 @Serializable
 data class HistoryCheckpoint(val cursor: String, val through: Long)
-
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-@Serializable
-data class EventStats(
-    val ts: Long,
-    /** 100% is one fully busy logical CPU. */
-    val cpuPerc: Double,
-    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-    val cpuCeiling: Double? = null,
-    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-    val cpuQuota: Double? = null,
-    /** Owning runtime's logical CPU count; null when unknown. */
-    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
-    /** Runtime CPU metadata observation failure; usage samples remain usable. */
-    val cpuError: String? = null,
-    val memUsed: Long,
-    val memLimit: Long,
-    val memPerc: Double,
-    val netRx: Long,
-    val netTx: Long,
-    val blockRead: Long,
-    val blockWrite: Long,
-    val diskUsed: Long,
-)
 
 /**
  * HistoryStats contains the bounded 60-sample runtime ring, oldest first.

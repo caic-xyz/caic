@@ -173,6 +173,26 @@ export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
   };
 }
 
+export function validateEventStats(raw: ValidatorInput): EventStats {
+  const obj = asObject(raw, "EventStats");
+  return {
+    ts: asNumber(obj["ts"], "EventStats.ts"),
+    cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
+    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
+    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
+    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
+    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
+    memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
+    memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
+    memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),
+    netRx: asNumber(obj["netRx"], "EventStats.netRx"),
+    netTx: asNumber(obj["netTx"], "EventStats.netTx"),
+    blockRead: asNumber(obj["blockRead"], "EventStats.blockRead"),
+    blockWrite: asNumber(obj["blockWrite"], "EventStats.blockWrite"),
+    diskUsed: asNumber(obj["diskUsed"], "EventStats.diskUsed"),
+  };
+}
+
 export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
   const obj = asObject(raw, "TaskRateLimit");
   return {
@@ -237,6 +257,7 @@ export function validateTask(raw: ValidatorInput): Task {
     inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
     currentPlan: (obj["currentPlan"] === undefined || obj["currentPlan"] === null ? undefined : validateTaskPlan(obj["currentPlan"])),
     runtime: validateRuntimeInstance(obj["runtime"]),
+    resourceUsage: (obj["resourceUsage"] === undefined || obj["resourceUsage"] === null ? undefined : validateEventStats(obj["resourceUsage"])),
     rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
     gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
   };
@@ -965,26 +986,6 @@ export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoin
   return {
     cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
     through: asNumber(obj["through"], "HistoryCheckpoint.through"),
-  };
-}
-
-export function validateEventStats(raw: ValidatorInput): EventStats {
-  const obj = asObject(raw, "EventStats");
-  return {
-    ts: asNumber(obj["ts"], "EventStats.ts"),
-    cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
-    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
-    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
-    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
-    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
-    memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
-    memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
-    memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),
-    netRx: asNumber(obj["netRx"], "EventStats.netRx"),
-    netTx: asNumber(obj["netTx"], "EventStats.netTx"),
-    blockRead: asNumber(obj["blockRead"], "EventStats.blockRead"),
-    blockWrite: asNumber(obj["blockWrite"], "EventStats.blockWrite"),
-    diskUsed: asNumber(obj["diskUsed"], "EventStats.diskUsed"),
   };
 }
 

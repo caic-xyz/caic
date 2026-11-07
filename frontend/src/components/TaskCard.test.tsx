@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal, type JSX } from "solid-js";
 import { expect, vi } from "@tests/expect";
 
-import type { ISOTimestamp } from "@sdk/types.gen";
+import type { EventStats, ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
@@ -60,6 +60,56 @@ function renderCard(card: () => JSX.Element) {
 }
 
 describe("TaskCard", () => {
+  it("shows container-relative resource levels, unknown capacity, stale samples, and terminal state", () => {
+    const [sample, setSample] = createSignal<EventStats | undefined>();
+    const [state, setState] = createSignal<TaskCardProps["state"]>("running");
+    renderCard(() => <TaskCard {...props({ resourceUsage: sample(), state: state() })} />);
+    const levels = screen.getByTestId("task-resource-levels");
+    const cpu = screen.getByTestId("task-cpu-level");
+    const memory = screen.getByTestId("task-memory-level");
+    expect(levels).toHaveAccessibleName(/waiting for the first sample/);
+    const unavailable = cpu.getAttribute("class");
+    const initial: EventStats = {
+      ts: now(),
+      cpuPerc: 160,
+      cpuCeiling: 2,
+      cpuQuota: 2,
+      runtimeCPUs: 16,
+      memUsed: 950,
+      memLimit: 1000,
+      memPerc: 95,
+      netRx: 0,
+      netTx: 0,
+      blockRead: 0,
+      blockWrite: 0,
+      diskUsed: -1,
+    };
+    setSample(initial);
+    expect(levels).toHaveAccessibleName(/80.0% of configured ceiling/);
+    expect(levels).toHaveAccessibleName(/95.0% of limit/);
+    const warning = cpu.getAttribute("class");
+    const high = memory.getAttribute("class");
+    expect(warning).not.toBe(unavailable);
+    expect(high).not.toBe(warning);
+    setSample({ ...initial, cpuPerc: 0, memUsed: 0 });
+    expect(levels).toHaveAccessibleName(/0.0% of configured ceiling/);
+    expect(cpu.getAttribute("class")).not.toBe(warning);
+    expect(cpu.getAttribute("class")).not.toBe(high);
+    setSample({ ...initial, cpuCeiling: undefined, memLimit: 0 });
+    expect(cpu).toHaveAttribute("class", unavailable);
+    expect(memory).toHaveAttribute("class", unavailable);
+    expect(levels).toHaveAccessibleName(/limit unknown/);
+    setSample({ ...initial, cpuError: "inspect failed" });
+    expect(cpu).toHaveAttribute("class", unavailable);
+    expect(memory).toHaveAttribute("class", high);
+    setSample({ ...initial, ts: now() - 16_000 });
+    expect(cpu).toHaveAttribute("class", unavailable);
+    expect(memory).toHaveAttribute("class", unavailable);
+    expect(levels).toHaveAccessibleName(/Updates unavailable/);
+    setState("stopped");
+    expect(screen.queryByTestId("task-resource-levels")).not.toBeInTheDocument();
+  });
+
   it("uses native context occupancy instead of billed input and shows an explicit zero", () => {
     const [used, setUsed] = createSignal<number | null>(45_000);
     renderCard(() => (

@@ -434,7 +434,8 @@ type Task struct {
 	InPlanMode      bool            `json:"inPlanMode,omitempty"`
 	CurrentPlan     *TaskPlan       `json:"currentPlan,omitempty"`
 	Runtime         RuntimeInstance `json:"runtime"`
-	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
+	ResourceUsage   *EventStats     `json:"resourceUsage,omitempty"` // Latest runtime sample; absent before sampling. Not persisted.
+	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"`      // Current quota block resolved by the backend.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
