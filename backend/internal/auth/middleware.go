@@ -21,13 +21,13 @@ type TokenRefresher func(ctx context.Context, u *User) *User
 
 // Middleware validates the caic_session cookie (or Authorization: Bearer header
 // as a fallback for Android/API clients). Injects *User into context.
-// When secret is nil (auth disabled), passes through unconditionally.
+// When store or secret is nil (auth disabled), passes through unconditionally.
 // When refresh is non-nil, expired tokens with a refresh token are renewed
 // before the user is injected into the context.
 func Middleware(store *Store, secret []byte, refresh TokenRefresher) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if secret == nil {
+			if store == nil || secret == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
