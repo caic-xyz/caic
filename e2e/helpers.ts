@@ -1,4 +1,4 @@
-// Shared e2e fixtures: browser version diagnostics, isolated task choices, typed API client, and utilities.
+// Shared e2e fixtures: browser diagnostics, isolated task choices and cleanup, typed API client, and utilities.
 import { ok } from "node:assert/strict";
 import { test as base, expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
@@ -176,8 +176,7 @@ export const test = base.extend<{
   api: async ({ request }, use) => {
     await use(createClient(request));
   },
-  // eslint-disable-next-line no-empty-pattern -- this fixture intentionally has no fixture dependencies
-  uniquePrompt: async ({}, use, testInfo) => {
+  uniquePrompt: async ({ api }, use, testInfo) => {
     const seed = process.env.CAIC_E2E_SEED;
     if (!seed) throw new Error("CAIC_E2E_SEED is not configured");
     const testTag = createHash("sha256")
@@ -185,7 +184,32 @@ export const test = base.extend<{
       .digest("hex")
       .slice(0, 12);
     let sequence = 0;
-    await use((prefix) => `${prefix} ${testTag}-${sequence++}`);
+    try {
+      await use((prefix) => `${prefix} ${testTag}-${sequence++}`);
+    } finally {
+      // The fake backend is shared across workers. Retire only this test's
+      // tasks so later pages and trace snapshots do not accumulate every
+      // earlier conversation's active sidebar card and resource updates.
+      const tasks = (await api.listTasks()).filter((task) => task.initialPrompt.includes(testTag));
+      await Promise.all(
+        tasks.map(async (task) => {
+          // Purge rejects transient startup and sync states; let them settle.
+          // Failed and purged tasks need no further cleanup.
+          await expect
+            .poll(
+              async () => {
+                task = await api.getTask(task.id);
+                return ["branching", "pending", "provisioning", "pulling", "pushing", "starting"].includes(task.state);
+              },
+              { timeout: 30_000 },
+            )
+            .toBe(false);
+          if (task.state === "failed" || task.state === "purged") return;
+          if (task.state !== "purging") await api.purgeTask(task.id);
+          await waitForTaskState(api, task.id, "purged");
+        }),
+      );
+    }
   },
 });
 
