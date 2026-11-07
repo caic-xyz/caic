@@ -72,13 +72,13 @@ describe("TaskCard", () => {
     const unavailable = cpu.getAttribute("class");
     const initial: EventStats = {
       ts: now(),
-      cpuPerc: 160,
+      cpuPerc: 100,
       cpuCeiling: 2,
       cpuQuota: 2,
       runtimeCPUs: 16,
-      memUsed: 950,
+      memUsed: 750,
       memLimit: 1000,
-      memPerc: 95,
+      memPerc: 75,
       netRx: 0,
       netTx: 0,
       blockRead: 0,
@@ -86,8 +86,8 @@ describe("TaskCard", () => {
       diskUsed: -1,
     };
     setSample(initial);
-    expect(levels).toHaveAccessibleName(/80.0% of configured ceiling/);
-    expect(levels).toHaveAccessibleName(/95.0% of limit/);
+    expect(levels).toHaveAccessibleName(/50.0% of configured ceiling/);
+    expect(levels).toHaveAccessibleName(/75.0% of limit/);
     const warning = cpu.getAttribute("class");
     const high = memory.getAttribute("class");
     expect(warning).not.toBe(unavailable);
@@ -96,6 +96,16 @@ describe("TaskCard", () => {
     expect(levels).toHaveAccessibleName(/0.0% of configured ceiling/);
     expect(cpu.getAttribute("class")).not.toBe(warning);
     expect(cpu.getAttribute("class")).not.toBe(high);
+    const normal = cpu.getAttribute("class");
+    setSample({ ...initial, cpuPerc: 99.8, memUsed: 499 });
+    expect(cpu).toHaveAttribute("class", normal);
+    expect(memory).toHaveAttribute("class", normal);
+    setSample({ ...initial, cpuPerc: 149.8, memUsed: 500 });
+    expect(cpu).toHaveAttribute("class", warning);
+    expect(memory).toHaveAttribute("class", warning);
+    setSample({ ...initial, cpuPerc: 150, memUsed: 749 });
+    expect(cpu).toHaveAttribute("class", high);
+    expect(memory).toHaveAttribute("class", warning);
     setSample({ ...initial, cpuCeiling: undefined, memLimit: 0 });
     expect(cpu).toHaveAttribute("class", unavailable);
     expect(memory).toHaveAttribute("class", unavailable);

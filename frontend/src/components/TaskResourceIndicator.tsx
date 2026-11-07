@@ -21,8 +21,8 @@ export default function TaskResourceIndicator(props: { href: string; sample: Eve
   };
   const level = (percent: number | null) => {
     if (stale() || percent === null) return styles.unavailable;
-    if (percent >= 90) return styles.high;
-    if (percent >= 80) return styles.warning;
+    if (percent >= 75) return styles.high;
+    if (percent >= 50) return styles.warning;
     return styles.normal;
   };
   const description = () => {
