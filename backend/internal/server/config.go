@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/gomode/voicegateway"
 )
 
@@ -202,15 +203,7 @@ func (c *AuthConfig) Validate() error {
 
 // TrustedProxyPrefixes parses the configured trusted reverse-proxy prefixes.
 func (c *AuthConfig) TrustedProxyPrefixes() ([]netip.Prefix, error) {
-	prefixes := make([]netip.Prefix, 0, len(c.TrustedProxies))
-	for _, raw := range c.TrustedProxies {
-		prefix, err := netip.ParsePrefix(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid trusted proxy prefix %q: %w", raw, err)
-		}
-		prefixes = append(prefixes, prefix)
-	}
-	return prefixes, nil
+	return httpserver.ParseTrustedProxies(c.TrustedProxies)
 }
 
 func (c *AuthConfig) normalizeExternalURL() {

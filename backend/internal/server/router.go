@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode"
 	"github.com/maruel/gomode/devicelogin"
+	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
@@ -594,7 +595,7 @@ func (r *Router) ipgeoMiddleware(next http.Handler) http.Handler {
 
 func httpLogContextMiddleware(log *slog.Logger, trustedProxies []netip.Prefix, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logCtx := &httpLogContext{clientIP: clientIP(r, trustedProxies)}
+		logCtx := &httpLogContext{clientIP: httpserver.ResolveClientIP(r, trustedProxies)}
 		ctx := context.WithValue(r.Context(), httpLogContextKey{}, logCtx)
 		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, log))
 		next.ServeHTTP(w, r)
@@ -643,7 +644,7 @@ func (w *backgroundWorkers) Close() {
 func httpLogContextFromRequest(r *http.Request) *httpLogContext {
 	logCtx, _ := r.Context().Value(httpLogContextKey{}).(*httpLogContext)
 	if logCtx == nil {
-		return &httpLogContext{clientIP: clientIP(r, nil)}
+		return &httpLogContext{clientIP: httpserver.ResolveClientIP(r, nil)}
 	}
 	return logCtx
 }
