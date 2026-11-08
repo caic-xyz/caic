@@ -1,4 +1,4 @@
-// Package taskmgr coordinates task execution, pending prompts, attachments, and ordered runtime history import.
+// Package taskmgr coordinates task execution, pending prompts, attachments, runtime history, and resource invalidations.
 //
 // It sits between the HTTP adapter (internal/server) and task execution
 // (internal/task/taskrun). Manager owns the registry of running tasks and
@@ -184,10 +184,12 @@ type Manager struct {
 	preparationLocks map[string]*sync.Mutex
 
 	// Guarded by mu.
-	mu            sync.Mutex
-	tasks         map[ksid.ID]*Entry
-	changed       chan struct{} // closed on mutation, replaced under mu
-	changeVersion uint64        // incremented with changed under mu
+	mu              sync.Mutex
+	tasks           map[ksid.ID]*Entry
+	changed         chan struct{} // closed on mutation, replaced under mu
+	changeVersion   uint64        // incremented with changed under mu
+	taskChanges     [512]TaskChange
+	taskDescriptors map[ksid.ID]taskDescriptor
 
 	// Guarded by settledMu. Tracks background runtime/history restoration so the
 	// task-list stream can report it (loading -> completed | failed). The zero
@@ -246,6 +248,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		Checkouts:            cfg.Checkouts,
 		relay:                agentRelayReader{},
 		tasks:                make(map[ksid.ID]*Entry),
+		taskDescriptors:      make(map[ksid.ID]taskDescriptor),
 		preparationLocks:     make(map[string]*sync.Mutex),
 		changed:              make(chan struct{}),
 	}
@@ -363,7 +366,7 @@ func (m *Manager) NewEntry(t *taskrun.Task, lt *taskhistory.LoadedTask) *Entry {
 			LogPath:              &e.LogPath,
 			Runtimes:             m.Runtimes,
 			Log:                  m.log.With("task", t.ID),
-			NotifyTaskChange:     m.NotifyTaskChange,
+			NotifyTaskChange:     func() { m.NotifyTaskUpdate(t.ID) },
 			Checkout:             m.resolveCheckout(t),
 			RuntimeMetadata:      m.runtimeMetadata,
 			RuntimeStartTimeout:  m.runtimeStartTimeout,
@@ -415,11 +418,58 @@ func (m *Manager) TaskMCPAvailable() bool {
 	return m.taskMCPScoper != nil
 }
 
-// NotifyTaskChange signals that task data may have changed.
+// NotifyTaskChange invalidates shared task-list state, such as
+// quota and warning projections. Task mutations use NotifyTaskUpdate.
 func (m *Manager) NotifyTaskChange() {
 	m.mu.Lock()
-	m.taskChangedLocked()
+	m.taskChangedLocked(0)
 	m.mu.Unlock()
+}
+
+// TaskChange is a process-local authoritative invalidation. Versions are not
+// resource read revisions. An expired journal cursor requires authorized resync.
+type TaskChange struct {
+	Version       uint64
+	TaskID        ksid.ID
+	Catalog       bool
+	Summary       bool
+	Notifications bool
+	Resync        bool
+	Removed       bool
+	OwnerID       string
+	ParentTaskID  ksid.ID
+}
+
+type taskDescriptor struct {
+	entryInvalidationState
+
+	ownerID      string
+	parentTaskID ksid.ID
+}
+
+// NotifyTaskUpdate publishes one task mutation without invalidating unrelated
+// task resources. Descriptor effects are computed once at this owning boundary.
+func (m *Manager) NotifyTaskUpdate(id ksid.ID) {
+	m.mu.Lock()
+	m.taskChangedLocked(id)
+	m.mu.Unlock()
+}
+
+// TaskChanges returns journal entries after a retained version and atomically
+// re-arms the notification channel. A gap requires refreshing authorized state.
+// The bounded journal preserves distinct state/alert occurrences without timers.
+func (m *Manager) TaskChanges(after uint64) (version uint64, changed <-chan struct{}, changes []TaskChange, gap bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	start := after + 1
+	if m.changeVersion > uint64(len(m.taskChanges)) && start <= m.changeVersion-uint64(len(m.taskChanges)) {
+		gap = true
+		start = m.changeVersion - uint64(len(m.taskChanges)) + 1
+	}
+	for version := start; version <= m.changeVersion; version++ {
+		changes = append(changes, m.taskChanges[version%uint64(len(m.taskChanges))])
+	}
+	return m.changeVersion, m.changed, changes, gap
 }
 
 // Changed returns a channel that is closed on task mutation.
@@ -901,9 +951,6 @@ func (m *Manager) LoadUnsettledTasks(plain []*taskhistory.LoadedTask) error {
 	if err != nil {
 		return err
 	}
-	if loaded > 0 {
-		m.NotifyTaskChange()
-	}
 	m.log.Info("loaded unsettled tasks from logs", "n", loaded, "candidates", len(plain))
 	return nil
 }
@@ -920,9 +967,6 @@ func (m *Manager) LoadPurgedTasks(purged []*taskhistory.LoadedTask) error {
 	loaded, err := m.insertLoadedTasks(purged)
 	if err != nil {
 		return err
-	}
-	if loaded > 0 {
-		m.NotifyTaskChange()
 	}
 	m.log.Info("loaded purged tasks from logs", "n", loaded, "candidates", len(purged))
 	return nil
@@ -1207,7 +1251,13 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 		entry := m.NewEntry(t, lt)
 		entry.Finish(lt.LastTrailer)
 		m.replaceEntryLocked(t.ID, entry)
+		m.taskDescriptors[t.ID] = taskDescriptor{entryInvalidationState: entry.invalidationState(), ownerID: t.OwnerID, parentTaskID: t.ParentTaskID}
 		loaded++
+	}
+	if loaded > 0 {
+		// Restored descriptors are quiet baselines. Publish their membership
+		// together, including a quiet refresh of existing summary/alert views.
+		m.publishTaskChangeLocked(TaskChange{Catalog: true, Summary: true, Notifications: true})
 	}
 	return loaded, nil
 }
@@ -1371,7 +1421,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 		}
 	}
 	m.tasks[t.ID] = entry
-	m.taskChangedLocked()
+	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
 	m.watchRateLimitEvents(t)
 	return nil
@@ -1850,7 +1900,7 @@ func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runt
 	}
 	m.log.InfoContext(ctx, "instance died, archiving as stopped", "instance", instanceID, "task", t.ID, "br", deathBranch, "prev_state", prevState)
 	t.DetachSession()
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(t.ID)
 }
 
 func (m *Manager) handleRuntimeDestroy(ctx context.Context, instanceID runtime.ID) {
@@ -1866,7 +1916,7 @@ func (m *Manager) handleRuntimeDestroy(ctx context.Context, instanceID runtime.I
 	t.DetachSession()
 	entry.Finish(&task.Result{State: task.StateFailed, Err: err})
 	m.log.WarnContext(ctx, "runtime instance destroyed", "instance", instanceID, "task", t.ID)
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(t.ID)
 }
 
 func (m *Manager) handleRuntimeOOM(ctx context.Context, instanceID runtime.ID) {
@@ -1879,7 +1929,7 @@ func (m *Manager) handleRuntimeOOM(ctx context.Context, instanceID runtime.ID) {
 		return
 	}
 	m.log.WarnContext(ctx, "runtime instance ran out of memory", "instance", instanceID, "task", t.ID)
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(t.ID)
 }
 
 func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
@@ -1892,7 +1942,7 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 		return
 	}
 	entry.Lifecycle.reconnectImportedSession()
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(t.ID)
 }
 
 // insertEntry adds an entry under m.mu and signals the change.
@@ -1900,7 +1950,7 @@ func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 	m.inputMu.Lock()
 	m.mu.Lock()
 	m.replaceEntryLocked(id, entry)
-	m.taskChangedLocked()
+	m.taskChangedLocked(id)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
 	m.watchRateLimitEvents(entry.Task())
@@ -1948,12 +1998,12 @@ func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
 		}
 	}
 	if historyChanged {
-		m.NotifyTaskChange()
+		m.NotifyTaskUpdate(t.ID)
 	}
 	m.quotaWatchers.Go(func() {
 		for rateLimit := range live {
 			m.recordRateLimitMessage(rateLimit)
-			m.NotifyTaskChange()
+			m.NotifyTaskUpdate(t.ID)
 		}
 	})
 }
@@ -1977,10 +2027,37 @@ func (m *Manager) recordRateLimitMessage(rateLimit *agent.RateLimitMessage) bool
 
 // taskChangedLocked closes the current changed channel and replaces it.
 // Must be called while holding m.mu.
-func (m *Manager) taskChangedLocked() {
+func (m *Manager) taskChangedLocked(id ksid.ID) {
+	change := TaskChange{TaskID: id, Summary: id == 0, Notifications: id == 0}
+	if id != 0 {
+		previous, found := m.taskDescriptors[id]
+		if entry, ok := m.tasks[id]; ok {
+			t := entry.Task()
+			current := taskDescriptor{entryInvalidationState: entry.invalidationState(), ownerID: t.OwnerID, parentTaskID: t.ParentTaskID}
+			change.OwnerID, change.ParentTaskID = current.ownerID, current.parentTaskID
+			change.Catalog = !found || previous.Title != current.Title
+			metadataChanged := !found || previous.Title != current.Title || previous.State != current.State
+			change.Summary = metadataChanged || previous.HasError != current.HasError
+			change.Notifications = metadataChanged || previous.Sequence != current.Sequence || previous.RateLimit != current.RateLimit
+			m.taskDescriptors[id] = current
+		} else {
+			change.Catalog, change.Summary = found, found
+			change.Notifications = found
+			change.Removed = true
+			change.OwnerID, change.ParentTaskID = previous.ownerID, previous.parentTaskID
+			delete(m.taskDescriptors, id)
+		}
+	}
+	m.publishTaskChangeLocked(change)
+}
+
+// publishTaskChangeLocked publishes a classified change under the registry lock.
+func (m *Manager) publishTaskChangeLocked(change TaskChange) {
 	close(m.changed)
 	m.changed = make(chan struct{})
 	m.changeVersion++
+	change.Version = m.changeVersion
+	m.taskChanges[m.changeVersion%uint64(len(m.taskChanges))] = change
 }
 
 // resolveCheckout returns the checkout for a task's primary repo, if any.
@@ -2412,11 +2489,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		for _, oldID := range branchIDs[relPath+"\x00"+branch] {
 			if oldID != t.ID {
 				delete(m.tasks, oldID)
+				m.taskChangedLocked(oldID)
 			}
 		}
 	}
 	m.replaceEntryLocked(t.ID, entry)
-	m.taskChangedLocked()
+	m.taskChangedLocked(t.ID)
 	m.mu.Unlock()
 	m.inputMu.Unlock()
 	m.watchRateLimitEvents(t)
@@ -2511,7 +2589,6 @@ func (m *Manager) drainInputQueue(ctx context.Context) {
 	m.inputMu.Lock()
 	defer m.inputMu.Unlock()
 	m.pruneInputQueueLocked(ctx)
-	started := false
 	for _, e := range m.Entries() {
 		q := e.PendingInput()
 		if ctx.Err() != nil {
@@ -2525,10 +2602,7 @@ func (m *Manager) drainInputQueue(ctx context.Context) {
 		e.setPendingInput(&next)
 		id, p := q.ID, q.Prompt
 		m.background.Go(func() { m.deliverQueuedInput(ctx, e, id, p) })
-		started = true
-	}
-	if started {
-		m.NotifyTaskChange()
+		m.NotifyTaskUpdate(e.Task().ID)
 	}
 }
 
@@ -2555,7 +2629,9 @@ func (m *Manager) pruneInputQueueLocked(ctx context.Context) {
 		m.log.ErrorContext(ctx, "discard obsolete pending input failed", "err", err)
 		return
 	}
-	m.NotifyTaskChange()
+	for entry := range removed {
+		m.NotifyTaskUpdate(entry.Task().ID)
+	}
 }
 
 func (m *Manager) deliverQueuedInput(ctx context.Context, e *Entry, id ksid.ID, p agent.Prompt) {
@@ -2587,7 +2663,7 @@ func (m *Manager) deliverQueuedInput(ctx context.Context, e *Entry, id ksid.ID, 
 	if !sent || err != nil {
 		e.setPendingInput(&q)
 	}
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(e.Task().ID)
 }
 
 // relaySnapshotAppend returns only physically verified, unmatched relay bytes.

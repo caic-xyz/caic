@@ -77,7 +77,7 @@ func (b *testCIBackend) SetRepoCIStatusIfChanged(relPath, sha string, result for
 	return b.repoStatus.SetResultIfChanged(relPath, sha, result)
 }
 
-func (b *testCIBackend) NotifyTaskChange() { b.taskMgr.NotifyTaskChange() }
+func (b *testCIBackend) NotifyTaskChange(id ksid.ID) { b.taskMgr.NotifyTaskUpdate(id) }
 func (b *testCIBackend) UpdateWarning(context.Context, ci.WarningCategory, string, []ci.WarningDetail) error {
 	return nil
 }

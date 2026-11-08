@@ -475,7 +475,7 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
+		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors, true)
 		if len(out) != 10 || len(replays) != 10 {
 			b.Fatalf("task count = %d, replay count = %d, want 10", len(out), len(replays))
 		}

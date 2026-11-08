@@ -98,7 +98,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 		return pr.Number, fmt.Errorf("write PR metadata: %w", err)
 	}
 	svc.backend.SetTaskMonitorBranch(entry, branch)
-	svc.backend.NotifyTaskChange()
+	svc.backend.NotifyTaskChange(t.ID)
 	svc.startWorker(ctx, func(ctx context.Context) { svc.MonitorCI(ctx, entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA) })
 	return pr.Number, nil
 }
@@ -146,7 +146,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 			status := InterimCIStatus(runs)
 			svc.log.InfoContext(ctx, "interim status via GitHub App", "task", t.ID, "status", status, "checks", len(result.Checks))
 			t.SetCIStatus(status, result.Checks)
-			svc.backend.NotifyTaskChange()
+			svc.backend.NotifyTaskChange(t.ID)
 		}
 		return // check_suite webhook delivers the terminal result
 	}
@@ -171,7 +171,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		if !done {
 			status := InterimCIStatus(runs)
 			t.SetCIStatus(status, result.Checks)
-			svc.backend.NotifyTaskChange()
+			svc.backend.NotifyTaskChange(t.ID)
 			return false
 		}
 		if err := svc.cache.Put(owner, repoName, sha, result); err != nil {
@@ -218,7 +218,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	if svc.cache.IsNotified(t.ID.String(), sha) {
 		svc.log.InfoContext(ctx, "already notified; skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
 		t.SetCIStatus(result.Status, result.Checks)
-		svc.backend.NotifyTaskChange()
+		svc.backend.NotifyTaskChange(t.ID)
 		return
 	}
 
@@ -252,7 +252,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 		}
 	}
 	t.SetCIStatus(ciStatus, result.Checks)
-	svc.backend.NotifyTaskChange()
+	svc.backend.NotifyTaskChange(t.ID)
 	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
 		svc.log.WarnContext(ctx, "send input", "task", t.ID, "err", err)
 		// No active session — attempt auto-fix for CI failures if enabled.
@@ -339,7 +339,7 @@ func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
 // SSE subscribers if the status changed.
 func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Result) {
 	if svc.backend.SetRepoCIStatusIfChanged(relPath, sha, result) {
-		svc.backend.NotifyTaskChange()
+		svc.backend.NotifyTaskChange(0)
 	}
 }
 
@@ -426,7 +426,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, svc.log, svc.backend.RuntimeRouter(), target)
 		changed, recordErr := entry.RecordRepositorySummary(ctx, &snapshot)
 		if changed {
-			svc.backend.NotifyTaskChange()
+			svc.backend.NotifyTaskChange(t.ID)
 		}
 		if err := errors.Join(err, recordErr); err != nil {
 			svc.log.WarnContext(ctx, "push completed but refreshing task repository summary failed", "task", t.ID, "err", err)
@@ -441,7 +441,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 
 	svc.log.InfoContext(ctx, "restarting monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
-	svc.backend.NotifyTaskChange()
+	svc.backend.NotifyTaskChange(t.ID)
 	svc.MonitorCI(ctx, entry, f, owner, repoName, newSHA)
 }
 

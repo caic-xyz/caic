@@ -23,8 +23,10 @@ type serviceNotification struct {
 }
 
 type observedTaskState struct {
-	state v1.TaskState
-	seen  uint64
+	state      v1.TaskState
+	seq        uint64
+	timelineID string
+	seen       uint64
 }
 
 // Bound inactive owners together with every correlated notification-feed map.
@@ -54,7 +56,7 @@ func newNotificationFeed() *notificationFeed {
 // notifications returns the current snapshot. The focused task ID is attached
 // to each alert so voice clients receive the active task with the same flat JSON
 // fields as the service-item baseline.
-func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
+func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
@@ -123,8 +125,13 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 		task := &tasks[i]
 		id := task.ID.String()
 		old := previousStates[id]
-		previousStates[id] = observedTaskState{state: task.State, seen: generation}
-		if old.seen != 0 && old.state != task.State && taskNotificationTitle(task.State, i+1) != "" {
+		replay := replays[id]
+		seq := replay.seq
+		previousStates[id] = observedTaskState{state: task.State, seq: seq, timelineID: replay.timelineID, seen: generation}
+		// State revision belongs to the same locked snapshot as the DTO. A
+		// repeated enum after an unseen round trip is a new occurrence; content
+		// activity and request timing cannot manufacture another one.
+		if old.seen != 0 && old.timelineID == replay.timelineID && (old.state != task.State || old.seq != seq) && taskNotificationTitle(task.State, i+1) != "" {
 			f.events[owner] = append(f.events[owner], serviceNotification{
 				ID:         fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
 				ItemID:     id,

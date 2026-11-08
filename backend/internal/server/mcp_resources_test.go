@@ -21,11 +21,69 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/maruel/gomode/mcp"
 )
 
 func TestMCPResources(t *testing.T) {
 	t.Parallel()
+	t.Run("BackgroundLoadedCatalog", func(t *testing.T) {
+		t.Parallel()
+		owned, foreign := ksid.NewID(), ksid.NewID()
+		synctest.Test(t, func(t *testing.T) {
+			s := newTestRouter(t, nil)
+			reg, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+			if !ok {
+				t.Fatalf("registry=%T", s.mcpHandlers.protocol.Registry)
+			}
+			ctx, cancel := context.WithCancel(newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "owner"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeRead, mcpScopeTasksRead}}))
+			var workers sync.WaitGroup
+			t.Cleanup(func() { cancel(); workers.Wait() })
+			seq, err := reg.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourcesListChanged: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updates := make(chan mcp.ResourceUpdate, 1)
+			workers.Go(func() {
+				for update, err := range seq {
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					updates <- update
+					return
+				}
+			})
+			synctest.Wait()
+			if err := s.taskMgr.LoadPurgedTasks([]*taskhistory.LoadedTask{
+				{TaskID: owned.String(), Prompt: "owned", Title: "Restored owned", OwnerID: "owner", State: task.StatePurged, Harness: harness.Claude},
+				{TaskID: foreign.String(), Prompt: "foreign", Title: "Restored foreign", OwnerID: "foreign", State: task.StatePurged, Harness: harness.Claude},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			select {
+			case update := <-updates:
+				if !update.ResourcesListChanged || len(update.ResourceURIs) != 0 {
+					t.Fatalf("loaded catalog=%+v", update)
+				}
+			default:
+				t.Fatal("connected subscriber missed loaded membership")
+			}
+			listed, err := reg.ListResources(ctx, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			uris := make([]string, 0, len(listed.Resources))
+			for _, resource := range listed.Resources {
+				uris = append(uris, resource.URI)
+			}
+			if !slices.Contains(uris, "caic://tasks/"+owned.String()) || slices.Contains(uris, "caic://tasks/"+foreign.String()) {
+				t.Fatalf("loaded catalog visibility=%v", uris)
+			}
+		})
+	})
 	t.Run("SubscribeResourceUpdates/conversationFocus", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {

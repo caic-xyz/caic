@@ -36,8 +36,8 @@ type ciAdapter struct {
 }
 
 // NotifyTaskChange wakes SSE subscribers after a task state change.
-func (a *ciAdapter) NotifyTaskChange() {
-	a.taskMgr.NotifyTaskChange()
+func (a *ciAdapter) NotifyTaskChange(id ksid.ID) {
+	a.taskMgr.NotifyTaskUpdate(id)
 }
 
 // UpdateWarning coalesces an authenticated account's warning by category.

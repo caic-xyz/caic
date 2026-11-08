@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/invopop/jsonschema"
@@ -938,7 +939,7 @@ func TestMCPTools(t *testing.T) {
 				t.Fatalf("child subscription error: %v", err)
 			}
 			sources.taskResourceIDs = append(sources.taskResourceIDs, unrelatedID)
-			update := sources.taskUpdate(ctx, resources)
+			update := sources.taskUpdate(ctx, resources, taskmgr.TaskChange{Resync: true})
 			wantUpdateURIs := []string{"caic://tasks/" + firstChildID.String()}
 			if !reflect.DeepEqual(update.ResourceURIs, wantUpdateURIs) {
 				t.Fatalf("task subscription update URIs = %#v, want %#v", update.ResourceURIs, wantUpdateURIs)

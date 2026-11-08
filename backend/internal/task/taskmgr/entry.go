@@ -127,6 +127,15 @@ func (e *Entry) Result() *task.Result {
 	return e.term.Load().result
 }
 
+// entryInvalidationState combines task metadata with the result owned by Entry.
+// A result replacement retries the task sample, so classification never combines
+// task metadata with a result superseded while that metadata was captured.
+type entryInvalidationState struct {
+	taskrun.InvalidationState
+
+	HasError bool
+}
+
 // MonitorBranch returns the branch being monitored for CI, or "".
 func (e *Entry) MonitorBranch() string {
 	e.mu.Lock()
@@ -182,6 +191,16 @@ func (e *Entry) Reset() {
 	e.mu.Lock()
 	e.cleanupOnce = sync.Once{}
 	e.mu.Unlock()
+}
+
+func (e *Entry) invalidationState() entryInvalidationState {
+	for {
+		terminal := e.term.Load()
+		state := e.task.InvalidationState()
+		if e.term.Load() == terminal {
+			return entryInvalidationState{InvalidationState: state, HasError: terminal.result != nil && terminal.result.Err != nil}
+		}
+	}
 }
 
 // clearResult reopens completion only if the result captured before reconnect

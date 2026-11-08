@@ -259,7 +259,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	for _, e := range affected {
 		if !done {
 			e.Task().SetCIStatus(interimStatus, result.Checks)
-			h.taskMgr.NotifyTaskChange()
+			h.taskMgr.NotifyTaskUpdate(e.Task().ID)
 			continue
 		}
 		if err := h.ciCache.Put(owner, repoName, sha, result); err != nil {
@@ -365,7 +365,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 				h.log.ErrorContext(ctx, "associate external PR failed", "task", entry.Task().ID, "err", err)
 				continue
 			}
-			h.taskMgr.NotifyTaskChange()
+			h.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 			// Start CI monitoring.
 			if ri, ok := h.repoByForge(owner + "/" + repoName); ok {
 				f := h.forgeMgr.ForgeFor(ctx, ri.ForgeKind)
@@ -404,7 +404,7 @@ func (h *WebhookHandlers) handlePRClosedEvent(ev *github.PullRequestEvent) {
 		}
 		h.log.Info("PR closed or merged", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber, "state", state)
 		entry.Task().SetPRState(state)
-		h.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 	}
 }
 
@@ -419,7 +419,7 @@ func (h *WebhookHandlers) handlePRReopenedEvent(ev *github.PullRequestEvent) {
 	for _, entry := range h.taskMgr.FindTasksByPR(owner, repoName, prNumber) {
 		h.log.Info("PR reopened", "task", entry.Task().ID, "repo", owner+"/"+repoName, "pr", prNumber)
 		entry.Task().SetPRState(forge.PRStateOpen)
-		h.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 	}
 }
 
@@ -442,7 +442,7 @@ func (h *WebhookHandlers) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestE
 		}
 		h.log.Info("GitLab merge request state", "task", entry.Task().ID, "repo", owner+"/"+repoName, "mr", mrIID, "state", state)
 		entry.Task().SetPRState(state)
-		h.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 	}
 }
 

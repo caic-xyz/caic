@@ -851,6 +851,88 @@ func TestNew(t *testing.T) {
 }
 
 func TestManager(t *testing.T) {
+	t.Run("TaskChanges", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "watched"}, "", "")
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+		version, changed := m.ChangeSnapshot()
+		tk.SetTitle("Renamed")
+		m.NotifyTaskUpdate(tk.ID)
+		select {
+		case <-changed:
+		default:
+			t.Fatal("mutation did not signal")
+		}
+		version, changed, events, gap := m.TaskChanges(version)
+		if gap || len(events) != 1 || events[0].TaskID != tk.ID || !events[0].Catalog || !events[0].Summary {
+			t.Fatalf("rename=%+v gap=%v", events, gap)
+		}
+		tk.SetState(task.StateRunning)
+		m.NotifyTaskUpdate(tk.ID)
+		tk.SetState(task.StateWaiting)
+		m.NotifyTaskUpdate(tk.ID)
+		select {
+		case <-changed:
+		default:
+			t.Fatal("state change lost during rearm")
+		}
+		version, _, events, gap = m.TaskChanges(version)
+		if gap || len(events) != 2 || events[0].Catalog || events[1].Catalog || events[0].Version >= events[1].Version {
+			t.Fatalf("distinct occurrences=%+v gap=%v", events, gap)
+		}
+		m.NotifyTaskUpdate(tk.ID)
+		version, _, events, gap = m.TaskChanges(version)
+		if gap || len(events) != 1 || events[0].Catalog || events[0].Summary || events[0].Notifications {
+			t.Fatalf("detail-only activity invalidates unrelated projections=%+v", events)
+		}
+		for range 513 {
+			m.NotifyTaskUpdate(tk.ID)
+		}
+		_, _, events, gap = m.TaskChanges(version)
+		if !gap || len(events) != 512 {
+			t.Fatalf("overflow count=%d gap=%v", len(events), gap)
+		}
+	})
+	t.Run("ErrorOnlyInvalidation", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "attention"}, "", "")
+		e := m.NewEntry(tk, nil)
+		m.Insert(tk.ID, e)
+		version, _ := m.ChangeSnapshot()
+		result := &task.Result{State: tk.GetState(), Err: errors.New("intent rejected")}
+		e.Finish(result)
+		m.NotifyTaskUpdate(tk.ID)
+		version, _, changes, _ := m.TaskChanges(version)
+		if len(changes) != 1 || !changes[0].Summary || changes[0].Catalog || changes[0].Notifications {
+			t.Fatalf("error-only finish=%+v", changes)
+		}
+		e.clearResult(result)
+		m.NotifyTaskUpdate(tk.ID)
+		_, _, changes, _ = m.TaskChanges(version)
+		if len(changes) != 1 || !changes[0].Summary || changes[0].Catalog || changes[0].Notifications {
+			t.Fatalf("error clear=%+v", changes)
+		}
+	})
+	t.Run("LoadedInvalidationBaseline", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		version, _ := m.ChangeSnapshot()
+		id := ksid.NewID()
+		if err := m.LoadPurgedTasks([]*taskhistory.LoadedTask{{TaskID: id.String(), Prompt: "restored", State: task.StatePurged, Harness: harness.Claude, Title: "restored"}}); err != nil {
+			t.Fatal(err)
+		}
+		version, _, changes, _ := m.TaskChanges(version)
+		if len(changes) != 1 || !changes[0].Catalog {
+			t.Fatalf("load catalog=%+v", changes)
+		}
+		m.NotifyTaskUpdate(id)
+		_, _, changes, _ = m.TaskChanges(version)
+		if len(changes) != 1 || changes[0].Catalog || changes[0].Summary || changes[0].Notifications {
+			t.Fatalf("quiet loaded detail=%+v", changes)
+		}
+	})
 	t.Run("drainInputQueue", func(t *testing.T) {
 		t.Run("restart_edit_and_deliver", func(t *testing.T) {
 			t.Parallel()
@@ -2547,6 +2629,7 @@ func TestManager(t *testing.T) {
 			if got := src.LogPath.Get(); got != "" {
 				t.Fatalf("source log path = %q before fork, want empty", got)
 			}
+			version, _ := m.ChangeSnapshot()
 			id, err := src.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
@@ -2559,6 +2642,17 @@ func TestManager(t *testing.T) {
 			case <-fork.Done():
 			case <-time.After(time.Second):
 				t.Fatal("fork did not finish")
+			}
+			fork.Lifecycle.wg.Wait()
+			_, _, changes, _ := m.TaskChanges(version)
+			found := 0
+			for _, change := range changes {
+				if change.TaskID == id && change.Summary && change.Notifications {
+					found++
+				}
+			}
+			if found < 2 {
+				t.Fatalf("fork outcome missing alert invalidation: %+v", changes)
 			}
 			if got := src.LogPath.Get(); got != "" {
 				t.Errorf("source log path = %q after fork, want empty (fork must not write to the source entry's log path)", got)

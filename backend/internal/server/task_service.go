@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"iter"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"path"
@@ -230,15 +231,16 @@ func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Tas
 }
 
 func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
-	out, _, _ := s.taskListSnapshotWithReplay(ctx, nil)
+	out, _, _ := s.taskListSnapshotWithReplay(ctx, nil, false)
 	return out
 }
 
 // taskStateReplay is the state transition history a task-list SSE connection
 // has not yet observed for one task.
 type taskStateReplay struct {
-	seq     uint64                    // Task state sequence the DTO state corresponds to.
-	history []taskrun.StateTransition // Retained transitions newer than the connection cursor.
+	seq        uint64                    // Task state sequence the DTO state corresponds to.
+	timelineID string                    // Immutable task-object incarnation; state counters restart on replacement.
+	history    []taskrun.StateTransition // Retained transitions newer than the connection cursor.
 }
 
 // taskListSnapshotWithReplay returns the task DTOs plus each task's retained
@@ -246,9 +248,11 @@ type taskStateReplay struct {
 // states a later snapshot would overwrite. It reads the history in the same
 // critical section as the DTO's state, so a replayed state is never newer than
 // the DTO reported alongside it. A nil cursors map skips the history. Authorized
-// registered membership is independent of conversion success, so a failed DTO
+// With history disabled, a non-nil cursors map requests only the state revision
+// captured atomically with each DTO, without copying retained transitions.
+// Registered membership is independent of conversion success, so a failed DTO
 // cannot turn an existing task into an apparent deletion.
-func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay, membership []string) {
+func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64, history bool) (tasks []v1.Task, replays map[string]taskStateReplay, membership []string) {
 	access := taskAccessFromContext(ctx)
 	if cursors != nil {
 		replays = make(map[string]taskStateReplay)
@@ -263,7 +267,11 @@ func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors ma
 		var replay taskStateReplay
 		var err error
 		if cursors != nil {
-			dto, replay, err = taskDTOWithReplay(ctx, e, cursors[id], s.taskMgr, s.checkouts, s.authStore)
+			after := uint64(math.MaxUint64)
+			if history {
+				after = cursors[id]
+			}
+			dto, replay, err = taskDTOWithReplay(ctx, e, after, s.taskMgr, s.checkouts, s.authStore)
 		} else {
 			dto, err = taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
 		}
@@ -317,7 +325,7 @@ func taskDTOWithReplay(ctx context.Context, entry *taskmgr.Entry, after uint64, 
 	if err != nil {
 		return v1.Task{}, taskStateReplay{}, err
 	}
-	return dto, taskStateReplay{seq: seq, history: history}, nil
+	return dto, taskStateReplay{seq: seq, timelineID: entry.Task().TimelineID(), history: history}, nil
 }
 
 // taskDTOFromSnapshot projects a pre-read snapshot so callers can read the
@@ -1056,7 +1064,7 @@ func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Che
 	}
 	changed, err := entry.RecordRepositorySummary(ctx, &snapshot)
 	if changed {
-		s.taskMgr.NotifyTaskChange()
+		s.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 	}
 	return snapshot.Statuses, err
 }

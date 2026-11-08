@@ -99,7 +99,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 	generation := r.purgeGeneration
 	purgeCtx, purgeCancel := context.WithCancel(context.WithoutCancel(ctx))
 	r.purgeCancel = purgeCancel
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	r.manager.log.InfoContext(ctx, "purge scheduled", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state, "delay", delay)
 	r.wg.Go(func() {
 		defer purgeCancel()
@@ -119,7 +119,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 				// delivered.
 				goruntime.Gosched()
 				r.agentRuntime.StopTask(purgeCtx, t)
-				r.manager.NotifyTaskChange()
+				r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 			}
 			if !r.waitForStopped(purgeCtx) {
 				return
@@ -155,7 +155,7 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 	if !accepted {
 		return conflict("task is not running or waiting")
 	}
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	r.manager.log.InfoContext(ctx, "stop requested", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state)
 	r.wg.Go(func() {
 		r.operationMu.Lock()
@@ -164,7 +164,7 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 			r.entry.Finish(res)
 		}
 		r.manager.log.InfoContext(r.ctx, "stop completed", "task", t.ID, "instance", t.RuntimeInstanceID(), "final_state", t.GetState())
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	})
 	return nil
 }
@@ -211,7 +211,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 		return internalErr(err, "restart session")
 	}
 	r.watchSession(h) //nolint:contextcheck // watcher uses the Manager lifetime.
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	return nil
 }
 
@@ -233,7 +233,7 @@ func (r *Lifecycle) ClearContext() error {
 		return internalErr(err, "clear context")
 	}
 	r.watchSession(h)
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	return nil
 }
 
@@ -266,13 +266,13 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 			result.StartupFailure = &details
 		}
 		r.entry.Finish(result)
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		return err
 	}
 	if t.Sudo {
 		t.SetSudoPassword(r.manager.SudoPassword(ctx, t))
 	}
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	r.watchSession(h) //nolint:contextcheck // watcher uses the Manager lifetime.
 	return nil
 }
@@ -392,13 +392,13 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 		h, err := forkEntry.Lifecycle.agentRuntime.ForkTask(ctx, source, t, forkOpts, p.ResolvedGitHubToken)
 		if err != nil {
 			forkEntry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "fork task")})
-			r.manager.NotifyTaskChange()
+			r.manager.NotifyTaskUpdate(t.ID)
 			return
 		}
 		if t.Sudo {
 			t.SetSudoPassword(r.manager.SudoPassword(ctx, t))
 		}
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(t.ID)
 		forkEntry.Lifecycle.watchSession(h)
 	})
 	return t.ID, nil
@@ -458,7 +458,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, r.manager.log, r.manager.Runtimes, gitTarget)
 		changed, recordErr := r.agentRuntime.RecordRepositorySummary(ctx, t, &snapshot)
 		if changed {
-			r.manager.NotifyTaskChange()
+			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		}
 		if err := errors.Join(err, recordErr); err != nil {
 			return nil, internalErr(err, "push completed but refreshing task repository summary failed")
@@ -516,7 +516,7 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 	if err := m.updatePendingInputsLocked(map[*Entry]*PendingInput{r.entry: q}); err != nil {
 		return false, internalErr(err, "save pending prompt")
 	}
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(r.entry.Task().ID)
 	return true, nil
 }
 
@@ -535,7 +535,7 @@ func (r *Lifecycle) CancelQueuedInput(id ksid.ID) error {
 	if err := m.updatePendingInputsLocked(map[*Entry]*PendingInput{r.entry: nil}); err != nil {
 		return internalErr(err, "cancel pending prompt")
 	}
-	m.NotifyTaskChange()
+	m.NotifyTaskUpdate(r.entry.Task().ID)
 	return nil
 }
 
@@ -641,12 +641,12 @@ func (r *Lifecycle) recoverImportedSession(expectedState task.State) error {
 	h, err := r.agentRuntime.RecoverRetainedSession(r.ctx, t, expectedState)
 	if err != nil {
 		r.entry.Finish(&task.Result{State: t.GetState(), Err: err})
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		return err
 	}
 	r.cancelScheduledPurge()
 	r.entry.Reset()
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	r.watchSession(h)
 	return nil
 }
@@ -663,12 +663,12 @@ func (r *Lifecycle) reviveLocked() {
 		if err != nil {
 			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
 			r.entry.Finish(&task.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
-			r.manager.NotifyTaskChange()
+			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 			return
 		}
 		r.cancelScheduledPurge()
 		r.entry.Reset()
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		r.watchSession(h)
 	})
 }
@@ -702,7 +702,7 @@ func (r *Lifecycle) reconnectForInput() error {
 		return err
 	}
 	r.entry.clearResult(previousResult)
-	r.manager.NotifyTaskChange()
+	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	r.watchSession(h)
 	return nil
 }
@@ -724,7 +724,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
 		tlog.Warn("auto-reconnect failed", "err", err)
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		return
 	}
 	r.wg.Go(func() {
@@ -733,7 +733,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 			tlog.Warn("ensure session failed", "err", err)
 			// Failed readiness cannot resolve a pending question or plan.
 			t.SetStateIf(task.StateRunning, task.StateWaiting)
-			r.manager.NotifyTaskChange()
+			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 			return
 		}
 		r.entry.clearResult(previousResult)
@@ -747,7 +747,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 				tlog.Warn("record restored branch diff stat failed", "err", err)
 			}
 		}
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		r.watchSession(h)
 	})
 }
@@ -801,7 +801,7 @@ func (r *Lifecycle) watchSession(h *taskrun.SessionHandle) {
 				r.manager.log.InfoContext(ctx, "session exited", attrs...)
 			}
 
-			r.manager.NotifyTaskChange()
+			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		case <-r.entry.Done():
 		case <-ctx.Done():
 		}
@@ -831,7 +831,7 @@ func (r *Lifecycle) finishPurge(ctx context.Context, t *taskrun.Task, stoppedImm
 			r.manager.log.InfoContext(ctx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
 			return
 		}
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	}
 	r.cleanup(ctx, task.StatePurged)
 	r.manager.log.InfoContext(ctx, "purge completed", "task", t.ID, "final_state", t.GetState())
@@ -852,7 +852,7 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 			r.manager.log.InfoContext(ctx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed, "cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
 		}
 		r.entry.Finish(&result)
-		r.manager.NotifyTaskChange()
+		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	})
 }
 

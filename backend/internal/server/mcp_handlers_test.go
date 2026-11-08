@@ -17,9 +17,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	"github.com/maruel/ksid"
@@ -34,6 +36,93 @@ import (
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth"
 )
+
+type notificationReadRegistry struct {
+	*mcpRegistry
+
+	reads atomic.Int64
+}
+
+func (r *notificationReadRegistry) ReadResource(ctx context.Context, p *mcp.ResourcesReadParams) (mcp.ResourcesReadResult, error) {
+	if p.URI == "gomode://notifications" {
+		r.reads.Add(1)
+	}
+	return r.mcpRegistry.ReadResource(ctx, p)
+}
+
+func TestMCPDetailOnlyInvalidation(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Detail update"}, harness.Claude)
+	insertTestTask(s, tk.ID, tk)
+	base, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+	if !ok {
+		t.Fatalf("registry type=%T", s.mcpHandlers.protocol.Registry)
+	}
+	registry := &notificationReadRegistry{mcpRegistry: base}
+	s.mcpHandlers.protocol.Registry = registry
+	handler, err := s.buildHandler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	uri := "caic://tasks/" + tk.ID.String()
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["`+uri+`","gomode://notifications"]}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/caic/v1/mcp", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+	req.Header.Set("Mcp-Method", "subscriptions/listen")
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); _ = response.Body.Close() })
+	if response.StatusCode != http.StatusOK {
+		t.Fatal(response.StatusCode)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	readUpdate := func() string {
+		for scanner.Scan() {
+			data, ok := strings.CutPrefix(scanner.Text(), "data: ")
+			if !ok {
+				continue
+			}
+			var event struct {
+				Method string `json:"method"`
+				Params struct {
+					URI string `json:"uri"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Method == "notifications/resources/updated" {
+				return event.Params.URI
+			}
+		}
+		t.Fatalf("stream ended: %v", scanner.Err())
+		return ""
+	}
+	if got := readUpdate(); got != uri {
+		t.Fatalf("initial task=%s", got)
+	}
+	if got := readUpdate(); got != "gomode://notifications" {
+		t.Fatalf("initial notifications=%s", got)
+	}
+	tk.SetCIStatus(forge.CIStatusPending, nil)
+	s.taskMgr.NotifyTaskUpdate(tk.ID)
+	if got := readUpdate(); got != uri {
+		t.Fatalf("detail-only change invalidated unrelated resource=%s", got)
+	}
+	if got := registry.reads.Load(); got != 1 {
+		t.Fatalf("detail-only change probed alerts: reads=%d", got)
+	}
+}
 
 func TestMCPReleasedNotifications(t *testing.T) {
 	t.Parallel()
@@ -220,8 +309,9 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if baseline.Error != nil {
 				t.Fatalf("baseline notifications: %#v", baseline)
 			}
+			alertStarted := time.Now()
 			tk.SetState(task.StateWaiting)
-			s.taskMgr.NotifyTaskChange()
+			s.taskMgr.NotifyTaskUpdate(tk.ID)
 			readUpdates()
 			_, updated, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
 			data, err := json.Marshal(updated.Result)
@@ -239,6 +329,69 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			var alerts []serviceNotification
 			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil || len(alerts) != 1 || alerts[0].ItemID != id.String() || alerts[0].Title != "Task #1 is waiting" {
 				t.Fatalf("delivered alerts = %#v, err %v", alerts, err)
+			}
+			t.Logf("mutation-to-alert resource ready: %s elapsed=%s", version, time.Since(alertStarted))
+			firstOccurrence := alerts[0].ID
+			// Both transitions happen between resource reads. The final enum is
+			// unchanged, but its atomic task-state identity denotes a new alert.
+			tk.SetState(task.StateRunning)
+			s.taskMgr.NotifyTaskUpdate(tk.ID)
+			tk.SetState(task.StateWaiting)
+			s.taskMgr.NotifyTaskUpdate(tk.ID)
+			readUpdates()
+			readUpdates()
+			_, roundTrip, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
+			data, err = json.Marshal(roundTrip.Result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &resource); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
+				t.Fatal(err)
+			}
+			if len(alerts) != 2 || alerts[0].ID == alerts[1].ID || (alerts[0].ID != firstOccurrence && alerts[1].ID != firstOccurrence) {
+				t.Fatalf("repeated-state occurrences=%+v", alerts)
+			}
+			occurrences := []string{alerts[0].ID, alerts[1].ID}
+			tk.SetTitle("Content-only update")
+			s.taskMgr.NotifyTaskUpdate(tk.ID)
+			readUpdates()
+			_, contentOnly, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
+			data, err = json.Marshal(contentOnly.Result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &resource); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
+				t.Fatal(err)
+			}
+			if len(alerts) != 2 || !slices.Equal([]string{alerts[0].ID, alerts[1].ID}, occurrences) {
+				t.Fatalf("content activity manufactured occurrence=%+v", alerts)
+			}
+			// Replacement restarts the task-local sequence. Its existing timeline
+			// incarnation identifies a quiet baseline, not a new occurrence ID.
+			restored := mustNewTask(t, id, agent.Prompt{Text: "Restored task"}, harness.Claude)
+			restored.OwnerID = owner.ID
+			restored.SetState(task.StateWaiting)
+			insertTestTask(s, id, restored)
+			readUpdates()
+			_, replaced, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
+			data, err = json.Marshal(replaced.Result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &resource); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
+				t.Fatal(err)
+			}
+			if len(alerts) != 2 || !slices.Equal([]string{alerts[0].ID, alerts[1].ID}, occurrences) {
+				t.Fatalf("restored baseline manufactured occurrence=%+v", alerts)
 			}
 			deleteReq := request(http.MethodDelete, ownerToken.AccessToken, session, "")
 			deleted, err := client.Do(deleteReq)
@@ -1235,7 +1388,7 @@ func TestMCPHandlers(t *testing.T) {
 				count++
 				if count == 1 {
 					tk.SetState(task.StateWaiting)
-					s.taskMgr.NotifyTaskChange()
+					s.taskMgr.NotifyTaskUpdate(tk.ID)
 				}
 				if count == 2 {
 					return
@@ -1248,7 +1401,7 @@ func TestMCPHandlers(t *testing.T) {
 		})
 
 		tk.SetState(task.StateRunning)
-		s.taskMgr.NotifyTaskChange()
+		s.taskMgr.NotifyTaskUpdate(tk.ID)
 		for range 2 {
 			select {
 			case update := <-updates:

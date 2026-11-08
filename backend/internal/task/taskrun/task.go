@@ -483,6 +483,23 @@ func (t *Task) GetState() task.State {
 	return t.state
 }
 
+// InvalidationState is bounded metadata needed to classify resource effects.
+// Sequence is task-incarnation-local, not an externally stable occurrence ID.
+type InvalidationState struct {
+	State     task.State
+	Sequence  uint64
+	Title     string
+	RateLimit RateLimit
+}
+
+// InvalidationState captures classification metadata in one critical section
+// without copying task bodies, repository details, or retained history.
+func (t *Task) InvalidationState() InvalidationState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return InvalidationState{State: t.state, Sequence: t.stateSeq, Title: t.title, RateLimit: t.rateLimit}
+}
+
 // GetSessionID returns the agent session ID under the mutex.
 func (t *Task) GetSessionID() string {
 	t.mu.Lock()
@@ -716,9 +733,11 @@ func (t *Task) SnapshotWithStateHistory(after uint64) (Snapshot, uint64, []State
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var history []StateTransition
-	for _, tr := range t.stateTransitions {
-		if tr.Seq > after {
-			history = append(history, tr)
+	if after < t.stateSeq {
+		for _, tr := range t.stateTransitions {
+			if tr.Seq > after {
+				history = append(history, tr)
+			}
 		}
 	}
 	return t.snapshotLocked(), t.stateSeq, history

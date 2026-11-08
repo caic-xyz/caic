@@ -74,7 +74,7 @@ type Backend interface {
 	SetRepoCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool
 
 	// Notifications.
-	NotifyTaskChange()
+	NotifyTaskChange(id ksid.ID)
 	UpdateWarning(ctx context.Context, category WarningCategory, message string, details []WarningDetail) error
 	ResolveWarning(ctx context.Context, category WarningCategory) error
 

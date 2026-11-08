@@ -29,11 +29,15 @@ func taskAccessFromContext(ctx context.Context) taskAccess {
 // canAccess permits ordinary task access. A user may access their own and
 // legacy unowned tasks; a task principal may access its direct children.
 func (access taskAccess) canAccess(t *taskrun.Task) bool {
-	if access.userID != "" && (t.OwnerID == "" || t.OwnerID == access.userID) {
+	return access.canAccessOwner(t.OwnerID, t.ParentTaskID)
+}
+
+func (access taskAccess) canAccessOwner(ownerID string, parentTaskID ksid.ID) bool {
+	if access.userID != "" && (ownerID == "" || ownerID == access.userID) {
 		return true
 	}
 	if access.delegatingTaskID != 0 {
-		return t.ParentTaskID == access.delegatingTaskID
+		return parentTaskID == access.delegatingTaskID
 	}
 	return access.userID == ""
 }

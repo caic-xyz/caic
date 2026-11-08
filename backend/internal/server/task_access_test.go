@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/maruel/gomode/mcp"
 )
@@ -160,7 +161,7 @@ func TestTaskAccessTransportMatrix(t *testing.T) {
 		if _, err := registry.subscriptionSources(mcpCtx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{foreignURI}}); err == nil {
 			t.Fatal("subscribe to foreign task resource succeeded")
 		}
-		update := sources.taskUpdate(mcpCtx, registry.mcpResources)
+		update := sources.taskUpdate(mcpCtx, registry.mcpResources, taskmgr.TaskChange{Resync: true})
 		if len(update.ResourceURIs) != 1 || update.ResourceURIs[0] != mineURI {
 			t.Fatalf("subscription update = %+v, want only %s", update, mineURI)
 		}

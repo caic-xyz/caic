@@ -81,7 +81,7 @@ func (w *importedTaskWiring) LookupExternalPRForTask(ctx context.Context, entry 
 		log.ErrorContext(ctx, "associate external PR failed", "err", err)
 		return
 	}
-	w.taskMgr.NotifyTaskChange()
+	w.taskMgr.NotifyTaskUpdate(entry.Task().ID)
 	sha := pr.HeadSHA
 	if sha == "" {
 		var err error

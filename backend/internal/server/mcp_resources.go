@@ -1,4 +1,4 @@
-// MCP skill and resource catalogs, conversation-scoped reads and subscriptions, and keepalives.
+// MCP resource catalogs, scoped reads, authoritative task invalidations, and subscription lifetimes.
 
 package server
 
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
@@ -121,8 +122,8 @@ func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesRe
 		}
 		return m.resourceJSON(ctx, uri, items)
 	case uri == "gomode://notifications":
-		taskList := m.taskSvc.taskListSnapshot(ctx)
-		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx), m.taskSvc.focusedTaskIDString(ctx))
+		taskList, replays, _ := m.taskSvc.taskListSnapshotWithReplay(ctx, map[string]uint64{}, false)
+		notifications := m.notifications.notifications(ctx, taskList, replays, m.usage.buildResp(ctx), m.taskSvc.focusedTaskIDString(ctx))
 		return m.resourceJSON(ctx, uri, mcpNotificationsInLocation(notifications, mcpRequestLocation(&params.Meta)))
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
@@ -197,15 +198,7 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, params *mcp
 			defer usageTicker.Stop()
 			usageC = usageTicker.C
 		}
-		pendingTaskUpdate := false
 		for {
-			if pendingTaskUpdate {
-				pendingTaskUpdate = false
-				if !yield(sources.taskUpdate(ctx, m), nil) {
-					return
-				}
-				continue
-			}
 			select {
 			case <-ctx.Done():
 				return
@@ -213,11 +206,21 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, params *mcp
 				// Re-arm before yielding. yield may block while another task mutation
 				// closes the replacement channel; retaining the versioned snapshot
 				// makes that later mutation observable after the callback returns.
-				previousVersion := sources.taskVersion
-				sources.taskVersion, taskC = m.taskSvc.taskMgr.ChangeSnapshot()
-				pendingTaskUpdate = sources.taskVersion > previousVersion+1
-				if !yield(sources.taskUpdate(ctx, m), nil) {
-					return
+				var changes []taskmgr.TaskChange
+				var gap bool
+				sources.taskVersion, taskC, changes, gap = m.taskSvc.taskMgr.TaskChanges(sources.taskVersion)
+				if gap {
+					if !yield(sources.taskUpdate(ctx, m, taskmgr.TaskChange{Catalog: true, Summary: true, Resync: true}), nil) {
+						return
+					}
+				} else {
+					// Do not coalesce distinct alert occurrences. Each committed task
+					// event retains its own notification, including events during yield.
+					for _, change := range changes {
+						if !yield(sources.taskUpdate(ctx, m, change), nil) {
+							return
+						}
+					}
 				}
 			case <-repoC:
 				if !yield(sources.repoUpdate(), nil) {
@@ -225,7 +228,7 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, params *mcp
 				}
 				repoC = m.serverConfig.checkouts.Changed()
 			case <-repoStatusC:
-				if !yield(sources.repoUpdate(), nil) {
+				if !yield(mcp.ResourceUpdate{ResourceURIs: sources.repoResourceURIs}, nil) {
 					return
 				}
 				repoStatusC = m.serverConfig.repoStatus.Changed()
@@ -445,10 +448,35 @@ type subscriptionSources struct {
 	usageResourceURIs    []string
 }
 
-func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpResources) mcp.ResourceUpdate {
-	uris := append([]string(nil), s.taskUpdateURIs...)
-	resourcesListChanged := s.resourcesListChanged
+func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpResources, change taskmgr.TaskChange) mcp.ResourceUpdate {
+	global := change.TaskID == 0
+	if !global {
+		if change.Removed {
+			if !taskAccessFromContext(ctx).canAccessOwner(change.OwnerID, change.ParentTaskID) {
+				return mcp.ResourceUpdate{}
+			}
+		} else if _, visible := visibleTaskEntry(ctx, registry.taskSvc, change.TaskID); !visible {
+			return mcp.ResourceUpdate{}
+		}
+	}
+	var uris []string
+	for _, uri := range s.taskUpdateURIs {
+		if change.Resync || (uri == "gomode://items" && change.Summary) || (uri == "gomode://notifications" && change.Notifications) {
+			uris = append(uris, uri)
+		}
+	}
+	resourcesListChanged := s.resourcesListChanged && change.Catalog
 	for _, id := range s.taskResourceIDs {
+		if global && !change.Resync {
+			continue
+		}
+		if !global && id != change.TaskID {
+			continue
+		}
+		if change.Removed {
+			uris = append(uris, "caic://tasks/"+id.String())
+			continue
+		}
 		if _, ok := visibleTaskEntry(ctx, registry.taskSvc, id); ok {
 			uris = append(uris, "caic://tasks/"+id.String())
 		} else {
@@ -463,5 +491,5 @@ func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
 }
 
 func (s *subscriptionSources) usageUpdate() mcp.ResourceUpdate {
-	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.usageResourceURIs}
+	return mcp.ResourceUpdate{ResourceURIs: s.usageResourceURIs}
 }
