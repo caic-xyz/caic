@@ -348,16 +348,6 @@ ImageRefreshState describes the lifecycle of a specialized image refresh.
 | `succeeded` |  |
 | `failed` |  |
 
-### MCPPendingInputState
-
-MCPPendingInputState identifies the current delivery status of a pending prompt.
-
-| Value | Description |
-|-------|-------------|
-| `delivered` |  |
-| `delivering` |  |
-| `queued` |  |
-
 ### OAuthGrantStatus
 
 OAuthGrantStatus is the user-visible state of a connected OAuth client grant.

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+
+	"github.com/maruel/apisdkgen/apispec"
 )
 
 func TestEventResultCostJSON(t *testing.T) {
@@ -289,14 +291,14 @@ func TestRoutes(t *testing.T) {
 	})
 }
 
-func routeByName(t *testing.T, name string) Route {
+func routeByName(t *testing.T, name string) apispec.Route {
 	for i := range Routes {
 		if Routes[i].Name == name {
 			return Routes[i]
 		}
 	}
 	t.Fatalf("route %q not found", name)
-	return Route{}
+	return apispec.Route{}
 }
 
 func TestEventMessageSource(t *testing.T) {

@@ -22,7 +22,7 @@ func mainImpl() error {
 	flag.Parse()
 	api := apisdkgen.NewAPI(
 		"../../../../../sdk/caic", "CaicSDK",
-		apisdkgen.NewVersion("v1", ".", v1.SDKAPI()),
+		apisdkgen.NewVersion("v1", ".", v1.SDKAPI),
 	)
 	if *check {
 		return api.Verify()

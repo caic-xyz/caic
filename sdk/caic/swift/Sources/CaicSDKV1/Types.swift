@@ -435,28 +435,6 @@ public struct ImageRefreshState: Codable, Equatable, Hashable {
     }
 }
 
-public struct MCPPendingInputState: Codable, Equatable, Hashable {
-    public let value: String
-
-    public init(_ value: String) { self.value = value }
-
-    public static let MCPPendingInputDelivered = MCPPendingInputState("delivered")
-    public static let MCPPendingInputDelivering = MCPPendingInputState("delivering")
-    public static let MCPPendingInputQueued = MCPPendingInputState("queued")
-
-    public static func other(_ value: String) -> MCPPendingInputState { MCPPendingInputState(value) }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        value = try c.decode(String.self)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
-        try c.encode(value)
-    }
-}
-
 public struct OAuthGrantStatus: Codable, Equatable, Hashable {
     public let value: String
 

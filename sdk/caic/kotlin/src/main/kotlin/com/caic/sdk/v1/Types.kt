@@ -779,39 +779,6 @@ object ImageRefreshStateSerializer : KSerializer<ImageRefreshState> {
     }
 }
 
-@Serializable(with = MCPPendingInputStateSerializer::class)
-sealed interface MCPPendingInputState {
-    val value: String
-    @Serializable
-    data object MCPPendingInputDelivered : MCPPendingInputState {
-        override val value = "delivered"
-    }
-    @Serializable
-    data object MCPPendingInputDelivering : MCPPendingInputState {
-        override val value = "delivering"
-    }
-    @Serializable
-    data object MCPPendingInputQueued : MCPPendingInputState {
-        override val value = "queued"
-    }
-    @Serializable
-    data class Other(override val value: String) : MCPPendingInputState
-}
-
-object MCPPendingInputStateSerializer : KSerializer<MCPPendingInputState> {
-    override val descriptor = PrimitiveSerialDescriptor("MCPPendingInputState", PrimitiveKind.STRING)
-    override fun serialize(encoder: Encoder, value: MCPPendingInputState) = encoder.encodeString(value.value)
-    override fun deserialize(decoder: Decoder): MCPPendingInputState {
-        val v = decoder.decodeString()
-        return when (v) {
-            "delivered" -> MCPPendingInputState.MCPPendingInputDelivered
-            "delivering" -> MCPPendingInputState.MCPPendingInputDelivering
-            "queued" -> MCPPendingInputState.MCPPendingInputQueued
-            else -> MCPPendingInputState.Other(v)
-        }
-    }
-}
-
 @Serializable(with = OAuthGrantStatusSerializer::class)
 sealed interface OAuthGrantStatus {
     val value: String

@@ -700,17 +700,6 @@ export const ImageRefreshRunning = "running";
 export const ImageRefreshSucceeded = "succeeded";
 export const ImageRefreshFailed = "failed";
 
-export type MCPPendingInputState =
-  | "delivered"
-  | "delivering"
-  | "queued";
-/**
- * Supported values.
- */
-export const MCPPendingInputDelivered = "delivered";
-export const MCPPendingInputDelivering = "delivering";
-export const MCPPendingInputQueued = "queued";
-
 export type OAuthGrantStatus =
   | "active"
   | "expired"
