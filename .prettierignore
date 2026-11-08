@@ -6,9 +6,8 @@ backend/frontend/dist
 build
 coverage
 pnpm-lock.yaml
-sdk/*/API.md
+sdk/**
 backend/docs/ARCHITECTURE.md
-sdk/*/ts/**/*.gen.ts
 **/testdata/**
 backend/internal/agent/*/testdata/*.md
 # AGENTS.md indexes are written by scripts/update_agents_file_index.py.

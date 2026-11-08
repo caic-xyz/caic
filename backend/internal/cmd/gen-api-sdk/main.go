@@ -21,25 +21,11 @@ func mainImpl() error {
 	check := flag.Bool("check", false, "verify generated SDKs without writing them")
 	flag.Parse()
 	api := apisdkgen.NewAPI(
-		".",
-		outputConfig(
-			"../../../../../sdk/caic",
-			"../../../../../sdk/caic/kotlin/src/main/kotlin/com/caic/sdk/v1",
-			"../../../../../sdk/caic/swift/Sources/CaicSDK",
-		),
-		v1.SDKAPI(),
+		"../../../../../sdk/caic", "CaicSDK",
+		apisdkgen.NewVersion("v1", ".", v1.SDKAPI()),
 	)
 	if *check {
 		return api.Verify()
 	}
 	return api.Generate()
-}
-
-func outputConfig(sdkDir, kotlinDir, swiftDir string) apisdkgen.OutputConfig {
-	return apisdkgen.OutputConfig{
-		TypeScriptDir: sdkDir + "/ts/v1",
-		KotlinDir:     kotlinDir,
-		SwiftDir:      swiftDir,
-		MarkdownDir:   sdkDir,
-	}
 }

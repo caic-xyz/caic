@@ -4,16 +4,19 @@ import { validateEventStats, validateHistoryCheckpoint, validateHistoryEvent, va
 
 export interface GlobalTaskEventsHandlers {
   onMessage: (event: TaskListEvent) => void;
+  // Decode and callback failures are reported here; the EventSource stays open.
   onError: (err: unknown) => void;
 }
 
 export interface GlobalUsageEventsHandlers {
   onMessage: (event: UsageResp) => void;
+  // Decode and callback failures are reported here; the EventSource stays open.
   onError: (err: unknown) => void;
 }
 
 export interface HistoryEventsHandlers {
   onMessage: (event: HistoryEvent) => void;
+  // Decode and callback failures are reported here; the EventSource stays open.
   onError: (err: unknown) => void;
   onManifest?: (event: HistoryManifest) => void;
   onCheckpoint?: (event: HistoryCheckpoint) => void;

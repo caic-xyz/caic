@@ -4,6 +4,7 @@ package com.caic.sdk.v1
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -65,27 +66,26 @@ class ApiClient(
                     cont.resumeWithException(e)
                 }
                 override fun onResponse(call: okhttp3.Call, response: Response) {
-                    response.use { resp ->
-                        val responseBody = resp.body?.string() ?: ""
-                        if (!resp.isSuccessful) {
-                            try {
-                                val err = json.decodeFromString<ErrorResponse>(responseBody)
-                                cont.resumeWithException(
+                    // Finish body processing and response cleanup before settling the continuation.
+                    val result = try {
+                        response.use { resp ->
+                            val responseBody = resp.body?.string() ?: ""
+                            if (!resp.isSuccessful) {
+                                val failure = try {
+                                    val err = json.decodeFromString<ErrorResponse>(responseBody)
                                     ApiException(resp.code, err.error.code, err.error.message, err.details)
-                                )
-                            } catch (_: Exception) {
-                                cont.resumeWithException(
+                                } catch (_: Exception) {
                                     ApiException(resp.code, ErrorCode.Other("UNKNOWN"), responseBody)
-                                )
+                                }
+                                throw failure
                             }
-                            return
+                            json.decodeFromString<T>(responseBody)
                         }
-                        try {
-                            cont.resume(json.decodeFromString<T>(responseBody))
-                        } catch (e: Exception) {
-                            cont.resumeWithException(e)
-                        }
+                    } catch (e: Exception) {
+                        cont.resumeWithException(e)
+                        return
                     }
+                    cont.resume(result)
                 }
             })
         }
@@ -244,13 +244,19 @@ class ApiClient(
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
                     val event = json.decodeFromString<T>(data)
-                    if (trySend(event).isFailure) eventSource.cancel()
+                    // OkHttp invokes this on an IO callback thread; suspend reads until delivery.
+                    trySendBlocking(event).getOrThrow()
                 } catch (e: Exception) {
                     close(e)
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                close(t ?: java.io.IOException("SSE connection failed: HTTP ${response?.code ?: "unknown"}"))
+                val failure = if (t is java.io.IOException && (response == null || response.isSuccessful)) {
+                    SSETransportFailure(t)
+                } else {
+                    t ?: java.io.IOException("SSE connection failed: HTTP ${response?.code ?: "unknown"}")
+                }
+                close(failure)
             }
             override fun onClosed(eventSource: EventSource) {
                 close()
@@ -267,7 +273,56 @@ class ApiClient(
         throw SSETransportFailure(e)
     }
 
+    private data class SSEFrame(val type: String, val id: String?, val data: String?)
+
+    // Owns byte delimiters and frame accumulation; EOF discards any unfinished frame.
+    private class SSEFrameParser(private val maxBytes: Long?) {
+        private val lineBytes = okio.Buffer()
+        private val data = StringBuilder()
+        private var dataSize = 0L
+        private var eventType = "message"
+        private var eventID: String? = null
+        private var previousCR = false
+        private var firstLine = true
+
+        fun accept(byte: Int): SSEFrame? {
+            if (byte == 10 && previousCR) { previousCR = false; return null }
+            previousCR = byte == 13
+            if (byte != 10 && byte != 13) {
+                if (maxBytes != null && lineBytes.size >= maxBytes) throw java.io.IOException("SSE line too large")
+                lineBytes.writeByte(byte)
+                return null
+            }
+            var line = lineBytes.readUtf8()
+            if (firstLine) { line = line.removePrefix("\uFEFF"); firstLine = false }
+            if (line.isEmpty()) {
+                val frame = SSEFrame(eventType, eventID, if (data.isEmpty()) null else data.substring(0, data.length - 1))
+                eventType = "message"
+                eventID = null
+                data.setLength(0)
+                dataSize = 0
+                return frame
+            }
+            if (line.startsWith(":")) return null
+            val field = line.substringBefore(":")
+            val value = line.substringAfter(":", "").removePrefix(" ")
+            when (field) {
+                "event" -> eventType = value.ifEmpty { "message" }
+                "id" -> if (!value.contains('\u0000')) eventID = value
+                "data" -> {
+                    if (maxBytes != null) {
+                        dataSize += value.toByteArray(Charsets.UTF_8).size + if (data.isEmpty()) 0 else 1
+                        if (dataSize > maxBytes) throw java.io.IOException("SSE frame too large")
+                    }
+                    data.append(value).append('\n')
+                }
+            }
+            return null
+        }
+    }
+
     // Named streams own framing because EventSource normalizes empty IDs to null.
+    // Decode and callback failures terminate collection; unknown event types are ignored.
     // One frame is materialized at a time; flow backpressure bounds queued events, not event size.
     private fun <T> namedSSEFlow(
         path: String,
@@ -287,47 +342,14 @@ class ApiClient(
                 sseIO { call.execute() }.use { response ->
                     if (!response.isSuccessful) throw java.io.IOException("SSE connection failed: HTTP ${response.code}")
                     val source = response.body?.source() ?: throw java.io.IOException("Missing SSE body")
-                    val lineBytes = okio.Buffer()
-                    val data = StringBuilder()
-                    var dataSize = 0L
-                    var eventType = "message"
-                    var eventID: String? = null
-                    var previousCR = false
+                    val parser = SSEFrameParser(maxSSEEventBytes)
                     while (!sseIO { source.exhausted() }) {
-                        val byte = sseIO { source.readByte() }.toInt() and 255
-                        if (byte == 10 && previousCR) { previousCR = false; continue }
-                        previousCR = byte == 13
-                        if (byte != 10 && byte != 13) {
-                            if (maxSSEEventBytes != null && lineBytes.size >= maxSSEEventBytes) throw java.io.IOException("SSE line too large")
-                            lineBytes.writeByte(byte)
-                            continue
-                        }
-                        val line = lineBytes.readUtf8()
-                        if (line.isEmpty()) {
-                            eventID?.let { onEventID?.invoke(it) }
-                            if (data.isNotEmpty()) {
-                                val event = decode(eventType, data.substring(0, data.length - 1))
-                                if (event != null) send(event)
-                            }
-                            eventType = "message"
-                            eventID = null
-                            data.setLength(0)
-                            dataSize = 0
-                            continue
-                        }
-                        if (line.startsWith(":")) continue
-                        val field = line.substringBefore(":")
-                        val value = line.substringAfter(":", "").removePrefix(" ")
-                        when (field) {
-                            "event" -> eventType = value.ifEmpty { "message" }
-                            "id" -> if (!value.contains('\u0000')) eventID = value
-                            "data" -> {
-                                if (maxSSEEventBytes != null) {
-                                    dataSize += value.toByteArray(Charsets.UTF_8).size + if (data.isEmpty()) 0 else 1
-                                    if (dataSize > maxSSEEventBytes) throw java.io.IOException("SSE frame too large")
-                                }
-                                data.append(value).append('\n')
-                            }
+                        val frame = parser.accept(sseIO { source.readByte() }.toInt() and 255) ?: continue
+                        // A completed-frame ID is transport position, saved before callbacks/decode/delivery; it is not an acknowledgement.
+                        frame.id?.let { onEventID?.invoke(it) }
+                        frame.data?.let { data ->
+                            val event = decode(frame.type, data)
+                            if (event != null) send(event)
                         }
                     }
                 }
@@ -350,34 +372,32 @@ class ApiClient(
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
     /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
     fun historyEventsReconnecting(id: String, cursor: String, onManifest: ((HistoryManifest) -> Unit)? = null, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
+        // This cold flow starts a fresh cursor for each collection.
         val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
-        reconnectingNamedFlow { historyEvents(id, cursor, onManifest = onManifest, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
+        reconnectingFlow { historyEvents(id, cursor, onManifest = onManifest, onCheckpoint = onCheckpoint, onStatsSnapshot = onStatsSnapshot, onStats = onStats, onReset = onReset, onHistoryError = onHistoryError, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
     }
 
-    private fun <T> reconnectingNamedFlow(connect: () -> Flow<T>): Flow<T> = flow {
-        var delayMs = 500L
-        while (true) {
-            try {
-                connect().onEach { delayMs = 500L }.collect { emit(it) }
-            } catch (e: SSETransportFailure) {
-                // Only exceptions marked at network reads are retryable.
-            }
-            delay(jitteredDelay(delayMs))
+    // Each collection owns its backoff. Receiving primary values resets it.
+    private class SSEBackoff {
+        private var delayMs = 500L
+        fun reset() { delayMs = 500L }
+        fun nextDelay(): Long {
+            val current = delayMs
             delayMs = (delayMs * 3 / 2).coerceAtMost(30_000L)
+            return current
         }
     }
 
+    // Clean EOF and failures marked at transport boundaries retry; all other failures terminate.
     private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {
-        var delayMs = 500L
+        val backoff = SSEBackoff()
         while (true) {
             try {
-                connect().onEach { delayMs = 500L }.collect { emit(it) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                delay(jitteredDelay(delayMs))
-                delayMs = (delayMs * 3 / 2).coerceAtMost(30_000L)
+                connect().onEach { backoff.reset() }.collect { emit(it) }
+            } catch (_: SSETransportFailure) {
+                // Decoder, callback, HTTP, size and cancellation errors retain their identity.
             }
+            delay(jitteredDelay(backoff.nextDelay()))
         }
     }
 
