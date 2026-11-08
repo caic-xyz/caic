@@ -40,7 +40,7 @@ archives:
     files:
       - contrib/config.toml
       - src: '{{ if eq .Os "linux" }}contrib/caic.service{{ end }}'
-      - src: '{{ if eq .Os "darwin" }}contrib/com.caic.caic.plist{{ end }}'
+      - src: '{{ if eq .Os "darwin" }}contrib/com.fghbuild.caic.plist{{ end }}'
 
 checksum:
   name_template: "checksums.txt"

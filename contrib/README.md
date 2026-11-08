@@ -8,7 +8,7 @@ Platform service files and default configuration for running caic as a daemon.
   and edit.
 - `voice-gateway-config.toml` — Standalone voice gateway configuration; copy to
   `~/.config/voice-gateway/config.toml` and edit.
-- `com.caic.caic.plist` — macOS launchd user agent with system-path defaults;
+- `com.fghbuild.caic.plist` — macOS launchd user agent with system-path defaults;
   the installer overrides them with per-user paths.
 - `caic.service` — Linux systemd user service; starts Podman's packaged user
   socket when available.
@@ -18,11 +18,11 @@ Platform service files and default configuration for running caic as a daemon.
 
 ```bash
 # Install (or replace an existing plist to update its paths)
-plist="$HOME/Library/LaunchAgents/com.caic.caic.plist"
+plist="$HOME/Library/LaunchAgents/com.fghbuild.caic.plist"
 logs="$HOME/Library/Logs/caic"
 mkdir -p "$HOME/Library/LaunchAgents"
 (umask 077 && mkdir -p "$logs")
-cp contrib/com.caic.caic.plist "$plist"
+cp contrib/com.fghbuild.caic.plist "$plist"
 /usr/bin/plutil -replace ProgramArguments.0 -string "$HOME/.local/bin/caic" -- "$plist"
 /usr/bin/plutil -replace StandardOutPath -string "$logs/stdout.log" -- "$plist"
 /usr/bin/plutil -replace StandardErrorPath -string "$logs/stderr.log" -- "$plist"
@@ -31,15 +31,15 @@ cp contrib/com.caic.caic.plist "$plist"
 # Export tool paths and SSH_AUTH_SOCK in the shell's startup configuration.
 
 # Enable
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist
 
 # Disable
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist
 
 # Restart (after editing the plist)
 # launchctl has no "reload" — you must bootout then bootstrap.
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist
 
 # Logs
 tail -f "$HOME/Library/Logs/caic/stdout.log" "$HOME/Library/Logs/caic/stderr.log"

@@ -156,15 +156,15 @@ install_service_systemd() {
 
 install_service_launchd() {
   tmpdir="$1"
-  src="${tmpdir}/contrib/com.caic.caic.plist"
+  src="${tmpdir}/contrib/com.fghbuild.caic.plist"
   [ -f "$src" ] || return 0
-  dest="${HOME}/Library/LaunchAgents/com.caic.caic.plist"
+  dest="${HOME}/Library/LaunchAgents/com.fghbuild.caic.plist"
   if [ ! -f "$dest" ]; then
     logs="${HOME}/Library/Logs/caic"
     mkdir -p "$(dirname "$dest")"
     (umask 077 && mkdir -p "$logs")
     # launchd does not expand HOME. Configure absolute paths before publishing.
-    staged="${tmpdir}/com.caic.caic.plist"
+    staged="${tmpdir}/com.fghbuild.caic.plist"
     cp "$src" "$staged"
     /usr/bin/plutil -replace ProgramArguments.0 -string "${INSTALL_DIR}/caic" -- "$staged"
     /usr/bin/plutil -replace StandardOutPath -string "${logs}/stdout.log" -- "$staged"

@@ -4,14 +4,14 @@
 <!--          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml -->
 <!--          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation). -->
 <!--          caic loads the user's shell environment unless core.shell_env is false. -->
-<!-- Enable:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
-<!-- Disable: launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
+<!-- Enable:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist -->
+<!-- Disable: launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist -->
 <!-- Logs:    defaults to /var/log/caic/; installer uses ~/Library/Logs/caic/. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.caic.caic</string>
+  <string>com.fghbuild.caic</string>
 
   <key>ProgramArguments</key>
   <array>
