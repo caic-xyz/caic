@@ -27,15 +27,14 @@ export default function TaskResourceIndicator(props: { href: string; sample: Eve
   };
   const description = () => {
     const s = props.sample;
-    if (!s) return "Container resources: waiting for the first sample";
+    if (!s) return "Resources: pending";
     const c = cpu();
     const m = memory();
     return [
-      `CPU: ${(s.cpuPerc / 100).toFixed(2)} / ${s.cpuCeiling ?? "unknown"} CPUs (${c === null ? "configured ceiling unknown" : `${c.toFixed(1)}% of configured ceiling`})`,
-      "Inherited CPU limits and process affinity are unreported.",
-      `RAM: ${formatBytes(s.memUsed)} / ${s.memLimit > 0 ? formatBytes(s.memLimit) : "unknown"} (${m === null ? "limit unknown" : `${m.toFixed(1)}% of limit`})`,
-      ...(s.cpuError ? [`CPU metadata warning: ${s.cpuError}`] : []),
-      ...(stale() ? ["Updates unavailable; showing last sample"] : []),
+      `CPU: ${(s.cpuPerc / 100).toFixed(2)} / ${s.cpuCeiling ?? "??"} CPUs (${c === null ? "??" : `${c.toFixed(1)}%`})`,
+      `RAM: ${formatBytes(s.memUsed)} / ${s.memLimit > 0 ? formatBytes(s.memLimit) : "??"} (${m === null ? "??" : `${m.toFixed(1)}%`})`,
+      ...(s.cpuError ? ["CPU metadata: unavailable"] : []),
+      ...(stale() ? ["Sample: stale"] : []),
     ].join("\n");
   };
   return (

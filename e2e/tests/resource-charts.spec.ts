@@ -16,14 +16,15 @@ test("task-card resources open performance from either icon and the keyboard", a
   await page.goto("/");
   const card = page.locator(`[data-task-id="${id}"]`);
   const levels = card.getByTestId("task-resource-levels");
-  await expect(levels).toHaveAccessibleName(/% of configured ceiling/);
-  await expect(levels).toHaveAccessibleName(/% of limit/);
+  await expect(levels).toHaveAccessibleName(/CPU: .*\([\d.]+%\)/);
+  await expect(levels).toHaveAccessibleName(/RAM: .*\([\d.]+%\)/);
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(levels).toBeVisible();
     const link = card.getByRole("link", { name: /^Task performance:/ });
     await expect(link).toHaveAttribute("href", `/task/@${id}/stats`);
-    await expect(link).toHaveAttribute("title", /Inherited CPU limits and process affinity are unreported/);
+    await expect(link).toHaveAttribute("title", /CPU: [\d.]+ \/ [\d.]+ CPUs/);
+    await expect(link).toHaveAttribute("title", /RAM: /);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await link.focus();
     await expect(link).toBeFocused();

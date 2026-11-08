@@ -68,7 +68,7 @@ describe("TaskCard", () => {
     const levels = screen.getByTestId("task-resource-levels");
     const cpu = screen.getByTestId("task-cpu-level");
     const memory = screen.getByTestId("task-memory-level");
-    expect(levels).toHaveAccessibleName(/waiting for the first sample/);
+    expect(levels).toHaveAccessibleName(/Resources: pending/);
     const unavailable = cpu.getAttribute("class");
     const initial: EventStats = {
       ts: now(),
@@ -86,14 +86,14 @@ describe("TaskCard", () => {
       diskUsed: -1,
     };
     setSample(initial);
-    expect(levels).toHaveAccessibleName(/50.0% of configured ceiling/);
-    expect(levels).toHaveAccessibleName(/75.0% of limit/);
+    expect(levels).toHaveAccessibleName(/CPU: .*\(50\.0%\)/);
+    expect(levels).toHaveAccessibleName(/RAM: .*\(75\.0%\)/);
     const warning = cpu.getAttribute("class");
     const high = memory.getAttribute("class");
     expect(warning).not.toBe(unavailable);
     expect(high).not.toBe(warning);
     setSample({ ...initial, cpuPerc: 0, memUsed: 0 });
-    expect(levels).toHaveAccessibleName(/0.0% of configured ceiling/);
+    expect(levels).toHaveAccessibleName(/CPU: .*\(0\.0%\)/);
     expect(cpu.getAttribute("class")).not.toBe(warning);
     expect(cpu.getAttribute("class")).not.toBe(high);
     const normal = cpu.getAttribute("class");
@@ -109,14 +109,16 @@ describe("TaskCard", () => {
     setSample({ ...initial, cpuCeiling: undefined, memLimit: 0 });
     expect(cpu).toHaveAttribute("class", unavailable);
     expect(memory).toHaveAttribute("class", unavailable);
-    expect(levels).toHaveAccessibleName(/limit unknown/);
+    expect(levels).toHaveAccessibleName(/CPU: .*\/ \?\? CPUs \(\?\?\)/);
+    expect(levels).toHaveAccessibleName(/RAM: .*\/ \?\? \(\?\?\)/);
     setSample({ ...initial, cpuError: "inspect failed" });
     expect(cpu).toHaveAttribute("class", unavailable);
     expect(memory).toHaveAttribute("class", high);
+    expect(levels).toHaveAccessibleName(/CPU metadata: unavailable/);
     setSample({ ...initial, ts: now() - 16_000 });
     expect(cpu).toHaveAttribute("class", unavailable);
     expect(memory).toHaveAttribute("class", unavailable);
-    expect(levels).toHaveAccessibleName(/Updates unavailable/);
+    expect(levels).toHaveAccessibleName(/Sample: stale/);
     setState("stopped");
     expect(screen.queryByTestId("task-resource-levels")).not.toBeInTheDocument();
   });
