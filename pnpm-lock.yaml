@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@maruel/gomode':
-        specifier: github:maruel/gomode#072861bf9cc64ad211c3104ed3d153983d2829a6
-        version: https://codeload.github.com/maruel/gomode/tar.gz/072861bf9cc64ad211c3104ed3d153983d2829a6(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
+        specifier: github:maruel/gomode#a37d0722a9d80b7c72801523652f9934f62dc613
+        version: git+https://github.com/maruel/gomode.git#a37d0722a9d80b7c72801523652f9934f62dc613(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)
       '@material-symbols/svg-400':
         specifier: 0.47.4
         version: 0.47.4
@@ -791,8 +791,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/072861bf9cc64ad211c3104ed3d153983d2829a6':
-    resolution: {gitHosted: true, integrity: sha512-RCqmXPuGXc1tf3aaw/WpvmrfaaJ6HivQIafeFhzlVMEr+rh0CfChftfju5w0QIYWI41YRr3kki7XjQpWXVAhKQ==, tarball: https://codeload.github.com/maruel/gomode/tar.gz/072861bf9cc64ad211c3104ed3d153983d2829a6}
+  '@maruel/gomode@git+https://github.com/maruel/gomode.git#a37d0722a9d80b7c72801523652f9934f62dc613':
+    resolution: {commit: a37d0722a9d80b7c72801523652f9934f62dc613, repo: https://github.com/maruel/gomode.git, type: git}
     version: 0.1.0
     engines: {node: '>=26 <27', pnpm: '>=12.5.1'}
     peerDependencies:
@@ -3750,7 +3750,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@maruel/gomode@https://codeload.github.com/maruel/gomode/tar.gz/072861bf9cc64ad211c3104ed3d153983d2829a6(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
+  '@maruel/gomode@git+https://github.com/maruel/gomode.git#a37d0722a9d80b7c72801523652f9934f62dc613(@solidjs/router@1.0.0(solid-js@1.9.15))(solid-js@1.9.15)':
     dependencies:
       '@material-symbols/svg-400': 0.48.2
       '@solidjs/router': 1.0.0(solid-js@1.9.15)

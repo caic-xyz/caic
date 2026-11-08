@@ -327,13 +327,15 @@ func TestMCPEndpointTaskAccessContract(t *testing.T) {
 	insertTestTask(s, foreignID, foreign)
 
 	post := func(t *testing.T, ctx context.Context, method, name, params string) string {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON(method, params)))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", method)
 		if name != "" {
 			req.Header.Set("Mcp-Name", name)
 		}
-		w := httptest.NewRecorder()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodResourcesUpdated}
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("%s status = %d, want %d: %s", method, w.Code, http.StatusOK, w.Body.String())
@@ -405,9 +407,7 @@ func TestMCPEndpointTaskAccessContract(t *testing.T) {
 				t.Fatalf("tasks_list contains hidden task %s: %s", tc.hiddenID, list)
 			}
 
-			streamCtx, cancel := context.WithCancel(tc.ctx)
-			cancel()
-			subscription := post(t, streamCtx, "subscriptions/listen", "", `"notifications":{"resourceSubscriptions":["`+visibleURI+`"]}`)
+			subscription := post(t, tc.ctx, "subscriptions/listen", "", `"notifications":{"resourceSubscriptions":["`+visibleURI+`"]}`)
 			if !strings.Contains(subscription, tc.visibleID.String()) {
 				t.Fatalf("subscription initial state does not contain visible task %s: %s", tc.visibleID, subscription)
 			}
@@ -769,13 +769,12 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["gomode://items"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		w := httptest.NewRecorder()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodResourcesUpdated}
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -790,9 +789,8 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"resourceSubscriptions":["gomode://items"]`) {
 			t.Fatalf("subscription response = %s, want supported task resource acknowledged", data)
 		}
-		// The context is pre-cancelled, so the change loop adds nothing and
-		// the body is the ack, the announced list change, and the delivered
-		// initial state.
+		// Cancel after the initial resource update, so the body contains
+		// the acknowledgment, list change, and initial resource snapshot.
 		if !strings.Contains(data, `"method":"notifications/resources/list_changed"`) {
 			t.Fatalf("subscription response = %s, want initial resources list_changed", data)
 		}
@@ -849,13 +847,12 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://notifications"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		w := httptest.NewRecorder()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodResourcesUpdated}
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -940,13 +937,12 @@ func TestMCPHandlers(t *testing.T) {
 			seeded = append(seeded, id.String())
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		w := httptest.NewRecorder()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodResourcesUpdated}
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1051,14 +1047,13 @@ func TestMCPHandlers(t *testing.T) {
 		other.OwnerID = "other-owner"
 		insertTestTask(s, otherID, other)
 		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
 		ctx = auth.NewContext(ctx, &user)
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		w := httptest.NewRecorder()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodResourcesUpdated}
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1114,8 +1109,7 @@ func TestMCPHandlers(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
-		w := httptest.NewRecorder()
-		cancel()
+		w := &mcpNotificationWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, until: mcp.NotificationMethodSubscriptionsAcknowledged}
 		s.mcpHandlers.protocol.HandleMCP(w, req)
 		if !strings.Contains(w.Body.String(), "subscriptions/acknowledged") {
 			t.Fatalf("empty native filter was not acknowledged: %s", w.Body.String())
@@ -1538,4 +1532,32 @@ func registerTestClient(t *testing.T, h http.Handler, clientName string, redirec
 		t.Fatalf("decode register response: %v", err)
 	}
 	return resp
+}
+
+// mcpNotificationWriter cancels a finite subscription only after its expected notification is delivered.
+type mcpNotificationWriter struct {
+	*httptest.ResponseRecorder
+
+	cancel context.CancelFunc
+	until  mcp.NotificationMethod
+}
+
+func (w *mcpNotificationWriter) Write(raw []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(raw)
+	if err != nil {
+		return n, err
+	}
+	data, ok := bytes.CutPrefix(raw, []byte("data: "))
+	if !ok {
+		return n, nil
+	}
+	var notification mcp.JSONRPCNotification
+	if err := json.Unmarshal(bytes.TrimSpace(data), &notification); err != nil {
+		w.cancel()
+		return n, err
+	}
+	if notification.Method == w.until {
+		w.cancel()
+	}
+	return n, nil
 }
