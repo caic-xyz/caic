@@ -1,4 +1,4 @@
-// Project-specific entry point for caic API SDK generation.
+// Project-specific entry point for versioned caic SDK package generation.
 package main
 
 import (

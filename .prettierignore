@@ -6,7 +6,7 @@ backend/frontend/dist
 build
 coverage
 pnpm-lock.yaml
-sdk/**
+sdk/caic
 backend/docs/ARCHITECTURE.md
 **/testdata/**
 backend/internal/agent/*/testdata/*.md

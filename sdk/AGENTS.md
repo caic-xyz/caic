@@ -11,8 +11,10 @@ run `make generate-sdks`.
 The standalone `github.com/maruel/gomode` repository owns Go Mode, MCP, voice
 gateway, and OAuth SDK generation. caic imports its browser library.
 
-Keep each SDK's TypeScript, Kotlin, Swift, and `API.v*.md` outputs together when
-moving or regenerating generated SDKs.
+The generator owns each complete SDK package directory, including TypeScript,
+Kotlin, Swift, versioned `API.v*.md` references, package manifests, and cache
+ignores. Keep handwritten files outside those generated directories. Run the
+generator instead of editing manifests when their layout changes.
 
 The standalone gomode repository owns the Android Gradle workspace and Halo SDK.
 
