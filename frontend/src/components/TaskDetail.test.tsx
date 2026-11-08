@@ -2016,17 +2016,17 @@ describe("TaskDetail", () => {
     expect(getByText(error)).toBeInTheDocument();
   });
 
-  it("keeps the prompt visible when a later input repeats it", async () => {
+  it("keeps repeated prompts visible with line breaks while agent prose wraps normally", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       emit(handlers, {
         kind: "text",
         ts: 1,
-        text: { text: "agent reply" },
+        text: { text: "agent\nreply" },
       });
       emit(handlers, {
         kind: "userInput",
         ts: 2,
-        userInput: { text: "same prompt" },
+        userInput: { text: "same\nprompt" },
       });
       return {
         addEventListener: vi.fn(),
@@ -2035,9 +2035,15 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByRole } = await renderTaskDetail({ initialPrompt: "same prompt" });
+    const { getByRole, getAllByText, getByText } = await renderTaskDetail({ initialPrompt: "same\nprompt" });
 
     expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+    const prompts = getAllByText("sameprompt", { selector: "p" });
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt.querySelectorAll("br")).toHaveLength(1);
+    }
+    expect(getByText("agent reply").querySelectorAll("br")).toHaveLength(0);
   });
 
   it("shows setup logs inside task details", async () => {

@@ -1,4 +1,4 @@
-// Markdown safely renders agent and file text with viewer links, external links in new tabs, copyable code, Pele diagrams, and a raw toggle.
+// Markdown safely renders prompt, agent, and file text with optional soft breaks, viewer links, copyable code, Pele diagrams, and a raw toggle.
 
 import {
   Show,
@@ -148,7 +148,7 @@ function isLocalPath(dest: string): boolean {
  * baseDir is the runtime directory of the rendered document. Relative links
  * and images resolve against it; without it the task checkout owns them.
  */
-export default function Markdown(props: { text: string; baseDir?: string }) {
+export default function Markdown(props: { text: string; baseDir?: string; breaks?: boolean }) {
   const taskId = useContext(MarkdownTaskContext);
   const navigate = useNavigate();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
@@ -193,7 +193,7 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
   });
   // Content cannot submit authenticated forms or install page-wide CSS.
   const html = createMemo(() =>
-    markdownSanitizer.sanitize(marked.parse(props.text) as string, {
+    markdownSanitizer.sanitize(marked.parse(props.text, { breaks: props.breaks ?? false }) as string, {
       USE_PROFILES: { html: true },
       FORBID_TAGS: ["form", "style"],
       FORBID_ATTR: ["form", "formaction", "formenctype", "formmethod", "formtarget"],

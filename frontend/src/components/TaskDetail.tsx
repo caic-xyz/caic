@@ -1435,7 +1435,7 @@ export default function TaskDetail(props: Props) {
                     Prompt
                   </h4>
                   <div class={styles.userInputMsg}>
-                    <Markdown text={prompt} />
+                    <Markdown text={prompt} breaks />
                   </div>
                 </section>
               )}
@@ -2128,7 +2128,7 @@ function GroupContent(props: {
       <Match when={group().kind === "userInput" && group().events[0]?.userInput} keyed>
         {(ui) => (
           <div class={styles.userInputMsg}>
-            <Markdown text={ui.text} />
+            <Markdown text={ui.text} breaks />
             <Show when={ui.images?.length}>
               <div class={styles.userInputImages}>
                 <For each={ui.images}>
