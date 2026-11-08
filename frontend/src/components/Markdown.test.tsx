@@ -38,6 +38,33 @@ describe("Markdown", () => {
     cleanup();
   });
 
+  it("keeps soft line breaks within a paragraph and blank lines between paragraphs", () => {
+    const { container } = renderMarkdown(
+      "# Focus and conflict recovery with fewer moving parts\n" +
+        "Simplify conversation focus across gomode, caic, and mddb, make context failures\n" +
+        "recoverable, and make conflicting document edits easier to compare and merge.\n" +
+        "Prioritize fewer owners and fewer implicit state machines before adding behavior.\n" +
+        "Dependency-roll automation is out of scope; pushes remain owner-managed.\n\n" +
+        "A separate paragraph.",
+    );
+
+    expect(container.querySelectorAll("p")).toHaveLength(2);
+    expect(container.querySelector("p")).toHaveTextContent(
+      "Simplify conversation focus across gomode, caic, and mddb, make context failures recoverable, " +
+        "and make conflicting document edits easier to compare and merge. Prioritize fewer owners " +
+        "and fewer implicit state machines before adding behavior. Dependency-roll automation is " +
+        "out of scope; pushes remain owner-managed.",
+    );
+    expect(container.querySelectorAll("br")).toHaveLength(0);
+  });
+
+  it("preserves explicit hard breaks and newlines inside fenced code", () => {
+    const { container } = renderMarkdown("Two spaces  \nBackslash\\\nLast line\n\n```text\nfirst\nsecond\n```");
+
+    expect(container.querySelector("p")?.querySelectorAll("br")).toHaveLength(2);
+    expect(container.querySelector("pre code")?.textContent).toBe("first\nsecond\n");
+  });
+
   it("renders prose, headers, and regular code blocks with copy buttons", async () => {
     const text = "# Heading\n\nSome text.\n\n```python\nprint('hello')\n```";
     renderMarkdown(text);

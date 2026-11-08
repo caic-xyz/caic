@@ -154,7 +154,6 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
   const runtimeTarget = (href: string) => (taskId ? runtimeFileTarget(href, props.baseDir ?? null) : null);
   const marked = new Marked({
-    breaks: true,
     gfm: true,
     tokenizer: {
       link(this: Tokenizer, src: string): Tokens.Link | Tokens.Image | undefined {

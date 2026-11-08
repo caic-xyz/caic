@@ -5,7 +5,7 @@ import { Marked } from "marked";
 import { bench } from "@tests/bench";
 
 const purify = createDOMPurify(new JSDOM("").window);
-const marked = new Marked({ breaks: true, gfm: true });
+const marked = new Marked({ gfm: true });
 const samples = [
   ["message", "# Notes\n\nA paragraph with [a link](https://example.com) and **emphasis**.\n\n".repeat(40)],
   ["1 MiB text file", "# Large file\n\n" + "x".repeat(1_048_562)],
