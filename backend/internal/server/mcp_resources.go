@@ -253,12 +253,10 @@ func (m *mcpResources) SubscribeResourceUpdates(ctx context.Context, params *mcp
 
 func (m *mcpResources) subscriptionSources(ctx context.Context, filter mcp.SubscriptionFilter) (subscriptionSources, error) {
 	var sources subscriptionSources
-	hasFilter := false
 	for _, uri := range filter.ResourceSubscriptions {
 		if decision, ok := m.authorizeResource(ctx, uri); !ok {
 			return subscriptionSources{}, mcp.ErrInvalidParams("%s", decision)
 		}
-		hasFilter = true
 		switch {
 		case strings.HasPrefix(uri, "caic://tasks/"):
 			id, err := mcpTaskResourceID(uri)
@@ -291,14 +289,10 @@ func (m *mcpResources) subscriptionSources(ctx context.Context, filter mcp.Subsc
 		if !mcpHasScope(ctx, mcpScopeRead) {
 			return subscriptionSources{}, mcp.ErrInvalidParams("missing required MCP scope: %s", mcpScopeRead)
 		}
-		hasFilter = true
 		sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 		sources.repoC = m.serverConfig.checkouts.Changed()
 		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true
-	}
-	if !hasFilter {
-		return subscriptionSources{}, mcp.ErrInvalidParams("subscription filter is empty")
 	}
 	return sources, nil
 }

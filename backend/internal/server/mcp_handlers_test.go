@@ -107,6 +107,18 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if session == "" {
 				t.Fatal("initialize omitted the notification session")
 			}
+			emptyReq := request(http.MethodGet, ownerToken.AccessToken, session, "")
+			emptyReq.Header.Set("Accept", "text/event-stream")
+			emptyStream, err := client.Do(emptyReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if emptyStream.StatusCode != http.StatusOK {
+				t.Fatalf("pre-subscribe stream HTTP %d", emptyStream.StatusCode)
+			}
+			if err := emptyStream.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
 			for _, uri := range []string{"gomode://items", "gomode://notifications"} {
 				_, out, code := post(ownerToken.AccessToken, session, "resources/subscribe", `{"uri":"`+uri+`"}`)
 				if code != http.StatusOK || out.Error != nil {
@@ -762,6 +774,7 @@ func TestMCPHandlers(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		w := httptest.NewRecorder()
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
@@ -841,6 +854,7 @@ func TestMCPHandlers(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		w := httptest.NewRecorder()
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
@@ -888,6 +902,7 @@ func TestMCPHandlers(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		w := httptest.NewRecorder()
 		s.mcpHandlers.handleMCP(w, req)
 		var resp mcp.JSONRPCResponse
@@ -930,6 +945,7 @@ func TestMCPHandlers(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		w := httptest.NewRecorder()
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
@@ -1041,6 +1057,7 @@ func TestMCPHandlers(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		w := httptest.NewRecorder()
 		s.mcpHandlers.handleMCP(w, req)
 		if w.Code != http.StatusOK {
@@ -1080,19 +1097,28 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("subscriptionsListenRejectsEmptyFilter", func(t *testing.T) {
+	t.Run("subscriptionsListenEmptyFilter", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
+		// Nil production dependencies make any accidental content read fail.
+		sources, err := (&mcpResources{}).subscriptionSources(t.Context(), mcp.SubscriptionFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(sources, subscriptionSources{}) {
+			t.Fatalf("empty filter armed content sources: %+v", sources)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{}`)
-		_, resp := postMCP(t, s.mcpHandlers, "subscriptions/listen", "", body)
-		if resp.Error == nil {
-			t.Fatal("error is nil, want invalid params")
-		}
-		if resp.Error.Code != mcp.InvalidParamsCode {
-			t.Fatalf("error code = %d, want %d", resp.Error.Code, mcp.InvalidParamsCode)
-		}
-		if !strings.Contains(resp.Error.Message, "empty") {
-			t.Fatalf("error message = %q, want empty filter", resp.Error.Message)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		w := httptest.NewRecorder()
+		cancel()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		if !strings.Contains(w.Body.String(), "subscriptions/acknowledged") {
+			t.Fatalf("empty native filter was not acknowledged: %s", w.Body.String())
 		}
 	})
 
