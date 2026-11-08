@@ -255,8 +255,8 @@ export default function (pi: ExtensionAPI) {
 
 
 # The backend scanners reject a physical record whose size including LF is not
-# strictly smaller than 32 MiB.
-_MAX_ENCODED_RECORD_LEN = 32 << 20
+# strictly smaller than taskslog.MaxRecordSize in the Go backend.
+_MAX_ENCODED_RECORD_LEN = 128 << 20
 _MAX_UNIX_SECONDS = (1 << 63) - 1 - 62_135_596_800
 _DIAGNOSTIC_PREVIEW_BYTES = 1024
 _JSON_WHITESPACE = b" \t\r\n"

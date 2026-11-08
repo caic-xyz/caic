@@ -152,12 +152,16 @@ const (
 )
 
 const (
-	v3AgentRecordPrefix   = `{"t":"` + string(KindAgent) + `","ts":`
-	v3InputRecordPrefix   = `{"t":"` + string(KindInput) + `","ts":`
-	v3AgentMessagePrefix  = `,"msg":`
-	v3MaxEncodedRecordLen = 32 << 20
-	v3MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
+	v3AgentRecordPrefix  = `{"t":"` + string(KindAgent) + `","ts":`
+	v3InputRecordPrefix  = `{"t":"` + string(KindInput) + `","ts":`
+	v3AgentMessagePrefix = `,"msg":`
+	v3MaxUnixSeconds     = int64(^uint64(0)>>1) - 62_135_596_800
 )
+
+// MaxRecordSize is the exclusive byte limit for a physical task-log record,
+// including its LF. Live transport, validation, and history readers share it.
+// The Python relay's _MAX_ENCODED_RECORD_LEN must match this limit.
+const MaxRecordSize = 128 << 20
 
 // Frame is a validated v3 physical record. Encoded and Native borrow the input
 // until its owner reuses the buffer; Control holds an owned v3 schema value.
@@ -286,10 +290,10 @@ func v3ControlFieldAllowed(kind logControlKind, field string) bool {
 }
 
 func validateV3RecordBytes(line []byte) error {
-	if len(line) >= v3MaxEncodedRecordLen-1 {
+	if len(line) >= MaxRecordSize-1 {
 		return fmt.Errorf(
 			"corrupt v3 log record: encoded size with LF must be smaller than %d bytes",
-			v3MaxEncodedRecordLen,
+			MaxRecordSize,
 		)
 	}
 	if !utf8.Valid(line) {

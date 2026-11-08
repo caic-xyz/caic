@@ -965,6 +965,19 @@ func (w *stopTestWriter) Write(p []byte) (int, error) {
 func TestRelayNativeRecordEncoding(t *testing.T) {
 	t.Parallel()
 
+	t.Run("record limit matches relay", func(t *testing.T) {
+		t.Parallel()
+		cmd := exec.CommandContext(t.Context(), "uv", "run", "--locked", "python", "-c",
+			`import runpy; print(runpy.run_path("relay/relay_v2.py")["_MAX_ENCODED_RECORD_LEN"])`)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("relay record limit: %v: %s", err, out)
+		}
+		if string(out) != fmt.Sprintln(taskslog.MaxRecordSize) {
+			t.Fatalf("relay limit = %s, Go limit = %d", out, taskslog.MaxRecordSize)
+		}
+	})
+
 	t.Run("V3TerminatesWithLF", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{}
@@ -1415,18 +1428,38 @@ func TestReadMessages(t *testing.T) {
 
 func TestRelayRecordReader(t *testing.T) {
 	t.Parallel()
-	t.Run("rejects unterminated record without persistence", func(t *testing.T) {
+	t.Run("ReadRecord", func(t *testing.T) {
 		t.Parallel()
-		log := &testLogSink{}
-		owner := newTestRecords(t, t.Context(), log, nil)
-		reader := NewRelayRecordReader(t.Context(), strings.NewReader(`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`), owner)
+		t.Run("rejects unterminated record without persistence", func(t *testing.T) {
+			t.Parallel()
+			log := &testLogSink{}
+			owner := newTestRecords(t, t.Context(), log, nil)
+			reader := NewRelayRecordReader(t.Context(), strings.NewReader(`{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"init"}}`), owner)
 
-		if _, _, err := reader.ReadRecord(); !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("ReadRecord error = %v, want unexpected EOF", err)
-		}
-		if log.Len() != 0 {
-			t.Fatalf("persisted truncated record = %q", log.String())
-		}
+			if _, _, err := reader.ReadRecord(); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("ReadRecord error = %v, want unexpected EOF", err)
+			}
+			if log.Len() != 0 {
+				t.Fatalf("persisted truncated record = %q", log.String())
+			}
+		})
+		t.Run("large native record persists unchanged", func(t *testing.T) {
+			t.Parallel()
+			input := `{"t":"agent","ts":1.000,"msg":{"text":"` + strings.Repeat("x", 33<<20) + `"}}` + "\n"
+			log := &testLogSink{}
+			owner := newTestRecords(t, t.Context(), log, nil)
+			reader := NewRelayRecordReader(t.Context(), strings.NewReader(input), owner)
+			native, _, err := reader.ReadRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(native) != input[len(`{"t":"agent","ts":1.000,"msg":`):len(input)-2] {
+				t.Fatal("large native bytes changed")
+			}
+			if log.String() != input {
+				t.Fatal("large physical record changed")
+			}
+		})
 	})
 }
 
@@ -1533,11 +1566,12 @@ func TestReadRelayTailRecords(t *testing.T) {
 			}
 		}
 	})
+
 	t.Run("corruption and oversized records do not persist", func(t *testing.T) {
 		t.Parallel()
 		for _, input := range []string{
 			`{"t":"agent","time":1.000,"msg":{}}` + "\n",
-			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", maxNDJSONRecordLen) + `"}` + "\n",
+			`{"t":"agent","ts":1.000,"msg":"` + strings.Repeat("x", taskslog.MaxRecordSize) + `"}` + "\n",
 		} {
 			log := &testLogSink{}
 			owner := newTestRecords(t, t.Context(), log, nil)

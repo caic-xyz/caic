@@ -196,12 +196,11 @@ func (c *RawCursor) closeCompressed() error {
 }
 
 func readCursorLine(r *bufio.Reader) ([]byte, error) {
-	const maxRecordBytes = 32 << 20
 	var line []byte
 	for {
 		part, err := r.ReadSlice('\n')
-		if len(line)+len(part) > maxRecordBytes {
-			return nil, errors.New("physical history record exceeds 32 MiB")
+		if len(line)+len(part) >= MaxRecordSize {
+			return nil, fmt.Errorf("physical history record must be smaller than %d bytes", MaxRecordSize)
 		}
 		if len(line) == 0 && err == nil {
 			return part, nil

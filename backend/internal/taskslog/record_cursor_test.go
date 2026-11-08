@@ -40,6 +40,43 @@ func writeRawFixture(t *testing.T, compressed bool, raw string) string {
 
 func TestRawCursor(t *testing.T) {
 	t.Parallel()
+	for _, compressed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("large record compressed=%t", compressed), func(t *testing.T) {
+			t.Parallel()
+			line := `{"t":"agent","ts":1.000,"msg":{"text":"` + strings.Repeat("x", 33<<20) + `"}}`
+			tail := `{"t":"text","text":"after"}`
+			path := writeRawFixture(t, compressed, testHeader+"\n"+line+"\n"+tail+"\n")
+			cursor, err := OpenRawCursor(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := cursor.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			var count uint64
+			for record, err := range cursor.Read(t.Context()) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count++
+				if record.ID != count {
+					t.Fatalf("record ID = %d, want %d", record.ID, count)
+				}
+				if count == 2 && string(record.Frame.Encoded) != line {
+					t.Fatal("large record bytes changed")
+				}
+				if count == 3 && string(record.Frame.Encoded) != tail {
+					t.Fatal("record following large record changed")
+				}
+			}
+			if count != 3 {
+				t.Fatalf("records = %d, want 3", count)
+			}
+		})
+	}
+
 	t.Run("partial append and ordinals", func(t *testing.T) {
 		t.Parallel()
 		path := writeRawFixture(t, false, testHeader+"\n\n"+`{"t":"model_info","context_window":123}`+"\n"+`{"t":"text","text":"pending"}`)

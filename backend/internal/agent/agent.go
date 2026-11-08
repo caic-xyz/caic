@@ -1256,17 +1256,15 @@ func relaySnapshotCommand(ctx context.Context, container string, tailBytes, size
 	return sshCmd(ctx, container, command), 0
 }
 
-const maxNDJSONRecordLen = 32 << 20
-
 // readNDJSONRecord reads one LF-terminated physical record without inventing a
-// delimiter. It retains the prior 32 MiB maximum line limit.
+// delimiter. The task-log limit includes the physical LF terminator.
 func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
 	var record []byte
 	for {
 		fragment, err := r.ReadSlice('\n')
 		record = append(record, fragment...)
-		if len(record) > maxNDJSONRecordLen {
-			return record, fmt.Errorf("NDJSON record exceeds %d bytes", maxNDJSONRecordLen)
+		if len(record) >= taskslog.MaxRecordSize {
+			return record, fmt.Errorf("NDJSON record must be smaller than %d bytes", taskslog.MaxRecordSize)
 		}
 		switch {
 		case err == nil:

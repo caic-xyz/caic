@@ -30,7 +30,7 @@ type Scanner struct {
 // NewScanner constructs a bounded physical reader.
 func NewScanner(r io.Reader, src string) *Scanner {
 	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	s.Buffer(make([]byte, 0, 1<<20), MaxRecordSize)
 	return &Scanner{scanner: s, src: src}
 }
 
@@ -140,7 +140,7 @@ func ReadHeader(path string) (meta v3.MetaMessage, retErr error) {
 	}
 	defer func() { retErr = errors.Join(retErr, r.Close()) }()
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 4<<10), 32<<20)
+	scanner.Buffer(make([]byte, 0, 4<<10), MaxRecordSize)
 	s := &Scanner{scanner: scanner, src: path}
 	return s.ReadHeader()
 }

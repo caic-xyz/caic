@@ -634,6 +634,26 @@ def test_invalid_native_values_use_bounded_diagnostics() -> None:
         assert len(record) < relay._MAX_ENCODED_RECORD_LEN
 
 
+def test_large_records_are_lossless() -> None:
+    relay = _load_relay()
+    native = b'{"text":"' + b"x" * (33 << 20) + b'"}'
+    record = relay._encode_agent_record(native, 1_700_000_000_000_000_000)
+    assert record == b'{"t":"agent","ts":1700000000.000,"msg":' + native + b"}\n"
+
+    daemon, _proc, output, client = _new_daemon(relay)
+    daemon.publish_records(record, to_client=True)
+    assert output.data == record
+    assert client.sent == record
+
+    output.data.clear()
+    client.sent.clear()
+    fields = {"error": "x" * (33 << 20)}
+    control = daemon.publish_control("exit", fields, to_client=True)
+    assert json.loads(control) == {"t": "exit", **fields}
+    assert output.data == control
+    assert client.sent == control
+
+
 def test_oversize_and_final_encoded_size_use_one_diagnostic() -> None:
     relay = _load_relay()
     old_limit = relay._MAX_ENCODED_RECORD_LEN
@@ -1206,6 +1226,7 @@ def main() -> int:
         test_shared_encoder_vectors,
         test_native_bytes_and_outer_shape,
         test_invalid_native_values_use_bounded_diagnostics,
+        test_large_records_are_lossless,
         test_oversize_and_final_encoded_size_use_one_diagnostic,
         test_timestamp_failures_precede_emission,
         test_publish_records_persists_partial_writes_before_client_send,

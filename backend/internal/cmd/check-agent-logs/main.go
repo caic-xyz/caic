@@ -19,14 +19,13 @@ import (
 	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 	codexdto "github.com/maruel/genai/providers/codex"
 	pidto "github.com/maruel/genai/providers/pi"
 )
-
-const maxRecordSize = 32 << 20
 
 var knownClaudeSystemSubtypes = map[claudedto.SystemSubtype]struct{}{
 	claudedto.SystemInit:        {},
@@ -294,7 +293,7 @@ func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 	}()
 
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<20), maxRecordSize)
+	sc.Buffer(make([]byte, 1<<20), taskslog.MaxRecordSize)
 	if !sc.Scan() {
 		if err := sc.Err(); err != nil {
 			return fileCheck{}, fmt.Errorf("read %s: %w", path, err)

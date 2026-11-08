@@ -3,6 +3,7 @@
 package agent_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -11,10 +12,41 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 func TestRecords(t *testing.T) {
 	t.Parallel()
+	t.Run("AppendMessage", func(t *testing.T) {
+		t.Parallel()
+		t.Run("large host record persists unchanged", func(t *testing.T) {
+			t.Parallel()
+			text := strings.Repeat("x", 33<<20)
+			log := &agenttest.LogSink{}
+			owner, err := agent.NewRecords(t.Context(), &agenttest.Wire{}, log, &agenttest.RecordHandler{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := owner.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := owner.AppendMessage(t.Context(), &agent.TextMessage{Text: text}); err != nil {
+				t.Fatal(err)
+			}
+			frame, err := taskslog.DecodeFrame(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, ok := frame.Control.(*v3.TextMessage)
+			if !ok || got.Text != text {
+				t.Fatal("large host text changed")
+			}
+		})
+	})
+
 	t.Run("Close", func(t *testing.T) {
 		t.Parallel()
 		t.Run("error", func(t *testing.T) {
