@@ -364,6 +364,7 @@ test("turn completion refreshes the diff and preserves task-card agreement", asy
     });
   } finally {
     await api.purgeTask(id);
+    await waitForTaskState(api, id, "purged");
   }
 });
 

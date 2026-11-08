@@ -356,8 +356,6 @@ test("UI: a dispatched image submission stays with its task across navigation", 
   await expect(thumbnail).toHaveCount(0);
   expect(sent).toBe(1);
   expect(await page.evaluate(() => window.draftProbe.revoked)).toEqual([originalURL]);
-  await api.purgeTask(first);
-  await api.purgeTask(second);
 });
 
 test("UI: unavailable attachment policy keeps text-only task creation working", async ({ page, api, uniquePrompt }) => {
