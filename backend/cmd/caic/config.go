@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/maruel/gomode/httpserver/geoip"
 	"github.com/maruel/gomode/voicegateway"
 	"github.com/pelletier/go-toml/v2"
 
@@ -232,9 +233,9 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 		Debug: server.DebugConfig{
 			Pprof: tc.Debug.Pprof,
 		},
-		IPGeo: server.IPGeoConfig{
-			DB:        geoDBOrDefault(tc.Server.GeoDB, cfgDir),
-			Allowlist: strings.Join(allowOriginsOrDefault(tc.Server.AllowOrigins), ","),
+		IPGeo: geoip.Config{
+			DB:           geoDBOrDefault(tc.Server.GeoDB, cfgDir),
+			AllowOrigins: allowOriginsOrDefault(tc.Server.AllowOrigins),
 		},
 	}
 	return cfg, tc.Server.HTTP, tc.Core.Root, tc.Debug.LogLevel, nil
@@ -245,8 +246,7 @@ var defaultAllowOrigins = []string{"local", "tailscale", "github"}
 
 // allowOriginsOrDefault returns origins if non-empty, otherwise the default.
 // defaultConfig pre-populates the default, so this guards against a config that
-// explicitly sets allow_origins = [], which would otherwise produce an empty
-// (and rejected) allowlist.
+// explicitly sets allow_origins = []; caic keeps its default filtering policy.
 func allowOriginsOrDefault(origins []string) []string {
 	if len(origins) == 0 {
 		return defaultAllowOrigins
@@ -254,11 +254,11 @@ func allowOriginsOrDefault(origins []string) []string {
 	return origins
 }
 
-// geoDBOrDefault returns the geo_db path to use, or empty when geoip is disabled.
+// geoDBOrDefault returns the geo_db path, or empty when country lookup is disabled.
 //
 // If geoDB is empty (not set in config), checks for "GeoLite2-Country.mmdb" in
 // cfgDir and returns that path only if it exists; otherwise returns empty string
-// (geoip disabled). If geoDB is set, returns the configured value resolved
+// (country lookup disabled). If geoDB is set, returns the configured value resolved
 // relative to cfgDir (validation happens in main).
 func geoDBOrDefault(geoDB, cfgDir string) string {
 	if geoDB == "" {

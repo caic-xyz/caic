@@ -413,6 +413,19 @@ func TestGeoDBOrDefault(t *testing.T) {
 
 func TestTomlToServerConfig(t *testing.T) {
 	t.Parallel()
+	t.Run("empty origins keep caic filtering defaults", func(t *testing.T) {
+		t.Parallel()
+		for _, origins := range [][]string{nil, {}} {
+			tc := data.Config{Server: data.Server{AllowOrigins: origins}}
+			cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cfg.IPGeo.AllowOrigins, []string{"local", "tailscale", "github"}) {
+				t.Fatalf("IPGeo.AllowOrigins = %v", cfg.IPGeo.AllowOrigins)
+			}
+		}
+	})
 	t.Run("external voice signing key", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -556,8 +569,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.IPGeo.DB != filepath.Join(dir, "geo.mmdb") {
 			t.Errorf("IPGeoDB = %q", cfg.IPGeo.DB)
 		}
-		if cfg.IPGeo.Allowlist != "local,tailscale" {
-			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeo.Allowlist)
+		if !slices.Equal(cfg.IPGeo.AllowOrigins, []string{"local", "tailscale"}) {
+			t.Errorf("IPGeoAllowOrigins = %q", cfg.IPGeo.AllowOrigins)
 		}
 		if coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY") != "AIza_from_core_env" {
 			t.Errorf("GEMINI_API_KEY = %q, want AIza_from_core_env", coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY"))

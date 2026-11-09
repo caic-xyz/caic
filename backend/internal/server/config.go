@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/gomode/httpserver"
+	"github.com/maruel/gomode/httpserver/geoip"
 	"github.com/maruel/gomode/voicegateway"
 )
 
@@ -31,7 +32,7 @@ type Config struct {
 	Auth    AuthConfig
 	Voice   VoiceConfig
 	Debug   DebugConfig
-	IPGeo   IPGeoConfig
+	IPGeo   geoip.Config
 
 	FakeCI FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
 
@@ -43,6 +44,9 @@ type Config struct {
 
 // Validate returns an error if the configuration is invalid.
 func (c *Config) Validate() error {
+	if err := c.IPGeo.Validate(); err != nil {
+		return fmt.Errorf("server.%w", err)
+	}
 	if err := c.GitHub.Validate(); err != nil {
 		return err
 	}
@@ -314,17 +318,6 @@ func (c *VoiceGatewayConfig) Validate() error {
 // DebugConfig configures optional server diagnostics.
 type DebugConfig struct {
 	Pprof bool // expose /debug/pprof/* endpoints
-}
-
-// IPGeoConfig configures optional request geolocation allowlisting.
-type IPGeoConfig struct {
-	// DB is the path to a MaxMind MMDB file (e.g. GeoLite2-Country.mmdb).
-	DB string
-	// Allowlist is a comma-separated list of permitted country codes, CIDRs, and
-	// named origins: "local", "tailscale", "anthropic", "github", and "openai".
-	// When set, requests from IPs that do not resolve to an allowed value are
-	// rejected with 403. Requires DB for country-code tokens.
-	Allowlist string
 }
 
 func validateBaseURL(name, value string) error {

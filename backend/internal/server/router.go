@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -17,6 +16,16 @@ import (
 
 	"github.com/maruel/genai"
 
+	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/devicelogin"
+	"github.com/maruel/gomode/httpserver"
+	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/maruel/gomode/voicegateway"
+	"github.com/maruel/gomode/voicegateway/voicertc"
+
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
@@ -24,23 +33,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/devicelogin"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/oauth/oauthserver"
-	"github.com/maruel/gomode/voicegateway"
-	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,
@@ -75,9 +74,9 @@ type Router struct {
 	webhooks *WebhookHandlers
 
 	// Auth / session middleware deps.
-	authStore     *auth.Store     // nil when auth disabled
-	sessionSecret []byte          // nil when auth disabled
-	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
+	authStore     *auth.Store            // nil when auth disabled
+	sessionSecret []byte                 // nil when auth disabled
+	hostPolicy    *httpserver.HostPolicy // non-nil when ExternalURL is set (static or auto)
 
 	// mcpDisabled refuses all MCP endpoint requests. Serve sets it when auth is
 	// disabled on a non-loopback listener, so an exposed server never serves MCP
@@ -85,7 +84,7 @@ type Router struct {
 	mcpDisabled bool
 
 	// IP geolocation.
-	ipgeoChecker   *ipgeo.Checker
+	ipgeoChecker   *geoip.Checker
 	trustedProxies []netip.Prefix
 
 	// Profiling (opt-in).
@@ -193,7 +192,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			log:                log.With("handler", "auth"),
 			store:              d.AuthStore,
 			sessionSecret:      d.SessionSecret,
-			hostState:          d.HostState,
+			hostPolicy:         d.HostPolicy,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,
 			googleOAuth:        d.GoogleOAuth,
@@ -259,7 +258,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
 		sessionSecret:    d.SessionSecret,
-		hostState:        d.HostState,
+		hostPolicy:       d.HostPolicy,
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 		trustedProxies:   slices.Clone(d.TrustedProxies),
@@ -299,7 +298,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 
 	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,
-		hostState:   d.HostState,
+		hostPolicy:  d.HostPolicy,
 	}
 	registry := &mcpRegistry{
 		mcpTools: &mcpTools{
@@ -443,7 +442,7 @@ func (r *Router) buildAPIHandler() http.Handler {
 // route registration can be tested without a listener.
 func (r *Router) buildHandler() (http.Handler, error) {
 	// Sync shared references (tests may mutate after construction).
-	r.mcpHandlers.hostState = r.hostState
+	r.mcpHandlers.hostPolicy = r.hostPolicy
 
 	// --- Root mux ---
 	//
@@ -551,18 +550,28 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	}
 	mux.Handle("/", &spaHandler{dist: dist, authProviders: r.serverHandlers.authProviders()})
 
-	// Middleware chain: log context → logging → IP origin check → host check → auth → decompress → compress → mux.
+	// Shared edge policies wrap authentication, decompression and compression.
 	var inner http.Handler = mux
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
 	inner = auth.Middleware(r.authStore, r.sessionSecret, r.authHandlers.refreshTokenRefresher())(inner)
-	if r.hostState != nil {
-		inner = r.hostState.Middleware(inner)
+	opts := httpserver.Options{
+		TrustedProxies: r.trustedProxies,
+		Hosts:          r.hostPolicy,
+		Logger:         r.log,
+		SuccessLevel:   slog.LevelDebug,
 	}
-	inner = r.ipgeoMiddleware(inner)
-	inner = httplog.Handler{Handler: inner, Logger: r.log, Attrs: r.httpLogAttrs}
-	inner = httpLogContextMiddleware(r.log, r.trustedProxies, inner)
-	return inner, nil
+	if r.ipgeoChecker != nil {
+		opts.GeoIP = r.ipgeoChecker
+	}
+	inner, err = httpserver.NewHandler(inner, opts)
+	if err != nil {
+		return nil, err
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := context.WithValue(req.Context(), httpLoggerKey{}, r.log)
+		inner.ServeHTTP(w, req.WithContext(ctx))
+	}), nil
 }
 
 // mountPrefix mounts a handler at prefix on mux, stripping base from the URL
@@ -573,41 +582,6 @@ func mountPrefix(mux *http.ServeMux, base, prefix string, h http.Handler) {
 	h = http.StripPrefix(base, h)
 	mux.Handle(prefix, h)
 	mux.Handle(prefix+"/", h)
-}
-
-func (r *Router) ipgeoMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if r.ipgeoChecker == nil {
-			next.ServeHTTP(w, req)
-			return
-		}
-		logCtx := httpLogContextFromRequest(req)
-		clientIP := logCtx.clientIP
-		origin, allowed := r.ipgeoChecker.CheckOrigin(clientIP)
-		logCtx.origin = origin
-		if !allowed {
-			http.Error(w, fmt.Sprintf("forbidden: origin %s (%s) not allowed", clientIP, origin), http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, req)
-	})
-}
-
-func httpLogContextMiddleware(log *slog.Logger, trustedProxies []netip.Prefix, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logCtx := &httpLogContext{clientIP: httpserver.ResolveClientIP(r, trustedProxies)}
-		ctx := context.WithValue(r.Context(), httpLogContextKey{}, logCtx)
-		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, log))
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (r *Router) httpLogAttrs(req *http.Request) []slog.Attr {
-	logCtx := httpLogContextFromRequest(req)
-	return []slog.Attr{
-		slog.String("ip", logCtx.clientIP),
-		slog.String("origin", logCtx.origin),
-	}
 }
 
 // backgroundWorkers owns work that must outlive individual HTTP requests.
@@ -639,21 +613,6 @@ func (w *backgroundWorkers) Close() {
 	w.cancel()
 	w.mu.Unlock()
 	w.wg.Wait()
-}
-
-func httpLogContextFromRequest(r *http.Request) *httpLogContext {
-	logCtx, _ := r.Context().Value(httpLogContextKey{}).(*httpLogContext)
-	if logCtx == nil {
-		return &httpLogContext{clientIP: httpserver.ResolveClientIP(r, nil)}
-	}
-	return logCtx
-}
-
-type httpLogContextKey struct{}
-
-type httpLogContext struct {
-	clientIP string
-	origin   string
 }
 
 // hostOnly returns the host portion of a host:port address, or the input when
@@ -699,7 +658,7 @@ type Dependencies struct {
 	GitHubOAuth                *oauthclient.ProviderConfig
 	GitLabOAuth                *oauthclient.ProviderConfig
 	GoogleOAuth                *oauthclient.ProviderConfig
-	HostState                  *auth.HostState
+	HostPolicy                 *httpserver.HostPolicy
 	UsageFetchers              []usage.ProviderFetcher
 	UsageRollup                *usagedb.Store
 	VoiceBridge                *voicertc.Bridge
@@ -709,7 +668,7 @@ type Dependencies struct {
 	Runtimes                   *runtime.Router
 	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
-	IPGeoChecker               *ipgeo.Checker
+	IPGeoChecker               *geoip.Checker
 	TrustedProxies             []netip.Prefix
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.

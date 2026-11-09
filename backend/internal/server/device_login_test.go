@@ -21,10 +21,11 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/maruel/gomode/devicelogin"
+	"github.com/maruel/gomode/httpserver/geoip"
 	"github.com/maruel/gomode/oauth/oauthclient"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
 //nolint:paralleltest // Virtual polling must isolate KSID's process-wide clock.
@@ -419,12 +420,16 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("IP origin protection retained", func(t *testing.T) {
-		s, h, _, _, _ := setup(t)
-		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "127.0.0.0/8", "", "")
+		s, _, _, _, _ := setup(t)
+		checker, err := geoip.NewChecker(t.Context(), testLogger(), "127.0.0.0/8", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		s.ipgeoChecker = checker
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if w := post(t, h, "/auth/device/start", "{}", "", ""); w.Code != 403 {
 			t.Fatalf("IP protection %d", w.Code)
 		}

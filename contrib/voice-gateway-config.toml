@@ -18,8 +18,30 @@
 [server]
 # Use an HTTPS reverse proxy for secure signaling.
 http = "127.0.0.1:3479"
+# Expected public origin. Trusted proxies may supply forwarded host/scheme;
+# otherwise the request Host must match.
+# external_url = "https://voice.example.com"
+# Only these direct peers may supply X-Forwarded-For or X-Real-IP.
+# Their resolved client IP drives access logs and origin filtering.
+# trusted_proxies = ["127.0.0.1/32", "::1/128"]
+# GeoIP is disabled when both settings are absent. geo_db alone enriches logs;
+# relative paths resolve beside this config file; ~ expands to your home directory.
+# geo_db = "GeoLite2-Country.mmdb"
+# A nonempty allowlist rejects other origins. Two-letter country codes need geo_db and must occur in it;
+# local, tailscale, anthropic, github, openai and CIDRs can be used without it.
+# GitHub/OpenAI ranges are cached under the user cache directory.
+# allow_origins = ["local", "tailscale", "github", "CA", "203.0.113.0/24"]
+# Enables the live-test UI and unauthenticated test routes on this listener.
+# Anyone who can access it can use your voice backends.
+debug_frontend = false
 # The WebRTC UDP port must be reachable by clients (directly or through NAT).
 webrtc_udp_port = 3480
+# Log level: debug, info (default), warn, or error.
+# log_level = "info"
+
+[debug]
+# Go execution trace output, readable with go tool trace. Empty disables tracing.
+# trace = "/tmp/voice-gateway.trace"
 
 # Managed LLMs, speech stages, and native llama.cpp audio load on first use.
 # A choice counts as one instance, including its ASR/LLM/TTS workers. Active

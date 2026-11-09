@@ -16,9 +16,9 @@ import (
 	"testing"
 
 	"github.com/andybalholm/brotli"
-	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
+	"github.com/maruel/gomode/httpserver"
 )
 
 type flushErrorWriteCloser struct {
@@ -112,7 +112,7 @@ func TestCompressMiddleware(t *testing.T) {
 					beforeClose = bytes.Clone(wire.Body.Bytes())
 					wire.failing = true
 				})
-				h := httplog.Handler{Handler: compressMiddleware(handler), Logger: log}
+				h := httpserver.AccessLog{Handler: compressMiddleware(handler), Logger: log, SuccessLevel: slog.LevelDebug}
 				h.ServeHTTP(wire, req)
 				if wire.failedWrites == 0 {
 					t.Fatal("compressor finalization did not exercise transport failure")

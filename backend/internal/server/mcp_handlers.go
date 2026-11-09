@@ -11,12 +11,14 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/ksid"
+
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthserver"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthserver"
 )
 
 // mcpHandlers owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and
@@ -27,7 +29,7 @@ type mcpHandlers struct {
 	rateLimiter *rateLimiter
 
 	// Shared, injected reference (not owned).
-	hostState *auth.HostState
+	hostPolicy *httpserver.HostPolicy
 }
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
@@ -114,7 +116,7 @@ func (h *mcpHandlers) validateMCPOrigin(r *http.Request) error {
 	if err != nil || originURL.Scheme == "" || originURL.Host == "" || originURL.Path != "" {
 		return errors.New("invalid origin")
 	}
-	baseURL, err := url.Parse(externalBaseURL(h.hostState, r))
+	baseURL, err := url.Parse(externalBaseURL(h.hostPolicy, r))
 	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return errors.New("invalid server origin")
 	}
@@ -248,27 +250,13 @@ func mcpHasScope(ctx context.Context, scope string) bool {
 	return ok
 }
 
-// externalBaseURL constructs the server's external base URL from hostState or
-// the request. Used by both mcpHandlers (origin validation) and oauthserver.Server
-// (metadata, challenge, bearer verification).
-func externalBaseURL(hostState *auth.HostState, r *http.Request) string {
-	if hostState != nil {
-		if externalURL := hostState.ExternalURL(r); externalURL != "" {
-			return strings.TrimRight(externalURL, "/")
+// externalBaseURL uses the public policy URL or trusted request metadata
+// for MCP same-origin checks.
+func externalBaseURL(hostPolicy *httpserver.HostPolicy, r *http.Request) string {
+	if hostPolicy != nil {
+		if externalURL := hostPolicy.ExternalURL(); externalURL != "" {
+			return externalURL
 		}
 	}
-	authority, scheme := effectiveRequestHostAndScheme(r)
-	return scheme + "://" + authority
-}
-
-func effectiveRequestHostAndScheme(r *http.Request) (authority, scheme string) {
-	authority = r.Host
-	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
-		authority = forwardedHost
-	}
-	scheme = "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return authority, scheme
+	return httpserver.RequestOrigin(r.Context())
 }

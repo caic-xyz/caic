@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/gomode/httpserver/geoip"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/ksid"
@@ -75,7 +77,7 @@ func TestRuntimeRestoreMissingLog(t *testing.T) {
 		if err := errors.Join(a.taskMgr.Close(), a.metricsLog.Close()); err != nil {
 			t.Error(err)
 		}
-		for _, c := range a.providerClosers {
+		for _, c := range a.resourceClosers {
 			if err := c.Close(); err != nil {
 				t.Error(err)
 			}
@@ -335,7 +337,7 @@ func BenchmarkAppStartupWithSlowImport(b *testing.B) {
 		Runtime:       server.RuntimeConfig{System: &slowImportSystem{delay: 20 * time.Millisecond}, SkipWarmup: true},
 		Agent:         server.AgentConfig{Backends: agent.Backends{}},
 		LLM:           server.LLMConfig{Disable: true},
-		IPGeo:         server.IPGeoConfig{Allowlist: "0.0.0.0/0,::/0"},
+		IPGeo:         geoip.Config{AllowOrigins: []string{"0.0.0.0/0", "::/0"}},
 		UsageFetchers: []usage.ProviderFetcher{},
 	}
 	log := slog.New(slog.DiscardHandler)
@@ -406,7 +408,7 @@ func closeSpyConfig(t *testing.T, providerName string) *server.Config {
 		Runtime:       server.RuntimeConfig{System: &runtimetest.FakeSystem{}, SkipWarmup: true},
 		Agent:         server.AgentConfig{Backends: agent.Backends{}},
 		LLM:           server.LLMConfig{Provider: providerName},
-		IPGeo:         server.IPGeoConfig{Allowlist: "0.0.0.0/0,::/0"},
+		IPGeo:         geoip.Config{AllowOrigins: []string{"0.0.0.0/0", "::/0"}},
 		UsageFetchers: []usage.ProviderFetcher{},
 	}
 }
@@ -445,30 +447,42 @@ func TestApp(t *testing.T) {
 		}
 	})
 
-	t.Run("ServeClosesProviderAtShutdown", func(t *testing.T) {
-		t.Setenv("TEST_KEY", "test-key")
-		spy := &closeSpyProvider{}
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
-		srv, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), closeSpyConfig(t, registerCloseSpyProvider(t, spy)))
-		if err != nil {
-			t.Fatalf("New() = %v", err)
-		}
-		var lc net.ListenConfig
-		ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan error, 1)
-		var workers sync.WaitGroup
-		t.Cleanup(func() { cancel(); workers.Wait() })
-		workers.Go(func() { done <- srv.Serve(ctx, ln) })
-		cancel()
-		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
-			t.Errorf("Serve() = %v", err)
-		}
-		if !spy.closed {
-			t.Error("provider was not closed when serving stopped")
+	t.Run("Serve", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			origins []string
+		}{
+			{name: "GeoIP disabled"},
+			{name: "GeoIP filter", origins: []string{"0.0.0.0/0", "::/0"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("TEST_KEY", "test-key")
+				spy := &closeSpyProvider{}
+				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
+				cfg := closeSpyConfig(t, registerCloseSpyProvider(t, spy))
+				cfg.IPGeo.AllowOrigins = tc.origins
+				srv, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg)
+				if err != nil {
+					t.Fatalf("New() = %v", err)
+				}
+				var lc net.ListenConfig
+				ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				done := make(chan error, 1)
+				var workers sync.WaitGroup
+				t.Cleanup(func() { cancel(); workers.Wait() })
+				workers.Go(func() { done <- srv.Serve(ctx, ln) })
+				cancel()
+				if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+					t.Errorf("Serve() = %v", err)
+				}
+				if !spy.closed {
+					t.Error("provider was not closed when serving stopped")
+				}
+			})
 		}
 	})
 }

@@ -16,12 +16,11 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.2.2-0.20261108141113-a5edecdbc0b9
 	github.com/maruel/genai v0.10.3-0.20261108213537-284216ad07af
-	github.com/maruel/gomode v0.3.1-0.20261109023842-7208233ecab7
+	github.com/maruel/gomode v0.3.1-0.20261109151238-37e12bcc1b5f
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
-	github.com/oschwald/maxminddb-golang/v2 v2.6.0
 	github.com/pb33f/ordered-map/v2 v2.3.2
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/shirou/gopsutil/v4 v4.26.9
@@ -172,6 +171,7 @@ require (
 	github.com/nishanths/exhaustive v0.17.1 // indirect
 	github.com/nishanths/predeclared v0.3.1 // indirect
 	github.com/nunnatsa/ginkgolinter v0.24.0 // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.6.0 // indirect
 	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pb33f/go-yaml v0.1.1 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect

@@ -10,8 +10,10 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/maruel/gomode/devicelogin"
+	"github.com/maruel/gomode/httpserver"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
 type deviceLoginHost struct {
@@ -24,12 +26,12 @@ func (h *deviceLoginHost) Enabled() bool {
 }
 
 func (h *deviceLoginHost) ClientIP(r *http.Request) netip.Addr {
-	ip, _ := netip.ParseAddr(httpLogContextFromRequest(r).clientIP)
+	ip, _ := netip.ParseAddr(httpserver.ClientIP(r.Context()))
 	return ip
 }
 
 func (h *deviceLoginHost) VerificationURL(r *http.Request) string {
-	return h.auth.hostState.ExternalURL(r) + "/device"
+	return h.auth.hostPolicy.ExternalURL() + "/device"
 }
 
 func (h *deviceLoginHost) Identify(r *http.Request) (string, error) {
@@ -74,19 +76,18 @@ func (h *deviceLoginHost) CreateSession(r *http.Request, subject string) (device
 	if err != nil {
 		return nil, err
 	}
-	return &deviceSession{handlers: h.auth, request: r, session: session, token: token}, nil
+	return &deviceSession{handlers: h.auth, session: session, token: token}, nil
 }
 
 type deviceSession struct {
 	handlers *authHandlers
-	request  *http.Request
 	session  auth.Session
 	token    string
 }
 
 func (s *deviceSession) SessionID() string { return s.session.ID }
 func (s *deviceSession) WriteResponse(w http.ResponseWriter) error {
-	s.handlers.writeSessionCookie(w, s.request, s.token, s.session.ExpiresAt)
+	s.handlers.writeSessionCookie(w, s.token, s.session.ExpiresAt)
 	w.Header().Set("Content-Type", "application/json")
 	return json.NewEncoder(w).Encode(struct{}{})
 }

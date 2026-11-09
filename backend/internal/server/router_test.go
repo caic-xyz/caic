@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -24,12 +25,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/gomode/httpserver"
+
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/ksid"
+
+	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
+	"github.com/maruel/gomode/voicegateway/voicertc"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -46,18 +56,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
-	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) api.ErrorDetails {
@@ -125,8 +129,8 @@ type testRuntimeBackend interface {
 }
 
 // newTestRouter creates a Router for tests. Tests commonly mutate auth/host
-// fields (authStore, sessionSecret, hostState) on the returned Router and then
-// call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
+// fields (authStore, sessionSecret, hostPolicy) on the returned Router and then
+// call buildHandler; buildHandler re-syncs hostPolicy into the MCP concern, and
 // the authHandlers copies must be synced by the test if exercised.
 func newTestRuntime(t testing.TB, backend testRuntimeBackend) *runtime.Router {
 	router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
@@ -180,9 +184,9 @@ func newTestUsageRollup(t testing.TB) *usagedb.Store {
 }
 
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
-	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
-		t.Fatalf("ipgeo.NewChecker: %v", err)
+		t.Fatalf("geoip.NewChecker: %v", err)
 	}
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
@@ -215,10 +219,10 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
 // OAuth tests that need s.oauthServer to be non-nil at construction time.
 // If refreshTokenPath is non-empty, it is used as the OAuth refresh token store.
-func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostState *auth.HostState) *testRouter {
-	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshTokenPath string, hostPolicy *httpserver.HostPolicy) *testRouter {
+	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
-		t.Fatalf("ipgeo.NewChecker: %v", err)
+		t.Fatalf("geoip.NewChecker: %v", err)
 	}
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
@@ -244,7 +248,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
 		OAuthRefreshTokenStorePath: refreshTokenPath,
-		HostState:                  hostState,
+		HostPolicy:                 hostPolicy,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -255,7 +259,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 // newTestOAuthRouter creates a Router configured with OAuth host state and a
 // session secret, suitable for tests that hit OAuth endpoints or issue tokens.
 func newTestOAuthRouter(t testing.TB, authStore *auth.Store) *testRouter {
-	s := newTestRouterWithAuthHost(t, authStore, "", auth.NewHostState("https://caic.example.com", nil))
+	s := newTestRouterWithAuthHost(t, authStore, "", newTestHostPolicy(t, "https://caic.example.com"))
 	s.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 	return s
 }
@@ -369,7 +373,7 @@ func TestNew(t *testing.T) {
 		}
 		d.AuthStore = store
 		d.SessionSecret = []byte("0123456789abcdef0123456789abcdef")
-		d.HostState = auth.NewHostState("", nil)
+		d.HostPolicy = newTestHostPolicy(t, "")
 		d.GitHubOAuth = oauthclient.NewGitHubConfig("client-id", "client-secret", func(*http.Request) string {
 			return "https://caic.example.com/auth/github/callback"
 		})
@@ -2330,9 +2334,9 @@ func TestBuildHandler(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
-				checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "local", "", "")
+				checker, err := geoip.NewChecker(t.Context(), testLogger(), "local", "", "")
 				if err != nil {
-					t.Fatalf("ipgeo.NewChecker: %v", err)
+					t.Fatalf("geoip.NewChecker: %v", err)
 				}
 				s.ipgeoChecker = checker
 				h, err := s.buildHandler()
@@ -2357,10 +2361,12 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("trusted proxy forwards allowed origin", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
+		var logs bytes.Buffer
+		s.log = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		s.trustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
-		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "local", "", "")
+		checker, err := geoip.NewChecker(t.Context(), testLogger(), "local", "", "")
 		if err != nil {
-			t.Fatalf("ipgeo.NewChecker: %v", err)
+			t.Fatalf("geoip.NewChecker: %v", err)
 		}
 		s.ipgeoChecker = checker
 		h, err := s.buildHandler()
@@ -2374,6 +2380,13 @@ func TestBuildHandler(t *testing.T) {
 		h.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var record map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["msg"] != "http" || record["level"] != "DEBUG" || record["ip"] != "127.0.0.1" || record["origin"] != "local" || record["s"] != float64(http.StatusOK) {
+			t.Fatalf("access log metadata = %v", record)
 		}
 	})
 
@@ -2533,6 +2546,40 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("MCP fallback origin honors proxy trust", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			peer   string
+			status int
+		}{
+			{"198.51.100.2:123", http.StatusForbidden},
+			{"192.0.2.10:123", http.StatusOK},
+		} {
+			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+			token := authorizeMCPClient(t, s.authStore, h, &user, &registered)
+			s.hostPolicy = nil
+			s.ipgeoChecker = nil
+			s.trustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+			h, err := s.buildHandler()
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://caic.example.com/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
+			req.RemoteAddr = tc.peer
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+			req.Header.Set("Mcp-Method", "tools/list")
+			req.Header.Set("Origin", "https://public.example.com")
+			req.Header.Set("X-Forwarded-Host", "public.example.com")
+			req.Header.Set("X-Forwarded-Proto", "https")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("peer %s: status=%d body=%s", tc.peer, w.Code, w.Body.String())
+			}
+		}
+	})
+
 	t.Run("MCP tool scope policy covers every advertised tool", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -2584,7 +2631,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP rate limiter rejects excess requests", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com", nil)
+		s.hostPolicy = newTestHostPolicy(t, "https://caic.example.com")
 		s.mcpHandlers.rateLimiter = newRateLimiter(1, time.Minute)
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2684,7 +2731,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check rejects wrong host", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com", nil)
+		s.hostPolicy = newTestHostPolicy(t, "https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2702,7 +2749,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check allows matching host", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com", nil)
+		s.hostPolicy = newTestHostPolicy(t, "https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2720,7 +2767,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("static host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = auth.NewHostState("https://caic.example.com", nil)
+		s.hostPolicy = newTestHostPolicy(t, "https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2735,7 +2782,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("no host check when hostState nil", func(t *testing.T) {
+	t.Run("no host check when hostPolicy nil", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
@@ -2755,7 +2802,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("auto host check locks first FQDN", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = &auth.HostState{}
+		s.hostPolicy = newTestHostPolicy(t, "")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2792,7 +2839,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("auto host check rejects same host on different port", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = &auth.HostState{}
+		s.hostPolicy = newTestHostPolicy(t, "")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2829,7 +2876,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = &auth.HostState{}
+		s.hostPolicy = newTestHostPolicy(t, "")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2863,7 +2910,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("auto host check allows localhost", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = &auth.HostState{}
+		s.hostPolicy = newTestHostPolicy(t, "")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2881,7 +2928,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("auto host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		s.hostState = &auth.HostState{}
+		s.hostPolicy = newTestHostPolicy(t, "")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2927,18 +2974,18 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		t.Fatalf("open auth store: %v", err)
 	}
 
-	host := auth.NewHostState("http://localhost", nil)
+	host := newTestHostPolicy(t, "http://localhost")
 	s := newTestRouter(t, nil)
 	s.sessionSecret = secret
 	s.authStore = store
-	s.hostState = host
+	s.hostPolicy = host
 	githubCfg := oauthclient.NewGitHubConfig("cid", "csec", func(_ *http.Request) string { return "http://localhost/api/caic/v1/auth/github/callback" })
 	githubCfg.TokenURL = tokenServer.URL
 	githubCfg.UserInfoURL = userServer.URL
 	githubCfg.Scopes = []string{"repo"}
 	s.authHandlers.store = s.authStore
 	s.authHandlers.sessionSecret = s.sessionSecret
-	s.authHandlers.hostState = s.hostState
+	s.authHandlers.hostPolicy = s.hostPolicy
 	s.authHandlers.githubOAuth = githubCfg
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
@@ -3262,4 +3309,12 @@ func recordRouterTaskLog(t testing.TB, s *testRouter, tk *taskrun.Task) {
 func TestMain(m *testing.M) {
 	gittest.Isolate()
 	os.Exit(m.Run())
+}
+
+func newTestHostPolicy(t testing.TB, origin string) *httpserver.HostPolicy {
+	p, err := httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: origin, AllowLocal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

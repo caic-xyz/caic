@@ -25,6 +25,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/maruel/gomode/httpserver/geoip"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
@@ -32,7 +34,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -174,7 +175,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", "", nil, err
 	}
-	checker, err := ipgeo.NewChecker(ctx, slog.New(slog.NewTextHandler(os.Stderr, nil)), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(ctx, slog.New(slog.NewTextHandler(os.Stderr, nil)), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		return "", "", nil, err
 	}

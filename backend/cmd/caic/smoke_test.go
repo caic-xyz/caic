@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/gomode/httpserver/geoip"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/md"
@@ -674,8 +676,8 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 			LLM: server.LLMConfig{
 				Disable: true,
 			},
-			IPGeo: server.IPGeoConfig{
-				Allowlist: "0.0.0.0/0,::/0",
+			IPGeo: geoip.Config{
+				AllowOrigins: []string{"0.0.0.0/0", "::/0"},
 			},
 		},
 	}

@@ -20,6 +20,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -29,14 +36,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/oauth/oauthserver"
-	"github.com/maruel/ksid"
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
@@ -91,7 +92,7 @@ func TestOAuthServer(t *testing.T) {
 			tokenResp := authorizeMCPClient(t, s.authStore, mustBuildMCPOAuthLifecycleHandler(t, s), &user, &registered)
 			s.oauthServer.Close()
 
-			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauthRefreshTokenPath, auth.NewHostState("https://caic.example.com", nil))
+			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauthRefreshTokenPath, newTestHostPolicy(t, "https://caic.example.com"))
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
@@ -399,7 +400,7 @@ func TestOAuthServer(t *testing.T) {
 		t.Run("redirects unauthenticated web authorization to caic login", func(t *testing.T) {
 			t.Parallel()
 			s2, _ := newAuthEnabledRouter(t)
-			s2.authHandlers.hostState = s2.hostState
+			s2.authHandlers.hostPolicy = s2.hostPolicy
 			s2.authHandlers.githubOAuth = oauthclient.NewGitHubConfig("github-client", "github-secret", func(_ *http.Request) string { return "https://localhost/api/caic/v1/auth/github/callback" })
 			h2, err := s2.buildHandler()
 			if err != nil {
@@ -446,9 +447,9 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		t.Fatalf("upsert user: %v", err)
 	}
 
-	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
+	checker, err := geoip.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
-		t.Fatalf("ipgeo.NewChecker: %v", err)
+		t.Fatalf("geoip.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
@@ -479,7 +480,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		UsageRollup:                newTestUsageRollup(t),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
-		HostState:                  auth.NewHostState("https://caic.example.com", nil),
+		HostPolicy:                 newTestHostPolicy(t, "https://caic.example.com"),
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
 		OAuthRefreshTokenStorePath: refreshTokenPath,

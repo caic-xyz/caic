@@ -17,7 +17,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/gomode/httpserver"
+
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/git"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/voicegateway/voicertc"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -32,7 +42,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -40,13 +49,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/metricsdb"
-	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/git"
-	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/voicegateway/voicertc"
-	"golang.org/x/sync/errgroup"
 )
 
 const repoDiscoveryDepth = 3
@@ -59,7 +61,7 @@ type App struct {
 	backgroundTasks []backgroundTask
 	metricsLog      *metricsdb.Log
 	taskMgr         *taskmgr.Manager
-	providerClosers []io.Closer
+	resourceClosers []io.Closer
 	ciService       *ci.Service
 	botService      *bot.Bot
 }
@@ -157,14 +159,18 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, err
 	}
 
-	var hostState *auth.HostState
+	var hostPolicy *httpserver.HostPolicy
 	var oauthIssuer string
 	isAuto := strings.EqualFold(cfg.Auth.ExternalURL, "auto")
 	if isAuto {
-		hostState = auth.NewHostState("", trustedProxies)
+		hostPolicy, err = httpserver.NewHostPolicy(httpserver.HostPolicyOptions{AllowLocal: true})
 	} else if cfg.Auth.ExternalURL != "" {
-		hostState = auth.NewHostState(cfg.Auth.ExternalURL, trustedProxies)
+		hostPolicy, err = httpserver.NewHostPolicy(httpserver.HostPolicyOptions{ExternalURL: cfg.Auth.ExternalURL, AllowLocal: true})
 		oauthIssuer = cfg.Auth.ExternalURL
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("host policy: %w", err)
 	}
 
 	appLog.InfoContext(ctx, "github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
@@ -186,7 +192,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			githubOAuth = oauthclient.NewGitHubConfig(
 				cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret,
 				func(r *http.Request) string {
-					u := hostState.ExternalURL(r)
+					u := hostPolicy.ExternalURL()
 					if u == "" {
 						return ""
 					}
@@ -198,7 +204,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			gitlabOAuth = oauthclient.NewGitLabConfig(
 				cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL,
 				func(r *http.Request) string {
-					u := hostState.ExternalURL(r)
+					u := hostPolicy.ExternalURL()
 					if u == "" {
 						return ""
 					}
@@ -210,7 +216,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			googleOAuth = oauthclient.NewGoogleConfig(
 				cfg.Google.OAuthClientID, cfg.Google.OAuthClientSecret,
 				func(r *http.Request) string {
-					u := hostState.ExternalURL(r)
+					u := hostPolicy.ExternalURL()
 					if u == "" {
 						return ""
 					}
@@ -252,18 +258,18 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		forgeManager.SetGitHubApp(app)
 	}
 
-	var providerClosers []io.Closer
-	keepProviders := false
+	var resourceClosers []io.Closer
+	keepResources := false
 	defer func() {
-		if !keepProviders {
-			for _, c := range providerClosers {
+		if !keepResources {
+			for _, c := range resourceClosers {
 				retErr = errors.Join(retErr, c.Close())
 			}
 		}
 	}()
 	provider := initProvider(ctx, appLog, cfg)
 	if provider != nil {
-		providerClosers = append(providerClosers, provider)
+		resourceClosers = append(resourceClosers, provider)
 	}
 	for i := range mdRuntimes {
 		mdRuntimes[i].backend.Provider = provider
@@ -272,7 +278,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	fetchers := usageFetchers(ctx, appLog, cfg)
 	for _, f := range fetchers {
 		if c, ok := f.(io.Closer); ok {
-			providerClosers = append(providerClosers, c)
+			resourceClosers = append(resourceClosers, c)
 		}
 	}
 	checkoutRegistry := repo.NewRegistry()
@@ -340,12 +346,15 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}()
 
-	ipgeoChecker, err := ipgeo.NewChecker(ctx, log.With("cmp", "ipgeo"), cfg.IPGeo.Allowlist, cfg.IPGeo.DB, cfg.Dirs.CacheDir)
+	ipgeoChecker, err := cfg.IPGeo.Open(ctx, log.With("cmp", "ipgeo"), cfg.Dirs.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}
+	if ipgeoChecker != nil {
+		resourceClosers = append(resourceClosers, ipgeoChecker)
+	}
 	if cfg.IPGeo.DB != "" {
-		appLog.InfoContext(ctx, "ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
+		appLog.InfoContext(ctx, "ipgeo", "path", cfg.IPGeo.DB, "list", strings.Join(cfg.IPGeo.AllowOrigins, ","))
 	}
 
 	s, err := server.New(ctx, log, server.Dependencies{
@@ -365,7 +374,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		GitHubOAuth:                githubOAuth,
 		GitLabOAuth:                gitlabOAuth,
 		GoogleOAuth:                googleOAuth,
-		HostState:                  hostState,
+		HostPolicy:                 hostPolicy,
 		UsageFetchers:              fetchers,
 		UsageRollup:                usageRollup,
 		VoiceBridge:                voiceBridge,
@@ -587,7 +596,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	)
 	keepTaskMgr = true
 	keepServer = true
-	keepProviders = true
+	keepResources = true
 	keepAutomation = true
 	return &App{
 		Server:          s,
@@ -595,7 +604,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		backgroundTasks: backgroundTasks,
 		metricsLog:      metricsLog,
 		taskMgr:         taskMgr,
-		providerClosers: providerClosers,
+		resourceClosers: resourceClosers,
 		ciService:       ciService,
 		botService:      botService,
 	}, nil
@@ -608,7 +617,7 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 		a.botService.Close()
 		a.ciService.Close()
 		err = errors.Join(err, a.taskMgr.Close(), a.metricsLog.Close())
-		for _, c := range a.providerClosers {
+		for _, c := range a.resourceClosers {
 			err = errors.Join(err, c.Close())
 		}
 	}()

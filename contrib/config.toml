@@ -57,18 +57,21 @@
 # for explicit loopback development origins.
 #external_url = "auto"  # e.g. "https://caic.example.com"
 
-# Direct reverse proxies trusted to set Forwarded or X-Forwarded-* origin
-# headers. Leave empty when caic is reached directly. Never include client
-# networks; only include the proxy peers that connect to caic.
+# Direct reverse proxies trusted to set Forwarded/X-Forwarded-* origin headers
+# and X-Forwarded-For/X-Real-IP client addresses for filtering and logging. Leave
+# empty when caic is reached directly. Never include client networks; only include
+# the proxy peers that connect to caic.
 #trusted_proxies = []  # e.g. ["127.0.0.1/32", "::1/128"]
 
 # MaxMind MMDB file for country-code resolution and logging. Relative paths
 # resolve against the config directory. Empty defaults to
-# "~/.config/caic/GeoLite2-Country.mmdb" if present, otherwise geoip is disabled.
+# "~/.config/caic/GeoLite2-Country.mmdb" if present, otherwise country lookup is
+# disabled; the named-origin and CIDR allowlist still applies.
 # https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
 #geo_db = ""  # e.g. "~/.config/caic/GeoLite2-Country.mmdb"
 
 # Allowed origins; requests from non-matching IPs are rejected with HTTP 403.
+# Omitted or empty lists retain the default ["local", "tailscale", "github"].
 # Named:
 # - "anthropic" (published Anthropic outbound IPs): necessary for Claude MCP.
 # - "github" (GitHub webhook IPs): necessary for GitHub App.
@@ -77,7 +80,7 @@
 # - "tailscale" (100.64.0.0/10): very useful if you use tailscale.com.
 # Others:
 # - CIDR: e.g. "203.0.113.0/24"
-# - Country codes: ISO 3166-1 alpha-2 (e.g. "CA"), require geo_db.
+# - Country codes: two letters (e.g. "CA"), require geo_db and must occur in it.
 #allow_origins = ["local", "tailscale", "github"]
 
 # ── Voice Gateway ────────────────────────────────────────────────────────────

@@ -63,10 +63,9 @@ func TestAuthHandlers(t *testing.T) {
 	t.Run("writeSessionCookie", func(t *testing.T) {
 		t.Parallel()
 		h := &authHandlers{}
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost/auth/device/poll", nil)
 		w := httptest.NewRecorder()
 		expires := time.Now().UTC().Truncate(time.Second).Add(90 * time.Second)
-		h.writeSessionCookie(w, r, "credential", expires)
+		h.writeSessionCookie(w, "credential", expires)
 		cookies := w.Result().Cookies()
 		if len(cookies) != 1 || !cookies[0].Expires.Equal(expires) || cookies[0].MaxAge < 88 || cookies[0].MaxAge > 90 {
 			t.Fatalf("cookie does not follow issued expiry: %v", cookies)

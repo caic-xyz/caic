@@ -16,13 +16,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/server/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/maruel/gomode/devicelogin"
+	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/gomode/oauth"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 const (
@@ -34,7 +36,7 @@ type authHandlers struct {
 	log           *slog.Logger
 	store         *auth.Store
 	sessionSecret []byte
-	hostState     *auth.HostState
+	hostPolicy    *httpserver.HostPolicy
 
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
@@ -113,7 +115,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			MaxAge:   600,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(r),
+			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
 		authURL := cfg.AuthURL(r, fullState)
@@ -138,7 +140,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(r),
+			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
 
@@ -227,7 +229,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			return
 		}
 
-		h.writeSessionCookie(w, r, jwt, session.ExpiresAt)
+		h.writeSessionCookie(w, jwt, session.ExpiresAt)
 
 		if redirectMode == "app" {
 			http.Redirect(w, r, "caic://auth?token="+url.QueryEscape(jwt), http.StatusFound)
@@ -309,7 +311,7 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   h.useSecureCookies(r),
+		Secure:   h.useSecureCookies(),
 		Path:     "/",
 	})
 	writeJSONResponse(r.Context(), w, &v1.StatusResp{Status: "ok"}, nil)
@@ -354,8 +356,8 @@ func (h *authHandlers) defaultProvider(r *http.Request) string {
 
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
-func (h *authHandlers) useSecureCookies(r *http.Request) bool {
-	return h.hostState != nil && strings.HasPrefix(h.hostState.ExternalURL(r), "https://")
+func (h *authHandlers) useSecureCookies() bool {
+	return h.hostPolicy != nil && strings.HasPrefix(h.hostPolicy.ExternalURL(), "https://")
 }
 
 func buildLoginState(mode, state, next string) string {
@@ -437,15 +439,15 @@ func (h *authHandlers) issueSession(r *http.Request, u *auth.User, source string
 	return h.store.IssueToken(u, h.sessionSecret, sessionTTL, h.sessionInfo(r, source))
 }
 
-func (h *authHandlers) writeSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+func (h *authHandlers) writeSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure follows the same trusted host policy as normal OAuth login.
 		Name: sessionCookieName, Value: token, MaxAge: max(1, int(time.Until(expires).Seconds())), Expires: expires, HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: h.useSecureCookies(r), Path: "/",
+		SameSite: http.SameSiteLaxMode, Secure: h.useSecureCookies(), Path: "/",
 	})
 }
 
 func (h *authHandlers) sessionInfo(r *http.Request, source string) auth.SessionInfo {
-	ip, _ := netip.ParseAddr(httpLogContextFromRequest(r).clientIP)
+	ip, _ := netip.ParseAddr(httpserver.ClientIP(r.Context()))
 	coarse := "unknown"
 	if ip.IsValid() {
 		bits := 48
@@ -467,7 +469,7 @@ func (h *authHandlers) sessionMutationAllowed(w http.ResponseWriter, r *http.Req
 	}
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		origin := r.Header.Get("Origin")
-		if r.Header.Get("X-Caic-Csrf") != "1" || (origin != "" && (h.hostState == nil || origin != h.hostState.ExternalURL(r))) {
+		if r.Header.Get("X-Caic-Csrf") != "1" || (origin != "" && (h.hostPolicy == nil || origin != h.hostPolicy.ExternalURL())) {
 			writeError(r.Context(), w, &api.Error{Status: 403, Code: api.CodeForbidden, Message: "same-origin session action required"})
 			return false
 		}

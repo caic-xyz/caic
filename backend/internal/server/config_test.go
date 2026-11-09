@@ -6,6 +6,8 @@ import (
 	"crypto/ed25519"
 	"strings"
 	"testing"
+
+	"github.com/maruel/gomode/httpserver/geoip"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {
@@ -115,6 +117,42 @@ func TestConfig(t *testing.T) {
 	t.Parallel()
 	t.Run("Validate", func(t *testing.T) {
 		t.Parallel()
+		t.Run("GeoIP", func(t *testing.T) {
+			t.Parallel()
+			t.Run("valid", func(t *testing.T) {
+				t.Parallel()
+				for _, ipgeo := range []geoip.Config{
+					{},
+					{DB: "country.mmdb"},
+					{AllowOrigins: []string{"local", "203.0.113.0/24"}},
+					{DB: "country.mmdb", AllowOrigins: []string{"CA"}},
+				} {
+					cfg := Config{IPGeo: ipgeo}
+					if err := cfg.Validate(); err != nil {
+						t.Fatalf("Validate(%+v): %v", ipgeo, err)
+					}
+				}
+			})
+			t.Run("error", func(t *testing.T) {
+				t.Parallel()
+				for _, tc := range []struct {
+					name  string
+					geo   geoip.Config
+					field string
+				}{
+					{name: "unknown origin", geo: geoip.Config{AllowOrigins: []string{"unknown"}}, field: "server.allow_origins[0]:"},
+					{name: "country without DB", geo: geoip.Config{AllowOrigins: []string{"CA"}}, field: "server.geo_db"},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						t.Parallel()
+						cfg := Config{IPGeo: tc.geo}
+						if err := cfg.Validate(); err == nil || !strings.HasPrefix(err.Error(), tc.field) {
+							t.Fatalf("Validate() = %v, want %s error", err, tc.field)
+						}
+					})
+				}
+			})
+		})
 		t.Run("both empty is valid", func(t *testing.T) {
 			t.Parallel()
 			if err := (&Config{}).Validate(); err != nil {

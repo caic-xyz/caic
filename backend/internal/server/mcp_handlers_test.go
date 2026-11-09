@@ -26,6 +26,9 @@ import (
 
 	"github.com/maruel/ksid"
 
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -33,8 +36,6 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
 )
 
 type notificationReadRegistry struct {
@@ -1190,7 +1191,7 @@ func TestMCPHandlers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upsert user: %v", err)
 		}
-		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com", nil))
+		s := newTestRouterWithAuthHost(t, store, "", newTestHostPolicy(t, "https://caic.example.com"))
 		mineID := ksid.NewID()
 		mine := mustNewTask(t, mineID, agent.Prompt{Text: "subscription initial state item owned"}, harness.Claude)
 		mine.OwnerID = user.ID
