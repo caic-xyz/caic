@@ -1,4 +1,4 @@
-// OAuth grant API routes and caic-specific OAuth adapters.
+// OAuth grant API routes and caic account-authority adapters.
 
 package server
 
@@ -54,6 +54,20 @@ func (m *caicSessionManager) FindUser(id string) (oauth.User, bool) {
 		return oauth.User{}, false
 	}
 	return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, true
+}
+
+// WithUserAuthority admits the initial authority of permanent caic account IDs.
+// caic has no account-disable or generation-retirement operation; nonempty
+// authorities are invalid. Store holds account updates across OAuth publication.
+func (m *caicSessionManager) WithUserAuthority(user oauth.User, publish func() error) error {
+	if user.Authority != "" {
+		return oauthserver.ErrUserAuthority
+	}
+	found, err := m.store.WithUser(user.ID, publish)
+	if !found {
+		return oauthserver.ErrUserAuthority
+	}
+	return err
 }
 
 // EndSession clears cookies for the user. The browser redirects to "/" after logout.

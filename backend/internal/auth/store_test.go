@@ -1,9 +1,10 @@
-// Tests for historical users persistence, token preservation, and empty-file shape.
+// Tests user persistence, account publication fencing, token preservation, and empty-file shape.
 
 package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -94,6 +95,90 @@ func TestStore(t *testing.T) {
 					t.Fatalf("empty shape = %#v, want %#v", got, want)
 				}
 			}
+		})
+	})
+	t.Run("WithUser", func(t *testing.T) {
+		t.Parallel()
+		store, err := Open(filepath.Join(t.TempDir(), "users.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		user, err := store.UpsertUser(&User{Provider: ProviderGoogle, ProviderID: "authority", Username: "Before"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			entered := make(chan bool, 1)
+			release := make(chan struct{})
+			published := make(chan error, 1)
+			go func() {
+				found, err := store.WithUser(user.ID, func() error {
+					locked := !store.mu.TryLock()
+					if !locked {
+						store.mu.Unlock()
+					}
+					entered <- locked
+					select {
+					case <-release:
+					case <-t.Context().Done():
+					}
+					return nil
+				})
+				if !found && err == nil {
+					err = errors.New("known user missing")
+				}
+				published <- err
+			}()
+			if !<-entered {
+				t.Fatal("publication does not hold the account lock")
+			}
+			started := make(chan struct{})
+			mutated := make(chan error, 1)
+			go func() {
+				close(started)
+				next := user
+				next.Username = "After"
+				_, err := store.UpsertUser(&next)
+				mutated <- err
+			}()
+			<-started
+			select {
+			case err := <-mutated:
+				t.Fatalf("account mutation passed held publication: %v", err)
+			default:
+			}
+			close(release)
+			if err := <-published; err != nil {
+				t.Fatal(err)
+			}
+			if err := <-mutated; err != nil {
+				t.Fatal(err)
+			}
+			updated, ok := store.FindByID(user.ID)
+			if !ok || updated.Username != "After" {
+				t.Fatalf("updated account = %#v, found %v", updated, ok)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("unknown", func(t *testing.T) {
+				t.Parallel()
+				calls := 0
+				found, err := store.WithUser("missing", func() error { calls++; return nil })
+				if found || err != nil || calls != 0 {
+					t.Fatalf("unknown account = %v, %v, calls %d", found, err, calls)
+				}
+			})
+			t.Run("callback", func(t *testing.T) {
+				t.Parallel()
+				failure := errors.New("publication failed")
+				calls := 0
+				found, err := store.WithUser(user.ID, func() error { calls++; return failure })
+				if !found || !errors.Is(err, failure) || calls != 1 {
+					t.Fatalf("publication = %v, %v, calls %d", found, err, calls)
+				}
+			})
 		})
 	})
 }

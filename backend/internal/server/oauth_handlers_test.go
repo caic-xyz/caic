@@ -1,4 +1,4 @@
-// Tests OAuth grants, server-stat authorization, token lifecycles, and authenticated task focus delivery.
+// Tests OAuth account-authority fencing, grants, token lifecycles, and authenticated task focus delivery.
 
 package server
 
@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -775,4 +776,53 @@ func TestMCPSystemStatsAuthorization(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCaicSessionManager(t *testing.T) {
+	t.Parallel()
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGoogle, ProviderID: "authority", Username: "Account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &caicSessionManager{store: store}
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		current, found := manager.FindUser(user.ID)
+		if !found || current.Authority != "" {
+			t.Fatalf("current account = %#v, found %v", current, found)
+		}
+		calls := 0
+		if err := manager.WithUserAuthority(current, func() error { calls++; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("publication called %d times", calls)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, invalid := range []oauth.User{{ID: "missing"}, {ID: user.ID, Authority: "retired-generation"}} {
+			t.Run(invalid.ID+invalid.Authority, func(t *testing.T) {
+				t.Parallel()
+				calls := 0
+				err := manager.WithUserAuthority(invalid, func() error { calls++; return nil })
+				if !errors.Is(err, oauthserver.ErrUserAuthority) || calls != 0 {
+					t.Fatalf("rejected authority = %v, calls %d", err, calls)
+				}
+			})
+		}
+		t.Run("callback", func(t *testing.T) {
+			t.Parallel()
+			failure := errors.New("publication failed")
+			calls := 0
+			err := manager.WithUserAuthority(oauth.User{ID: user.ID}, func() error { calls++; return failure })
+			if !errors.Is(err, failure) || calls != 1 {
+				t.Fatalf("publication = %v, calls %d", err, calls)
+			}
+		})
+	})
 }

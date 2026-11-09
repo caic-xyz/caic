@@ -1,4 +1,4 @@
-// User and session store persists identities and individually revocable login sessions with atomic rename.
+// Owns persistent identities, revocable sessions, and serialized account-authority publication.
 
 package auth
 
@@ -139,6 +139,21 @@ func (s *Store) FindByID(id string) (User, bool) {
 		}
 	}
 	return User{}, false
+}
+
+// WithUser holds account updates while publish runs for an existing ID.
+// It returns false without calling publish when the ID is unknown.
+// The account registry only appends or updates IDs; it never deletes or reuses them.
+// Lock order is Store followed by callback-owned state. publish must not call Store methods.
+func (s *Store) WithUser(id string, publish func() error) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID == id {
+			return true, publish()
+		}
+	}
+	return false, nil
 }
 
 // IssueToken creates and persists a session before returning its signed credential and session metadata.
