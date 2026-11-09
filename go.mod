@@ -16,7 +16,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.2.2-0.20261108141113-a5edecdbc0b9
 	github.com/maruel/genai v0.10.3-0.20261108213537-284216ad07af
-	github.com/maruel/gomode v0.3.1-0.20261108234038-cc5b316a7c8f
+	github.com/maruel/gomode v0.3.1-0.20261109023842-7208233ecab7
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.16
