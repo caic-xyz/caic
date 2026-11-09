@@ -62,17 +62,6 @@ func TestContribConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestContribVoiceGatewayConfig(t *testing.T) {
-	t.Parallel()
-	cfg, err := voicegateway.LoadConfig("../../../contrib/voice-gateway-config.toml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := cfg.Resolve(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestLoadTOMLConfig(t *testing.T) {
 	t.Parallel()
 	t.Run("missing file returns default config", func(t *testing.T) {

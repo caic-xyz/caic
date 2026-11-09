@@ -6,8 +6,6 @@ Platform service files and default configuration for running caic as a daemon.
 
 - `config.toml` — Default configuration; copy to `~/.config/caic/config.toml`
   and edit.
-- `voice-gateway-config.toml` — Standalone voice gateway configuration; copy to
-  `~/.config/voice-gateway/config.toml` and edit.
 - `com.fghbuild.caic.plist` — macOS launchd user agent with system-path defaults;
   the installer overrides them with per-user paths.
 - `caic.service` — Linux systemd user service; starts Podman's packaged user
@@ -116,10 +114,5 @@ cp contrib/config.toml ~/.config/caic/config.toml
 # Edit as needed; see config.toml for documentation.
 ```
 
-Standalone voice gateway configuration:
-
-```bash
-mkdir -p ~/.config/voice-gateway
-cp contrib/voice-gateway-config.toml ~/.config/voice-gateway/config.toml
-# Edit as needed; see voice-gateway-config.toml for documentation.
-```
+For standalone voice gateway installation and deployment, see the
+[Go Mode deployment guide](https://github.com/maruel/gomode/tree/main/contrib).
