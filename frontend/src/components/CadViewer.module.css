@@ -118,3 +118,10 @@
 .loadFeedback {
   color: var(--color-text-secondary);
 }
+
+@media (width <= 768px) {
+  .scrolling {
+    flex: none;
+    height: var(--size-document-preview-height);
+  }
+}

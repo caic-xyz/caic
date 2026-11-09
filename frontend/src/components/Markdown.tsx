@@ -148,7 +148,7 @@ function isLocalPath(dest: string): boolean {
  * baseDir is the runtime directory of the rendered document. Relative links
  * and images resolve against it; without it the task checkout owns them.
  */
-export default function Markdown(props: { text: string; baseDir?: string; breaks?: boolean }) {
+export default function Markdown(props: { text: string; baseDir?: string; breaks?: boolean; hideControls?: boolean }) {
   const taskId = useContext(MarkdownTaskContext);
   const navigate = useNavigate();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
@@ -265,7 +265,7 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
 
   return (
     <div
-      class={styles.markdownWrap}
+      class={`${styles.markdownWrap} ${props.hideControls ? styles.controlsHidden : ""}`}
       data-markdown-wrap
       ref={(el) => {
         wrapperRef = el;

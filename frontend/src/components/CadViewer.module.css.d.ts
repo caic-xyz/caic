@@ -15,6 +15,7 @@ declare const classes: {
   readonly "notice": string;
   readonly "progress": string;
   readonly "progressDetails": string;
+  readonly "scrolling": string;
   readonly "slowMessage": string;
   readonly "toolbar": string;
 };

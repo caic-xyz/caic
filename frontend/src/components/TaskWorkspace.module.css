@@ -29,6 +29,10 @@
   background: rgb(var(--color-bg-app-rgb));
 }
 
+.documentFullscreen {
+  padding: 0;
+}
+
 @media (width <= 768px) {
   .workspace {
     flex-direction: column;

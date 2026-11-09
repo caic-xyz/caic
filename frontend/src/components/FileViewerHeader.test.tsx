@@ -52,6 +52,20 @@ describe("FileViewerHeader", () => {
     expect(screen.queryByRole("link", { name: "guide.md" })).not.toBeInTheDocument();
   });
 
+  it("restores the document toolbar with Escape from full screen", async () => {
+    fixture(null);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(window.location.search).toContain("fullscreen=1");
+    expect(screen.queryByRole("button", { name: "Close view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "raw file" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Full screen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Close view" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "raw file" })).toBeInTheDocument();
+    expect(screen.getByText("notes.md")).toBeInTheDocument();
+  });
+
   it("lets a capture-phase dropdown close without closing the document", async () => {
     const [open, setOpen] = createSignal(false);
     fixture(

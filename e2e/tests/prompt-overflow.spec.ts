@@ -32,8 +32,9 @@ for (const width of [390, 1280]) {
         await expect(input).toBeInViewport();
         expect(await input.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(844);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-        expect(await messages.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
-          await messages.evaluate((el) => el.clientHeight),
+        const viewport = width === 390 ? page.getByTestId("app-shell") : messages;
+        expect(await viewport.evaluate((el) => el.scrollHeight)).toBeGreaterThan(
+          await viewport.evaluate((el) => el.clientHeight),
         );
 
         if (phase === "recorded") {

@@ -14,6 +14,7 @@ declare const classes: {
   readonly "headerActions": string;
   readonly "navbar": string;
   readonly "normalContent": string;
+  readonly "scrollingPage": string;
   readonly "subtitle": string;
   readonly "subviewFullscreen": string;
   readonly "subviewOpen": string;

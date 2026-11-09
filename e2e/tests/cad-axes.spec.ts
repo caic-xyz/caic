@@ -144,7 +144,7 @@ for (const width of [390, 1280]) {
       await trigger.focus();
       await page.keyboard.press("Escape");
       await expect(panel).toBeHidden();
-      await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+      await expect(page).toHaveURL(/fullscreen=1/);
       await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeVisible();
       expect(errors).toEqual([]);

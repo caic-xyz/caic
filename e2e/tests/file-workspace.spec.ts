@@ -5,12 +5,16 @@ import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
 // The conversation preserves the visible content, not a pixel offset that only
 // means the same thing at one pane width, so measure where a known row sits in
-// the message area and report every layout metric a failure needs.
+// the scroll viewport and report every layout metric a failure needs.
 async function conversationPosition(page: Page) {
   const link = page.getByRole("link", { name: "Guide", exact: true });
   await expect(link).toBeVisible();
   return link.evaluate((element) => {
-    const area = element.closest<HTMLElement>('[data-testid="task-message-area"]');
+    const area = element.closest<HTMLElement>(
+      window.matchMedia("(max-width: 768px)").matches
+        ? '[data-testid="app-shell"]'
+        : '[data-testid="task-message-area"]',
+    );
     if (!area) throw new Error("Guide link is outside the conversation");
     return {
       offset: Math.round(element.getBoundingClientRect().top - area.getBoundingClientRect().top),
@@ -35,7 +39,14 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(api, uniquePrompt("Read [Guide](/guide.md)."));
     await waitForTaskState(api, id, "waiting");
     await page.goto(`/task/@${id}`);
-    await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
+    await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
+    await expect
+      .poll(() =>
+        page
+          .getByRole("link", { name: "Guide", exact: true })
+          .evaluate((el) => el.closest("[data-anchor-key]") !== null),
+      )
+      .toBe(true);
     const taskURL = page.url();
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     const guideURL = page.url();
@@ -59,10 +70,11 @@ for (const width of [390, 1280]) {
     await expect(page).toHaveURL(taskURL);
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
 
-    // Opening a full-screen document from outside the task still closes to its conversation.
+    // A direct full-screen link restores its pane before closing to the conversation.
     await page.goto("/");
     await page.goto(`${guideURL}&fullscreen=1`);
-    await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(guideURL);
     await page.getByRole("button", { name: "Close view", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
     await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
@@ -117,7 +129,23 @@ for (const width of [390, 1000, 1440]) {
     const conversation = await page.getByTestId("conversation-pane").elementHandle();
     await page.getByTestId("task-detail-prompt").fill("Keep this draft");
     const initialStreams = streams;
+    // Read older output through user input before recording its position, so
+    // initial live-tail placement cannot overwrite a programmatic scroll.
+    const messages = page.getByTestId("task-message-area");
+    const viewport = width === 390 ? page.getByTestId("app-shell") : messages;
+    await expect(messages).toHaveAttribute("aria-busy", "false");
+    await expect
+      .poll(() =>
+        page
+          .getByRole("link", { name: "Guide", exact: true })
+          .evaluate((el) => el.closest("[data-anchor-key]") !== null),
+      )
+      .toBe(true);
+    await messages.hover();
+    await page.mouse.wheel(0, -10000);
+    await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
     await page.getByRole("link", { name: "Guide", exact: true }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeInViewport();
     let taskPosition = await conversationPosition(page);
     expect(taskPosition.scroll).toBeGreaterThan(0);
     await page.getByRole("link", { name: "Guide", exact: true }).click();
@@ -146,6 +174,21 @@ for (const width of [390, 1000, 1440]) {
     }
 
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
+    if (width === 390) {
+      const shell = page.getByTestId("app-shell");
+      const document = page.getByTestId("document-pane");
+      const header = document.locator("header");
+      await expect.poll(() => shell.evaluate((el) => el.scrollTop)).toBe(0);
+      await document.getByRole("heading", { name: "Guide", exact: true }).hover();
+      await page.mouse.wheel(0, 600);
+      await expect.poll(() => header.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+      await expect
+        .poll(() => page.getByTestId("new-task-button").evaluate((el) => el.getBoundingClientRect().bottom))
+        .toBeLessThanOrEqual(0);
+      await page.mouse.wheel(0, -10000);
+      await expect.poll(() => shell.evaluate((el) => el.scrollTop)).toBe(0);
+      await expect(header.getByRole("button", { name: "Full screen", exact: true })).toBeInViewport();
+    }
     if (width > 768) {
       await page.getByRole("button", { name: "Task actions", exact: true }).click();
       await expect(page.getByRole("menu")).toBeVisible();
@@ -159,20 +202,21 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByTestId("summary-pane")).toBeHidden();
     await expect(page.getByTestId("conversation-pane")).toBeHidden();
     await expect(page.getByTestId("voice-overlay")).toBeHidden();
-    await expect(page.getByRole("link", { name: "raw file", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "raw file", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "raw", exact: true })).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "Path", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeHidden();
+    const bounds = await page.getByTestId("document-pane").boundingBox();
+    expect(bounds).toEqual({ x: 0, y: 0, width, height: 900 });
+    await expect(page.getByTestId("document-pane").locator("header")).toBeHidden();
     await page.keyboard.press("PageDown");
     await page.keyboard.press("/");
     await expect(page).toHaveURL(new RegExp(`/view\\?[^#]*fullscreen=1`));
     await expect(page.getByTestId("task-detail-prompt")).not.toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
-    await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeFocused();
-
-    await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
-    await expect(page.getByTestId("new-task-button")).toBeVisible();
     await page.goBack();
-    await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+    await expect(page.getByTestId("new-task-button")).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(/fullscreen=1/);
     // Header reflow can leave a server-health tooltip under the pointer. Its
     // Escape dismissal takes precedence over the document's fullscreen action.
     await page.mouse.move(0, 899);
@@ -195,9 +239,8 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByTestId("task-detail-prompt")).toHaveText("Keep this draft");
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
     // The pane width legitimately differs once the document closes, so compare
-    // where the row sits; the message carries every metric a failure needs.
-    const restored = await conversationPosition(page);
-    expect(restored.offset, JSON.stringify({ taskPosition, restored })).toBe(taskPosition.offset);
+    // where the row sits after the queued anchor correction finishes.
+    await expect.poll(async () => (await conversationPosition(page)).offset).toBe(taskPosition.offset);
     expect(await conversation?.evaluate((node) => node.isConnected)).toBe(true);
     await page.getByRole("link", { name: "Guide", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
@@ -234,13 +277,13 @@ for (const width of [390, 1000, 1440]) {
     await expect(mode).toHaveAccessibleName("Display mode: Wireframe. Switch to translucent");
 
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
-    await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
+    await page.goBack();
     expect(await canvas?.evaluate((node) => node.isConnected)).toBe(true);
     await expect(mode).toHaveAccessibleName("Display mode: Wireframe. Switch to translucent");
     await expect(page.getByLabel("3D model", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
     await page.reload();
-    await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/fullscreen=1/);
     await expect(page.getByTestId("new-task-button")).toBeHidden();
     await api.sendInput(id, { prompt: { text: "continue" } });
     await waitForTaskState(api, id, "waiting");

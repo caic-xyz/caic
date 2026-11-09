@@ -53,7 +53,7 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
       {(taskId) => (
         <TaskTimelineProvider taskId={taskId()}>
           <div
-            class={`${styles.workspace} ${mode() === "fullscreen" ? styles.fullscreen : ""}`}
+            class={`${styles.workspace} ${mode() === "fullscreen" ? styles.fullscreen : ""} ${mode() === "fullscreen" && location.pathname.endsWith("/view") ? styles.documentFullscreen : ""}`}
 
             data-testid="task-workspace"
           >

@@ -242,6 +242,10 @@
     overflow-y: auto;
   }
 
+  .scrollingPage {
+    flex: 1 0 auto;
+  }
+
   .title {
     font-size: 1.2rem;
   }

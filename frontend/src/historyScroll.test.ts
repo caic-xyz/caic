@@ -53,6 +53,7 @@ function fixture() {
   let height = 1_000,
     top = 0,
     rowTop = 160,
+    viewportTop = 0,
     width = 400;
   Object.defineProperties(el, {
     clientHeight: { get: () => (visible ? 200 : 0) },
@@ -65,8 +66,8 @@ function fixture() {
       },
     },
   });
-  el.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
-  row.getBoundingClientRect = () => new DOMRect(0, rowTop - top, 400, 30);
+  el.getBoundingClientRect = () => new DOMRect(0, viewportTop, 400, 200);
+  row.getBoundingClientRect = () => new DOMRect(0, viewportTop + rowTop - top, 400, 30);
   const [messages, setMessages] = createSignal<EventMessage[]>([]),
     [preview, setPreview] = createSignal<string | null>(null),
     [plan, setPlan] = createSignal(""),
@@ -82,7 +83,6 @@ function fixture() {
       () => [messages(), preview(), plan()],
     ),
   }));
-  el.addEventListener("scroll", owner.scroll.scroll);
   return {
     el,
     row,
@@ -95,6 +95,9 @@ function fixture() {
     },
     dropOffset: () => {
       top = 0;
+    },
+    moveViewport: (position: number) => {
+      viewportTop = position;
     },
     setTask,
     setEpoch,
@@ -293,6 +296,60 @@ it("restores the offset when the layout drops it across a hidden pane", async ()
     f.reflow(400, 0);
     await paint();
     assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("keeps the visible row anchored when status content is inserted above it", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    f.expand();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.row.getBoundingClientRect().top, 60);
+    assert.equal(f.el.scrollTop, 200);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("restores the reading position relative to a viewport that moved while hidden", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    f.hide();
+    f.reflow(400, 0);
+    await paint();
+    f.moveViewport(40);
+    f.expand();
+    f.show();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.row.getBoundingClientRect().top - f.el.getBoundingClientRect().top, 60);
+    assert.equal(f.el.scrollTop, 200);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("restores a visible row when content above it changes while its pane is hidden", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    f.hide();
+    f.reflow(400, 0);
+    await paint();
+    f.expand();
+    f.show();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.row.getBoundingClientRect().top, 60);
+    assert.equal(f.el.scrollTop, 200);
   } finally {
     f.dispose();
   }

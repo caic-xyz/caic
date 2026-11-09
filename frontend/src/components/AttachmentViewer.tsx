@@ -6,10 +6,15 @@ import ImagePreview from "./ImagePreview";
 import TaskViewHeader from "./TaskViewHeader";
 import styles from "./AttachmentViewer.module.css";
 
-export default function AttachmentViewer(props: { taskPath: string; url: string; previewURL: string }) {
+export default function AttachmentViewer(props: {
+  taskPath: string;
+  url: string;
+  previewURL: string;
+  scrollWithPage?: boolean;
+}) {
   const [failed, setFailed] = createSignal(false);
   return (
-    <div class={styles.container}>
+    <div class={`${styles.container} ${props.scrollWithPage ? styles.scrolling : ""}`}>
       <TaskViewHeader
         taskPath={props.taskPath}
         label="Attachment controls"

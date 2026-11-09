@@ -45,7 +45,7 @@ for (const width of [390, 1280]) {
       await expect(progress).not.toHaveAttribute("value");
       await page.getByRole("button", { name: "Full screen", exact: true }).click();
       await expect(progress).toBeVisible();
-      await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
+      await page.goBack();
       await expect(progress).toBeVisible();
       expect(loads).toBe(1);
       expect(page.workers()).toContain(worker);

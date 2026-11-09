@@ -18,6 +18,7 @@ import { StepLoadTimings } from "../stepTimings";
 import type { CadLoadProgress } from "../stepProtocol";
 
 interface Props {
+  scrollWithPage?: boolean;
   taskId: string;
   taskPath: string;
   path: string;
@@ -234,7 +235,7 @@ export default function CadViewer(props: Props) {
   });
 
   return (
-    <div class={styles.container}>
+    <div class={`${styles.container} ${props.scrollWithPage ? styles.scrolling : ""}`}>
       <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path}>
         <div class={styles.toolbar}>
           <Show when={modelInfo()} keyed>

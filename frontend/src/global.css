@@ -1,6 +1,8 @@
 /* Global resets and design tokens for the web frontend. */
 
 :root {
+  --size-document-preview-height: calc(100dvh - 6rem);
+
   /* Filled primary controls and their foreground. */
   --color-primary: #4a90d9;
   --color-primary-hover: #357abd;

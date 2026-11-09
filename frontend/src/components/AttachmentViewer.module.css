@@ -37,3 +37,10 @@
   font-size: 0.85rem;
   color: var(--color-danger);
 }
+
+@media (width <= 768px) {
+  .scrolling {
+    flex: none;
+    height: var(--size-document-preview-height);
+  }
+}

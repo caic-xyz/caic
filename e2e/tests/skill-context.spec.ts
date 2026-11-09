@@ -87,9 +87,12 @@ for (const width of [390, 1280]) {
     await waitForTaskState(api, other, "waiting");
     await page.goto(`/task/@${other}`);
     const area = page.getByTestId("task-message-area");
+    const viewport = width === 390 ? page.getByTestId("app-shell") : area;
     const atBottom = async () => {
       await expect(area).toHaveAttribute("aria-busy", "false");
-      await expect.poll(() => area.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+      await expect
+        .poll(() => viewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+        .toBeLessThan(2);
     };
     for (let cycle = 0; cycle < 3; cycle++) {
       if (width === 390) await page.keyboard.press("Escape");
@@ -97,18 +100,34 @@ for (const width of [390, 1280]) {
       await card.focus();
       await card.press("Enter");
       await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(12);
-      await expect.poll(() => area.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await expect.poll(() => viewport.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
       await atBottom();
+      if (width === 390) {
+        await expect
+          .poll(() => page.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom))
+          .toBeLessThanOrEqual(0);
+        await expect
+          .poll(() => page.getByTestId("task-detail-header").evaluate((el) => el.getBoundingClientRect().bottom))
+          .toBeLessThanOrEqual(0);
+      }
       if (cycle === 0) {
+        await page.setViewportSize({ width: width === 390 ? 1280 : 390, height: 700 });
+        const resizedViewport = width === 390 ? area : page.getByTestId("app-shell");
+        await expect
+          .poll(() => resizedViewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+          .toBeLessThan(2);
+        await page.setViewportSize({ width, height: 700 });
+        await atBottom();
         await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_CONTINUE" } });
         await expect(page.getByText("Parent summary remains separate.", { exact: false })).toBeVisible();
         await atBottom();
         await area.hover();
         await page.mouse.wheel(0, -10_000);
-        await expect.poll(() => area.evaluate((el) => el.scrollTop)).toBe(0);
+        await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
+        await expect(page.getByTestId("task-detail-prompt")).toBeInViewport();
         await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_RECONNECT" } });
         await expect(area).toContainText("parent missed output");
-        expect(await area.evaluate((el) => el.scrollTop)).toBe(0);
+        expect(await viewport.evaluate((el) => el.scrollTop)).toBe(0);
         await area.focus();
         await page.keyboard.press("Control+End");
         await atBottom();

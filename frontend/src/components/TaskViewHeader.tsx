@@ -1,4 +1,4 @@
-// Shared task subview controls own pane closing, URL-backed full screen, focus, and Escape precedence.
+// Shared task-view controls handle immersive documents, pane closing, URL-backed full screen, focus, and Escape.
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -19,6 +19,7 @@ export default function TaskViewHeader(props: {
   const navigate = useNavigate();
   const [, setQuery] = useSearchParams();
   const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
+  const immersive = () => fullscreen() && location.pathname.endsWith("/view");
   let closeButton: HTMLButtonElement | undefined;
   let fullscreenButton: HTMLButtonElement | undefined;
   function close() {
@@ -56,7 +57,7 @@ export default function TaskViewHeader(props: {
   });
 
   return (
-    <header class={styles.header} aria-label={props.label}>
+    <header class={styles.header} hidden={immersive()} aria-label={props.label}>
       {props.children}
       {props.actions}
       <div class={styles.paneControls}>

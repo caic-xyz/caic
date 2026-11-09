@@ -186,11 +186,34 @@ for (const width of [390, 1280]) {
       await page.getByRole("combobox", { name: "PDF zoom" }).selectOption("2");
       await expect(preview).toHaveAttribute("aria-busy", "false");
       await expect(preview.locator("canvas")).toHaveJSProperty("clientWidth", 800);
+      if (width === 390) {
+        await page.setViewportSize({ width, height: 500 });
+        await preview.hover();
+        await page.mouse.wheel(0, 400);
+        await expect
+          .poll(() =>
+            page
+              .getByTestId("document-pane")
+              .locator("header")
+              .evaluate((el) => el.getBoundingClientRect().bottom),
+          )
+          .toBeLessThanOrEqual(0);
+        await expect
+          .poll(() =>
+            page.getByRole("combobox", { name: "PDF zoom" }).evaluate((el) => el.getBoundingClientRect().bottom),
+          )
+          .toBeLessThanOrEqual(0);
+        await page.mouse.wheel(0, -10000);
+        await expect.poll(() => page.getByTestId("app-shell").evaluate((el) => el.scrollTop)).toBe(0);
+        await page.setViewportSize({ width, height: 900 });
+      }
       await page.goBack();
       await expect(page.getByRole("combobox", { name: "PDF zoom" })).toHaveValue("fit");
       await page.goBack();
       await expect(preview).toContainText("First PDF page");
       await page.getByRole("button", { name: "Full screen", exact: true }).click();
+      await expect(page.getByRole("group", { name: "PDF controls" })).toBeHidden();
+      await expect(page.getByRole("link", { name: "raw file", exact: true })).toBeHidden();
       await expect(preview).toHaveAttribute("aria-busy", "false");
       const contained = await preview.locator("canvas").evaluate((el) => {
         const bounds = el.getBoundingClientRect();

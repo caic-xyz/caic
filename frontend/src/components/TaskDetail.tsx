@@ -14,7 +14,9 @@ import {
   type Accessor,
   type JSX,
   untrack,
+  useContext,
 } from "solid-js";
+import { ConversationViewportContext } from "../ConversationViewportContext";
 import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
@@ -276,8 +278,9 @@ export default function TaskDetail(props: Props) {
     });
     if (restore && home)
       queueMicrotask(() => {
-        if (!messageAreaRef?.isConnected) return;
-        anchorRow(messageAreaRef, sessionAnchor(home))?.querySelector("button")?.focus();
+        const area = messageArea();
+        if (!area?.isConnected) return;
+        anchorRow(area, sessionAnchor(home))?.querySelector("button")?.focus();
       });
   };
   const currentActivities = () =>
@@ -464,10 +467,12 @@ export default function TaskDetail(props: Props) {
     onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
-  let messageAreaRef: HTMLDivElement | undefined;
+  const [messageArea, setMessageArea] = createSignal<HTMLDivElement>();
   let messageContentRef: HTMLDivElement | undefined;
+  const shellViewport = useContext(ConversationViewportContext);
+  const historyViewport = createMemo(() => shellViewport() ?? messageArea());
   const historyScroll = createHistoryScroll(
-    () => messageAreaRef,
+    historyViewport,
     () => messageContentRef,
     () => props.taskId,
     timeline.epoch,
@@ -1418,8 +1423,7 @@ export default function TaskDetail(props: Props) {
         </Show>
         <div
           class={styles.messageArea}
-          ref={messageAreaRef}
-          onScroll={historyScroll.scroll}
+          ref={setMessageArea}
           tabIndex={0}
           role="region"
           aria-label="Task conversation"

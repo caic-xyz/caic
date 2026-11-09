@@ -3,6 +3,7 @@ declare const classes: {
   readonly "checkIcon": string;
   readonly "codeBlock": string;
   readonly "codeCopyBtn": string;
+  readonly "controlsHidden": string;
   readonly "copied": string;
   readonly "copyIcon": string;
   readonly "markdown": string;

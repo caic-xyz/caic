@@ -143,3 +143,24 @@
   contain-intrinsic-size: auto 1.9rem;
   content-visibility: auto;
 }
+
+@media (width <= 768px) {
+  .scrolling .content {
+    flex: none;
+    height: var(--size-document-preview-height);
+  }
+
+  .scrolling .flowContent {
+    height: auto;
+    overflow: visible;
+  }
+
+  .source {
+    overflow-x: auto;
+  }
+}
+
+.fullscreen .page {
+  border: none;
+  border-radius: 0;
+}

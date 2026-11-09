@@ -1,11 +1,12 @@
 // Previews PDFs one page at a time with selectable text, URL-backed navigation, zoom, and cancelled rendering.
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { useLocation, useSearchParams } from "@solidjs/router";
 import { TextLayer, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import PreviousIcon from "@material-symbols/svg-400/outlined/chevron_left.svg?solid";
 import NextIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 import ActionButton from "./ActionButton";
 import { loadPdf } from "../pdf";
+import { taskViewMode } from "../taskView";
 import { taskRawURL } from "../runtimePath";
 import styles from "./PdfPreview.module.css";
 
@@ -13,9 +14,11 @@ const zoomLevels = [0.5, 1, 1.5, 2, 3];
 // Limit the backing canvas to 16 MiB even on high-DPI screens or oversized pages.
 const maxCanvasPixels = 4_194_304;
 
-export default function PdfPreview(props: { taskId: string; path: string }) {
+export default function PdfPreview(props: { taskId: string; path: string; scrollWithPage?: boolean }) {
   let viewport!: HTMLDivElement;
   let pageHost!: HTMLDivElement;
+  const location = useLocation();
+  const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
   const [query, setQuery] = useSearchParams();
   const [pdf, setPdf] = createSignal<PDFDocumentProxy | null>(null);
   const [width, setWidth] = createSignal(0);
@@ -106,6 +109,7 @@ export default function PdfPreview(props: { taskId: string; path: string }) {
         if (disposed) return;
         pageHost.replaceChildren(container);
         viewport.scrollTo(0, 0);
+        pageHost.scrollTo(0, 0);
         setBusy(false);
       } finally {
         page.cleanup();
@@ -123,7 +127,9 @@ export default function PdfPreview(props: { taskId: string; path: string }) {
   }
 
   return (
-    <div class={styles.container}>
+    <div
+      class={`${styles.container} ${props.scrollWithPage ? styles.scrolling : ""} ${fullscreen() ? styles.fullscreen : ""}`}
+    >
       <Show when={pdf()} keyed>
         {(doc) => (
           <div class={styles.toolbar} role="group" aria-label="PDF controls">

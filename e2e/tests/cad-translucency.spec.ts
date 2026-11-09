@@ -174,8 +174,9 @@ for (const width of [390, 1280]) {
     await mode.click();
     await mode.click();
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
+    await expect(mode).toBeHidden();
+    await page.goBack();
     await expect(mode).toHaveAccessibleName("Display mode: Translucent. Switch to solid");
-    await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     // A hovered server warning can consume Escape before the document pane.
     if (width === 390) await page.getByRole("button", { name: "Close view", exact: true }).click();
     await page.getByRole("link", { name: "Other", exact: true }).click();

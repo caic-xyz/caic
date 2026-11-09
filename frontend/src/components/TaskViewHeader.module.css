@@ -1,4 +1,4 @@
-/* Wrapping task-view headers with full-screen and close controls grouped at the right. */
+/* Task-view toolbar layout; full-screen documents hide the entire toolbar. */
 .header {
   display: flex;
   flex-wrap: wrap;
@@ -13,4 +13,8 @@
   gap: 0.5rem;
   align-items: center;
   margin-left: auto;
+}
+
+.header[hidden] {
+  display: none;
 }

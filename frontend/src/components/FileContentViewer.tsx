@@ -12,7 +12,8 @@ import {
   lazy,
   onCleanup,
 } from "solid-js";
-import { A } from "@solidjs/router";
+import { A, useLocation } from "@solidjs/router";
+import { taskViewMode } from "../taskView";
 import { Dynamic } from "solid-js/web";
 import FolderIcon from "@material-symbols/svg-400/outlined/folder.svg?solid";
 import FileIcon from "@material-symbols/svg-400/outlined/draft.svg?solid";
@@ -29,6 +30,7 @@ import { readTaskFilePreview, type TaskFilePreview } from "../taskFile";
 const PdfPreview = lazy(() => import("./PdfPreview"));
 
 interface Props {
+  scrollWithPage?: boolean;
   taskId: string;
   taskPath: string;
   path: string;
@@ -149,6 +151,8 @@ function MediaPreview(props: { taskId: string; path: string; kind: "audio" | "vi
 }
 
 export default function FileContentViewer(props: Props) {
+  const location = useLocation();
+  const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
   let abort: AbortController | undefined;
   const [imageError, setImageError] = createSignal(false);
   onCleanup(() => abort?.abort());
@@ -173,14 +177,18 @@ export default function FileContentViewer(props: Props) {
   });
 
   return (
-    <div class={styles.container}>
+    <div
+      class={`${styles.container} ${props.scrollWithPage ? styles.scrolling : ""} ${fullscreen() ? styles.fullscreen : ""}`}
+    >
       <FileViewerHeader
         taskId={props.taskId}
         taskPath={props.taskPath}
         path={props.path}
         directory={dirListing() !== null}
       />
-      <div class={`${styles.content} ${file.state === "ready" && file()?.kind === "pdf" ? styles.pdfContent : ""}`}>
+      <div
+        class={`${styles.content} ${textFile() || dirListing() || (file.state === "ready" && file()?.kind === "pdf") ? styles.flowContent : ""} ${file.state === "ready" && file()?.kind === "pdf" ? styles.pdfContent : ""}`}
+      >
         <Switch>
           <Match when={file.state === "errored"}>
             <div class={styles.error} role="alert">
@@ -209,7 +217,7 @@ export default function FileContentViewer(props: Props) {
           </Match>
           <Match when={file.state === "ready" && file()?.kind === "pdf"}>
             <Suspense fallback={<div class={styles.loading}>Loading PDF…</div>}>
-              <PdfPreview taskId={props.taskId} path={props.path} />
+              <PdfPreview scrollWithPage={props.scrollWithPage} taskId={props.taskId} path={props.path} />
             </Suspense>
           </Match>
           <Match when={file.state === "ready" && file()?.kind === "audio"}>
@@ -245,7 +253,7 @@ export default function FileContentViewer(props: Props) {
                     </details>
                   )}
                 </Show>
-                <Markdown text={doc().body} baseDir={dirname(props.path)} />
+                <Markdown hideControls={fullscreen()} text={doc().body} baseDir={dirname(props.path)} />
                 <Show when={textFile()?.truncated}>
                   <div class={styles.notice}>File truncated: only the first 1 MiB is shown.</div>
                 </Show>

@@ -15,6 +15,10 @@
   padding-bottom: 0.5rem;
 }
 
+.fullscreen .toolbar {
+  display: none;
+}
+
 .pageNumber {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
@@ -133,4 +137,17 @@
 
 .error {
   color: var(--color-danger);
+}
+
+@media (width <= 768px) {
+  .scrolling .viewport {
+    flex: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .scrolling .pageHost {
+    max-width: 100%;
+    overflow: auto;
+  }
 }

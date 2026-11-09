@@ -3,11 +3,13 @@ declare const classes: {
   readonly "canvas": string;
   readonly "container": string;
   readonly "error": string;
+  readonly "fullscreen": string;
   readonly "hidden": string;
   readonly "loading": string;
   readonly "page": string;
   readonly "pageHost": string;
   readonly "pageNumber": string;
+  readonly "scrolling": string;
   readonly "textLayer": string;
   readonly "toolbar": string;
   readonly "viewport": string;

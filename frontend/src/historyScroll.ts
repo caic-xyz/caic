@@ -1,5 +1,5 @@
-// Preserves visible conversation anchors through context loading, live output, disclosure, pane visibility, and pane width changes.
-import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
+// Preserves visible conversation anchors through context loading, live output, disclosure, pane visibility, and responsive scroll viewport changes.
+import { createEffect, onCleanup, type Accessor } from "solid-js";
 import { anchorAt, anchorRow } from "./anchorKeys";
 
 interface Anchor {
@@ -31,6 +31,7 @@ export function createHistoryScroll(
   let structural = false;
   let scrollInput = false;
   let hidden = false;
+  let viewport: HTMLElement | undefined;
 
   const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
@@ -38,7 +39,7 @@ export function createHistoryScroll(
     const position = anchorAt(el);
     return {
       key: position.key,
-      top: position.top,
+      top: position.top === null ? null : position.top - el.getBoundingClientRect().top,
       scroll: el.scrollTop,
       height: el.scrollHeight,
       viewport: el.clientHeight,
@@ -55,6 +56,10 @@ export function createHistoryScroll(
     if (frame !== null) cancelAnimationFrame(frame);
     const el = area();
     if (!el) return;
+    if (viewport !== el) {
+      viewport = el;
+      structural = true;
+    }
     const id = taskId(),
       expectedEpoch = epochValue(),
       token = ++operation,
@@ -80,20 +85,18 @@ export function createHistoryScroll(
       }
       const returning = hidden;
       hidden = false;
-      const prior = expansion ?? (structural && !following ? saved : null);
+      const resized = saved !== null && saved.width === el.clientWidth && saved.height !== el.scrollHeight;
+      const prior = expansion ?? ((structural || returning || resized) && !following ? saved : null);
       if (prior) {
         const row = anchorRow(el, prior.key);
-        if (row && prior.top !== null) write(el, el.scrollTop + row.getBoundingClientRect().top - prior.top);
+        if (row && prior.top !== null)
+          write(el, el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - prior.top);
         // Without a row, the height delta stands in for the hidden content only
         // while the pane width is unchanged: a reflow folds line wrapping into
         // that delta, and the browser's own scroll anchoring places the text
         // better than the correction does.
-        else if (prior.width === el.clientWidth) write(el, prior.scroll + el.scrollHeight - prior.height);
-      } else if (returning && !following && el.scrollTop === 0 && saved !== null && saved.scroll > 0) {
-        // Some engines reset the offset of a display:none pane. Nothing else can
-        // scroll it while it is hidden, so a zero offset with a saved one means
-        // the layout dropped the position.
-        write(el, saved.scroll);
+        else if (structural && prior.width === el.clientWidth) write(el, prior.scroll + el.scrollHeight - prior.height);
+        else if (returning && el.scrollTop === 0) write(el, prior.scroll);
       } else if (following) {
         write(el, el.scrollHeight);
       }
@@ -126,7 +129,7 @@ export function createHistoryScroll(
     schedule();
   });
 
-  onMount(() => {
+  createEffect(() => {
     const el = area();
     if (!el) return;
     const observer = new ResizeObserver(schedule);
@@ -139,19 +142,24 @@ export function createHistoryScroll(
       scrollInput = true;
     };
     const keyInput = (event: KeyboardEvent) => {
-      if (event.target === el && ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key))
+      if (
+        (event.target === el || event.target === container?.parentElement) &&
+        ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key)
+      )
         input();
     };
     const pointerInput = (event: PointerEvent) => {
       const left = el.getBoundingClientRect().left + el.clientLeft;
       if (event.target === el && (event.clientX < left || event.clientX >= left + el.clientWidth)) input();
     };
+    el.addEventListener("scroll", scroll);
     el.addEventListener("wheel", input, { passive: true });
     el.addEventListener("touchmove", input, { passive: true });
     el.addEventListener("pointerdown", pointerInput, { passive: true });
     el.addEventListener("keydown", keyInput);
     onCleanup(() => {
       observer.disconnect();
+      el.removeEventListener("scroll", scroll);
       el.removeEventListener("wheel", input);
       el.removeEventListener("touchmove", input);
       el.removeEventListener("pointerdown", pointerInput);
@@ -173,7 +181,7 @@ export function createHistoryScroll(
       if (!el || top === undefined) return;
       expansion = {
         key,
-        top,
+        top: top - el.getBoundingClientRect().top,
         scroll: el.scrollTop,
         height: el.scrollHeight,
         viewport: el.clientHeight,
@@ -181,27 +189,28 @@ export function createHistoryScroll(
       };
       schedule();
     },
-    scroll() {
-      const el = area();
-      if (!el || el.clientHeight === 0) return;
-      if (
-        !scrollInput &&
-        (!saved || saved.height !== el.scrollHeight || saved.viewport !== el.clientHeight || structural)
-      ) {
-        schedule();
-        return;
-      }
-      const fromInput = scrollInput;
-      scrollInput = false;
-      saved = anchor(el);
-      if (!fromInput && writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
-        writtenTop = null;
-        return;
-      }
-      writtenTop = null;
-      movement++;
-      expansion = null;
-      following = nearBottom(el);
-    },
   };
+
+  function scroll() {
+    const el = area();
+    if (!el || el.clientHeight === 0) return;
+    if (
+      !scrollInput &&
+      (!saved || saved.height !== el.scrollHeight || saved.viewport !== el.clientHeight || structural)
+    ) {
+      schedule();
+      return;
+    }
+    const fromInput = scrollInput;
+    scrollInput = false;
+    saved = anchor(el);
+    if (!fromInput && writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
+      writtenTop = null;
+      return;
+    }
+    writtenTop = null;
+    movement++;
+    expansion = null;
+    following = nearBottom(el);
+  }
 }

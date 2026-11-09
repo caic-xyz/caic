@@ -4,6 +4,7 @@ declare const classes: {
   readonly "content": string;
   readonly "error": string;
   readonly "rawLink": string;
+  readonly "scrolling": string;
   readonly "title": string;
 };
 export default classes;

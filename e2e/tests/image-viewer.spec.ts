@@ -78,7 +78,7 @@ for (const width of [390, 1280]) {
           const fullImage = await image.boundingBox();
           if (!fullBounds || !fullImage) throw new Error("Missing full-screen bounds");
           expect(fullImage.y + fullImage.height).toBeLessThanOrEqual(fullBounds.y + fullBounds.height + 1);
-          await pane.getByRole("button", { name: "Exit full screen", exact: true }).click();
+          await page.goBack();
           await page.setViewportSize({ width, height: 900 });
           await expect(image).toHaveJSProperty("clientHeight", Math.round(fitted.height));
         }

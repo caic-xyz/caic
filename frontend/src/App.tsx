@@ -3,6 +3,7 @@
 import { createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useLocation } from "@solidjs/router";
 
+import { ConversationViewportContext } from "./ConversationViewportContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
 import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "@maruel/gomode/web/HostMode";
@@ -121,6 +122,18 @@ function Shell(props: { children?: JSX.Element }) {
   const [mobile, setMobile] = createSignal(mobileQuery.matches);
   const mobileVoice = () => mobile() && voiceConnected() && location.pathname === "/";
   const taskView = () => taskViewMode(location.pathname, location.search);
+  const [shell, setShell] = createSignal<HTMLDivElement>();
+  const scrollingConversation = createMemo(() => mobile() && s.selectedId() !== null && taskView() === "closed");
+  const scrollingDocument = createMemo(
+    () => mobile() && taskView() === "docked" && location.pathname.endsWith("/view"),
+  );
+  const documentNavigation = createMemo(() => (scrollingDocument() ? location.pathname + location.search : null));
+  createEffect(() => {
+    if (!documentNavigation()) return;
+    const element = shell();
+    if (element) element.scrollTop = 0;
+  });
+  const conversationViewport = createMemo(() => (scrollingConversation() ? shell() : undefined));
 
   onMount(() => {
     const onViewportChange = (event: MediaQueryListEvent) => setMobile(event.matches);
@@ -134,10 +147,11 @@ function Shell(props: { children?: JSX.Element }) {
         <div
           class={`${styles.app} ${taskView() !== "closed" ? styles.subviewOpen : ""} ${taskView() === "fullscreen" ? styles.subviewFullscreen : ""}`}
 
+          ref={setShell}
           data-testid="app-shell"
         >
           <div
-            class={`${styles.normalContent} ${mobileVoice() ? styles.voiceHidden : ""}`}
+            class={`${styles.normalContent} ${scrollingConversation() || scrollingDocument() ? styles.scrollingPage : ""} ${mobileVoice() ? styles.voiceHidden : ""}`}
             aria-hidden={mobileVoice()}
             data-testid="normal-content"
           >
@@ -167,7 +181,9 @@ function Shell(props: { children?: JSX.Element }) {
             </header>
 
             <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
-              {props.children}
+              <ConversationViewportContext.Provider value={conversationViewport}>
+                {props.children}
+              </ConversationViewportContext.Provider>
             </ErrorBoundary>
           </div>
 

@@ -336,3 +336,9 @@
   padding-right: 6rem;
   margin: 0;
 }
+
+.markdownWrap.controlsHidden .rawToolbar,
+.markdownWrap.controlsHidden .codeCopyBtn,
+.markdownWrap.controlsHidden .mermaidToolbar {
+  display: none;
+}

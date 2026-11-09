@@ -1,8 +1,9 @@
 // FileViewerPage mounts one document renderer inside the persistent task workspace.
 
 import { Match, Show, Switch } from "solid-js";
-import { useParams, useSearchParams } from "@solidjs/router";
+import { useLocation, useParams, useSearchParams } from "@solidjs/router";
 
+import { taskViewMode } from "../taskView";
 import AttachmentViewer from "../components/AttachmentViewer";
 import FileContentViewer from "../components/FileContentViewer";
 import CadViewer from "../components/CadViewer";
@@ -19,6 +20,8 @@ import {
 
 export default function FileViewerPage() {
   const s = useAppState();
+  const route = useLocation();
+  const scrollWithPage = () => taskViewMode(route.pathname, route.search) === "docked";
   const params = useParams();
   const [query] = useSearchParams();
   const id = () => taskIdFromParam(params.taskId);
@@ -45,10 +48,16 @@ export default function FileViewerPage() {
                 <section class={styles.document} aria-label="Document" data-testid="document-pane">
                   <Switch>
                     <Match when={isCadPath(filePath)}>
-                      <CadViewer taskId={taskId} taskPath={tp()} path={filePath} />
+                      <CadViewer scrollWithPage={scrollWithPage()} taskId={taskId} taskPath={tp()} path={filePath} />
                     </Match>
                     <Match when={true}>
-                      <FileContentViewer taskId={taskId} taskPath={tp()} path={filePath} line={line()} />
+                      <FileContentViewer
+                        scrollWithPage={scrollWithPage()}
+                        taskId={taskId}
+                        taskPath={tp()}
+                        path={filePath}
+                        line={line()}
+                      />
                     </Match>
                   </Switch>
                 </section>
@@ -58,6 +67,7 @@ export default function FileViewerPage() {
               {(location) => (
                 <section class={styles.document} aria-label="Document" data-testid="document-pane">
                   <AttachmentViewer
+                    scrollWithPage={scrollWithPage()}
                     taskPath={tp()}
                     url={taskAttachmentURL(taskId, location, null)}
                     previewURL={taskAttachmentURL(taskId, location, attachmentPaneMaxDimension)}
@@ -68,7 +78,7 @@ export default function FileViewerPage() {
             <Match when={image()} keyed>
               {(url) => (
                 <section class={styles.document} aria-label="Document" data-testid="document-pane">
-                  <AttachmentViewer taskPath={tp()} url={url} previewURL={url} />
+                  <AttachmentViewer scrollWithPage={scrollWithPage()} taskPath={tp()} url={url} previewURL={url} />
                 </section>
               )}
             </Match>

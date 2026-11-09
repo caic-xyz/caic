@@ -9,13 +9,16 @@ declare const classes: {
   readonly "dirEntryName": string;
   readonly "dirListing": string;
   readonly "error": string;
+  readonly "flowContent": string;
   readonly "frontMatter": string;
   readonly "frontMatterSource": string;
+  readonly "fullscreen": string;
   readonly "loading": string;
   readonly "mediaPreview": string;
   readonly "notice": string;
   readonly "page": string;
   readonly "pdfContent": string;
+  readonly "scrolling": string;
   readonly "source": string;
   readonly "sourceLine": string;
   readonly "video": string;
