@@ -1,4 +1,4 @@
-// AgentRuntime owns task sessions, recorded reconnect history and cursors, Git summaries, and turn measurements.
+// AgentRuntime owns account-fenced execution, recorded reconnect history and cursors, Git summaries, and turn measurements.
 
 package taskrun
 
@@ -73,6 +73,7 @@ type AgentRuntime struct {
 	RuntimeStartTimeout  time.Duration // Timeout for instance start (image pull). Must be non-zero.
 	EnsureSessionTimeout time.Duration // Timeout for session verification in EnsureSession. Defaults to 10s if <= 0.
 	MCPRegistry          mcp.Registry  // Task-scoped CAIC MCP registry; nil when disabled.
+	OwnerPolicy          task.OwnerPolicy
 }
 
 // Reconnect attaches to the existing relay using validated persistent history.
@@ -414,7 +415,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 // without removing it. The instance can be revived later. Unlike Cleanup,
 // this preserves git remotes and runtime config. It returns the persisted
 // result, or nil when a concurrent teardown supersedes the stop.
-func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
+func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) (*task.Result, error) {
 	ctx, span := trace.NewTask(ctx, "task.stop:"+t.ID.String())
 	defer span.End()
 
@@ -428,7 +429,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
 	if _, changed := t.SetStateUnless(task.StateStopping, task.StatePurging, task.StatePurged, task.StateCrashed, task.StateFailed, task.StateStopped); !changed {
 		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
-		return nil
+		return nil, nil //nolint:nilnil // A superseding lifecycle operation owns the settled result.
 	}
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
@@ -448,6 +449,10 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 		cStart := time.Now()
 		if err := r.Runtimes.Stop(ctx, name); err != nil {
 			tlog.WarnContext(ctx, "stop: instance Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
+			if h != nil {
+				err = errors.Join(err, h.Drain())
+			}
+			return nil, fmt.Errorf("runtime suspension unconfirmed: %w", err)
 		} else {
 			tlog.DebugContext(ctx, "stop: instance Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
 		}
@@ -471,7 +476,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 		// A purge or a crash already settled this incarnation and owns its record
 		// owner, so a stop must not record a result over it.
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
-		return nil
+		return nil, nil //nolint:nilnil // A superseding lifecycle operation owns the settled result.
 	}
 	// Announce the settled state now: a scheduled purge waits for the change
 	// signal to observe it, and unrelated activity must not be what wakes it.
@@ -498,8 +503,10 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 		res.DiffStat = ds
 	}
 	var recordErr error
-	if h != nil {
-		recordErr = r.finalizeRun(ctx, t, h.Run, &res)
+	if run := t.run.Load(); run != nil {
+		// A failed earlier runtime stop may already have detached and drained
+		// the transport. Its execution still owns the journal until this retry.
+		recordErr = r.finalizeRun(ctx, t, run, &res)
 	} else {
 		recordErr = r.CommitSettledResult(ctx, t, &res)
 	}
@@ -507,7 +514,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *task.Result {
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
 	res.Err = recordErr
-	return &res
+	return &res, recordErr
 }
 
 // ReviveTask restarts a stopped or crashed instance and resumes the agent session.
@@ -710,7 +717,11 @@ func (r *AgentRuntime) RecordLifecycleIntent(ctx context.Context, t *Task, persi
 	t.recordingMu.Lock()
 	defer t.recordingMu.Unlock()
 	if err := t.recordingAdmissionErrorLocked(); err != nil {
-		return t.GetState(), false, err
+		// Stopping is retained execution finalization after an account fence, not
+		// renewed execution authority. Its journal owner remains open for this drain.
+		if persistedState != task.StateStopping || t.shuttingDown.Load() {
+			return t.GetState(), false, err
+		}
 	}
 	intent := &lifecycleIntent{runtime: r, task: t, persisted: persistedState, state: runtimeState, allowed: allowedStates}
 	if t.run.Load() == nil {
@@ -1183,6 +1194,20 @@ func (r *AgentRuntime) runtimeDir(t *Task) string {
 }
 
 func (r *AgentRuntime) beginRun(ctx context.Context, t *Task, reopen, warm bool) (*Run, error) {
+	var release context.CancelFunc
+	if r.OwnerPolicy != nil {
+		var err error
+		ctx, release, err = r.OwnerPolicy.BindOwner(ctx, t.OwnerID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	keep := false
+	defer func() {
+		if !keep && release != nil {
+			release()
+		}
+	}()
 	t.recordingMu.Lock()
 	defer t.recordingMu.Unlock()
 	if t.shuttingDown.Load() {
@@ -1202,13 +1227,14 @@ func (r *AgentRuntime) beginRun(ctx context.Context, t *Task, reopen, warm bool)
 		return nil, err
 	}
 	lifetime, cancel := context.WithCancelCause(ctx)
-	run := &Run{parent: ctx, ctx: lifetime, cancel: cancel, runtime: r, task: t, startupDone: make(chan struct{}), pendingMutating: make(map[agent.ToolKey]struct{})}
+	run := &Run{parent: ctx, ctx: lifetime, cancel: cancel, releaseOwner: release, runtime: r, task: t, startupDone: make(chan struct{}), pendingMutating: make(map[agent.ToolKey]struct{})}
 	run.records, err = agent.NewRecords(context.WithoutCancel(ctx), agent.ApplyRequestedEffort(r.Backends[t.Harness].NewWire(), t.RequestedEffort), sink, run)
 	if err != nil {
 		cancel(err)
 		return nil, errors.Join(err, sink.Close())
 	}
 	t.run.Store(run)
+	keep = true // The execution now owns account lifetime release, including replay failure.
 	if t.shuttingDown.Load() {
 		run.cancel(context.Canceled)
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	inputqueuev1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue/v1"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -896,6 +897,221 @@ func (b *syncedSummaryBackend) CompactRepositoryStatus(context.Context, runtime.
 }
 
 func TestManager(t *testing.T) {
+	t.Run("cancelled no-repo admission never publishes", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := &gatedOwnerPolicy{Store: store, admitted: make(chan struct{}), resume: make(chan struct{})}
+		manager := newTestManager(t, Config{ServerCtx: t.Context(), OwnerPolicy: policy})
+		finished := make(chan error, 1)
+		var workers sync.WaitGroup
+		t.Cleanup(workers.Wait)
+		workers.Go(func() {
+			_, err := manager.Create(auth.NewContext(t.Context(), &user), CreateParams{OwnerID: user.ID, Prompt: agent.Prompt{Text: "must not publish"}, Harness: harness.Claude})
+			finished <- err
+		})
+		<-policy.admitted
+		if err := store.SetDisabled(user.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetDisabled(user.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		close(policy.resume)
+		if err := <-finished; !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled no-repo admission: %v", err)
+		}
+		if manager.Len() != 0 {
+			t.Fatal("cancelled no-repo task published")
+		}
+	})
+
+	t.Run("OwnerSuspension", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "other"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &suspensionBackend{}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), OwnerPolicy: store, Runtimes: newTestRuntime(t, backend, nil)})
+		m.CompleteRestoration(nil)
+		entries := make([]*Entry, 0, 3)
+		for i := range 3 {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "retained"}, "", "")
+			tk.OwnerID = owner.ID
+			if i == 1 {
+				tk.ParentTaskID = entries[0].Task().ID
+			}
+			if i == 2 {
+				tk.OwnerID = other.ID
+			}
+			id := runtime.NewID("test-runtime", runtime.InstanceID(tk.ID.String()))
+			if err := backend.Revive(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: tk.ID.String()}, "", "", 0)
+			tk.SetState(task.StateRunning)
+			e := m.NewEntry(tk, nil)
+			recordTestTaskLog(t, m, e)
+			m.Insert(tk.ID, e)
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "keep queued"}); err != nil {
+				t.Fatal(err)
+			}
+			entries = append(entries, e)
+		}
+		old, release, err := m.OwnerContext(t.Context(), owner.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(release)
+		if err := store.SetDisabled(owner.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if old.Err() == nil {
+			t.Fatal("existing lifetime was not fenced")
+		}
+		release()
+		backend.fail.Store(true)
+		if err := m.SuspendOwner(t.Context(), owner.ID); err == nil {
+			t.Fatal("failed runtime stop certified suspension")
+		}
+		for _, e := range entries[:2] {
+			if backend.Status(e.Task().RuntimeInstanceID()) != runtimetest.StatusRunning {
+				t.Fatal("failed stop unexpectedly confirmed runtime suspension")
+			}
+			if e.Task().GetState() != task.StateStopping {
+				t.Fatalf("unconfirmed state: %s", e.Task().GetState())
+			}
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "rejected"}); !errors.Is(err, auth.ErrAccountDisabled) {
+				t.Fatalf("queue admitted disabled owner: %v", err)
+			}
+			if err := e.Lifecycle.Revive(t.Context()); !errors.Is(err, auth.ErrAccountDisabled) {
+				t.Fatalf("revive admitted disabled owner: %v", err)
+			}
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), e.PendingInput().ID); !errors.Is(err, auth.ErrAccountDisabled) {
+				t.Fatalf("queue edit admitted: %v", err)
+			}
+		}
+		if _, err := m.Create(t.Context(), CreateParams{OwnerID: owner.ID, Prompt: agent.Prompt{Text: "rejected"}}); !errors.Is(err, auth.ErrAccountDisabled) {
+			t.Fatalf("creation admitted: %v", err)
+		}
+		backend.fail.Store(false)
+		if err := m.SuspendOwner(t.Context(), owner.ID); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries[:2] {
+			if backend.Status(e.Task().RuntimeInstanceID()) != runtimetest.StatusStopped || e.Task().GetState() != task.StateStopped {
+				t.Fatal("runtime not suspended")
+			}
+			if e.PendingInput() == nil || e.PendingInput().Prompt.Text != "keep queued" || e.Task().OwnerID != owner.ID {
+				t.Fatal("suspension lost queue or attribution")
+			}
+		}
+		if entries[2].Task().GetState() != task.StateRunning {
+			t.Fatal("unrelated owner suspended")
+		}
+		if err := store.SetDisabled(owner.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries[:2] {
+			if e.Task().GetState() != task.StateStopped || e.PendingInput() == nil {
+				t.Fatal("re-enable restarted or lost queued work")
+			}
+		}
+	})
+
+	t.Run("DisabledOwnerRestoration", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := &runtimetest.FakeBackend{}
+		id := ksid.NewID()
+		info := &runtimetest.FakeInfo{Meta: map[string]string{"md-agent-disabled\x00caic.id": id.String(), "md-agent-disabled\x00caic.harness": "claude"}}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), OwnerPolicy: store, Runtimes: newTestRuntime(t, fake, info)})
+		tk := mustNewTask(t, id, agent.Prompt{Text: "retained"}, "", "")
+		tk.OwnerID = owner.ID
+		e := m.NewEntry(tk, nil)
+		recordTestTaskLog(t, m, e)
+		logs, err := m.logStore.LoadForTaskIDs([]string{id.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetDisabled(owner.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		m.relay = fakeRelayReader{statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+			t.Error("disabled owner relay probed")
+			return false, "", nil
+		}}
+		instance := runtime.NewID("test-runtime", "md-agent-disabled")
+		entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instance, State: "running"}}, logs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 || entries[0].Task().GetState() != task.StateStopped || fake.Status(instance) != runtimetest.StatusStopped {
+			t.Fatalf("disabled runtime restoration: %+v", entries)
+		}
+		if entries[0].Task().OwnerID != owner.ID {
+			t.Fatal("restoration lost owner")
+		}
+	})
+
+	t.Run("CancelledOwnerAdmission", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := &runtimetest.FakeBackend{}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), OwnerPolicy: store, Runtimes: newTestRuntime(t, fake, nil)})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "delayed"}, "", "")
+		tk.OwnerID = owner.ID
+		e := m.NewEntry(tk, nil)
+		recordTestTaskLog(t, m, e)
+		m.Insert(tk.ID, e)
+		admission, release, err := m.OwnerContext(t.Context(), owner.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(release)
+		if err := store.SetDisabled(owner.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetDisabled(owner.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Lifecycle.Start(admission, ""); !errors.Is(err, context.Canceled) {
+			t.Fatalf("old startup admission survived re-enable: %v", err)
+		}
+		if tk.GetState() != task.StateStopped || tk.RuntimeInstanceID() != "" {
+			t.Fatal("cancelled startup launched a runtime")
+		}
+	})
+
 	t.Run("TaskChanges", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -1052,10 +1268,10 @@ func TestManager(t *testing.T) {
 				t.Fatal("cross-task attachment lookup succeeded")
 			}
 			other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Claude, "")
-			if err := restored.NewEntry(other, nil).Lifecycle.CancelQueuedInput(queue.ID); err == nil {
+			if err := restored.NewEntry(other, nil).Lifecycle.CancelQueuedInput(t.Context(), queue.ID); err == nil {
 				t.Fatal("cross-task cancellation succeeded")
 			}
-			if err := re.Lifecycle.CancelQueuedInput(queue.ID); err != nil {
+			if err := re.Lifecycle.CancelQueuedInput(t.Context(), queue.ID); err != nil {
 				t.Fatal(err)
 			}
 			prompt.Text = "edited"
@@ -1181,7 +1397,7 @@ func TestManager(t *testing.T) {
 			if pending.Delivering || pending.Error != "" || pending.Delivered {
 				t.Errorf("delivery mutated retained pending input: %+v", pending)
 			}
-			if err := e.Lifecycle.CancelQueuedInput(q.ID); err == nil {
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), q.ID); err == nil {
 				t.Fatal("in-flight cancellation succeeded")
 			}
 			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude}}
@@ -1287,7 +1503,7 @@ func TestManager(t *testing.T) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			if err := e.Lifecycle.CancelQueuedInput(q.ID); err != nil {
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), q.ID); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -1308,7 +1524,7 @@ func TestManager(t *testing.T) {
 			if q == nil || q.Error == "" {
 				t.Fatalf("failed delivery disappeared: %+v", q)
 			}
-			if err := e.Lifecycle.CancelQueuedInput(q.ID); err != nil {
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), q.ID); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -2264,7 +2480,7 @@ func TestManager(t *testing.T) {
 			call  func(m *Manager, e *Entry) error
 		}
 		stop := func(m *Manager, e *Entry) error { return e.Lifecycle.Stop(t.Context()) }
-		revive := func(m *Manager, e *Entry) error { return e.Lifecycle.Revive() }
+		revive := func(m *Manager, e *Entry) error { return e.Lifecycle.Revive(t.Context()) }
 		syncOrigin := func(m *Manager, e *Entry) error {
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			return err
@@ -3099,7 +3315,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			err := e.Lifecycle.ClearContext()
+			err := e.Lifecycle.ClearContext(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -3112,7 +3328,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			err := e.Lifecycle.ClearContext()
+			err := e.Lifecycle.ClearContext(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindInternal {
 				t.Fatalf("err = %v, want KindInternal", err)
@@ -4177,7 +4393,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("Purge: %v", err)
 			}
 			blockWire.Store(true)
-			if err := entry.Lifecycle.Revive(); err != nil {
+			if err := entry.Lifecycle.Revive(t.Context()); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
 			select {
@@ -4434,7 +4650,7 @@ func TestManager(t *testing.T) {
 			// publication. Revive must not reset this entry incarnation yet.
 			entry.Lifecycle.operationMu.Lock()
 			defer entry.Lifecycle.operationMu.Unlock()
-			if err := entry.Lifecycle.Revive(); err == nil {
+			if err := entry.Lifecycle.Revive(t.Context()); err == nil {
 				t.Fatal("Revive accepted an unfinished stop")
 			}
 			if entry.Done() != done || tk.GetState() != task.StateStopped {
@@ -4448,7 +4664,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			err := e.Lifecycle.Revive()
+			err := e.Lifecycle.Revive(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
@@ -4467,7 +4683,7 @@ func TestManager(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}), nil)
 
 			recordTestTaskLog(t, m, entry)
-			if err := entry.Lifecycle.Revive(); err != nil {
+			if err := entry.Lifecycle.Revive(t.Context()); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
 			awaitQueueCondition(t, m, func() bool { return tk.GetState() == task.StateProvisioning })
@@ -4508,7 +4724,7 @@ func TestManager(t *testing.T) {
 
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}), nil)
 			firstChanged := m.Changed()
-			if err := entry.Lifecycle.Revive(); err != nil {
+			if err := entry.Lifecycle.Revive(t.Context()); err != nil {
 				t.Fatalf("Revive: %v", err)
 			}
 			select {
@@ -7906,7 +8122,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	if err := entry.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "too early"}); err == nil {
 		t.Fatal("input accepted during recovery stop")
 	}
-	if err := entry.Lifecycle.Revive(); err == nil {
+	if err := entry.Lifecycle.Revive(t.Context()); err == nil {
 		t.Fatal("manual revival accepted during recovery")
 	}
 	if got := tk.GetState(); got != task.StateProvisioning {
@@ -8125,4 +8341,33 @@ func (b *blockedInputBackend) Start(ctx context.Context, opts *agent.Options) (*
 func TestMain(m *testing.M) {
 	gittest.Isolate()
 	os.Exit(m.Run())
+}
+
+type suspensionBackend struct {
+	runtimetest.FakeBackend
+
+	fail atomic.Bool
+}
+
+func (b *suspensionBackend) Stop(ctx context.Context, id runtime.ID) error {
+	if b.fail.Load() {
+		return errors.New("runtime unavailable")
+	}
+	return b.FakeBackend.Stop(ctx, id)
+}
+
+type gatedOwnerPolicy struct {
+	*auth.Store
+
+	admitted, resume chan struct{}
+	once             sync.Once
+}
+
+func (p *gatedOwnerPolicy) BindOwner(ctx context.Context, owner string) (context.Context, context.CancelFunc, error) {
+	work, release, err := p.Store.BindOwner(ctx, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	p.once.Do(func() { close(p.admitted); <-p.resume })
+	return work, release, nil
 }

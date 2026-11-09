@@ -19,7 +19,7 @@ func TestStoreSessions(t *testing.T) {
 	t.Run("independent cookie and bearer revocation survives restart", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "users.json")
-		store, err := Open(path)
+		store, err := Open(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +60,7 @@ func TestStoreSessions(t *testing.T) {
 		if err := store.RevokeSession(user.ID, firstClaims.SessionID); err != nil {
 			t.Fatal(err)
 		}
-		store, err = Open(path)
+		store, err = Open(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestStoreSessions(t *testing.T) {
 	t.Run("expired missing and mismatched sessions fail closed", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "users.json")
-		store, err := Open(path)
+		store, err := Open(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +128,7 @@ func TestStoreSessions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		store, err = Open(path)
+		store, err = Open(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -147,7 +147,7 @@ func TestStoreSessions(t *testing.T) {
 	t.Run("persistence failure never returns a credential or publishes a session", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "users.json")
-		store, err := Open(path)
+		store, err := Open(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}

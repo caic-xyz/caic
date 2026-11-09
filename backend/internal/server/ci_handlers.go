@@ -180,6 +180,11 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
+	ctx, release, err := entry.AutomationContext(ctx)
+	if err != nil {
+		return nil, toDTO(err)
+	}
+	defer release()
 	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.ForgePR == 0 {
@@ -217,7 +222,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
 	prompt := summary.ForPR(prURL, snap.ForgePR, primary.Branch)
 
-	if err := t.SendInput(ctx, agent.Prompt{Text: prompt}); err != nil {
+	if err := entry.Lifecycle.SendInput(ctx, agent.Prompt{Text: prompt}); err != nil {
 		return nil, fmt.Errorf("send input: %w", err)
 	}
 	return &v1.StatusResp{Status: "ok"}, nil

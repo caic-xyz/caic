@@ -22,14 +22,15 @@ type SessionInfo struct {
 
 // Session is a persisted host login, independent of MCP authorization grants.
 type Session struct {
-	ID        string
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Source    string
-	IP        string
-	UserAgent string
-	TokenHash [32]byte
+	ID           string
+	UserID       string
+	AccountEpoch int
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	Source       string
+	IP           string
+	UserAgent    string
+	TokenHash    [32]byte
 }
 
 func loadSessions(path string) (out []Session, retErr error) {
@@ -51,7 +52,7 @@ func loadSessions(path string) (out []Session, retErr error) {
 	out = make([]Session, len(data.Sessions))
 	for i := range data.Sessions {
 		r := &data.Sessions[i]
-		out[i] = Session{ID: r.ID, UserID: r.UserID, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
+		out[i] = Session{ID: r.ID, UserID: r.UserID, AccountEpoch: r.AccountEpoch, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
 	}
 	return out, nil
 }
@@ -66,7 +67,7 @@ func saveSessions(path string, sessions []Session) error {
 	records := make([]v1.Session, len(sessions))
 	for i := range sessions {
 		r := &sessions[i]
-		records[i] = v1.Session{ID: r.ID, UserID: r.UserID, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
+		records[i] = v1.Session{ID: r.ID, UserID: r.UserID, AccountEpoch: r.AccountEpoch, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
 	}
 	err = json.NewEncoder(f).Encode(v1.SessionsFile{Version: v1.Version, Sessions: records})
 	if err == nil {

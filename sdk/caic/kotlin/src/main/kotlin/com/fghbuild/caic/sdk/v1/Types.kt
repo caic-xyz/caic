@@ -1176,6 +1176,39 @@ object QuotaProviderSerializer : KSerializer<QuotaProvider> {
     }
 }
 
+@Serializable(with = RoleSerializer::class)
+sealed interface Role {
+    val value: String
+    @Serializable
+    data object Admin : Role {
+        override val value = "admin"
+    }
+    @Serializable
+    data object Member : Role {
+        override val value = "member"
+    }
+    @Serializable
+    data object SuperAdmin : Role {
+        override val value = "super_admin"
+    }
+    @Serializable
+    data class Other(override val value: String) : Role
+}
+
+object RoleSerializer : KSerializer<Role> {
+    override val descriptor = PrimitiveSerialDescriptor("Role", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: Role) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): Role {
+        val v = decoder.decodeString()
+        return when (v) {
+            "admin" -> Role.Admin
+            "member" -> Role.Member
+            "super_admin" -> Role.SuperAdmin
+            else -> Role.Other(v)
+        }
+    }
+}
+
 @Serializable(with = SyncTargetSerializer::class)
 sealed interface SyncTarget {
     val value: String
@@ -1465,6 +1498,7 @@ data class UserResp(
     /** SessionID is a public identifier, never an authentication credential. */
     @SerialName("sessionID") val sessionID: String,
     val id: String,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val role: Role? = null,
     val provider: String,
     val username: String,
     @SerialName("avatarURL") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val avatarURL: String? = null,

@@ -22,6 +22,7 @@ type Run struct {
 	ctx             context.Context
 	parent          context.Context
 	cancel          context.CancelCauseFunc
+	releaseOwner    context.CancelFunc
 	records         *agent.Records
 	runtime         *AgentRuntime
 	task            *Task
@@ -168,6 +169,9 @@ func (r *Run) joinTitles() error {
 func (r *Run) close() error {
 	joinErr := r.joinTitles()
 	r.cancel(context.Canceled)
+	if r.releaseOwner != nil {
+		r.releaseOwner()
+	}
 	return errors.Join(joinErr, r.records.Close())
 }
 

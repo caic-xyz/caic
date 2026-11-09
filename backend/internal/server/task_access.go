@@ -1,4 +1,4 @@
-// Task access policy shared by HTTP and MCP task operations.
+// Request principal authority and task access policy shared by HTTP and MCP operations.
 
 package server
 
@@ -10,6 +10,50 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
+
+type principalKind int
+
+const (
+	principalAnonymous principalKind = iota
+	principalLocal
+	principalUser
+	principalTask
+)
+
+// requestPrincipal separates local, human, and delegated task authority.
+// A task never inherits administrator authority from an attached human context.
+type requestPrincipal struct {
+	kind   principalKind
+	user   *auth.User
+	taskID ksid.ID
+}
+
+func requestPrincipalFromContext(ctx context.Context) requestPrincipal {
+	if id, ok := taskMCPTaskID(ctx); ok {
+		return requestPrincipal{kind: principalTask, taskID: id}
+	}
+	if u, ok := auth.UserFromContext(ctx); ok && u.ID != "" {
+		return requestPrincipal{kind: principalUser, user: u}
+	}
+	if p, ok := mcpPrincipalFromContext(ctx); ok && p.Remote {
+		return requestPrincipal{}
+	}
+	if auth.LocalOperatorFromContext(ctx) {
+		return requestPrincipal{kind: principalLocal}
+	}
+	return requestPrincipal{}
+}
+
+func (p requestPrincipal) role() auth.Role {
+	switch p.kind {
+	case principalLocal:
+		return auth.RoleAdmin
+	case principalUser:
+		return p.user.Role
+	default:
+		return ""
+	}
+}
 
 // taskAccess identifies the user and optional task principal making a request.
 type taskAccess struct {

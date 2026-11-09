@@ -1,4 +1,4 @@
-// Package taskmgr coordinates task execution, pending prompts, attachments, runtime history, and resource invalidations.
+// Package taskmgr coordinates account-fenced execution, pending prompts, attachments, runtime history, and resource invalidations.
 //
 // It sits between the HTTP adapter (internal/server) and task execution
 // (internal/task/taskrun). Manager owns the registry of running tasks and
@@ -100,8 +100,9 @@ type Config struct {
 	// a default quota-provider pricer is used.
 	Pricer quotausage.ModelPricer
 	// Rollup consumes task messages for the cross-task usage rollup. Required.
-	Rollup    task.RollupSink
-	Checkouts *repo.Registry
+	Rollup      task.RollupSink
+	Checkouts   *repo.Registry
+	OwnerPolicy task.OwnerPolicy // nil in auth-free operation
 }
 
 // TaskMCPScoper derives a server-authorized MCP registry for a task.
@@ -143,6 +144,7 @@ type Manager struct {
 	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
 	Checkouts    *repo.Registry
+	ownerPolicy  task.OwnerPolicy
 
 	log                  *slog.Logger
 	serverCtx            context.Context // lifetime of the Manager; for goroutines that outlive requests
@@ -250,6 +252,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		pricer:               pricer,
 		rollup:               cfg.Rollup,
 		Checkouts:            cfg.Checkouts,
+		ownerPolicy:          cfg.OwnerPolicy,
 		relay:                agentRelayReader{},
 		tasks:                make(map[ksid.ID]*Entry),
 		taskDescriptors:      make(map[ksid.ID]taskDescriptor),
@@ -377,6 +380,7 @@ func (m *Manager) NewEntry(t *taskrun.Task, lt *taskhistory.LoadedTask) *Entry {
 			RuntimeStartTimeout:  m.runtimeStartTimeout,
 			EnsureSessionTimeout: m.ensureSessionTimeout,
 			MCPRegistry:          taskMCP,
+			OwnerPolicy:          m.ownerPolicy,
 		},
 	}
 	return e
@@ -551,6 +555,16 @@ func (m *Manager) RegisteredLogPaths() map[string]struct{} {
 // then starts its runtime asynchronously. Preparation failures return without
 // registering a task.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
+	admission, release, ownerErr := m.OwnerContext(context.WithoutCancel(ctx), p.OwnerID)
+	if ownerErr != nil {
+		return 0, conflictErr(ownerErr, "task owner cannot create work")
+	}
+	keepAdmission := false
+	defer func() {
+		if !keepAdmission {
+			release()
+		}
+	}()
 	// Runtime restoration publishes entries only after their histories are
 	// trusted. Wait before allocating branches to avoid adopting one still
 	// owned by an importing task. Reads remain available during restoration.
@@ -629,16 +643,18 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 		t.SetPR(p.ForgeOwner, p.ForgeRepo, 0)
 	}
 	entry := m.NewEntry(t, nil)
-	if err := m.publishEntry(ctx, entry, 1, true); err != nil {
+	if err := m.publishEntry(admission, entry, 1, true); err != nil {
 		return 0, err
 	}
-	entry.Lifecycle.generateTitle()
+	entry.Lifecycle.generateTitle(admission)
+	keepAdmission = true
 
 	// Run setup under the lifecycle context.
 	entry.Lifecycle.wg.Go(func() {
+		defer release()
 		ghToken := p.ResolvedGitHubToken
 
-		if err := entry.Lifecycle.Start(entry.Lifecycle.ctx, ghToken); err != nil {
+		if err := entry.Lifecycle.Start(admission, ghToken); err != nil {
 			return
 		}
 	})
@@ -1095,6 +1111,43 @@ func (m *Manager) BranchAssociated(repoName, branch string) bool {
 	return false
 }
 
+// OwnerContext admits work against the configured account authority. Local
+// operation has no account store and preserves its existing operator workflow.
+func (m *Manager) OwnerContext(ctx context.Context, owner string) (context.Context, context.CancelFunc, error) {
+	if m.ownerPolicy == nil {
+		return ctx, func() {}, nil
+	}
+	return m.ownerPolicy.BindOwner(ctx, owner)
+}
+
+// SuspendOwner joins admitted lifecycle/input operations and stops every retained
+// instance for owner. The caller must publish the account fence first. A failed
+// stop remains retryable; it never counts as confirmed suspension.
+func (m *Manager) SuspendOwner(ctx context.Context, owner string) error {
+	if err := m.WaitForRuntimeImport(ctx); err != nil {
+		return err
+	}
+	if loading, msg := m.RestorationStatus(); loading || msg != "" {
+		return fmt.Errorf("cannot confirm account suspension before successful task restoration: loading=%t error=%s", loading, msg)
+	}
+	var errs []error
+	for _, e := range m.Entries() {
+		if e.Task().OwnerID != owner {
+			continue
+		}
+		if err := e.Lifecycle.suspend(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("task %s: %w", e.Task().ID, err))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	if m.ownerPolicy != nil {
+		return m.ownerPolicy.WaitOwner(ctx, owner)
+	}
+	return nil
+}
+
 // coldMessages decodes the task's physical log in recorded order. The consumer
 // must range to EOF so that interpretation failures reach it.
 func (m *Manager) coldMessages(ctx context.Context, entry *Entry) iter.Seq2[agent.Message, error] {
@@ -1390,6 +1443,9 @@ func (m *Manager) lockPreparation(mounts []repo.Mount) (func(), error) {
 // branch cannot be adopted twice, while the delegated cap is checked atomically
 // with insertion across disjoint repository sets.
 func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly int, adoptLocal bool) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t := entry.Task()
 	mounts := t.ReposSnapshot()
 	unlock, err := m.lockPreparation(mounts)
@@ -1397,6 +1453,9 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 		return internalErr(err, "lock task repositories")
 	}
 	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	branches, allocationErr := m.allocateBranchesLocked(ctx, t, mounts, reserveOnly, adoptLocal)
 	var log *taskslog.PreparedLog
 	defer func() {
@@ -1423,7 +1482,7 @@ func (m *Manager) publishEntry(ctx context.Context, entry *Entry, reserveOnly in
 	}
 	entry.LogPath.Set(log.Path)
 	m.mu.Lock()
-	if err := m.serverCtx.Err(); err != nil {
+	if err := errors.Join(m.serverCtx.Err(), ctx.Err()); err != nil {
 		m.mu.Unlock()
 		return err
 	}
@@ -2222,6 +2281,18 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("multiple task logs found for task %s", taskID)
 	}
 	lt := matchingLogs[0]
+	ownerDisabled := false
+	if _, release, err := m.OwnerContext(ctx, lt.OwnerID); err != nil {
+		ownerDisabled = true
+		if !isExited {
+			if err := m.Runtimes.Stop(ctx, c.ID); err != nil {
+				return nil, fmt.Errorf("stop unavailable owner's runtime: %w", err)
+			}
+			isExited = true
+		}
+	} else {
+		release()
+	}
 	importLogPath := lt.LogPath()
 	lp := lt.Primary()
 	if branch == "" && relPath == "" {
@@ -2262,7 +2333,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 	// Persisted user shutdown intent does not need a readable relay snapshot.
 	// Skip probes so unavailable output cannot prevent completing that intent.
-	shutdownIntent := lt.State == task.StateStopping || lt.State == task.StatePurging || lt.State == task.StateStopped || lt.State == task.StatePurged
+	shutdownIntent := ownerDisabled || lt.State == task.StateStopping || lt.State == task.StatePurging || lt.State == task.StateStopped || lt.State == task.StatePurged
 	// Check relay liveness.
 	var relayAlive bool
 	relayConfirmedDead := isExited
@@ -2533,7 +2604,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			}
 		}
 	}
-	recoverImported := importFailure == nil && relayConfirmedDead && canRecoverImportedTask(t, lt)
+	recoverImported := !ownerDisabled && importFailure == nil && relayConfirmedDead && canRecoverImportedTask(t, lt)
 	if recoverImported {
 		t.SetState(task.StateProvisioning)
 	}
@@ -2607,7 +2678,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 
 	// Preserve saved titles on restart, including when new turns were restored.
 	if lt.Title == "" {
-		entry.Lifecycle.generateTitle()
+		entry.Lifecycle.generateTitle(context.WithoutCancel(ctx))
 	}
 
 	// Recovery runs once during startup, only for a proven dead relay and
@@ -2715,6 +2786,11 @@ func (m *Manager) pruneInputQueueLocked(ctx context.Context) {
 	removed := make(map[*Entry]*PendingInput)
 	for _, e := range m.Entries() {
 		if q := e.PendingInput(); q != nil && !q.Delivering && e.Task().GetState().IsTerminal() {
+			if _, release, err := m.OwnerContext(ctx, e.Task().OwnerID); err != nil {
+				continue
+			} else {
+				release()
+			}
 			removed[e] = nil
 		}
 	}

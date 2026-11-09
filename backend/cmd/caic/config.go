@@ -221,6 +221,7 @@ func tomlToServerConfig(ctx context.Context, tc *configv1.Config, cfgDir string)
 			OAuthAllowedUsers: tc.Google.OAuth.AllowedUsers,
 		},
 		Auth: server.AuthConfig{
+			SuperAdmin:     tc.Server.SuperAdmin,
 			ExternalURL:    tc.Server.ExternalURL,
 			TrustedProxies: tc.Server.TrustedProxies,
 		},

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/gomodedev/gomode"
 	"github.com/gomodedev/gomode/oauth"
 	"github.com/gomodedev/gomode/voicegateway"
@@ -57,6 +58,41 @@ func fetchVoiceToken(t *testing.T, gateway *VoiceGatewayConfig, issuer voiceToke
 }
 
 func TestVoiceTokenHandlerOAuth(t *testing.T) {
+	t.Run("fresh narrow authority after re-enable", func(t *testing.T) {
+		t.Parallel()
+		s, _, original, _ := newMCPOAuthLifecycleRouter(t)
+		if err := s.authStore.SetDisabled(original.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.authStore.SetDisabled(original.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		fresh, _ := s.authStore.ActiveUser(original.ID)
+		for _, user := range []auth.User{fresh, original} {
+			req := httptest.NewRequestWithContext(auth.NewContext(t.Context(), &user), http.MethodGet, "/voice/token", http.NoBody)
+			response := httptest.NewRecorder()
+			voiceTokenHandler(externalVoiceGateway(VoiceTokenModeOAuth), s.oauthServer)(response, req)
+			if user.AccountEpoch == fresh.AccountEpoch {
+				if response.Code != http.StatusOK {
+					t.Fatalf("fresh authority failed: %d %s", response.Code, response.Body.String())
+				}
+			} else if response.Code != http.StatusInternalServerError {
+				t.Fatalf("stale authority issued narrow token: %d", response.Code)
+			}
+		}
+	})
+
+	t.Run("retains authenticated account generation", func(t *testing.T) {
+		t.Parallel()
+		issuer := &fakeVoiceTokenIssuer{token: "token"}
+		req := httptest.NewRequestWithContext(auth.NewContext(t.Context(), &auth.User{ID: "usr_renewed", AccountEpoch: 2}), http.MethodGet, "/voice/token", http.NoBody)
+		response := httptest.NewRecorder()
+		voiceTokenHandler(externalVoiceGateway(VoiceTokenModeOAuth), issuer)(response, req)
+		if response.Code != http.StatusOK || issuer.user.Authority != "2" {
+			t.Fatalf("captured voice authority: %d %+v", response.Code, issuer.user)
+		}
+	})
+
 	t.Parallel()
 	issuer := &fakeVoiceTokenIssuer{token: "header.payload.signature"}
 	w, service := fetchVoiceToken(t, externalVoiceGateway(VoiceTokenModeOAuth), issuer)

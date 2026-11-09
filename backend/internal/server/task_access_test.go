@@ -1,4 +1,4 @@
-// Tests for shared HTTP and MCP task access policy.
+// Tests request principal authority and shared HTTP and MCP task access policy.
 
 package server
 
@@ -76,6 +76,38 @@ func TestTaskAccess(t *testing.T) {
 		}
 		if !access.canInspect(foreign) {
 			t.Fatal("task principal stable-ID inspection did not bypass user access")
+		}
+	})
+}
+
+func TestRequestPrincipalFromContext(t *testing.T) {
+	t.Parallel()
+	t.Run("local and anonymous", func(t *testing.T) {
+		t.Parallel()
+		if p := requestPrincipalFromContext(t.Context()); p.kind != principalAnonymous || p.role() != "" {
+			t.Fatalf("anonymous authority=%+v", p)
+		}
+		ctx := auth.NewLocalContext(t.Context())
+		if p := requestPrincipalFromContext(ctx); p.kind != principalLocal || p.role() != auth.RoleAdmin {
+			t.Fatalf("local authority=%+v", p)
+		}
+		ctx = newMCPPrincipalContext(ctx, &mcpPrincipal{Remote: true})
+		if p := requestPrincipalFromContext(ctx); p.kind != principalAnonymous || p.role() != "" {
+			t.Fatal("missing remote user became local")
+		}
+	})
+	t.Run("human and task", func(t *testing.T) {
+		t.Parallel()
+		for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleMember} {
+			ctx := auth.NewContext(t.Context(), &auth.User{ID: "user", Role: role})
+			if p := requestPrincipalFromContext(ctx); p.kind != principalUser || p.role() != role {
+				t.Fatalf("user authority=%+v", p)
+			}
+			id := ksid.NewID()
+			ctx = newMCPPrincipalContext(ctx, &mcpPrincipal{TaskID: id})
+			if p := requestPrincipalFromContext(ctx); p.kind != principalTask || p.taskID != id || p.role() != "" {
+				t.Fatal("task inherited human authority")
+			}
 		}
 	})
 }

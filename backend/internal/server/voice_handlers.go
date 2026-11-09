@@ -28,9 +28,13 @@ type voiceTokenIssuer interface {
 func voiceTokenHandler(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		subject := "anonymous"
+		if r.Context().Err() != nil {
+			http.Error(w, "account request ended", http.StatusUnauthorized)
+			return
+		}
+		subject := oauth.User{ID: "anonymous", Username: "anonymous"}
 		if user, ok := auth.UserFromContext(r.Context()); ok {
-			subject = user.ID
+			subject = oauth.User{ID: user.ID, Username: user.ID, Authority: accountAuthority(user.AccountEpoch)}
 		}
 		token, err := issueVoiceToken(gateway, issuer, subject)
 		if err != nil {
@@ -53,18 +57,18 @@ func voiceTokenHandler(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer) htt
 // issueVoiceToken mints the external gateway token for subject: a narrow OAuth
 // 2.0 access token when configured, otherwise the transitional scoped Ed25519
 // token.
-func issueVoiceToken(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer, subject string) (string, error) {
+func issueVoiceToken(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer, subject oauth.User) (string, error) {
 	if gateway.TokenMode == VoiceTokenModeOAuth {
 		if issuer == nil {
 			return "", errors.New("OAuth authorization server is not configured")
 		}
-		return issuer.IssueNarrowToken(oauth.User{ID: subject, Username: subject}, gomode.ScopedTokenAudience, voicegateway.DefaultVoiceScope, 5*time.Minute)
+		return issuer.IssueNarrowToken(subject, gomode.ScopedTokenAudience, voicegateway.DefaultVoiceScope, 5*time.Minute)
 	}
 	claims := &gomode.ScopedTokenClaims{
 		ServiceKind:       goModeServiceCaic,
 		ServiceInstanceID: gateway.InstanceID,
 		BackendOrigin:     gateway.Issuer,
-		Subject:           subject,
+		Subject:           subject.ID,
 		Capabilities:      []string{voicegateway.DefaultVoiceScope},
 		Audience:          gomode.ScopedTokenAudience,
 		Expiry:            time.Now().Add(5 * time.Minute),

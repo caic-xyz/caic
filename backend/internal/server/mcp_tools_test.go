@@ -465,7 +465,7 @@ func TestMCPTools(t *testing.T) {
 			if detail.IsError || pending == nil || pending.Text != "first\nsecond" || pending.State != v1.MCPPendingInputQueued || pending.ID != entry.PendingInput().ID.String() {
 				t.Fatalf("task detail = %+v", detail)
 			}
-			if err := entry.Lifecycle.CancelQueuedInput(entry.PendingInput().ID); err != nil {
+			if err := entry.Lifecycle.CancelQueuedInput(t.Context(), entry.PendingInput().ID); err != nil {
 				t.Fatal(err)
 			}
 			list = c.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{})
@@ -511,7 +511,7 @@ func TestMCPTools(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					_, conn := newGatedInputSession(t, tk, claudecode.New().NewWire)
+					_, conn := newGatedInputSession(t, tk, claudecode.New().NewWire, nil)
 					close(conn.release)
 					args := fmt.Sprintf(`{"task_number":%q,"message":"follow up"}`, tk.ID.String())
 					if mode != "" {

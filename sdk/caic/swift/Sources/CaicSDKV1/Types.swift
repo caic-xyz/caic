@@ -652,6 +652,28 @@ public struct QuotaProvider: Codable, Equatable, Hashable {
     }
 }
 
+public struct Role: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Admin = Role("admin")
+    public static let Member = Role("member")
+    public static let SuperAdmin = Role("super_admin")
+
+    public static func other(_ value: String) -> Role { Role(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct SyncTarget: Codable, Equatable, Hashable {
     public let value: String
 
@@ -903,13 +925,15 @@ public struct UserResp: Codable {
     /// SessionID is a public identifier, never an authentication credential.
     public let sessionID: String
     public let id: String
+    public let role: Role?
     public let provider: String
     public let username: String
     public let avatarURL: String?
 
-    public init(sessionID: String, id: String, provider: String, username: String, avatarURL: String? = nil) {
+    public init(sessionID: String, id: String, role: Role? = nil, provider: String, username: String, avatarURL: String? = nil) {
         self.sessionID = sessionID
         self.id = id
+        self.role = role
         self.provider = provider
         self.username = username
         self.avatarURL = avatarURL

@@ -106,6 +106,9 @@ Task numbers follow the current task list and can change when another task is re
 - When safety issues block a push, nothing was pushed: describe each issue. For a task branch push, ask whether to retry with force; a push to main cannot be forced.`
 
 var mcpToolScopes = map[string]string{
+	"accounts_list":              mcpScopeServerAdmin,
+	"account_set_role":           mcpScopeServerAdmin,
+	"account_set_enabled":        mcpScopeServerAdmin,
 	"repos_list":                 mcpScopeRead,
 	"harnesses_list":             mcpScopeRead,
 	"tasks_list":                 mcpScopeTasksRead,
@@ -200,6 +203,12 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 }
 
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
+	if (name == "account_set_enabled" || name == "account_set_role" || name == "accounts_list") && !requestPrincipalFromContext(ctx).role().IsAdmin() {
+		return "administrator account required", false
+	}
+	if name == "account_set_role" && requestPrincipalFromContext(ctx).role() != auth.RoleSuperAdmin {
+		return "super_admin account required", false
+	}
 	if _, ok := taskMCPTaskID(ctx); ok {
 		switch name {
 		case "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":

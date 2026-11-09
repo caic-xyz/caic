@@ -305,6 +305,11 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,
 		hostPolicy:  d.HostPolicy,
+		authStore:   d.AuthStore,
+	}
+	var accounts *accountService
+	if d.AuthStore != nil {
+		accounts = &accountService{store: d.AuthStore, tasks: d.TaskMgr, oauth: s.oauthServer}
 	}
 	registry := &mcpRegistry{
 		mcpTools: &mcpTools{
@@ -314,6 +319,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			usage:        s.usageHandlers,
 			audit:        audit,
 			metrics:      d.Metrics,
+			accounts:     accounts,
 		},
 		mcpResources: &mcpResources{
 			serverConfig:  s.serverHandlers,

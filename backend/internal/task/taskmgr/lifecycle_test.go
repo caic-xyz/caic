@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -36,6 +37,56 @@ import (
 )
 
 func TestLifecycle(t *testing.T) {
+	t.Run("SuspendOwner joins title after successful startup admission", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider := &lifecycleTitleProvider{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
+		manager := newTestManager(t, Config{ServerCtx: t.Context(), OwnerPolicy: store})
+		manager.CompleteRestoration(nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "owned title"}, harness.Claude, "")
+		tk.OwnerID = user.ID
+		tk.Provider = provider
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "owned-title"), runtime.ConnectionTarget{SSHHost: "owned-title"}, "", "", 0)
+		tk.SetState(task.StateWaiting)
+		entry := manager.NewEntry(tk, nil)
+		manager.Insert(tk.ID, entry)
+		admission, release, err := manager.OwnerContext(t.Context(), user.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry.Lifecycle.generateTitle(admission)
+		select {
+		case <-provider.started:
+		case <-time.After(time.Second):
+			t.Fatal("title did not start")
+		}
+		startManagedSession(t, entry, &localProcessBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}, command: []string{"sh", "-c", "read line"}})
+		release() // The successful startup has transferred execution to its Run.
+		select {
+		case <-provider.finished:
+			t.Fatal("successful startup completion cancelled valid title")
+		default:
+		}
+		if err := store.SetDisabled(user.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.SuspendOwner(t.Context(), user.ID); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-provider.finished:
+		default:
+			t.Fatal("suspension returned before title producer joined")
+		}
+	})
+
 	t.Parallel()
 	t.Run("DelayedTitlePublication", func(t *testing.T) {
 		t.Parallel()
@@ -46,7 +97,7 @@ func TestLifecycle(t *testing.T) {
 		entry := m.NewEntry(tk, nil)
 		m.Insert(tk.ID, entry)
 		t.Cleanup(func() { close(provider.release); entry.Lifecycle.wg.Wait() })
-		entry.Lifecycle.generateTitle()
+		entry.Lifecycle.generateTitle(t.Context())
 		<-provider.started
 		version, _ := m.ChangeSnapshot()
 		provider.release <- struct{}{}
@@ -82,7 +133,7 @@ func TestLifecycle(t *testing.T) {
 					close(provider.release)
 					workers.Wait()
 				})
-				entry.Lifecycle.generateTitle()
+				entry.Lifecycle.generateTitle(t.Context())
 				select {
 				case <-provider.started:
 				case <-time.After(time.Second):
@@ -210,7 +261,7 @@ func TestLifecycle(t *testing.T) {
 			if !reflect.DeepEqual(old.Prompt, first) || !reflect.DeepEqual(q.Prompt, want) {
 				t.Fatal("append mutated an immutable prompt")
 			}
-			if err := e.Lifecycle.CancelQueuedInput(old.ID); err == nil {
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), old.ID); err == nil {
 				t.Fatal("stale edit removed appended content")
 			}
 			loaded, err := store.LoadInputQueue()
@@ -328,7 +379,7 @@ func TestLifecycle(t *testing.T) {
 			if err := os.Mkdir(path, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := e.Lifecycle.CancelQueuedInput(q.ID); err == nil {
+			if err := e.Lifecycle.CancelQueuedInput(t.Context(), q.ID); err == nil {
 				t.Fatal("cancel reported false success")
 			}
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "unsaved"}); err == nil {
@@ -475,12 +526,16 @@ func TestLifecycle(t *testing.T) {
 type lifecycleTitleProvider struct {
 	genai.Provider
 
-	started chan struct{}
-	release chan struct{}
+	started  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
 }
 
 func (p *lifecycleTitleProvider) GenSync(ctx context.Context, _ genai.Messages, _ ...genai.GenOption) (genai.Result, error) {
 	close(p.started)
+	if p.finished != nil {
+		defer close(p.finished)
+	}
 	select {
 	case <-p.release:
 		return genai.Result{Replies: []genai.Reply{{Text: "Joined title"}}}, nil

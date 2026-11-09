@@ -75,6 +75,11 @@ func (svc *Service) Close() {
 // StartPRFlow creates a PR/MR for the synced branch, records it on the task,
 // and launches CI monitoring in a goroutine. Returns the PR number on success.
 func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Forge, info *RepoInfo, branch, baseBranch string) (int, error) {
+	ctx, release, err := entry.AutomationContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	t := entry.Task()
 	title := t.Title()
 	if title == "" {
@@ -99,7 +104,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 	}
 	svc.backend.SetTaskMonitorBranch(entry, branch)
 	svc.backend.NotifyTaskChange(t.ID)
-	svc.startWorker(ctx, func(ctx context.Context) { svc.MonitorCI(ctx, entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA) })
+	svc.startWorker(ctx, entry, func(ctx context.Context) { svc.MonitorCI(ctx, entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA) })
 	return pr.Number, nil
 }
 
@@ -110,6 +115,12 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 // subsequent updates are delivered via check_suite webhook events.
 // Without an App, it polls every 15 s.
 func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName, sha string) {
+	ctx, release, err := entry.AutomationContext(ctx)
+	if err != nil {
+		svc.log.Info("CI owner authority ended", "err", err)
+		return
+	}
+	defer release()
 	t := entry.Task()
 	svc.log.InfoContext(ctx, "monitor started", "task", t.ID, "owner", owner, "repo", repoName, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
 
@@ -212,6 +223,12 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 //     re-monitor so the loop repeats automatically.
 //   - CI success: squash-merge the PR via the forge API, then notify the agent.
 func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName, sha string, result forgecache.Result) {
+	ctx, release, err := entry.AutomationContext(ctx)
+	if err != nil {
+		svc.log.Info("CI owner authority ended", "err", err)
+		return
+	}
+	defer release()
 	t := entry.Task()
 
 	// Dedup: skip if we already notified this task for this SHA.
@@ -251,12 +268,15 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 			summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repoName, sha[:min(7, len(sha))])
 		}
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	t.SetCIStatus(ciStatus, result.Checks)
 	svc.backend.NotifyTaskChange(t.ID)
 	// Count before sending so a fix turn that ends before the worker starts
 	// still counts.
 	turns := t.CompletedRootTurns()
-	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
+	if err := entry.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
 		svc.log.WarnContext(ctx, "send input", "task", t.ID, "err", err)
 		// No active session — attempt auto-fix for CI failures if enabled.
 		if result.Status == forge.CIStatusFailure {
@@ -272,7 +292,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
 	if ciStatus == forge.CIStatusFailure {
-		svc.startWorker(ctx, func(ctx context.Context) { svc.autoResync(ctx, entry, f, owner, repoName, turns) })
+		svc.startWorker(ctx, entry, func(ctx context.Context) { svc.autoResync(ctx, entry, f, owner, repoName, turns) })
 	}
 }
 
@@ -346,15 +366,24 @@ func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Resul
 	}
 }
 
-// startWorker retains request values while binding work to the service lifetime.
-func (svc *Service) startWorker(ctx context.Context, fn func(context.Context)) {
+// startWorker transfers admitted owner work beyond a request, retaining its
+// generation and joining both service shutdown and account suspension.
+func (svc *Service) startWorker(ctx context.Context, entry TaskEntry, fn func(context.Context)) {
+	work, release, err := entry.AutomationContext(context.WithoutCancel(ctx))
+	if err != nil {
+		svc.log.Info("CI worker authority ended", "err", err)
+		return
+	}
+
 	svc.workerMu.Lock()
 	defer svc.workerMu.Unlock()
 	if svc.closed {
+		release()
 		return
 	}
 	svc.workers.Go(func() error {
-		workerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		workerCtx, cancel := context.WithCancel(work)
+		defer release()
 		stop := context.AfterFunc(svc.workerCtx, cancel) //nolint:contextcheck // Service shutdown cancels work that retains request values.
 		defer stop()
 		defer cancel()

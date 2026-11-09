@@ -12,6 +12,75 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
+// AccountProvider identifies a supported login provider in account listings.
+type AccountProvider string
+
+// Supported account providers.
+const (
+	AccountProviderGitHub AccountProvider = "github"
+	AccountProviderGitLab AccountProvider = "gitlab"
+	AccountProviderGoogle AccountProvider = "google"
+)
+
+// AccountRole is effective instance authority, including operator configuration.
+type AccountRole string
+
+// Effective account roles.
+const (
+	AccountRoleAdmin      AccountRole = "admin"
+	AccountRoleMember     AccountRole = "member"
+	AccountRoleSuperAdmin AccountRole = "super_admin"
+)
+
+// ApplicationRole is an instance role the application can assign and persist.
+type ApplicationRole string
+
+// Assignable application roles.
+const (
+	ApplicationRoleAdmin  ApplicationRole = "admin"
+	ApplicationRoleMember ApplicationRole = "member"
+)
+
+// Account is an administrator-visible identity without tokens or session details.
+type Account struct {
+	UserID     string          `json:"user_id"`
+	Provider   AccountProvider `json:"provider" jsonschema:"enum=github,enum=gitlab,enum=google"`
+	ProviderID string          `json:"provider_id"`
+	Username   string          `json:"username"`
+	Role       AccountRole     `json:"role" jsonschema:"enum=admin,enum=member,enum=super_admin"`
+	Enabled    bool            `json:"enabled"`
+}
+
+// AccountsOutput lists existing accounts for administration.
+type AccountsOutput struct {
+	Accounts []Account `json:"accounts"`
+}
+
+// SetAccountRoleArgs assigns one application-owned role.
+type SetAccountRoleArgs struct {
+	UserID string          `json:"user_id"`
+	Role   ApplicationRole `json:"role" jsonschema:"enum=admin,enum=member" jsonschema_description:"Application-owned role; super_admin is configured by the operator"`
+}
+
+// AccountRoleOutput reports a persisted role assignment.
+type AccountRoleOutput struct {
+	UserID string          `json:"user_id"`
+	Role   ApplicationRole `json:"role" jsonschema:"enum=admin,enum=member"`
+}
+
+// SetAccountEnabledArgs changes admission for one existing account.
+type SetAccountEnabledArgs struct {
+	UserID  string `json:"user_id" jsonschema_description:"Stable account ID from accounts_list"`
+	Enabled *bool  `json:"enabled" jsonschema_description:"False fences and suspends work; true requires confirmed suspension before allowing fresh login"`
+}
+
+// AccountEnabledOutput reports confirmed account admission and suspension state.
+type AccountEnabledOutput struct {
+	UserID    string `json:"user_id"`
+	Enabled   bool   `json:"enabled"`
+	Suspended bool   `json:"suspended"`
+}
+
 // TaskReference accepts a JSON task number or a string task reference.
 type TaskReference string
 

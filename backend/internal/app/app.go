@@ -41,6 +41,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -186,7 +187,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	var googleOAuth *oauthclient.ProviderConfig
 	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != "" || cfg.Google.OAuthClientID != ""
 	if oauthConfigured {
-		store, err := auth.Open(filepath.Join(cfg.Dirs.ConfigDir, "users.json"))
+		store, err := auth.Open(filepath.Join(cfg.Dirs.ConfigDir, "users.json"), cfg.Auth.SuperAdmin)
 		if err != nil {
 			return nil, fmt.Errorf("open users store: %w", err)
 		}
@@ -285,7 +286,12 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}
 	checkoutRegistry := repo.NewRegistry()
+	var ownerPolicy task.OwnerPolicy
+	if authStore != nil {
+		ownerPolicy = authStore
+	}
 	taskMgr, err := taskmgr.New(taskmgr.Config{ //nolint:contextcheck // Config.ServerCtx passes this caller context to the Manager-owned MCP executor.
+		OwnerPolicy:         ownerPolicy,
 		ServerCtx:           ctx,
 		Log:                 log,
 		LogStore:            logStore,

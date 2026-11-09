@@ -203,7 +203,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, err
 	}
-	store, err := auth.Open(filepath.Join(stateDir, "users.json"))
+	store, err := auth.Open(filepath.Join(stateDir, "users.json"), "")
 	if err != nil {
 		return "", "", nil, err
 	}

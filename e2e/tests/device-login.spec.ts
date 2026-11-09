@@ -352,14 +352,14 @@ test("account changes require re-entering the code before approval", async ({ br
     ]);
     const retainedSession = await approver.request.get("/auth/me");
     expect(retainedSession.status()).toBe(200);
-    expect(await retainedSession.json()).toMatchObject({ username: "device-reviewer" });
+    expect(await retainedSession.json()).toMatchObject({ username: "device-reviewer", role: "member" });
     await expect(approval.getByRole("textbox", { name: "Device code" })).toHaveValue("");
     await expect(approval.getByRole("button", { name: "Approve sign-in" })).toHaveCount(0);
     await approval.getByRole("textbox", { name: "Device code" }).fill(code);
     await approval.getByRole("button", { name: "Approve sign-in" }).click();
     await expect(screen).toHaveURL(`${origin}/`, { timeout: 15000 });
     const me = await display.request.get("/auth/me");
-    expect(await me.json()).toMatchObject({ username: "device-reviewer" });
+    expect(await me.json()).toMatchObject({ username: "device-reviewer", role: "member" });
   } finally {
     await display.close();
     await approver.close();

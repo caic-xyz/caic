@@ -13,6 +13,7 @@ import (
 	voicegatewayv1 "github.com/gomodedev/gomode/voicegateway/data/v1"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/gomodedev/gomode/autoupdate"
@@ -186,8 +187,9 @@ func (c *GoogleConfig) Validate() error {
 	return nil
 }
 
-// AuthConfig configures public URL state used by OAuth and webhook flows.
+// AuthConfig configures operator-owned authority and public URL state for OAuth and webhooks.
 type AuthConfig struct {
+	SuperAdmin string // stable provider:account-id, resolved only at startup
 	// ExternalURL is the public base URL (e.g. https://caic.example.com).
 	// "auto" locks the hostname from the first FQDN request.
 	ExternalURL string
@@ -198,6 +200,9 @@ type AuthConfig struct {
 
 // Validate returns an error if the auth configuration is invalid.
 func (c *AuthConfig) Validate() error {
+	if err := auth.ValidateSuperAdmin(c.SuperAdmin); err != nil {
+		return err
+	}
 	if _, err := c.TrustedProxyPrefixes(); err != nil {
 		return err
 	}

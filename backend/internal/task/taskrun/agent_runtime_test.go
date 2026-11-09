@@ -35,6 +35,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -2763,7 +2764,9 @@ else:
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(state)
 
-				r.StopTask(t.Context(), tk)
+				if _, err := r.StopTask(t.Context(), tk); err != nil {
+					t.Fatal(err)
+				}
 
 				if got := tk.GetState(); got != state {
 					t.Errorf("state = %v, want %v", got, state)
@@ -2773,6 +2776,82 @@ else:
 				}
 			})
 		}
+
+		t.Run("failed runtime stop retains execution for retry", func(t *testing.T) {
+			t.Parallel()
+			store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend := &retryStopBackend{fail: true}
+			r := newTestAgentRuntimeWithRuntime(t, backend, nil, "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "retained"}, "", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
+			tk.OwnerID = owner.ID
+			r.OwnerPolicy = store
+			tk.SetState(task.StateRunning)
+			run := beginTestExecution(t, r, tk)
+			cmd := exec.CommandContext(run.ctx, "sh", "-c", "read line")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			session := agent.NewSession(run.ctx, cmd, agent.NewConn(run.ctx, testLogger(), stdin, run.records, nil), stdout, testLogger())
+			tk.AttachSession(&SessionHandle{Session: session, Run: run})
+			select {
+			case <-session.Done():
+				t.Fatal("transport was not attached alive")
+			default:
+			}
+			if err := store.SetDisabled(owner.ID, true); err != nil {
+				t.Fatal(err)
+			}
+			if !errors.Is(run.ctx.Err(), context.Canceled) {
+				t.Fatal("active execution survived owner disablement")
+			}
+			if err := tk.SendInput(t.Context(), agent.Prompt{Text: "disabled"}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("direct input bypassed owner fence: %v", err)
+			}
+			if err := tk.SendCompact(t.Context(), ""); !errors.Is(err, context.Canceled) {
+				t.Fatalf("direct compaction bypassed owner fence: %v", err)
+			}
+			if _, err := r.beginRun(t.Context(), tk, true, false); !errors.Is(err, auth.ErrAccountDisabled) {
+				t.Fatalf("disabled owner admitted execution: %v", err)
+			}
+			if result, err := r.StopTask(t.Context(), tk); err == nil || result != nil {
+				t.Fatalf("failed stop = %v, %v", result, err)
+			}
+			if tk.run.Load() != run || tk.GetState() != task.StateStopping {
+				t.Fatal("failed stop lost recording owner or claimed settled state")
+			}
+			select {
+			case <-session.Done():
+			default:
+				t.Fatal("failed remote stop did not join local transport")
+			}
+			if tk.SessionDone() != nil {
+				t.Fatal("failed remote stop left transport attached")
+			}
+			backend.fail = false
+			result, err := r.StopTask(t.Context(), tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || result.State != task.StateStopped || tk.run.Load() != nil {
+				t.Fatal("retry did not settle retained execution")
+			}
+		})
 		t.Run("announces_the_stopped_transition", func(t *testing.T) {
 			t.Parallel()
 			stub := testContainer()
@@ -2780,10 +2859,13 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
+			beginTestExecution(t, r, tk)
 			var announced []task.State
 			r.NotifyTaskChange = func() { announced = append(announced, tk.GetState()) }
 
-			r.StopTask(t.Context(), tk)
+			if _, err := r.StopTask(t.Context(), tk); err != nil {
+				t.Fatal(err)
+			}
 
 			// A scheduled purge waits for this announcement, so the stop cannot
 			// leave the settled state unannounced until its own tail finishes.
@@ -3569,4 +3651,18 @@ func writeProductionAdoptionFixture(b *testing.B, path string) {
 	} else if info.Size() < 128<<20 {
 		b.Fatalf("fixture size = %d, want at least %d", info.Size(), 128<<20)
 	}
+}
+
+// retryStopBackend retains runtime state until the simulated outage ends.
+type retryStopBackend struct {
+	runtimetest.FakeBackend
+
+	fail bool
+}
+
+func (b *retryStopBackend) Stop(ctx context.Context, id runtime.ID) error {
+	if b.fail {
+		return errors.New("runtime unavailable")
+	}
+	return b.FakeBackend.Stop(ctx, id)
 }

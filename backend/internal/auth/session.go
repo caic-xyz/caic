@@ -1,6 +1,6 @@
-// JWT claims and validation bind host credentials to persistent, individually revocable sessions.
+// Instance roles distinguish configured super administration; JWT validation binds credentials to persistent sessions.
 
-// Package auth manages caic user sessions and OAuth login identity.
+// Package auth manages caic user sessions, instance roles, and OAuth login identity.
 package auth
 
 import (
@@ -70,7 +70,10 @@ func hmacSHA256(secret []byte, data string) string {
 
 // User represents an authenticated caic user.
 type User struct {
-	ID           string   // "usr_<ksid>"
+	ID           string // "usr_<ksid>"
+	Role         Role   // instance authority, independent of provider tokens
+	Disabled     bool
+	AccountEpoch int      // invalidates sessions permanently when an account is disabled
 	Provider     Provider // "github" | "gitlab" | "google"
 	ProviderID   string   // provider's stable user ID as string
 	Username     string
@@ -80,6 +83,37 @@ type User struct {
 	TokenExpiry  time.Time // zero value means no expiry
 	CreatedAt    time.Time
 	LastSeenAt   time.Time
+}
+
+// Role identifies effective instance authority. Super administration is derived
+// only from startup configuration; an absent stored application role means member.
+type Role string
+
+// IsAdmin reports routine instance administration authority.
+func (r Role) IsAdmin() bool { return r == RoleAdmin || r == RoleSuperAdmin }
+
+// Instance roles do not grant task or credential access on their own.
+const (
+	RoleAdmin      Role = "admin"
+	RoleMember     Role = "member"
+	RoleSuperAdmin Role = "super_admin"
+)
+
+// ValidateSuperAdmin checks an optional stable provider account selector.
+func ValidateSuperAdmin(value string) error {
+	if value == "" {
+		return nil
+	}
+	provider, id, ok := strings.Cut(value, ":")
+	if !ok || id == "" || strings.ContainsAny(id, ": \t\r\n") {
+		return errors.New("super_admin must be provider:stable-account-id")
+	}
+	switch Provider(provider) {
+	case ProviderGitHub, ProviderGitLab, ProviderGoogle:
+		return nil
+	default:
+		return errors.New("super_admin provider must be github, gitlab, or google")
+	}
 }
 
 // claims are the fields embedded in the JWT payload.

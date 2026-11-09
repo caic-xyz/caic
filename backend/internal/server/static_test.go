@@ -318,13 +318,13 @@ func TestSpaHandlerBootstrapSnippet(t *testing.T) {
 	t.Run("user", func(t *testing.T) {
 		t.Parallel()
 		h := &spaHandler{authProviders: []string{"github"}}
-		u := &auth.User{ID: "u1", Provider: auth.ProviderGitHub, Username: "alice", AvatarURL: "https://x/a.png"}
+		u := &auth.User{ID: "u1", Role: auth.RoleMember, Provider: auth.ProviderGitHub, Username: "alice", AvatarURL: "https://x/a.png"}
 		req := httptest.NewRequestWithContext(auth.NewContext(t.Context(), u), http.MethodGet, "/", http.NoBody)
 		data := parse(t, h.bootstrapSnippet(req))
 		if data.User == nil {
 			t.Fatalf("user = nil, want alice")
 		}
-		if data.User.Username != "alice" || data.User.Provider != "github" || data.User.ID != "u1" {
+		if data.User.Username != "alice" || data.User.Provider != "github" || data.User.ID != "u1" || data.User.Role != "member" {
 			t.Errorf("user = %+v, want alice/github/u1", data.User)
 		}
 	})
@@ -333,7 +333,7 @@ func TestSpaHandlerBootstrapSnippet(t *testing.T) {
 		t.Parallel()
 		// A username containing </script> must not break out of the element.
 		h := &spaHandler{}
-		u := &auth.User{ID: "u1", Provider: auth.ProviderGitHub, Username: "</script><evil>"}
+		u := &auth.User{ID: "u1", Role: auth.RoleMember, Provider: auth.ProviderGitHub, Username: "</script><evil>"}
 		req := httptest.NewRequestWithContext(auth.NewContext(t.Context(), u), http.MethodGet, "/", http.NoBody)
 		snippet := h.bootstrapSnippet(req)
 		if n := bytes.Count(snippet, []byte("</script>")); n != 1 {

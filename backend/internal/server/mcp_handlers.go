@@ -1,4 +1,4 @@
-// MCP HTTP handlers: protocol dispatch, subscription ownership, origin validation, and rate limiting.
+// MCP HTTP handlers bind authenticated lifetimes and dispatch protocols, subscriptions, origin checks, and rate limits.
 
 package server
 
@@ -30,12 +30,33 @@ type mcpHandlers struct {
 
 	// Shared, injected reference (not owned).
 	hostPolicy *httpserver.HostPolicy
+	authStore  *auth.Store
 }
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
 // are applied here; configured bearer or session authentication is applied
 // upstream by the Router.
 func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
+	incoming := r.Context()
+	if h.authStore != nil {
+		u, ok := auth.UserFromContext(incoming)
+		if !ok {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		current, ok := h.authStore.ActiveUser(u.ID)
+		if !ok || current.AccountEpoch != u.AccountEpoch {
+			http.Error(w, "account session revoked", http.StatusUnauthorized)
+			return
+		}
+		ctx, release, err := h.authStore.BindUser(incoming, u)
+		if err != nil {
+			http.Error(w, "account session revoked", http.StatusUnauthorized)
+			return
+		}
+		defer release()
+		r = r.WithContext(ctx)
+	}
 	r = requestWithMCPPrincipal(r)
 	if err := h.validateMCPOrigin(r); err != nil {
 		http.Error(w, "forbidden: invalid origin", http.StatusForbidden)
@@ -82,17 +103,17 @@ func requestWithMCPPrincipal(r *http.Request) *http.Request {
 // identities rather than credentials, so refreshing a token preserves the
 // subscription while another user or task cannot reuse its session ID.
 func mcpSessionOwner(ctx context.Context) (string, error) {
-	principal, hasPrincipal := mcpPrincipalFromContext(ctx)
-	if hasPrincipal && principal.TaskID != 0 {
-		return "task:" + principal.TaskID.String(), nil
+	p := requestPrincipalFromContext(ctx)
+	switch p.kind {
+	case principalTask:
+		return "task:" + p.taskID.String(), nil
+	case principalUser:
+		return "user:" + p.user.ID, nil
+	case principalLocal:
+		return "local", nil
+	default:
+		return "", errors.New("MCP session is missing its principal")
 	}
-	if user, ok := auth.UserFromContext(ctx); ok && user.ID != "" {
-		return "user:" + user.ID, nil
-	}
-	if hasPrincipal && principal.Remote {
-		return "", errors.New("authenticated MCP session is missing its user")
-	}
-	return "local", nil
 }
 
 func (h *mcpHandlers) allowMCPRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -175,7 +196,7 @@ var mcpScopeLabels = map[string]string{
 	mcpScopeTasksWrite:  "Interact with and manage existing tasks",
 	mcpScopeTasksAdmin:  "Administer tasks (cancel, delete)",
 	mcpScopeReposWrite:  "Manage repositories",
-	mcpScopeServerAdmin: "Read server machine statistics and health",
+	mcpScopeServerAdmin: "Administer accounts and read server machine statistics and health",
 }
 
 type mcpPrincipalContextKey struct{}
@@ -238,6 +259,9 @@ func taskMCPTaskID(ctx context.Context) (ksid.ID, bool) {
 	return p.TaskID, true
 }
 
+// mcpHasScope bounds remote OAuth clients by their delegated scopes. First-party
+// browser sessions use the signed-in human's current authority directly; each
+// tool still enforces its account role and other domain permissions.
 func mcpHasScope(ctx context.Context, scope string) bool {
 	if p, ok := mcpPrincipalFromContext(ctx); ok && p.TaskID != 0 {
 		return scope == mcpScopeTasksCreate

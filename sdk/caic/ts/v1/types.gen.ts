@@ -399,6 +399,17 @@ export const QuotaProviderTypeSafe = "typesafe";
 export const QuotaProviderXiaomi = "xiaomi";
 export const QuotaProviderZai = "zai";
 
+export type Role =
+  | "admin"
+  | "member"
+  | "super_admin";
+/**
+ * Supported values.
+ */
+export const RoleAdmin = "admin";
+export const RoleMember = "member";
+export const RoleSuperAdmin = "super_admin";
+
 export type SyncTarget =
   | "branch"
   | "default";
@@ -541,6 +552,7 @@ export interface UserResp {
   /** SessionID is a public identifier, never an authentication credential. */
   sessionID: string;
   id: string;
+  role?: Role;
   provider: string;
   username: string;
   avatarURL?: string;

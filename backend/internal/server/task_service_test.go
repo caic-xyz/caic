@@ -195,7 +195,7 @@ func TestTaskService(t *testing.T) {
 				tk.SetState(task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				entry, _ := s.taskMgr.GetEntry(tk.ID)
-				session, _ := newGatedInputSession(t, tk, tc.wireFactory)
+				session, _ := newGatedInputSession(t, tk, tc.wireFactory, nil)
 				_, err := testTaskHandlers(s).taskSvc.compactContext(t.Context(), entry, &v1.CompactReq{Instructions: "preserve the failing test"})
 				apiError, ok := errors.AsType[*api.Error](err)
 				if !ok || apiError.Status != http.StatusBadRequest || apiError.Message != "compact context: custom compaction instructions are not supported" {
@@ -307,6 +307,102 @@ func TestTaskService(t *testing.T) {
 			t.Errorf("second task = %q, want inactive", got)
 		}
 	})
+
+	t.Run("stale authenticated create and fork", func(t *testing.T) {
+		t.Parallel()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newTestOAuthRouter(t, store)
+		source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
+		source.OwnerID = user.ID
+		source.SetState(task.StateWaiting)
+		insertTestTask(s, source.ID, source)
+		entry, _ := s.taskMgr.GetEntry(source.ID)
+		stale := auth.NewContext(t.Context(), &user)
+		if err := store.SetDisabled(user.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetDisabled(user.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := testTaskHandlers(s).taskSvc.createTask(stale, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: "stale"}}, nil); err == nil {
+			t.Fatal("stale no-repo create regained authority")
+		}
+		if _, err := entry.Lifecycle.Fork(stale, &taskmgr.ForkParams{OwnerID: user.ID, Prompt: agent.Prompt{Text: "stale"}}); !errors.Is(err, auth.ErrAccountDisabled) {
+			t.Fatalf("stale fork authority: %v", err)
+		}
+		if _, err := s.taskMgr.Create(stale, taskmgr.CreateParams{OwnerID: user.ID, Prompt: agent.Prompt{Text: "stale"}}); !errors.Is(err, auth.ErrAccountDisabled) {
+			t.Fatalf("stale no-repo lifecycle admission: %v", err)
+		}
+		if s.taskMgr.Len() != 1 {
+			t.Fatal("stale admission published a task")
+		}
+	})
+	t.Run("authenticated detached input authority", func(t *testing.T) {
+		t.Parallel()
+		for _, when := range []string{"during send", "stale generation"} {
+			t.Run(when, func(t *testing.T) {
+				t.Parallel()
+				store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "owner"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				s := newTestOAuthRouter(t, store)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+				tk.OwnerID = user.ID
+				tk.SetState(task.StateWaiting)
+				insertTestTask(s, tk.ID, tk)
+				entry, _ := s.taskMgr.GetEntry(tk.ID)
+				_, conn := newGatedInputSession(t, tk, claudecode.New().NewWire, store)
+				ctx := auth.NewContext(t.Context(), &user)
+				if when == "stale generation" {
+					if err := store.SetDisabled(user.ID, true); err != nil {
+						t.Fatal(err)
+					}
+					if err := store.SetDisabled(user.ID, false); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := testTaskHandlers(s).taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: "revoked"}}, nil); err == nil {
+						t.Fatal("stale detached input admitted")
+					}
+					return
+				}
+				sent := make(chan error, 1)
+				var workers sync.WaitGroup
+				workers.Go(func() {
+					_, err := testTaskHandlers(s).taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: "revoked"}}, nil)
+					sent <- err
+				})
+				t.Cleanup(workers.Wait)
+				select {
+				case <-conn.started:
+				case <-time.After(time.Second):
+					t.Fatal("input did not reach transport")
+				}
+				if err := store.SetDisabled(user.ID, true); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-sent:
+					if err == nil {
+						t.Fatal("disabled transport accepted input")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("owner cancellation failed to join input before cleanup")
+				}
+			})
+		}
+	})
 	t.Run("sendInput", func(t *testing.T) {
 		t.Parallel()
 		for _, when := range []string{"before_send", "during_send"} {
@@ -319,7 +415,7 @@ func TestTaskService(t *testing.T) {
 				e, _ := s.taskMgr.GetEntry(tk.ID)
 				wake, unsubscribe := tk.SubscribeTimelineWakeups(t.Context())
 				t.Cleanup(unsubscribe)
-				session, conn := newGatedInputSession(t, tk, claudecode.New().NewWire)
+				session, conn := newGatedInputSession(t, tk, claudecode.New().NewWire, nil)
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
 				if when == "before_send" {
@@ -397,19 +493,25 @@ type gatedInputConn struct {
 
 	started chan struct{}
 	release chan struct{}
+	ctx     context.Context
 }
 
 func (c *gatedInputConn) SendPrompt(p agent.Prompt, data []byte) error {
 	close(c.started)
-	<-c.release
+	select {
+	case <-c.release:
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 	return c.Conn.SendPrompt(p, data)
 }
 
-func newGatedInputSession(t *testing.T, tk *taskrun.Task, wireFactory func() agent.WireFormat) (*agent.Session, *gatedInputConn) {
+func newGatedInputSession(t *testing.T, tk *taskrun.Task, wireFactory func() agent.WireFormat, policy task.OwnerPolicy) (*agent.Session, *gatedInputConn) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	backend := &gatedInputBackend{FakeBackend: &agenttest.FakeBackend{WireFactory: wireFactory}}
 	r := &taskrun.AgentRuntime{
+		OwnerPolicy:      policy,
 		Backends:         agent.Backends{tk.Harness: backend},
 		LogStore:         taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil)),
 		LogPath:          &taskslog.Path{},
@@ -450,7 +552,7 @@ func (b *gatedInputBackend) Start(ctx context.Context, opts *agent.Options) (*ag
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	b.conn = &gatedInputConn{Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), started: make(chan struct{}), release: make(chan struct{})}
+	b.conn = &gatedInputConn{ctx: ctx, Conn: agent.NewConn(ctx, opts.Logger, stdin, opts.Records, nil), started: make(chan struct{}), release: make(chan struct{})}
 	return agent.NewSession(ctx, cmd, b.conn, stdout, opts.Logger), nil
 }
 

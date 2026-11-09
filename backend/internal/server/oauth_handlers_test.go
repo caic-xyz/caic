@@ -45,7 +45,7 @@ const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpSc
 
 func TestOAuthUserAuthority(t *testing.T) {
 	t.Parallel()
-	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,8 @@ func TestOAuthUserAuthority(t *testing.T) {
 		{name: "valid", user: oauth.User{ID: user.ID}, want: failure, calls: 1},
 		{name: "missing", user: oauth.User{ID: "missing"}, want: oauthserver.ErrUserAuthority},
 		{name: "stale", user: oauth.User{ID: user.ID, Authority: "retired"}, want: oauthserver.ErrUserAuthority},
+		{name: "zero", user: oauth.User{ID: user.ID, Authority: "0"}, want: oauthserver.ErrUserAuthority},
+		{name: "negative", user: oauth.User{ID: user.ID, Authority: "-1"}, want: oauthserver.ErrUserAuthority},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -329,7 +331,7 @@ func TestOAuthServer(t *testing.T) {
 			}
 
 			// Verify scope descriptions.
-			if !strings.Contains(flat, "caic:server.admin") || !strings.Contains(flat, "Read server machine statistics and health") {
+			if !strings.Contains(flat, "caic:server.admin") || !strings.Contains(flat, "Administer accounts and read server machine statistics and health") {
 				t.Error("body missing server-admin scope and description")
 			}
 			if !strings.Contains(flat, "caic:mcp.read") {
@@ -472,7 +474,7 @@ func TestOAuthServer(t *testing.T) {
 }
 
 func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRouter, http.Handler, auth.User, oauth.RegisterResponse) {
-	store, err := auth.Open(t.TempDir() + "/users.json")
+	store, err := auth.Open(t.TempDir()+"/users.json", "")
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
 	}
@@ -488,7 +490,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 	backend := &mdruntime.Backend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry, OwnerPolicy: store})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
@@ -568,6 +570,24 @@ func authorizeMCPClientWithRedirect(t *testing.T, store *auth.Store, h http.Hand
 }
 
 func authorizeMCPClientWithScopes(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string, scopes []string) oauth.TokenResponse {
+	tokenForm := authorizeMCPClientCode(t, store, h, user, registered, redirectURI, scopes)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Host = "caic.example.com"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var tokenResp oauth.TokenResponse
+	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
+		t.Fatal(err)
+	}
+	return tokenResp
+}
+
+func authorizeMCPClientCode(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string, scopes []string) url.Values {
 	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
@@ -633,19 +653,7 @@ func authorizeMCPClientWithScopes(t *testing.T, store *auth.Store, h http.Handle
 		"code_verifier": {verifier},
 		"resource":      {resource},
 	}
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Host = "caic.example.com"
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("token status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var tokenResp oauth.TokenResponse
-	if err := json.NewDecoder(w.Body).Decode(&tokenResp); err != nil {
-		t.Fatal(err)
-	}
-	return tokenResp
+	return tokenForm
 }
 
 func listOAuthGrants(t *testing.T, store *auth.Store, h http.Handler, user *auth.User) v1.OAuthGrantsResp {
@@ -812,7 +820,7 @@ func TestMCPSystemStatsAuthorization(t *testing.T) {
 
 func TestCaicSessionManager(t *testing.T) {
 	t.Parallel()
-	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

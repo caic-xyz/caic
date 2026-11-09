@@ -14,6 +14,7 @@ import (
 
 	"github.com/gomodedev/gomode"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -38,6 +39,7 @@ type mcpTools struct {
 	usage        *usageHandlers
 	audit        *auditStore
 	metrics      metrics.Recorder
+	accounts     *accountService
 }
 
 func (m *mcpTools) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
@@ -137,7 +139,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 	botFixCISpec.InputSchema = buildBotFixCISchema()
 	botFixCISpec.Annotations = &mcp.ToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
-	return []mcp.ToolSpec{
+	specs := []mcp.ToolSpec{
 		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List coding tasks in stable active-first order. A task-scoped agent lists only the tasks it created; task_get_detail accepts any stable task ID. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
@@ -158,6 +160,14 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", m.handleTaskFixPR), mcp.ToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
 		botFixCISpec,
 	}
+	if m.accounts != nil {
+		specs = append(specs,
+			annotateTool(mcp.NewToolSpec("accounts_list", "List accounts", "Administrator only. List existing account identities, effective roles and enabled state without tokens or session details.", m.handleListAccounts), mcp.ToolAnnotations{Title: "List accounts", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+			annotateTool(mcp.NewToolSpec("account_set_role", "Assign account role", "Super administrator only. Assign admin or member to an existing account. The configuration-owned super_admin cannot be changed.", m.handleSetAccountRole), mcp.ToolAnnotations{Title: "Assign account role", DestructiveHint: true, OpenWorldHint: false}),
+			annotateTool(mcp.NewToolSpec("account_set_enabled", "Enable or suspend account", "Administrator only. Disable an account, cancel its sessions, and confirm its retained runtimes are stopped without deleting history. Retry on an unconfirmed suspension. Re-enabling requires confirmed suspension and revokes old OAuth grants; it never restarts tasks or restores sessions.", m.handleSetAccountEnabled), mcp.ToolAnnotations{Title: "Enable or suspend account", DestructiveHint: true, OpenWorldHint: false}),
+		)
+	}
+	return specs
 }
 
 // validateToolSchemas fails when any advertised tool schema is structurally
@@ -1013,6 +1023,28 @@ func (m *mcpTools) entryByTaskRef(ctx context.Context, ref mcpschema.TaskReferen
 // MCP users require a user token until there is an explicit server-side GitLab
 // authority policy.
 func (m *mcpTools) authorizeTool(ctx context.Context, name string) (string, bool) {
+	if ctx.Err() != nil {
+		return "request authority ended", false
+	}
+	if m.accounts != nil {
+		if u, ok := auth.UserFromContext(ctx); ok {
+			current, active := m.accounts.store.ActiveUser(u.ID)
+			if !active || current.AccountEpoch != u.AccountEpoch {
+				return "account authority ended", false
+			}
+		}
+		if id, ok := taskMCPTaskID(ctx); ok {
+			e, found := m.taskSvc.taskMgr.GetEntry(id)
+			if !found {
+				return "task authority unavailable", false
+			}
+			if _, release, err := m.taskSvc.taskMgr.OwnerContext(ctx, e.Task().OwnerID); err != nil {
+				return "task owner authority ended", false
+			} else {
+				release()
+			}
+		}
+	}
 	if reason, ok := authorizeToolScope(ctx, name); !ok {
 		return reason, false
 	}
@@ -1020,6 +1052,20 @@ func (m *mcpTools) authorizeTool(ctx context.Context, name string) (string, bool
 		return "linked GitHub identity or GitLab token is required for forge MCP tools", false
 	}
 	return "allow", true
+}
+
+func (m *mcpTools) handleSetAccountEnabled(ctx context.Context, call *mcp.ToolRequest[mcpschema.SetAccountEnabledArgs]) mcp.ToolResult[mcpschema.AccountEnabledOutput] {
+	if call.Arguments.UserID == "" {
+		return mcp.ToolError[mcpschema.AccountEnabledOutput]("user_id is required")
+	}
+	if call.Arguments.Enabled == nil {
+		return mcp.ToolError[mcpschema.AccountEnabledOutput]("enabled is required")
+	}
+	out, err := m.accounts.setEnabled(ctx, call.Arguments.UserID, *call.Arguments.Enabled)
+	if err != nil {
+		return domainToolError[mcpschema.AccountEnabledOutput](err)
+	}
+	return mcp.TypedToolResult(out)
 }
 
 func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSpec { //nolint:gocritic // Tool specs are immutable catalog entries; value style keeps call sites simple.
@@ -1175,4 +1221,23 @@ func formatBalance(currency string, total float64) string {
 	default:
 		return fmt.Sprintf("%.2f %s", total, currency)
 	}
+}
+
+func (m *mcpTools) handleListAccounts(ctx context.Context, _ *mcp.ToolRequest[struct{}]) mcp.ToolResult[mcpschema.AccountsOutput] {
+	out, err := m.accounts.list(ctx)
+	if err != nil {
+		return domainToolError[mcpschema.AccountsOutput](err)
+	}
+	return mcp.TypedToolResult(out)
+}
+
+func (m *mcpTools) handleSetAccountRole(ctx context.Context, call *mcp.ToolRequest[mcpschema.SetAccountRoleArgs]) mcp.ToolResult[mcpschema.AccountRoleOutput] {
+	if call.Arguments.UserID == "" {
+		return mcp.ToolError[mcpschema.AccountRoleOutput]("user_id is required")
+	}
+	out, err := m.accounts.setRole(ctx, call.Arguments.UserID, call.Arguments.Role)
+	if err != nil {
+		return domainToolError[mcpschema.AccountRoleOutput](err)
+	}
+	return mcp.TypedToolResult(out)
 }

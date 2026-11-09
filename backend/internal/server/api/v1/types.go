@@ -47,6 +47,17 @@ const (
 	HarnessPi          Harness = "pi"
 )
 
+// Role identifies a user's effective instance authority.
+// Values must match auth.Role constants.
+type Role string
+
+// Instance roles.
+const (
+	RoleAdmin      Role = "admin"
+	RoleMember     Role = "member"
+	RoleSuperAdmin Role = "super_admin"
+)
+
 // QuotaProvider identifies a monitored quota source.
 type QuotaProvider string
 
@@ -208,6 +219,7 @@ type UserResp struct {
 	// SessionID is a public identifier, never an authentication credential.
 	SessionID string `json:"sessionID"`
 	ID        string `json:"id"`
+	Role      Role   `json:"role,omitempty"`
 	Provider  string `json:"provider"`
 	Username  string `json:"username"`
 	AvatarURL string `json:"avatarURL,omitempty"`

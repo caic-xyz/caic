@@ -34,6 +34,7 @@ type Core struct {
 
 // Server is the persisted Server section.
 type Server struct {
+	SuperAdmin     string   `toml:"super_admin"`
 	HTTP           string   `toml:"http"`
 	ExternalURL    string   `toml:"external_url"`
 	GeoDB          string   `toml:"geo_db"`

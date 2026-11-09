@@ -1,4 +1,4 @@
-// Lifecycle commits task intents, joins execution producers, and delivers durable queued prompt appends and edits.
+// Lifecycle fences owner control, joins execution producers, and delivers durable queued prompts without losing retained history.
 
 package taskmgr
 
@@ -35,6 +35,9 @@ type Lifecycle struct {
 
 	inputMu sync.Mutex // Serializes immediate input and waiting-turn queue delivery.
 
+	titleMu   sync.Mutex // Serializes background title admission with suspension.
+	titleWork sync.WaitGroup
+
 	operationMu sync.Mutex // Keeps Stop/Revive/Purge completion in the same entry incarnation.
 
 	syncMu sync.Mutex // Held for a whole Sync: verification, push and summary refresh run one at a time.
@@ -66,12 +69,20 @@ func (r *Lifecycle) Close() error {
 // Purge removes a stopped task immediately. Active tasks are stopped first and
 // retain their runtime resources for delay so they can be revived.
 func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
+	ctx, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	t := r.entry.Task()
 	if delay < 0 {
 		return badRequestf("purge delay cannot be negative")
 	}
 	r.purgeMu.Lock()
 	defer r.purgeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.purgeScheduled {
 		switch t.GetState() {
 		case task.StateStopping, task.StateStopped, task.StatePurging:
@@ -124,7 +135,10 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 				// state transition journal is what guarantees the transition is
 				// delivered.
 				goruntime.Gosched()
-				r.agentRuntime.StopTask(purgeCtx, t)
+				if _, err := r.agentRuntime.StopTask(purgeCtx, t); err != nil {
+					r.manager.log.ErrorContext(purgeCtx, "stop before purge failed", "task", t.ID, "err", err)
+					return
+				}
 				r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 			}
 			if !r.waitForStopped(purgeCtx) {
@@ -143,10 +157,18 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 // Stop transitions the task to stopping and stops its runtime without purging it.
 // Failed and crashed tasks can retain a running instance after partial startup.
 func (r *Lifecycle) Stop(ctx context.Context) error {
+	ctx, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 	defer r.operationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if (t.GetState() == task.StateFailed || t.GetState() == task.StateCrashed) && t.RuntimeInstanceID() == "" {
 		return conflict("task has no runtime instance to stop")
@@ -166,8 +188,12 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 	r.wg.Go(func() {
 		r.operationMu.Lock()
 		defer r.operationMu.Unlock()
-		if res := r.agentRuntime.StopTask(r.ctx, t); res != nil {
+		res, err := r.agentRuntime.StopTask(r.ctx, t)
+		if res != nil {
 			r.entry.Finish(res)
+		}
+		if err != nil {
+			r.manager.log.ErrorContext(r.ctx, "stop failed", "task", t.ID, "err", err)
 		}
 		r.manager.log.InfoContext(r.ctx, "stop completed", "task", t.ID, "instance", t.RuntimeInstanceID(), "final_state", t.GetState())
 		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
@@ -176,26 +202,43 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 }
 
 // Revive restarts a stopped or crashed task.
-func (r *Lifecycle) Revive() error {
+func (r *Lifecycle) Revive(ctx context.Context) error {
+	work, release, ownerErr := r.ownerContext(ctx)
+	if ownerErr != nil {
+		return conflictErr(ownerErr, "task owner cannot revive")
+	}
+	defer release()
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 
+	if err := work.Err(); err != nil {
+		r.operationMu.Unlock()
+		return err
+	}
 	t := r.entry.Task()
 	if state := t.GetState(); state != task.StateStopped && state != task.StateCrashed {
 		r.operationMu.Unlock()
 		return conflict("task is not stopped or crashed")
 	}
-	r.reviveLocked()
+	r.reviveLocked() //nolint:contextcheck // The accepted revive and watcher use the manager lifetime while operationMu joins suspension.
 	return nil
 }
 
 // Restart starts a fresh agent session with prompt.
 func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
+	work, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return conflictErr(err, "task owner cannot restart")
+	}
+	defer release()
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 	defer r.operationMu.Unlock()
+	if err := work.Err(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
 		return conflict("task is not waiting or asking")
@@ -204,7 +247,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 		target := t.RuntimeConnectionTarget()
 		var err error
 		if target.SSHHost != "" {
-			prompt.Text, err = agent.ReadPlan(r.ctx, target.SSHHost, t.GetPlanFile()) //nolint:contextcheck // plan read must finish during shutdown
+			prompt.Text, err = agent.ReadPlan(work, target.SSHHost, t.GetPlanFile())
 		} else {
 			err = errors.New("agent connection target missing SSH host")
 		}
@@ -222,11 +265,19 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 }
 
 // ClearContext starts a fresh idle agent session.
-func (r *Lifecycle) ClearContext() error {
+func (r *Lifecycle) ClearContext(ctx context.Context) error {
+	work, release, ownerErr := r.ownerContext(ctx)
+	if ownerErr != nil {
+		return conflictErr(ownerErr, "task owner cannot clear context")
+	}
+	defer release()
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 	defer r.operationMu.Unlock()
+	if err := work.Err(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
 		return conflict("task is not waiting or asking")
@@ -234,17 +285,24 @@ func (r *Lifecycle) ClearContext() error {
 	if r.agentRuntime.Checkout == nil {
 		return internalErr(errors.New("task checkout is unavailable"), "clear context")
 	}
-	h, err := r.agentRuntime.ClearContextSession(r.ctx, t)
+	h, err := r.agentRuntime.ClearContextSession(context.WithoutCancel(ctx), t)
 	if err != nil {
 		return internalErr(err, "clear context")
 	}
-	r.watchSession(h)
+	r.watchSession(h) //nolint:contextcheck // Session watching belongs to the manager after accepted startup.
 	r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	return nil
 }
 
 // Compact asks the active agent session to compact its context.
 func (r *Lifecycle) Compact(ctx context.Context, instructions string) error {
+	ctx, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return conflictErr(err, "task owner cannot execute")
+	}
+	defer release()
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	if err := r.entry.Task().SendCompact(ctx, instructions); err != nil {
 		if errors.Is(err, agent.ErrCompactInstructionsUnsupported) {
 			return &Error{Kind: KindBadRequest, Msg: "compact context", Err: err}
@@ -263,8 +321,19 @@ func (r *Lifecycle) SendInput(ctx context.Context, prompt agent.Prompt) error {
 
 // Start starts the runtime and agent session for a newly registered task.
 func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		t := r.entry.Task()
+		t.SetState(task.StateStopped)
+		res := &task.Result{State: task.StateStopped, Err: err}
+		res.Err = errors.Join(err, r.agentRuntime.CommitSettledResult(context.WithoutCancel(ctx), t, res))
+		r.entry.Finish(res)
+		r.manager.NotifyTaskUpdate(t.ID)
+		return err
+	}
 	t := r.entry.Task()
-	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
+	h, err := r.agentRuntime.Start(context.WithoutCancel(ctx), t, resolvedGitHubToken)
 	if err != nil {
 		result := &task.Result{State: task.StateFailed, Err: internalErr(err, "start task")}
 		if startupErr, ok := errors.AsType[*taskrun.StartupError](err); ok {
@@ -288,6 +357,16 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 //
 // p must be non-nil.
 func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
+	admission, release, ownerErr := r.ownerContext(context.WithoutCancel(ctx))
+	if ownerErr != nil {
+		return 0, conflictErr(ownerErr, "task owner cannot fork")
+	}
+	keepAdmission := false
+	defer func() {
+		if !keepAdmission {
+			release()
+		}
+	}()
 	source := r.entry.Task()
 	state := source.GetState()
 	switch state {
@@ -382,13 +461,25 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	}
 	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
-	if err := r.manager.publishEntry(ctx, forkEntry, len(sourceRepos), false); err != nil {
+	if err := r.manager.publishEntry(admission, forkEntry, len(sourceRepos), false); err != nil {
 		return 0, err
 	}
-	forkEntry.Lifecycle.generateTitle()
+	forkEntry.Lifecycle.generateTitle(admission)
+	keepAdmission = true
 
-	forkEntry.Lifecycle.wg.Go(func() { //nolint:contextcheck // fork must finish during shutdown
-		ctx, tk := trace.NewTask(forkEntry.Lifecycle.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
+	forkEntry.Lifecycle.wg.Go(func() {
+		defer release()
+		forkEntry.Lifecycle.operationMu.Lock()
+		defer forkEntry.Lifecycle.operationMu.Unlock()
+		if err := admission.Err(); err != nil {
+			t.SetState(task.StateStopped)
+			res := &task.Result{State: task.StateStopped, Err: err}
+			res.Err = errors.Join(err, forkEntry.Lifecycle.agentRuntime.CommitSettledResult(context.WithoutCancel(admission), t, res))
+			forkEntry.Finish(res)
+			r.manager.NotifyTaskUpdate(t.ID)
+			return
+		}
+		ctx, tk := trace.NewTask(context.WithoutCancel(admission), "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
 		metadata := maps.Clone(r.manager.runtimeMetadata)
 		if metadata == nil {
@@ -409,7 +500,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 			t.SetSudoPassword(r.manager.SudoPassword(ctx, t))
 		}
 		r.manager.NotifyTaskUpdate(t.ID)
-		forkEntry.Lifecycle.watchSession(h)
+		forkEntry.Lifecycle.watchSession(h) //nolint:contextcheck // Session watching is owned by the manager, independently of fork admission.
 	})
 	return t.ID, nil
 }
@@ -433,8 +524,8 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 // retry, and the running sync already pushes the task's commits.
 //
 // The push runs on a context detached from ctx: a caller that disconnects does
-// not cancel it. Only CancelSync does; the sync then records the cancelled
-// outcome and returns a conflict error.
+// not cancel it. Account suspension and CancelSync can cancel the push; an
+// explicit cancellation records the cancelled outcome and returns a conflict error.
 //
 // Once the push destinations are resolved, the sync is recorded in the task log
 // as a start record, bounded hook output records and an end record.
@@ -443,6 +534,13 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		return nil, conflict("a sync of this task is already running")
 	}
 	defer r.syncMu.Unlock()
+	ctx, release, ownerErr := r.ownerContext(ctx)
+	if ownerErr != nil {
+		return nil, conflictErr(ownerErr, "task owner cannot sync")
+	}
+	defer release()
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	t := r.entry.Task()
 	switch t.GetState() {
 	case task.StatePending:
@@ -459,7 +557,12 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if checkout == nil {
 		return nil, conflict("task has no checkout")
 	}
-	pushCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	pushOwnerCtx, releasePush, ownerErr := r.ownerContext(context.WithoutCancel(ctx))
+	if ownerErr != nil {
+		return nil, conflictErr(ownerErr, "task owner cannot sync")
+	}
+	defer releasePush()
+	pushCtx, cancel := context.WithCancelCause(pushOwnerCtx)
 	r.setSyncCancel(cancel)
 	endPush := sync.OnceFunc(func() {
 		r.setSyncCancel(nil)
@@ -535,6 +638,11 @@ func (r *Lifecycle) CancelSync() error {
 // Otherwise it persists a new pending prompt.
 // It reports whether the prompt was queued rather than sent.
 func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, error) {
+	ctx, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return false, conflictErr(err, "task owner cannot queue input")
+	}
+	defer release()
 	// Busy tasks can enqueue independently of a blocked transport write. Only
 	// the immediate waiting path needs the same serialization as SendInput.
 	sendNow := r.entry.Task().GetState() == task.StateWaiting
@@ -555,6 +663,10 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 		return false, conflict("task is not ready for queued input")
 	}
 	m.inputMu.Lock()
+	if err := ctx.Err(); err != nil {
+		m.inputMu.Unlock()
+		return false, err
+	}
 	pending := r.entry.PendingInput()
 	if pending != nil && (pending.Delivering || pending.Delivered) {
 		m.inputMu.Unlock()
@@ -585,10 +697,18 @@ func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, 
 }
 
 // CancelQueuedInput removes a prompt only if it still belongs to this task's queue.
-func (r *Lifecycle) CancelQueuedInput(id ksid.ID) error {
+func (r *Lifecycle) CancelQueuedInput(ctx context.Context, id ksid.ID) error {
+	work, release, err := r.ownerContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	m := r.manager
 	m.inputMu.Lock()
 	defer m.inputMu.Unlock()
+	if err := work.Err(); err != nil {
+		return err
+	}
 	q := r.entry.PendingInput()
 	if q == nil || q.ID != id {
 		return conflict("pending prompt was already sent or canceled")
@@ -604,6 +724,14 @@ func (r *Lifecycle) CancelQueuedInput(id ksid.ID) error {
 }
 
 func (r *Lifecycle) sendInputLocked(ctx context.Context, prompt agent.Prompt) error {
+	ctx, release, ownerErr := r.ownerContext(ctx)
+	if ownerErr != nil {
+		return conflictErr(ownerErr, "task owner cannot receive input")
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if len(prompt.Images) > 0 {
 		if b := r.manager.Backends[t.Harness]; b != nil && !b.SupportsImages() {
@@ -773,6 +901,7 @@ func (r *Lifecycle) reconnectForInput() error {
 
 // reconnectImportedSession restores a session for a live runtime imported at startup.
 func (r *Lifecycle) reconnectImportedSession() {
+	r.operationMu.Lock()
 	t := r.entry.Task()
 	primary := t.Primary()
 	repoName := ""
@@ -787,11 +916,13 @@ func (r *Lifecycle) reconnectImportedSession() {
 	previousResult := r.entry.Result()
 	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
+		r.operationMu.Unlock()
 		tlog.Warn("auto-reconnect failed", "err", err)
 		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 		return
 	}
 	r.wg.Go(func() {
+		defer r.operationMu.Unlock()
 		h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
 		if err != nil {
 			tlog.Warn("ensure session failed", "err", err)
@@ -923,9 +1054,60 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 	})
 }
 
-func (r *Lifecycle) generateTitle() {
+func (r *Lifecycle) generateTitle(ctx context.Context) {
+	// Capture the owner lifetime before waiting for suspension. The title has
+	// its own lifetime so completion of startup does not cancel a valid title.
+	work, release, err := r.ownerContext(context.WithoutCancel(ctx))
+	if err != nil {
+		return
+	}
+	r.titleMu.Lock()
+	defer r.titleMu.Unlock()
+	if ctx.Err() != nil || work.Err() != nil {
+		release()
+		return
+	}
+	r.titleWork.Add(1)
+	r.wg.Go(func() {
+		defer r.titleWork.Done()
+		defer release()
+		r.entry.Task().GenerateTitle(work, r.manager.log.With("task", r.entry.Task().ID), r.agentRuntime.NotifyTaskChange)
+	})
+}
+
+func (r *Lifecycle) ownerContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	return r.manager.OwnerContext(ctx, r.entry.Task().OwnerID)
+}
+
+func (r *Lifecycle) suspend(ctx context.Context) error {
+	r.cancelScheduledPurge()
+	r.titleMu.Lock()
+	r.titleWork.Wait()
+	r.titleMu.Unlock()
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
 	t := r.entry.Task()
-	r.wg.Go(func() { t.GenerateTitle(r.ctx, r.manager.log.With("task", t.ID), r.agentRuntime.NotifyTaskChange) })
+	if t.GetState() == task.StatePurged {
+		return nil
+	}
+	// Provisioning is joined by operationMu. An account-cancelled startup can
+	// leave a retained instance even when its session never became ready.
+	if t.RuntimeInstanceID() == "" {
+		return nil
+	}
+	state := t.GetState()
+	_, _, err := r.agentRuntime.RecordLifecycleIntent(ctx, t, task.StateStopping, task.StateStopping, state)
+	if err != nil {
+		return fmt.Errorf("persist account suspension intent: %w", err)
+	}
+	res, err := r.agentRuntime.StopTask(ctx, t)
+	if res != nil {
+		r.entry.Finish(res)
+	}
+	r.manager.NotifyTaskUpdate(t.ID)
+	return err
 }
 
 var _ io.Closer = (*Lifecycle)(nil)

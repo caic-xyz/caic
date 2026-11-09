@@ -69,6 +69,31 @@ type Entry struct {
 // concurrency-safe via its own internal locking.
 func (e *Entry) Task() *taskrun.Task { return e.task }
 
+// AutomationContext admits task-owned background control until explicit release.
+// Stopped tasks retain history but do not resume automation without revival.
+func (e *Entry) AutomationContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	work, release, err := e.Lifecycle.ownerContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Bind before reading state: an unbound webhook may cross disable/re-enable
+	// while admission waits, and must then observe the suspended task.
+	switch e.Task().GetState() {
+	case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
+		return work, release, nil
+	case task.StateStopped, task.StateStopping, task.StatePurging, task.StatePurged, task.StateFailed, task.StateCrashed:
+		release()
+		return nil, nil, conflict("task is suspended for automation")
+	}
+	release()
+	return nil, nil, conflict("task state does not admit automation")
+}
+
+// SendInput serializes automated input through the task lifecycle authority fence.
+func (e *Entry) SendInput(ctx context.Context, prompt agent.Prompt) error {
+	return e.Lifecycle.SendInput(ctx, prompt)
+}
+
 // RecordHost commits a backend control through the entry's journal owner.
 func (e *Entry) RecordHost(ctx context.Context, m agent.Message) error {
 	return e.Lifecycle.agentRuntime.RecordHost(ctx, e.task, m)

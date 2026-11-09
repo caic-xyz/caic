@@ -4,8 +4,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,37 +36,45 @@ type caicSessionManager struct {
 
 func (m *caicSessionManager) CurrentUser(ctx context.Context) (oauth.User, bool) {
 	u, ok := auth.UserFromContext(ctx)
-	if !ok {
+	if !ok || ctx.Err() != nil {
 		return oauth.User{}, false
 	}
-	return oauth.User{ID: u.ID, Username: u.Username, Provider: string(u.Provider)}, true
+	current, active := m.store.ActiveUser(u.ID)
+	if !active || current.AccountEpoch != u.AccountEpoch {
+		return oauth.User{}, false
+	}
+	return oauth.User{ID: u.ID, Username: u.Username, Provider: string(u.Provider), Authority: accountAuthority(current.AccountEpoch)}, true
 }
 
 func (m *caicSessionManager) AttachUser(ctx context.Context, u oauth.User) context.Context {
-	user, ok := m.store.FindByID(u.ID)
-	if !ok {
-		return ctx
+	user, ok := m.store.ActiveUser(u.ID)
+	if !ok || accountAuthority(user.AccountEpoch) != u.Authority {
+		return auth.NewContext(ctx, nil)
 	}
 	return auth.NewContext(ctx, &user)
 }
 
 func (m *caicSessionManager) FindUser(id string) (oauth.User, bool) {
-	user, ok := m.store.FindByID(id)
+	user, ok := m.store.ActiveUser(id)
 	if !ok {
 		return oauth.User{}, false
 	}
-	return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider)}, true
+	return oauth.User{ID: user.ID, Username: user.Username, Provider: string(user.Provider), Authority: accountAuthority(user.AccountEpoch)}, true
 }
 
-// WithUserAuthority admits the initial authority of permanent caic account IDs.
-// caic has no account-disable or generation-retirement operation; nonempty
-// authorities are invalid. Store holds account updates across OAuth publication.
-func (m *caicSessionManager) WithUserAuthority(user oauth.User, publish func() error) error {
-	if user.Authority != "" {
-		return oauthserver.ErrUserAuthority
+// WithUserAuthority keeps account disablement and OAuth authority publication
+// in one order. The OAuth owner calls this outside its own publication lock.
+func (m *caicSessionManager) WithUserAuthority(u oauth.User, publish func() error) error {
+	var epoch int
+	if u.Authority != "" {
+		var err error
+		epoch, err = strconv.Atoi(u.Authority)
+		if err != nil || epoch <= 0 || accountAuthority(epoch) != u.Authority {
+			return oauthserver.ErrUserAuthority
+		}
 	}
-	found, err := m.store.WithUser(user.ID, publish)
-	if !found {
+	err := m.store.WithAccountAuthority(u.ID, epoch, publish)
+	if errors.Is(err, auth.ErrAccountDisabled) {
 		return oauthserver.ErrUserAuthority
 	}
 	return err
@@ -157,4 +167,12 @@ func oauthGrantRoutes(s *oauthserver.Server) http.Handler {
 	m.HandleFunc("GET /oauth/grants", handle(h.listOAuthGrants))
 	m.HandleFunc("POST /oauth/grants/{grantID}/revoke", handle(h.revokeOAuthGrant))
 	return m
+}
+
+// accountAuthority preserves never-disabled identities from persisted OAuth state.
+func accountAuthority(epoch int) string {
+	if epoch == 0 {
+		return ""
+	}
+	return strconv.Itoa(epoch)
 }

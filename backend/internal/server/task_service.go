@@ -817,8 +817,8 @@ const (
 )
 
 // cancelQueuedInput removes a pending prompt before delivery.
-func (s *taskService) cancelQueuedInput(_ context.Context, entry *taskmgr.Entry, req *v1.CancelQueuedInputReq) (*v1.StatusResp, error) {
-	if err := entry.Lifecycle.CancelQueuedInput(req.ID); err != nil {
+func (s *taskService) cancelQueuedInput(ctx context.Context, entry *taskmgr.Entry, req *v1.CancelQueuedInputReq) (*v1.StatusResp, error) {
+	if err := entry.Lifecycle.CancelQueuedInput(ctx, req.ID); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "canceled"}, nil
@@ -835,6 +835,20 @@ func (s *taskService) cancelQueuedInput(_ context.Context, entry *taskmgr.Entry,
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq, images []logv3.ImageData) (*v1.StatusResp, error) {
+	// Accepted input survives ordinary disconnects while retaining the original
+	// account generation, so suspension cannot be bypassed by re-enablement.
+	work := context.WithoutCancel(ctx)
+	if s.authStore != nil {
+		if u, ok := auth.UserFromContext(ctx); ok {
+			bound, release, err := s.authStore.BindUser(work, u)
+			if err != nil {
+				return nil, &api.Error{Status: http.StatusUnauthorized, Code: api.CodeUnauthorized, Message: "account session revoked"}
+			}
+			defer release()
+			work = bound
+		}
+	}
+
 	prompt, resolveErr := promptToAgent(req.Prompt, images)
 	if resolveErr != nil {
 		return nil, resolveErr
@@ -842,12 +856,12 @@ func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *
 	var err error
 	if req.Queue {
 		var queued bool
-		queued, err = entry.Lifecycle.QueueInput(context.WithoutCancel(ctx), prompt)
+		queued, err = entry.Lifecycle.QueueInput(work, prompt)
 		if err == nil && queued {
 			return &v1.StatusResp{Status: "queued"}, nil
 		}
 	} else {
-		err = entry.Lifecycle.SendInput(context.WithoutCancel(ctx), prompt)
+		err = entry.Lifecycle.SendInput(work, prompt)
 	}
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
@@ -908,7 +922,7 @@ func (s *taskService) restartTask(ctx context.Context, entry *taskmgr.Entry, req
 }
 
 func (s *taskService) clearContext(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := entry.Lifecycle.ClearContext(); err != nil { //nolint:contextcheck // Lifecycle owns its Manager-lifetime watcher.
+	if err := entry.Lifecycle.ClearContext(ctx); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "cleared"}, nil
@@ -936,7 +950,7 @@ func (s *taskService) purgeTask(ctx context.Context, entry *taskmgr.Entry, _ *ap
 }
 
 func (s *taskService) reviveTask(ctx context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
-	if err := entry.Lifecycle.Revive(); err != nil { //nolint:contextcheck // Lifecycle owns the revive context.
+	if err := entry.Lifecycle.Revive(ctx); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "provisioning"}, nil

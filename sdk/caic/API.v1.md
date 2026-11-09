@@ -451,6 +451,17 @@ QuotaProvider identifies a monitored quota source.
 | `xiaomi` |  |
 | `zai` |  |
 
+### Role
+
+Role identifies a user's effective instance authority.
+Values must match auth.Role constants.
+
+| Value | Description |
+|-------|-------------|
+| `admin` |  |
+| `member` |  |
+| `super_admin` |  |
+
 ### SyncTarget
 
 SyncTarget selects where to push changes.
@@ -589,6 +600,7 @@ UserResp is returned by GET /auth/me.
 |-------|------|-------------|----------|
 | `sessionID` | `string` | SessionID is a public identifier, never an authentication credential. | yes |
 | `id` | `string` |  | yes |
+| `role` | `Role` |  |  |
 | `provider` | `string` |  | yes |
 | `username` | `string` |  | yes |
 | `avatarURL` | `string` |  |  |

@@ -48,6 +48,15 @@ type WarningDetail struct {
 // TaskEntry is an abstract task handle for CI monitoring.
 type TaskEntry interface {
 	Task() *taskrun.Task
+	// AutomationContext admits CI work on the task and returns a lease: a
+	// context and its release function. It fails when the task owner's
+	// account is disabled, or when the task is stopping, stopped, or terminal.
+	// Disabling the owner cancels the context, then waits for release before
+	// the account counts as suspended. Call release when the work ends,
+	// including after a cancellation. Work that outlives its caller, such as
+	// a worker goroutine, takes its own lease.
+	AutomationContext(ctx context.Context) (context.Context, context.CancelFunc, error)
+	SendInput(ctx context.Context, prompt agent.Prompt) error
 	RecordHost(ctx context.Context, m agent.Message) error
 	RecordRepositorySummary(ctx context.Context, read *repo.GitSnapshot) (bool, error)
 	MonitorBranch() string

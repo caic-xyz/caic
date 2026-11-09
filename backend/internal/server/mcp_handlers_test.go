@@ -1178,7 +1178,7 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("subscriptionsListenDeliversOwnerFilteredInitialState", func(t *testing.T) {
 		t.Parallel()
 		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
+		store, err := auth.Open(usersPath, "")
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
@@ -1651,7 +1651,7 @@ func sseInitialStateNotification(data string) (bool, mcp.JSONRPCNotification) {
 
 func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {
 	usersPath := filepath.Join(t.TempDir(), "users.json")
-	store, err := auth.Open(usersPath)
+	store, err := auth.Open(usersPath, "")
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
 	}

@@ -227,7 +227,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry, OwnerPolicy: authStore})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
@@ -361,7 +361,7 @@ func TestNew(t *testing.T) {
 	t.Run("automatic external URL keeps session MCP without remote OAuth", func(t *testing.T) {
 		t.Parallel()
 		d := validDependencies(t)
-		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 		if err != nil {
 			t.Fatalf("auth.Open: %v", err)
 		}
@@ -435,7 +435,7 @@ func TestHostIsLoopback(t *testing.T) {
 // RequireUser rejected with 401, silently breaking login.
 func TestLoginCallbackPublic(t *testing.T) {
 	t.Parallel()
-	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
 	}
@@ -2086,7 +2086,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 func TestVoiceRoutesByMode(t *testing.T) {
 	t.Parallel()
 	newRouter := func(t *testing.T) (*testRouter, *auth.User) {
-		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+		t.Helper()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2173,7 +2174,7 @@ func TestVoiceRoutesByMode(t *testing.T) {
 func TestExternalVoiceToken(t *testing.T) {
 	t.Parallel()
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2524,7 +2525,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP rejects caic session JWT in authorization header", func(t *testing.T) {
 		t.Parallel()
 		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
+		store, err := auth.Open(usersPath, "")
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
@@ -2682,7 +2683,7 @@ func TestBuildHandler(t *testing.T) {
 		secret := make([]byte, 32)
 		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
+		store, err := auth.Open(usersPath, "")
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
@@ -2726,7 +2727,7 @@ func TestBuildHandler(t *testing.T) {
 		secret := make([]byte, 32)
 		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
+		store, err := auth.Open(usersPath, "")
 		if err != nil {
 			t.Fatalf("open auth store: %v", err)
 		}
@@ -2994,7 +2995,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 
 	secret := make([]byte, 32)
 	usersPath := filepath.Join(t.TempDir(), "users.json")
-	store, err := auth.Open(usersPath)
+	store, err := auth.Open(usersPath, "")
 	if err != nil {
 		t.Fatalf("open auth store: %v", err)
 	}

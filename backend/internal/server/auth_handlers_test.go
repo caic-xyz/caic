@@ -1,20 +1,59 @@
-// Tests shared login eligibility, issued-session cookie expiry, and browser metadata bounds.
+// Tests login eligibility, current account roles, session cookies, and browser metadata bounds.
 
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/gomodedev/gomode/oauth/oauthclient"
 )
 
 func TestAuthHandlers(t *testing.T) {
 	t.Parallel()
+	t.Run("handleGetMe/current role", func(t *testing.T) {
+		t.Parallel()
+		s, err := auth.Open(filepath.Join(t.TempDir(), "users.json"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := s.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "role-test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		router := newTestOAuthRouter(t, s)
+		token, _, err := s.IssueToken(&u, router.sessionSecret, time.Hour, auth.SessionInfo{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := router.buildHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, role := range []auth.Role{auth.RoleMember, auth.RoleAdmin} {
+			if err := s.SetRole(u.ID, role); err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/me", http.NoBody)
+			r.AddCookie(&http.Cookie{Name: "caic_session", Value: token, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			var me v1.UserResp
+			if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != http.StatusOK || me.ID != u.ID || me.Role != v1.Role(role) {
+				t.Fatalf("me=%+v status=%d", me, w.Code)
+			}
+		}
+	})
 	t.Run("checkLogin", func(t *testing.T) {
 		t.Parallel()
 		for _, provider := range []auth.Provider{auth.ProviderGitHub, auth.ProviderGitLab, auth.ProviderGoogle} {

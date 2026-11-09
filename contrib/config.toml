@@ -42,6 +42,13 @@
 # ── Server ───────────────────────────────────────────────────────────────────
 
 [server]
+# Optional configuration-owned super administrator for authenticated use.
+# Use github, gitlab, or google plus the provider's stable account ID, not a
+# username, email address, or caic account ID. The matching account may sign in
+# later; signing in first never grants authority. Restart after changing this.
+# The application cannot change this role or disable this account.
+#super_admin = ""  # e.g. "github:123456"
+
 # HTTP listen address for the web UI. Defaults to localhost only; prefix with
 # "0.0.0.0" to listen on all IPv4 addresses.
 # Safety: the MCP endpoint at /api/caic/v1/mcp is disabled when no OAuth login

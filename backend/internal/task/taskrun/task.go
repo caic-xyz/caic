@@ -1474,8 +1474,17 @@ var ErrInitialPromptNotAccepted = errors.New("task startup did not accept its in
 // dead-session detection proactively, so SendInput no longer does lazy
 // cleanup.
 func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
+	if run := t.run.Load(); run != nil && run.ctx.Err() != nil {
+		return run.ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t.inputMu.Lock()
 	defer t.inputMu.Unlock()
+	if run := t.run.Load(); run != nil && run.ctx.Err() != nil {
+		return run.ctx.Err()
+	}
 	t.mu.Lock()
 	h := t.handle
 	sessionStatus := SessionNone
@@ -1499,7 +1508,12 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 // the task state. Returns an error if no session is active or the backend
 // does not support compaction.
 func (t *Task) SendCompact(ctx context.Context, instructions string) error {
-	_ = ctx
+	if run := t.run.Load(); run != nil && run.ctx.Err() != nil {
+		return run.ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t.mu.Lock()
 	h := t.handle
 	sessionStatus := SessionNone

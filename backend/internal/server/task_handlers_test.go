@@ -547,7 +547,7 @@ func TestTaskHandlers(t *testing.T) {
 					}
 					inputID := entry.PendingInput().ID
 					if tc.cancel {
-						if err := entry.Lifecycle.CancelQueuedInput(inputID); err != nil {
+						if err := entry.Lifecycle.CancelQueuedInput(t.Context(), inputID); err != nil {
 							t.Fatal(err)
 						}
 					}

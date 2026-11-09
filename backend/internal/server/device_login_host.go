@@ -48,11 +48,11 @@ func (h *deviceLoginHost) Identify(r *http.Request) (string, error) {
 }
 
 func (h *deviceLoginHost) Eligible(_ context.Context, id string) error {
-	id, _, ok := strings.Cut(id, "\x00")
+	id, sid, ok := strings.Cut(id, "\x00")
 	if !ok {
 		return errors.New("invalid approving session")
 	}
-	u, ok := h.auth.store.FindByID(id)
+	u, ok := h.auth.store.SessionUser(id, sid)
 	if !ok {
 		return errors.New("user unavailable")
 	}
@@ -64,15 +64,18 @@ func (h *deviceLoginHost) Audit(ctx context.Context, event *devicelogin.AuditEve
 }
 
 func (h *deviceLoginHost) CreateSession(r *http.Request, subject string) (devicelogin.Session, error) {
-	id, _, ok := strings.Cut(subject, "\x00")
+	id, sid, ok := strings.Cut(subject, "\x00")
 	if !ok {
 		return nil, errors.New("invalid approving session")
 	}
-	u, ok := h.auth.store.FindByID(id)
+	u, ok := h.auth.store.SessionUser(id, sid)
 	if !ok {
 		return nil, errors.New("user unavailable")
 	}
-	token, session, err := h.auth.issueSession(r, &u, "device")
+	if err := h.auth.checkLogin(u.Provider, u.Username); err != nil {
+		return nil, err
+	}
+	token, session, err := h.auth.store.IssuePairedToken(id, sid, h.auth.sessionSecret, sessionTTL, h.auth.sessionInfo(r, "device"))
 	if err != nil {
 		return nil, err
 	}

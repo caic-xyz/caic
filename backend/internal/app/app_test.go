@@ -449,11 +449,13 @@ func TestApp(t *testing.T) {
 
 	t.Run("Serve", func(t *testing.T) {
 		for _, tc := range []struct {
-			name    string
-			origins []string
+			name       string
+			origins    []string
+			superAdmin string
 		}{
 			{name: "GeoIP disabled"},
 			{name: "GeoIP filter", origins: []string{"0.0.0.0/0", "::/0"}},
+			{name: "configured identity without OAuth", superAdmin: "github:123"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Setenv("TEST_KEY", "test-key")
@@ -462,6 +464,7 @@ func TestApp(t *testing.T) {
 				t.Cleanup(cancel)
 				cfg := closeSpyConfig(t, registerCloseSpyProvider(t, spy))
 				cfg.IPGeo.AllowOrigins = tc.origins
+				cfg.Auth.SuperAdmin = tc.superAdmin
 				srv, err := New(ctx, slog.New(slog.DiscardHandler), t.TempDir(), cfg)
 				if err != nil {
 					t.Fatalf("New() = %v", err)
@@ -481,6 +484,11 @@ func TestApp(t *testing.T) {
 				}
 				if !spy.closed {
 					t.Error("provider was not closed when serving stopped")
+				}
+				for _, name := range []string{"users.json", "users.json.sessions"} {
+					if _, err := os.Stat(filepath.Join(cfg.Dirs.ConfigDir, name)); !os.IsNotExist(err) {
+						t.Fatalf("auth-free startup created %s: %v", name, err)
+					}
 				}
 			})
 		}

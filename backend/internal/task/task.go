@@ -2,6 +2,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -9,6 +10,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
+
+// OwnerPolicy binds task work to its owning account's current admission policy.
+// A nil policy in the runtime configuration denotes account-free local use.
+type OwnerPolicy interface {
+	BindOwner(ctx context.Context, owner string) (context.Context, context.CancelFunc, error)
+	WaitOwner(ctx context.Context, owner string) error
+}
 
 // CreateRequest describes an automated task creation request for one managed repository.
 type CreateRequest struct {

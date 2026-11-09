@@ -252,6 +252,7 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSONResponse(r.Context(), w, &v1.UserResp{
 		ID:        u.ID,
+		Role:      v1.Role(requestPrincipalFromContext(r.Context()).role()),
 		SessionID: auth.SessionIDFromContext(r.Context()),
 		Provider:  string(u.Provider),
 		Username:  u.Username,
@@ -432,7 +433,7 @@ func (h *authHandlers) checkLogin(provider auth.Provider, username string) error
 	return nil
 }
 
-func (h *authHandlers) issueSession(r *http.Request, u *auth.User, source string) (string, auth.Session, error) {
+func (h *authHandlers) issueSession(r *http.Request, u *auth.User, source string) (credential string, recorded auth.Session, retErr error) {
 	if err := h.checkLogin(u.Provider, u.Username); err != nil {
 		return "", auth.Session{}, err
 	}

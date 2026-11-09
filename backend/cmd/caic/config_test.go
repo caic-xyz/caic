@@ -403,6 +403,63 @@ func TestGeoDBOrDefault(t *testing.T) {
 
 func TestTomlToServerConfig(t *testing.T) {
 	t.Parallel()
+
+	t.Run("configured super administrator", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, selector := range []string{"", "github:123", "gitlab:456", "google:789"} {
+				t.Run(selector, func(t *testing.T) {
+					t.Parallel()
+					dir := t.TempDir()
+					if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[server]\nsuper_admin = \""+selector+"\"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					tc, err := loadTOMLConfig(dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if cfg.Auth.SuperAdmin != selector {
+						t.Fatalf("selector lost: %q", cfg.Auth.SuperAdmin)
+					}
+					if err := cfg.Auth.Validate(); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, selector := range []string{"github:", "unknown:123"} {
+				t.Run(selector, func(t *testing.T) {
+					t.Parallel()
+					dir := t.TempDir()
+					if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[server]\nsuper_admin = \""+selector+"\"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					tc, err := loadTOMLConfig(dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if cfg.Auth.SuperAdmin != selector {
+						t.Fatalf("selector lost: %q", cfg.Auth.SuperAdmin)
+					}
+					if err := cfg.Auth.Validate(); err == nil {
+						t.Fatalf("accepted selector %q", selector)
+					}
+				})
+			}
+		})
+	})
+
 	t.Run("empty origins keep caic filtering defaults", func(t *testing.T) {
 		t.Parallel()
 		for _, origins := range [][]string{nil, {}} {

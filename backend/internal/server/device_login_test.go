@@ -42,7 +42,7 @@ func TestDeviceLogin(t *testing.T) {
 	}
 	setup := func(t *testing.T) (*testRouter, http.Handler, auth.User, string, string) {
 		dir := t.TempDir()
-		store, err := auth.Open(filepath.Join(dir, "users.json"))
+		store, err := auth.Open(filepath.Join(dir, "users.json"), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,6 +106,29 @@ func TestDeviceLogin(t *testing.T) {
 		}
 		return out
 	}
+
+	t.Run("old approval cannot survive disablement", func(t *testing.T) {
+		s, _, user, _, _ := setup(t)
+		sessions := s.authStore.Sessions(user.ID)
+		subject := user.ID + "\x00" + sessions[0].ID
+		host := &deviceLoginHost{auth: s.authHandlers}
+		if err := s.authStore.SetDisabled(user.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.authStore.SetDisabled(user.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := host.Eligible(t.Context(), subject); err == nil {
+			t.Error("old approving session remained eligible")
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/device/poll", http.NoBody)
+		if session, err := host.CreateSession(req, subject); err == nil {
+			if err := session.Revoke(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			t.Fatal("old approval created fresh session")
+		}
+	})
 	t.Run("completion persistence", func(t *testing.T) {
 		for _, failure := range []string{"none", "before creation", "after creation", "created audit", "response audit", "write", "concurrent", "cancel"} {
 			t.Run(failure, func(t *testing.T) {
@@ -145,7 +168,7 @@ func TestDeviceLogin(t *testing.T) {
 					} else {
 						poll()
 					}
-					restarted, err := auth.Open(filepath.Join(filepath.Dir(path), "users.json"))
+					restarted, err := auth.Open(filepath.Join(filepath.Dir(path), "users.json"), "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -410,7 +433,7 @@ func TestDeviceLogin(t *testing.T) {
 	t.Run("session creation rechecks eligibility", func(t *testing.T) {
 		s, _, user, _, _ := setup(t)
 		host := &deviceLoginHost{auth: s.authHandlers}
-		subject := user.ID + "\x00session"
+		subject := user.ID + "\x00" + s.authStore.Sessions(user.ID)[0].ID
 		if err := host.Eligible(t.Context(), subject); err != nil {
 			t.Fatal(err)
 		}
