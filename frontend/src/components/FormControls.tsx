@@ -63,7 +63,7 @@ export function HarnessControls(props: {
   const modelOptions = createMemo(() =>
     (selectedHarness()?.models ?? []).map((model) => ({
       value: model.id,
-      label: model.id as JSX.Element,
+      label: model.id,
       search: model.id,
     })),
   );

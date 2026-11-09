@@ -56,6 +56,7 @@ export default function CameraCapture(props: Props) {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Camera setup handles permission and enumeration failures itself.
   onMount(async () => {
     await startCamera(facingMode());
     // Detect whether multiple cameras are available.

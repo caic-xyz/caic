@@ -151,7 +151,6 @@ export default function PromptInput(props: Props) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- drag-and-drop target for file attachment
     <div
       class={`${styles.container}${dragging() ? ` ${styles.dragOver}` : ""}`}
       onDragOver={handleDragOver}

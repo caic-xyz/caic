@@ -294,6 +294,7 @@ export default function TaskDetail(props: Props) {
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
+  const [passwordCopyError, setPasswordCopyError] = createSignal(false);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [dismissedKey, setDismissedKey] = createSignal<string | null>(null);
   const isQuotaDismissed = () =>
@@ -826,7 +827,7 @@ export default function TaskDetail(props: Props) {
   function clearAndExecutePlan() {
     const prompt = props.inputDraft.trim();
     // eslint-disable-next-line solid/reactivity -- only called from onClick
-    runAction("restart", async () => {
+    void runAction("restart", async () => {
       await api.restartTask(props.taskId, { prompt: { text: prompt } });
       props.onInputDraft("");
     });
@@ -834,7 +835,7 @@ export default function TaskDetail(props: Props) {
 
   function doCompact() {
     // eslint-disable-next-line solid/reactivity -- only called from onClick
-    runAction("compact", () => api.compactContext(props.taskId, {}));
+    void runAction("compact", () => api.compactContext(props.taskId, {}));
   }
 
   async function doSync(force: boolean, target?: SyncTarget) {
@@ -1296,17 +1297,26 @@ export default function TaskDetail(props: Props) {
                 title="Copy password"
                 onClick={(e) => {
                   const btn = e.currentTarget;
-                  if (props.sudoPassword) {
-                    navigator.clipboard.writeText(props.sudoPassword);
+                  if (!props.sudoPassword) return;
+                  setPasswordCopyError(false);
+                  if (!navigator.clipboard) {
+                    setPasswordCopyError(true);
+                    return;
                   }
-                  const copiedClass = styles.copied;
-                  btn.classList.add(copiedClass);
-                  setTimeout(() => btn.classList.remove(copiedClass), 1500);
+                  navigator.clipboard
+                    .writeText(props.sudoPassword)
+                    .then(() => {
+                      const copiedClass = styles.copied;
+                      btn.classList.add(copiedClass);
+                      setTimeout(() => btn.classList.remove(copiedClass), 1500);
+                    })
+                    .catch(() => setPasswordCopyError(true));
                 }}
               >
                 <CopyIcon width={14} height={14} class={styles.copyIcon} />
                 <CheckIcon width={14} height={14} class={styles.checkIcon} />
               </button>
+              <span role="status">{passwordCopyError() ? "Copy failed" : ""}</span>
             </span>
           </Show>
           <Show when={props.inPlanMode}>
@@ -1697,7 +1707,7 @@ export default function TaskDetail(props: Props) {
             }
             onSubmit={(e) => {
               e.preventDefault();
-              if (canSendInput()) sendInput(false);
+              if (canSendInput()) void sendInput(false);
             }}
             class={styles.inputForm}
             data-testid="task-detail-form"
@@ -1775,11 +1785,11 @@ export default function TaskDetail(props: Props) {
                       canFork={!!props.onFork && !!props.repo}
                       onSync={() => {
                         setActionsMenuOpen(false);
-                        doSync(false);
+                        void doSync(false);
                       }}
                       onSyncDefault={() => {
                         setActionsMenuOpen(false);
-                        doSync(false, SyncTargetDefault);
+                        void doSync(false, SyncTargetDefault);
                       }}
                       onStop={() => {
                         setActionsMenuOpen(false);
@@ -1841,7 +1851,7 @@ export default function TaskDetail(props: Props) {
                 disabled={!!pendingAction()}
                 onClick={() => {
                   setSafetyIssues([]);
-                  doSync(true);
+                  void doSync(true);
                 }}
               >
                 Force Push to {props.branch}
@@ -2767,7 +2777,7 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
             return (
               <div class={styles.toolInputRow}>
                 <span class={styles.toolInputKey}>{k}:</span>
-                {multiline ? <pre class={styles.toolInputBlock}>{v as string}</pre> : <> {fmtValue(v)}</>}
+                {multiline ? <pre class={styles.toolInputBlock}>{v}</pre> : <> {fmtValue(v)}</>}
               </div>
             );
           }}

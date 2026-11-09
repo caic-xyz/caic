@@ -1330,6 +1330,35 @@ describe("TaskDetail", () => {
     expect(await screen.findByText("First response", { exact: true })).toBeVisible();
   });
 
+  it("reports password clipboard failures even for stopped tasks", async () => {
+    const user = userEvent.setup();
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("clipboard denied")) },
+    });
+    try {
+      await renderTaskDetail({ sudoPassword: "secret", taskState: "stopped" });
+      await user.click(screen.getByTitle("Copy password"));
+      await waitFor(() => expect(screen.getByText("Copy failed")).toBeVisible());
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+    }
+  });
+
+  it("reports when password copying is unavailable", async () => {
+    const user = userEvent.setup();
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    try {
+      await renderTaskDetail({ sudoPassword: "secret", taskState: "stopped" });
+      await user.click(screen.getByTitle("Copy password"));
+      expect(screen.getByText("Copy failed")).toBeVisible();
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+    }
+  });
+
   it("copies only the selected fenced code block", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -2551,7 +2580,7 @@ describe("streamed conversation", () => {
   it("queues Enter, steers Ctrl+Enter, and preserves newlines and IME composition", async () => {
     vi.useRealTimers();
     const send = vi.fn(async (_steer: boolean) => {});
-    renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: send });
+    await renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: send });
     const prompt = screen.getByTestId("task-detail-prompt");
     fireEvent.keyDown(prompt, { key: "Enter" });
     await waitFor(() => expect(send).toHaveBeenCalledWith(false));
@@ -2569,7 +2598,7 @@ describe("streamed conversation", () => {
     it(`answers ${taskState} immediately with Enter`, async () => {
       vi.useRealTimers();
       const send = vi.fn(async (_steer: boolean) => {});
-      renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
+      await renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
       fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter" });
       await waitFor(() => expect(send).toHaveBeenCalledWith(true));
     });
@@ -2582,7 +2611,7 @@ describe("streamed conversation", () => {
       const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
       makeSyncReadyMock(created, capturedCb);
       const send = vi.fn(async (_steer: boolean) => {});
-      renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
+      await renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
       await waitFor(() => expect(capturedCb.value).not.toBeNull());
       if (!capturedCb.value) throw new Error("historyEvents callback not captured");
       capturedCb.value({
@@ -2602,7 +2631,7 @@ describe("streamed conversation", () => {
     const [draft, setDraft] = createSignal("another draft");
     const edit = vi.fn(async () => {});
     const send = vi.fn(async (_steer: boolean) => {});
-    renderTaskDetail({
+    await renderTaskDetail({
       get inputDraft() {
         return draft();
       },
@@ -2642,10 +2671,10 @@ describe("streamed conversation", () => {
     ["delivery in progress", { pendingInput: { id: "queued1", prompt: { text: "follow up" }, delivering: true } }],
     ["a draft attachment", { inputImages: [{ id: "draft1", blob: new Blob(["image"]), previewURL: "blob:draft1" }] }],
   ] satisfies [string, Partial<Parameters<typeof TaskDetail>[0]>][]) {
-    it(`leaves Arrow Up alone with ${name}`, () => {
+    it(`leaves Arrow Up alone with ${name}`, async () => {
       vi.useRealTimers();
       const edit = vi.fn(async () => {});
-      renderTaskDetail({
+      await renderTaskDetail({
         pendingInput: { id: "queued1", prompt: { text: "follow up" } },
         ...overrides,
         onEditQueuedInput: edit,
@@ -2672,7 +2701,7 @@ describe("streamed conversation", () => {
         ],
       },
     });
-    renderTaskDetail({
+    await renderTaskDetail({
       get pendingInput() {
         return queue();
       },
@@ -2699,7 +2728,7 @@ describe("streamed conversation", () => {
     vi.useRealTimers();
     const cancel = vi.spyOn(api, "cancelQueuedInput").mockResolvedValue({ status: "ok" });
     const edit = vi.fn(async () => {});
-    renderTaskDetail({
+    await renderTaskDetail({
       pendingInput: {
         id: "queued1",
         prompt: {
@@ -2726,7 +2755,7 @@ describe("streamed conversation", () => {
     const edit = vi.fn(async () => {
       throw new Error("Offline");
     });
-    renderTaskDetail({
+    await renderTaskDetail({
       onEditQueuedInput: edit,
       pendingInput: {
         id: "queued1",

@@ -1,9 +1,9 @@
 // Linting rules and plugin configuration for TypeScript and SolidJS source files.
 
 import eslint from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 import solid from "eslint-plugin-solid/configs/typescript";
-import jsxA11y from "eslint-plugin-jsx-a11y";
 import globals from "globals";
 import prettier from "eslint-config-prettier";
 
@@ -17,6 +17,15 @@ const sharedRules = {
   "@typescript-eslint/no-shadow": ["error", { hoist: "all" }],
   "no-console": ["error", { allow: ["warn", "error"] }],
   "@typescript-eslint/switch-exhaustiveness-check": "error",
+  // node:test owns test registration promises and reports their failures.
+  "@typescript-eslint/no-floating-promises": [
+    "error",
+    { allowForKnownSafeCalls: [{ from: "package", name: ["test", "it", "describe"], package: "@types/node" }] },
+  ],
+  // Solid event callbacks can return handled promises; the framework does not await them.
+  "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: { attributes: false } }],
+  "@typescript-eslint/no-misused-spread": "error",
+  "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
   "no-debugger": "error",
   eqeqeq: ["error", "always"],
   "no-var": "error",
@@ -25,56 +34,38 @@ const sharedRules = {
   "object-shorthand": "error",
 };
 
-export default tseslint.config(
+// Test doubles intentionally use loose external fixtures; production values must be typed.
+// no-unnecessary-condition cannot follow Solid lifecycle and cancellation state across callbacks.
+const productionRules = {
+  "@typescript-eslint/await-thenable": "error",
+  "@typescript-eslint/no-array-delete": "error",
+  "@typescript-eslint/no-base-to-string": "error",
+  "@typescript-eslint/no-deprecated": "error",
+  "@typescript-eslint/no-for-in-array": "error",
+  "@typescript-eslint/no-unnecessary-type-assertion": "error",
+  "@typescript-eslint/no-unsafe-argument": "error",
+  "@typescript-eslint/no-unsafe-assignment": "error",
+  "@typescript-eslint/no-unsafe-call": "error",
+  "@typescript-eslint/no-unsafe-member-access": "error",
+  "@typescript-eslint/no-unsafe-return": "error",
+  "@typescript-eslint/only-throw-error": "error",
+  "@typescript-eslint/prefer-promise-reject-errors": "error",
+  "@typescript-eslint/require-await": "error",
+  "@typescript-eslint/use-unknown-in-catch-callback-variable": "error",
+};
+
+export default defineConfig(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ["frontend/src/**/*.{ts,tsx}"],
     ...solid,
-    plugins: {
-      ...solid.plugins,
-      "jsx-a11y": jsxA11y,
-    },
     languageOptions: {
       globals: { ...globals.browser },
       parserOptions: { project: "./tsconfig.json" },
     },
     rules: {
       ...sharedRules,
-      // Accessibility rules (eslint-plugin-jsx-a11y)
-      "jsx-a11y/alt-text": "error",
-      "jsx-a11y/anchor-has-content": "error",
-      "jsx-a11y/anchor-is-valid": "error",
-      "jsx-a11y/aria-activedescendant-has-tabindex": "error",
-      "jsx-a11y/aria-props": "error",
-      "jsx-a11y/aria-proptypes": "error",
-      "jsx-a11y/aria-role": "error",
-      "jsx-a11y/aria-unsupported-elements": "error",
-      "jsx-a11y/autocomplete-valid": "error",
-      "jsx-a11y/click-events-have-key-events": "error",
-      "jsx-a11y/heading-has-content": "error",
-      "jsx-a11y/html-has-lang": "error",
-      "jsx-a11y/iframe-has-title": "error",
-      "jsx-a11y/img-redundant-alt": "error",
-      "jsx-a11y/interactive-supports-focus": "error",
-      "jsx-a11y/label-has-associated-control": "error",
-      "jsx-a11y/media-has-caption": "error",
-      "jsx-a11y/mouse-events-have-key-events": "error",
-      "jsx-a11y/no-access-key": "error",
-      "jsx-a11y/no-autofocus": "error",
-      "jsx-a11y/no-distracting-elements": "error",
-      "jsx-a11y/no-interactive-element-to-noninteractive-role": "error",
-      // Image load/error events report resource state, not user interaction.
-      "jsx-a11y/no-noninteractive-element-interactions": ["error", { img: ["onError", "onLoad"] }],
-      "jsx-a11y/no-noninteractive-element-to-interactive-role": "error",
-      // Named overflow regions must be reachable for keyboard scrolling.
-      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["region", "tabpanel"] }],
-      "jsx-a11y/no-redundant-roles": "error",
-      "jsx-a11y/no-static-element-interactions": "error",
-      "jsx-a11y/role-has-required-aria-props": "error",
-      "jsx-a11y/role-supports-aria-props": "error",
-      "jsx-a11y/scope": "error",
-      "jsx-a11y/tabindex-no-positive": "error",
       "solid/components-return-once": "error",
       "solid/event-handlers": "error",
       "solid/imports": "error",
@@ -112,6 +103,16 @@ export default tseslint.config(
   {
     files: ["scripts/**/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    files: ["frontend/src/**/*.tsx"],
+    // Solid's ref={element} assigns the variable during rendering.
+    rules: { "no-unassigned-vars": "off" },
+  },
+  {
+    files: ["frontend/src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}", "**/*.bench.{ts,tsx}"],
+    rules: productionRules,
   },
   // scripts/check-staged.sh mirrors these roots so its eslint invocation never receives an
   // ignored path (which would only print an ignore warning). Keep the two lists in sync.

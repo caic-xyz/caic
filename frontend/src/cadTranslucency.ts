@@ -16,7 +16,8 @@ export class CadTranslucency {
     this.minimumSpan = Math.max(this.bounds.min.distanceTo(this.bounds.max) * 1e-6, 1e-6);
     root.traverse((child) => {
       if (!(child instanceof Mesh)) return;
-      const materials: Material[] = Array.isArray(child.material) ? child.material : [child.material];
+      const mesh = child as Mesh;
+      const materials: Material[] = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of materials) {
         if (this.materials.has(material)) continue;
         this.materials.set(material, { transparent: material.transparent, depthWrite: material.depthWrite });

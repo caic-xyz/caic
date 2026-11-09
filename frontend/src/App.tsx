@@ -166,7 +166,7 @@ function Shell(props: { children?: JSX.Element }) {
               </div>
             </header>
 
-            <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+            <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
               {props.children}
             </ErrorBoundary>
           </div>
@@ -226,7 +226,7 @@ export default function App(props: { children?: JSX.Element }) {
   };
 
   return (
-    <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+    <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
       <HostModeProvider>
         <Show
           when={accountScope()}

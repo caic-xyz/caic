@@ -20,6 +20,8 @@ export function loadStep(
     }
     function abort() {
       cleanup();
+      // Preserve the caller-provided abort reason.
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
       reject(signal.reason);
     }
     signal.addEventListener("abort", abort, { once: true });
@@ -55,6 +57,8 @@ export function loadStep(
       worker.postMessage(request);
     } catch (error) {
       cleanup();
+      // Preserve the original worker startup failure.
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
       reject(error);
     }
   });

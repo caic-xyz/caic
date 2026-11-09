@@ -55,7 +55,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         }
         onSubmit={(e) => {
           e.preventDefault();
-          s.submitTask();
+          void s.submitTask();
         }}
         class={`${styles.submitForm} ${s.selectedId() ? styles.hidden : ""}`}
         data-testid="new-task-form"

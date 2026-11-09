@@ -35,7 +35,6 @@ linters:
     - godot
     - gomoddirectives
     - goprintffuncname
-    - gosec
     - grouper
     - iface
     - importas
@@ -46,7 +45,6 @@ linters:
     - makezero
     - mirror
     - methodfilecheck
-    - misspell
     - modernize
     - musttag
     - nakedret

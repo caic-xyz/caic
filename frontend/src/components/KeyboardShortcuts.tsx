@@ -132,7 +132,7 @@ export default function KeyboardShortcuts(props: Props) {
   function purgeSelectedTask() {
     const task = s.selectedTask();
     if (!task || new Set(["failed", "purged", "purging", "stopping"]).has(task.state)) return;
-    s.handlePurge(task.id);
+    void s.handlePurge(task.id);
   }
 
   onMount(() => {

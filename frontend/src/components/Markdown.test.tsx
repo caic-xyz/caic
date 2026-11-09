@@ -96,6 +96,27 @@ describe("Markdown", () => {
     expect(written).toContain("echo 123");
   });
 
+  it("reports a rejected raw clipboard write", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("clipboard denied")) },
+    });
+    renderMarkdown("Source");
+    await user.click(screen.getByTitle("Show raw"));
+    await user.click(screen.getByTitle("Copy to clipboard"));
+    await waitFor(() => expect(screen.getByText("Copy failed")).toBeVisible());
+  });
+
+  it("reports when the clipboard API is unavailable", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    renderMarkdown("Source");
+    await user.click(screen.getByTitle("Show raw"));
+    await user.click(screen.getByTitle("Copy to clipboard"));
+    expect(screen.getByText("Copy failed")).toBeVisible();
+  });
+
   it("renders Mermaid diagrams inline and allows toggling to source code", async () => {
     const user = userEvent.setup();
     const text =

@@ -28,7 +28,8 @@ function promptClient(fetchFn: FetchFn, options: PromptOptions | undefined) {
     let body = init?.body;
     if (options.images.length) {
       const form = new FormData();
-      form.append("request", String(body));
+      if (typeof body !== "string") throw new TypeError("Expected a JSON request body");
+      form.append("request", body);
       options.images.forEach((image, i) => form.append(`image-${i}`, image));
       body = form;
       headers.delete("Content-Type");

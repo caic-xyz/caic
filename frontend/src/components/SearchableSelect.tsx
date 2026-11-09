@@ -10,7 +10,7 @@ import styles from "./SearchableSelect.module.css";
 export interface SearchableOption {
   value: string;
   label: JSX.Element;
-  /** Text used for filtering and match ranking; defaults to the string-cast label. */
+  /** Text used for filtering and match ranking; defaults to the text label or option value. */
   search?: string;
   /** Optional group label rendered before the first matching option in a group. */
   group?: string;
@@ -70,7 +70,12 @@ export default function SearchableSelect(props: Props) {
           .map((option, index) => ({
             option,
             index,
-            search: (option.search ?? String(option.label)).toLowerCase(),
+            search: (
+              option.search ??
+              (typeof option.label === "string" || typeof option.label === "number"
+                ? String(option.label)
+                : option.value)
+            ).toLowerCase(),
           }))
           .filter(({ search }) => search.includes(initialFilter))
           .sort((a, b) => matchRank(a.search, initialFilter) - matchRank(b.search, initialFilter) || a.index - b.index)

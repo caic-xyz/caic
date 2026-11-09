@@ -6,7 +6,7 @@ Dependencies to build locally from scratch including the frontend:
 - brotli
 - make
 - Node.js 26
-- pnpm 12.4.2
+- pnpm 12.17.0
 
 From the repository root:
 

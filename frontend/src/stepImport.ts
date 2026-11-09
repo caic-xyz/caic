@@ -54,7 +54,7 @@ async function readStep(
 function packStepMeshes(result: OcctResult): StepMesh[] {
   if (!result?.success || !result.meshes.length)
     throw new Error("Failed to parse STEP file: invalid geometry or syntax");
-  const meshes: StepMesh[] = new Array(result.meshes.length);
+  const meshes: StepMesh[] = new Array<StepMesh>(result.meshes.length);
   // Remove each source mesh as it is packed so the original numeric arrays
   // can be collected instead of retaining two complete geometry representations.
   while (result.meshes.length) {

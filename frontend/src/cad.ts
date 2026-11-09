@@ -156,6 +156,8 @@ export function parse3mf(buffer: ArrayBuffer): ParsedCad {
 }
 
 // Parses STL and 3MF mesh formats; STEP files are owned by loadCadFile's worker.
+// Keep parser errors as promise rejections for callers.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function parseCad(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<ParsedCad> {
   // Only compressed STEP downloads use prefix views; ordinary CAD buffers
   // already own exactly their bytes. Respect subviews from other callers.
@@ -177,7 +179,7 @@ export function computeModelInfo(group: THREE.Group): Omit<CadModelInfo, "plates
   group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       meshCount++;
-      const geom = child.geometry;
+      const geom = (child as THREE.Mesh).geometry;
       if (geom instanceof BambuPaintGeometry) {
         triangleCount += geom.sourceTriangleCount;
       } else if (geom.index) {
@@ -297,7 +299,8 @@ export function prepareModelShading(group: THREE.Group): void {
   }
   group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
-      child.material = Array.isArray(child.material) ? child.material.map(prepare) : prepare(child.material);
+      const mesh = child as THREE.Mesh;
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
     }
   });
 }
@@ -363,8 +366,9 @@ export function disposeCadGroup(group: THREE.Group) {
   group.removeFromParent();
   group.traverse((child) => {
     if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      const object = child as THREE.Mesh | THREE.Line;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
       for (const material of materials) {
         if (material instanceof THREE.MeshBasicMaterial && material.map instanceof THREE.CanvasTexture) {
           material.map.dispose();
@@ -508,6 +512,8 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
         }
         function abort() {
           cleanup();
+          // Preserve the caller-provided abort reason.
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
           reject(signal.reason);
         }
         signal.addEventListener("abort", abort, { once: true });
@@ -530,14 +536,20 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
       const enabled = mode === "wireframe";
       model.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => {
-              m.wireframe = enabled;
-              m.needsUpdate = true;
-            });
+          const mesh = child as THREE.Mesh<
+            THREE.BufferGeometry,
+            THREE.MeshBasicMaterial | THREE.MeshPhongMaterial | THREE.MeshStandardMaterial
+          >;
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(
+              (m: THREE.MeshBasicMaterial | THREE.MeshPhongMaterial | THREE.MeshStandardMaterial) => {
+                m.wireframe = enabled;
+                m.needsUpdate = true;
+              },
+            );
           } else {
-            child.material.wireframe = enabled;
-            child.material.needsUpdate = true;
+            mesh.material.wireframe = enabled;
+            mesh.material.needsUpdate = true;
           }
         }
       });

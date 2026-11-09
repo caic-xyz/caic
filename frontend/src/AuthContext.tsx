@@ -66,6 +66,7 @@ export const AuthProvider: ParentComponent = (props) => {
     frontendPreparation()?.dispose();
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Solid runs this self-contained initialization without awaiting it.
   onMount(async () => {
     // The backend injects auth state into the served document so the logged-in
     // user is hydrated without a round-trip and the login page never flashes.
@@ -84,7 +85,7 @@ export const AuthProvider: ParentComponent = (props) => {
     try {
       const res = await fetch("/server-info/config");
       if (!res.ok) throw new Error(`server-info: ${res.status}`);
-      const cfg: Config = await res.json();
+      const cfg = (await res.json()) as Config;
       const authProviders = cfg.authProviders ?? [];
       setProviders(authProviders);
       if (authProviders.length === 0) {

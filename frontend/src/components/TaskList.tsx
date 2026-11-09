@@ -7,7 +7,7 @@ import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.sv
 import ArrowRight from "@material-symbols/svg-400/outlined/arrow_right.svg?solid";
 import ArrowDropDown from "@material-symbols/svg-400/outlined/arrow_drop_down.svg?solid";
 
-import type { CIStatus, Repo, Task, UsageResp } from "@sdk/types.gen";
+import type { Repo, Task, UsageResp } from "@sdk/types.gen";
 
 import TaskCard from "./TaskCard";
 import ActionButton from "./ActionButton";
@@ -409,7 +409,7 @@ export default function TaskList(props: TaskListProps) {
                       <Show when={meta.ci} keyed>
                         {(status) => (
                           <>
-                            <CIDot status={status as CIStatus} checks={meta.ciChecks} href={ciDotURL(meta)} />
+                            <CIDot status={status} checks={meta.ciChecks} href={ciDotURL(meta)} />
                             <Show when={status === "failure" && props.autoFixCI()}>
                               <span class={styles.autoBadge} title="Auto-fix CI enabled">
                                 auto

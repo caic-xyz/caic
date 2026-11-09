@@ -152,7 +152,11 @@ describe("service worker", () => {
     const activate = listeners.get("activate") as (event: { waitUntil: (promise: Promise<unknown>) => void }) => void;
     let pending: Promise<unknown> | undefined;
 
-    activate({ waitUntil: (promise) => (pending = promise) });
+    activate({
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
     await pending;
 
     expect(remove).toHaveBeenCalledOnce();

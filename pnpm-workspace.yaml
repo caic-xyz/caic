@@ -1,12 +1,6 @@
 # pnpm configuration
 engineStrict: true
 minimumReleaseAge: 11520
-minimumReleaseAgeExclude:
-  - "@pnpm/*"
-  # Exact renderer version evaluated for the Mermaid replacement.
-  - pele@1.6.0
-  - pnpm
-
 allowBuilds:
   # Allow esbuild's build script so frozen dependency installation succeeds.
   esbuild: true

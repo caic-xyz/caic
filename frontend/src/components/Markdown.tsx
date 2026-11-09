@@ -38,7 +38,7 @@ markdownSanitizer.addHook("afterSanitizeAttributes", (node) => {
 
 const markdownRenderer = {
   code(this: Renderer, token: Tokens.Code): string {
-    const code = Renderer.prototype.code.call(this, token);
+    const code = Renderer.prototype.code.call(this, token) as string;
     if (token.codeBlockStyle === "indented") return code;
     const blockClass = token.text.includes("\n")
       ? styles.codeBlock
@@ -179,15 +179,18 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
       ...markdownRenderer,
       link(this: Renderer, token: Tokens.Link): string {
         const target = runtimeTarget(token.href);
-        if (target === null || !taskId) return Renderer.prototype.link.call(this, token);
-        return Renderer.prototype.link
-          .call(this, { ...token, href: taskViewURL(taskId(), target.path, target.line) })
-          .replace("<a ", "<a data-app-link ");
+        if (target === null || !taskId) return Renderer.prototype.link.call(this, token) as string;
+        return (
+          Renderer.prototype.link.call(this, {
+            ...token,
+            href: taskViewURL(taskId(), target.path, target.line),
+          }) as string
+        ).replace("<a ", "<a data-app-link ");
       },
       image(this: Renderer, token: Tokens.Image): string {
         const path = runtimePath(token.href);
-        if (path === null || !taskId) return Renderer.prototype.image.call(this, token);
-        return Renderer.prototype.image.call(this, { ...token, href: taskRawURL(taskId(), path) });
+        if (path === null || !taskId) return Renderer.prototype.image.call(this, token) as string;
+        return Renderer.prototype.image.call(this, { ...token, href: taskRawURL(taskId(), path) }) as string;
       },
     },
   });
@@ -201,6 +204,7 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
   );
   const [raw, setRaw] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
+  const [copyError, setCopyError] = createSignal(false);
   let wrapperRef: HTMLDivElement | undefined;
 
   function onWrapperClick(event: MouseEvent) {
@@ -270,7 +274,10 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
       <div class={styles.rawToolbar}>
         <button
           class={styles.rawToolbarBtn}
-          onClick={() => setRaw(!raw())}
+          onClick={() => {
+            setRaw(!raw());
+            setCopyError(false);
+          }}
           title={raw() ? "Show rendered" : "Show raw"}
         >
           {raw() ? "rendered" : "raw"}
@@ -279,9 +286,18 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
           <button
             class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
             onClick={() => {
-              navigator.clipboard.writeText(props.text);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
+              setCopyError(false);
+              if (!navigator.clipboard) {
+                setCopyError(true);
+                return;
+              }
+              navigator.clipboard
+                .writeText(props.text)
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+                .catch(() => setCopyError(true));
             }}
             title="Copy to clipboard"
           >
@@ -290,6 +306,9 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
           </button>
         </Show>
       </div>
+      <Show when={raw()}>
+        <span role="status">{copyError() ? "Copy failed" : ""}</span>
+      </Show>
       <Show
         when={raw()}
         fallback={

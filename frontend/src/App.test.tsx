@@ -1263,10 +1263,11 @@ describe("App keyboard shortcuts", () => {
 
   it("does not autofocus a task-detail prompt on touch-primary devices", async () => {
     const matchMedia = window.matchMedia;
-    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      ...matchMedia(query),
-      matches: query === "(hover: none) and (pointer: coarse)",
-    }));
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const media = matchMedia(query);
+      Object.defineProperty(media, "matches", { value: query === "(hover: none) and (pointer: coarse)" });
+      return media;
+    });
     renderApp("/task/@task1+do-something");
 
     const prompt = await screen.findByTestId("task-detail-prompt");

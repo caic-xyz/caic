@@ -73,6 +73,7 @@ export async function* readHistoryBatches(
     finished = true;
   } finally {
     signal.removeEventListener("abort", abort);
+    // eslint-disable-next-line no-useless-assignment -- release partial input while cancellation is pending
     parts = [];
     batch = [];
     if (!finished) await (cancellation ?? reader.cancel());

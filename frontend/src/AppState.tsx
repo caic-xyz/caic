@@ -620,7 +620,7 @@ function createAppStore() {
       invalidateTaskDiff(id);
     }
     if (typeof patch["state"] === "string") {
-      const newState = patch["state"] as string;
+      const newState = patch["state"];
       const existing = tasks().find((task) => task.id === id);
       if (existing) checkAndNotify({ ...existing, state: newState } as Task);
       prevStates.set(id, newState);
@@ -770,7 +770,7 @@ function createAppStore() {
           api.listHarnesses().catch(() => [] as HarnessInfo[]),
           api.getConfig().catch(() => null),
           api.getUsage().catch(() => null),
-          api.listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
+          api.listCaches().catch(() => null),
           api.getCacheSizes().catch(() => null),
         ]);
         if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
@@ -1006,11 +1006,13 @@ function createAppStore() {
         setConnected(false);
         if (taskTimer !== null) clearTimeout(taskTimer);
         const probeGeneration = generation;
-        checkUnauthorized(probeGeneration).then((loggedOut) => {
-          if (loggedOut || !active || generation !== probeGeneration) return;
-          taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
-          taskDelay = Math.min(taskDelay * 1.5, 30_000);
-        });
+        checkUnauthorized(probeGeneration)
+          .then((loggedOut) => {
+            if (loggedOut || !active || generation !== probeGeneration) return;
+            taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
+            taskDelay = Math.min(taskDelay * 1.5, 30_000);
+          })
+          .catch((err: unknown) => showWarning(`Task reconnect failed: ${String(err)}`));
       }
       taskES.onerror = disconnectTasks;
       armWatchdog();
@@ -1032,11 +1034,13 @@ function createAppStore() {
         usageES = null;
         if (usageTimer !== null) clearTimeout(usageTimer);
         const probeGeneration = generation;
-        checkUnauthorized(probeGeneration).then((loggedOut) => {
-          if (loggedOut || !active || generation !== probeGeneration) return;
-          usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
-          usageDelay = Math.min(usageDelay * 1.5, 30_000);
-        });
+        checkUnauthorized(probeGeneration)
+          .then((loggedOut) => {
+            if (loggedOut || !active || generation !== probeGeneration) return;
+            usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
+            usageDelay = Math.min(usageDelay * 1.5, 30_000);
+          })
+          .catch((err: unknown) => showWarning(`Usage reconnect failed: ${String(err)}`));
       };
     }
 

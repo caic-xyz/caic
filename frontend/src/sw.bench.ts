@@ -31,7 +31,12 @@ bench(
   "serves a cached service-worker asset",
   async () => {
     let response: Promise<Response> | undefined;
-    handler({ request, respondWith: (next) => (response = next) });
+    handler({
+      request,
+      respondWith: (next) => {
+        response = next;
+      },
+    });
     if ((await response) !== cached) throw new Error("cached asset not returned");
   },
   { time: 1_000, warmupTime: 200 },
@@ -42,7 +47,12 @@ bench(
   "refreshes a service-worker icon",
   async () => {
     let response: Promise<Response> | undefined;
-    handler({ request: iconRequest, respondWith: (next) => (response = next) });
+    handler({
+      request: iconRequest,
+      respondWith: (next) => {
+        response = next;
+      },
+    });
     if (!(await response)?.ok) throw new Error("icon request failed");
   },
   { time: 1_000, warmupTime: 200 },

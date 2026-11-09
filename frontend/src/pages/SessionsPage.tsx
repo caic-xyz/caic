@@ -71,7 +71,7 @@ export default function SessionsPage() {
         <Show when={sessions.loading}>
           <p role="status">Loading sessions…</p>
         </Show>
-        <Show when={sessions.error}>
+        <Show when={sessions.error as unknown}>
           <p role="alert">Could not load sessions.</p>
           <Button onClick={() => void refetch()}>Reload sessions</Button>
         </Show>

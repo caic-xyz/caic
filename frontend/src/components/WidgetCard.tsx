@@ -52,15 +52,22 @@ export default function WidgetCard(props: { group: MessageGroup }) {
 
   // Listen for messages from the iframes.
   function onMessage(e: MessageEvent) {
+    const data: unknown = e.data;
+    if (typeof data !== "object" || data === null || !("type" in data)) return;
     if (e.source === iframeRef?.contentWindow) {
-      if (e.data?.type === "resize") {
-        const h = Math.max(100, Math.min(2000, e.data.height + 20));
+      if (
+        data.type === "resize" &&
+        "height" in data &&
+        typeof data.height === "number" &&
+        Number.isFinite(data.height)
+      ) {
+        const h = Math.max(100, Math.min(2000, data.height + 20));
         setIframeHeight(h);
-      } else if (e.data?.type === "ready") {
+      } else if (data.type === "ready") {
         setIframeReady(true);
       }
     } else if (e.source === fullscreenIframeRef?.contentWindow) {
-      if (e.data?.type === "ready") {
+      if (data.type === "ready") {
         setFullscreenReady(true);
       }
     }
@@ -156,7 +163,6 @@ export default function WidgetCard(props: { group: MessageGroup }) {
       </div>
       <Show when={fullscreen()}>
         <Portal>
-          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to close button and Escape key */}
           <div
             class={styles.fullscreenOverlay}
             onClick={(e) => {

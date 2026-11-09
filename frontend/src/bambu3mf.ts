@@ -133,7 +133,8 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
         clone.color.setStyle(color, THREE.SRGBColorSpace);
         return clone;
       }
-      child.material = Array.isArray(child.material) ? child.material.map(material) : material(child.material);
+      const mesh = child as THREE.Mesh;
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(material) : material(mesh.material);
     });
   }
 
@@ -152,7 +153,8 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
       const count = info ? Number(info.hasDefaultTriangles) + Number(info.lattice) : node.children.length;
       const fallback = count > 0 ? node.children.slice(-count) : [];
       fallback.forEach((mesh) => paint(mesh, effective));
-      if (info?.hasDefaultTriangles && fallback[0] instanceof THREE.Mesh) facePainter.paint(fallback[0], info);
+      if (info?.hasDefaultTriangles && fallback[0] instanceof THREE.Mesh)
+        facePainter.paint(fallback[0] as THREE.Mesh, info);
       return;
     }
     const object = Array.from(document(path).querySelectorAll("resources > object")).find(

@@ -16,7 +16,7 @@ for (const [name, source] of samples) {
   bench(
     `${name}: parse`,
     () => {
-      marked.parse(source);
+      marked.parse(source, { async: false });
     },
     { time: 500, warmupTime: 100 },
   );

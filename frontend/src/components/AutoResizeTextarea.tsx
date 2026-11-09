@@ -115,6 +115,8 @@ export default function AutoResizeTextarea(props: Props) {
     const text = e.clipboardData.getData("text/plain");
     if (text !== undefined) {
       e.preventDefault();
+      // Preserve the browser's undo history when inserting plain text.
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
       document.execCommand("insertText", false, text);
     }
   }

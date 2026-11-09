@@ -32,4 +32,36 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   await expect(messages.locator("strong", { hasText: "Done" })).toBeVisible({
     timeout: 10_000,
   });
+  // Observe both messages after the app's listener has processed them, in
+  // sender order, so the assertion cannot race the sandbox's resize events.
+  await page.evaluate(() => {
+    const state = window as Window & { widgetHeights?: Promise<string[]> };
+    state.widgetHeights = new Promise<string[]>((resolve) => {
+      const observed: string[] = [];
+      const frame = document.querySelector<HTMLIFrameElement>("iframe[title='light_refraction_in_water']");
+      if (!frame) throw new Error("Missing widget frame");
+      function onMessage(event: MessageEvent<unknown>) {
+        if (event.source !== frame?.contentWindow || typeof event.data !== "object" || event.data === null) return;
+        if (!("testResize" in event.data)) return;
+        observed.push(frame.style.getPropertyValue("--iframe-height"));
+        if (observed.length === 2) {
+          window.removeEventListener("message", onMessage);
+          resolve(observed);
+        }
+      }
+      window.addEventListener("message", onMessage);
+    });
+  });
+  const widgetFrame = page.frameLocator("iframe[title='light_refraction_in_water']");
+  await widgetFrame.locator("body").evaluate(() => {
+    window.parent.postMessage({ type: "resize", height: 123, testResize: true }, "*");
+    window.parent.postMessage({ type: "resize", height: "bad", testResize: true }, "*");
+  });
+  const [validHeight, invalidHeight] = await page.evaluate(() => {
+    const state = window as Window & { widgetHeights?: Promise<string[]> };
+    if (!state.widgetHeights) throw new Error("Missing widget listener");
+    return state.widgetHeights;
+  });
+  expect(validHeight).toBe("143px");
+  expect(invalidHeight).toBe(validHeight);
 });

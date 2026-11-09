@@ -72,6 +72,23 @@ describe("SearchableSelect", () => {
     expect(screen.getByRole("option", { name: "Default" })).toBeInTheDocument();
   });
 
+  it("filters numeric labels and falls back to the value for rendered labels", async () => {
+    const user = userEvent.setup();
+    const choices: SearchableOption[] = [
+      { value: "number", label: 42 },
+      { value: "rendered-value", label: <span>Rendered</span> },
+    ];
+    render(() => <SearchableSelect ariaLabel="Pick" value="number" options={() => choices} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Pick" }));
+    const input = screen.getByRole("combobox", { name: "Pick" });
+    await user.type(input, "42");
+    expect(screen.getByRole("option", { name: "42" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Rendered" })).not.toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, "rendered-value");
+    expect(screen.getByRole("option", { name: "Rendered" })).toBeInTheDocument();
+  });
+
   it("renders the popup inside its dialog so it remains above the modal backdrop", async () => {
     const user = userEvent.setup();
     render(() => (
