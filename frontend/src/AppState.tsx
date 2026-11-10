@@ -41,6 +41,7 @@ import type {
   WarningDetail,
 } from "@sdk/types.gen";
 
+import { observeNetworkChanges } from "./networkChanges";
 import { useHostMode } from "@maruel/gomode/web/HostMode";
 import type { FrontendPreparationScope } from "@maruel/gomode/web/FrontendVoiceTools";
 
@@ -820,6 +821,7 @@ function createAppStore() {
   {
     let taskES: EventSource | null = null;
     let usageES: EventSource | null = null;
+    let usageStreamGeneration = 0;
     let taskWatchdog: ReturnType<typeof setTimeout> | null = null;
     let taskTimer: ReturnType<typeof setTimeout> | null = null;
     let usageTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1019,17 +1021,26 @@ function createAppStore() {
     }
 
     function connectUsage() {
+      const streamGeneration = ++usageStreamGeneration;
+      const currentStream = () =>
+        active && !accountController.signal.aborted && streamGeneration === usageStreamGeneration;
       usageES = api.globalUsageEvents({
-        onMessage: (event) => setUsage(event),
+        onMessage: (event) => {
+          if (currentStream()) setUsage(event);
+        },
         onError: (err) => {
+          if (!currentStream()) return;
           const msg = err instanceof Error ? err.message : String(err);
           showWarning(`Usage event error: ${msg}`);
         },
       });
       usageES.addEventListener("open", () => {
+        if (!currentStream()) return;
         usageDelay = 500;
       });
       usageES.onerror = () => {
+        if (!currentStream()) return;
+        usageStreamGeneration++;
         usageES?.close();
         usageES = null;
         if (usageTimer !== null) clearTimeout(usageTimer);
@@ -1048,6 +1059,7 @@ function createAppStore() {
       if (taskWatchdog !== null) clearTimeout(taskWatchdog);
       taskWatchdog = null;
       generation++;
+      usageStreamGeneration++;
       taskStreamGeneration++;
       setTaskStreamReady(false);
       setTaskSnapshotComplete(false);
@@ -1065,6 +1077,10 @@ function createAppStore() {
 
     function connectAll() {
       closeAll();
+      if (!active || document.hidden || !navigator.onLine) {
+        setConnected(false);
+        return;
+      }
       taskDelay = 500;
       usageDelay = 500;
       connectTasks();
@@ -1096,16 +1112,17 @@ function createAppStore() {
       generation++;
       connectAll();
       document.addEventListener("visibilitychange", onVisibilityChange);
-      window.addEventListener("online", onOnline);
-      window.addEventListener("offline", onOffline);
+      const stopObserving = observeNetworkChanges(() => {
+        if (navigator.onLine) onOnline();
+        else onOffline();
+      });
       onCleanup(() => {
         active = false;
         generation++;
         closeAll();
         setServerHealth(null);
         document.removeEventListener("visibilitychange", onVisibilityChange);
-        window.removeEventListener("online", onOnline);
-        window.removeEventListener("offline", onOffline);
+        stopObserving();
       });
     });
   }

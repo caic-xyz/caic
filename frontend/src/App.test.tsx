@@ -275,6 +275,11 @@ function chipPathValues(): string[] {
   return Array.from(btns ?? []).map((b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "");
 }
 
+function networkOnline(online: boolean) {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(online);
+  fireEvent(window, new Event(online ? "online" : "offline"));
+}
+
 beforeEach(() => {
   spySeams();
   vi.clearAllMocks();
@@ -421,8 +426,8 @@ it("waits after tool registration for an authoritative initial snapshot, includi
   expect(readiness.at(-1)?.tools).toEqual([expect.objectContaining({ name: "focus_task" })]);
   const preparedCount = readiness.length;
   dispatchSSE({ kind: "upsert", upsert: makeTask() });
-  fireEvent(window, new Event("offline"));
-  fireEvent(window, new Event("online"));
+  networkOnline(false);
+  networkOnline(true);
   await waitFor(() => expect(taskEventSubscriptions).toBe(2));
   dispatchSSE({ kind: "snapshot", snapshot: [], complete: false });
   expect(readiness).toHaveLength(preparedCount);
@@ -2265,8 +2270,8 @@ describe("App repo chips: No repository", () => {
         await waitForTaskEventsSubscription();
         dispatchOpen();
         await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2));
-        fireEvent(window, new Event("offline"));
-        fireEvent(window, new Event("online"));
+        networkOnline(false);
+        networkOnline(true);
         await waitFor(() => expect(taskEventSubscriptions).toBe(2));
         dispatchOpen();
         await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(3));
@@ -4138,8 +4143,8 @@ it("preserves offline drafts through partial restoration, ignores the old connec
     chooseDraftImage(form, new File(["private"], "private.png", { type: "image/png" }));
     const oldMessages = [...fakeESListeners];
     initialTaskSnapshot = null;
-    fireEvent(window, new Event("offline"));
-    fireEvent(window, new Event("online"));
+    networkOnline(false);
+    networkOnline(true);
     await waitFor(() => expect(taskEventSubscriptions).toBe(2));
     fakeESListeners.forEach((listener) =>
       listener({ data: JSON.stringify({ kind: "snapshot", snapshot: [], complete: null }) }),
@@ -4171,8 +4176,8 @@ it("rejects retired-connection REST recovery results after the replacement snaps
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
     await waitFor(() => expect(api.getTask).toHaveBeenCalledOnce());
-    fireEvent(window, new Event("offline"));
-    fireEvent(window, new Event("online"));
+    networkOnline(false);
+    networkOnline(true);
     await waitFor(() => expect(taskEventSubscriptions).toBe(2));
     expect(api.getTask).toHaveBeenCalledOnce();
     dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
@@ -4337,6 +4342,29 @@ it("retains warnings during silence and retries only when task-stream heartbeats
   view.unmount();
 });
 
+it("replaces task and usage streams on a route change and rejects retired usage errors", async (t) => {
+  const network = Object.assign(new EventTarget(), { type: "wifi" });
+  Object.defineProperty(navigator, "connection", { configurable: true, value: network });
+  t.after(() => Reflect.deleteProperty(navigator, "connection"));
+  const view = renderApp();
+  try {
+    await waitForTaskEventsSubscription();
+    const retiredUsage = vi.mocked(api.globalUsageEvents).mock.results.at(-1)?.value as FakeEventSource;
+    network.type = "cellular";
+    network.dispatchEvent(new Event("change"));
+    await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+    expect(retiredUsage.close).toHaveBeenCalledOnce();
+    network.dispatchEvent(new Event("change"));
+    expect(taskEventSubscriptions).toBe(2);
+    vi.useFakeTimers();
+    retiredUsage.onerror?.(new Event("error"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.globalUsageEvents).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+  }
+});
+
 it("retains health across task reconnects and ignores retired streams", async () => {
   renderApp();
   await waitForTaskEventsSubscription();
@@ -4348,7 +4376,7 @@ it("retains health across task reconnects and ignores retired streams", async ()
   const link = screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" });
   fireEvent.focus(link);
   expect(screen.getByRole("tooltip")).toHaveTextContent("Updates unavailable");
-  fireEvent(window, new Event("online"));
+  networkOnline(true);
   await waitFor(() => expect(taskEventSubscriptions).toBe(2));
   retired.forEach((listener) =>
     listener({ data: JSON.stringify({ kind: "health", health: { ...highHealth, cpuPerc: 0, memUsed: 0 } }) }),
@@ -4357,7 +4385,7 @@ it("retains health across task reconnects and ignores retired streams", async ()
   dispatchSSE({ kind: "health", health: { ...highHealth, cpuPerc: 0, memUsed: 0 } });
   expect(screen.getByRole("link", { name: "CPU normal, memory normal — open System" })).toBe(link);
   dispatchSSE({ kind: "health", health: highHealth });
-  fireEvent(window, new Event("offline"));
+  networkOnline(false);
   expect(link).toBeInTheDocument();
 });
 

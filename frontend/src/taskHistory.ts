@@ -1,4 +1,5 @@
 // Owns the current context, compact server metadata, immutable disclosure reads, and exact live handoff.
+import { observeNetworkChanges } from "./networkChanges";
 import { batch, createSignal, onCleanup } from "solid-js";
 import type {
   EventMessage,
@@ -199,7 +200,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     }
   }
   function scheduleRetry(signal: AbortSignal) {
-    if (!current(signal)) return;
+    if (!current(signal) || !navigator.onLine) return;
     if (retryTimer !== null) clearTimeout(retryTimer);
     retryTimer = setTimeout(() => {
       retryTimer = null;
@@ -207,15 +208,22 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     }, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 10_000);
   }
-  async function discover() {
+  function retire() {
     controller.abort();
     bodyRequest?.abort();
-    controller = new AbortController();
     source?.close();
     source = null;
     if (timer !== null) clearTimeout(timer);
     if (retryTimer !== null) clearTimeout(retryTimer);
     timer = retryTimer = null;
+  }
+  async function discover() {
+    retire();
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
+    controller = new AbortController();
     const signal = controller.signal;
     complete = false;
     waitingManifest = false;
@@ -303,13 +311,17 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     if (!value) throw new Error("Task history is still loading");
     return { value, signal: AbortSignal.any([signal, controller.signal]) };
   }
+  const stopObserving = observeNetworkChanges(() => {
+    if (navigator.onLine) void discover();
+    else {
+      retire();
+      setLoading(false);
+    }
+  });
   onCleanup(() => {
     active = false;
-    controller.abort();
-    bodyRequest?.abort();
-    source?.close();
-    if (timer !== null) clearTimeout(timer);
-    if (retryTimer !== null) clearTimeout(retryTimer);
+    stopObserving();
+    retire();
     pending = [];
     discovery = null;
     positions = new WeakMap();

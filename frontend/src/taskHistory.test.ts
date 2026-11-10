@@ -49,6 +49,36 @@ async function loaded(owner: TaskHistory) {
 }
 const values = (owner: TaskHistory) => owner.messages().flatMap((message) => (message.text ? [message.text.text] : []));
 describe("section history owner", () => {
+  it("pauses offline and replaces an abandoned route without accepting its events", async (t) => {
+    let online = true;
+    t.mock.getter(navigator, "onLine", () => online);
+    const network = Object.assign(new EventTarget(), { type: "wifi" });
+    Object.defineProperty(navigator, "connection", { configurable: true, value: network });
+    t.after(() => Reflect.deleteProperty(navigator, "connection"));
+    const events = [text(1, "retained", 0)];
+    const owner = fixture(events, historyManifest(events, ""));
+    try {
+      await loaded(owner);
+      const first = defined(owner.connections[0]);
+      online = false;
+      window.dispatchEvent(new Event("offline"));
+      assert.equal(first.close.mock.calls.length, 1);
+      first.handlers.onMessage?.(text(2, "retired", 0));
+      assert.deepEqual(values(owner), ["retained"]);
+      assert.equal(owner.connections.length, 1);
+      online = true;
+      network.type = "cellular";
+      network.dispatchEvent(new Event("change"));
+      await loaded(owner);
+      assert.equal(owner.connections.length, 2);
+      network.dispatchEvent(new Event("change"));
+      assert.equal(owner.connections.length, 2);
+    } finally {
+      owner.dispose();
+    }
+    window.dispatchEvent(new Event("online"));
+    assert.equal(owner.connections.length, 2);
+  });
   it("requests only current context pages, retaining summaries without archived payloads", async () => {
     const events = [text(1, "archived", 0), text(513, "current", 0), text(520, "latest", 0)];
     const manifest = historyManifest(events, "");

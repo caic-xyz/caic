@@ -72,14 +72,10 @@ test("network failure shows reconnect banner", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
-  // Intercept all API requests to simulate network failure. This must close
-  // the existing SSE connection too, so we abort any in-flight requests and
-  // close the page's EventSource by navigating through a network-blocked state.
-  await page.route("**/api/**", (route) => route.abort("failed"));
-
-  // Force the existing SSE connection to break by evaluating a close on it,
-  // then reload the page so it tries to reconnect through the blocked route.
-  await page.reload();
+  const draft = page.getByTestId("prompt-input");
+  await draft.fill("Keep my draft through the network handoff");
+  const origin = await page.evaluate(() => performance.timeOrigin);
+  await page.context().setOffline(true);
 
   // The caic wordmark should turn red when disconnected.
   const word = page.getByTestId("new-task-button");
@@ -90,9 +86,9 @@ test("network failure shows reconnect banner", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(word).toHaveCSS("animation-name", "none");
 
-  // Restore network and reload to verify recovery.
-  await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.reload();
+  await page.context().setOffline(false);
   await expect(word).toHaveAttribute("data-status", "connected", { timeout: 15_000 });
   await expect(word).toHaveCSS("color", "rgb(0, 0, 0)");
+  await expect(draft).toHaveText("Keep my draft through the network handoff");
+  expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
 });
