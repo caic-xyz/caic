@@ -41,7 +41,7 @@ import type {
   WarningDetail,
 } from "@sdk/types.gen";
 
-import { observeNetworkChanges } from "./networkChanges";
+import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
 import { useHostMode } from "@maruel/gomode/web/HostMode";
 import type { FrontendPreparationScope } from "@maruel/gomode/web/FrontendVoiceTools";
 

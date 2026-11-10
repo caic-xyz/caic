@@ -1,5 +1,5 @@
 // Owns the current context, compact server metadata, immutable disclosure reads, and exact live handoff.
-import { observeNetworkChanges } from "./networkChanges";
+import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
 import { batch, createSignal, onCleanup } from "solid-js";
 import type {
   EventMessage,

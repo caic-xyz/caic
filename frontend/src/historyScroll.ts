@@ -1,4 +1,4 @@
-// Preserves visible conversation anchors through context loading, live output, disclosure, pane visibility, and responsive scroll viewport changes.
+// Owns conversation reading intent and pending layout corrections through live output, disclosure, and viewport changes.
 import { createEffect, onCleanup, type Accessor } from "solid-js";
 import { anchorAt, anchorRow } from "./anchorKeys";
 
@@ -11,6 +11,15 @@ interface Anchor {
   width: number;
 }
 
+type ReadingIntent = { kind: "following"; anchor: Anchor | null } | { kind: "reading"; anchor: Anchor };
+interface Correction {
+  disclosure: Anchor | null;
+  // A replacement can span a hidden pane. Preserve both fallback reasons if
+  // the keyed row disappears before the correction runs.
+  replacement: boolean;
+  restore: boolean;
+}
+
 export function createHistoryScroll(
   area: Accessor<HTMLElement | undefined>,
   body: Accessor<HTMLElement | undefined>,
@@ -21,16 +30,11 @@ export function createHistoryScroll(
   let active = true;
   let task = "";
   let epoch = -1;
-  let operation = 0;
-  let movement = 0;
-  let following = true;
-  let saved: Anchor | null = null;
-  let expansion: Anchor | null = null;
+  let intent: ReadingIntent = { kind: "following", anchor: null };
+  let correction: Correction | null = null;
   let writtenTop: number | null = null;
-  let frame: number | null = null;
-  let structural = false;
+  let frame: { id: number } | null = null;
   let scrollInput = false;
-  let hidden = false;
   let viewport: HTMLElement | undefined;
 
   const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -52,27 +56,37 @@ export function createHistoryScroll(
     writtenTop = el.scrollTop;
   }
 
+  function cancelFrame() {
+    if (frame !== null) cancelAnimationFrame(frame.id);
+    frame = null;
+  }
+
+  function correctLayout(kind: "replacement" | "restore") {
+    correction ??= { disclosure: null, replacement: false, restore: false };
+    correction[kind] = true;
+    return correction;
+  }
+
   function schedule() {
-    if (frame !== null) cancelAnimationFrame(frame);
+    cancelFrame();
     const el = area();
     if (!el) return;
     if (viewport !== el) {
       viewport = el;
-      structural = true;
+      correctLayout("replacement");
     }
     const id = taskId(),
-      expectedEpoch = epochValue(),
-      token = ++operation,
-      input = movement;
-    frame = requestAnimationFrame(() => {
+      expectedEpoch = epochValue();
+    const scheduled = { id: 0 };
+    frame = scheduled;
+    scheduled.id = requestAnimationFrame(() => {
       if (
         !active ||
         area() !== el ||
         !el.isConnected ||
         taskId() !== id ||
         epochValue() !== expectedEpoch ||
-        operation !== token ||
-        movement !== input
+        frame !== scheduled
       )
         return;
       frame = null;
@@ -80,34 +94,35 @@ export function createHistoryScroll(
         // Out of layout. Hold a pending structural correction for the frame
         // that brings the pane back instead of letting it wait for an unrelated
         // later frame.
-        hidden = true;
+        correctLayout("restore");
         return;
       }
-      const returning = hidden;
-      hidden = false;
+      const saved = intent.anchor;
       const resized = saved !== null && saved.width === el.clientWidth && saved.height !== el.scrollHeight;
-      const prior = expansion ?? ((structural || returning || resized) && !following ? saved : null);
+      const disclosure = correction?.disclosure;
+      const prior =
+        disclosure ?? (intent.kind === "reading" && (correction !== null || resized) ? intent.anchor : null);
       if (prior) {
         const row = anchorRow(el, prior.key);
         // A reader at the beginning should also see newly inserted feedback.
         // Explicit disclosure anchors still preserve the clicked row.
-        if (prior.scroll === 0 && expansion === null) write(el, 0);
+        if (prior.scroll === 0 && !disclosure) write(el, 0);
         else if (row && prior.top !== null)
           write(el, el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - prior.top);
         // Without a row, the height delta stands in for the hidden content only
         // while the pane width is unchanged: a reflow folds line wrapping into
         // that delta, and the browser's own scroll anchoring places the text
         // better than the correction does.
-        else if (structural && prior.width === el.clientWidth) write(el, prior.scroll + el.scrollHeight - prior.height);
-        else if (returning && el.scrollTop === 0) write(el, prior.scroll);
-      } else if (following) {
+        else if (correction?.replacement && prior.width === el.clientWidth)
+          write(el, prior.scroll + el.scrollHeight - prior.height);
+        else if (correction?.restore && el.scrollTop === 0) write(el, prior.scroll);
+      } else if (intent.kind === "following") {
         write(el, el.scrollHeight);
       }
-      following = nearBottom(el);
-      structural = false;
+      const measured = anchor(el);
+      intent = { kind: nearBottom(el) ? "following" : "reading", anchor: measured };
       scrollInput = false;
-      expansion = null;
-      saved = anchor(el);
+      correction = null;
     });
   }
 
@@ -118,15 +133,11 @@ export function createHistoryScroll(
     if (task !== id) {
       task = id;
       scrollInput = false;
-      following = true;
-      saved = null;
-      expansion = null;
+      intent = { kind: "following", anchor: null };
+      correction = null;
       writtenTop = null;
-      structural = false;
-      hidden = false;
     } else if (epoch !== nextEpoch) {
-      structural = true;
-      expansion = null;
+      correctLayout("replacement").disclosure = null;
     }
     epoch = nextEpoch;
     schedule();
@@ -172,23 +183,26 @@ export function createHistoryScroll(
 
   onCleanup(() => {
     active = false;
-    operation++;
-    if (frame !== null) cancelAnimationFrame(frame);
-    saved = null;
-    expansion = null;
+    cancelFrame();
+    intent = { kind: "following", anchor: null };
+    correction = null;
   });
 
   return {
     restoreAnchor(key: string, top: number | undefined) {
       const el = area();
       if (!el || top === undefined) return;
-      expansion = {
-        key,
-        top: top - el.getBoundingClientRect().top,
-        scroll: el.scrollTop,
-        height: el.scrollHeight,
-        viewport: el.clientHeight,
-        width: el.clientWidth,
+      correction = {
+        replacement: correction?.replacement ?? false,
+        restore: correction?.restore ?? false,
+        disclosure: {
+          key,
+          top: top - el.getBoundingClientRect().top,
+          scroll: el.scrollTop,
+          height: el.scrollHeight,
+          viewport: el.clientHeight,
+          width: el.clientWidth,
+        },
       };
       schedule();
     },
@@ -197,23 +211,25 @@ export function createHistoryScroll(
   function scroll() {
     const el = area();
     if (!el || el.clientHeight === 0) return;
+    const saved = intent.anchor;
     if (
       !scrollInput &&
-      (!saved || saved.height !== el.scrollHeight || saved.viewport !== el.clientHeight || structural)
+      (!saved || saved.height !== el.scrollHeight || saved.viewport !== el.clientHeight || correction !== null)
     ) {
       schedule();
       return;
     }
     const fromInput = scrollInput;
     scrollInput = false;
-    saved = anchor(el);
+    const measured = anchor(el);
     if (!fromInput && writtenTop !== null && Math.abs(el.scrollTop - writtenTop) < 1) {
       writtenTop = null;
+      intent = { ...intent, anchor: measured };
       return;
     }
     writtenTop = null;
-    movement++;
-    expansion = null;
-    following = nearBottom(el);
+    cancelFrame();
+    correction = null;
+    intent = { kind: nearBottom(el) ? "following" : "reading", anchor: measured };
   }
 }

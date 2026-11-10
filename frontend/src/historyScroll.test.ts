@@ -392,6 +392,28 @@ it("holds a pending content correction until the pane returns", async () => {
   }
 });
 
+it("restores the disclosure offset when its row disappears while hidden", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    const before = f.row.getBoundingClientRect().top;
+    f.expand();
+    f.scroll.restoreAnchor("visible", before);
+    f.hide();
+    f.reflow(400, 0);
+    await paint();
+    f.dropOffset();
+    f.row.remove();
+    f.show();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.el.scrollTop, 100);
+  } finally {
+    f.dispose();
+  }
+});
+
 for (const change of ["task", "generation", "dispose", "element"] as const) {
   it(`ignores an old expansion frame after ${change}`, async () => {
     const f = fixture();
@@ -410,6 +432,28 @@ for (const change of ["task", "generation", "dispose", "element"] as const) {
       assert.equal(f.el.scrollTop, 25);
     } finally {
       if (change !== "dispose") f.dispose();
+    }
+  });
+}
+
+for (const change of ["content", "input"] as const) {
+  it(`ignores a replaced disclosure callback after ${change} without changing its successor`, async () => {
+    const f = fixture();
+    try {
+      await paint();
+      f.userScroll(100);
+      const before = f.row.getBoundingClientRect().top;
+      f.expand();
+      f.scroll.restoreAnchor("visible", before);
+      const stale = [...frames.values()];
+      if (change === "content") f.append();
+      else f.userScroll(400);
+      for (const callback of stale) callback(0);
+      assert.equal(f.el.scrollTop, change === "content" ? 100 : 400);
+      await paint();
+      assert.equal(f.el.scrollTop, change === "content" ? 200 : 400);
+    } finally {
+      f.dispose();
     }
   });
 }
