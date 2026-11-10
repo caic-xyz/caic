@@ -1859,6 +1859,8 @@ export interface EventInit {
 /** EventText is an assistant text block. */
 export interface EventText {
   text: string;
+  /** Phase is the harness-provided text phase, such as commentary or final_answer. */
+  phase?: string;
 }
 
 /** EventTextDelta is a streaming text fragment from --include-partial-messages. */

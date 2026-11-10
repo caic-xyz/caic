@@ -2011,6 +2011,7 @@ EventText is an assistant text block.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `text` | `string` |  | yes |
+| `phase` | `string` | Phase is the harness-provided text phase, such as commentary or final_answer. |  |
 
 ### EventTextDelta
 

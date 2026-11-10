@@ -561,6 +561,7 @@ export function validateEventText(raw: ValidatorInput): EventText {
   if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventText.text");
   return {
     text: asString(obj["text"], "EventText.text"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "phase") ? { phase: asString(obj["phase"], "EventText.phase") } : {}),
   };
 }
 

@@ -2713,7 +2713,11 @@ data class EventInit(
 
 /** EventText is an assistant text block. */
 @Serializable
-data class EventText(val text: String)
+data class EventText(
+    val text: String,
+    /** Phase is the harness-provided text phase, such as commentary or final_answer. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val phase: String? = null,
+)
 
 /** EventTextDelta is a streaming text fragment from --include-partial-messages. */
 @Serializable

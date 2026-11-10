@@ -121,6 +121,8 @@ func (s *EventMessageSource) IsZero() bool {
 // EventText is an assistant text block.
 type EventText struct {
 	Text string `json:"text"`
+	// Phase is the harness-provided text phase, such as commentary or final_answer.
+	Phase string `json:"phase,omitempty"`
 }
 
 // EventTextDelta is a streaming text fragment from --include-partial-messages.

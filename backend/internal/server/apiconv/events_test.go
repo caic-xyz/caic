@@ -279,7 +279,7 @@ func TestToolTimingTracker(t *testing.T) {
 			t.Parallel()
 			gt := NewToolTimingTracker("", harness.Codex, "", nil)
 
-			textMsg := &agent.TextMessage{Text: "hello"}
+			textMsg := &agent.TextMessage{Text: "hello", Phase: "final_answer"}
 			usageMsg := &agent.UsageMessage{
 				Usage:         agent.Usage{InputTokens: 200, OutputTokens: 100},
 				ReportedModel: "gemini-2.5-pro",
@@ -295,6 +295,9 @@ func TestToolTimingTracker(t *testing.T) {
 			}
 			if events[0].Kind != v1.EventKindText {
 				t.Errorf("event[0].kind = %q, want %q", events[0].Kind, v1.EventKindText)
+			}
+			if events[0].Text == nil || events[0].Text.Phase != "final_answer" {
+				t.Errorf("event[0].text = %+v, want final_answer phase", events[0].Text)
 			}
 			if events[1].Kind != v1.EventKindUsage {
 				t.Errorf("event[1].kind = %q, want %q", events[1].Kind, v1.EventKindUsage)

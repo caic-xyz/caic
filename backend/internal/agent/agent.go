@@ -792,7 +792,7 @@ func (r *RelayRecordReader) ReadRecord() ([]byte, []TimedMessage, error) {
 		if len(data) == 1 {
 			continue
 		}
-		result := r.records.submit(r.ctx, &recordWork{op: recordRelay, data: data})
+		result := r.records.submit(r.ctx, &recordWork{op: recordRelay, data: data, returnNative: true})
 		return result.data, result.messages, result.err
 	}
 }

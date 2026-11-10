@@ -2300,6 +2300,44 @@ func BenchmarkWarmHistoryReplay(b *testing.B) {
 	}
 }
 
+func TestRelayRecordAdmission(t *testing.T) {
+	t.Parallel()
+	valid := []byte("{\"t\":\"agent\",\"ts\":1.000,\"msg\":{\"text\":\"hello\"}}\n")
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"missing newline", bytes.TrimSuffix(valid, []byte("\n"))},
+		{"multiple records", append(bytes.Clone(valid), valid...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &testLogSink{}
+			owner := newTestRecordsWithHandler(t, t.Context(), sink, &testMessageParser{}, &testRecordHandler{consumer: t.Context()})
+			if result := owner.submit(t.Context(), &recordWork{op: recordRelay, data: tc.data}); result.err == nil {
+				t.Fatal("invalid relay record was accepted")
+			}
+			if sink.Len() != 0 {
+				t.Fatal("invalid relay record was persisted")
+			}
+		})
+	}
+}
+
+// BenchmarkLiveRelayRecord measures live record dispatch for large tool output.
+func BenchmarkLiveRelayRecord(b *testing.B) {
+	data := fmt.Appendf(nil, "{\"t\":\"agent\",\"ts\":1.000,\"msg\":{\"text\":%q}}\n", strings.Repeat("x", 8<<20))
+	owner := newTestRecordsWithHandler(b, b.Context(), DiscardLogSink{}, &testMessageParser{}, &testRecordHandler{consumer: b.Context()})
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if result := owner.submit(b.Context(), &recordWork{op: recordRelay, data: data}); result.err != nil {
+			b.Fatal(result.err)
+		}
+	}
+}
+
 // warmHistoryStream builds a canonical v3 agent-record stream of at most size
 // bytes, ending on a whole record.
 func warmHistoryStream(b *testing.B, size int64) []byte {

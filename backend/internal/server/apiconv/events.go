@@ -143,11 +143,10 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		}}
 	case *agent.TextMessage:
 		if m.Text != "" || m.Source.HasIdentity() {
-			// TODO: propagate m.Phase to EventText once EventText has a Phase field.
 			return []v1.EventMessage{{
 				Kind: v1.EventKindText,
 				Ts:   ts,
-				Text: &v1.EventText{Text: m.Text},
+				Text: &v1.EventText{Text: m.Text, Phase: m.Phase},
 			}}
 		}
 		return nil

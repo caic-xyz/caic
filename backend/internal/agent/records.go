@@ -181,9 +181,8 @@ func (r *Records) process(w *recordWork) recordResult {
 	case recordHost, recordIntent:
 		encoded, err = marshalRecordMessages(w.messages)
 	case recordRelay:
-		// TODO: Bound or spool large relay frames (images and long command
-		// output) before appending. Native bytes are currently persisted
-		// verbatim because replay and previews need the exact payload.
+		// Relay records have the task-log size limit and retain their exact bytes
+		// for persistence and replay.
 		encoded = w.data
 	case recordInput:
 		encoded, err = marshalInputRecords(w.data)
@@ -222,15 +221,24 @@ func (r *Records) process(w *recordWork) recordResult {
 	if err != nil {
 		return recordResult{err: err}
 	}
-	frames, err := validateRecordBatch(encoded)
-	if err != nil {
-		return recordResult{err: err}
+	var frames []taskslog.Frame
+	if w.op == recordRelay {
+		if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+			return recordResult{err: io.ErrUnexpectedEOF}
+		}
+		frame, err := taskslog.DecodeFrame(encoded[:len(encoded)-1])
+		if err != nil {
+			return recordResult{err: err}
+		}
+		frames = append(frames, frame)
+	} else {
+		frames, err = validateRecordBatch(encoded)
+		if err != nil {
+			return recordResult{err: err}
+		}
 	}
 	physical := PhysicalRecord{Encoded: encoded}
 	if w.op == recordRelay {
-		if len(frames) != 1 {
-			return recordResult{err: errors.New("relay submission must contain one record")}
-		}
 		physical.Provenance = FrameProvenance(&frames[0])
 	}
 	if len(encoded) > 0 {
@@ -297,7 +305,7 @@ func (r *Records) process(w *recordWork) recordResult {
 	result := recordResult{delivery: delivery, messages: observed, data: w.data, err: operationErr, nonfatal: operationErr != nil}
 	if w.op == recordRelay {
 		result.data = nil
-		if frames[0].Kind == taskslog.KindAgent {
+		if w.returnNative && frames[0].Kind == taskslog.KindAgent {
 			result.data = bytes.Clone(frames[0].Native)
 		}
 	}
@@ -355,16 +363,17 @@ const (
 )
 
 type recordWork struct {
-	ctx         context.Context
-	intent      RecordIntent
-	op          recordOperation
-	data        []byte
-	messages    []Message
-	prompt      Prompt
-	failure     error
-	text        string
-	disposition func(TimedMessage) (bool, error)
-	ack         chan recordResult
+	ctx          context.Context
+	intent       RecordIntent
+	op           recordOperation
+	data         []byte
+	messages     []Message
+	prompt       Prompt
+	failure      error
+	text         string
+	returnNative bool
+	disposition  func(TimedMessage) (bool, error)
+	ack          chan recordResult
 }
 type recordResult struct {
 	delivery inputDelivery

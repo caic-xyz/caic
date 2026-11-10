@@ -3987,9 +3987,12 @@ public struct EventInit: Codable {
 /// EventText is an assistant text block.
 public struct EventText: Codable {
     public let text: String
+    /// Phase is the harness-provided text phase, such as commentary or final_answer.
+    public let phase: String?
 
-    public init(text: String) {
+    public init(text: String, phase: String? = nil) {
         self.text = text
+        self.phase = phase
     }
 }
 
