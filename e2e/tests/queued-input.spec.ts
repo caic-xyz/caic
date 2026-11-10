@@ -179,7 +179,9 @@ for (const mobile of [false, true]) {
       String(recent.last),
       "end",
     );
-    const inputs = events.filter((event) => event.message.kind === "userInput").map((event) => event.message.userInput);
+    const inputs = (events ?? [])
+      .filter((event) => event.message.kind === "userInput")
+      .map((event) => event.message.userInput);
     expect(inputs.map((input) => input?.text)).toEqual([
       "FAKE_DEMO_GATED queue journey",
       "FAKE_DEMO_FINISH",
@@ -187,7 +189,7 @@ for (const mobile of [false, true]) {
     ]);
     expect(inputs.at(-1)?.images).toHaveLength(3);
     expect(
-      events.filter((event) => event.message.kind === "result").map((event) => event.message.result?.numTurns),
+      (events ?? []).filter((event) => event.message.kind === "result").map((event) => event.message.result?.numTurns),
     ).toEqual([1, 2]);
     expect(pageErrors).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

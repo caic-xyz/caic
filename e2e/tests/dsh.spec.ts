@@ -2,7 +2,7 @@
 import { test, expect, waitForTaskState } from "../helpers";
 
 test("dsh task selection and follow-up survive browser reload", async ({ page, api, uniquePrompt }) => {
-  const harnesses = await api.listHarnesses();
+  const harnesses = (await api.listHarnesses()) ?? [];
   const dsh = harnesses.find((harness) => harness.name === "dsh");
   expect(dsh).toBeTruthy();
   expect(dsh!.logoUrl).toBe("/logos/deepseek.svg");
@@ -20,7 +20,7 @@ test("dsh task selection and follow-up survive browser reload", async ({ page, a
   await expect(page).toHaveURL(/\/task\//);
   await expect(page.getByTestId("task-message-area")).toContainText("Lifecycle completed");
 
-  const task = (await api.listTasks()).find((candidate) => candidate.initialPrompt === prompt);
+  const task = ((await api.listTasks()) ?? []).find((candidate) => candidate.initialPrompt === prompt);
   expect(task).toBeTruthy();
   expect(task!.harness).toBe("dsh");
   const initial = await waitForTaskState(api, task!.id, "waiting");
@@ -41,7 +41,7 @@ test("native context occupancy stays independent of billed input and preserves z
   api,
   uniquePrompt,
 }) => {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const repo = repos[0];
   expect(repo).toBeTruthy();
   const task = await api.createTask({

@@ -68,7 +68,7 @@ export function HarnessControls(props: {
     })),
   );
   const efforts = () => {
-    const model = selectedHarness()?.models.find((candidate) => candidate.id === props.model);
+    const model = selectedHarness()?.models?.find((candidate) => candidate.id === props.model);
     return model?.effortOptions ?? [];
   };
   return (

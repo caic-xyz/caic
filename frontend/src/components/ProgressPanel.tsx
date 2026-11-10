@@ -32,7 +32,7 @@ function todoStatusClass(status: string): string {
 const DETAILS_KEY = "progress";
 
 export default function ProgressPanel(props: { todos: EventTodo["todos"] }) {
-  const todos = () => props.todos;
+  const todos = () => props.todos ?? [];
 
   const completedCount = createMemo(() => todos().filter((item) => item.status === "completed").length);
 

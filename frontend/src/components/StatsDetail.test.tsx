@@ -47,6 +47,8 @@ const turns: [HistoryTurn] = [
 const stats: [EventStats, EventStats, EventStats] = [
   {
     ts: 1_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
     cpuCeiling: 4,
     cpuPerc: 10,
     memUsed: 1_024,
@@ -60,6 +62,8 @@ const stats: [EventStats, EventStats, EventStats] = [
   },
   {
     ts: 2_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
     cpuCeiling: 4,
     cpuPerc: 140.25,
     memUsed: 2_048,
@@ -73,6 +77,8 @@ const stats: [EventStats, EventStats, EventStats] = [
   },
   {
     ts: 3_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
     cpuCeiling: 4,
     cpuPerc: 50,
     memUsed: 3_072,
@@ -223,12 +229,7 @@ describe("StatsContent", () => {
 
   it("shows CPU equivalents without inventing unknown capacity", async () => {
     const { findByTestId } = render(() => (
-      <StatsContent
-        tools={[]}
-        stats={[{ ...stats[0], cpuPerc: 150, cpuCeiling: undefined }]}
-        turns={[]}
-        usage={usage}
-      />
+      <StatsContent tools={[]} stats={[{ ...stats[0], cpuPerc: 150, cpuCeiling: null }]} turns={[]} usage={usage} />
     ));
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("CPU150.0% · 1.50 CPUs");
@@ -273,7 +274,7 @@ describe("StatsContent", () => {
     const { findByTestId } = render(() => (
       <StatsContent
         tools={[]}
-        stats={[{ ...stats[0], cpuQuota: undefined, runtimeCPUs: 4, cpuError: "inspect unavailable" }]}
+        stats={[{ ...stats[0], cpuQuota: null, runtimeCPUs: 4, cpuError: "inspect unavailable" }]}
         turns={[]}
         usage={usage}
       />

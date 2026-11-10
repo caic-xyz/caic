@@ -299,7 +299,7 @@ export function ResourceCharts(props: {
         <Show when={props.scope === "task"}>
           <div class={styles.note}>
             Runtime: {latest()?.runtimeCPUs ?? "unknown"} CPUs ·{" "}
-            {latest()?.cpuQuota === undefined
+            {(latest()?.cpuQuota ?? null) === null
               ? "quota unknown"
               : latest()?.cpuQuota === 0
                 ? "no explicit quota"

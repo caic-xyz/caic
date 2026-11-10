@@ -133,6 +133,28 @@ func (w *pipeResponseWriter) SetWriteDeadline(deadline time.Time) error {
 
 func TestEmitTaskListEvent(t *testing.T) {
 	t.Parallel()
+	t.Run("empty collections", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name  string
+			event v1.TaskListEvent
+			want  string
+		}{
+			{"snapshot", v1.TaskListEvent{Kind: "snapshot"}, "event: message\ndata: {\"kind\":\"snapshot\",\"snapshot\":[]}\n\n"},
+			{"repos", v1.TaskListEvent{Kind: "repos"}, "event: message\ndata: {\"kind\":\"repos\",\"repos\":[]}\n\n"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				w := &deadlineResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+				if err := emitTaskListEvent(sse.New(w), &tc.event); err != nil {
+					t.Fatal(err)
+				}
+				if got := w.Body.String(); got != tc.want {
+					t.Errorf("got %q, want %q", got, tc.want)
+				}
+			})
+		}
+	})
 	t.Run("PipeDeadlineStopsBlockedWrite", func(t *testing.T) {
 		t.Parallel()
 		server, client := net.Pipe()

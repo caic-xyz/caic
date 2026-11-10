@@ -26,6 +26,7 @@ function apiError(status: number): Error & { status: number } {
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
+    pendingInput: null,
     id: "task1",
     initialPrompt: "do something",
     title: "do something",
@@ -579,7 +580,7 @@ describe("structured warnings", () => {
       const updated: Warning = {
         ...warning,
         message: "CI-Abfrage fehlgeschlagen.",
-        details: [...warning.details, { repo: "repos/b", error: "connection refused" }],
+        details: [...(warning.details ?? []), { repo: "repos/b", error: "connection refused" }],
       };
       dispatchWarning(updated);
       expect(screen.getAllByText(updated.message)).toHaveLength(1);
@@ -1093,6 +1094,9 @@ it("shares conversation and numeric statistics subscriptions across task switche
       });
       handlers.onStats?.({
         ts: 1000,
+        cpuCeiling: null,
+        cpuQuota: null,
+        runtimeCPUs: null,
         cpuPerc: id === "first" ? 11 : 88,
         memUsed: 512,
         memLimit: 1024,
@@ -3339,6 +3343,7 @@ describe("App repo chips: No repository", () => {
       kind: "snapshot",
       snapshot: [
         makeTask({
+          pendingInput: null,
           id: "task1",
           state: "waiting",
           repos: [{ name: "repos/a", branch: "main" }],

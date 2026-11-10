@@ -110,9 +110,9 @@ describe("section history owner", () => {
         owner.requests.filter((url) => url.includes("/slice/")),
         ["/history/owner/3/test/slice/513/0/520/0"],
       );
-      assert.equal(owner.manifest()?.sections.length, 2);
+      assert.equal(owner.manifest()?.sections?.length, 2);
       assert.equal(owner.connections.length, 1);
-      const archived = await owner.readSection(defined(manifest.sections[0]), new AbortController().signal);
+      const archived = await owner.readSection(defined(defined(manifest.sections)[0]), new AbortController().signal);
       assert.equal(archived[0]?.message.text?.text, "archived");
       assert.deepEqual(values(owner), ["current", "latest"]);
     } finally {
@@ -129,7 +129,7 @@ describe("section history owner", () => {
       text(257, "excluded after", 1),
     ];
     const manifest = historyManifest(events, "");
-    defined(manifest.sections[0]).body = { first: defined(events[1]), last: defined(events[2]) };
+    defined(defined(manifest.sections)[0]).body = { first: defined(events[1]), last: defined(events[2]) };
     const owner = fixture(events, manifest);
     try {
       await loaded(owner);
@@ -171,7 +171,7 @@ describe("section history owner", () => {
       events.push(boundary, current);
       const next = structuredClone(manifest);
       next.bootstrap.through = 3;
-      next.sections.push({
+      defined(next.sections).push({
         id: "2",
         body: { first: boundary, last: current },
         boundary,
@@ -236,7 +236,7 @@ describe("section history owner", () => {
         release = resolve;
       });
     });
-    const read = owner.readSection(defined(manifest.sections[0]), new AbortController().signal);
+    const read = owner.readSection(defined(defined(manifest.sections)[0]), new AbortController().signal);
     owner.dispose();
     assert.equal((signal as AbortSignal | null)?.aborted, true);
     release(historyResponse(events));
@@ -276,7 +276,7 @@ it("waits for a split root-boundary manifest despite timers, checkpoints, and im
     assert.deepEqual(values(owner), ["old current"]);
     const next = structuredClone(first);
     next.bootstrap.through = 4;
-    next.sections.push({
+    defined(next.sections).push({
       id: "2",
       body: { first: boundary, last: ask },
       boundary,

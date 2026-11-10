@@ -76,7 +76,7 @@ test("browser voice setup receives the conversation's active task from service i
     expect(body.error).toBeUndefined();
     const contents = body.result.contents[0];
     const items = JSON.parse(contents.text);
-    const tasks = await api.listTasks();
+    const tasks = (await api.listTasks()) ?? [];
     const taskNumber = tasks.findIndex((task) => task.id === id) + 1;
     expect(taskNumber).toBeGreaterThan(0);
     // Overlay advisory focus on the actual projection. A real focus tool call

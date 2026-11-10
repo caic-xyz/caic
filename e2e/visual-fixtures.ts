@@ -42,6 +42,9 @@ export function resourceHistory(): EventStats[] {
     const memory = (384 + index * 8) * 1024 * 1024;
     return {
       ts,
+      cpuCeiling: null,
+      cpuQuota: null,
+      runtimeCPUs: null,
       cpuPerc: cpu,
       memUsed: memory,
       memLimit: 2 * 1024 * 1024 * 1024,

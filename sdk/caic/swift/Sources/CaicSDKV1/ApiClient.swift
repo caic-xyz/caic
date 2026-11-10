@@ -406,7 +406,7 @@ public final class ApiClient {
         try await request("POST", path: "/api/caic/v1/oauth/grants/\(grantID)/revoke", body: try encoder.encode(req))
     }
     /// Lists available coding agent harnesses.
-    public func listHarnesses() async throws -> [HarnessInfo] {
+    public func listHarnesses() async throws -> [HarnessInfo]? {
         try await request("GET", path: "/api/caic/v1/server/harnesses")
     }
     /// Refreshes one coding agent model inventory, bypassing its cache.
@@ -438,7 +438,7 @@ public final class ApiClient {
         try await request("GET", path: "/api/caic/v1/server/metrics")
     }
     /// Lists all discovered repositories.
-    public func listRepos() async throws -> [Repo] {
+    public func listRepos() async throws -> [Repo]? {
         try await request("GET", path: "/api/caic/v1/server/repos")
     }
     /// Clones a repository into the server's root directory.
@@ -458,7 +458,7 @@ public final class ApiClient {
         try await request("POST", path: "/api/caic/v1/ci/fix-pr", body: try encoder.encode(req))
     }
     /// Returns all tasks.
-    public func listTasks() async throws -> [Task] {
+    public func listTasks() async throws -> [Task]? {
         try await request("GET", path: "/api/caic/v1/tasks")
     }
     /// Returns a single task by id (404 if it does not exist).
@@ -566,19 +566,19 @@ public final class ApiClient {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/manifest")
     }
     /// Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads.
-    public func getHistorySetup(id: String, scope: String, version: String, generation: String, through: String) async throws -> [HistoryEvent] {
+    public func getHistorySetup(id: String, scope: String, version: String, generation: String, through: String) async throws -> [HistoryEvent]? {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/setup/\(through)")
     }
     /// Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges.
-    public func getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String) async throws -> [HistoryEvent] {
+    public func getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String) async throws -> [HistoryEvent]? {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/slice/\(first)/\(firstIndex)/\(last)/\(lastIndex)")
     }
     /// Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata.
-    public func getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String) async throws -> [HistoryEvent] {
+    public func getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String) async throws -> [HistoryEvent]? {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/\(scope)/\(version)/\(generation)/activity/\(kind)/\(activity)/\(through)?afterRecordID=\(afterRecordID.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")&afterIndex=\(afterIndex.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")")
     }
     /// Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently.
-    public func getHistoryCosts(id: String, generation: String, through: String) async throws -> [HistoryTurnEstimate] {
+    public func getHistoryCosts(id: String, generation: String, through: String) async throws -> [HistoryTurnEstimate]? {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/costs?generation=\(generation.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")&through=\(through.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")")
     }
 

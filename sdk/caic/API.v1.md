@@ -17,7 +17,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/update` | Triggers a background server auto-update to the latest release. |  | `UpdateResp` |
 | GET | `/api/caic/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
-| GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
+| GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[] \| null` |
 | POST | `/api/caic/v1/server/harnesses/{harness}/refresh` | Refreshes one coding agent model inventory, bypassing its cache. | `RefreshHarnessReq` | `HarnessInfo` |
 | POST | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Rebuilds one runtime's specialized image and updates its installed coding agents. | `ImageRefreshReq` | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Returns one runtime's specialized image refresh progress. |  | `ImageRefreshStatus` |
@@ -25,7 +25,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
 | GET | `/api/caic/v1/server/system-stats` | Returns recent whole-machine utilization samples. |  | `SystemStatsResp` |
 | GET | `/api/caic/v1/server/metrics` | Returns aggregated operation latency statistics. |  | `MetricsResp` |
-| GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
+| GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[] \| null` |
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
 | GET | `/api/caic/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
 
@@ -57,7 +57,7 @@ Type notation: `JSONValue` means any valid JSON value.
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[]` |
+| GET | `/api/caic/v1/tasks` | Returns all tasks. |  | `Task[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. | `CreateTaskReq` | `Task` |
@@ -79,10 +79,10 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
 | GET | `/api/caic/v1/tasks/{id}/history/manifest` | Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. |  | `HistoryManifest` |
-| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}` | Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. |  | `HistoryEvent[]` |
-| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}` | Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. |  | `HistoryEvent[]` |
-| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}` | Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[]` |
-| GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[]` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}` | Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. |  | `HistoryEvent[] \| null` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}` | Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. |  | `HistoryEvent[] \| null` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}` | Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[] \| null` |
+| GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `manifest` (`HistoryManifest`), `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
 ## Processes
@@ -478,7 +478,7 @@ ImageConstraints describes image-picker byte budgets and supported MIME types.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `allowedMediaTypes` | `string[]` |  | yes |
+| `allowedMediaTypes` | `string[] \| null` |  | yes |
 | `maxImageBytes` | `int` |  | yes |
 | `maxPromptImageBytes` | `int` |  | yes |
 
@@ -581,7 +581,7 @@ SessionsResp lists the signed-in user's sessions.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `sessions` | `SessionResp[]` |  | yes |
+| `sessions` | `SessionResp[] \| null` |  | yes |
 
 ### RepoPrefsResp
 
@@ -657,10 +657,10 @@ PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `repositories` | `RepoPrefsResp[]` |  | yes |
+| `repositories` | `RepoPrefsResp[] \| null` |  | yes |
 | `harness` | `string` |  |  |
 | `models` | `Record<string, string>` |  |  |
-| `efforts` | `Record<string, Record<string, string>>` |  |  |
+| `efforts` | `Record<string, Record<string, string> \| null>` |  |  |
 | `settings` | `UserSettings` |  | yes |
 
 ### UpdatePreferencesReq
@@ -680,7 +680,7 @@ OAuthGrantResp describes one user-authorized remote MCP client grant.
 | `id` | `string` |  | yes |
 | `clientID` | `string` |  | yes |
 | `clientName` | `string` |  | yes |
-| `scopes` | `string[]` |  | yes |
+| `scopes` | `string[] \| null` |  | yes |
 | `resource` | `string` |  | yes |
 | `createdAt` | `ISOTimestamp` |  | yes |
 | `lastUsedAt` | `ISOTimestamp` |  |  |
@@ -694,7 +694,7 @@ OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `grants` | `OAuthGrantResp[]` |  | yes |
+| `grants` | `OAuthGrantResp[] \| null` |  | yes |
 
 ### RevokeOAuthGrantReq
 
@@ -710,7 +710,7 @@ Model describes the configuration choices supported by a harness model.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `id` | `string` |  | yes |
-| `effortOptions` | `string[]` |  | yes |
+| `effortOptions` | `string[] \| null` |  | yes |
 
 ### HarnessInfo
 
@@ -719,7 +719,7 @@ HarnessInfo is the JSON representation of an available harness.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `Harness` |  | yes |
-| `models` | `Model[]` |  | yes |
+| `models` | `Model[] \| null` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
 | `supportsCompact` | `boolean` |  | yes |
 | `supportsModelRefresh` | `boolean` |  | yes |
@@ -758,7 +758,7 @@ WellKnownCache describes a single well-known cache.
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
 | `description` | `string` |  | yes |
-| `mounts` | `string[]` | List of runtime mount paths | yes |
+| `mounts` | `string[] \| null` | List of runtime mount paths | yes |
 
 ### WellKnownCachesResp
 
@@ -766,8 +766,8 @@ WellKnownCachesResp is the response for GET /api/caic/v1/server/caches.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `harnessMounts` | `string[]` | e.g. "~/.claude", "~/.codex" | yes |
-| `wellKnown` | `WellKnownCache[]` |  | yes |
+| `harnessMounts` | `string[] \| null` | e.g. "~/.claude", "~/.codex" | yes |
+| `wellKnown` | `WellKnownCache[] \| null` |  | yes |
 
 ### CacheSize
 
@@ -786,7 +786,7 @@ CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `wellKnown` | `CacheSize[]` |  | yes |
+| `wellKnown` | `CacheSize[] \| null` |  | yes |
 
 ### CPUUsage
 
@@ -807,7 +807,7 @@ Disk measures the filesystem containing the server working directory.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `time` | `ISOTimestamp` |  | yes |
-| `cpus` | `CPUUsage[]` |  | yes |
+| `cpus` | `CPUUsage[] \| null` |  | yes |
 | `memUsed` | `uint64` |  | yes |
 | `memTotal` | `uint64` |  | yes |
 | `memPerc` | `float64` |  | yes |
@@ -823,7 +823,7 @@ Error describes the most recent sampling failure; retained samples remain availa
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `samples` | `SystemSample[]` |  | yes |
+| `samples` | `SystemSample[] \| null` |  | yes |
 | `error` | `string` |  |  |
 
 ### MetricResource
@@ -871,7 +871,7 @@ MetricsResp is the historical and live aggregate for GET
 |-------|------|-------------|----------|
 | `since` | `ISOTimestamp` | Since is the earliest retained observation in the aggregate. |  |
 | `resource` | `MetricResource` | Resource identifies the process that produced the observations. | yes |
-| `series` | `MetricSeries[]` | Series holds per-operation aggregates, slowest p95 first. | yes |
+| `series` | `MetricSeries[] \| null` | Series holds per-operation aggregates, slowest p95 first. | yes |
 
 ### BranchInfo
 
@@ -931,7 +931,7 @@ RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `branches` | `BranchInfo[]` |  | yes |
+| `branches` | `BranchInfo[] \| null` |  | yes |
 
 ### BotFixCIReq
 
@@ -1070,9 +1070,9 @@ EventStats is a runtime resource usage snapshot emitted periodically.
 |-------|------|-------------|----------|
 | `ts` | `int64` |  | yes |
 | `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
-| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
-| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
-| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
+| `cpuCeiling` | `float64 \| null` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. | yes |
+| `cpuQuota` | `float64 \| null` | Explicit quota in CPU units; zero is unrestricted, null is unknown. | yes |
+| `runtimeCPUs` | `int \| null` | Owning runtime's logical CPU count; null when unknown. | yes |
 | `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
 | `memUsed` | `uint64` |  | yes |
 | `memLimit` | `uint64` |  | yes |
@@ -1100,7 +1100,7 @@ Task is the JSON representation sent to the frontend.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `pendingInput` | `PendingInput` |  |  |
+| `pendingInput` | `PendingInput \| null` |  | yes |
 | `id` | `string` |  | yes |
 | `initialPrompt` | `string` |  | yes |
 | `title` | `string` |  | yes |
@@ -1412,7 +1412,7 @@ GitCommit describes one commit unique to either side of a repository's compariso
 | `decorations` | `string` |  |  |
 | `authoredDate` | `string` |  | yes |
 | `behind` | `boolean` | Present on the comparison branch and missing from HEAD. |  |
-| `stat` | `DiffStat` |  | yes |
+| `stat` | `DiffStat \| null` |  | yes |
 
 ### GitFileStatus
 
@@ -1441,8 +1441,8 @@ GitRepositoryStatus describes the checked-out state of one task repository.
 | `upstream` | `string` |  |  |
 | `ahead` | `int` |  | yes |
 | `behind` | `int` |  | yes |
-| `commits` | `GitCommit[]` |  | yes |
-| `uncommitted` | `GitFileStatus[]` |  | yes |
+| `commits` | `GitCommit[] \| null` |  | yes |
+| `uncommitted` | `GitFileStatus[] \| null` |  | yes |
 
 ### DiffResp
 
@@ -1451,7 +1451,7 @@ DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `diff` | `string` |  | yes |
-| `repositories` | `GitRepositoryStatus[]` |  | yes |
+| `repositories` | `GitRepositoryStatus[] \| null` |  | yes |
 
 ### DiffIndexFileStat
 
@@ -1476,7 +1476,7 @@ DiffIndexCommit describes one commit and its changed-file metadata.
 | `decorations` | `string` |  |  |
 | `authoredDate` | `string` |  | yes |
 | `behind` | `boolean` | Present on the comparison branch and missing from HEAD. |  |
-| `stat` | `DiffIndexFileStat[]` |  | yes |
+| `stat` | `DiffIndexFileStat[] \| null` |  | yes |
 
 ### DiffIndexFileStatus
 
@@ -1504,8 +1504,8 @@ DiffIndexRepository describes one repository in a diff index.
 | `upstream` | `string` |  |  |
 | `ahead` | `int` |  | yes |
 | `behind` | `int` |  | yes |
-| `commits` | `DiffIndexCommit[]` |  | yes |
-| `uncommitted` | `DiffIndexFileStatus[]` |  | yes |
+| `commits` | `DiffIndexCommit[] \| null` |  | yes |
+| `uncommitted` | `DiffIndexFileStatus[] \| null` |  | yes |
 
 ### TaskDiffIndexResp
 
@@ -1513,7 +1513,7 @@ TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `repositories` | `DiffIndexRepository[]` |  | yes |
+| `repositories` | `DiffIndexRepository[] \| null` |  | yes |
 
 ### FileDiffResp
 
@@ -1529,7 +1529,7 @@ TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `repositories` | `GitRepositoryState[]` |  | yes |
+| `repositories` | `GitRepositoryState[] \| null` |  | yes |
 
 ### ProcessInfo
 
@@ -1559,7 +1559,7 @@ ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `processes` | `ProcessInfo[]` |  | yes |
+| `processes` | `ProcessInfo[] \| null` |  | yes |
 
 ### SignalProcessReq
 
@@ -1577,7 +1577,7 @@ It returns the full (untruncated) input for a tool call.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
-| `input` | `JSONValue` |  | yes |
+| `input` | `JSONValue \| null` |  | yes |
 
 ### WarningDetail
 
@@ -1598,7 +1598,7 @@ a new failure after recovery receives a new ID.
 | `id` | `string` |  | yes |
 | `category` | `WarningCategory` |  | yes |
 | `message` | `string` |  | yes |
-| `details` | `WarningDetail[]` |  | yes |
+| `details` | `WarningDetail[] \| null` |  | yes |
 
 ### TaskListRestorationStatus
 
@@ -1654,7 +1654,7 @@ kind=="status":   Status holds runtime/history restoration state, emitted on con
 | `kind` | `string` |  | yes |
 | `snapshot` | `Task[]` |  |  |
 | `upsert` | `Task` |  |  |
-| `patch` | `Record<string, JSONValue>` |  |  |
+| `patch` | `Record<string, JSONValue \| null>` |  |  |
 | `delete` | `string` |  |  |
 | `repos` | `Repo[]` |  |  |
 | `warning` | `Warning` |  |  |
@@ -1740,7 +1740,7 @@ LocalUsage is the aggregated cost across all tasks within recent time windows.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `windows` | `LocalWindow[]` |  | yes |
+| `windows` | `LocalWindow[] \| null` |  | yes |
 
 ### UsageResp
 
@@ -1821,7 +1821,7 @@ written before the distribution existed contribute counts without buckets.
 | `name` | `string` |  | yes |
 | `count` | `int` |  | yes |
 | `durationMs` | `int64` |  | yes |
-| `buckets` | `UsageDashboardToolDuration[]` |  | yes |
+| `buckets` | `UsageDashboardToolDuration[] \| null` |  | yes |
 
 ### UsageDashboardRepo
 
@@ -1852,10 +1852,10 @@ model; skills and repos keep the day leaderboards' distinct-task counts.
 | `costUSD` | `float64` |  | yes |
 | `cost` | `UsageDashboardCost` |  | yes |
 | `contextWindow` | `int` |  | yes |
-| `tools` | `UsageDashboardCount[]` |  | yes |
-| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
-| `skills` | `UsageDashboardCount[]` |  | yes |
-| `repos` | `UsageDashboardRepo[]` |  | yes |
+| `tools` | `UsageDashboardCount[] \| null` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[] \| null` |  | yes |
+| `skills` | `UsageDashboardCount[] \| null` |  | yes |
+| `repos` | `UsageDashboardRepo[] \| null` |  | yes |
 
 ### UsageDashboardHarness
 
@@ -1875,11 +1875,11 @@ harness filter can still list the models used under it.
 | `subagentSpawns` | `int` |  | yes |
 | `costUSD` | `float64` |  | yes |
 | `cost` | `UsageDashboardCost` |  | yes |
-| `tools` | `UsageDashboardCount[]` |  | yes |
-| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
-| `skills` | `UsageDashboardCount[]` |  | yes |
-| `repos` | `UsageDashboardRepo[]` |  | yes |
-| `models` | `UsageDashboardModel[]` |  | yes |
+| `tools` | `UsageDashboardCount[] \| null` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[] \| null` |  | yes |
+| `skills` | `UsageDashboardCount[] \| null` |  | yes |
+| `repos` | `UsageDashboardRepo[] \| null` |  | yes |
+| `models` | `UsageDashboardModel[] \| null` |  | yes |
 
 ### UsageDashboardDay
 
@@ -1899,12 +1899,12 @@ cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
 | `subagentSpawnsBackground` | `int` |  | yes |
 | `costUSD` | `float64` |  | yes |
 | `cost` | `UsageDashboardCost` |  | yes |
-| `models` | `UsageDashboardModel[]` |  | yes |
-| `harnesses` | `UsageDashboardHarness[]` |  | yes |
-| `repos` | `UsageDashboardRepo[]` |  | yes |
-| `skills` | `UsageDashboardCount[]` |  | yes |
-| `tools` | `UsageDashboardCount[]` |  | yes |
-| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
+| `models` | `UsageDashboardModel[] \| null` |  | yes |
+| `harnesses` | `UsageDashboardHarness[] \| null` |  | yes |
+| `repos` | `UsageDashboardRepo[] \| null` |  | yes |
+| `skills` | `UsageDashboardCount[] \| null` |  | yes |
+| `tools` | `UsageDashboardCount[] \| null` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[] \| null` |  | yes |
 
 ### UsageDashboardResp
 
@@ -1915,7 +1915,7 @@ has been recorded yet.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `dataSince` | `string` |  |  |
-| `days` | `UsageDashboardDay[]` |  | yes |
+| `days` | `UsageDashboardDay[] \| null` |  | yes |
 
 ### WebFetchReq
 
@@ -2059,7 +2059,7 @@ EventToolUse is emitted when the assistant invokes a tool.
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
 | `name` | `string` |  | yes |
-| `input` | `JSONValue` |  | yes |
+| `input` | `JSONValue \| null` |  | yes |
 | `detail` | `string` | Backend-normalized short display detail for tool headers. |  |
 | `inputView` | `EventToolInputView` | Backend-normalized structured input for tool-card rendering. |  |
 | `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
@@ -2092,7 +2092,7 @@ AskQuestion is a single question from AskUserQuestion.
 |-------|------|-------------|----------|
 | `question` | `string` |  | yes |
 | `header` | `string` |  |  |
-| `options` | `AskOption[]` |  | yes |
+| `options` | `AskOption[] \| null` |  | yes |
 | `multiSelect` | `boolean` |  |  |
 
 ### EventAsk
@@ -2102,7 +2102,7 @@ EventAsk is emitted when the agent asks the user a question.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
-| `questions` | `AskQuestion[]` |  | yes |
+| `questions` | `AskQuestion[] \| null` |  | yes |
 
 ### EventUsage
 
@@ -2177,7 +2177,7 @@ EventTodo is emitted when the agent writes/updates its todo list.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
-| `todos` | `TodoItem[]` |  | yes |
+| `todos` | `TodoItem[] \| null` |  | yes |
 
 ### EventDiffStat
 
@@ -2354,7 +2354,7 @@ fetched from the runtime when a turn finishes.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `repositoryCommits` | `EventRepositoryCommit[]` |  | yes |
+| `repositoryCommits` | `EventRepositoryCommit[] \| null` |  | yes |
 | `baseline` | `boolean` |  |  |
 | `changeStat` | `EventChangeStat` |  |  |
 
@@ -2432,7 +2432,7 @@ Boundary and EndBoundary contain init/system metadata, never transcript text.
 | `textCount` | `int` |  | yes |
 | `toolCount` | `int` |  | yes |
 | `durationMs` | `int64` |  | yes |
-| `skills` | `EventSkillLoad[]` |  | yes |
+| `skills` | `EventSkillLoad[] \| null` |  | yes |
 
 ### HistoryRoute
 
@@ -2519,12 +2519,12 @@ identifies the first root input, permitting prompt deduplication by position.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `routingRevision` | `uint64` | RoutingRevision changes when earlier delegated ownership may have changed. | yes |
-| `routing` | `HistoryRoute[]` |  | yes |
+| `routing` | `HistoryRoute[] \| null` |  | yes |
 | `hasInitialPrompt` | `boolean` |  | yes |
 | `setupEndedAt` | `ISOTimestamp` |  |  |
-| `turns` | `HistoryTurn[]` |  | yes |
-| `tools` | `HistoryToolTiming[]` |  | yes |
-| `activities` | `HistoryActivity[]` |  | yes |
+| `turns` | `HistoryTurn[] \| null` |  | yes |
+| `tools` | `HistoryToolTiming[] \| null` |  | yes |
+| `activities` | `HistoryActivity[] \| null` |  | yes |
 | `initialInit` | `HistoryEvent` |  |  |
 | `initialInput` | `HistoryPosition` |  |  |
 | `setup` | `HistorySlice` |  |  |
@@ -2538,7 +2538,7 @@ Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `bootstrap` | `HistoryBootstrap` |  | yes |
-| `sections` | `HistorySection[]` |  | yes |
+| `sections` | `HistorySection[] \| null` |  | yes |
 | `metadata` | `HistoryMetadata` |  | yes |
 
 ### HistoryTurnEstimate
@@ -2577,7 +2577,7 @@ These host observations are separate from immutable raw task history.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `samples` | `EventStats[]` |  | yes |
+| `samples` | `EventStats[] \| null` |  | yes |
 
 ### HistoryReset
 

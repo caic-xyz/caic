@@ -11,7 +11,7 @@ for (const width of [390, 1280]) {
     // Validate the real endpoint separately from deterministic chart data.
     const response = await api.getSystemStats();
     expect(Array.isArray(response.samples)).toBe(true);
-    for (const sample of response.samples) {
+    for (const sample of response.samples ?? []) {
       expect(sample).toMatchObject({
         time: expect.any(String),
         cpus: expect.any(Array),

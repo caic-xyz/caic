@@ -26,7 +26,7 @@ test("forking from mobile opens only the forked task detail", async ({ page, api
 
   let forkedId = "";
   await expect(async () => {
-    const tasks = await api.listTasks();
+    const tasks = (await api.listTasks()) ?? [];
     const forked = tasks.find((task) => task.initialPrompt === forkPrompt);
     expect(forked).toBeTruthy();
     forkedId = forked!.id;

@@ -12,7 +12,7 @@ import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual"
 
 /** Creates the task cards the prompt captures show, newest first. */
 async function seedTaskList(api: APIClient) {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   if (!firstRepo) throw new Error("Fake server has no repository");
   const prompts = [
@@ -50,7 +50,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   // spec usually fills it first; when this spec runs alone, seed it so the
   // capture never shows an empty list. Ask the server, because the cards load
   // after the first paint.
-  if ((await api.listTasks()).length === 0) {
+  if (((await api.listTasks()) ?? []).length === 0) {
     await seedTaskList(api);
     await page.goto("/");
     await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();

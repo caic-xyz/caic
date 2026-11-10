@@ -1,5 +1,6 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
+import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import type { JSX } from "solid-js";
 import { beforeEach, describe, it } from "node:test";
@@ -85,9 +86,9 @@ describe("DiffDetail", () => {
   it("groups missing upstream commits separately and loads their patches on demand", async () => {
     const user = userEvent.setup();
     const index = diffIndexFixture();
-    assert.ok(index.repositories[0] !== undefined);
-    index.repositories[0].behind = 1;
-    index.repositories[0].commits.push({
+    assert.ok(defined(defined(index.repositories)[0]) !== undefined);
+    defined(defined(index.repositories)[0]).behind = 1;
+    defined(defined(index.repositories)[0]).commits?.push({
       sha: "abcdef1234567890abcdef1234567890abcdef12",
       subject: "Missing upstream change",
       authoredDate: "2026-09-16",
@@ -118,7 +119,7 @@ describe("DiffDetail", () => {
 
   it("selects a file from the second repository by index", async () => {
     const index = diffIndexFixture();
-    index.repositories.push({
+    defined(index.repositories).push({
       name: "tools",
       branch: "feature",
       ahead: 0,
@@ -246,8 +247,8 @@ describe("DiffDetail", () => {
 
   it("refreshes stale metadata while retaining an expanded loaded row", async () => {
     const refreshed = diffIndexFixture();
-    assert.ok(refreshed.repositories[0] !== undefined);
-    refreshed.repositories[0].behind = 2;
+    assert.ok(defined(defined(refreshed.repositories)[0]) !== undefined);
+    defined(defined(refreshed.repositories)[0]).behind = 2;
     let resolveRefresh: (response: TaskDiffIndexResp) => void = () => undefined;
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(
       new Promise((resolve) => {
@@ -468,8 +469,8 @@ describe("DiffDetail", () => {
       resolveFirstPatch = resolve;
     });
     const refreshed = diffIndexFixture();
-    assert.ok(refreshed.repositories[0] !== undefined);
-    refreshed.repositories[0].behind = 2;
+    assert.ok(defined(defined(refreshed.repositories)[0]) !== undefined);
+    defined(defined(refreshed.repositories)[0]).behind = 2;
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockResolvedValueOnce(refreshed);
     getTaskFileDiffMock.mockReturnValueOnce(firstPatch).mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
     renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);

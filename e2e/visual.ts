@@ -114,7 +114,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
       if (!history) throw new Error(`Visual task has no timestamp map: ${id}`);
       const positionTime = (position: { recordID: number; index: number }) =>
         history.start + (position.recordID - 2) * stride + position.index;
-      for (const section of manifest.sections) {
+      for (const section of manifest.sections ?? []) {
         for (const event of [section.boundary, section.endBoundary]) if (event) event.message.ts = positionTime(event);
       }
       const iso = (milliseconds: number) => new Date(milliseconds).toISOString() as ISOTimestamp;
@@ -127,11 +127,11 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         if (setupEnd.length === 0) throw new Error("Visual setup has no end position");
         metadata.setupEndedAt = iso(Math.min(...setupEnd));
       }
-      for (const turn of metadata.turns) {
+      for (const turn of metadata.turns ?? []) {
         turn.at = iso(positionTime(turn));
         if (turn.waitInput) turn.waitMs = positionTime(turn.waitInput) - positionTime(turn);
       }
-      for (const activity of metadata.activities) {
+      for (const activity of metadata.activities ?? []) {
         const original = history.timestamps.get(`${activity.first.recordID}:${activity.first.index}`);
         if (original === undefined) throw new Error("Visual activity has no first position timestamp");
         // Producer milliseconds can repeat. Anchor at the exact first position

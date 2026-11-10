@@ -35,6 +35,23 @@ describe("readTaskFilePreview", () => {
     });
   }
 
+  it("normalizes null directory entries and rejects malformed entries", async () => {
+    const headers = { "Content-Type": "application/vnd.caic.dir+json" };
+    fetchMock.mockResolvedValueOnce(Response.json({ path: "/x", entries: null, truncated: false }, { headers }));
+    await expect(readTaskFilePreview("abc", "/x", new AbortController().signal)).resolves.toEqual({
+      kind: "dir",
+      path: "/x",
+      entries: [],
+      truncated: false,
+    });
+    for (const entries of [undefined, "invalid", [null], [{ name: "bad", isDir: false, size: "1" }]]) {
+      fetchMock.mockResolvedValueOnce(Response.json({ path: "/x", entries, truncated: false }, { headers }));
+      await expect(readTaskFilePreview("abc", "/x", new AbortController().signal)).rejects.toThrow(
+        "invalid directory listing",
+      );
+    }
+  });
+
   it("keeps text with an audio extension as text", async () => {
     fetchMock.mockResolvedValue(new Response("notes", { headers: { "Content-Type": "text/plain" } }));
     expect(await readTaskFilePreview("abc", "/recording.mp3", new AbortController().signal)).toEqual({

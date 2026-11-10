@@ -13,7 +13,7 @@ import SectionControls from "../components/SectionControls";
 import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
 
-const noMetricSeries: MetricsResp["series"] = [];
+const noMetricSeries: NonNullable<MetricsResp["series"]> = [];
 
 type Stat = "sum" | "p50" | "p95" | "max" | "last";
 

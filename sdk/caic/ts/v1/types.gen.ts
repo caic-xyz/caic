@@ -137,11 +137,11 @@ export interface EventStats {
   /** 100% is one fully busy logical CPU. */
   cpuPerc: number /* float64 */;
   /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-  cpuCeiling?: number /* float64 */;
+  cpuCeiling: number /* float64 */ | null;
   /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-  cpuQuota?: number /* float64 */;
+  cpuQuota: number /* float64 */ | null;
   /** Owning runtime's logical CPU count; null when unknown. */
-  runtimeCPUs?: number /* int */;
+  runtimeCPUs: number /* int */ | null;
   /** Runtime CPU metadata observation failure; usage samples remain usable. */
   cpuError?: string;
   memUsed: number /* uint64 */;
@@ -222,7 +222,7 @@ export interface EventToolInputView {
 export interface EventToolUse {
   toolUseID: string;
   name: string;
-  input: any /* json.RawMessage */;
+  input: any /* json.RawMessage */ | null;
   /** Backend-normalized short display detail for tool headers. */
   detail?: string;
   /** Backend-normalized structured input for tool-card rendering. */
@@ -251,14 +251,14 @@ export interface AskOption {
 export interface AskQuestion {
   question: string;
   header?: string;
-  options: AskOption[];
+  options: AskOption[] | null;
   multiSelect?: boolean;
 }
 
 /** EventAsk is emitted when the agent asks the user a question. */
 export interface EventAsk {
   toolUseID: string;
-  questions: AskQuestion[];
+  questions: AskQuestion[] | null;
 }
 
 /**
@@ -329,7 +329,7 @@ export interface TodoItem {
 /** EventTodo is emitted when the agent writes/updates its todo list. */
 export interface EventTodo {
   toolUseID: string;
-  todos: TodoItem[];
+  todos: TodoItem[] | null;
 }
 
 /** EventDiffStat is emitted when the relay reports updated diff statistics. */
@@ -485,7 +485,7 @@ export interface EventChangeStat {
  * fetched from the runtime when a turn finishes.
  */
 export interface EventCommitSnapshot {
-  repositoryCommits: EventRepositoryCommit[];
+  repositoryCommits: EventRepositoryCommit[] | null;
   baseline?: boolean;
   changeStat?: EventChangeStat;
 }
@@ -850,7 +850,7 @@ export type DiffStat = DiffFileStat[];
 
 /** ImageConstraints describes image-picker byte budgets and supported MIME types. */
 export interface ImageConstraints {
-  allowedMediaTypes: string[];
+  allowedMediaTypes: string[] | null;
   maxImageBytes: number /* int */;
   maxPromptImageBytes: number /* int */;
 }
@@ -933,7 +933,7 @@ export interface SessionResp {
 
 /** SessionsResp lists the signed-in user's sessions. */
 export interface SessionsResp {
-  sessions: SessionResp[];
+  sessions: SessionResp[] | null;
 }
 
 /** RepoPrefsResp holds per-repository preferences. */
@@ -1020,10 +1020,10 @@ export interface UserSettings {
 
 /** PreferencesResp is the response for GET /api/caic/v1/server/preferences. */
 export interface PreferencesResp {
-  repositories: RepoPrefsResp[];
+  repositories: RepoPrefsResp[] | null;
   harness?: string;
   models?: { [key: string]: string};
-  efforts?: { [key: string]: { [key: string]: string}};
+  efforts?: { [key: string]: { [key: string]: string} | null};
   settings: UserSettings;
 }
 
@@ -1037,7 +1037,7 @@ export interface OAuthGrantResp {
   id: string;
   clientID: string;
   clientName: string;
-  scopes: string[];
+  scopes: string[] | null;
   resource: string;
   createdAt: ISOTimestamp;
   lastUsedAt?: ISOTimestamp;
@@ -1048,7 +1048,7 @@ export interface OAuthGrantResp {
 
 /** OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants. */
 export interface OAuthGrantsResp {
-  grants: OAuthGrantResp[];
+  grants: OAuthGrantResp[] | null;
 }
 
 /** RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke. */
@@ -1058,13 +1058,13 @@ export interface RevokeOAuthGrantReq {
 /** Model describes the configuration choices supported by a harness model. */
 export interface Model {
   id: string;
-  effortOptions: string[];
+  effortOptions: string[] | null;
 }
 
 /** HarnessInfo is the JSON representation of an available harness. */
 export interface HarnessInfo {
   name: Harness;
-  models: Model[];
+  models: Model[] | null;
   supportsImages: boolean;
   supportsCompact: boolean;
   supportsModelRefresh: boolean;
@@ -1094,14 +1094,14 @@ export interface WellKnownCache {
   name: string;
   description: string;
   /** List of runtime mount paths */
-  mounts: string[];
+  mounts: string[] | null;
 }
 
 /** WellKnownCachesResp is the response for GET /api/caic/v1/server/caches. */
 export interface WellKnownCachesResp {
   /** e.g. "~/.claude", "~/.codex" */
-  harnessMounts: string[];
-  wellKnown: WellKnownCache[];
+  harnessMounts: string[] | null;
+  wellKnown: WellKnownCache[] | null;
 }
 
 /** CacheSize describes the most recent size snapshot for a well-known cache. */
@@ -1114,7 +1114,7 @@ export interface CacheSize {
 
 /** CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes. */
 export interface CacheSizesResp {
-  wellKnown: CacheSize[];
+  wellKnown: CacheSize[] | null;
 }
 
 /** CPUUsage measures one logical CPU over the sampling interval. */
@@ -1132,7 +1132,7 @@ export interface CPUUsage {
  */
 export interface SystemSample {
   time: ISOTimestamp;
-  cpus: CPUUsage[];
+  cpus: CPUUsage[] | null;
   memUsed: number /* uint64 */;
   memTotal: number /* uint64 */;
   memPerc: number /* float64 */;
@@ -1147,7 +1147,7 @@ export interface SystemSample {
  * Error describes the most recent sampling failure; retained samples remain available.
  */
 export interface SystemStatsResp {
-  samples: SystemSample[];
+  samples: SystemSample[] | null;
   error?: string;
 }
 
@@ -1217,7 +1217,7 @@ export interface MetricsResp {
   /** Resource identifies the process that produced the observations. */
   resource: MetricResource;
   /** Series holds per-operation aggregates, slowest p95 first. */
-  series: MetricSeries[];
+  series: MetricSeries[] | null;
 }
 
 /** BranchInfo describes a single branch with its origin and task-creation action. */
@@ -1272,7 +1272,7 @@ export interface CloneRepoReq {
 
 /** RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches. */
 export interface RepoBranchesResp {
-  branches: BranchInfo[];
+  branches: BranchInfo[] | null;
 }
 
 /**
@@ -1401,7 +1401,7 @@ export interface TaskRateLimit {
 
 /** Task is the JSON representation sent to the frontend. */
 export interface Task {
-  pendingInput?: PendingInput;
+  pendingInput: PendingInput | null;
   id: string;
   initialPrompt: string;
   title: string;
@@ -1695,7 +1695,7 @@ export interface GitCommit {
   authoredDate: string;
   /** Present on the comparison branch and missing from HEAD. */
   behind?: boolean;
-  stat: DiffStat;
+  stat: DiffStat | null;
 }
 
 /** GitFileStatus describes one uncommitted repository path. */
@@ -1720,14 +1720,14 @@ export interface GitRepositoryStatus {
   upstream?: string;
   ahead: number /* int */;
   behind: number /* int */;
-  commits: GitCommit[];
-  uncommitted: GitFileStatus[];
+  commits: GitCommit[] | null;
+  uncommitted: GitFileStatus[] | null;
 }
 
 /** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 export interface DiffResp {
   diff: string;
-  repositories: GitRepositoryStatus[];
+  repositories: GitRepositoryStatus[] | null;
 }
 
 /** DiffIndexFileStat describes a committed file without its patch body. */
@@ -1749,7 +1749,7 @@ export interface DiffIndexCommit {
   authoredDate: string;
   /** Present on the comparison branch and missing from HEAD. */
   behind?: boolean;
-  stat: DiffIndexFileStat[];
+  stat: DiffIndexFileStat[] | null;
 }
 
 /** DiffIndexFileStatus describes one uncommitted path without its patch body. */
@@ -1773,13 +1773,13 @@ export interface DiffIndexRepository {
   upstream?: string;
   ahead: number /* int */;
   behind: number /* int */;
-  commits: DiffIndexCommit[];
-  uncommitted: DiffIndexFileStatus[];
+  commits: DiffIndexCommit[] | null;
+  uncommitted: DiffIndexFileStatus[] | null;
 }
 
 /** TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index. */
 export interface TaskDiffIndexResp {
-  repositories: DiffIndexRepository[];
+  repositories: DiffIndexRepository[] | null;
 }
 
 /** FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file. */
@@ -1789,7 +1789,7 @@ export interface FileDiffResp {
 
 /** TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status. */
 export interface TaskRepoStatusResp {
-  repositories: GitRepositoryState[];
+  repositories: GitRepositoryState[] | null;
 }
 
 /** ProcessInfo describes a single process running inside the task runtime instance. */
@@ -1828,7 +1828,7 @@ export interface ProcessInfo {
 
 /** ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes. */
 export interface ProcessListResp {
-  processes: ProcessInfo[];
+  processes: ProcessInfo[] | null;
 }
 
 /** SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal. */
@@ -1843,7 +1843,7 @@ export interface SignalProcessReq {
  */
 export interface TaskToolInputResp {
   toolUseID: string;
-  input: any /* json.RawMessage */;
+  input: any /* json.RawMessage */ | null;
 }
 
 /** WarningDetail describes a failed operation on a repository. */
@@ -1860,7 +1860,7 @@ export interface Warning {
   id: string;
   category: WarningCategory;
   message: string;
-  details: WarningDetail[];
+  details: WarningDetail[] | null;
 }
 
 /**
@@ -1913,7 +1913,7 @@ export interface TaskListEvent {
   kind: string;
   snapshot?: Task[];
   upsert?: Task;
-  patch?: { [key: string]: any /* json.RawMessage */};
+  patch?: { [key: string]: any /* json.RawMessage */ | null};
   delete?: string;
   repos?: Repo[];
   warning?: Warning;
@@ -2012,7 +2012,7 @@ export interface LocalWindow {
 
 /** LocalUsage is the aggregated cost across all tasks within recent time windows. */
 export interface LocalUsage {
-  windows: LocalWindow[];
+  windows: LocalWindow[] | null;
 }
 
 /** UsageResp is the response for GET /api/caic/v1/usage. */
@@ -2082,7 +2082,7 @@ export interface UsageDashboardToolTiming {
   name: string;
   count: number /* int */;
   durationMs: number /* int64 */;
-  buckets: UsageDashboardToolDuration[];
+  buckets: UsageDashboardToolDuration[] | null;
 }
 
 /**
@@ -2111,10 +2111,10 @@ export interface UsageDashboardModel {
   costUSD: number /* float64 */;
   cost: UsageDashboardCost;
   contextWindow: number /* int */;
-  tools: UsageDashboardCount[];
-  toolTimings: UsageDashboardToolTiming[];
-  skills: UsageDashboardCount[];
-  repos: UsageDashboardRepo[];
+  tools: UsageDashboardCount[] | null;
+  toolTimings: UsageDashboardToolTiming[] | null;
+  skills: UsageDashboardCount[] | null;
+  repos: UsageDashboardRepo[] | null;
 }
 
 /**
@@ -2133,11 +2133,11 @@ export interface UsageDashboardHarness {
   subagentSpawns: number /* int */;
   costUSD: number /* float64 */;
   cost: UsageDashboardCost;
-  tools: UsageDashboardCount[];
-  toolTimings: UsageDashboardToolTiming[];
-  skills: UsageDashboardCount[];
-  repos: UsageDashboardRepo[];
-  models: UsageDashboardModel[];
+  tools: UsageDashboardCount[] | null;
+  toolTimings: UsageDashboardToolTiming[] | null;
+  skills: UsageDashboardCount[] | null;
+  repos: UsageDashboardRepo[] | null;
+  models: UsageDashboardModel[] | null;
 }
 
 /**
@@ -2156,12 +2156,12 @@ export interface UsageDashboardDay {
   subagentSpawnsBackground: number /* int */;
   costUSD: number /* float64 */;
   cost: UsageDashboardCost;
-  models: UsageDashboardModel[];
-  harnesses: UsageDashboardHarness[];
-  repos: UsageDashboardRepo[];
-  skills: UsageDashboardCount[];
-  tools: UsageDashboardCount[];
-  toolTimings: UsageDashboardToolTiming[];
+  models: UsageDashboardModel[] | null;
+  harnesses: UsageDashboardHarness[] | null;
+  repos: UsageDashboardRepo[] | null;
+  skills: UsageDashboardCount[] | null;
+  tools: UsageDashboardCount[] | null;
+  toolTimings: UsageDashboardToolTiming[] | null;
 }
 
 /**
@@ -2171,7 +2171,7 @@ export interface UsageDashboardDay {
  */
 export interface UsageDashboardResp {
   dataSince?: string;
-  days: UsageDashboardDay[];
+  days: UsageDashboardDay[] | null;
 }
 
 /** WebFetchReq is the request body for POST /api/caic/v1/web/fetch. */
@@ -2245,7 +2245,7 @@ export interface HistorySection {
   textCount: number /* int */;
   toolCount: number /* int */;
   durationMs: number /* int64 */;
-  skills: EventSkillLoad[];
+  skills: EventSkillLoad[] | null;
 }
 
 /**
@@ -2329,12 +2329,12 @@ export interface HistoryActivity {
 export interface HistoryMetadata {
   /** RoutingRevision changes when earlier delegated ownership may have changed. */
   routingRevision: number /* uint64 */;
-  routing: HistoryRoute[];
+  routing: HistoryRoute[] | null;
   hasInitialPrompt: boolean;
   setupEndedAt?: ISOTimestamp;
-  turns: HistoryTurn[];
-  tools: HistoryToolTiming[];
-  activities: HistoryActivity[];
+  turns: HistoryTurn[] | null;
+  tools: HistoryToolTiming[] | null;
+  activities: HistoryActivity[] | null;
   initialInit?: HistoryEvent;
   initialInput?: HistoryPosition;
   setup?: HistorySlice;
@@ -2347,7 +2347,7 @@ export interface HistoryMetadata {
  */
 export interface HistoryManifest {
   bootstrap: HistoryBootstrap;
-  sections: HistorySection[];
+  sections: HistorySection[] | null;
   metadata: HistoryMetadata;
 }
 
@@ -2383,7 +2383,7 @@ export interface HistoryCheckpoint {
  * These host observations are separate from immutable raw task history.
  */
 export interface HistoryStats {
-  samples: EventStats[];
+  samples: EventStats[] | null;
 }
 
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
@@ -2407,7 +2407,7 @@ export interface ErrorResponse {
  * /server-info/config and /auth/me.
  */
 export interface AuthBootstrapResp {
-  authProviders: string[];
+  authProviders: string[] | null;
   user?: UserResp;
 }
 
@@ -2426,7 +2426,7 @@ export interface TaskDirListing {
   /** Path is the resolved container directory. */
   path: string;
   /** Entries are the immediate children, sorted by name. */
-  entries: TaskDirEntry[];
+  entries: TaskDirEntry[] | null;
   /** Truncated reports that entries were dropped at the runtime's limit. */
   truncated: boolean;
 }

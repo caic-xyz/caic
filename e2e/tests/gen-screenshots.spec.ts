@@ -139,7 +139,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Create the showcase in reverse because the sidebar orders active tasks by
   // descending ID: Codex waiting, Claude asking, Pi waiting, Antigravity running.
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
   const secondRepo = repos[1];

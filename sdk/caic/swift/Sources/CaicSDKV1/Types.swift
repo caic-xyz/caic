@@ -4,6 +4,27 @@ import Foundation
 /// ISO 8601 timestamp string (e.g. "2026-04-13T12:00:00Z").
 public typealias ISOTimestamp = String
 
+/// A JSON field that may be omitted, null, or a value.
+public enum JSONPresence<Value: Codable>: Codable {
+    case missing
+    case null
+    case value(Value)
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self = container.decodeNil() ? .null : .value(try container.decode(Value.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .missing: throw EncodingError.invalidValue(self, .init(codingPath: encoder.codingPath, debugDescription: "Missing fields must be omitted"))
+        case .null: try container.encodeNil()
+        case .value(let value): try container.encode(value)
+        }
+    }
+}
+
 /// A Codable representation of an arbitrary JSON value.
 public enum JSONValue: Codable, Equatable {
     case string(String)
@@ -683,9 +704,35 @@ public typealias DiffStat = [DiffFileStat]
 
 /// ImageConstraints describes image-picker byte budgets and supported MIME types.
 public struct ImageConstraints: Codable {
-    public let allowedMediaTypes: [String]
+    public let allowedMediaTypes: [String]?
     public let maxImageBytes: Int
     public let maxPromptImageBytes: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case allowedMediaTypes
+        case maxImageBytes
+        case maxPromptImageBytes
+    }
+
+    public init(allowedMediaTypes: [String]?, maxImageBytes: Int, maxPromptImageBytes: Int) {
+        self.allowedMediaTypes = allowedMediaTypes
+        self.maxImageBytes = maxImageBytes
+        self.maxPromptImageBytes = maxPromptImageBytes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.allowedMediaTypes = try c.decode([String]?.self, forKey: .allowedMediaTypes)
+        self.maxImageBytes = try c.decode(Int.self, forKey: .maxImageBytes)
+        self.maxPromptImageBytes = try c.decode(Int.self, forKey: .maxPromptImageBytes)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.allowedMediaTypes, forKey: .allowedMediaTypes)
+        try c.encode(self.maxImageBytes, forKey: .maxImageBytes)
+        try c.encode(self.maxPromptImageBytes, forKey: .maxPromptImageBytes)
+    }
 }
 
 /// VoiceGatewayMetadata reports structured voice gateway support.
@@ -694,11 +741,22 @@ public struct VoiceGatewayMetadata: Codable {
     public let url: String?
     public let authRequired: Bool?
     public let capabilities: [String]?
+
+    public init(mode: VoiceGatewayMode, url: String? = nil, authRequired: Bool? = nil, capabilities: [String]? = nil) {
+        self.mode = mode
+        self.url = url
+        self.authRequired = authRequired
+        self.capabilities = capabilities
+    }
 }
 
 /// RuntimeInfo is the JSON representation of an available task runtime backend.
 public struct RuntimeInfo: Codable {
     public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
 }
 
 /// Config reports server capabilities to the frontend.
@@ -717,6 +775,22 @@ public struct Config: Codable {
     public let authProviders: [String]?
     public let mcpOAuthAvailable: Bool
     public let runtimes: [RuntimeInfo]?
+
+    public init(imageConstraints: ImageConstraints, version: String? = nil, displayName: String, tailscaleAvailable: Bool, usbAvailable: Bool, displayAvailable: Bool, sudoAvailable: Bool, gitHubTokenAvailable: Bool, voiceGateway: VoiceGatewayMetadata, gitHubAppEnabled: Bool? = nil, authProviders: [String]? = nil, mcpOAuthAvailable: Bool, runtimes: [RuntimeInfo]? = nil) {
+        self.imageConstraints = imageConstraints
+        self.version = version
+        self.displayName = displayName
+        self.tailscaleAvailable = tailscaleAvailable
+        self.usbAvailable = usbAvailable
+        self.displayAvailable = displayAvailable
+        self.sudoAvailable = sudoAvailable
+        self.gitHubTokenAvailable = gitHubTokenAvailable
+        self.voiceGateway = voiceGateway
+        self.gitHubAppEnabled = gitHubAppEnabled
+        self.authProviders = authProviders
+        self.mcpOAuthAvailable = mcpOAuthAvailable
+        self.runtimes = runtimes
+    }
 }
 
 /// VersionResp is the response for GET /api/caic/v1/server/version.
@@ -730,12 +804,24 @@ public struct VersionResp: Codable {
     public let checkError: String?
     /// true when autoupdate schedule is configured
     public let autoUpdateEnabled: Bool
+
+    public init(current: String, latest: String? = nil, updateAvailable: Bool, checkError: String? = nil, autoUpdateEnabled: Bool) {
+        self.current = current
+        self.latest = latest
+        self.updateAvailable = updateAvailable
+        self.checkError = checkError
+        self.autoUpdateEnabled = autoUpdateEnabled
+    }
 }
 
 /// UpdateResp is the response for POST /api/caic/v1/server/update.
 public struct UpdateResp: Codable {
     /// "started" or "already_up_to_date"
     public let status: String
+
+    public init(status: String) {
+        self.status = status
+    }
 }
 
 /// UserResp is returned by GET /auth/me.
@@ -746,11 +832,23 @@ public struct UserResp: Codable {
     public let provider: String
     public let username: String
     public let avatarURL: String?
+
+    public init(sessionID: String, id: String, provider: String, username: String, avatarURL: String? = nil) {
+        self.sessionID = sessionID
+        self.id = id
+        self.provider = provider
+        self.username = username
+        self.avatarURL = avatarURL
+    }
 }
 
 /// StatusResp is a common response for mutation endpoints.
 public struct StatusResp: Codable {
     public let status: String
+
+    public init(status: String) {
+        self.status = status
+    }
 }
 
 /// SessionResp describes an active host login without exposing its credential.
@@ -762,11 +860,39 @@ public struct SessionResp: Codable {
     public let source: String
     public let ip: String
     public let userAgent: String
+
+    public init(id: String, current: Bool, createdAt: ISOTimestamp, expiresAt: ISOTimestamp, source: String, ip: String, userAgent: String) {
+        self.id = id
+        self.current = current
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.source = source
+        self.ip = ip
+        self.userAgent = userAgent
+    }
 }
 
 /// SessionsResp lists the signed-in user's sessions.
 public struct SessionsResp: Codable {
-    public let sessions: [SessionResp]
+    public let sessions: [SessionResp]?
+
+    private enum CodingKeys: String, CodingKey {
+        case sessions
+    }
+
+    public init(sessions: [SessionResp]?) {
+        self.sessions = sessions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.sessions = try c.decode([SessionResp]?.self, forKey: .sessions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.sessions, forKey: .sessions)
+    }
 }
 
 /// RepoPrefsResp holds per-repository preferences.
@@ -775,6 +901,13 @@ public struct RepoPrefsResp: Codable {
     public let baseBranch: String?
     public let harness: String?
     public let requestedModel: String?
+
+    public init(path: String, baseBranch: String? = nil, harness: String? = nil, requestedModel: String? = nil) {
+        self.path = path
+        self.baseBranch = baseBranch
+        self.harness = harness
+        self.requestedModel = requestedModel
+    }
 }
 
 /// RuntimeSettings holds CPU configuration for a single runtime.
@@ -786,6 +919,11 @@ public struct RuntimeSettings: Codable {
     /// Zero means use the runtime default: leave two CPUs of headroom where
     /// possible, allowing at least two CPUs when available.
     public let maxCPUs: Int?
+
+    public init(containerPlatform: Platform? = nil, maxCPUs: Int? = nil) {
+        self.containerPlatform = containerPlatform
+        self.maxCPUs = maxCPUs
+    }
 }
 
 /// CacheMappingResp represents a directory mapping for cache/state sharing.
@@ -796,6 +934,13 @@ public struct CacheMappingResp: Codable {
     /// ResolvedContainerPath is the runtime target after applying the ContainerPath default.
     public let resolvedContainerPath: String?
     public let enabled: Bool
+
+    public init(hostPath: String, containerPath: String, resolvedContainerPath: String? = nil, enabled: Bool) {
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.resolvedContainerPath = resolvedContainerPath
+        self.enabled = enabled
+    }
 }
 
 /// MountMappingResp represents a general host-to-runtime directory mount.
@@ -807,6 +952,14 @@ public struct MountMappingResp: Codable {
     public let resolvedContainerPath: String?
     public let enabled: Bool
     public let readOnly: Bool
+
+    public init(hostPath: String, containerPath: String, resolvedContainerPath: String? = nil, enabled: Bool, readOnly: Bool) {
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.resolvedContainerPath = resolvedContainerPath
+        self.enabled = enabled
+        self.readOnly = readOnly
+    }
 }
 
 /// UserSettings holds user-configurable behavioral settings.
@@ -835,20 +988,70 @@ public struct UserSettings: Codable {
     public let cacheMappings: [CacheMappingResp]?
     /// CustomMounts are custom non-cache host-to-runtime directory mappings.
     public let customMounts: [MountMappingResp]?
+
+    public init(autoFixOnCIFailure: Bool, autoFixOnPROpen: Bool, baseImage: String? = nil, runtimeSettings: [String: RuntimeSettings]? = nil, purgeDelay: Int, runtimeName: String? = nil, wellKnownCaches: [String: Bool]? = nil, cacheMappings: [CacheMappingResp]? = nil, customMounts: [MountMappingResp]? = nil) {
+        self.autoFixOnCIFailure = autoFixOnCIFailure
+        self.autoFixOnPROpen = autoFixOnPROpen
+        self.baseImage = baseImage
+        self.runtimeSettings = runtimeSettings
+        self.purgeDelay = purgeDelay
+        self.runtimeName = runtimeName
+        self.wellKnownCaches = wellKnownCaches
+        self.cacheMappings = cacheMappings
+        self.customMounts = customMounts
+    }
 }
 
 /// PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 public struct PreferencesResp: Codable {
-    public let repositories: [RepoPrefsResp]
+    public let repositories: [RepoPrefsResp]?
     public let harness: String?
     public let models: [String: String]?
-    public let efforts: [String: [String: String]]?
+    public let efforts: [String: [String: String]?]?
     public let settings: UserSettings
+
+    private enum CodingKeys: String, CodingKey {
+        case repositories
+        case harness
+        case models
+        case efforts
+        case settings
+    }
+
+    public init(repositories: [RepoPrefsResp]?, harness: String? = nil, models: [String: String]? = nil, efforts: [String: [String: String]?]? = nil, settings: UserSettings) {
+        self.repositories = repositories
+        self.harness = harness
+        self.models = models
+        self.efforts = efforts
+        self.settings = settings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repositories = try c.decode([RepoPrefsResp]?.self, forKey: .repositories)
+        self.harness = try c.decodeIfPresent(String.self, forKey: .harness)
+        self.models = try c.decodeIfPresent([String: String].self, forKey: .models)
+        self.efforts = try c.decodeIfPresent([String: [String: String]?].self, forKey: .efforts)
+        self.settings = try c.decode(UserSettings.self, forKey: .settings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repositories, forKey: .repositories)
+        try c.encodeIfPresent(self.harness, forKey: .harness)
+        try c.encodeIfPresent(self.models, forKey: .models)
+        try c.encodeIfPresent(self.efforts, forKey: .efforts)
+        try c.encode(self.settings, forKey: .settings)
+    }
 }
 
 /// UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences.
 public struct UpdatePreferencesReq: Codable {
     public let settings: UserSettings
+
+    public init(settings: UserSettings) {
+        self.settings = settings
+    }
 }
 
 /// OAuthGrantResp describes one user-authorized remote MCP client grant.
@@ -856,34 +1059,131 @@ public struct OAuthGrantResp: Codable {
     public let id: String
     public let clientID: String
     public let clientName: String
-    public let scopes: [String]
+    public let scopes: [String]?
     public let resource: String
     public let createdAt: ISOTimestamp
     public let lastUsedAt: ISOTimestamp?
     public let expiresAt: ISOTimestamp
     public let revokedAt: ISOTimestamp?
     public let status: OAuthGrantStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case clientID
+        case clientName
+        case scopes
+        case resource
+        case createdAt
+        case lastUsedAt
+        case expiresAt
+        case revokedAt
+        case status
+    }
+
+    public init(id: String, clientID: String, clientName: String, scopes: [String]?, resource: String, createdAt: ISOTimestamp, lastUsedAt: ISOTimestamp? = nil, expiresAt: ISOTimestamp, revokedAt: ISOTimestamp? = nil, status: OAuthGrantStatus) {
+        self.id = id
+        self.clientID = clientID
+        self.clientName = clientName
+        self.scopes = scopes
+        self.resource = resource
+        self.createdAt = createdAt
+        self.lastUsedAt = lastUsedAt
+        self.expiresAt = expiresAt
+        self.revokedAt = revokedAt
+        self.status = status
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.clientID = try c.decode(String.self, forKey: .clientID)
+        self.clientName = try c.decode(String.self, forKey: .clientName)
+        self.scopes = try c.decode([String]?.self, forKey: .scopes)
+        self.resource = try c.decode(String.self, forKey: .resource)
+        self.createdAt = try c.decode(ISOTimestamp.self, forKey: .createdAt)
+        self.lastUsedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .lastUsedAt)
+        self.expiresAt = try c.decode(ISOTimestamp.self, forKey: .expiresAt)
+        self.revokedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .revokedAt)
+        self.status = try c.decode(OAuthGrantStatus.self, forKey: .status)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.id, forKey: .id)
+        try c.encode(self.clientID, forKey: .clientID)
+        try c.encode(self.clientName, forKey: .clientName)
+        try c.encode(self.scopes, forKey: .scopes)
+        try c.encode(self.resource, forKey: .resource)
+        try c.encode(self.createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(self.lastUsedAt, forKey: .lastUsedAt)
+        try c.encode(self.expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(self.revokedAt, forKey: .revokedAt)
+        try c.encode(self.status, forKey: .status)
+    }
 }
 
 /// OAuthGrantsResp is the response for GET /api/caic/v1/oauth/grants.
 public struct OAuthGrantsResp: Codable {
-    public let grants: [OAuthGrantResp]
+    public let grants: [OAuthGrantResp]?
+
+    private enum CodingKeys: String, CodingKey {
+        case grants
+    }
+
+    public init(grants: [OAuthGrantResp]?) {
+        self.grants = grants
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.grants = try c.decode([OAuthGrantResp]?.self, forKey: .grants)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.grants, forKey: .grants)
+    }
 }
 
 /// RevokeOAuthGrantReq is the request for POST /api/caic/v1/oauth/grants/{grantID}/revoke.
 public struct RevokeOAuthGrantReq: Codable {
+
+    public init() {
+    }
 }
 
 /// Model describes the configuration choices supported by a harness model.
 public struct Model: Codable {
     public let id: String
-    public let effortOptions: [String]
+    public let effortOptions: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case effortOptions
+    }
+
+    public init(id: String, effortOptions: [String]?) {
+        self.id = id
+        self.effortOptions = effortOptions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.effortOptions = try c.decode([String]?.self, forKey: .effortOptions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.id, forKey: .id)
+        try c.encode(self.effortOptions, forKey: .effortOptions)
+    }
 }
 
 /// HarnessInfo is the JSON representation of an available harness.
 public struct HarnessInfo: Codable {
     public let name: Harness
-    public let models: [Model]
+    public let models: [Model]?
     public let supportsImages: Bool
     public let supportsCompact: Bool
     public let supportsModelRefresh: Bool
@@ -891,14 +1191,62 @@ public struct HarnessInfo: Codable {
     public let quotaGroup: QuotaProvider?
     /// Absolute URL path to the harness logo, e.g. "/logos/codex.svg"; empty when none exists.
     public let logoUrl: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case models
+        case supportsImages
+        case supportsCompact
+        case supportsModelRefresh
+        case quotaGroup
+        case logoUrl
+    }
+
+    public init(name: Harness, models: [Model]?, supportsImages: Bool, supportsCompact: Bool, supportsModelRefresh: Bool, quotaGroup: QuotaProvider? = nil, logoUrl: String? = nil) {
+        self.name = name
+        self.models = models
+        self.supportsImages = supportsImages
+        self.supportsCompact = supportsCompact
+        self.supportsModelRefresh = supportsModelRefresh
+        self.quotaGroup = quotaGroup
+        self.logoUrl = logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.name = try c.decode(Harness.self, forKey: .name)
+        self.models = try c.decode([Model]?.self, forKey: .models)
+        self.supportsImages = try c.decode(Bool.self, forKey: .supportsImages)
+        self.supportsCompact = try c.decode(Bool.self, forKey: .supportsCompact)
+        self.supportsModelRefresh = try c.decode(Bool.self, forKey: .supportsModelRefresh)
+        self.quotaGroup = try c.decodeIfPresent(QuotaProvider.self, forKey: .quotaGroup)
+        self.logoUrl = try c.decodeIfPresent(String.self, forKey: .logoUrl)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.models, forKey: .models)
+        try c.encode(self.supportsImages, forKey: .supportsImages)
+        try c.encode(self.supportsCompact, forKey: .supportsCompact)
+        try c.encode(self.supportsModelRefresh, forKey: .supportsModelRefresh)
+        try c.encodeIfPresent(self.quotaGroup, forKey: .quotaGroup)
+        try c.encodeIfPresent(self.logoUrl, forKey: .logoUrl)
+    }
 }
 
 /// RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.
 public struct RefreshHarnessReq: Codable {
+
+    public init() {
+    }
 }
 
 /// ImageRefreshReq identifies the runtime whose specialized image is refreshed.
 public struct ImageRefreshReq: Codable {
+
+    public init() {
+    }
 }
 
 /// ImageRefreshStatus describes the current or most recent image refresh.
@@ -906,6 +1254,12 @@ public struct ImageRefreshStatus: Codable {
     public let state: ImageRefreshState
     public let error: String?
     public let scheduled: Bool?
+
+    public init(state: ImageRefreshState, error: String? = nil, scheduled: Bool? = nil) {
+        self.state = state
+        self.error = error
+        self.scheduled = scheduled
+    }
 }
 
 /// WellKnownCache describes a single well-known cache.
@@ -913,14 +1267,62 @@ public struct WellKnownCache: Codable {
     public let name: String
     public let description: String
     /// List of runtime mount paths
-    public let mounts: [String]
+    public let mounts: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case mounts
+    }
+
+    public init(name: String, description: String, mounts: [String]?) {
+        self.name = name
+        self.description = description
+        self.mounts = mounts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.description = try c.decode(String.self, forKey: .description)
+        self.mounts = try c.decode([String]?.self, forKey: .mounts)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.description, forKey: .description)
+        try c.encode(self.mounts, forKey: .mounts)
+    }
 }
 
 /// WellKnownCachesResp is the response for GET /api/caic/v1/server/caches.
 public struct WellKnownCachesResp: Codable {
     /// e.g. "~/.claude", "~/.codex"
-    public let harnessMounts: [String]
-    public let wellKnown: [WellKnownCache]
+    public let harnessMounts: [String]?
+    public let wellKnown: [WellKnownCache]?
+
+    private enum CodingKeys: String, CodingKey {
+        case harnessMounts
+        case wellKnown
+    }
+
+    public init(harnessMounts: [String]?, wellKnown: [WellKnownCache]?) {
+        self.harnessMounts = harnessMounts
+        self.wellKnown = wellKnown
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.harnessMounts = try c.decode([String]?.self, forKey: .harnessMounts)
+        self.wellKnown = try c.decode([WellKnownCache]?.self, forKey: .wellKnown)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.harnessMounts, forKey: .harnessMounts)
+        try c.encode(self.wellKnown, forKey: .wellKnown)
+    }
 }
 
 /// CacheSize describes the most recent size snapshot for a well-known cache.
@@ -929,11 +1331,36 @@ public struct CacheSize: Codable {
     public let sizeBytes: Int
     public let calculatedAt: ISOTimestamp?
     public let error: String?
+
+    public init(name: String, sizeBytes: Int, calculatedAt: ISOTimestamp? = nil, error: String? = nil) {
+        self.name = name
+        self.sizeBytes = sizeBytes
+        self.calculatedAt = calculatedAt
+        self.error = error
+    }
 }
 
 /// CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
 public struct CacheSizesResp: Codable {
-    public let wellKnown: [CacheSize]
+    public let wellKnown: [CacheSize]?
+
+    private enum CodingKeys: String, CodingKey {
+        case wellKnown
+    }
+
+    public init(wellKnown: [CacheSize]?) {
+        self.wellKnown = wellKnown
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.wellKnown = try c.decode([CacheSize]?.self, forKey: .wellKnown)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.wellKnown, forKey: .wellKnown)
+    }
 }
 
 /// CPUUsage measures one logical CPU over the sampling interval.
@@ -941,6 +1368,11 @@ public struct CPUUsage: Codable {
     public let id: String
     /// 100% means this logical CPU was fully busy.
     public let usagePerc: Double
+
+    public init(id: String, usagePerc: Double) {
+        self.id = id
+        self.usagePerc = usagePerc
+    }
 }
 
 /// SystemSample measures the machine running caic, including all processes.
@@ -949,7 +1381,7 @@ public struct CPUUsage: Codable {
 /// Disk measures the filesystem containing the server working directory.
 public struct SystemSample: Codable {
     public let time: ISOTimestamp
-    public let cpus: [CPUUsage]
+    public let cpus: [CPUUsage]?
     public let memUsed: Int
     public let memTotal: Int
     public let memPerc: Double
@@ -957,13 +1389,85 @@ public struct SystemSample: Codable {
     public let netTx: Int
     public let diskUsed: Int
     public let diskTotal: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case time
+        case cpus
+        case memUsed
+        case memTotal
+        case memPerc
+        case netRx
+        case netTx
+        case diskUsed
+        case diskTotal
+    }
+
+    public init(time: ISOTimestamp, cpus: [CPUUsage]?, memUsed: Int, memTotal: Int, memPerc: Double, netRx: Int, netTx: Int, diskUsed: Int, diskTotal: Int) {
+        self.time = time
+        self.cpus = cpus
+        self.memUsed = memUsed
+        self.memTotal = memTotal
+        self.memPerc = memPerc
+        self.netRx = netRx
+        self.netTx = netTx
+        self.diskUsed = diskUsed
+        self.diskTotal = diskTotal
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.time = try c.decode(ISOTimestamp.self, forKey: .time)
+        self.cpus = try c.decode([CPUUsage]?.self, forKey: .cpus)
+        self.memUsed = try c.decode(Int.self, forKey: .memUsed)
+        self.memTotal = try c.decode(Int.self, forKey: .memTotal)
+        self.memPerc = try c.decode(Double.self, forKey: .memPerc)
+        self.netRx = try c.decode(Int.self, forKey: .netRx)
+        self.netTx = try c.decode(Int.self, forKey: .netTx)
+        self.diskUsed = try c.decode(Int.self, forKey: .diskUsed)
+        self.diskTotal = try c.decode(Int.self, forKey: .diskTotal)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.time, forKey: .time)
+        try c.encode(self.cpus, forKey: .cpus)
+        try c.encode(self.memUsed, forKey: .memUsed)
+        try c.encode(self.memTotal, forKey: .memTotal)
+        try c.encode(self.memPerc, forKey: .memPerc)
+        try c.encode(self.netRx, forKey: .netRx)
+        try c.encode(self.netTx, forKey: .netTx)
+        try c.encode(self.diskUsed, forKey: .diskUsed)
+        try c.encode(self.diskTotal, forKey: .diskTotal)
+    }
 }
 
 /// SystemStatsResp contains up to five minutes of five-second samples.
 /// Error describes the most recent sampling failure; retained samples remain available.
 public struct SystemStatsResp: Codable {
-    public let samples: [SystemSample]
+    public let samples: [SystemSample]?
     public let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case samples
+        case error
+    }
+
+    public init(samples: [SystemSample]?, error: String? = nil) {
+        self.samples = samples
+        self.error = error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.samples = try c.decode([SystemSample]?.self, forKey: .samples)
+        self.error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.samples, forKey: .samples)
+        try c.encodeIfPresent(self.error, forKey: .error)
+    }
 }
 
 /// MetricResource identifies the process that produced the observations.
@@ -974,6 +1478,12 @@ public struct MetricResource: Codable {
     public let serviceVersion: String?
     /// Host is the machine the process runs on, when known.
     public let host: String?
+
+    public init(serviceName: String, serviceVersion: String? = nil, host: String? = nil) {
+        self.serviceName = serviceName
+        self.serviceVersion = serviceVersion
+        self.host = host
+    }
 }
 
 /// MetricSeries describes aggregated measurements sharing one name, kind, unit,
@@ -1010,6 +1520,22 @@ public struct MetricSeries: Codable {
     public let max: Double
     /// Last is the most recently recorded amount, in Unit.
     public let last: Double
+
+    public init(name: String, outcome: String, kind: String, unit: String, attrs: [String: String]? = nil, count: Int, samples: Int, sum: Double, min: Double, p50: Double, p95: Double, max: Double, last: Double) {
+        self.name = name
+        self.outcome = outcome
+        self.kind = kind
+        self.unit = unit
+        self.attrs = attrs
+        self.count = count
+        self.samples = samples
+        self.sum = sum
+        self.min = min
+        self.p50 = p50
+        self.p95 = p95
+        self.max = max
+        self.last = last
+    }
 }
 
 /// MetricsResp is the historical and live aggregate for GET
@@ -1020,7 +1546,33 @@ public struct MetricsResp: Codable {
     /// Resource identifies the process that produced the observations.
     public let resource: MetricResource
     /// Series holds per-operation aggregates, slowest p95 first.
-    public let series: [MetricSeries]
+    public let series: [MetricSeries]?
+
+    private enum CodingKeys: String, CodingKey {
+        case since
+        case resource
+        case series
+    }
+
+    public init(since: ISOTimestamp? = nil, resource: MetricResource, series: [MetricSeries]?) {
+        self.since = since
+        self.resource = resource
+        self.series = series
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.since = try c.decodeIfPresent(ISOTimestamp.self, forKey: .since)
+        self.resource = try c.decode(MetricResource.self, forKey: .resource)
+        self.series = try c.decode([MetricSeries]?.self, forKey: .series)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encodeIfPresent(self.since, forKey: .since)
+        try c.encode(self.resource, forKey: .resource)
+        try c.encode(self.series, forKey: .series)
+    }
 }
 
 /// BranchInfo describes a single branch with its origin and task-creation action.
@@ -1028,6 +1580,12 @@ public struct BranchInfo: Codable {
     public let name: String
     public let remote: String?
     public let action: BranchAction?
+
+    public init(name: String, remote: String? = nil, action: BranchAction? = nil) {
+        self.name = name
+        self.remote = remote
+        self.action = action
+    }
 }
 
 /// ForgeCheck describes a CI check run with its status, conclusion, and timing.
@@ -1049,6 +1607,19 @@ public struct ForgeCheck: Codable {
     public let startedAt: ISOTimestamp?
     /// When execution finished.
     public let completedAt: ISOTimestamp?
+
+    public init(name: String, owner: String, repo: String, runID: Int, jobID: Int, status: CheckStatus, conclusion: CheckConclusion, queuedAt: ISOTimestamp? = nil, startedAt: ISOTimestamp? = nil, completedAt: ISOTimestamp? = nil) {
+        self.name = name
+        self.owner = owner
+        self.repo = repo
+        self.runID = runID
+        self.jobID = jobID
+        self.status = status
+        self.conclusion = conclusion
+        self.queuedAt = queuedAt
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
 }
 
 /// Repo is the JSON representation of a discovered repo.
@@ -1062,6 +1633,17 @@ public struct Repo: Codable {
     public let ci: CIStatus?
     public let ciChecks: [ForgeCheck]?
     public let checksDate: ISOTimestamp?
+
+    public init(path: String, branch: String, baseBranch: BranchInfo, remoteURL: String? = nil, forge: Forge? = nil, ci: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, checksDate: ISOTimestamp? = nil) {
+        self.path = path
+        self.branch = branch
+        self.baseBranch = baseBranch
+        self.remoteURL = remoteURL
+        self.forge = forge
+        self.ci = ci
+        self.ciChecks = ciChecks
+        self.checksDate = checksDate
+    }
 }
 
 /// CloneRepoReq is the request body for POST /api/caic/v1/server/repos.
@@ -1071,17 +1653,45 @@ public struct CloneRepoReq: Codable {
     /// Target subdirectory under rootDir; defaults to repo basename.
     public let path: String?
     public let depth: Int?
+
+    public init(url: String, path: String? = nil, depth: Int? = nil) {
+        self.url = url
+        self.path = path
+        self.depth = depth
+    }
 }
 
 /// RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches.
 public struct RepoBranchesResp: Codable {
-    public let branches: [BranchInfo]
+    public let branches: [BranchInfo]?
+
+    private enum CodingKeys: String, CodingKey {
+        case branches
+    }
+
+    public init(branches: [BranchInfo]?) {
+        self.branches = branches
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.branches = try c.decode([BranchInfo]?.self, forKey: .branches)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.branches, forKey: .branches)
+    }
 }
 
 /// BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
 /// The server fetches CI logs, builds a prompt, and creates a fix task.
 public struct BotFixCIReq: Codable {
     public let repo: String
+
+    public init(repo: String) {
+        self.repo = repo
+    }
 }
 
 /// InputImage identifies a prompt attachment's original, thumbnail, and preview.
@@ -1095,12 +1705,23 @@ public struct InputImage: Codable {
     public let thumbnailURL: String?
     /// Inline preview, at most 480px on either axis.
     public let previewURL: String?
+
+    public init(url: String, thumbnailURL: String? = nil, previewURL: String? = nil) {
+        self.url = url
+        self.thumbnailURL = thumbnailURL
+        self.previewURL = previewURL
+    }
 }
 
 /// Prompt bundles user text with optional images.
 public struct Prompt: Codable {
     public let text: String
     public let images: [InputImage]?
+
+    public init(text: String, images: [InputImage]? = nil) {
+        self.text = text
+        self.images = images
+    }
 }
 
 /// PendingInput is a task's single pending prompt without embedded image payloads.
@@ -1112,6 +1733,14 @@ public struct PendingInput: Codable {
     public let id: String
     public let prompt: Prompt
     public let error: String?
+
+    public init(delivered: Bool? = nil, delivering: Bool? = nil, id: String, prompt: Prompt, error: String? = nil) {
+        self.delivered = delivered
+        self.delivering = delivering
+        self.id = id
+        self.prompt = prompt
+        self.error = error
+    }
 }
 
 /// TaskRepo describes a repository associated with a task in the API response.
@@ -1122,6 +1751,14 @@ public struct TaskRepo: Codable {
     public let remoteURL: String?
     /// "github", "gitlab", or empty if unknown.
     public let forge: Forge?
+
+    public init(name: String, baseBranch: String? = nil, branch: String, remoteURL: String? = nil, forge: Forge? = nil) {
+        self.name = name
+        self.baseBranch = baseBranch
+        self.branch = branch
+        self.remoteURL = remoteURL
+        self.forge = forge
+    }
 }
 
 /// DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
@@ -1136,6 +1773,15 @@ public struct DiffFileStat: Codable {
     /// NewSize is the binary post-image byte size, or -1 for text files.
     public let newSize: Int
     public let diff: String?
+
+    public init(path: String, linesAdded: Int, linesDeleted: Int, oldSize: Int, newSize: Int, diff: String? = nil) {
+        self.path = path
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.oldSize = oldSize
+        self.newSize = newSize
+        self.diff = diff
+    }
 }
 
 /// GitRepositoryState summarizes the compact Git state of one task repository.
@@ -1152,6 +1798,20 @@ public struct GitRepositoryState: Codable {
     public let uncommittedFiles: Int
     public let conflicts: Int
     public let operation: GitOperation?
+
+    public init(stale: Bool? = nil, name: String, branch: String, ahead: Int, behind: Int, changedFiles: Int, linesAdded: Int, linesDeleted: Int, uncommittedFiles: Int, conflicts: Int, operation: GitOperation? = nil) {
+        self.stale = stale
+        self.name = name
+        self.branch = branch
+        self.ahead = ahead
+        self.behind = behind
+        self.changedFiles = changedFiles
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.uncommittedFiles = uncommittedFiles
+        self.conflicts = conflicts
+        self.operation = operation
+    }
 }
 
 /// TaskStartupFailure identifies the failed startup phase and original agent diagnostic.
@@ -1159,6 +1819,12 @@ public struct TaskStartupFailure: Codable {
     public let harness: Harness
     public let phase: String
     public let cause: String
+
+    public init(harness: Harness, phase: String, cause: String) {
+        self.harness = harness
+        self.phase = phase
+        self.cause = cause
+    }
 }
 
 /// TaskPlan is the task's current root ExitPlanMode content. The identity and
@@ -1166,6 +1832,11 @@ public struct TaskStartupFailure: Codable {
 public struct TaskPlan: Codable {
     public let toolUseID: String
     public let content: String
+
+    public init(toolUseID: String, content: String) {
+        self.toolUseID = toolUseID
+        self.content = content
+    }
 }
 
 /// RuntimeInstance holds per-task runtime metadata.
@@ -1182,6 +1853,17 @@ public struct RuntimeInstance: Codable {
     /// SudoPassword is the random sudo password, only populated when Sudo is true.
     public let sudoPassword: String?
     public let vncPort: Int?
+
+    public init(id: String, runtimeName: String? = nil, tailscale: String? = nil, usb: Bool? = nil, display: Bool? = nil, sudo: Bool? = nil, sudoPassword: String? = nil, vncPort: Int? = nil) {
+        self.id = id
+        self.runtimeName = runtimeName
+        self.tailscale = tailscale
+        self.usb = usb
+        self.display = display
+        self.sudo = sudo
+        self.sudoPassword = sudoPassword
+        self.vncPort = vncPort
+    }
 }
 
 /// EventStats is a runtime resource usage snapshot emitted periodically.
@@ -1205,6 +1887,76 @@ public struct EventStats: Codable {
     public let blockRead: Int
     public let blockWrite: Int
     public let diskUsed: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case ts
+        case cpuPerc
+        case cpuCeiling
+        case cpuQuota
+        case runtimeCPUs
+        case cpuError
+        case memUsed
+        case memLimit
+        case memPerc
+        case netRx
+        case netTx
+        case blockRead
+        case blockWrite
+        case diskUsed
+    }
+
+    public init(ts: Int, cpuPerc: Double, cpuCeiling: Double?, cpuQuota: Double?, runtimeCPUs: Int?, cpuError: String? = nil, memUsed: Int, memLimit: Int, memPerc: Double, netRx: Int, netTx: Int, blockRead: Int, blockWrite: Int, diskUsed: Int) {
+        self.ts = ts
+        self.cpuPerc = cpuPerc
+        self.cpuCeiling = cpuCeiling
+        self.cpuQuota = cpuQuota
+        self.runtimeCPUs = runtimeCPUs
+        self.cpuError = cpuError
+        self.memUsed = memUsed
+        self.memLimit = memLimit
+        self.memPerc = memPerc
+        self.netRx = netRx
+        self.netTx = netTx
+        self.blockRead = blockRead
+        self.blockWrite = blockWrite
+        self.diskUsed = diskUsed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.ts = try c.decode(Int.self, forKey: .ts)
+        self.cpuPerc = try c.decode(Double.self, forKey: .cpuPerc)
+        self.cpuCeiling = try c.decode(Double?.self, forKey: .cpuCeiling)
+        self.cpuQuota = try c.decode(Double?.self, forKey: .cpuQuota)
+        self.runtimeCPUs = try c.decode(Int?.self, forKey: .runtimeCPUs)
+        self.cpuError = try c.decodeIfPresent(String.self, forKey: .cpuError)
+        self.memUsed = try c.decode(Int.self, forKey: .memUsed)
+        self.memLimit = try c.decode(Int.self, forKey: .memLimit)
+        self.memPerc = try c.decode(Double.self, forKey: .memPerc)
+        self.netRx = try c.decode(Int.self, forKey: .netRx)
+        self.netTx = try c.decode(Int.self, forKey: .netTx)
+        self.blockRead = try c.decode(Int.self, forKey: .blockRead)
+        self.blockWrite = try c.decode(Int.self, forKey: .blockWrite)
+        self.diskUsed = try c.decode(Int.self, forKey: .diskUsed)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.ts, forKey: .ts)
+        try c.encode(self.cpuPerc, forKey: .cpuPerc)
+        try c.encode(self.cpuCeiling, forKey: .cpuCeiling)
+        try c.encode(self.cpuQuota, forKey: .cpuQuota)
+        try c.encode(self.runtimeCPUs, forKey: .runtimeCPUs)
+        try c.encodeIfPresent(self.cpuError, forKey: .cpuError)
+        try c.encode(self.memUsed, forKey: .memUsed)
+        try c.encode(self.memLimit, forKey: .memLimit)
+        try c.encode(self.memPerc, forKey: .memPerc)
+        try c.encode(self.netRx, forKey: .netRx)
+        try c.encode(self.netTx, forKey: .netTx)
+        try c.encode(self.blockRead, forKey: .blockRead)
+        try c.encode(self.blockWrite, forKey: .blockWrite)
+        try c.encode(self.diskUsed, forKey: .diskUsed)
+    }
 }
 
 /// TaskRateLimit is the current quota block resolved by the backend for one task.
@@ -1213,6 +1965,13 @@ public struct TaskRateLimit: Codable {
     public let quotaGroup: QuotaProvider?
     public let window: String?
     public let resetsAt: ISOTimestamp?
+
+    public init(blocked: Bool, quotaGroup: QuotaProvider? = nil, window: String? = nil, resetsAt: ISOTimestamp? = nil) {
+        self.blocked = blocked
+        self.quotaGroup = quotaGroup
+        self.window = window
+        self.resetsAt = resetsAt
+    }
 }
 
 /// Task is the JSON representation sent to the frontend.
@@ -1292,12 +2051,250 @@ public struct Task: Codable {
     public let rateLimit: TaskRateLimit?
     /// Per-task feature flags.
     public let gitHubToken: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case pendingInput
+        case id
+        case initialPrompt
+        case title
+        case repos
+        case state
+        case stateUpdatedAt
+        case diffStat
+        case repoStates
+        case costUSD
+        case costKnown
+        case costComplete
+        case duration
+        case numTurns
+        case cumulativeInputTokens
+        case cumulativeOutputTokens
+        case cumulativeCacheCreationInputTokens
+        case cumulativeCacheReadInputTokens
+        case activeInputTokens
+        case activeCacheReadTokens
+        case cacheTTLSeconds
+        case cacheExpiresAt
+        case stoppedDiskUsedBytes
+        case contextUsed
+        case contextWindowLimit
+        case autoCompactTokenLimit
+        case error
+        case startupFailure
+        case result
+        case forgeOwner
+        case forgeRepo
+        case forgePR
+        case forgePRState
+        case forgeIssue
+        case ciStatus
+        case ciChecks
+        case owner
+        case forkedFromTaskID
+        case parentTaskID
+        case caicMCP
+        case harness
+        case requestedModel
+        case requestedEffort
+        case reportedModel
+        case reportedEffort
+        case agentVersion
+        case sessionID
+        case startedAt
+        case turnStartedAt
+        case inPlanMode
+        case currentPlan
+        case runtime
+        case resourceUsage
+        case rateLimit
+        case gitHubToken
+    }
+
+    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, gitHubToken: Bool? = nil) {
+        self.pendingInput = pendingInput
+        self.id = id
+        self.initialPrompt = initialPrompt
+        self.title = title
+        self.repos = repos
+        self.state = state
+        self.stateUpdatedAt = stateUpdatedAt
+        self.diffStat = diffStat
+        self.repoStates = repoStates
+        self.costUSD = costUSD
+        self.costKnown = costKnown
+        self.costComplete = costComplete
+        self.duration = duration
+        self.numTurns = numTurns
+        self.cumulativeInputTokens = cumulativeInputTokens
+        self.cumulativeOutputTokens = cumulativeOutputTokens
+        self.cumulativeCacheCreationInputTokens = cumulativeCacheCreationInputTokens
+        self.cumulativeCacheReadInputTokens = cumulativeCacheReadInputTokens
+        self.activeInputTokens = activeInputTokens
+        self.activeCacheReadTokens = activeCacheReadTokens
+        self.cacheTTLSeconds = cacheTTLSeconds
+        self.cacheExpiresAt = cacheExpiresAt
+        self.stoppedDiskUsedBytes = stoppedDiskUsedBytes
+        self.contextUsed = contextUsed
+        self.contextWindowLimit = contextWindowLimit
+        self.autoCompactTokenLimit = autoCompactTokenLimit
+        self.error = error
+        self.startupFailure = startupFailure
+        self.result = result
+        self.forgeOwner = forgeOwner
+        self.forgeRepo = forgeRepo
+        self.forgePR = forgePR
+        self.forgePRState = forgePRState
+        self.forgeIssue = forgeIssue
+        self.ciStatus = ciStatus
+        self.ciChecks = ciChecks
+        self.owner = owner
+        self.forkedFromTaskID = forkedFromTaskID
+        self.parentTaskID = parentTaskID
+        self.caicMCP = caicMCP
+        self.harness = harness
+        self.requestedModel = requestedModel
+        self.requestedEffort = requestedEffort
+        self.reportedModel = reportedModel
+        self.reportedEffort = reportedEffort
+        self.agentVersion = agentVersion
+        self.sessionID = sessionID
+        self.startedAt = startedAt
+        self.turnStartedAt = turnStartedAt
+        self.inPlanMode = inPlanMode
+        self.currentPlan = currentPlan
+        self.runtime = runtime
+        self.resourceUsage = resourceUsage
+        self.rateLimit = rateLimit
+        self.gitHubToken = gitHubToken
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.pendingInput = try c.decode(PendingInput?.self, forKey: .pendingInput)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.initialPrompt = try c.decode(String.self, forKey: .initialPrompt)
+        self.title = try c.decode(String.self, forKey: .title)
+        self.repos = try c.decodeIfPresent([TaskRepo].self, forKey: .repos)
+        self.state = try c.decode(TaskState.self, forKey: .state)
+        self.stateUpdatedAt = try c.decode(ISOTimestamp.self, forKey: .stateUpdatedAt)
+        self.diffStat = try c.decodeIfPresent(DiffStat.self, forKey: .diffStat)
+        self.repoStates = try c.decodeIfPresent([GitRepositoryState].self, forKey: .repoStates)
+        self.costUSD = try c.decode(Double.self, forKey: .costUSD)
+        self.costKnown = try c.decode(Bool.self, forKey: .costKnown)
+        self.costComplete = try c.decode(Bool.self, forKey: .costComplete)
+        self.duration = try c.decode(Double.self, forKey: .duration)
+        self.numTurns = try c.decode(Int.self, forKey: .numTurns)
+        self.cumulativeInputTokens = try c.decode(Int.self, forKey: .cumulativeInputTokens)
+        self.cumulativeOutputTokens = try c.decode(Int.self, forKey: .cumulativeOutputTokens)
+        self.cumulativeCacheCreationInputTokens = try c.decode(Int.self, forKey: .cumulativeCacheCreationInputTokens)
+        self.cumulativeCacheReadInputTokens = try c.decode(Int.self, forKey: .cumulativeCacheReadInputTokens)
+        self.activeInputTokens = try c.decode(Int.self, forKey: .activeInputTokens)
+        self.activeCacheReadTokens = try c.decode(Int.self, forKey: .activeCacheReadTokens)
+        self.cacheTTLSeconds = try c.decodeIfPresent(Int.self, forKey: .cacheTTLSeconds)
+        self.cacheExpiresAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .cacheExpiresAt)
+        self.stoppedDiskUsedBytes = try c.decode(Int.self, forKey: .stoppedDiskUsedBytes)
+        self.contextUsed = try c.decodeIfPresent(Int.self, forKey: .contextUsed)
+        self.contextWindowLimit = try c.decode(Int.self, forKey: .contextWindowLimit)
+        self.autoCompactTokenLimit = try c.decode(Int.self, forKey: .autoCompactTokenLimit)
+        self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.startupFailure = try c.decodeIfPresent(TaskStartupFailure.self, forKey: .startupFailure)
+        self.result = try c.decodeIfPresent(String.self, forKey: .result)
+        self.forgeOwner = try c.decodeIfPresent(String.self, forKey: .forgeOwner)
+        self.forgeRepo = try c.decodeIfPresent(String.self, forKey: .forgeRepo)
+        self.forgePR = try c.decodeIfPresent(Int.self, forKey: .forgePR)
+        self.forgePRState = try c.decodeIfPresent(ForgePRState.self, forKey: .forgePRState)
+        self.forgeIssue = try c.decodeIfPresent(Int.self, forKey: .forgeIssue)
+        self.ciStatus = try c.decodeIfPresent(CIStatus.self, forKey: .ciStatus)
+        self.ciChecks = try c.decodeIfPresent([ForgeCheck].self, forKey: .ciChecks)
+        self.owner = try c.decodeIfPresent(String.self, forKey: .owner)
+        self.forkedFromTaskID = try c.decodeIfPresent(String.self, forKey: .forkedFromTaskID)
+        self.parentTaskID = try c.decodeIfPresent(String.self, forKey: .parentTaskID)
+        self.caicMCP = try c.decodeIfPresent(Bool.self, forKey: .caicMCP)
+        self.harness = try c.decode(Harness.self, forKey: .harness)
+        self.requestedModel = try c.decodeIfPresent(String.self, forKey: .requestedModel)
+        self.requestedEffort = try c.decodeIfPresent(String.self, forKey: .requestedEffort)
+        self.reportedModel = try c.decodeIfPresent(String.self, forKey: .reportedModel)
+        self.reportedEffort = try c.decodeIfPresent(String.self, forKey: .reportedEffort)
+        self.agentVersion = try c.decodeIfPresent(String.self, forKey: .agentVersion)
+        self.sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+        self.startedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .startedAt)
+        self.turnStartedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .turnStartedAt)
+        self.inPlanMode = try c.decodeIfPresent(Bool.self, forKey: .inPlanMode)
+        self.currentPlan = try c.decodeIfPresent(TaskPlan.self, forKey: .currentPlan)
+        self.runtime = try c.decode(RuntimeInstance.self, forKey: .runtime)
+        self.resourceUsage = try c.decodeIfPresent(EventStats.self, forKey: .resourceUsage)
+        self.rateLimit = try c.decodeIfPresent(TaskRateLimit.self, forKey: .rateLimit)
+        self.gitHubToken = try c.decodeIfPresent(Bool.self, forKey: .gitHubToken)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.pendingInput, forKey: .pendingInput)
+        try c.encode(self.id, forKey: .id)
+        try c.encode(self.initialPrompt, forKey: .initialPrompt)
+        try c.encode(self.title, forKey: .title)
+        try c.encodeIfPresent(self.repos, forKey: .repos)
+        try c.encode(self.state, forKey: .state)
+        try c.encode(self.stateUpdatedAt, forKey: .stateUpdatedAt)
+        try c.encodeIfPresent(self.diffStat, forKey: .diffStat)
+        try c.encodeIfPresent(self.repoStates, forKey: .repoStates)
+        try c.encode(self.costUSD, forKey: .costUSD)
+        try c.encode(self.costKnown, forKey: .costKnown)
+        try c.encode(self.costComplete, forKey: .costComplete)
+        try c.encode(self.duration, forKey: .duration)
+        try c.encode(self.numTurns, forKey: .numTurns)
+        try c.encode(self.cumulativeInputTokens, forKey: .cumulativeInputTokens)
+        try c.encode(self.cumulativeOutputTokens, forKey: .cumulativeOutputTokens)
+        try c.encode(self.cumulativeCacheCreationInputTokens, forKey: .cumulativeCacheCreationInputTokens)
+        try c.encode(self.cumulativeCacheReadInputTokens, forKey: .cumulativeCacheReadInputTokens)
+        try c.encode(self.activeInputTokens, forKey: .activeInputTokens)
+        try c.encode(self.activeCacheReadTokens, forKey: .activeCacheReadTokens)
+        try c.encodeIfPresent(self.cacheTTLSeconds, forKey: .cacheTTLSeconds)
+        try c.encodeIfPresent(self.cacheExpiresAt, forKey: .cacheExpiresAt)
+        try c.encode(self.stoppedDiskUsedBytes, forKey: .stoppedDiskUsedBytes)
+        try c.encodeIfPresent(self.contextUsed, forKey: .contextUsed)
+        try c.encode(self.contextWindowLimit, forKey: .contextWindowLimit)
+        try c.encode(self.autoCompactTokenLimit, forKey: .autoCompactTokenLimit)
+        try c.encodeIfPresent(self.error, forKey: .error)
+        try c.encodeIfPresent(self.startupFailure, forKey: .startupFailure)
+        try c.encodeIfPresent(self.result, forKey: .result)
+        try c.encodeIfPresent(self.forgeOwner, forKey: .forgeOwner)
+        try c.encodeIfPresent(self.forgeRepo, forKey: .forgeRepo)
+        try c.encodeIfPresent(self.forgePR, forKey: .forgePR)
+        try c.encodeIfPresent(self.forgePRState, forKey: .forgePRState)
+        try c.encodeIfPresent(self.forgeIssue, forKey: .forgeIssue)
+        try c.encodeIfPresent(self.ciStatus, forKey: .ciStatus)
+        try c.encodeIfPresent(self.ciChecks, forKey: .ciChecks)
+        try c.encodeIfPresent(self.owner, forKey: .owner)
+        try c.encodeIfPresent(self.forkedFromTaskID, forKey: .forkedFromTaskID)
+        try c.encodeIfPresent(self.parentTaskID, forKey: .parentTaskID)
+        try c.encodeIfPresent(self.caicMCP, forKey: .caicMCP)
+        try c.encode(self.harness, forKey: .harness)
+        try c.encodeIfPresent(self.requestedModel, forKey: .requestedModel)
+        try c.encodeIfPresent(self.requestedEffort, forKey: .requestedEffort)
+        try c.encodeIfPresent(self.reportedModel, forKey: .reportedModel)
+        try c.encodeIfPresent(self.reportedEffort, forKey: .reportedEffort)
+        try c.encodeIfPresent(self.agentVersion, forKey: .agentVersion)
+        try c.encodeIfPresent(self.sessionID, forKey: .sessionID)
+        try c.encodeIfPresent(self.startedAt, forKey: .startedAt)
+        try c.encodeIfPresent(self.turnStartedAt, forKey: .turnStartedAt)
+        try c.encodeIfPresent(self.inPlanMode, forKey: .inPlanMode)
+        try c.encodeIfPresent(self.currentPlan, forKey: .currentPlan)
+        try c.encode(self.runtime, forKey: .runtime)
+        try c.encodeIfPresent(self.resourceUsage, forKey: .resourceUsage)
+        try c.encodeIfPresent(self.rateLimit, forKey: .rateLimit)
+        try c.encodeIfPresent(self.gitHubToken, forKey: .gitHubToken)
+    }
 }
 
 /// BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
 /// The server fetches CI logs for the task's PR and injects a fix command.
 public struct BotFixPRReq: Codable {
     public let taskId: String
+
+    public init(taskId: String) {
+        self.taskId = taskId
+    }
 }
 
 /// TaskInfoCapability describes recorded runtime capabilities and injected-token presence.
@@ -1307,6 +2304,14 @@ public struct TaskInfoCapability: Codable {
     public let display: Bool?
     public let sudo: Bool?
     public let gitHubToken: Bool?
+
+    public init(tailscale: Bool? = nil, usb: Bool? = nil, display: Bool? = nil, sudo: Bool? = nil, gitHubToken: Bool? = nil) {
+        self.tailscale = tailscale
+        self.usb = usb
+        self.display = display
+        self.sudo = sudo
+        self.gitHubToken = gitHubToken
+    }
 }
 
 /// TaskInfoRepo describes a repository mounted into a task runtime.
@@ -1318,6 +2323,16 @@ public struct TaskInfoRepo: Codable {
     public let containerPath: String?
     public let remoteURL: String?
     public let forge: Forge?
+
+    public init(name: String, baseBranch: String? = nil, branch: String? = nil, gitRoot: String? = nil, containerPath: String? = nil, remoteURL: String? = nil, forge: Forge? = nil) {
+        self.name = name
+        self.baseBranch = baseBranch
+        self.branch = branch
+        self.gitRoot = gitRoot
+        self.containerPath = containerPath
+        self.remoteURL = remoteURL
+        self.forge = forge
+    }
 }
 
 /// TaskInfoCacheMount describes a recorded cache mount.
@@ -1328,6 +2343,15 @@ public struct TaskInfoCacheMount: Codable {
     public let containerPath: String?
     public let readOnly: Bool?
     public let shallow: Bool?
+
+    public init(name: String? = nil, description: String? = nil, hostPath: String? = nil, containerPath: String? = nil, readOnly: Bool? = nil, shallow: Bool? = nil) {
+        self.name = name
+        self.description = description
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.readOnly = readOnly
+        self.shallow = shallow
+    }
 }
 
 /// TaskInfoMount describes a recorded or observed bind mount.
@@ -1335,6 +2359,12 @@ public struct TaskInfoMount: Codable {
     public let hostPath: String?
     public let containerPath: String?
     public let readOnly: Bool?
+
+    public init(hostPath: String? = nil, containerPath: String? = nil, readOnly: Bool? = nil) {
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.readOnly = readOnly
+    }
 }
 
 /// TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
@@ -1361,6 +2391,31 @@ public struct TaskInfoRecorded: Codable {
     public let repos: [TaskInfoRepo]?
     public let caches: [TaskInfoCacheMount]?
     public let mounts: [TaskInfoMount]?
+
+    public init(state: TaskState, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, startedAt: ISOTimestamp? = nil, stateUpdatedAt: ISOTimestamp? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, baseImage: String? = nil, containerOS: String? = nil, containerCPUArchitecture: String? = nil, maxCPUs: Int? = nil, capabilities: TaskInfoCapability, runtime: RuntimeInstance, repos: [TaskInfoRepo]? = nil, caches: [TaskInfoCacheMount]? = nil, mounts: [TaskInfoMount]? = nil) {
+        self.state = state
+        self.forkedFromTaskID = forkedFromTaskID
+        self.parentTaskID = parentTaskID
+        self.caicMCP = caicMCP
+        self.startedAt = startedAt
+        self.stateUpdatedAt = stateUpdatedAt
+        self.harness = harness
+        self.requestedModel = requestedModel
+        self.requestedEffort = requestedEffort
+        self.reportedModel = reportedModel
+        self.reportedEffort = reportedEffort
+        self.agentVersion = agentVersion
+        self.sessionID = sessionID
+        self.baseImage = baseImage
+        self.containerOS = containerOS
+        self.containerCPUArchitecture = containerCPUArchitecture
+        self.maxCPUs = maxCPUs
+        self.capabilities = capabilities
+        self.runtime = runtime
+        self.repos = repos
+        self.caches = caches
+        self.mounts = mounts
+    }
 }
 
 /// TaskInfoObservedRuntime describes runtime-observed instance details from the runtime adapter.
@@ -1376,6 +2431,20 @@ public struct TaskInfoObservedRuntime: Codable {
     public let cpuLimit: Double?
     public let mounts: [TaskInfoMount]?
     public let caches: [TaskInfoCacheMount]?
+
+    public init(runtimeName: String? = nil, runtime: String? = nil, id: String? = nil, state: String? = nil, imageRef: String? = nil, imageID: String? = nil, os: String? = nil, cpuArchitecture: String? = nil, cpuLimit: Double? = nil, mounts: [TaskInfoMount]? = nil, caches: [TaskInfoCacheMount]? = nil) {
+        self.runtimeName = runtimeName
+        self.runtime = runtime
+        self.id = id
+        self.state = state
+        self.imageRef = imageRef
+        self.imageID = imageID
+        self.os = os
+        self.cpuArchitecture = cpuArchitecture
+        self.cpuLimit = cpuLimit
+        self.mounts = mounts
+        self.caches = caches
+    }
 }
 
 /// TaskInfo is the detailed metadata response for a task.
@@ -1384,12 +2453,24 @@ public struct TaskInfo: Codable {
     public let recorded: TaskInfoRecorded
     public let observed: TaskInfoObservedRuntime?
     public let warnings: [String]?
+
+    public init(id: String, recorded: TaskInfoRecorded, observed: TaskInfoObservedRuntime? = nil, warnings: [String]? = nil) {
+        self.id = id
+        self.recorded = recorded
+        self.observed = observed
+        self.warnings = warnings
+    }
 }
 
 /// RepoSpec describes a repository to associate with a task at creation time.
 public struct RepoSpec: Codable {
     public let name: String
     public let baseBranch: String?
+
+    public init(name: String, baseBranch: String? = nil) {
+        self.name = name
+        self.baseBranch = baseBranch
+    }
 }
 
 /// CreateTaskReq is the request body for POST /api/caic/v1/tasks.
@@ -1410,11 +2491,31 @@ public struct CreateTaskReq: Codable {
     public let gitHubToken: Bool?
     /// Enables task-scoped CAIC MCP delegation.
     public let caicMCP: Bool?
+
+    public init(initialPrompt: Prompt, repos: [RepoSpec]? = nil, model: String? = nil, effort: String? = nil, harness: Harness, runtimeName: String? = nil, resumeSessionID: String? = nil, tailscale: Bool? = nil, usb: Bool? = nil, display: Bool? = nil, sudo: Bool? = nil, gitHubToken: Bool? = nil, caicMCP: Bool? = nil) {
+        self.initialPrompt = initialPrompt
+        self.repos = repos
+        self.model = model
+        self.effort = effort
+        self.harness = harness
+        self.runtimeName = runtimeName
+        self.resumeSessionID = resumeSessionID
+        self.tailscale = tailscale
+        self.usb = usb
+        self.display = display
+        self.sudo = sudo
+        self.gitHubToken = gitHubToken
+        self.caicMCP = caicMCP
+    }
 }
 
 /// CancelQueuedInputReq identifies a pending prompt to cancel.
 public struct CancelQueuedInputReq: Codable {
     public let id: String
+
+    public init(id: String) {
+        self.id = id
+    }
 }
 
 /// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
@@ -1422,16 +2523,29 @@ public struct InputReq: Codable {
     /// Append to the pending prompt, or deliver when waiting instead of steering the active turn.
     public let queue: Bool?
     public let prompt: Prompt
+
+    public init(queue: Bool? = nil, prompt: Prompt) {
+        self.queue = queue
+        self.prompt = prompt
+    }
 }
 
 /// RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart.
 public struct RestartReq: Codable {
     public let prompt: Prompt
+
+    public init(prompt: Prompt) {
+        self.prompt = prompt
+    }
 }
 
 /// CompactReq is the request body for POST /api/caic/v1/tasks/{id}/compact.
 public struct CompactReq: Codable {
     public let instructions: String?
+
+    public init(instructions: String? = nil) {
+        self.instructions = instructions
+    }
 }
 
 /// CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
@@ -1439,12 +2553,22 @@ public struct CompactReq: Codable {
 public struct CILogResp: Codable {
     public let stepName: String
     public let log: String
+
+    public init(stepName: String, log: String) {
+        self.stepName = stepName
+        self.log = log
+    }
 }
 
 /// SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync.
 public struct SyncReq: Codable {
     public let force: Bool?
     public let target: SyncTarget?
+
+    public init(force: Bool? = nil, target: SyncTarget? = nil) {
+        self.force = force
+        self.target = target
+    }
 }
 
 /// SafetyIssue describes a potential problem detected before pushing to origin.
@@ -1454,6 +2578,12 @@ public struct SafetyIssue: Codable {
     public let kind: String
     /// Human-readable description.
     public let detail: String
+
+    public init(file: String, kind: String, detail: String) {
+        self.file = file
+        self.kind = kind
+        self.detail = detail
+    }
 }
 
 /// SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
@@ -1465,6 +2595,14 @@ public struct SyncResp: Codable {
     public let safetyIssues: [SafetyIssue]?
     /// non-zero if a PR/MR was created
     public let prNumber: Int?
+
+    public init(status: String, branch: String? = nil, diffStat: DiffStat? = nil, safetyIssues: [SafetyIssue]? = nil, prNumber: Int? = nil) {
+        self.status = status
+        self.branch = branch
+        self.diffStat = diffStat
+        self.safetyIssues = safetyIssues
+        self.prNumber = prNumber
+    }
 }
 
 /// ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
@@ -1489,12 +2627,29 @@ public struct ForkTaskReq: Codable {
     public let sudo: Bool?
     /// Override gitHubToken; nil means inherit from source.
     public let gitHubToken: Bool?
+
+    public init(prompt: Prompt, harness: Harness? = nil, model: String? = nil, effort: String? = nil, extraRepos: [RepoSpec]? = nil, tailscale: Bool? = nil, usb: Bool? = nil, display: Bool? = nil, sudo: Bool? = nil, gitHubToken: Bool? = nil) {
+        self.prompt = prompt
+        self.harness = harness
+        self.model = model
+        self.effort = effort
+        self.extraRepos = extraRepos
+        self.tailscale = tailscale
+        self.usb = usb
+        self.display = display
+        self.sudo = sudo
+        self.gitHubToken = gitHubToken
+    }
 }
 
 /// TaskHandoffResp contains an editable prompt for continuing a source task in
 /// a fresh agent session.
 public struct TaskHandoffResp: Codable {
     public let prompt: String
+
+    public init(prompt: String) {
+        self.prompt = prompt
+    }
 }
 
 /// GitCommit describes one commit unique to either side of a repository's comparison branch.
@@ -1505,7 +2660,45 @@ public struct GitCommit: Codable {
     public let authoredDate: String
     /// Present on the comparison branch and missing from HEAD.
     public let behind: Bool?
-    public let stat: DiffStat
+    public let stat: DiffStat?
+
+    private enum CodingKeys: String, CodingKey {
+        case sha
+        case subject
+        case decorations
+        case authoredDate
+        case behind
+        case stat
+    }
+
+    public init(sha: String, subject: String, decorations: String? = nil, authoredDate: String, behind: Bool? = nil, stat: DiffStat?) {
+        self.sha = sha
+        self.subject = subject
+        self.decorations = decorations
+        self.authoredDate = authoredDate
+        self.behind = behind
+        self.stat = stat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.sha = try c.decode(String.self, forKey: .sha)
+        self.subject = try c.decode(String.self, forKey: .subject)
+        self.decorations = try c.decodeIfPresent(String.self, forKey: .decorations)
+        self.authoredDate = try c.decode(String.self, forKey: .authoredDate)
+        self.behind = try c.decodeIfPresent(Bool.self, forKey: .behind)
+        self.stat = try c.decode(DiffStat?.self, forKey: .stat)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.sha, forKey: .sha)
+        try c.encode(self.subject, forKey: .subject)
+        try c.encodeIfPresent(self.decorations, forKey: .decorations)
+        try c.encode(self.authoredDate, forKey: .authoredDate)
+        try c.encodeIfPresent(self.behind, forKey: .behind)
+        try c.encode(self.stat, forKey: .stat)
+    }
 }
 
 /// GitFileStatus describes one uncommitted repository path.
@@ -1521,6 +2714,18 @@ public struct GitFileStatus: Codable {
     /// NewSize is the binary post-image byte size, or -1 for text files.
     public let newSize: Int
     public let diff: String
+
+    public init(path: String, originalPath: String? = nil, indexStatus: String? = nil, worktreeStatus: String? = nil, linesAdded: Int, linesDeleted: Int, oldSize: Int, newSize: Int, diff: String) {
+        self.path = path
+        self.originalPath = originalPath
+        self.indexStatus = indexStatus
+        self.worktreeStatus = worktreeStatus
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.oldSize = oldSize
+        self.newSize = newSize
+        self.diff = diff
+    }
 }
 
 /// GitRepositoryStatus describes the checked-out state of one task repository.
@@ -1530,14 +2735,78 @@ public struct GitRepositoryStatus: Codable {
     public let upstream: String?
     public let ahead: Int
     public let behind: Int
-    public let commits: [GitCommit]
-    public let uncommitted: [GitFileStatus]
+    public let commits: [GitCommit]?
+    public let uncommitted: [GitFileStatus]?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case branch
+        case upstream
+        case ahead
+        case behind
+        case commits
+        case uncommitted
+    }
+
+    public init(name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [GitCommit]?, uncommitted: [GitFileStatus]?) {
+        self.name = name
+        self.branch = branch
+        self.upstream = upstream
+        self.ahead = ahead
+        self.behind = behind
+        self.commits = commits
+        self.uncommitted = uncommitted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.branch = try c.decode(String.self, forKey: .branch)
+        self.upstream = try c.decodeIfPresent(String.self, forKey: .upstream)
+        self.ahead = try c.decode(Int.self, forKey: .ahead)
+        self.behind = try c.decode(Int.self, forKey: .behind)
+        self.commits = try c.decode([GitCommit]?.self, forKey: .commits)
+        self.uncommitted = try c.decode([GitFileStatus]?.self, forKey: .uncommitted)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.branch, forKey: .branch)
+        try c.encodeIfPresent(self.upstream, forKey: .upstream)
+        try c.encode(self.ahead, forKey: .ahead)
+        try c.encode(self.behind, forKey: .behind)
+        try c.encode(self.commits, forKey: .commits)
+        try c.encode(self.uncommitted, forKey: .uncommitted)
+    }
 }
 
 /// DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 public struct DiffResp: Codable {
     public let diff: String
-    public let repositories: [GitRepositoryStatus]
+    public let repositories: [GitRepositoryStatus]?
+
+    private enum CodingKeys: String, CodingKey {
+        case diff
+        case repositories
+    }
+
+    public init(diff: String, repositories: [GitRepositoryStatus]?) {
+        self.diff = diff
+        self.repositories = repositories
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.diff = try c.decode(String.self, forKey: .diff)
+        self.repositories = try c.decode([GitRepositoryStatus]?.self, forKey: .repositories)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.diff, forKey: .diff)
+        try c.encode(self.repositories, forKey: .repositories)
+    }
 }
 
 /// DiffIndexFileStat describes a committed file without its patch body.
@@ -1549,6 +2818,14 @@ public struct DiffIndexFileStat: Codable {
     public let oldSize: Int
     /// NewSize is the binary post-image byte size, or -1 for text files.
     public let newSize: Int
+
+    public init(path: String, linesAdded: Int, linesDeleted: Int, oldSize: Int, newSize: Int) {
+        self.path = path
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.oldSize = oldSize
+        self.newSize = newSize
+    }
 }
 
 /// DiffIndexCommit describes one commit and its changed-file metadata.
@@ -1559,7 +2836,45 @@ public struct DiffIndexCommit: Codable {
     public let authoredDate: String
     /// Present on the comparison branch and missing from HEAD.
     public let behind: Bool?
-    public let stat: [DiffIndexFileStat]
+    public let stat: [DiffIndexFileStat]?
+
+    private enum CodingKeys: String, CodingKey {
+        case sha
+        case subject
+        case decorations
+        case authoredDate
+        case behind
+        case stat
+    }
+
+    public init(sha: String, subject: String, decorations: String? = nil, authoredDate: String, behind: Bool? = nil, stat: [DiffIndexFileStat]?) {
+        self.sha = sha
+        self.subject = subject
+        self.decorations = decorations
+        self.authoredDate = authoredDate
+        self.behind = behind
+        self.stat = stat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.sha = try c.decode(String.self, forKey: .sha)
+        self.subject = try c.decode(String.self, forKey: .subject)
+        self.decorations = try c.decodeIfPresent(String.self, forKey: .decorations)
+        self.authoredDate = try c.decode(String.self, forKey: .authoredDate)
+        self.behind = try c.decodeIfPresent(Bool.self, forKey: .behind)
+        self.stat = try c.decode([DiffIndexFileStat]?.self, forKey: .stat)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.sha, forKey: .sha)
+        try c.encode(self.subject, forKey: .subject)
+        try c.encodeIfPresent(self.decorations, forKey: .decorations)
+        try c.encode(self.authoredDate, forKey: .authoredDate)
+        try c.encodeIfPresent(self.behind, forKey: .behind)
+        try c.encode(self.stat, forKey: .stat)
+    }
 }
 
 /// DiffIndexFileStatus describes one uncommitted path without its patch body.
@@ -1574,6 +2889,17 @@ public struct DiffIndexFileStatus: Codable {
     public let oldSize: Int
     /// NewSize is the binary post-image byte size, or -1 for text files.
     public let newSize: Int
+
+    public init(path: String, originalPath: String? = nil, indexStatus: String? = nil, worktreeStatus: String? = nil, linesAdded: Int, linesDeleted: Int, oldSize: Int, newSize: Int) {
+        self.path = path
+        self.originalPath = originalPath
+        self.indexStatus = indexStatus
+        self.worktreeStatus = worktreeStatus
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.oldSize = oldSize
+        self.newSize = newSize
+    }
 }
 
 /// DiffIndexRepository describes one repository in a diff index.
@@ -1583,23 +2909,105 @@ public struct DiffIndexRepository: Codable {
     public let upstream: String?
     public let ahead: Int
     public let behind: Int
-    public let commits: [DiffIndexCommit]
-    public let uncommitted: [DiffIndexFileStatus]
+    public let commits: [DiffIndexCommit]?
+    public let uncommitted: [DiffIndexFileStatus]?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case branch
+        case upstream
+        case ahead
+        case behind
+        case commits
+        case uncommitted
+    }
+
+    public init(name: String, branch: String, upstream: String? = nil, ahead: Int, behind: Int, commits: [DiffIndexCommit]?, uncommitted: [DiffIndexFileStatus]?) {
+        self.name = name
+        self.branch = branch
+        self.upstream = upstream
+        self.ahead = ahead
+        self.behind = behind
+        self.commits = commits
+        self.uncommitted = uncommitted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.branch = try c.decode(String.self, forKey: .branch)
+        self.upstream = try c.decodeIfPresent(String.self, forKey: .upstream)
+        self.ahead = try c.decode(Int.self, forKey: .ahead)
+        self.behind = try c.decode(Int.self, forKey: .behind)
+        self.commits = try c.decode([DiffIndexCommit]?.self, forKey: .commits)
+        self.uncommitted = try c.decode([DiffIndexFileStatus]?.self, forKey: .uncommitted)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.branch, forKey: .branch)
+        try c.encodeIfPresent(self.upstream, forKey: .upstream)
+        try c.encode(self.ahead, forKey: .ahead)
+        try c.encode(self.behind, forKey: .behind)
+        try c.encode(self.commits, forKey: .commits)
+        try c.encode(self.uncommitted, forKey: .uncommitted)
+    }
 }
 
 /// TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index.
 public struct TaskDiffIndexResp: Codable {
-    public let repositories: [DiffIndexRepository]
+    public let repositories: [DiffIndexRepository]?
+
+    private enum CodingKeys: String, CodingKey {
+        case repositories
+    }
+
+    public init(repositories: [DiffIndexRepository]?) {
+        self.repositories = repositories
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repositories = try c.decode([DiffIndexRepository]?.self, forKey: .repositories)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repositories, forKey: .repositories)
+    }
 }
 
 /// FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
 public struct FileDiffResp: Codable {
     public let diff: String
+
+    public init(diff: String) {
+        self.diff = diff
+    }
 }
 
 /// TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
 public struct TaskRepoStatusResp: Codable {
-    public let repositories: [GitRepositoryState]
+    public let repositories: [GitRepositoryState]?
+
+    private enum CodingKeys: String, CodingKey {
+        case repositories
+    }
+
+    public init(repositories: [GitRepositoryState]?) {
+        self.repositories = repositories
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repositories = try c.decode([GitRepositoryState]?.self, forKey: .repositories)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repositories, forKey: .repositories)
+    }
 }
 
 /// ProcessInfo describes a single process running inside the task runtime instance.
@@ -1634,30 +3042,97 @@ public struct ProcessInfo: Codable {
     public let startedAt: ISOTimestamp
     /// Command is the full command line reported by the runtime.
     public let command: String
+
+    public init(pid: Int, ppid: Int, pgrp: Int, user: String, state: String, priority: Int, nice: Int, threads: Int, openFDs: Int? = nil, cpu: Double, mem: Double, rssBytes: Int, cpuTime: Int, startedAt: ISOTimestamp, command: String) {
+        self.pid = pid
+        self.ppid = ppid
+        self.pgrp = pgrp
+        self.user = user
+        self.state = state
+        self.priority = priority
+        self.nice = nice
+        self.threads = threads
+        self.openFDs = openFDs
+        self.cpu = cpu
+        self.mem = mem
+        self.rssBytes = rssBytes
+        self.cpuTime = cpuTime
+        self.startedAt = startedAt
+        self.command = command
+    }
 }
 
 /// ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes.
 public struct ProcessListResp: Codable {
-    public let processes: [ProcessInfo]
+    public let processes: [ProcessInfo]?
+
+    private enum CodingKeys: String, CodingKey {
+        case processes
+    }
+
+    public init(processes: [ProcessInfo]?) {
+        self.processes = processes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.processes = try c.decode([ProcessInfo]?.self, forKey: .processes)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.processes, forKey: .processes)
+    }
 }
 
 /// SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal.
 public struct SignalProcessReq: Codable {
     /// "SIGTERM" or "SIGKILL"
     public let signal: String
+
+    public init(signal: String) {
+        self.signal = signal
+    }
 }
 
 /// TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 /// It returns the full (untruncated) input for a tool call.
 public struct TaskToolInputResp: Codable {
     public let toolUseID: String
-    public let input: JSONValue
+    public let input: JSONValue?
+
+    private enum CodingKeys: String, CodingKey {
+        case toolUseID
+        case input
+    }
+
+    public init(toolUseID: String, input: JSONValue?) {
+        self.toolUseID = toolUseID
+        self.input = input
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.toolUseID = try c.decode(String.self, forKey: .toolUseID)
+        self.input = try c.decode(JSONValue?.self, forKey: .input)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.toolUseID, forKey: .toolUseID)
+        try c.encode(self.input, forKey: .input)
+    }
 }
 
 /// WarningDetail describes a failed operation on a repository.
 public struct WarningDetail: Codable {
     public let repo: String
     public let error: String
+
+    public init(repo: String, error: String) {
+        self.repo = repo
+        self.error = error
+    }
 }
 
 /// Warning is an alert episode. ID is stable across detail updates and SSE replay;
@@ -1666,7 +3141,37 @@ public struct Warning: Codable {
     public let id: String
     public let category: WarningCategory
     public let message: String
-    public let details: [WarningDetail]
+    public let details: [WarningDetail]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case category
+        case message
+        case details
+    }
+
+    public init(id: String, category: WarningCategory, message: String, details: [WarningDetail]?) {
+        self.id = id
+        self.category = category
+        self.message = message
+        self.details = details
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.category = try c.decode(WarningCategory.self, forKey: .category)
+        self.message = try c.decode(String.self, forKey: .message)
+        self.details = try c.decode([WarningDetail]?.self, forKey: .details)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.id, forKey: .id)
+        try c.encode(self.category, forKey: .category)
+        try c.encode(self.message, forKey: .message)
+        try c.encode(self.details, forKey: .details)
+    }
 }
 
 /// TaskListRestorationStatus carries background runtime/history restoration
@@ -1675,6 +3180,11 @@ public struct Warning: Codable {
 public struct TaskListRestorationStatus: Codable {
     public let loading: Bool
     public let error: String
+
+    public init(loading: Bool, error: String) {
+        self.loading = loading
+        self.error = error
+    }
 }
 
 /// ServerHealth is compact last-observed machine health. Time is omitted before the first
@@ -1692,6 +3202,17 @@ public struct ServerHealth: Codable {
     public let cpuHigh: Bool
     public let memHigh: Bool
     public let error: String?
+
+    public init(time: ISOTimestamp? = nil, cpuPerc: Double, cpuCount: Int, memUsed: Int, memTotal: Int, cpuHigh: Bool, memHigh: Bool, error: String? = nil) {
+        self.time = time
+        self.cpuPerc = cpuPerc
+        self.cpuCount = cpuCount
+        self.memUsed = memUsed
+        self.memTotal = memTotal
+        self.cpuHigh = cpuHigh
+        self.memHigh = memHigh
+        self.error = error
+    }
 }
 
 /// TaskListEvent is a discriminated-union event for the task list SSE stream.
@@ -1713,12 +3234,26 @@ public struct TaskListEvent: Codable {
     public let kind: String
     public let snapshot: [Task]?
     public let upsert: Task?
-    public let patch: [String: JSONValue]?
+    public let patch: [String: JSONValue?]?
     public let delete: String?
     public let repos: [Repo]?
     public let warning: Warning?
     public let status: TaskListRestorationStatus?
     public let health: ServerHealth?
+
+    public init(focus: String? = nil, complete: Bool? = nil, kind: String, snapshot: [Task]? = nil, upsert: Task? = nil, patch: [String: JSONValue?]? = nil, delete: String? = nil, repos: [Repo]? = nil, warning: Warning? = nil, status: TaskListRestorationStatus? = nil, health: ServerHealth? = nil) {
+        self.focus = focus
+        self.complete = complete
+        self.kind = kind
+        self.snapshot = snapshot
+        self.upsert = upsert
+        self.patch = patch
+        self.delete = delete
+        self.repos = repos
+        self.warning = warning
+        self.status = status
+        self.health = health
+    }
 }
 
 /// QuotaRateLimit is a single rate-limit window snapshot from any provider.
@@ -1731,6 +3266,13 @@ public struct QuotaRateLimit: Codable {
     public let utilization: Double
     /// zero when unknown
     public let resetsAt: ISOTimestamp?
+
+    public init(label: String, window: String, utilization: Double, resetsAt: ISOTimestamp? = nil) {
+        self.label = label
+        self.window = window
+        self.utilization = utilization
+        self.resetsAt = resetsAt
+    }
 }
 
 /// UnassessedQuotaWindow identifies a reported bucket with unknown utilization.
@@ -1739,6 +3281,11 @@ public struct UnassessedQuotaWindow: Codable {
     public let group: String
     /// Native bucket ID, when reported.
     public let window: String?
+
+    public init(group: String, window: String? = nil) {
+        self.group = group
+        self.window = window
+    }
 }
 
 /// QuotaBalance is a balance/credit snapshot from any provider. When the
@@ -1761,6 +3308,17 @@ public struct QuotaBalance: Codable {
     public let monthlyLimit: Double?
     /// 0.0–1.0 against the cap
     public let utilization: Double?
+
+    public init(currency: String, total: Double, granted: Double? = nil, toppedUp: Double? = nil, extraEnabled: Bool? = nil, usedCredits: Double? = nil, monthlyLimit: Double? = nil, utilization: Double? = nil) {
+        self.currency = currency
+        self.total = total
+        self.granted = granted
+        self.toppedUp = toppedUp
+        self.extraEnabled = extraEnabled
+        self.usedCredits = usedCredits
+        self.monthlyLimit = monthlyLimit
+        self.utilization = utilization
+    }
 }
 
 /// ProviderQuota is the quota data for one provider.
@@ -1789,6 +3347,20 @@ public struct ProviderQuota: Codable {
     /// off-peak. Clients should interpolate between snapshots, which arrive
     /// at the usage cache TTL cadence.
     public let pricingTransitionAt: ISOTimestamp?
+
+    public init(provider: QuotaProvider, label: String, logoUrl: String, authKind: ProviderAuthKind, usageUrl: String, fetchStatus: ProviderFetchStatus, rateLimits: [QuotaRateLimit]? = nil, unassessedWindows: [UnassessedQuotaWindow]? = nil, balance: QuotaBalance? = nil, pricingPhase: String? = nil, pricingTransitionAt: ISOTimestamp? = nil) {
+        self.provider = provider
+        self.label = label
+        self.logoUrl = logoUrl
+        self.authKind = authKind
+        self.usageUrl = usageUrl
+        self.fetchStatus = fetchStatus
+        self.rateLimits = rateLimits
+        self.unassessedWindows = unassessedWindows
+        self.balance = balance
+        self.pricingPhase = pricingPhase
+        self.pricingTransitionAt = pricingTransitionAt
+    }
 }
 
 /// LocalWindow is the aggregated local cost for a rolling time window.
@@ -1800,17 +3372,48 @@ public struct LocalWindow: Codable {
     public let costKnown: Bool
     public let inputTokens: Int
     public let outputTokens: Int
+
+    public init(duration: String, costUSD: Double, costKnown: Bool, inputTokens: Int, outputTokens: Int) {
+        self.duration = duration
+        self.costUSD = costUSD
+        self.costKnown = costKnown
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+    }
 }
 
 /// LocalUsage is the aggregated cost across all tasks within recent time windows.
 public struct LocalUsage: Codable {
-    public let windows: [LocalWindow]
+    public let windows: [LocalWindow]?
+
+    private enum CodingKeys: String, CodingKey {
+        case windows
+    }
+
+    public init(windows: [LocalWindow]?) {
+        self.windows = windows
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.windows = try c.decode([LocalWindow]?.self, forKey: .windows)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.windows, forKey: .windows)
+    }
 }
 
 /// UsageResp is the response for GET /api/caic/v1/usage.
 public struct UsageResp: Codable {
     public let providers: [ProviderQuota]?
     public let local: LocalUsage
+
+    public init(providers: [ProviderQuota]? = nil, local: LocalUsage) {
+        self.providers = providers
+        self.local = local
+    }
 }
 
 /// UsageDashboardCacheWrite counts cache writes for one applied lifetime.
@@ -1818,6 +3421,11 @@ public struct UsageResp: Codable {
 public struct UsageDashboardCacheWrite: Codable {
     public let ttlSeconds: Int
     public let tokens: Int
+
+    public init(ttlSeconds: Int, tokens: Int) {
+        self.ttlSeconds = ttlSeconds
+        self.tokens = tokens
+    }
 }
 
 /// UsageDashboardTokens separates usage totals by their prompt-cache bucket.
@@ -1831,6 +3439,16 @@ public struct UsageDashboardTokens: Codable {
     public let cacheReadTokens: Int
     public let outputTokens: Int
     public let reasoningTokens: Int
+
+    public init(cacheWrites: [UsageDashboardCacheWrite]? = nil, inputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, outputTokens: Int, reasoningTokens: Int) {
+        self.cacheWrites = cacheWrites
+        self.inputTokens = inputTokens
+        self.cacheWrite5mTokens = cacheWrite5mTokens
+        self.cacheWrite1hTokens = cacheWrite1hTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.outputTokens = outputTokens
+        self.reasoningTokens = reasoningTokens
+    }
 }
 
 /// UsageDashboardCost preserves additive cost provenance across range filters.
@@ -1842,12 +3460,25 @@ public struct UsageDashboardCost: Codable {
     public let reportedParts: Int
     public let estimatedParts: Int
     public let unknownParts: Int
+
+    public init(reportedUSD: Double, estimatedUSD: Double, reportedParts: Int, estimatedParts: Int, unknownParts: Int) {
+        self.reportedUSD = reportedUSD
+        self.estimatedUSD = estimatedUSD
+        self.reportedParts = reportedParts
+        self.estimatedParts = estimatedParts
+        self.unknownParts = unknownParts
+    }
 }
 
 /// UsageDashboardCount is a named counter such as a skill read or tool call.
 public struct UsageDashboardCount: Codable {
     public let name: String
     public let count: Int
+
+    public init(name: String, count: Int) {
+        self.name = name
+        self.count = count
+    }
 }
 
 /// UsageDashboardToolDuration counts measured calls whose duration falls above
@@ -1855,6 +3486,11 @@ public struct UsageDashboardCount: Codable {
 public struct UsageDashboardToolDuration: Codable {
     public let upperMs: Int
     public let count: Int
+
+    public init(upperMs: Int, count: Int) {
+        self.upperMs = upperMs
+        self.count = count
+    }
 }
 
 /// UsageDashboardToolTiming measures completed tool calls with known duration.
@@ -1864,7 +3500,37 @@ public struct UsageDashboardToolTiming: Codable {
     public let name: String
     public let count: Int
     public let durationMs: Int
-    public let buckets: [UsageDashboardToolDuration]
+    public let buckets: [UsageDashboardToolDuration]?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case count
+        case durationMs
+        case buckets
+    }
+
+    public init(name: String, count: Int, durationMs: Int, buckets: [UsageDashboardToolDuration]?) {
+        self.name = name
+        self.count = count
+        self.durationMs = durationMs
+        self.buckets = buckets
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.count = try c.decode(Int.self, forKey: .count)
+        self.durationMs = try c.decode(Int.self, forKey: .durationMs)
+        self.buckets = try c.decode([UsageDashboardToolDuration]?.self, forKey: .buckets)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.count, forKey: .count)
+        try c.encode(self.durationMs, forKey: .durationMs)
+        try c.encode(self.buckets, forKey: .buckets)
+    }
 }
 
 /// UsageDashboardRepo is a repository leaderboard entry for one UTC day.
@@ -1872,6 +3538,11 @@ public struct UsageDashboardToolTiming: Codable {
 public struct UsageDashboardRepo: Codable {
     public let repo: String
     public let tasks: Int
+
+    public init(repo: String, tasks: Int) {
+        self.repo = repo
+        self.tasks = tasks
+    }
 }
 
 /// UsageDashboardModel is one model's totals within a UTC day. It carries the
@@ -1889,10 +3560,84 @@ public struct UsageDashboardModel: Codable {
     public let costUSD: Double
     public let cost: UsageDashboardCost
     public let contextWindow: Int
-    public let tools: [UsageDashboardCount]
-    public let toolTimings: [UsageDashboardToolTiming]
-    public let skills: [UsageDashboardCount]
-    public let repos: [UsageDashboardRepo]
+    public let tools: [UsageDashboardCount]?
+    public let toolTimings: [UsageDashboardToolTiming]?
+    public let skills: [UsageDashboardCount]?
+    public let repos: [UsageDashboardRepo]?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case tokens
+        case turns
+        case erroredTurns
+        case apiMs
+        case wallMs
+        case compactions
+        case subagentSpawns
+        case costUSD
+        case cost
+        case contextWindow
+        case tools
+        case toolTimings
+        case skills
+        case repos
+    }
+
+    public init(model: String, tokens: UsageDashboardTokens, turns: Int, erroredTurns: Int, apiMs: Int, wallMs: Int, compactions: Int, subagentSpawns: Int, costUSD: Double, cost: UsageDashboardCost, contextWindow: Int, tools: [UsageDashboardCount]?, toolTimings: [UsageDashboardToolTiming]?, skills: [UsageDashboardCount]?, repos: [UsageDashboardRepo]?) {
+        self.model = model
+        self.tokens = tokens
+        self.turns = turns
+        self.erroredTurns = erroredTurns
+        self.apiMs = apiMs
+        self.wallMs = wallMs
+        self.compactions = compactions
+        self.subagentSpawns = subagentSpawns
+        self.costUSD = costUSD
+        self.cost = cost
+        self.contextWindow = contextWindow
+        self.tools = tools
+        self.toolTimings = toolTimings
+        self.skills = skills
+        self.repos = repos
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.model = try c.decode(String.self, forKey: .model)
+        self.tokens = try c.decode(UsageDashboardTokens.self, forKey: .tokens)
+        self.turns = try c.decode(Int.self, forKey: .turns)
+        self.erroredTurns = try c.decode(Int.self, forKey: .erroredTurns)
+        self.apiMs = try c.decode(Int.self, forKey: .apiMs)
+        self.wallMs = try c.decode(Int.self, forKey: .wallMs)
+        self.compactions = try c.decode(Int.self, forKey: .compactions)
+        self.subagentSpawns = try c.decode(Int.self, forKey: .subagentSpawns)
+        self.costUSD = try c.decode(Double.self, forKey: .costUSD)
+        self.cost = try c.decode(UsageDashboardCost.self, forKey: .cost)
+        self.contextWindow = try c.decode(Int.self, forKey: .contextWindow)
+        self.tools = try c.decode([UsageDashboardCount]?.self, forKey: .tools)
+        self.toolTimings = try c.decode([UsageDashboardToolTiming]?.self, forKey: .toolTimings)
+        self.skills = try c.decode([UsageDashboardCount]?.self, forKey: .skills)
+        self.repos = try c.decode([UsageDashboardRepo]?.self, forKey: .repos)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.model, forKey: .model)
+        try c.encode(self.tokens, forKey: .tokens)
+        try c.encode(self.turns, forKey: .turns)
+        try c.encode(self.erroredTurns, forKey: .erroredTurns)
+        try c.encode(self.apiMs, forKey: .apiMs)
+        try c.encode(self.wallMs, forKey: .wallMs)
+        try c.encode(self.compactions, forKey: .compactions)
+        try c.encode(self.subagentSpawns, forKey: .subagentSpawns)
+        try c.encode(self.costUSD, forKey: .costUSD)
+        try c.encode(self.cost, forKey: .cost)
+        try c.encode(self.contextWindow, forKey: .contextWindow)
+        try c.encode(self.tools, forKey: .tools)
+        try c.encode(self.toolTimings, forKey: .toolTimings)
+        try c.encode(self.skills, forKey: .skills)
+        try c.encode(self.repos, forKey: .repos)
+    }
 }
 
 /// UsageDashboardHarness is one coding harness's totals within a UTC day,
@@ -1909,11 +3654,85 @@ public struct UsageDashboardHarness: Codable {
     public let subagentSpawns: Int
     public let costUSD: Double
     public let cost: UsageDashboardCost
-    public let tools: [UsageDashboardCount]
-    public let toolTimings: [UsageDashboardToolTiming]
-    public let skills: [UsageDashboardCount]
-    public let repos: [UsageDashboardRepo]
-    public let models: [UsageDashboardModel]
+    public let tools: [UsageDashboardCount]?
+    public let toolTimings: [UsageDashboardToolTiming]?
+    public let skills: [UsageDashboardCount]?
+    public let repos: [UsageDashboardRepo]?
+    public let models: [UsageDashboardModel]?
+
+    private enum CodingKeys: String, CodingKey {
+        case harness
+        case tokens
+        case turns
+        case erroredTurns
+        case apiMs
+        case wallMs
+        case compactions
+        case subagentSpawns
+        case costUSD
+        case cost
+        case tools
+        case toolTimings
+        case skills
+        case repos
+        case models
+    }
+
+    public init(harness: String, tokens: UsageDashboardTokens, turns: Int, erroredTurns: Int, apiMs: Int, wallMs: Int, compactions: Int, subagentSpawns: Int, costUSD: Double, cost: UsageDashboardCost, tools: [UsageDashboardCount]?, toolTimings: [UsageDashboardToolTiming]?, skills: [UsageDashboardCount]?, repos: [UsageDashboardRepo]?, models: [UsageDashboardModel]?) {
+        self.harness = harness
+        self.tokens = tokens
+        self.turns = turns
+        self.erroredTurns = erroredTurns
+        self.apiMs = apiMs
+        self.wallMs = wallMs
+        self.compactions = compactions
+        self.subagentSpawns = subagentSpawns
+        self.costUSD = costUSD
+        self.cost = cost
+        self.tools = tools
+        self.toolTimings = toolTimings
+        self.skills = skills
+        self.repos = repos
+        self.models = models
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.harness = try c.decode(String.self, forKey: .harness)
+        self.tokens = try c.decode(UsageDashboardTokens.self, forKey: .tokens)
+        self.turns = try c.decode(Int.self, forKey: .turns)
+        self.erroredTurns = try c.decode(Int.self, forKey: .erroredTurns)
+        self.apiMs = try c.decode(Int.self, forKey: .apiMs)
+        self.wallMs = try c.decode(Int.self, forKey: .wallMs)
+        self.compactions = try c.decode(Int.self, forKey: .compactions)
+        self.subagentSpawns = try c.decode(Int.self, forKey: .subagentSpawns)
+        self.costUSD = try c.decode(Double.self, forKey: .costUSD)
+        self.cost = try c.decode(UsageDashboardCost.self, forKey: .cost)
+        self.tools = try c.decode([UsageDashboardCount]?.self, forKey: .tools)
+        self.toolTimings = try c.decode([UsageDashboardToolTiming]?.self, forKey: .toolTimings)
+        self.skills = try c.decode([UsageDashboardCount]?.self, forKey: .skills)
+        self.repos = try c.decode([UsageDashboardRepo]?.self, forKey: .repos)
+        self.models = try c.decode([UsageDashboardModel]?.self, forKey: .models)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.harness, forKey: .harness)
+        try c.encode(self.tokens, forKey: .tokens)
+        try c.encode(self.turns, forKey: .turns)
+        try c.encode(self.erroredTurns, forKey: .erroredTurns)
+        try c.encode(self.apiMs, forKey: .apiMs)
+        try c.encode(self.wallMs, forKey: .wallMs)
+        try c.encode(self.compactions, forKey: .compactions)
+        try c.encode(self.subagentSpawns, forKey: .subagentSpawns)
+        try c.encode(self.costUSD, forKey: .costUSD)
+        try c.encode(self.cost, forKey: .cost)
+        try c.encode(self.tools, forKey: .tools)
+        try c.encode(self.toolTimings, forKey: .toolTimings)
+        try c.encode(self.skills, forKey: .skills)
+        try c.encode(self.repos, forKey: .repos)
+        try c.encode(self.models, forKey: .models)
+    }
 }
 
 /// UsageDashboardDay is the complete daily usage snapshot from the durable
@@ -1930,12 +3749,94 @@ public struct UsageDashboardDay: Codable {
     public let subagentSpawnsBackground: Int
     public let costUSD: Double
     public let cost: UsageDashboardCost
-    public let models: [UsageDashboardModel]
-    public let harnesses: [UsageDashboardHarness]
-    public let repos: [UsageDashboardRepo]
-    public let skills: [UsageDashboardCount]
-    public let tools: [UsageDashboardCount]
-    public let toolTimings: [UsageDashboardToolTiming]
+    public let models: [UsageDashboardModel]?
+    public let harnesses: [UsageDashboardHarness]?
+    public let repos: [UsageDashboardRepo]?
+    public let skills: [UsageDashboardCount]?
+    public let tools: [UsageDashboardCount]?
+    public let toolTimings: [UsageDashboardToolTiming]?
+
+    private enum CodingKeys: String, CodingKey {
+        case day
+        case tokens
+        case turns
+        case erroredTurns
+        case apiMs
+        case wallMs
+        case compactions
+        case subagentSpawns
+        case subagentSpawnsBackground
+        case costUSD
+        case cost
+        case models
+        case harnesses
+        case repos
+        case skills
+        case tools
+        case toolTimings
+    }
+
+    public init(day: String, tokens: UsageDashboardTokens, turns: Int, erroredTurns: Int, apiMs: Int, wallMs: Int, compactions: Int, subagentSpawns: Int, subagentSpawnsBackground: Int, costUSD: Double, cost: UsageDashboardCost, models: [UsageDashboardModel]?, harnesses: [UsageDashboardHarness]?, repos: [UsageDashboardRepo]?, skills: [UsageDashboardCount]?, tools: [UsageDashboardCount]?, toolTimings: [UsageDashboardToolTiming]?) {
+        self.day = day
+        self.tokens = tokens
+        self.turns = turns
+        self.erroredTurns = erroredTurns
+        self.apiMs = apiMs
+        self.wallMs = wallMs
+        self.compactions = compactions
+        self.subagentSpawns = subagentSpawns
+        self.subagentSpawnsBackground = subagentSpawnsBackground
+        self.costUSD = costUSD
+        self.cost = cost
+        self.models = models
+        self.harnesses = harnesses
+        self.repos = repos
+        self.skills = skills
+        self.tools = tools
+        self.toolTimings = toolTimings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.day = try c.decode(String.self, forKey: .day)
+        self.tokens = try c.decode(UsageDashboardTokens.self, forKey: .tokens)
+        self.turns = try c.decode(Int.self, forKey: .turns)
+        self.erroredTurns = try c.decode(Int.self, forKey: .erroredTurns)
+        self.apiMs = try c.decode(Int.self, forKey: .apiMs)
+        self.wallMs = try c.decode(Int.self, forKey: .wallMs)
+        self.compactions = try c.decode(Int.self, forKey: .compactions)
+        self.subagentSpawns = try c.decode(Int.self, forKey: .subagentSpawns)
+        self.subagentSpawnsBackground = try c.decode(Int.self, forKey: .subagentSpawnsBackground)
+        self.costUSD = try c.decode(Double.self, forKey: .costUSD)
+        self.cost = try c.decode(UsageDashboardCost.self, forKey: .cost)
+        self.models = try c.decode([UsageDashboardModel]?.self, forKey: .models)
+        self.harnesses = try c.decode([UsageDashboardHarness]?.self, forKey: .harnesses)
+        self.repos = try c.decode([UsageDashboardRepo]?.self, forKey: .repos)
+        self.skills = try c.decode([UsageDashboardCount]?.self, forKey: .skills)
+        self.tools = try c.decode([UsageDashboardCount]?.self, forKey: .tools)
+        self.toolTimings = try c.decode([UsageDashboardToolTiming]?.self, forKey: .toolTimings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.day, forKey: .day)
+        try c.encode(self.tokens, forKey: .tokens)
+        try c.encode(self.turns, forKey: .turns)
+        try c.encode(self.erroredTurns, forKey: .erroredTurns)
+        try c.encode(self.apiMs, forKey: .apiMs)
+        try c.encode(self.wallMs, forKey: .wallMs)
+        try c.encode(self.compactions, forKey: .compactions)
+        try c.encode(self.subagentSpawns, forKey: .subagentSpawns)
+        try c.encode(self.subagentSpawnsBackground, forKey: .subagentSpawnsBackground)
+        try c.encode(self.costUSD, forKey: .costUSD)
+        try c.encode(self.cost, forKey: .cost)
+        try c.encode(self.models, forKey: .models)
+        try c.encode(self.harnesses, forKey: .harnesses)
+        try c.encode(self.repos, forKey: .repos)
+        try c.encode(self.skills, forKey: .skills)
+        try c.encode(self.tools, forKey: .tools)
+        try c.encode(self.toolTimings, forKey: .toolTimings)
+    }
 }
 
 /// UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
@@ -1943,18 +3844,49 @@ public struct UsageDashboardDay: Codable {
 /// has been recorded yet.
 public struct UsageDashboardResp: Codable {
     public let dataSince: String?
-    public let days: [UsageDashboardDay]
+    public let days: [UsageDashboardDay]?
+
+    private enum CodingKeys: String, CodingKey {
+        case dataSince
+        case days
+    }
+
+    public init(dataSince: String? = nil, days: [UsageDashboardDay]?) {
+        self.dataSince = dataSince
+        self.days = days
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.dataSince = try c.decodeIfPresent(String.self, forKey: .dataSince)
+        self.days = try c.decode([UsageDashboardDay]?.self, forKey: .days)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encodeIfPresent(self.dataSince, forKey: .dataSince)
+        try c.encode(self.days, forKey: .days)
+    }
 }
 
 /// WebFetchReq is the request body for POST /api/caic/v1/web/fetch.
 public struct WebFetchReq: Codable {
     public let url: String
+
+    public init(url: String) {
+        self.url = url
+    }
 }
 
 /// WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 public struct WebFetchResp: Codable {
     public let title: String
     public let content: String
+
+    public init(title: String, content: String) {
+        self.title = title
+        self.content = content
+    }
 }
 
 /// HistoryBootstrap identifies the raw prefix captured with a HistoryManifest.
@@ -1970,6 +3902,16 @@ public struct HistoryBootstrap: Codable {
     public let through: Int
     public let cursor: String
     public let resourceBase: String
+
+    public init(projectionVersion: String, generation: String, scope: String, recordsPerChunk: Int, through: Int, cursor: String, resourceBase: String) {
+        self.projectionVersion = projectionVersion
+        self.generation = generation
+        self.scope = scope
+        self.recordsPerChunk = recordsPerChunk
+        self.through = through
+        self.cursor = cursor
+        self.resourceBase = resourceBase
+    }
 }
 
 /// HistoryPosition identifies one normalized output in a one-based physical raw
@@ -1978,6 +3920,11 @@ public struct HistoryBootstrap: Codable {
 public struct HistoryPosition: Codable {
     public let recordID: Int
     public let index: UInt32
+
+    public init(recordID: Int, index: UInt32) {
+        self.recordID = recordID
+        self.index = index
+    }
 }
 
 /// HistorySlice selects inclusive normalized positions, independently of raw
@@ -1985,6 +3932,11 @@ public struct HistoryPosition: Codable {
 public struct HistorySlice: Codable {
     public let first: HistoryPosition
     public let last: HistoryPosition
+
+    public init(first: HistoryPosition, last: HistoryPosition) {
+        self.first = first
+        self.last = last
+    }
 }
 
 /// EventMessageSource identifies the provider origin of any normalized event.
@@ -1998,6 +3950,15 @@ public struct EventMessageSource: Codable {
     public let turnID: String?
     public let itemID: String?
     public let rootThreadID: String?
+
+    public init(agentID: String? = nil, delegationToolUseID: String? = nil, threadID: String? = nil, turnID: String? = nil, itemID: String? = nil, rootThreadID: String? = nil) {
+        self.agentID = agentID
+        self.delegationToolUseID = delegationToolUseID
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.rootThreadID = rootThreadID
+    }
 }
 
 /// EventInit is emitted once at the start of a session. It includes a Harness
@@ -2011,22 +3972,45 @@ public struct EventInit: Codable {
     public let tools: [String]?
     public let cwd: String
     public let harness: String
+
+    public init(reportedModel: String, reportedEffort: String? = nil, agentVersion: String, sessionID: String, tools: [String]? = nil, cwd: String, harness: String) {
+        self.reportedModel = reportedModel
+        self.reportedEffort = reportedEffort
+        self.agentVersion = agentVersion
+        self.sessionID = sessionID
+        self.tools = tools
+        self.cwd = cwd
+        self.harness = harness
+    }
 }
 
 /// EventText is an assistant text block.
 public struct EventText: Codable {
     public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
 }
 
 /// EventTextDelta is a streaming text fragment from --include-partial-messages.
 public struct EventTextDelta: Codable {
     public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
 }
 
 /// EventFileChange is one changed file rendered from a unified patch.
 public struct EventFileChange: Codable {
     public let path: String
     public let patch: String
+
+    public init(path: String, patch: String) {
+        self.path = path
+        self.patch = patch
+    }
 }
 
 /// EventSubagentSpawn is one backend-normalized subagent invocation.
@@ -2035,6 +4019,13 @@ public struct EventSubagentSpawn: Codable {
     public let task: String
     public let label: String?
     public let phase: String?
+
+    public init(agent: String, task: String, label: String? = nil, phase: String? = nil) {
+        self.agent = agent
+        self.task = task
+        self.label = label
+        self.phase = phase
+    }
 }
 
 /// EventToolInputView is a backend-normalized rendering model for known tool
@@ -2043,13 +4034,19 @@ public struct EventToolInputView: Codable {
     public let kind: EventToolInputKind
     public let files: [EventFileChange]?
     public let subagents: [EventSubagentSpawn]?
+
+    public init(kind: EventToolInputKind, files: [EventFileChange]? = nil, subagents: [EventSubagentSpawn]? = nil) {
+        self.kind = kind
+        self.files = files
+        self.subagents = subagents
+    }
 }
 
 /// EventToolUse is emitted when the assistant invokes a tool.
 public struct EventToolUse: Codable {
     public let toolUseID: String
     public let name: String
-    public let input: JSONValue
+    public let input: JSONValue?
     /// Backend-normalized short display detail for tool headers.
     public let detail: String?
     /// Backend-normalized structured input for tool-card rendering.
@@ -2058,6 +4055,48 @@ public struct EventToolUse: Codable {
     public let inputTruncated: Bool?
     /// True when the tool runs in the background (Bash/Agent run_in_background).
     public let background: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case toolUseID
+        case name
+        case input
+        case detail
+        case inputView
+        case inputTruncated
+        case background
+    }
+
+    public init(toolUseID: String, name: String, input: JSONValue?, detail: String? = nil, inputView: EventToolInputView? = nil, inputTruncated: Bool? = nil, background: Bool? = nil) {
+        self.toolUseID = toolUseID
+        self.name = name
+        self.input = input
+        self.detail = detail
+        self.inputView = inputView
+        self.inputTruncated = inputTruncated
+        self.background = background
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.toolUseID = try c.decode(String.self, forKey: .toolUseID)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.input = try c.decode(JSONValue?.self, forKey: .input)
+        self.detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        self.inputView = try c.decodeIfPresent(EventToolInputView.self, forKey: .inputView)
+        self.inputTruncated = try c.decodeIfPresent(Bool.self, forKey: .inputTruncated)
+        self.background = try c.decodeIfPresent(Bool.self, forKey: .background)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.toolUseID, forKey: .toolUseID)
+        try c.encode(self.name, forKey: .name)
+        try c.encode(self.input, forKey: .input)
+        try c.encodeIfPresent(self.detail, forKey: .detail)
+        try c.encodeIfPresent(self.inputView, forKey: .inputView)
+        try c.encodeIfPresent(self.inputTruncated, forKey: .inputTruncated)
+        try c.encodeIfPresent(self.background, forKey: .background)
+    }
 }
 
 /// EventToolResult is emitted when a tool call completes.
@@ -2066,26 +4105,89 @@ public struct EventToolResult: Codable {
     /// Seconds; server-computed; 0 if unknown.
     public let duration: Double
     public let error: String?
+
+    public init(toolUseID: String, duration: Double, error: String? = nil) {
+        self.toolUseID = toolUseID
+        self.duration = duration
+        self.error = error
+    }
 }
 
 /// AskOption is a single option in an AskUserQuestion.
 public struct AskOption: Codable {
     public let label: String
     public let description: String?
+
+    public init(label: String, description: String? = nil) {
+        self.label = label
+        self.description = description
+    }
 }
 
 /// AskQuestion is a single question from AskUserQuestion.
 public struct AskQuestion: Codable {
     public let question: String
     public let header: String?
-    public let options: [AskOption]
+    public let options: [AskOption]?
     public let multiSelect: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case question
+        case header
+        case options
+        case multiSelect
+    }
+
+    public init(question: String, header: String? = nil, options: [AskOption]?, multiSelect: Bool? = nil) {
+        self.question = question
+        self.header = header
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.question = try c.decode(String.self, forKey: .question)
+        self.header = try c.decodeIfPresent(String.self, forKey: .header)
+        self.options = try c.decode([AskOption]?.self, forKey: .options)
+        self.multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.question, forKey: .question)
+        try c.encodeIfPresent(self.header, forKey: .header)
+        try c.encode(self.options, forKey: .options)
+        try c.encodeIfPresent(self.multiSelect, forKey: .multiSelect)
+    }
 }
 
 /// EventAsk is emitted when the agent asks the user a question.
 public struct EventAsk: Codable {
     public let toolUseID: String
-    public let questions: [AskQuestion]
+    public let questions: [AskQuestion]?
+
+    private enum CodingKeys: String, CodingKey {
+        case toolUseID
+        case questions
+    }
+
+    public init(toolUseID: String, questions: [AskQuestion]?) {
+        self.toolUseID = toolUseID
+        self.questions = questions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.toolUseID = try c.decode(String.self, forKey: .toolUseID)
+        self.questions = try c.decode([AskQuestion]?.self, forKey: .questions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.toolUseID, forKey: .toolUseID)
+        try c.encode(self.questions, forKey: .questions)
+    }
 }
 
 /// EventUsage reports token usage and independent native context occupancy.
@@ -2102,12 +4204,28 @@ public struct EventUsage: Codable {
     public let contextUsed: Int?
     /// Active model context capacity.
     public let contextWindow: Int?
+
+    public init(inputTokens: Int, outputTokens: Int, cacheCreationInputTokens: Int, cacheReadInputTokens: Int, reasoningOutputTokens: Int? = nil, reportedModel: String, contextUsed: Int? = nil, contextWindow: Int? = nil) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.reportedModel = reportedModel
+        self.contextUsed = contextUsed
+        self.contextWindow = contextWindow
+    }
 }
 
 /// EventCost is one completed turn's reported or API-equivalent estimated cost.
 public struct EventCost: Codable {
     public let usd: Double
     public let source: EventCostSource
+
+    public init(usd: Double, source: EventCostSource) {
+        self.usd = usd
+        self.source = source
+    }
 }
 
 /// EventResult is emitted when the task reaches a terminal state.
@@ -2124,6 +4242,19 @@ public struct EventResult: Codable {
     public let durationAPI: Double
     public let numTurns: Int
     public let usage: EventUsage
+
+    public init(cost: EventCost? = nil, subtype: String, isError: Bool, result: String, diffStat: DiffStat? = nil, totalCostUSD: Double, duration: Double, durationAPI: Double, numTurns: Int, usage: EventUsage) {
+        self.cost = cost
+        self.subtype = subtype
+        self.isError = isError
+        self.result = result
+        self.diffStat = diffStat
+        self.totalCostUSD = totalCostUSD
+        self.duration = duration
+        self.durationAPI = durationAPI
+        self.numTurns = numTurns
+        self.usage = usage
+    }
 }
 
 /// EventSystem is a system event (status, compact_boundary, etc.).
@@ -2137,6 +4268,13 @@ public struct EventSystem: Codable {
     /// ContextTokensAfter is the context size the harness reported after a
     /// compact_boundary, measured or estimated. Zero means it did not report it.
     public let contextTokensAfter: Int?
+
+    public init(subtype: String, detail: String? = nil, contextTokensBefore: Int? = nil, contextTokensAfter: Int? = nil) {
+        self.subtype = subtype
+        self.detail = detail
+        self.contextTokensBefore = contextTokensBefore
+        self.contextTokensAfter = contextTokensAfter
+    }
 }
 
 /// TodoItem is a single todo entry from a TodoWrite tool call.
@@ -2145,32 +4283,76 @@ public struct TodoItem: Codable {
     /// "pending", "in_progress", "completed".
     public let status: String
     public let activeForm: String?
+
+    public init(content: String, status: String, activeForm: String? = nil) {
+        self.content = content
+        self.status = status
+        self.activeForm = activeForm
+    }
 }
 
 /// EventTodo is emitted when the agent writes/updates its todo list.
 public struct EventTodo: Codable {
     public let toolUseID: String
-    public let todos: [TodoItem]
+    public let todos: [TodoItem]?
+
+    private enum CodingKeys: String, CodingKey {
+        case toolUseID
+        case todos
+    }
+
+    public init(toolUseID: String, todos: [TodoItem]?) {
+        self.toolUseID = toolUseID
+        self.todos = todos
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.toolUseID = try c.decode(String.self, forKey: .toolUseID)
+        self.todos = try c.decode([TodoItem]?.self, forKey: .todos)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.toolUseID, forKey: .toolUseID)
+        try c.encode(self.todos, forKey: .todos)
+    }
 }
 
 /// EventDiffStat is emitted when the relay reports updated diff statistics.
 public struct EventDiffStat: Codable {
     public let diffStat: DiffStat?
+
+    public init(diffStat: DiffStat? = nil) {
+        self.diffStat = diffStat
+    }
 }
 
 /// EventError reports an agent subprocess failure.
 public struct EventError: Codable {
     public let err: String
+
+    public init(err: String) {
+        self.err = err
+    }
 }
 
 /// EventThinking is an assistant thinking block.
 public struct EventThinking: Codable {
     public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
 }
 
 /// EventThinkingDelta is a streaming thinking fragment.
 public struct EventThinkingDelta: Codable {
     public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
 }
 
 /// EventSubagentStart is emitted when a subagent task begins. It is the legacy
@@ -2180,6 +4362,11 @@ public struct EventThinkingDelta: Codable {
 public struct EventSubagentStart: Codable {
     public let taskID: String
     public let description: String
+
+    public init(taskID: String, description: String) {
+        self.taskID = taskID
+        self.description = description
+    }
 }
 
 /// EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
@@ -2191,6 +4378,11 @@ public struct EventSubagentEnd: Codable {
     public let taskID: String
     /// "completed", "failed", "stopped"
     public let status: String
+
+    public init(taskID: String, status: String) {
+        self.taskID = taskID
+        self.status = status
+    }
 }
 
 /// EventNativeSubagent is one lifecycle update for a harness native subagent.
@@ -2208,6 +4400,18 @@ public struct EventNativeSubagent: Codable {
     /// Background reports that the harness launched the delegation detached from
     /// the parent turn, so it can outlive that turn's result.
     public let background: Bool?
+
+    public init(toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, id: String, groupID: String? = nil, label: String? = nil, prompt: String? = nil, status: EventNativeSubagentStatus, result: String? = nil, background: Bool? = nil) {
+        self.toolUseID = toolUseID
+        self.scope = scope
+        self.id = id
+        self.groupID = groupID
+        self.label = label
+        self.prompt = prompt
+        self.status = status
+        self.result = result
+        self.background = background
+    }
 }
 
 /// EventBackgroundCommand reports one harness-native detached shell command's
@@ -2222,11 +4426,25 @@ public struct EventBackgroundCommand: Codable {
     public let exitCode: Int?
     public let outputRef: String?
     public let toolUseID: String?
+
+    public init(id: String, label: String? = nil, status: String, result: String? = nil, exitCode: Int? = nil, outputRef: String? = nil, toolUseID: String? = nil) {
+        self.id = id
+        self.label = label
+        self.status = status
+        self.result = result
+        self.exitCode = exitCode
+        self.outputRef = outputRef
+        self.toolUseID = toolUseID
+    }
 }
 
 /// EventLog is a provisioning/startup log line from the runtime backend.
 public struct EventLog: Codable {
     public let line: String
+
+    public init(line: String) {
+        self.line = line
+    }
 }
 
 /// EventToolOutputDelta is a streaming output fragment from a running tool.
@@ -2238,6 +4456,13 @@ public struct EventToolOutputDelta: Codable {
     public let contentType: ToolOutputContentType?
     /// Pretty-printed JSON or other transformation.
     public let formatted: String?
+
+    public init(toolUseID: String, delta: String, contentType: ToolOutputContentType? = nil, formatted: String? = nil) {
+        self.toolUseID = toolUseID
+        self.delta = delta
+        self.contentType = contentType
+        self.formatted = formatted
+    }
 }
 
 /// EventWidget is emitted when the agent produces a complete HTML widget.
@@ -2245,12 +4470,23 @@ public struct EventWidget: Codable {
     public let toolUseID: String
     public let title: String
     public let html: String
+
+    public init(toolUseID: String, title: String, html: String) {
+        self.toolUseID = toolUseID
+        self.title = title
+        self.html = html
+    }
 }
 
 /// EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
 public struct EventWidgetDelta: Codable {
     public let toolUseID: String
     public let delta: String
+
+    public init(toolUseID: String, delta: String) {
+        self.toolUseID = toolUseID
+        self.delta = delta
+    }
 }
 
 /// EventRateLimit is emitted when the agent's rate limit status changes.
@@ -2266,6 +4502,15 @@ public struct EventRateLimit: Codable {
     public let isUsingOverage: Bool?
     /// When overage resets; zero if not using overage.
     public let overageResetsAt: ISOTimestamp?
+
+    public init(status: EventRateLimitStatus, resetsAt: ISOTimestamp? = nil, rateLimitType: String, utilization: Double, isUsingOverage: Bool? = nil, overageResetsAt: ISOTimestamp? = nil) {
+        self.status = status
+        self.resetsAt = resetsAt
+        self.rateLimitType = rateLimitType
+        self.utilization = utilization
+        self.isUsingOverage = isUsingOverage
+        self.overageResetsAt = overageResetsAt
+    }
 }
 
 /// EventRepositoryCommit identifies one immutable repository branch tip in a
@@ -2277,6 +4522,12 @@ public struct EventRepositoryCommit: Codable {
     public let branchName: String
     /// CommitHash is the full Git object ID of the branch tip.
     public let commitHash: String
+
+    public init(repositoryPath: String, branchName: String, commitHash: String) {
+        self.repositoryPath = repositoryPath
+        self.branchName = branchName
+        self.commitHash = commitHash
+    }
 }
 
 /// EventChangeStat summarizes a completed turn's net committed change.
@@ -2285,14 +4536,47 @@ public struct EventChangeStat: Codable {
     public let linesAdded: Int
     public let linesDeleted: Int
     public let binaryFiles: Int
+
+    public init(files: Int, linesAdded: Int, linesDeleted: Int, binaryFiles: Int) {
+        self.files = files
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.binaryFiles = binaryFiles
+    }
 }
 
 /// EventCommitSnapshot records the exact committed repository branch tips
 /// fetched from the runtime when a turn finishes.
 public struct EventCommitSnapshot: Codable {
-    public let repositoryCommits: [EventRepositoryCommit]
+    public let repositoryCommits: [EventRepositoryCommit]?
     public let baseline: Bool?
     public let changeStat: EventChangeStat?
+
+    private enum CodingKeys: String, CodingKey {
+        case repositoryCommits
+        case baseline
+        case changeStat
+    }
+
+    public init(repositoryCommits: [EventRepositoryCommit]?, baseline: Bool? = nil, changeStat: EventChangeStat? = nil) {
+        self.repositoryCommits = repositoryCommits
+        self.baseline = baseline
+        self.changeStat = changeStat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.repositoryCommits = try c.decode([EventRepositoryCommit]?.self, forKey: .repositoryCommits)
+        self.baseline = try c.decodeIfPresent(Bool.self, forKey: .baseline)
+        self.changeStat = try c.decodeIfPresent(EventChangeStat.self, forKey: .changeStat)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.repositoryCommits, forKey: .repositoryCommits)
+        try c.encodeIfPresent(self.baseline, forKey: .baseline)
+        try c.encodeIfPresent(self.changeStat, forKey: .changeStat)
+    }
 }
 
 /// EventSkillLoad is emitted when a skill enters the main agent's context. A
@@ -2302,6 +4586,11 @@ public struct EventSkillLoad: Codable {
     public let skill: String
     /// SKILL.md in the task runtime; empty when the harness did not report it.
     public let path: String?
+
+    public init(skill: String, path: String? = nil) {
+        self.skill = skill
+        self.path = path
+    }
 }
 
 // Backend-neutral event types
@@ -2337,6 +4626,38 @@ public struct EventMessage: Codable {
     public let rateLimit: EventRateLimit?
     public let commitSnapshot: EventCommitSnapshot?
     public let skillLoad: EventSkillLoad?
+
+    public init(source: EventMessageSource? = nil, kind: EventKind, ts: Int, `init`: EventInit? = nil, text: EventText? = nil, textDelta: EventTextDelta? = nil, toolUse: EventToolUse? = nil, toolResult: EventToolResult? = nil, ask: EventAsk? = nil, usage: EventUsage? = nil, result: EventResult? = nil, system: EventSystem? = nil, userInput: Prompt? = nil, todo: EventTodo? = nil, diffStat: EventDiffStat? = nil, error: EventError? = nil, thinking: EventThinking? = nil, thinkingDelta: EventThinkingDelta? = nil, subagentStart: EventSubagentStart? = nil, subagentEnd: EventSubagentEnd? = nil, nativeSubagent: EventNativeSubagent? = nil, backgroundCommand: EventBackgroundCommand? = nil, log: EventLog? = nil, toolOutputDelta: EventToolOutputDelta? = nil, widget: EventWidget? = nil, widgetDelta: EventWidgetDelta? = nil, rateLimit: EventRateLimit? = nil, commitSnapshot: EventCommitSnapshot? = nil, skillLoad: EventSkillLoad? = nil) {
+        self.source = source
+        self.kind = kind
+        self.ts = ts
+        self.`init` = `init`
+        self.text = text
+        self.textDelta = textDelta
+        self.toolUse = toolUse
+        self.toolResult = toolResult
+        self.ask = ask
+        self.usage = usage
+        self.result = result
+        self.system = system
+        self.userInput = userInput
+        self.todo = todo
+        self.diffStat = diffStat
+        self.error = error
+        self.thinking = thinking
+        self.thinkingDelta = thinkingDelta
+        self.subagentStart = subagentStart
+        self.subagentEnd = subagentEnd
+        self.nativeSubagent = nativeSubagent
+        self.backgroundCommand = backgroundCommand
+        self.log = log
+        self.toolOutputDelta = toolOutputDelta
+        self.widget = widget
+        self.widgetDelta = widgetDelta
+        self.rateLimit = rateLimit
+        self.commitSnapshot = commitSnapshot
+        self.skillLoad = skillLoad
+    }
 }
 
 /// HistoryEvent is an immutable normalized output; the identity is scoped to the
@@ -2345,6 +4666,12 @@ public struct HistoryEvent: Codable {
     public let recordID: Int
     public let index: UInt32
     public let message: EventMessage
+
+    public init(recordID: Int, index: UInt32, message: EventMessage) {
+        self.recordID = recordID
+        self.index = index
+        self.message = message
+    }
 }
 
 /// HistorySection describes one root context. Only the final section is current.
@@ -2359,7 +4686,61 @@ public struct HistorySection: Codable {
     public let textCount: Int
     public let toolCount: Int
     public let durationMs: Int
-    public let skills: [EventSkillLoad]
+    public let skills: [EventSkillLoad]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case body
+        case boundary
+        case endBoundary
+        case reportedModel
+        case turnCount
+        case textCount
+        case toolCount
+        case durationMs
+        case skills
+    }
+
+    public init(id: String, body: HistorySlice? = nil, boundary: HistoryEvent? = nil, endBoundary: HistoryEvent? = nil, reportedModel: String? = nil, turnCount: Int, textCount: Int, toolCount: Int, durationMs: Int, skills: [EventSkillLoad]?) {
+        self.id = id
+        self.body = body
+        self.boundary = boundary
+        self.endBoundary = endBoundary
+        self.reportedModel = reportedModel
+        self.turnCount = turnCount
+        self.textCount = textCount
+        self.toolCount = toolCount
+        self.durationMs = durationMs
+        self.skills = skills
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.body = try c.decodeIfPresent(HistorySlice.self, forKey: .body)
+        self.boundary = try c.decodeIfPresent(HistoryEvent.self, forKey: .boundary)
+        self.endBoundary = try c.decodeIfPresent(HistoryEvent.self, forKey: .endBoundary)
+        self.reportedModel = try c.decodeIfPresent(String.self, forKey: .reportedModel)
+        self.turnCount = try c.decode(Int.self, forKey: .turnCount)
+        self.textCount = try c.decode(Int.self, forKey: .textCount)
+        self.toolCount = try c.decode(Int.self, forKey: .toolCount)
+        self.durationMs = try c.decode(Int.self, forKey: .durationMs)
+        self.skills = try c.decode([EventSkillLoad]?.self, forKey: .skills)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.id, forKey: .id)
+        try c.encodeIfPresent(self.body, forKey: .body)
+        try c.encodeIfPresent(self.boundary, forKey: .boundary)
+        try c.encodeIfPresent(self.endBoundary, forKey: .endBoundary)
+        try c.encodeIfPresent(self.reportedModel, forKey: .reportedModel)
+        try c.encode(self.turnCount, forKey: .turnCount)
+        try c.encode(self.textCount, forKey: .textCount)
+        try c.encode(self.toolCount, forKey: .toolCount)
+        try c.encode(self.durationMs, forKey: .durationMs)
+        try c.encode(self.skills, forKey: .skills)
+    }
 }
 
 /// HistoryRoute is one authoritative delegation relation or namespace observation.
@@ -2368,6 +4749,12 @@ public struct HistoryRoute: Codable {
     public let toolUseID: String
     public let namespace: String
     public let agentID: String?
+
+    public init(toolUseID: String, namespace: String, agentID: String? = nil) {
+        self.toolUseID = toolUseID
+        self.namespace = namespace
+        self.agentID = agentID
+    }
 }
 
 /// HistoryTurn retains numeric invocation facts independently of transcript
@@ -2386,6 +4773,21 @@ public struct HistoryTurn: Codable {
     public let waitMs: Int?
     public let changeStat: EventChangeStat?
     public let cost: EventCost?
+
+    public init(recordID: Int, index: UInt32, sectionID: String, at: ISOTimestamp, model: String, usage: EventUsage, durationMs: Int, durationAPIMs: Int, waitInput: HistoryPosition? = nil, waitMs: Int? = nil, changeStat: EventChangeStat? = nil, cost: EventCost? = nil) {
+        self.recordID = recordID
+        self.index = index
+        self.sectionID = sectionID
+        self.at = at
+        self.model = model
+        self.usage = usage
+        self.durationMs = durationMs
+        self.durationAPIMs = durationAPIMs
+        self.waitInput = waitInput
+        self.waitMs = waitMs
+        self.changeStat = changeStat
+        self.cost = cost
+    }
 }
 
 /// HistoryToolTiming aggregates completed tools across root and child actors.
@@ -2393,6 +4795,12 @@ public struct HistoryToolTiming: Codable {
     public let name: String
     public let calls: Int
     public let durationMs: Int
+
+    public init(name: String, calls: Int, durationMs: Int) {
+        self.name = name
+        self.calls = calls
+        self.durationMs = durationMs
+    }
 }
 
 /// HistoryActivity is payload-free lifecycle and routing state. Kind is
@@ -2424,6 +4832,27 @@ public struct HistoryActivity: Codable {
     public let ownershipThrough: Int
     public let exitCode: Int?
     public let outputRef: String?
+
+    public init(kind: EventKind, id: String, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int, exitCode: Int? = nil, outputRef: String? = nil) {
+        self.kind = kind
+        self.id = id
+        self.sectionID = sectionID
+        self.source = source
+        self.toolUseID = toolUseID
+        self.scope = scope
+        self.groupID = groupID
+        self.label = label
+        self.status = status
+        self.background = background
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.anchorAt = anchorAt
+        self.first = first
+        self.bodyThrough = bodyThrough
+        self.ownershipThrough = ownershipThrough
+        self.exitCode = exitCode
+        self.outputRef = outputRef
+    }
 }
 
 /// HistoryMetadata contains compact task-wide facts needed without archived
@@ -2433,24 +4862,108 @@ public struct HistoryActivity: Codable {
 public struct HistoryMetadata: Codable {
     /// RoutingRevision changes when earlier delegated ownership may have changed.
     public let routingRevision: Int
-    public let routing: [HistoryRoute]
+    public let routing: [HistoryRoute]?
     public let hasInitialPrompt: Bool
     public let setupEndedAt: ISOTimestamp?
-    public let turns: [HistoryTurn]
-    public let tools: [HistoryToolTiming]
-    public let activities: [HistoryActivity]
+    public let turns: [HistoryTurn]?
+    public let tools: [HistoryToolTiming]?
+    public let activities: [HistoryActivity]?
     public let initialInit: HistoryEvent?
     public let initialInput: HistoryPosition?
     public let setup: HistorySlice?
     public let todo: EventTodo?
+
+    private enum CodingKeys: String, CodingKey {
+        case routingRevision
+        case routing
+        case hasInitialPrompt
+        case setupEndedAt
+        case turns
+        case tools
+        case activities
+        case initialInit
+        case initialInput
+        case setup
+        case todo
+    }
+
+    public init(routingRevision: Int, routing: [HistoryRoute]?, hasInitialPrompt: Bool, setupEndedAt: ISOTimestamp? = nil, turns: [HistoryTurn]?, tools: [HistoryToolTiming]?, activities: [HistoryActivity]?, initialInit: HistoryEvent? = nil, initialInput: HistoryPosition? = nil, setup: HistorySlice? = nil, todo: EventTodo? = nil) {
+        self.routingRevision = routingRevision
+        self.routing = routing
+        self.hasInitialPrompt = hasInitialPrompt
+        self.setupEndedAt = setupEndedAt
+        self.turns = turns
+        self.tools = tools
+        self.activities = activities
+        self.initialInit = initialInit
+        self.initialInput = initialInput
+        self.setup = setup
+        self.todo = todo
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.routingRevision = try c.decode(Int.self, forKey: .routingRevision)
+        self.routing = try c.decode([HistoryRoute]?.self, forKey: .routing)
+        self.hasInitialPrompt = try c.decode(Bool.self, forKey: .hasInitialPrompt)
+        self.setupEndedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .setupEndedAt)
+        self.turns = try c.decode([HistoryTurn]?.self, forKey: .turns)
+        self.tools = try c.decode([HistoryToolTiming]?.self, forKey: .tools)
+        self.activities = try c.decode([HistoryActivity]?.self, forKey: .activities)
+        self.initialInit = try c.decodeIfPresent(HistoryEvent.self, forKey: .initialInit)
+        self.initialInput = try c.decodeIfPresent(HistoryPosition.self, forKey: .initialInput)
+        self.setup = try c.decodeIfPresent(HistorySlice.self, forKey: .setup)
+        self.todo = try c.decodeIfPresent(EventTodo.self, forKey: .todo)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.routingRevision, forKey: .routingRevision)
+        try c.encode(self.routing, forKey: .routing)
+        try c.encode(self.hasInitialPrompt, forKey: .hasInitialPrompt)
+        try c.encodeIfPresent(self.setupEndedAt, forKey: .setupEndedAt)
+        try c.encode(self.turns, forKey: .turns)
+        try c.encode(self.tools, forKey: .tools)
+        try c.encode(self.activities, forKey: .activities)
+        try c.encodeIfPresent(self.initialInit, forKey: .initialInit)
+        try c.encodeIfPresent(self.initialInput, forKey: .initialInput)
+        try c.encodeIfPresent(self.setup, forKey: .setup)
+        try c.encodeIfPresent(self.todo, forKey: .todo)
+    }
 }
 
 /// HistoryManifest discovers context sections without downloading their bodies.
 /// Metadata is mutable at Bootstrap.Through; bodies are immutable finite slices.
 public struct HistoryManifest: Codable {
     public let bootstrap: HistoryBootstrap
-    public let sections: [HistorySection]
+    public let sections: [HistorySection]?
     public let metadata: HistoryMetadata
+
+    private enum CodingKeys: String, CodingKey {
+        case bootstrap
+        case sections
+        case metadata
+    }
+
+    public init(bootstrap: HistoryBootstrap, sections: [HistorySection]?, metadata: HistoryMetadata) {
+        self.bootstrap = bootstrap
+        self.sections = sections
+        self.metadata = metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.bootstrap = try c.decode(HistoryBootstrap.self, forKey: .bootstrap)
+        self.sections = try c.decode([HistorySection]?.self, forKey: .sections)
+        self.metadata = try c.decode(HistoryMetadata.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.bootstrap, forKey: .bootstrap)
+        try c.encode(self.sections, forKey: .sections)
+        try c.encode(self.metadata, forKey: .metadata)
+    }
 }
 
 /// HistoryTurnEstimate is a revalidated price for a canonical result. TotalUSD
@@ -2463,6 +4976,14 @@ public struct HistoryTurnEstimate: Codable {
     public let model: String?
     public let cost: EventCost?
     public let totalUSD: Double
+
+    public init(recordID: Int, index: UInt32, model: String? = nil, cost: EventCost? = nil, totalUSD: Double) {
+        self.recordID = recordID
+        self.index = index
+        self.model = model
+        self.cost = cost
+        self.totalUSD = totalUSD
+    }
 }
 
 /// HistoryCheckpoint advances through all outputs of a physical record,
@@ -2473,41 +4994,104 @@ public struct HistoryTurnEstimate: Codable {
 public struct HistoryCheckpoint: Codable {
     public let cursor: String
     public let through: Int
+
+    public init(cursor: String, through: Int) {
+        self.cursor = cursor
+        self.through = through
+    }
 }
 
 /// HistoryStats contains the bounded 60-sample runtime ring, oldest first.
 /// Replace samples sharing a timestamp: disk usage can revise the latest sample.
 /// These host observations are separate from immutable raw task history.
 public struct HistoryStats: Codable {
-    public let samples: [EventStats]
+    public let samples: [EventStats]?
+
+    private enum CodingKeys: String, CodingKey {
+        case samples
+    }
+
+    public init(samples: [EventStats]?) {
+        self.samples = samples
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.samples = try c.decode([EventStats]?.self, forKey: .samples)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.samples, forKey: .samples)
+    }
 }
 
 /// HistoryReset tells an SSE client to close the stream and rediscover bootstrap.
 public struct HistoryReset: Codable {
     public let manifestURL: String
+
+    public init(manifestURL: String) {
+        self.manifestURL = manifestURL
+    }
 }
 
 /// TaskHistoryStreamError reports that task history could not be replayed.
 public struct TaskHistoryStreamError: Codable {
     public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
 }
 
 public struct ErrorDetails: Codable {
     public let code: ErrorCode
     public let message: String
+
+    public init(code: ErrorCode, message: String) {
+        self.code = code
+        self.message = message
+    }
 }
 
 public struct ErrorResponse: Codable {
     public let error: ErrorDetails
     public let details: [String: JSONValue]?
+
+    public init(error: ErrorDetails, details: [String: JSONValue]? = nil) {
+        self.error = error
+        self.details = details
+    }
 }
 
 /// AuthBootstrapResp is injected into the SPA document before the frontend
 /// hydrates. It mirrors the auth-related fields otherwise fetched from
 /// /server-info/config and /auth/me.
 public struct AuthBootstrapResp: Codable {
-    public let authProviders: [String]
+    public let authProviders: [String]?
     public let user: UserResp?
+
+    private enum CodingKeys: String, CodingKey {
+        case authProviders
+        case user
+    }
+
+    public init(authProviders: [String]?, user: UserResp? = nil) {
+        self.authProviders = authProviders
+        self.user = user
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.authProviders = try c.decode([String]?.self, forKey: .authProviders)
+        self.user = try c.decodeIfPresent(UserResp.self, forKey: .user)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.authProviders, forKey: .authProviders)
+        try c.encodeIfPresent(self.user, forKey: .user)
+    }
 }
 
 /// TaskDirEntry is one child of a listed directory.
@@ -2518,6 +5102,13 @@ public struct TaskDirEntry: Codable {
     public let size: Int
     /// Modified is the modification time, absent when the runtime cannot report it.
     public let modified: ISOTimestamp?
+
+    public init(name: String, isDir: Bool, size: Int, modified: ISOTimestamp? = nil) {
+        self.name = name
+        self.isDir = isDir
+        self.size = size
+        self.modified = modified
+    }
 }
 
 /// TaskDirListing is the raw endpoint's directory representation.
@@ -2525,7 +5116,33 @@ public struct TaskDirListing: Codable {
     /// Path is the resolved container directory.
     public let path: String
     /// Entries are the immediate children, sorted by name.
-    public let entries: [TaskDirEntry]
+    public let entries: [TaskDirEntry]?
     /// Truncated reports that entries were dropped at the runtime's limit.
     public let truncated: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path
+        case entries
+        case truncated
+    }
+
+    public init(path: String, entries: [TaskDirEntry]?, truncated: Bool) {
+        self.path = path
+        self.entries = entries
+        self.truncated = truncated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.path = try c.decode(String.self, forKey: .path)
+        self.entries = try c.decode([TaskDirEntry]?.self, forKey: .entries)
+        self.truncated = try c.decode(Bool.self, forKey: .truncated)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.path, forKey: .path)
+        try c.encode(self.entries, forKey: .entries)
+        try c.encode(self.truncated, forKey: .truncated)
+    }
 }

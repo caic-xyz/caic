@@ -30,7 +30,7 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   // "waiting" state; clicking stop while still "running" triggers a
   // window.confirm() that Playwright auto-dismisses as false, skipping the
   // stop.
-  const tasks = await api.listTasks();
+  const tasks = (await api.listTasks()) ?? [];
   const task = tasks.find((t) => t.initialPrompt === prompt);
   expect(task).toBeTruthy();
   await waitForTaskState(api, task!.id, "waiting");
@@ -63,7 +63,7 @@ test("create task, verify streaming text and result, then purge", async ({ page,
 });
 
 test("new-task effort stays compact and features follow the selectors", async ({ page, api }) => {
-  const harnesses = await api.listHarnesses();
+  const harnesses = (await api.listHarnesses()) ?? [];
   await page.route("**/server/harnesses", (route) =>
     route.fulfill({
       json: harnesses.map((harness) =>
@@ -174,7 +174,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimeConfig.name });
   expect(body.caicMCP).toBeUndefined();
   await expect(page).toHaveURL(/\/task\//);
-  const tasks = await api.listTasks();
+  const tasks = (await api.listTasks()) ?? [];
   const task = tasks.find((t) => t.initialPrompt === prompt);
   expect(task).toBeTruthy();
   await waitForTaskState(api, task!.id, "waiting");

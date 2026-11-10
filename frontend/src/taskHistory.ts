@@ -128,7 +128,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       return;
     }
     if (discovery && value.bootstrap.through < discovery.bootstrap.through) return;
-    const section = value.sections.at(-1);
+    const section = value.sections?.at(-1);
     const changed = section?.id !== currentID;
     discovery = value;
     batch(() => {
@@ -166,7 +166,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     const request = new AbortController();
     bodyRequest = request;
     const signal = AbortSignal.any([controller.signal, request.signal]);
-    const section = value.sections.at(-1);
+    const section = value.sections?.at(-1);
     currentID = section?.id ?? null;
     try {
       const events = section ? await sectionBody(value, section, signal) : [];
@@ -245,7 +245,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       const value = await client(signal).getHistoryManifest(id);
       if (!current(signal)) return;
       discovery = value;
-      currentID = value.sections.at(-1)?.id ?? null;
+      currentID = value.sections?.at(-1)?.id ?? null;
       lastLive = { recordID: value.bootstrap.through, index: Number.MAX_SAFE_INTEGER };
       batch(() => {
         setManifest(value);
@@ -272,7 +272,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
           if (complete) setError(null);
         },
         onStatsSnapshot: (snapshot) => {
-          if (current(signal)) setStats(mergeStats([], snapshot.samples));
+          if (current(signal)) setStats(mergeStats([], snapshot.samples ?? []));
         },
         onStats: (sample) => {
           if (current(signal)) setStats((previous) => mergeStats(previous, [sample]));
@@ -362,7 +362,9 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       const { value, signal } = capture(request);
       return through() === 0
         ? Promise.resolve([])
-        : client(signal).getHistoryCosts(id, value.bootstrap.generation, String(through()));
+        : client(signal)
+            .getHistoryCosts(id, value.bootstrap.generation, String(through()))
+            .then((costs) => costs ?? []);
     },
   };
 }

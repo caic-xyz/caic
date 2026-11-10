@@ -71,7 +71,7 @@ async function readDirListing(res: Response): Promise<TaskFilePreview> {
   if (!isDirListing(listing)) {
     throw new Error("invalid directory listing");
   }
-  return { kind: "dir", path: listing.path, entries: listing.entries, truncated: listing.truncated };
+  return { kind: "dir", path: listing.path, entries: listing.entries ?? [], truncated: listing.truncated };
 }
 
 function isDirListing(value: unknown): value is TaskDirListing {
@@ -80,17 +80,18 @@ function isDirListing(value: unknown): value is TaskDirListing {
   return (
     typeof path === "string" &&
     typeof truncated === "boolean" &&
-    Array.isArray(entries) &&
-    entries.every((entry: unknown) => {
-      if (typeof entry !== "object" || entry === null) return false;
-      const { name, isDir, size, modified } = entry as Record<string, unknown>;
-      return (
-        typeof name === "string" &&
-        typeof isDir === "boolean" &&
-        typeof size === "number" &&
-        (modified === undefined || modified === null || typeof modified === "string")
-      );
-    })
+    (entries === null ||
+      (Array.isArray(entries) &&
+        entries.every((entry: unknown) => {
+          if (typeof entry !== "object" || entry === null) return false;
+          const { name, isDir, size, modified } = entry as Record<string, unknown>;
+          return (
+            typeof name === "string" &&
+            typeof isDir === "boolean" &&
+            typeof size === "number" &&
+            (modified === undefined || modified === null || typeof modified === "string")
+          );
+        })))
   );
 }
 

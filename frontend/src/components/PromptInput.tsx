@@ -182,7 +182,7 @@ export default function PromptInput(props: Props) {
               }}
               type="file"
               multiple
-              accept={props.imageConstraints?.allowedMediaTypes.join(",") ?? ""}
+              accept={props.imageConstraints?.allowedMediaTypes?.join(",") ?? ""}
               class={styles.hiddenFileInput}
               onChange={handleFileChange}
             />

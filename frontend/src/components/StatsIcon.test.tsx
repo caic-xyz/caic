@@ -23,6 +23,9 @@ const usage: TaskUsageSummary = {
 const stats: [EventStats] = [
   {
     ts: 1_000,
+    cpuCeiling: null,
+    cpuQuota: null,
+    runtimeCPUs: null,
     cpuPerc: 10,
     memUsed: 1_024,
     memLimit: 4_096,

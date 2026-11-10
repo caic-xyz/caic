@@ -54,7 +54,7 @@ export function createTaskAnalytics(history: TaskHistory) {
   }
   const boundary = createMemo(() => {
     const value = history.manifest();
-    const last = value?.metadata.turns.at(-1);
+    const last = value?.metadata.turns?.at(-1);
     return value ? `${value.bootstrap.generation}:${last ? historyPositionKey(last) : ""}` : null;
   });
   createEffect(() => {

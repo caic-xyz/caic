@@ -190,7 +190,7 @@ export const test = base.extend<{
       // The fake backend is shared across workers. Retire only this test's
       // tasks so later pages and trace snapshots do not accumulate every
       // earlier conversation's active sidebar card and resource updates.
-      const tasks = (await api.listTasks()).filter((task) => task.initialPrompt.includes(testTag));
+      const tasks = ((await api.listTasks()) ?? []).filter((task) => task.initialPrompt.includes(testTag));
       await Promise.all(
         tasks.map(async (task) => {
           // Purge rejects transient startup and sync states; let them settle.
@@ -232,7 +232,7 @@ export const STEP_IMPORT_TIMEOUT = 30_000;
 // ---------------------------------------------------------------------------
 
 export async function createTaskAPI(api: APIClient, prompt: string): Promise<string> {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
   const resp = await api.createTask({

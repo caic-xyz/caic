@@ -82,7 +82,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Revokes one connected OAuth client grant for the authenticated user. */
     revokeOAuthGrant: (grantID: string, req: RevokeOAuthGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/oauth/grants/${encodeURIComponent(grantID)}/revoke`, req),
     /** Lists available coding agent harnesses. */
-    listHarnesses: (): Promise<HarnessInfo[]> => request<HarnessInfo[]>("GET", "/api/caic/v1/server/harnesses"),
+    listHarnesses: (): Promise<HarnessInfo[] | null> => request<HarnessInfo[] | null>("GET", "/api/caic/v1/server/harnesses"),
     /** Refreshes one coding agent model inventory, bypassing its cache. */
     refreshHarness: (harness: string, req: RefreshHarnessReq): Promise<HarnessInfo> => request<HarnessInfo>("POST", `/api/caic/v1/server/harnesses/${encodeURIComponent(harness)}/refresh`, req),
     /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
@@ -98,7 +98,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Returns aggregated operation latency statistics. */
     getMetrics: (): Promise<MetricsResp> => request<MetricsResp>("GET", "/api/caic/v1/server/metrics"),
     /** Lists all discovered repositories. */
-    listRepos: (): Promise<Repo[]> => request<Repo[]>("GET", "/api/caic/v1/server/repos"),
+    listRepos: (): Promise<Repo[] | null> => request<Repo[] | null>("GET", "/api/caic/v1/server/repos"),
     /** Clones a repository into the server's root directory. */
     cloneRepo: (req: CloneRepoReq): Promise<Repo> => request<Repo>("POST", "/api/caic/v1/server/repos", req),
     /** Lists branches for a repository. */
@@ -108,7 +108,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Injects a CI fix command into an existing task's PR. */
     botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/ci/fix-pr", req),
     /** Returns all tasks. */
-    listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/caic/v1/tasks"),
+    listTasks: (): Promise<Task[] | null> => request<Task[] | null>("GET", "/api/caic/v1/tasks"),
     /** Returns a single task by id (404 if it does not exist). */
     getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}`),
     /** Returns recorded and observed runtime metadata for a task. */
@@ -186,13 +186,13 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. */
     getHistoryManifest: (id: string): Promise<HistoryManifest> => request<HistoryManifest>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/manifest`),
     /** Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. */
-    getHistorySetup: (id: string, scope: string, version: string, generation: string, through: string): Promise<HistoryEvent[]> => request<HistoryEvent[]>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/setup/${encodeURIComponent(through)}`),
+    getHistorySetup: (id: string, scope: string, version: string, generation: string, through: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/setup/${encodeURIComponent(through)}`),
     /** Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. */
-    getHistorySlice: (id: string, scope: string, version: string, generation: string, first: string, firstIndex: string, last: string, lastIndex: string): Promise<HistoryEvent[]> => request<HistoryEvent[]>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/slice/${encodeURIComponent(first)}/${encodeURIComponent(firstIndex)}/${encodeURIComponent(last)}/${encodeURIComponent(lastIndex)}`),
+    getHistorySlice: (id: string, scope: string, version: string, generation: string, first: string, firstIndex: string, last: string, lastIndex: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/slice/${encodeURIComponent(first)}/${encodeURIComponent(firstIndex)}/${encodeURIComponent(last)}/${encodeURIComponent(lastIndex)}`),
     /** Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. */
-    getHistoryActivity: (id: string, scope: string, version: string, generation: string, kind: string, activity: string, through: string, afterRecordID: string, afterIndex: string): Promise<HistoryEvent[]> => request<HistoryEvent[]>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/activity/${encodeURIComponent(kind)}/${encodeURIComponent(activity)}/${encodeURIComponent(through)}?afterRecordID=${encodeURIComponent(afterRecordID)}&afterIndex=${encodeURIComponent(afterIndex)}`),
+    getHistoryActivity: (id: string, scope: string, version: string, generation: string, kind: string, activity: string, through: string, afterRecordID: string, afterIndex: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/activity/${encodeURIComponent(kind)}/${encodeURIComponent(activity)}/${encodeURIComponent(through)}?afterRecordID=${encodeURIComponent(afterRecordID)}&afterIndex=${encodeURIComponent(afterIndex)}`),
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
-    getHistoryCosts: (id: string, generation: string, through: string): Promise<HistoryTurnEstimate[]> => request<HistoryTurnEstimate[]>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/costs?generation=${encodeURIComponent(generation)}&through=${encodeURIComponent(through)}`),
+    getHistoryCosts: (id: string, generation: string, through: string): Promise<HistoryTurnEstimate[] | null> => request<HistoryTurnEstimate[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/costs?generation=${encodeURIComponent(generation)}&through=${encodeURIComponent(through)}`),
     /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
     historyEvents: (id: string, cursor: string, handlers: HistoryEventsHandlers): EventSource => {
       const es = new EventSource(`/api/caic/v1/tasks/${encodeURIComponent(id)}/history/events?cursor=${encodeURIComponent(cursor)}`);

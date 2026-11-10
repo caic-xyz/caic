@@ -14,6 +14,7 @@ import styles from "./TaskList.module.css";
 function task(id: string): Task {
   return {
     id,
+    pendingInput: null,
     initialPrompt: "Do work",
     title: "Do work",
     state: "running",

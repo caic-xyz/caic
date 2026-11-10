@@ -106,7 +106,7 @@ describe("TaskCard", () => {
     setSample({ ...initial, cpuPerc: 150, memUsed: 749 });
     expect(cpu).toHaveAttribute("class", high);
     expect(memory).toHaveAttribute("class", warning);
-    setSample({ ...initial, cpuCeiling: undefined, memLimit: 0 });
+    setSample({ ...initial, cpuCeiling: null, memLimit: 0 });
     expect(cpu).toHaveAttribute("class", unavailable);
     expect(memory).toHaveAttribute("class", unavailable);
     expect(levels).toHaveAccessibleName(/CPU: .*\/ \?\? CPUs \(\?\?\)/);

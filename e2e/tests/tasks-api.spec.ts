@@ -52,7 +52,7 @@ test("SDK task lifecycle keeps concurrent tasks isolated", async ({ api, uniqueP
     );
     // Reaching waiting alone could pass without a restart. The first joke
     // proves that the agent's session-local turn counter started over.
-    const result = events.filter((event) => event.message.kind === "result").at(-1);
+    const result = (events ?? []).filter((event) => event.message.kind === "result").at(-1);
     expect(result?.message.result?.result).toContain("Why do programmers prefer dark mode?");
     expect(restarted.repos?.[0]?.branch).toBe(repo.branch);
     expect(await api.getTask(otherID)).toMatchObject({

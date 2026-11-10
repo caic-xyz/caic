@@ -43,6 +43,39 @@ import (
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
 
+func TestOAuthUserAuthority(t *testing.T) {
+	t.Parallel()
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "1", Username: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := caicSessionManager{store: store}
+	failure := errors.New("publication failed")
+	for _, tc := range []struct {
+		name  string
+		user  oauth.User
+		want  error
+		calls int
+	}{
+		{name: "valid", user: oauth.User{ID: user.ID}, want: failure, calls: 1},
+		{name: "missing", user: oauth.User{ID: "missing"}, want: oauthserver.ErrUserAuthority},
+		{name: "stale", user: oauth.User{ID: user.ID, Authority: "retired"}, want: oauthserver.ErrUserAuthority},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			err := manager.WithUserAuthority(tc.user, func() error { calls++; return failure })
+			if !errors.Is(err, tc.want) || calls != tc.calls {
+				t.Fatalf("got error %v and %d calls; want %v and %d", err, calls, tc.want, tc.calls)
+			}
+		})
+	}
+}
+
 func TestOAuthConsentIdentityProvenance(t *testing.T) {
 	t.Parallel()
 

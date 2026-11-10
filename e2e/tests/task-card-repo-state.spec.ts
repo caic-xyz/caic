@@ -100,7 +100,7 @@ test("task-card fixtures distinguish known zero from unknown cost", async ({ pag
 });
 
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
   const secondRepo = repos[1];
@@ -139,12 +139,12 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
 });
 
 test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }) => {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
   const secondRepo = repos[1];
   ok(secondRepo);
-  const harnesses = await api.listHarnesses();
+  const harnesses = (await api.listHarnesses()) ?? [];
   const harness = harnesses[0];
   ok(harness);
   expect(repos.length).toBeGreaterThanOrEqual(2);
@@ -166,9 +166,9 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   await waitForTaskState(api, multiTask.id, "waiting");
   const singleRepoStatus = await api.getTaskRepoStatus(singleTask.id);
   const multiRepoStatus = await api.getTaskRepoStatus(multiTask.id);
-  const singleStatus = singleRepoStatus.repositories[0];
-  const firstStatus = multiRepoStatus.repositories[0];
-  const secondStatus = multiRepoStatus.repositories[1];
+  const singleStatus = singleRepoStatus.repositories?.[0];
+  const firstStatus = multiRepoStatus.repositories?.[0];
+  const secondStatus = multiRepoStatus.repositories?.[1];
   const firstTaskRepo = multiTask.repos?.[0];
   const secondTaskRepo = multiTask.repos?.[1];
   ok(singleStatus);
@@ -373,7 +373,7 @@ test("failed refreshes retain counts and show a stale marker at desktop and mobi
   api,
   uniquePrompt,
 }) => {
-  const repos = await api.listRepos();
+  const repos = (await api.listRepos()) ?? [];
   const firstRepo = repos[0];
   ok(firstRepo);
   const secondRepo = repos[1];

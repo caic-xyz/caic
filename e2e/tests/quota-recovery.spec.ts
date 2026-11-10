@@ -24,7 +24,7 @@ async function finishRecovery(page: Page, api: APIClient, sourceID: string, prom
 
   let forkedID = "";
   await expect(async () => {
-    const tasks = await api.listTasks();
+    const tasks = (await api.listTasks()) ?? [];
     const forked = tasks.find((task) => task.initialPrompt === prompt);
     expect(forked).toBeTruthy();
     forkedID = forked!.id;

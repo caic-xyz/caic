@@ -262,7 +262,7 @@ export default function TaskDetail(props: Props) {
     setOpenActivityIDs(new Set<string>());
   });
   const pinActivity = (id: string, open: boolean) => {
-    const activity = metadata()?.activities.find((value) => value.kind === "nativeSubagent" && value.id === id);
+    const activity = metadata()?.activities?.find((value) => value.kind === "nativeSubagent" && value.id === id);
     const home = activity ? activity.sectionID : null;
     const focused =
       document.activeElement instanceof HTMLElement
@@ -556,7 +556,7 @@ export default function TaskDetail(props: Props) {
     timingTaskId = taskId;
     timingEpoch = epoch;
     const first = currentSection()?.body?.first;
-    const previous = first ? metadata()?.turns.findLast((turn) => compareHistoryPosition(turn, first) < 0) : null;
+    const previous = first ? metadata()?.turns?.findLast((turn) => compareHistoryPosition(turn, first) < 0) : null;
     return timingTracker.derive(messages(), reset, previous ? Date.parse(previous.at) : 0);
   });
   const numericTurns = createMemo(
@@ -1926,7 +1926,7 @@ function ArchivedSession(props: {
       </div>
       <Show when={props.open}>
         <div class={styles.indentSession}>
-          <SkillStrip taskId={props.taskId} skills={props.section.skills} label="Previous context skills" />
+          <SkillStrip taskId={props.taskId} skills={props.section.skills ?? []} label="Previous context skills" />
           <ArchivedSessionBody
             section={props.section}
             renderGroups={props.renderGroups}
@@ -1997,7 +1997,7 @@ function ArchivedSessionBody(props: {
               .find((message) => message.result === turn.result);
             const position = event ? positions().get(event) : null;
             return position
-              ? timeline.manifest()?.metadata.turns.find((item) => historyPositionKey(item) === position)
+              ? timeline.manifest()?.metadata.turns?.find((item) => historyPositionKey(item) === position)
               : null;
           };
           return (
@@ -3066,7 +3066,7 @@ function AskQuestionCard(props: {
   }
 
   function formatAnswer(): string {
-    const qs = questions();
+    const qs = questions() ?? [];
     const parts: string[] = [];
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];

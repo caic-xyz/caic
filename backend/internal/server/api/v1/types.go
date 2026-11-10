@@ -580,20 +580,6 @@ type TaskListEvent struct {
 	Health   *ServerHealth              `json:"health,omitempty"`
 }
 
-// MarshalJSON preserves the discriminated-union contract for empty snapshot
-// and repos events. omitzero keeps nil slices out of unrelated event kinds, but
-// clients expect arrays for kind=="snapshot" and kind=="repos".
-func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json.Marshaler must work for top-level value marshaling.
-	type taskListEvent TaskListEvent
-	if e.Kind == "snapshot" && e.Snapshot == nil {
-		e.Snapshot = []Task{}
-	}
-	if e.Kind == "repos" && e.Repos == nil {
-		e.Repos = []Repo{}
-	}
-	return json.Marshal(taskListEvent(e))
-}
-
 // ServerHealth is compact last-observed machine health. Time is omitted before the first
 // successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
 // the whole-machine capacity. High flags are true when the latest successful sample

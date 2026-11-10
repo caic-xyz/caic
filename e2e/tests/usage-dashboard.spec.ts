@@ -10,7 +10,7 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
 
   await expect(async () => {
     const dashboard = await api.getUsageDashboard();
-    expect(dashboard.days.length).toBeGreaterThan(0);
+    expect((dashboard.days ?? []).length).toBeGreaterThan(0);
   }).toPass({ timeout: 10_000, intervals: [250] });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -81,21 +81,21 @@ test("usage cost distinguishes native zero, estimates, and unknown coverage", as
     { reportedUSD: 0, estimatedUSD: 0.25, reportedParts: 0, estimatedParts: 1, unknownParts: 0 },
     { reportedUSD: 0.5, estimatedUSD: 0.25, reportedParts: 1, estimatedParts: 1, unknownParts: 1 },
   ];
-  dashboard.days = dashboard.days.slice(0, 4);
+  dashboard.days = (dashboard.days ?? []).slice(0, 4);
   for (const [index, day] of dashboard.days.entries()) {
     const cost = costs[index];
     expect(cost).toBeDefined();
     if (!cost) throw new Error("Missing cost fixture");
     day.cost = cost;
     day.costUSD = cost.reportedUSD + cost.estimatedUSD;
-    for (const model of day.models) {
+    for (const model of day.models ?? []) {
       model.cost = cost;
       model.costUSD = day.costUSD;
     }
-    for (const harness of day.harnesses) {
+    for (const harness of day.harnesses ?? []) {
       harness.cost = cost;
       harness.costUSD = day.costUSD;
-      for (const model of harness.models) {
+      for (const model of harness.models ?? []) {
         model.cost = cost;
         model.costUSD = day.costUSD;
       }

@@ -43,7 +43,7 @@ function actorFixture(events: HistoryEvent[]) {
     requests.push(url);
     return fixtureHistoryResponse(url, events, "");
   });
-  const initial = defined(historyManifest(events, "").metadata.activities[0]);
+  const initial = defined(historyManifest(events, "").metadata.activities?.[0]);
   const [activity, setActivity] = createSignal(initial);
   const view = render(() => (
     <TaskTimelineProvider taskId="task">
@@ -65,7 +65,7 @@ function actorFixture(events: HistoryEvent[]) {
   const checkpoint = (event: HistoryEvent) => {
     events.push(event);
     const manifest = historyManifest(events, "");
-    setActivity(defined(manifest.metadata.activities[0]));
+    setActivity(defined(manifest.metadata.activities?.[0]));
     if (!handlers) throw new Error("Missing task stream");
     handlers.onMessage(event);
     handlers.onCheckpoint?.({ cursor: manifest.bootstrap.cursor, through: event.recordID });
@@ -353,7 +353,7 @@ it("keeps a disclosed background card mounted across equivalent manifest copies"
     return { close: vi.fn() } as unknown as EventSource;
   });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => fixtureHistoryResponse(String(input), events, ""));
-  const first = historyManifest(events, "").metadata.activities;
+  const first = historyManifest(events, "").metadata.activities ?? [];
   const [commands, setCommands] = createSignal(first);
   render(() => (
     <TaskTimelineProvider taskId="background-identity">

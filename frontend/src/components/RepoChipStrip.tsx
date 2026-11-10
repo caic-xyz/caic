@@ -32,7 +32,7 @@ export default function RepoChipStrip(props: Props) {
   function loadBranches(path: string) {
     api
       .listRepoBranches(path)
-      .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches })))
+      .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches ?? [] })))
       .catch((err: unknown) => console.error("Failed to load repository branches", err));
   }
 

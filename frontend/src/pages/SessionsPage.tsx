@@ -27,7 +27,7 @@ export default function SessionsPage() {
       if (
         !disposed &&
         auth.user()?.sessionID === sid &&
-        !response.sessions.some((session) => session.current && session.id === sid)
+        !response.sessions?.some((session) => session.current && session.id === sid)
       ) {
         await auth.refreshIdentity();
       }

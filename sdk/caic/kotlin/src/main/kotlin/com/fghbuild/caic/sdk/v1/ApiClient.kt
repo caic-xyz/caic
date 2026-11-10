@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.serializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -44,7 +48,7 @@ class ApiClient(
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMediaType = "application/json".toMediaType()
 
-    private suspend inline fun <reified T> request(method: String, path: String, body: String? = null, headers: Map<String, String> = emptyMap()): T {
+    private suspend inline fun <reified T> request(method: String, path: String, body: String? = null, headers: Map<String, String> = emptyMap(), crossinline decode: (String) -> T = { json.decodeFromString<T>(it) }): T {
         val url = "$baseURL$path"
         val needsBody = method in listOf("POST", "PUT", "PATCH")
         val requestBody = body?.toRequestBody(jsonMediaType)
@@ -79,7 +83,7 @@ class ApiClient(
                                 }
                                 throw failure
                             }
-                            json.decodeFromString<T>(responseBody)
+                            decode(responseBody)
                         }
                     } catch (e: Exception) {
                         cont.resumeWithException(e)
@@ -115,7 +119,7 @@ class ApiClient(
     /** Revokes one connected OAuth client grant for the authenticated user. */
     suspend fun revokeOAuthGrant(grantID: String, req: RevokeOAuthGrantReq): StatusResp = request("POST", "/api/caic/v1/oauth/grants/$grantID/revoke", json.encodeToString(req))
     /** Lists available coding agent harnesses. */
-    suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
+    suspend fun listHarnesses(): List<HarnessInfo>? = request("GET", "/api/caic/v1/server/harnesses")
     /** Refreshes one coding agent model inventory, bypassing its cache. */
     suspend fun refreshHarness(harness: String, req: RefreshHarnessReq): HarnessInfo = request("POST", "/api/caic/v1/server/harnesses/$harness/refresh", json.encodeToString(req))
     /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
@@ -131,7 +135,7 @@ class ApiClient(
     /** Returns aggregated operation latency statistics. */
     suspend fun getMetrics(): MetricsResp = request("GET", "/api/caic/v1/server/metrics")
     /** Lists all discovered repositories. */
-    suspend fun listRepos(): List<Repo> = request("GET", "/api/caic/v1/server/repos")
+    suspend fun listRepos(): List<Repo>? = request("GET", "/api/caic/v1/server/repos")
     /** Clones a repository into the server's root directory. */
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/caic/v1/server/repos", json.encodeToString(req))
     /** Lists branches for a repository. */
@@ -141,7 +145,7 @@ class ApiClient(
     /** Injects a CI fix command into an existing task's PR. */
     suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/ci/fix-pr", json.encodeToString(req))
     /** Returns all tasks. */
-    suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
+    suspend fun listTasks(): List<Task>? = request("GET", "/api/caic/v1/tasks")
     /** Returns a single task by id (404 if it does not exist). */
     suspend fun getTask(id: String): Task = request("GET", "/api/caic/v1/tasks/$id")
     /** Returns recorded and observed runtime metadata for a task. */
@@ -195,13 +199,13 @@ class ApiClient(
     /** Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. */
     suspend fun getHistoryManifest(id: String): HistoryManifest = request("GET", "/api/caic/v1/tasks/$id/history/manifest")
     /** Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. */
-    suspend fun getHistorySetup(id: String, scope: String, version: String, generation: String, through: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/setup/$through")
+    suspend fun getHistorySetup(id: String, scope: String, version: String, generation: String, through: String): List<HistoryEvent>? = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/setup/$through")
     /** Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. */
-    suspend fun getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/slice/$first/$firstIndex/$last/$lastIndex")
+    suspend fun getHistorySlice(id: String, scope: String, version: String, generation: String, first: String, firstIndex: String, last: String, lastIndex: String): List<HistoryEvent>? = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/slice/$first/$firstIndex/$last/$lastIndex")
     /** Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. */
-    suspend fun getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String): List<HistoryEvent> = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/activity/$kind/$activity/$through?afterRecordID=${java.net.URLEncoder.encode(afterRecordID, "UTF-8")}&afterIndex=${java.net.URLEncoder.encode(afterIndex, "UTF-8")}")
+    suspend fun getHistoryActivity(id: String, scope: String, version: String, generation: String, kind: String, activity: String, through: String, afterRecordID: String, afterIndex: String): List<HistoryEvent>? = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/activity/$kind/$activity/$through?afterRecordID=${java.net.URLEncoder.encode(afterRecordID, "UTF-8")}&afterIndex=${java.net.URLEncoder.encode(afterIndex, "UTF-8")}")
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
-    suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate> = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
+    suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate>? = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
 
     // SSE endpoints
     /** Streams task list updates for all tasks via SSE. */
@@ -222,18 +226,17 @@ class ApiClient(
         }
     }
 
-    private inline fun <reified T> sseFlow(
-        path: String,
-        method: String = "GET",
-        body: String? = null,
-        headers: Map<String, String> = emptyMap(),
-    ): Flow<T> = callbackFlow {
+    private inline fun <reified T> sseFlow(path: String): Flow<T> = stream(path) { json.decodeFromString<T>(it) }
+
+    /** Opens a cold event stream, decoding each data frame with the supplied function. */
+    fun <T> stream(path: String, method: String = "GET", body: String? = null, headers: Map<String, String> = emptyMap(), decode: (String) -> T): Flow<T> = callbackFlow {
         val requestBody = body?.toRequestBody(jsonMediaType)
+            ?: if (method in listOf("PATCH", "POST", "PROPPATCH", "PUT", "REPORT")) "".toRequestBody(null) else null
         val request = Request.Builder()
             .url("$baseURL$path")
             .header("Accept", "text/event-stream")
             .apply {
-                if (requestBody != null) header("Content-Type", "application/json")
+                if (body != null) header("Content-Type", "application/json")
                 headers.forEach { (name, value) -> header(name, value) }
                 tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") }
             }
@@ -243,7 +246,7 @@ class ApiClient(
         val source = factory.newEventSource(request, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
-                    val event = json.decodeFromString<T>(data)
+                    val event = decode(data)
                     // OkHttp invokes this on an IO callback thread; suspend reads until delivery.
                     trySendBlocking(event).getOrThrow()
                 } catch (e: Exception) {

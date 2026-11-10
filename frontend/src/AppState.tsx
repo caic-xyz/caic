@@ -199,7 +199,7 @@ function createAppStore() {
   };
   const [purgeDelay, setPurgeDelay] = createSignal(0);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
-  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
+  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<NonNullable<WellKnownCachesResp["wellKnown"]>>([]);
   const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
@@ -350,13 +350,13 @@ function createAppStore() {
       // Update an existing toast in place without remounting its disclosure or
       // restarting its timer. Dismissed episodes stay quiet on SSE replay.
       if (idx >= 0) {
-        setWarningState("items", idx, { message: warning.message, details: warning.details });
+        setWarningState("items", idx, { message: warning.message, details: warning.details ?? [] });
       }
       return;
     }
     latestWarningIDs.set(warning.category, warning.id);
     for (const item of warnings().filter((w) => w.category === warning.category)) dismissWarning(item.id);
-    addWarning(warning);
+    addWarning({ ...warning, details: warning.details ?? [] });
   }
   onCleanup(() => {
     for (const timer of warningTimers.values()) clearTimeout(timer);
@@ -538,7 +538,7 @@ function createAppStore() {
   };
   const selectedEffortForModel = (harness: string, model: string) => {
     const harnessInfo = harnesses().find((x) => x.name === harness);
-    const options = harnessInfo?.models.find((candidate) => candidate.id === model)?.effortOptions ?? [];
+    const options = harnessInfo?.models?.find((candidate) => candidate.id === model)?.effortOptions ?? [];
     const effort = getPrefEffort(harness, model);
     return effort && options.includes(effort) ? effort : "";
   };
@@ -660,12 +660,12 @@ function createAppStore() {
     setOAuthGrantError("");
     void api
       .getCacheSizes()
-      .then((sizes) => updateWellKnownCacheSizes(sizes.wellKnown))
+      .then((sizes) => updateWellKnownCacheSizes(sizes.wellKnown ?? []))
       .catch(() => undefined);
     if (initialMcpOAuthAvailable) {
       void api
         .listOAuthGrants()
-        .then((grants) => setOAuthGrants(grants.grants))
+        .then((grants) => setOAuthGrants(grants.grants ?? []))
         .catch((e: unknown) => {
           setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
         });
@@ -774,16 +774,16 @@ function createAppStore() {
           api.listCaches().catch(() => null),
           api.getCacheSizes().catch(() => null),
         ]);
-        if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
-        if (cacheSizesData) updateWellKnownCacheSizes(cacheSizesData.wellKnown);
-        const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
+        if (cachesData) setWellKnownCachesList(cachesData.wellKnown ?? []);
+        if (cacheSizesData) updateWellKnownCacheSizes(cacheSizesData.wellKnown ?? []);
+        const recentPaths = prefs?.repositories?.map((r) => r.path) ?? [];
         const recentSet = new Set(recentPaths);
         const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
-          const repo = data.find((d) => d.path === r);
+          const repo = (data ?? []).find((d) => d.path === r);
           if (repo) acc.push(repo);
           return acc;
         }, []);
-        const rest = data.filter((d) => !recentSet.has(d.path));
+        const rest = (data ?? []).filter((d) => !recentSet.has(d.path));
         const ordered = [...recentRepos, ...rest];
         setRepos(ordered);
         setRecentCount(recentRepos.length);
@@ -793,11 +793,13 @@ function createAppStore() {
           setSelectedRepos([{ path: first, branch: "" }]);
         }
         {
-          setHarnesses(h);
+          setHarnesses(h ?? []);
           prefModels = prefs?.models ?? {};
-          prefEfforts = prefs?.efforts ?? {};
+          prefEfforts = Object.fromEntries(
+            Object.entries(prefs?.efforts ?? {}).map(([key, value]) => [key, value ?? {}]),
+          );
           const prefHarness = prefs?.harness ?? "";
-          const harness = prefHarness && h.find((x) => x.name === prefHarness) ? prefHarness : (h[0]?.name ?? "");
+          const harness = prefHarness && h?.find((x) => x.name === prefHarness) ? prefHarness : (h?.[0]?.name ?? "");
           selectHarness(harness);
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
@@ -1518,7 +1520,7 @@ function createAppStore() {
     try {
       await api.revokeOAuthGrant(grantID, {});
       const grants = await api.listOAuthGrants();
-      setOAuthGrants(grants.grants);
+      setOAuthGrants(grants.grants ?? []);
     } catch (e: unknown) {
       setOAuthGrantError(e instanceof Error ? e.message : "Could not revoke MCP client");
     } finally {

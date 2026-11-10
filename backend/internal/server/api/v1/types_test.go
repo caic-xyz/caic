@@ -43,58 +43,6 @@ func TestEventResultCostJSON(t *testing.T) {
 func TestTaskListEvent(t *testing.T) {
 	t.Parallel()
 
-	assertEmptyArray := func(t *testing.T, ev TaskListEvent, field string) {
-		data, err := json.Marshal(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			t.Fatal(err)
-		}
-		arr, ok := raw[field].([]any)
-		if !ok {
-			t.Fatalf("%q is not an array, got %T", field, raw[field])
-		}
-		if len(arr) != 0 {
-			t.Errorf("%s array length = %d, want 0", field, len(arr))
-		}
-	}
-
-	t.Run("emptySnapshot", func(t *testing.T) {
-		t.Parallel()
-		cases := []struct {
-			name string
-			ev   TaskListEvent
-		}{
-			{name: "nil", ev: TaskListEvent{Kind: "snapshot"}},
-			{name: "non_nil", ev: TaskListEvent{Kind: "snapshot", Snapshot: make([]Task, 0)}},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				assertEmptyArray(t, tc.ev, "snapshot")
-			})
-		}
-	})
-
-	t.Run("emptyRepos", func(t *testing.T) {
-		t.Parallel()
-		cases := []struct {
-			name string
-			ev   TaskListEvent
-		}{
-			{name: "nil", ev: TaskListEvent{Kind: "repos"}},
-			{name: "non_nil", ev: TaskListEvent{Kind: "repos", Repos: make([]Repo, 0)}},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				assertEmptyArray(t, tc.ev, "repos")
-			})
-		}
-	})
-
 	t.Run("successful restoration status stays explicit", func(t *testing.T) {
 		t.Parallel()
 		data, err := json.Marshal(TaskListEvent{Kind: "status", Status: &TaskListRestorationStatus{}})

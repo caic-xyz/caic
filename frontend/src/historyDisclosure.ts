@@ -55,7 +55,9 @@ export function createActivityHistory(activity: Accessor<HistoryActivity>) {
     if (reading || disposed || through >= history.through() || error()) return;
     const controller = new AbortController();
     const value = history.manifest();
-    const actor = value?.metadata.activities.find((item) => item.id === activity().id && item.kind === activity().kind);
+    const actor = value?.metadata.activities?.find(
+      (item) => item.id === activity().id && item.kind === activity().kind,
+    );
     if (!value || !actor) return;
     request = controller;
     reading = true;
@@ -93,7 +95,9 @@ export function createActivityHistory(activity: Accessor<HistoryActivity>) {
   }
   createEffect(() => {
     const value = history.manifest();
-    const actor = value?.metadata.activities.find((item) => item.id === activity().id && item.kind === activity().kind);
+    const actor = value?.metadata.activities?.find(
+      (item) => item.id === activity().id && item.kind === activity().kind,
+    );
     if (!value || !actor) return;
     const identity = `${value.bootstrap.generation}:${actor.kind}:${actor.id}:${actor.ownershipThrough}:${attempt()}`;
     history.through();

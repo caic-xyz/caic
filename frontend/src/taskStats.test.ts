@@ -9,6 +9,9 @@ describe("task stats", () => {
     const stats = [
       {
         ts: 1_000,
+        cpuCeiling: null,
+        cpuQuota: null,
+        runtimeCPUs: null,
         cpuPerc: 0,
         memUsed: 0,
         memLimit: 0,
@@ -21,6 +24,9 @@ describe("task stats", () => {
       },
       {
         ts: 3_000,
+        cpuCeiling: null,
+        cpuQuota: null,
+        runtimeCPUs: null,
         cpuPerc: 0,
         memUsed: 0,
         memLimit: 0,
@@ -33,6 +39,9 @@ describe("task stats", () => {
       },
       {
         ts: 4_000,
+        cpuCeiling: null,
+        cpuQuota: null,
+        runtimeCPUs: null,
         cpuPerc: 0,
         memUsed: 0,
         memLimit: 0,

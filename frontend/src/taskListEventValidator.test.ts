@@ -16,10 +16,8 @@ describe("validateTaskListEvent restoration and snapshot authority", () => {
     });
   }
 
-  it("normalizes null snapshot authority to absence", () => {
-    const ev = validateTaskListEvent({ kind: "snapshot", snapshot: [], complete: null });
-    expect(ev.complete).toBeUndefined();
-    expect(ev.snapshot).toEqual([]);
+  it("rejects null snapshot authority", () => {
+    expect(() => validateTaskListEvent({ kind: "snapshot", snapshot: [], complete: null })).toThrow();
   });
 
   it("rejects malformed snapshot authority", () => {

@@ -53,7 +53,7 @@ test("server model reload shows progress, success, and recoverable failure", asy
   await expect(codex).toBeEnabled();
   await expect(pi).toBeEnabled();
   await expect
-    .poll(async () => (await api.listHarnesses()).find((h) => h.name === "codex")?.models.map((m) => m.id))
+    .poll(async () => ((await api.listHarnesses()) ?? []).find((h) => h.name === "codex")?.models?.map((m) => m.id))
     .toContain("fake-model-fast");
 
   const successColor = await status.evaluate((element) => getComputedStyle(element).color);

@@ -22,7 +22,7 @@ export class ImageDraftOwner {
     if (!limits) throw new Error("Image attachments are unavailable until server limits load.");
     let total = current.reduce((sum, img) => sum + img.blob.size, 0);
     for (const blob of blobs) {
-      if (!limits.allowedMediaTypes.includes(blob.type)) throw new Error("This image type is not supported.");
+      if (!limits.allowedMediaTypes?.includes(blob.type)) throw new Error("This image type is not supported.");
       if (!blob.size) throw new Error("The image is empty.");
       if (blob.size > limits.maxImageBytes) {
         throw new Error(`Each image must be ${limits.maxImageBytes / (1024 * 1024)} MiB or smaller.`);

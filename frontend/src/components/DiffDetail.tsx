@@ -32,10 +32,10 @@ type ViewRepository = Omit<DiffIndexRepository, "commits" | "uncommitted"> & {
 
 function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepository[] {
   return repositories.map(({ commits, uncommitted, ...repo }, repositoryIndex) => {
-    const indexedCommits = commits.map((commit) => ({
+    const indexedCommits = (commits ?? []).map((commit) => ({
       ...commit,
       id: `${repo.name}\0${commit.sha}`,
-      stat: commit.stat.map((file) => ({
+      stat: (commit.stat ?? []).map((file) => ({
         ...file,
         id: `${repo.name}\0${commit.sha}\0${file.path}`,
       })),
@@ -47,7 +47,7 @@ function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepositor
         { id: "ahead", commits: indexedCommits.filter((commit) => !commit.behind) },
         { id: "behind", commits: indexedCommits.filter((commit) => commit.behind) },
       ],
-      uncommitted: uncommitted.map((file) => ({
+      uncommitted: (uncommitted ?? []).map((file) => ({
         ...file,
         id: `${repo.name}\0${file.originalPath ?? ""}\0${file.path}`,
       })),

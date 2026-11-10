@@ -120,12 +120,12 @@ type DayView = Pick<
 function dayView(day: UsageDashboardDay, drilldown: UsageDrilldown | null): DayView | null {
   if (!drilldown) return day;
   if (drilldown.harness) {
-    const harness = day.harnesses.find((entry) => entry.harness === drilldown.harness);
+    const harness = day.harnesses?.find((entry) => entry.harness === drilldown.harness);
     if (!harness) return null;
-    if (drilldown.model) return harness.models.find((entry) => entry.model === drilldown.model) ?? null;
+    if (drilldown.model) return harness.models?.find((entry) => entry.model === drilldown.model) ?? null;
     return harness;
   }
-  if (drilldown.model) return day.models.find((entry) => entry.model === drilldown.model) ?? null;
+  if (drilldown.model) return day.models?.find((entry) => entry.model === drilldown.model) ?? null;
   return day;
 }
 
@@ -300,27 +300,27 @@ export function summarizeUsageDays(
     subagentSpawns += view.subagentSpawns;
     costUSD += view.costUSD;
     addUsageCost(cost, view.cost);
-    for (const skill of view.skills) skills.set(skill.name, (skills.get(skill.name) ?? 0) + skill.count);
-    for (const repo of view.repos) repos.set(repo.repo, (repos.get(repo.repo) ?? 0) + repo.tasks);
+    for (const skill of view.skills ?? []) skills.set(skill.name, (skills.get(skill.name) ?? 0) + skill.count);
+    for (const repo of view.repos ?? []) repos.set(repo.repo, (repos.get(repo.repo) ?? 0) + repo.tasks);
     // Both leaderboards stay visible under any filter by reading the
     // harness-by-model cross product: a model filter ranks the harnesses that
     // used it with that model's numbers, and a harness filter ranks the
     // models used under it.
     if (drilldown?.harness) {
-      const harness = day.harnesses.find((entry) => entry.harness === drilldown.harness);
+      const harness = day.harnesses?.find((entry) => entry.harness === drilldown.harness);
       for (const model of harness?.models ?? []) {
         if (drilldown.model && model.model !== drilldown.model) continue;
         addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD, model.cost);
       }
     } else {
-      for (const model of day.models) {
+      for (const model of day.models ?? []) {
         if (drilldown?.model && model.model !== drilldown.model) continue;
         addLeaderboard(models, model.model, model.tokens, model.turns, model.compactions, model.costUSD, model.cost);
       }
     }
     if (drilldown?.model) {
-      for (const harness of day.harnesses) {
-        const pair = harness.models.find((entry) => entry.model === drilldown.model);
+      for (const harness of day.harnesses ?? []) {
+        const pair = harness.models?.find((entry) => entry.model === drilldown.model);
         if (!pair) continue;
         addLeaderboard(harnesses, harness.harness, pair.tokens, pair.turns, pair.compactions, pair.costUSD, pair.cost);
         const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
@@ -328,7 +328,7 @@ export function summarizeUsageDays(
         harnessTokens.set(harness.harness, combined);
       }
     } else {
-      for (const harness of day.harnesses) {
+      for (const harness of day.harnesses ?? []) {
         if (drilldown?.harness && harness.harness !== drilldown.harness) continue;
         addLeaderboard(
           harnesses,
@@ -344,17 +344,17 @@ export function summarizeUsageDays(
         harnessTokens.set(harness.harness, combined);
       }
     }
-    for (const tool of view.tools) {
+    for (const tool of view.tools ?? []) {
       const entry = tools.get(tool.name) ?? newToolEntry(tool.name);
       entry.calls += tool.count;
       tools.set(tool.name, entry);
     }
-    for (const timing of view.toolTimings) {
+    for (const timing of view.toolTimings ?? []) {
       const entry = tools.get(timing.name) ?? newToolEntry(timing.name);
       entry.timedCalls += timing.count;
       entry.durationMs += timing.durationMs;
       const buckets = toolBuckets.get(timing.name) ?? new Map<number, number>();
-      for (const bucket of timing.buckets) {
+      for (const bucket of timing.buckets ?? []) {
         buckets.set(bucket.upperMs, (buckets.get(bucket.upperMs) ?? 0) + bucket.count);
       }
       toolBuckets.set(timing.name, buckets);

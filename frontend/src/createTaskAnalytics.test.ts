@@ -1,4 +1,6 @@
 // Tests metadata-only analytics, exact-position price joins, and cancelled pricing owners.
+
+import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { setImmediate as yieldToTasks } from "node:timers/promises";
@@ -126,9 +128,9 @@ describe("server task analytics", () => {
 it("keeps charts mounted for unrelated manifests and redraws an earlier corrected turn", async () => {
   const state = setup(async () => []);
   const value = manifestValue();
-  const first = value.metadata.turns[0];
+  const first = defined(value.metadata.turns)[0];
   assert.ok(first);
-  value.metadata.turns.push({ ...first, recordID: 8, usage: { ...first.usage } });
+  defined(value.metadata.turns).push({ ...first, recordID: 8, usage: { ...first.usage } });
   state.setManifest(value);
   const view = render(() =>
     createComponent(StatsCharts, {
@@ -155,12 +157,17 @@ it("keeps charts mounted for unrelated manifests and redraws an earlier correcte
     const corrected = structuredClone(unrelated);
     const last = before.turns[1];
     assert.ok(last);
-    corrected.metadata.turns[1] = last;
-    assert.ok(corrected.metadata.turns[0]);
-    corrected.metadata.turns[0].usage.inputTokens = 900;
-    corrected.metadata.turns[0].waitMs = 500;
-    corrected.metadata.turns[0].changeStat = { files: 1, linesAdded: 2, linesDeleted: 3, binaryFiles: 0 };
-    corrected.metadata.turns[0].cost = { usd: 4, source: "reported" };
+    defined(corrected.metadata.turns)[1] = last;
+    assert.ok(defined(defined(corrected.metadata.turns)[0]));
+    defined(defined(corrected.metadata.turns)[0]).usage.inputTokens = 900;
+    defined(defined(corrected.metadata.turns)[0]).waitMs = 500;
+    defined(defined(corrected.metadata.turns)[0]).changeStat = {
+      files: 1,
+      linesAdded: 2,
+      linesDeleted: 3,
+      binaryFiles: 0,
+    };
+    defined(defined(corrected.metadata.turns)[0]).cost = { usd: 4, source: "reported" };
     state.setManifest(corrected);
     assert.notEqual(state.snapshot().turns, before.turns);
     assert.equal(state.snapshot().turns[0]?.cost?.usd, 4);

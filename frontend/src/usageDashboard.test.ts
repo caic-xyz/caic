@@ -1,5 +1,6 @@
 // Tests usage dashboard range selection and additive rollup aggregation.
 
+import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
@@ -227,12 +228,12 @@ describe("summarizeUsageDays", () => {
 
   it("weights harness cache hit rate by input tokens across days", () => {
     const first = day("2026-01-24");
-    assert.ok(first.harnesses[0] !== undefined);
+    assert.ok(defined(defined(first.harnesses)[0]) !== undefined);
     const second = day("2026-01-25", {
       harnesses: [
         {
-          ...first.harnesses[0],
-          tokens: { ...first.harnesses[0].tokens, inputTokens: 70, cacheReadTokens: 0 },
+          ...defined(defined(first.harnesses)[0]),
+          tokens: { ...defined(defined(first.harnesses)[0]).tokens, inputTokens: 70, cacheReadTokens: 0 },
         },
       ],
     });
@@ -253,7 +254,7 @@ describe("summarizeUsageDays drill-down", () => {
       outputTokens: 20,
       reasoningTokens: 0,
     };
-    const pair: UsageDashboardDay["models"][number] = {
+    const pair: NonNullable<UsageDashboardDay["models"]>[number] = {
       model: "model-a",
       tokens,
       turns: 2,

@@ -57,8 +57,11 @@ export default function SystemPage() {
     }
     return samples.map((s) => ({
       ts: new Date(s.time).getTime(),
-      cpuPerc: s.cpus.reduce((sum, cpu) => sum + cpu.usagePerc, 0),
-      cpuCount: s.cpus.length,
+      cpuPerc: (s.cpus ?? []).reduce((sum, cpu) => sum + cpu.usagePerc, 0),
+      cpuCount: (s.cpus ?? []).length,
+      cpuCeiling: null,
+      cpuQuota: null,
+      runtimeCPUs: null,
       memUsed: s.memUsed,
       memLimit: s.memTotal,
       memPerc: s.memPerc,
@@ -70,7 +73,7 @@ export default function SystemPage() {
       diskTotal: s.diskTotal,
     }));
   }, []);
-  const latest = () => data()?.samples.at(-1);
+  const latest = () => data()?.samples?.at(-1);
   return (
     <section class={styles.page} aria-label="System">
       <SectionControls>
@@ -88,7 +91,7 @@ export default function SystemPage() {
       <Show when={stats().length > 0} fallback={<p>Waiting for system samples…</p>}>
         <Suspense fallback={<p>Loading charts…</p>}>
           <ResourceCharts samples={false} stats={stats()} scope="machine" />
-          <h3 class={styles.cpuTitle}>Logical CPUs ({latest()?.cpus.length ?? 0})</h3>
+          <h3 class={styles.cpuTitle}>Logical CPUs ({latest()?.cpus?.length ?? 0})</h3>
           <div class={styles.cpuGrid}>
             <For each={latest()?.cpus ?? []}>
               {(cpu) => (

@@ -49,7 +49,7 @@ interface SettingsFormProps {
   setSelectedRuntimeName: (runtimeName: string) => void;
   wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
   setWellKnownCaches: Setter<Record<string, boolean | undefined>>;
-  wellKnownCachesList: Accessor<WellKnownCachesResp["wellKnown"]>;
+  wellKnownCachesList: Accessor<NonNullable<WellKnownCachesResp["wellKnown"]>>;
   wellKnownCacheSizes: Accessor<Record<string, CacheSize | undefined>>;
   cacheMappings: Accessor<CacheMappingResp[]>;
   setCacheMappings: Setter<CacheMappingResp[]>;
@@ -127,8 +127,8 @@ export default function SettingsForm(props: SettingsFormProps) {
   const caches = createMemo(() =>
     [...props.wellKnownCachesList()].sort((a, b) => {
       const firstPath = (mounts: string[]) => mounts.map(containerSortPath).sort()[0] ?? "";
-      const left = firstPath(a.mounts);
-      const right = firstPath(b.mounts);
+      const left = firstPath(a.mounts ?? []);
+      const right = firstPath(b.mounts ?? []);
       return left < right ? -1 : left > right ? 1 : a.name.localeCompare(b.name);
     }),
   );
@@ -327,7 +327,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                       <span class={styles.cacheInfo}>
                         <span class={styles.cacheName}>{cache.name}</span>
                         <span class={styles.cachePath}>
-                          {[...cache.mounts]
+                          {[...(cache.mounts ?? [])]
                             .sort((a, b) => containerSortPath(a).localeCompare(containerSortPath(b)))
                             .map((path) => path.replace(/^\/home\/user(?=\/|$)/, "~"))
                             .join(" · ")}
@@ -403,7 +403,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                           <span class={styles.oauthGrantStatus}>{grant.status}</span>
                         </div>
                         <div class={styles.oauthGrantDetails}>
-                          <div>Scopes: {grant.scopes.join(", ")}</div>
+                          <div>Scopes: {grant.scopes?.join(", ")}</div>
                           <div>Resource: {grant.resource}</div>
                           <div>Created: {formatDate(grant.createdAt)}</div>
                           <div>Last used: {formatDate(grant.lastUsedAt)}</div>

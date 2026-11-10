@@ -7,7 +7,7 @@ async function submitAndGetId(page: import("@playwright/test").Page, api: APICli
   await page.getByTestId("submit-task").click();
   let taskId = "";
   await expect(async () => {
-    const tasks = await api.listTasks();
+    const tasks = (await api.listTasks()) ?? [];
     const task = tasks.find((t) => t.initialPrompt === prompt);
     expect(task).toBeTruthy();
     taskId = task!.id;

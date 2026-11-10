@@ -301,7 +301,14 @@ func taskStatePatch(id string, state v1.TaskState, at time.Time) (map[string]jso
 // bounded and failures end the stream. EventSource then reconnects for a new
 // authoritative snapshot rather than leaving that loop blocked indefinitely.
 func emitTaskListEvent(stream *sse.Stream, ev *v1.TaskListEvent) error {
-	data, err := json.Marshal(ev)
+	event := *ev
+	if event.Kind == "snapshot" && event.Snapshot == nil {
+		event.Snapshot = []v1.Task{}
+	}
+	if event.Kind == "repos" && event.Repos == nil {
+		event.Repos = []v1.Repo{}
+	}
+	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}

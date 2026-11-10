@@ -53,66 +53,86 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
   }
   const result: Record<string, T> = {};
   for (const k of Object.keys(v as ObjectValue)) {
-    result[k] = valValidator((v as ObjectValue)[k]);
+    Object.defineProperty(result, k, { value: valValidator((v as ObjectValue)[k]), enumerable: true, writable: true, configurable: true });
   }
   return result;
 }
 
 export function validateInputImage(raw: ValidatorInput): InputImage {
   const obj = asObject(raw, "InputImage");
+  if (!Object.prototype.hasOwnProperty.call(obj, "url")) throw new TypeError("missing required field: InputImage.url");
   return {
     url: asString(obj["url"], "InputImage.url"),
-    thumbnailURL: (obj["thumbnailURL"] === undefined || obj["thumbnailURL"] === null ? undefined : asString(obj["thumbnailURL"], "InputImage.thumbnailURL")),
-    previewURL: (obj["previewURL"] === undefined || obj["previewURL"] === null ? undefined : asString(obj["previewURL"], "InputImage.previewURL")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "thumbnailURL") ? { thumbnailURL: asString(obj["thumbnailURL"], "InputImage.thumbnailURL") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "previewURL") ? { previewURL: asString(obj["previewURL"], "InputImage.previewURL") } : {}),
   };
 }
 
 export function validatePrompt(raw: ValidatorInput): Prompt {
   const obj = asObject(raw, "Prompt");
+  if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: Prompt.text");
   return {
     text: asString(obj["text"], "Prompt.text"),
-    images: (obj["images"] === undefined || obj["images"] === null ? undefined : validateArray(obj["images"], "Prompt.images", validateInputImage) as InputImage[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "images") ? { images: validateArray(obj["images"], "Prompt.images", (v) => validateInputImage(v)) } : {}),
   };
 }
 
 export function validatePendingInput(raw: ValidatorInput): PendingInput {
   const obj = asObject(raw, "PendingInput");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: PendingInput.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "prompt")) throw new TypeError("missing required field: PendingInput.prompt");
   return {
-    delivered: (obj["delivered"] === undefined || obj["delivered"] === null ? undefined : asBoolean(obj["delivered"], "PendingInput.delivered")),
-    delivering: (obj["delivering"] === undefined || obj["delivering"] === null ? undefined : asBoolean(obj["delivering"], "PendingInput.delivering")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "delivered") ? { delivered: asBoolean(obj["delivered"], "PendingInput.delivered") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "delivering") ? { delivering: asBoolean(obj["delivering"], "PendingInput.delivering") } : {}),
     id: asString(obj["id"], "PendingInput.id"),
     prompt: validatePrompt(obj["prompt"]),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "PendingInput.error")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "PendingInput.error") } : {}),
   };
 }
 
 export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
   const obj = asObject(raw, "TaskRepo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: TaskRepo.name");
+  if (!Object.prototype.hasOwnProperty.call(obj, "branch")) throw new TypeError("missing required field: TaskRepo.branch");
   return {
     name: asString(obj["name"], "TaskRepo.name"),
-    baseBranch: (obj["baseBranch"] === undefined || obj["baseBranch"] === null ? undefined : asString(obj["baseBranch"], "TaskRepo.baseBranch")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "baseBranch") ? { baseBranch: asString(obj["baseBranch"], "TaskRepo.baseBranch") } : {}),
     branch: asString(obj["branch"], "TaskRepo.branch"),
-    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "TaskRepo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "TaskRepo.forge") as Forge)),
+    ...(Object.prototype.hasOwnProperty.call(obj, "remoteURL") ? { remoteURL: asString(obj["remoteURL"], "TaskRepo.remoteURL") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forge") ? { forge: (asString(obj["forge"], "TaskRepo.forge") as Forge) } : {}),
   };
 }
 
 export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
   const obj = asObject(raw, "DiffFileStat");
+  if (!Object.prototype.hasOwnProperty.call(obj, "path")) throw new TypeError("missing required field: DiffFileStat.path");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesAdded")) throw new TypeError("missing required field: DiffFileStat.linesAdded");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesDeleted")) throw new TypeError("missing required field: DiffFileStat.linesDeleted");
+  if (!Object.prototype.hasOwnProperty.call(obj, "oldSize")) throw new TypeError("missing required field: DiffFileStat.oldSize");
+  if (!Object.prototype.hasOwnProperty.call(obj, "newSize")) throw new TypeError("missing required field: DiffFileStat.newSize");
   return {
     path: asString(obj["path"], "DiffFileStat.path"),
     linesAdded: asNumber(obj["linesAdded"], "DiffFileStat.linesAdded"),
     linesDeleted: asNumber(obj["linesDeleted"], "DiffFileStat.linesDeleted"),
     oldSize: asNumber(obj["oldSize"], "DiffFileStat.oldSize"),
     newSize: asNumber(obj["newSize"], "DiffFileStat.newSize"),
-    diff: (obj["diff"] === undefined || obj["diff"] === null ? undefined : asString(obj["diff"], "DiffFileStat.diff")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "diff") ? { diff: asString(obj["diff"], "DiffFileStat.diff") } : {}),
   };
 }
 
 export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
   const obj = asObject(raw, "GitRepositoryState");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: GitRepositoryState.name");
+  if (!Object.prototype.hasOwnProperty.call(obj, "branch")) throw new TypeError("missing required field: GitRepositoryState.branch");
+  if (!Object.prototype.hasOwnProperty.call(obj, "ahead")) throw new TypeError("missing required field: GitRepositoryState.ahead");
+  if (!Object.prototype.hasOwnProperty.call(obj, "behind")) throw new TypeError("missing required field: GitRepositoryState.behind");
+  if (!Object.prototype.hasOwnProperty.call(obj, "changedFiles")) throw new TypeError("missing required field: GitRepositoryState.changedFiles");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesAdded")) throw new TypeError("missing required field: GitRepositoryState.linesAdded");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesDeleted")) throw new TypeError("missing required field: GitRepositoryState.linesDeleted");
+  if (!Object.prototype.hasOwnProperty.call(obj, "uncommittedFiles")) throw new TypeError("missing required field: GitRepositoryState.uncommittedFiles");
+  if (!Object.prototype.hasOwnProperty.call(obj, "conflicts")) throw new TypeError("missing required field: GitRepositoryState.conflicts");
   return {
-    stale: (obj["stale"] === undefined || obj["stale"] === null ? undefined : asBoolean(obj["stale"], "GitRepositoryState.stale")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "stale") ? { stale: asBoolean(obj["stale"], "GitRepositoryState.stale") } : {}),
     name: asString(obj["name"], "GitRepositoryState.name"),
     branch: asString(obj["branch"], "GitRepositoryState.branch"),
     ahead: asNumber(obj["ahead"], "GitRepositoryState.ahead"),
@@ -122,12 +142,15 @@ export function validateGitRepositoryState(raw: ValidatorInput): GitRepositorySt
     linesDeleted: asNumber(obj["linesDeleted"], "GitRepositoryState.linesDeleted"),
     uncommittedFiles: asNumber(obj["uncommittedFiles"], "GitRepositoryState.uncommittedFiles"),
     conflicts: asNumber(obj["conflicts"], "GitRepositoryState.conflicts"),
-    operation: (obj["operation"] === undefined || obj["operation"] === null ? undefined : (asString(obj["operation"], "GitRepositoryState.operation") as GitOperation)),
+    ...(Object.prototype.hasOwnProperty.call(obj, "operation") ? { operation: (asString(obj["operation"], "GitRepositoryState.operation") as GitOperation) } : {}),
   };
 }
 
 export function validateTaskStartupFailure(raw: ValidatorInput): TaskStartupFailure {
   const obj = asObject(raw, "TaskStartupFailure");
+  if (!Object.prototype.hasOwnProperty.call(obj, "harness")) throw new TypeError("missing required field: TaskStartupFailure.harness");
+  if (!Object.prototype.hasOwnProperty.call(obj, "phase")) throw new TypeError("missing required field: TaskStartupFailure.phase");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cause")) throw new TypeError("missing required field: TaskStartupFailure.cause");
   return {
     harness: (asString(obj["harness"], "TaskStartupFailure.harness") as Harness),
     phase: asString(obj["phase"], "TaskStartupFailure.phase"),
@@ -137,6 +160,13 @@ export function validateTaskStartupFailure(raw: ValidatorInput): TaskStartupFail
 
 export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
   const obj = asObject(raw, "ForgeCheck");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: ForgeCheck.name");
+  if (!Object.prototype.hasOwnProperty.call(obj, "owner")) throw new TypeError("missing required field: ForgeCheck.owner");
+  if (!Object.prototype.hasOwnProperty.call(obj, "repo")) throw new TypeError("missing required field: ForgeCheck.repo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "runID")) throw new TypeError("missing required field: ForgeCheck.runID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "jobID")) throw new TypeError("missing required field: ForgeCheck.jobID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: ForgeCheck.status");
+  if (!Object.prototype.hasOwnProperty.call(obj, "conclusion")) throw new TypeError("missing required field: ForgeCheck.conclusion");
   return {
     name: asString(obj["name"], "ForgeCheck.name"),
     owner: asString(obj["owner"], "ForgeCheck.owner"),
@@ -145,14 +175,16 @@ export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
     jobID: asNumber(obj["jobID"], "ForgeCheck.jobID"),
     status: (asString(obj["status"], "ForgeCheck.status") as CheckStatus),
     conclusion: (asString(obj["conclusion"], "ForgeCheck.conclusion") as CheckConclusion),
-    queuedAt: (obj["queuedAt"] === undefined || obj["queuedAt"] === null ? undefined : asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp),
-    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp),
-    completedAt: (obj["completedAt"] === undefined || obj["completedAt"] === null ? undefined : asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "queuedAt") ? { queuedAt: asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startedAt") ? { startedAt: asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "completedAt") ? { completedAt: asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp } : {}),
   };
 }
 
 export function validateTaskPlan(raw: ValidatorInput): TaskPlan {
   const obj = asObject(raw, "TaskPlan");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: TaskPlan.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "content")) throw new TypeError("missing required field: TaskPlan.content");
   return {
     toolUseID: asString(obj["toolUseID"], "TaskPlan.toolUseID"),
     content: asString(obj["content"], "TaskPlan.content"),
@@ -161,27 +193,41 @@ export function validateTaskPlan(raw: ValidatorInput): TaskPlan {
 
 export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
   const obj = asObject(raw, "RuntimeInstance");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: RuntimeInstance.id");
   return {
     id: asString(obj["id"], "RuntimeInstance.id"),
-    runtimeName: (obj["runtimeName"] === undefined || obj["runtimeName"] === null ? undefined : asString(obj["runtimeName"], "RuntimeInstance.runtimeName")),
-    tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
-    usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
-    display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),
-    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "RuntimeInstance.sudo")),
-    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "RuntimeInstance.sudoPassword")),
-    vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "RuntimeInstance.vncPort")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "runtimeName") ? { runtimeName: asString(obj["runtimeName"], "RuntimeInstance.runtimeName") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "tailscale") ? { tailscale: asString(obj["tailscale"], "RuntimeInstance.tailscale") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "usb") ? { usb: asBoolean(obj["usb"], "RuntimeInstance.usb") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "display") ? { display: asBoolean(obj["display"], "RuntimeInstance.display") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "sudo") ? { sudo: asBoolean(obj["sudo"], "RuntimeInstance.sudo") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "sudoPassword") ? { sudoPassword: asString(obj["sudoPassword"], "RuntimeInstance.sudoPassword") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "vncPort") ? { vncPort: asNumber(obj["vncPort"], "RuntimeInstance.vncPort") } : {}),
   };
 }
 
 export function validateEventStats(raw: ValidatorInput): EventStats {
   const obj = asObject(raw, "EventStats");
+  if (!Object.prototype.hasOwnProperty.call(obj, "ts")) throw new TypeError("missing required field: EventStats.ts");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuPerc")) throw new TypeError("missing required field: EventStats.cpuPerc");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuCeiling")) throw new TypeError("missing required field: EventStats.cpuCeiling");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuQuota")) throw new TypeError("missing required field: EventStats.cpuQuota");
+  if (!Object.prototype.hasOwnProperty.call(obj, "runtimeCPUs")) throw new TypeError("missing required field: EventStats.runtimeCPUs");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memUsed")) throw new TypeError("missing required field: EventStats.memUsed");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memLimit")) throw new TypeError("missing required field: EventStats.memLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memPerc")) throw new TypeError("missing required field: EventStats.memPerc");
+  if (!Object.prototype.hasOwnProperty.call(obj, "netRx")) throw new TypeError("missing required field: EventStats.netRx");
+  if (!Object.prototype.hasOwnProperty.call(obj, "netTx")) throw new TypeError("missing required field: EventStats.netTx");
+  if (!Object.prototype.hasOwnProperty.call(obj, "blockRead")) throw new TypeError("missing required field: EventStats.blockRead");
+  if (!Object.prototype.hasOwnProperty.call(obj, "blockWrite")) throw new TypeError("missing required field: EventStats.blockWrite");
+  if (!Object.prototype.hasOwnProperty.call(obj, "diskUsed")) throw new TypeError("missing required field: EventStats.diskUsed");
   return {
     ts: asNumber(obj["ts"], "EventStats.ts"),
     cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
-    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
-    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
-    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
-    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
+    cpuCeiling: (obj["cpuCeiling"] === null ? null : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
+    cpuQuota: (obj["cpuQuota"] === null ? null : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
+    runtimeCPUs: (obj["runtimeCPUs"] === null ? null : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "cpuError") ? { cpuError: asString(obj["cpuError"], "EventStats.cpuError") } : {}),
     memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
     memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
     memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),
@@ -195,26 +241,49 @@ export function validateEventStats(raw: ValidatorInput): EventStats {
 
 export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
   const obj = asObject(raw, "TaskRateLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "blocked")) throw new TypeError("missing required field: TaskRateLimit.blocked");
   return {
     blocked: asBoolean(obj["blocked"], "TaskRateLimit.blocked"),
-    quotaGroup: (obj["quotaGroup"] === undefined || obj["quotaGroup"] === null ? undefined : (asString(obj["quotaGroup"], "TaskRateLimit.quotaGroup") as QuotaProvider)),
-    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "TaskRateLimit.window")),
-    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "quotaGroup") ? { quotaGroup: (asString(obj["quotaGroup"], "TaskRateLimit.quotaGroup") as QuotaProvider) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "window") ? { window: asString(obj["window"], "TaskRateLimit.window") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "resetsAt") ? { resetsAt: asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp } : {}),
   };
 }
 
 export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
+  if (!Object.prototype.hasOwnProperty.call(obj, "pendingInput")) throw new TypeError("missing required field: Task.pendingInput");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: Task.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "initialPrompt")) throw new TypeError("missing required field: Task.initialPrompt");
+  if (!Object.prototype.hasOwnProperty.call(obj, "title")) throw new TypeError("missing required field: Task.title");
+  if (!Object.prototype.hasOwnProperty.call(obj, "state")) throw new TypeError("missing required field: Task.state");
+  if (!Object.prototype.hasOwnProperty.call(obj, "stateUpdatedAt")) throw new TypeError("missing required field: Task.stateUpdatedAt");
+  if (!Object.prototype.hasOwnProperty.call(obj, "costUSD")) throw new TypeError("missing required field: Task.costUSD");
+  if (!Object.prototype.hasOwnProperty.call(obj, "costKnown")) throw new TypeError("missing required field: Task.costKnown");
+  if (!Object.prototype.hasOwnProperty.call(obj, "costComplete")) throw new TypeError("missing required field: Task.costComplete");
+  if (!Object.prototype.hasOwnProperty.call(obj, "duration")) throw new TypeError("missing required field: Task.duration");
+  if (!Object.prototype.hasOwnProperty.call(obj, "numTurns")) throw new TypeError("missing required field: Task.numTurns");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cumulativeInputTokens")) throw new TypeError("missing required field: Task.cumulativeInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cumulativeOutputTokens")) throw new TypeError("missing required field: Task.cumulativeOutputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cumulativeCacheCreationInputTokens")) throw new TypeError("missing required field: Task.cumulativeCacheCreationInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cumulativeCacheReadInputTokens")) throw new TypeError("missing required field: Task.cumulativeCacheReadInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "activeInputTokens")) throw new TypeError("missing required field: Task.activeInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "activeCacheReadTokens")) throw new TypeError("missing required field: Task.activeCacheReadTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "stoppedDiskUsedBytes")) throw new TypeError("missing required field: Task.stoppedDiskUsedBytes");
+  if (!Object.prototype.hasOwnProperty.call(obj, "contextWindowLimit")) throw new TypeError("missing required field: Task.contextWindowLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "autoCompactTokenLimit")) throw new TypeError("missing required field: Task.autoCompactTokenLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "harness")) throw new TypeError("missing required field: Task.harness");
+  if (!Object.prototype.hasOwnProperty.call(obj, "runtime")) throw new TypeError("missing required field: Task.runtime");
   return {
-    pendingInput: (obj["pendingInput"] === undefined || obj["pendingInput"] === null ? undefined : validatePendingInput(obj["pendingInput"])),
+    pendingInput: (obj["pendingInput"] === null ? null : validatePendingInput(obj["pendingInput"])),
     id: asString(obj["id"], "Task.id"),
     initialPrompt: asString(obj["initialPrompt"], "Task.initialPrompt"),
     title: asString(obj["title"], "Task.title"),
-    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "Task.repos", validateTaskRepo) as TaskRepo[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "repos") ? { repos: validateArray(obj["repos"], "Task.repos", (v) => validateTaskRepo(v)) } : {}),
     state: (asString(obj["state"], "Task.state") as TaskState),
     stateUpdatedAt: asString(obj["stateUpdatedAt"], "Task.stateUpdatedAt") as ISOTimestamp,
-    diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
-    repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "diffStat") ? { diffStat: validateArray(obj["diffStat"], "Task.diffStat", (v) => validateDiffFileStat(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "repoStates") ? { repoStates: validateArray(obj["repoStates"], "Task.repoStates", (v) => validateGitRepositoryState(v)) } : {}),
     costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
     costKnown: asBoolean(obj["costKnown"], "Task.costKnown"),
     costComplete: asBoolean(obj["costComplete"], "Task.costComplete"),
@@ -226,69 +295,75 @@ export function validateTask(raw: ValidatorInput): Task {
     cumulativeCacheReadInputTokens: asNumber(obj["cumulativeCacheReadInputTokens"], "Task.cumulativeCacheReadInputTokens"),
     activeInputTokens: asNumber(obj["activeInputTokens"], "Task.activeInputTokens"),
     activeCacheReadTokens: asNumber(obj["activeCacheReadTokens"], "Task.activeCacheReadTokens"),
-    cacheTTLSeconds: (obj["cacheTTLSeconds"] === undefined || obj["cacheTTLSeconds"] === null ? undefined : asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds")),
-    cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "cacheTTLSeconds") ? { cacheTTLSeconds: asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "cacheExpiresAt") ? { cacheExpiresAt: asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp } : {}),
     stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
-    contextUsed: (obj["contextUsed"] === undefined || obj["contextUsed"] === null ? undefined : asNumber(obj["contextUsed"], "Task.contextUsed")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contextUsed") ? { contextUsed: asNumber(obj["contextUsed"], "Task.contextUsed") } : {}),
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
     autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
-    startupFailure: (obj["startupFailure"] === undefined || obj["startupFailure"] === null ? undefined : validateTaskStartupFailure(obj["startupFailure"])),
-    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),
-    forgeOwner: (obj["forgeOwner"] === undefined || obj["forgeOwner"] === null ? undefined : asString(obj["forgeOwner"], "Task.forgeOwner")),
-    forgeRepo: (obj["forgeRepo"] === undefined || obj["forgeRepo"] === null ? undefined : asString(obj["forgeRepo"], "Task.forgeRepo")),
-    forgePR: (obj["forgePR"] === undefined || obj["forgePR"] === null ? undefined : asNumber(obj["forgePR"], "Task.forgePR")),
-    forgePRState: (obj["forgePRState"] === undefined || obj["forgePRState"] === null ? undefined : (asString(obj["forgePRState"], "Task.forgePRState") as ForgePRState)),
-    forgeIssue: (obj["forgeIssue"] === undefined || obj["forgeIssue"] === null ? undefined : asNumber(obj["forgeIssue"], "Task.forgeIssue")),
-    ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus)),
-    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Task.ciChecks", validateForgeCheck) as ForgeCheck[]),
-    owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
-    forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
-    parentTaskID: (obj["parentTaskID"] === undefined || obj["parentTaskID"] === null ? undefined : asString(obj["parentTaskID"], "Task.parentTaskID")),
-    caicMCP: (obj["caicMCP"] === undefined || obj["caicMCP"] === null ? undefined : asBoolean(obj["caicMCP"], "Task.caicMCP")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "Task.error") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startupFailure") ? { startupFailure: validateTaskStartupFailure(obj["startupFailure"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "result") ? { result: asString(obj["result"], "Task.result") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forgeOwner") ? { forgeOwner: asString(obj["forgeOwner"], "Task.forgeOwner") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forgeRepo") ? { forgeRepo: asString(obj["forgeRepo"], "Task.forgeRepo") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forgePR") ? { forgePR: asNumber(obj["forgePR"], "Task.forgePR") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forgePRState") ? { forgePRState: (asString(obj["forgePRState"], "Task.forgePRState") as ForgePRState) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forgeIssue") ? { forgeIssue: asNumber(obj["forgeIssue"], "Task.forgeIssue") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "ciStatus") ? { ciStatus: (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "ciChecks") ? { ciChecks: validateArray(obj["ciChecks"], "Task.ciChecks", (v) => validateForgeCheck(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "owner") ? { owner: asString(obj["owner"], "Task.owner") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forkedFromTaskID") ? { forkedFromTaskID: asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "parentTaskID") ? { parentTaskID: asString(obj["parentTaskID"], "Task.parentTaskID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "caicMCP") ? { caicMCP: asBoolean(obj["caicMCP"], "Task.caicMCP") } : {}),
     harness: (asString(obj["harness"], "Task.harness") as Harness),
-    requestedModel: (obj["requestedModel"] === undefined || obj["requestedModel"] === null ? undefined : asString(obj["requestedModel"], "Task.requestedModel")),
-    requestedEffort: (obj["requestedEffort"] === undefined || obj["requestedEffort"] === null ? undefined : asString(obj["requestedEffort"], "Task.requestedEffort")),
-    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "Task.reportedModel")),
-    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "Task.reportedEffort")),
-    agentVersion: (obj["agentVersion"] === undefined || obj["agentVersion"] === null ? undefined : asString(obj["agentVersion"], "Task.agentVersion")),
-    sessionID: (obj["sessionID"] === undefined || obj["sessionID"] === null ? undefined : asString(obj["sessionID"], "Task.sessionID")),
-    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp),
-    turnStartedAt: (obj["turnStartedAt"] === undefined || obj["turnStartedAt"] === null ? undefined : asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp),
-    inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
-    currentPlan: (obj["currentPlan"] === undefined || obj["currentPlan"] === null ? undefined : validateTaskPlan(obj["currentPlan"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "requestedModel") ? { requestedModel: asString(obj["requestedModel"], "Task.requestedModel") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "requestedEffort") ? { requestedEffort: asString(obj["requestedEffort"], "Task.requestedEffort") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "reportedModel") ? { reportedModel: asString(obj["reportedModel"], "Task.reportedModel") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "reportedEffort") ? { reportedEffort: asString(obj["reportedEffort"], "Task.reportedEffort") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "agentVersion") ? { agentVersion: asString(obj["agentVersion"], "Task.agentVersion") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "sessionID") ? { sessionID: asString(obj["sessionID"], "Task.sessionID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startedAt") ? { startedAt: asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "turnStartedAt") ? { turnStartedAt: asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "inPlanMode") ? { inPlanMode: asBoolean(obj["inPlanMode"], "Task.inPlanMode") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "currentPlan") ? { currentPlan: validateTaskPlan(obj["currentPlan"]) } : {}),
     runtime: validateRuntimeInstance(obj["runtime"]),
-    resourceUsage: (obj["resourceUsage"] === undefined || obj["resourceUsage"] === null ? undefined : validateEventStats(obj["resourceUsage"])),
-    rateLimit: (obj["rateLimit"] === undefined || obj["rateLimit"] === null ? undefined : validateTaskRateLimit(obj["rateLimit"])),
-    gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "resourceUsage") ? { resourceUsage: validateEventStats(obj["resourceUsage"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "rateLimit") ? { rateLimit: validateTaskRateLimit(obj["rateLimit"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "gitHubToken") ? { gitHubToken: asBoolean(obj["gitHubToken"], "Task.gitHubToken") } : {}),
   };
 }
 
 export function validateBranchInfo(raw: ValidatorInput): BranchInfo {
   const obj = asObject(raw, "BranchInfo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: BranchInfo.name");
   return {
     name: asString(obj["name"], "BranchInfo.name"),
-    remote: (obj["remote"] === undefined || obj["remote"] === null ? undefined : asString(obj["remote"], "BranchInfo.remote")),
-    action: (obj["action"] === undefined || obj["action"] === null ? undefined : (asString(obj["action"], "BranchInfo.action") as BranchAction)),
+    ...(Object.prototype.hasOwnProperty.call(obj, "remote") ? { remote: asString(obj["remote"], "BranchInfo.remote") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "action") ? { action: (asString(obj["action"], "BranchInfo.action") as BranchAction) } : {}),
   };
 }
 
 export function validateRepo(raw: ValidatorInput): Repo {
   const obj = asObject(raw, "Repo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "path")) throw new TypeError("missing required field: Repo.path");
+  if (!Object.prototype.hasOwnProperty.call(obj, "branch")) throw new TypeError("missing required field: Repo.branch");
+  if (!Object.prototype.hasOwnProperty.call(obj, "baseBranch")) throw new TypeError("missing required field: Repo.baseBranch");
   return {
     path: asString(obj["path"], "Repo.path"),
     branch: asString(obj["branch"], "Repo.branch"),
     baseBranch: validateBranchInfo(obj["baseBranch"]),
-    remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "Repo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "Repo.forge") as Forge)),
-    ci: (obj["ci"] === undefined || obj["ci"] === null ? undefined : (asString(obj["ci"], "Repo.ci") as CIStatus)),
-    ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Repo.ciChecks", validateForgeCheck) as ForgeCheck[]),
-    checksDate: (obj["checksDate"] === undefined || obj["checksDate"] === null ? undefined : asString(obj["checksDate"], "Repo.checksDate") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "remoteURL") ? { remoteURL: asString(obj["remoteURL"], "Repo.remoteURL") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "forge") ? { forge: (asString(obj["forge"], "Repo.forge") as Forge) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "ci") ? { ci: (asString(obj["ci"], "Repo.ci") as CIStatus) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "ciChecks") ? { ciChecks: validateArray(obj["ciChecks"], "Repo.ciChecks", (v) => validateForgeCheck(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "checksDate") ? { checksDate: asString(obj["checksDate"], "Repo.checksDate") as ISOTimestamp } : {}),
   };
 }
 
 export function validateWarningDetail(raw: ValidatorInput): WarningDetail {
   const obj = asObject(raw, "WarningDetail");
+  if (!Object.prototype.hasOwnProperty.call(obj, "repo")) throw new TypeError("missing required field: WarningDetail.repo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "error")) throw new TypeError("missing required field: WarningDetail.error");
   return {
     repo: asString(obj["repo"], "WarningDetail.repo"),
     error: asString(obj["error"], "WarningDetail.error"),
@@ -297,16 +372,22 @@ export function validateWarningDetail(raw: ValidatorInput): WarningDetail {
 
 export function validateWarning(raw: ValidatorInput): Warning {
   const obj = asObject(raw, "Warning");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: Warning.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "category")) throw new TypeError("missing required field: Warning.category");
+  if (!Object.prototype.hasOwnProperty.call(obj, "message")) throw new TypeError("missing required field: Warning.message");
+  if (!Object.prototype.hasOwnProperty.call(obj, "details")) throw new TypeError("missing required field: Warning.details");
   return {
     id: asString(obj["id"], "Warning.id"),
     category: (asString(obj["category"], "Warning.category") as WarningCategory),
     message: asString(obj["message"], "Warning.message"),
-    details: validateArray(obj["details"], "Warning.details", validateWarningDetail) as WarningDetail[],
+    details: (obj["details"] === null ? null : validateArray(obj["details"], "Warning.details", (v) => validateWarningDetail(v))),
   };
 }
 
 export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskListRestorationStatus {
   const obj = asObject(raw, "TaskListRestorationStatus");
+  if (!Object.prototype.hasOwnProperty.call(obj, "loading")) throw new TypeError("missing required field: TaskListRestorationStatus.loading");
+  if (!Object.prototype.hasOwnProperty.call(obj, "error")) throw new TypeError("missing required field: TaskListRestorationStatus.error");
   return {
     loading: asBoolean(obj["loading"], "TaskListRestorationStatus.loading"),
     error: asString(obj["error"], "TaskListRestorationStatus.error"),
@@ -315,69 +396,88 @@ export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskList
 
 export function validateServerHealth(raw: ValidatorInput): ServerHealth {
   const obj = asObject(raw, "ServerHealth");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuPerc")) throw new TypeError("missing required field: ServerHealth.cpuPerc");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuCount")) throw new TypeError("missing required field: ServerHealth.cpuCount");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memUsed")) throw new TypeError("missing required field: ServerHealth.memUsed");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memTotal")) throw new TypeError("missing required field: ServerHealth.memTotal");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cpuHigh")) throw new TypeError("missing required field: ServerHealth.cpuHigh");
+  if (!Object.prototype.hasOwnProperty.call(obj, "memHigh")) throw new TypeError("missing required field: ServerHealth.memHigh");
   return {
-    time: (obj["time"] === undefined || obj["time"] === null ? undefined : asString(obj["time"], "ServerHealth.time") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "time") ? { time: asString(obj["time"], "ServerHealth.time") as ISOTimestamp } : {}),
     cpuPerc: asNumber(obj["cpuPerc"], "ServerHealth.cpuPerc"),
     cpuCount: asNumber(obj["cpuCount"], "ServerHealth.cpuCount"),
     memUsed: asNumber(obj["memUsed"], "ServerHealth.memUsed"),
     memTotal: asNumber(obj["memTotal"], "ServerHealth.memTotal"),
     cpuHigh: asBoolean(obj["cpuHigh"], "ServerHealth.cpuHigh"),
     memHigh: asBoolean(obj["memHigh"], "ServerHealth.memHigh"),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "ServerHealth.error")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "ServerHealth.error") } : {}),
   };
 }
 
 export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
+  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: TaskListEvent.kind");
   return {
-    focus: (obj["focus"] === undefined || obj["focus"] === null ? undefined : asString(obj["focus"], "TaskListEvent.focus")),
-    complete: (obj["complete"] === undefined || obj["complete"] === null ? undefined : asBoolean(obj["complete"], "TaskListEvent.complete")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "focus") ? { focus: asString(obj["focus"], "TaskListEvent.focus") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "complete") ? { complete: asBoolean(obj["complete"], "TaskListEvent.complete") } : {}),
     kind: asString(obj["kind"], "TaskListEvent.kind"),
-    snapshot: (obj["snapshot"] === undefined || obj["snapshot"] === null ? undefined : validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[]),
-    upsert: (obj["upsert"] === undefined || obj["upsert"] === null ? undefined : validateTask(obj["upsert"])),
-    patch: (obj["patch"] === undefined || obj["patch"] === null ? undefined : validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ }),
-    delete: (obj["delete"] === undefined || obj["delete"] === null ? undefined : asString(obj["delete"], "TaskListEvent.delete")),
-    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[]),
-    warning: (obj["warning"] === undefined || obj["warning"] === null ? undefined : validateWarning(obj["warning"])),
-    status: (obj["status"] === undefined || obj["status"] === null ? undefined : validateTaskListRestorationStatus(obj["status"])),
-    health: (obj["health"] === undefined || obj["health"] === null ? undefined : validateServerHealth(obj["health"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "snapshot") ? { snapshot: validateArray(obj["snapshot"], "TaskListEvent.snapshot", (v) => validateTask(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "upsert") ? { upsert: validateTask(obj["upsert"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "patch") ? { patch: validateRecord(obj["patch"], "TaskListEvent.patch", (v) => (v === null ? null : v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "delete") ? { delete: asString(obj["delete"], "TaskListEvent.delete") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "repos") ? { repos: validateArray(obj["repos"], "TaskListEvent.repos", (v) => validateRepo(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "warning") ? { warning: validateWarning(obj["warning"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "status") ? { status: validateTaskListRestorationStatus(obj["status"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "health") ? { health: validateServerHealth(obj["health"]) } : {}),
   };
 }
 
 export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
   const obj = asObject(raw, "QuotaRateLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "label")) throw new TypeError("missing required field: QuotaRateLimit.label");
+  if (!Object.prototype.hasOwnProperty.call(obj, "window")) throw new TypeError("missing required field: QuotaRateLimit.window");
+  if (!Object.prototype.hasOwnProperty.call(obj, "utilization")) throw new TypeError("missing required field: QuotaRateLimit.utilization");
   return {
     label: asString(obj["label"], "QuotaRateLimit.label"),
     window: asString(obj["window"], "QuotaRateLimit.window"),
     utilization: asNumber(obj["utilization"], "QuotaRateLimit.utilization"),
-    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "resetsAt") ? { resetsAt: asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp } : {}),
   };
 }
 
 export function validateUnassessedQuotaWindow(raw: ValidatorInput): UnassessedQuotaWindow {
   const obj = asObject(raw, "UnassessedQuotaWindow");
+  if (!Object.prototype.hasOwnProperty.call(obj, "group")) throw new TypeError("missing required field: UnassessedQuotaWindow.group");
   return {
     group: asString(obj["group"], "UnassessedQuotaWindow.group"),
-    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "UnassessedQuotaWindow.window")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "window") ? { window: asString(obj["window"], "UnassessedQuotaWindow.window") } : {}),
   };
 }
 
 export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
   const obj = asObject(raw, "QuotaBalance");
+  if (!Object.prototype.hasOwnProperty.call(obj, "currency")) throw new TypeError("missing required field: QuotaBalance.currency");
+  if (!Object.prototype.hasOwnProperty.call(obj, "total")) throw new TypeError("missing required field: QuotaBalance.total");
   return {
     currency: asString(obj["currency"], "QuotaBalance.currency"),
     total: asNumber(obj["total"], "QuotaBalance.total"),
-    granted: (obj["granted"] === undefined || obj["granted"] === null ? undefined : asNumber(obj["granted"], "QuotaBalance.granted")),
-    toppedUp: (obj["toppedUp"] === undefined || obj["toppedUp"] === null ? undefined : asNumber(obj["toppedUp"], "QuotaBalance.toppedUp")),
-    extraEnabled: (obj["extraEnabled"] === undefined || obj["extraEnabled"] === null ? undefined : asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled")),
-    usedCredits: (obj["usedCredits"] === undefined || obj["usedCredits"] === null ? undefined : asNumber(obj["usedCredits"], "QuotaBalance.usedCredits")),
-    monthlyLimit: (obj["monthlyLimit"] === undefined || obj["monthlyLimit"] === null ? undefined : asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit")),
-    utilization: (obj["utilization"] === undefined || obj["utilization"] === null ? undefined : asNumber(obj["utilization"], "QuotaBalance.utilization")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "granted") ? { granted: asNumber(obj["granted"], "QuotaBalance.granted") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "toppedUp") ? { toppedUp: asNumber(obj["toppedUp"], "QuotaBalance.toppedUp") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "extraEnabled") ? { extraEnabled: asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "usedCredits") ? { usedCredits: asNumber(obj["usedCredits"], "QuotaBalance.usedCredits") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "monthlyLimit") ? { monthlyLimit: asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "utilization") ? { utilization: asNumber(obj["utilization"], "QuotaBalance.utilization") } : {}),
   };
 }
 
 export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
   const obj = asObject(raw, "ProviderQuota");
+  if (!Object.prototype.hasOwnProperty.call(obj, "provider")) throw new TypeError("missing required field: ProviderQuota.provider");
+  if (!Object.prototype.hasOwnProperty.call(obj, "label")) throw new TypeError("missing required field: ProviderQuota.label");
+  if (!Object.prototype.hasOwnProperty.call(obj, "logoUrl")) throw new TypeError("missing required field: ProviderQuota.logoUrl");
+  if (!Object.prototype.hasOwnProperty.call(obj, "authKind")) throw new TypeError("missing required field: ProviderQuota.authKind");
+  if (!Object.prototype.hasOwnProperty.call(obj, "usageUrl")) throw new TypeError("missing required field: ProviderQuota.usageUrl");
+  if (!Object.prototype.hasOwnProperty.call(obj, "fetchStatus")) throw new TypeError("missing required field: ProviderQuota.fetchStatus");
   return {
     provider: (asString(obj["provider"], "ProviderQuota.provider") as QuotaProvider),
     label: asString(obj["label"], "ProviderQuota.label"),
@@ -385,16 +485,21 @@ export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
     authKind: (asString(obj["authKind"], "ProviderQuota.authKind") as ProviderAuthKind),
     usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
     fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
-    rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
-    unassessedWindows: (obj["unassessedWindows"] === undefined || obj["unassessedWindows"] === null ? undefined : validateArray(obj["unassessedWindows"], "ProviderQuota.unassessedWindows", validateUnassessedQuotaWindow) as UnassessedQuotaWindow[]),
-    balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
-    pricingPhase: (obj["pricingPhase"] === undefined || obj["pricingPhase"] === null ? undefined : asString(obj["pricingPhase"], "ProviderQuota.pricingPhase")),
-    pricingTransitionAt: (obj["pricingTransitionAt"] === undefined || obj["pricingTransitionAt"] === null ? undefined : asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "rateLimits") ? { rateLimits: validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", (v) => validateQuotaRateLimit(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "unassessedWindows") ? { unassessedWindows: validateArray(obj["unassessedWindows"], "ProviderQuota.unassessedWindows", (v) => validateUnassessedQuotaWindow(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "balance") ? { balance: validateQuotaBalance(obj["balance"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "pricingPhase") ? { pricingPhase: asString(obj["pricingPhase"], "ProviderQuota.pricingPhase") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "pricingTransitionAt") ? { pricingTransitionAt: asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp } : {}),
   };
 }
 
 export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
   const obj = asObject(raw, "LocalWindow");
+  if (!Object.prototype.hasOwnProperty.call(obj, "duration")) throw new TypeError("missing required field: LocalWindow.duration");
+  if (!Object.prototype.hasOwnProperty.call(obj, "costUSD")) throw new TypeError("missing required field: LocalWindow.costUSD");
+  if (!Object.prototype.hasOwnProperty.call(obj, "costKnown")) throw new TypeError("missing required field: LocalWindow.costKnown");
+  if (!Object.prototype.hasOwnProperty.call(obj, "inputTokens")) throw new TypeError("missing required field: LocalWindow.inputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "outputTokens")) throw new TypeError("missing required field: LocalWindow.outputTokens");
   return {
     duration: asString(obj["duration"], "LocalWindow.duration"),
     costUSD: asNumber(obj["costUSD"], "LocalWindow.costUSD"),
@@ -406,15 +511,17 @@ export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
 
 export function validateLocalUsage(raw: ValidatorInput): LocalUsage {
   const obj = asObject(raw, "LocalUsage");
+  if (!Object.prototype.hasOwnProperty.call(obj, "windows")) throw new TypeError("missing required field: LocalUsage.windows");
   return {
-    windows: validateArray(obj["windows"], "LocalUsage.windows", validateLocalWindow) as LocalWindow[],
+    windows: (obj["windows"] === null ? null : validateArray(obj["windows"], "LocalUsage.windows", (v) => validateLocalWindow(v))),
   };
 }
 
 export function validateUsageResp(raw: ValidatorInput): UsageResp {
   const obj = asObject(raw, "UsageResp");
+  if (!Object.prototype.hasOwnProperty.call(obj, "local")) throw new TypeError("missing required field: UsageResp.local");
   return {
-    providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "providers") ? { providers: validateArray(obj["providers"], "UsageResp.providers", (v) => validateProviderQuota(v)) } : {}),
     local: validateLocalUsage(obj["local"]),
   };
 }
@@ -422,23 +529,28 @@ export function validateUsageResp(raw: ValidatorInput): UsageResp {
 export function validateEventMessageSource(raw: ValidatorInput): EventMessageSource {
   const obj = asObject(raw, "EventMessageSource");
   return {
-    agentID: (obj["agentID"] === undefined || obj["agentID"] === null ? undefined : asString(obj["agentID"], "EventMessageSource.agentID")),
-    delegationToolUseID: (obj["delegationToolUseID"] === undefined || obj["delegationToolUseID"] === null ? undefined : asString(obj["delegationToolUseID"], "EventMessageSource.delegationToolUseID")),
-    threadID: (obj["threadID"] === undefined || obj["threadID"] === null ? undefined : asString(obj["threadID"], "EventMessageSource.threadID")),
-    turnID: (obj["turnID"] === undefined || obj["turnID"] === null ? undefined : asString(obj["turnID"], "EventMessageSource.turnID")),
-    itemID: (obj["itemID"] === undefined || obj["itemID"] === null ? undefined : asString(obj["itemID"], "EventMessageSource.itemID")),
-    rootThreadID: (obj["rootThreadID"] === undefined || obj["rootThreadID"] === null ? undefined : asString(obj["rootThreadID"], "EventMessageSource.rootThreadID")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "agentID") ? { agentID: asString(obj["agentID"], "EventMessageSource.agentID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "delegationToolUseID") ? { delegationToolUseID: asString(obj["delegationToolUseID"], "EventMessageSource.delegationToolUseID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "threadID") ? { threadID: asString(obj["threadID"], "EventMessageSource.threadID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "turnID") ? { turnID: asString(obj["turnID"], "EventMessageSource.turnID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "itemID") ? { itemID: asString(obj["itemID"], "EventMessageSource.itemID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "rootThreadID") ? { rootThreadID: asString(obj["rootThreadID"], "EventMessageSource.rootThreadID") } : {}),
   };
 }
 
 export function validateEventInit(raw: ValidatorInput): EventInit {
   const obj = asObject(raw, "EventInit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "reportedModel")) throw new TypeError("missing required field: EventInit.reportedModel");
+  if (!Object.prototype.hasOwnProperty.call(obj, "agentVersion")) throw new TypeError("missing required field: EventInit.agentVersion");
+  if (!Object.prototype.hasOwnProperty.call(obj, "sessionID")) throw new TypeError("missing required field: EventInit.sessionID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cwd")) throw new TypeError("missing required field: EventInit.cwd");
+  if (!Object.prototype.hasOwnProperty.call(obj, "harness")) throw new TypeError("missing required field: EventInit.harness");
   return {
     reportedModel: asString(obj["reportedModel"], "EventInit.reportedModel"),
-    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "EventInit.reportedEffort")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "reportedEffort") ? { reportedEffort: asString(obj["reportedEffort"], "EventInit.reportedEffort") } : {}),
     agentVersion: asString(obj["agentVersion"], "EventInit.agentVersion"),
     sessionID: asString(obj["sessionID"], "EventInit.sessionID"),
-    tools: (obj["tools"] === undefined || obj["tools"] === null ? undefined : validateArray(obj["tools"], "EventInit.tools", (v) => asString(v, "EventInit.tools[i]")) as string[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "tools") ? { tools: validateArray(obj["tools"], "EventInit.tools", (v) => asString(v, "EventInit.tools[element]")) } : {}),
     cwd: asString(obj["cwd"], "EventInit.cwd"),
     harness: asString(obj["harness"], "EventInit.harness"),
   };
@@ -446,6 +558,7 @@ export function validateEventInit(raw: ValidatorInput): EventInit {
 
 export function validateEventText(raw: ValidatorInput): EventText {
   const obj = asObject(raw, "EventText");
+  if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventText.text");
   return {
     text: asString(obj["text"], "EventText.text"),
   };
@@ -453,6 +566,7 @@ export function validateEventText(raw: ValidatorInput): EventText {
 
 export function validateEventTextDelta(raw: ValidatorInput): EventTextDelta {
   const obj = asObject(raw, "EventTextDelta");
+  if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventTextDelta.text");
   return {
     text: asString(obj["text"], "EventTextDelta.text"),
   };
@@ -460,6 +574,8 @@ export function validateEventTextDelta(raw: ValidatorInput): EventTextDelta {
 
 export function validateEventFileChange(raw: ValidatorInput): EventFileChange {
   const obj = asObject(raw, "EventFileChange");
+  if (!Object.prototype.hasOwnProperty.call(obj, "path")) throw new TypeError("missing required field: EventFileChange.path");
+  if (!Object.prototype.hasOwnProperty.call(obj, "patch")) throw new TypeError("missing required field: EventFileChange.patch");
   return {
     path: asString(obj["path"], "EventFileChange.path"),
     patch: asString(obj["patch"], "EventFileChange.patch"),
@@ -468,87 +584,107 @@ export function validateEventFileChange(raw: ValidatorInput): EventFileChange {
 
 export function validateEventSubagentSpawn(raw: ValidatorInput): EventSubagentSpawn {
   const obj = asObject(raw, "EventSubagentSpawn");
+  if (!Object.prototype.hasOwnProperty.call(obj, "agent")) throw new TypeError("missing required field: EventSubagentSpawn.agent");
+  if (!Object.prototype.hasOwnProperty.call(obj, "task")) throw new TypeError("missing required field: EventSubagentSpawn.task");
   return {
     agent: asString(obj["agent"], "EventSubagentSpawn.agent"),
     task: asString(obj["task"], "EventSubagentSpawn.task"),
-    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "EventSubagentSpawn.label")),
-    phase: (obj["phase"] === undefined || obj["phase"] === null ? undefined : asString(obj["phase"], "EventSubagentSpawn.phase")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "label") ? { label: asString(obj["label"], "EventSubagentSpawn.label") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "phase") ? { phase: asString(obj["phase"], "EventSubagentSpawn.phase") } : {}),
   };
 }
 
 export function validateEventToolInputView(raw: ValidatorInput): EventToolInputView {
   const obj = asObject(raw, "EventToolInputView");
+  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: EventToolInputView.kind");
   return {
     kind: (asString(obj["kind"], "EventToolInputView.kind") as EventToolInputKind),
-    files: (obj["files"] === undefined || obj["files"] === null ? undefined : validateArray(obj["files"], "EventToolInputView.files", validateEventFileChange) as EventFileChange[]),
-    subagents: (obj["subagents"] === undefined || obj["subagents"] === null ? undefined : validateArray(obj["subagents"], "EventToolInputView.subagents", validateEventSubagentSpawn) as EventSubagentSpawn[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "files") ? { files: validateArray(obj["files"], "EventToolInputView.files", (v) => validateEventFileChange(v)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "subagents") ? { subagents: validateArray(obj["subagents"], "EventToolInputView.subagents", (v) => validateEventSubagentSpawn(v)) } : {}),
   };
 }
 
 export function validateEventToolUse(raw: ValidatorInput): EventToolUse {
   const obj = asObject(raw, "EventToolUse");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventToolUse.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: EventToolUse.name");
+  if (!Object.prototype.hasOwnProperty.call(obj, "input")) throw new TypeError("missing required field: EventToolUse.input");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolUse.toolUseID"),
     name: asString(obj["name"], "EventToolUse.name"),
-    input: obj["input"],
-    detail: (obj["detail"] === undefined || obj["detail"] === null ? undefined : asString(obj["detail"], "EventToolUse.detail")),
-    inputView: (obj["inputView"] === undefined || obj["inputView"] === null ? undefined : validateEventToolInputView(obj["inputView"])),
-    inputTruncated: (obj["inputTruncated"] === undefined || obj["inputTruncated"] === null ? undefined : asBoolean(obj["inputTruncated"], "EventToolUse.inputTruncated")),
-    background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventToolUse.background")),
+    input: (obj["input"] === null ? null : obj["input"]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "detail") ? { detail: asString(obj["detail"], "EventToolUse.detail") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "inputView") ? { inputView: validateEventToolInputView(obj["inputView"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "inputTruncated") ? { inputTruncated: asBoolean(obj["inputTruncated"], "EventToolUse.inputTruncated") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "background") ? { background: asBoolean(obj["background"], "EventToolUse.background") } : {}),
   };
 }
 
 export function validateEventToolResult(raw: ValidatorInput): EventToolResult {
   const obj = asObject(raw, "EventToolResult");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventToolResult.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "duration")) throw new TypeError("missing required field: EventToolResult.duration");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolResult.toolUseID"),
     duration: asNumber(obj["duration"], "EventToolResult.duration"),
-    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "EventToolResult.error")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "EventToolResult.error") } : {}),
   };
 }
 
 export function validateAskOption(raw: ValidatorInput): AskOption {
   const obj = asObject(raw, "AskOption");
+  if (!Object.prototype.hasOwnProperty.call(obj, "label")) throw new TypeError("missing required field: AskOption.label");
   return {
     label: asString(obj["label"], "AskOption.label"),
-    description: (obj["description"] === undefined || obj["description"] === null ? undefined : asString(obj["description"], "AskOption.description")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "description") ? { description: asString(obj["description"], "AskOption.description") } : {}),
   };
 }
 
 export function validateAskQuestion(raw: ValidatorInput): AskQuestion {
   const obj = asObject(raw, "AskQuestion");
+  if (!Object.prototype.hasOwnProperty.call(obj, "question")) throw new TypeError("missing required field: AskQuestion.question");
+  if (!Object.prototype.hasOwnProperty.call(obj, "options")) throw new TypeError("missing required field: AskQuestion.options");
   return {
     question: asString(obj["question"], "AskQuestion.question"),
-    header: (obj["header"] === undefined || obj["header"] === null ? undefined : asString(obj["header"], "AskQuestion.header")),
-    options: validateArray(obj["options"], "AskQuestion.options", validateAskOption) as AskOption[],
-    multiSelect: (obj["multiSelect"] === undefined || obj["multiSelect"] === null ? undefined : asBoolean(obj["multiSelect"], "AskQuestion.multiSelect")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "header") ? { header: asString(obj["header"], "AskQuestion.header") } : {}),
+    options: (obj["options"] === null ? null : validateArray(obj["options"], "AskQuestion.options", (v) => validateAskOption(v))),
+    ...(Object.prototype.hasOwnProperty.call(obj, "multiSelect") ? { multiSelect: asBoolean(obj["multiSelect"], "AskQuestion.multiSelect") } : {}),
   };
 }
 
 export function validateEventAsk(raw: ValidatorInput): EventAsk {
   const obj = asObject(raw, "EventAsk");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventAsk.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "questions")) throw new TypeError("missing required field: EventAsk.questions");
   return {
     toolUseID: asString(obj["toolUseID"], "EventAsk.toolUseID"),
-    questions: validateArray(obj["questions"], "EventAsk.questions", validateAskQuestion) as AskQuestion[],
+    questions: (obj["questions"] === null ? null : validateArray(obj["questions"], "EventAsk.questions", (v) => validateAskQuestion(v))),
   };
 }
 
 export function validateEventUsage(raw: ValidatorInput): EventUsage {
   const obj = asObject(raw, "EventUsage");
+  if (!Object.prototype.hasOwnProperty.call(obj, "inputTokens")) throw new TypeError("missing required field: EventUsage.inputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "outputTokens")) throw new TypeError("missing required field: EventUsage.outputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cacheCreationInputTokens")) throw new TypeError("missing required field: EventUsage.cacheCreationInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cacheReadInputTokens")) throw new TypeError("missing required field: EventUsage.cacheReadInputTokens");
+  if (!Object.prototype.hasOwnProperty.call(obj, "reportedModel")) throw new TypeError("missing required field: EventUsage.reportedModel");
   return {
     inputTokens: asNumber(obj["inputTokens"], "EventUsage.inputTokens"),
     outputTokens: asNumber(obj["outputTokens"], "EventUsage.outputTokens"),
     cacheCreationInputTokens: asNumber(obj["cacheCreationInputTokens"], "EventUsage.cacheCreationInputTokens"),
     cacheReadInputTokens: asNumber(obj["cacheReadInputTokens"], "EventUsage.cacheReadInputTokens"),
-    reasoningOutputTokens: (obj["reasoningOutputTokens"] === undefined || obj["reasoningOutputTokens"] === null ? undefined : asNumber(obj["reasoningOutputTokens"], "EventUsage.reasoningOutputTokens")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "reasoningOutputTokens") ? { reasoningOutputTokens: asNumber(obj["reasoningOutputTokens"], "EventUsage.reasoningOutputTokens") } : {}),
     reportedModel: asString(obj["reportedModel"], "EventUsage.reportedModel"),
-    contextUsed: (obj["contextUsed"] === undefined || obj["contextUsed"] === null ? undefined : asNumber(obj["contextUsed"], "EventUsage.contextUsed")),
-    contextWindow: (obj["contextWindow"] === undefined || obj["contextWindow"] === null ? undefined : asNumber(obj["contextWindow"], "EventUsage.contextWindow")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contextUsed") ? { contextUsed: asNumber(obj["contextUsed"], "EventUsage.contextUsed") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contextWindow") ? { contextWindow: asNumber(obj["contextWindow"], "EventUsage.contextWindow") } : {}),
   };
 }
 
 export function validateEventCost(raw: ValidatorInput): EventCost {
   const obj = asObject(raw, "EventCost");
+  if (!Object.prototype.hasOwnProperty.call(obj, "usd")) throw new TypeError("missing required field: EventCost.usd");
+  if (!Object.prototype.hasOwnProperty.call(obj, "source")) throw new TypeError("missing required field: EventCost.source");
   return {
     usd: asNumber(obj["usd"], "EventCost.usd"),
     source: (asString(obj["source"], "EventCost.source") as EventCostSource),
@@ -557,12 +693,20 @@ export function validateEventCost(raw: ValidatorInput): EventCost {
 
 export function validateEventResult(raw: ValidatorInput): EventResult {
   const obj = asObject(raw, "EventResult");
+  if (!Object.prototype.hasOwnProperty.call(obj, "subtype")) throw new TypeError("missing required field: EventResult.subtype");
+  if (!Object.prototype.hasOwnProperty.call(obj, "isError")) throw new TypeError("missing required field: EventResult.isError");
+  if (!Object.prototype.hasOwnProperty.call(obj, "result")) throw new TypeError("missing required field: EventResult.result");
+  if (!Object.prototype.hasOwnProperty.call(obj, "totalCostUSD")) throw new TypeError("missing required field: EventResult.totalCostUSD");
+  if (!Object.prototype.hasOwnProperty.call(obj, "duration")) throw new TypeError("missing required field: EventResult.duration");
+  if (!Object.prototype.hasOwnProperty.call(obj, "durationAPI")) throw new TypeError("missing required field: EventResult.durationAPI");
+  if (!Object.prototype.hasOwnProperty.call(obj, "numTurns")) throw new TypeError("missing required field: EventResult.numTurns");
+  if (!Object.prototype.hasOwnProperty.call(obj, "usage")) throw new TypeError("missing required field: EventResult.usage");
   return {
-    cost: (obj["cost"] === undefined || obj["cost"] === null ? undefined : validateEventCost(obj["cost"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "cost") ? { cost: validateEventCost(obj["cost"]) } : {}),
     subtype: asString(obj["subtype"], "EventResult.subtype"),
     isError: asBoolean(obj["isError"], "EventResult.isError"),
     result: asString(obj["result"], "EventResult.result"),
-    diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "EventResult.diffStat", validateDiffFileStat) as DiffFileStat[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "diffStat") ? { diffStat: validateArray(obj["diffStat"], "EventResult.diffStat", (v) => validateDiffFileStat(v)) } : {}),
     totalCostUSD: asNumber(obj["totalCostUSD"], "EventResult.totalCostUSD"),
     duration: asNumber(obj["duration"], "EventResult.duration"),
     durationAPI: asNumber(obj["durationAPI"], "EventResult.durationAPI"),
@@ -573,40 +717,46 @@ export function validateEventResult(raw: ValidatorInput): EventResult {
 
 export function validateEventSystem(raw: ValidatorInput): EventSystem {
   const obj = asObject(raw, "EventSystem");
+  if (!Object.prototype.hasOwnProperty.call(obj, "subtype")) throw new TypeError("missing required field: EventSystem.subtype");
   return {
     subtype: asString(obj["subtype"], "EventSystem.subtype"),
-    detail: (obj["detail"] === undefined || obj["detail"] === null ? undefined : asString(obj["detail"], "EventSystem.detail")),
-    contextTokensBefore: (obj["contextTokensBefore"] === undefined || obj["contextTokensBefore"] === null ? undefined : asNumber(obj["contextTokensBefore"], "EventSystem.contextTokensBefore")),
-    contextTokensAfter: (obj["contextTokensAfter"] === undefined || obj["contextTokensAfter"] === null ? undefined : asNumber(obj["contextTokensAfter"], "EventSystem.contextTokensAfter")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "detail") ? { detail: asString(obj["detail"], "EventSystem.detail") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contextTokensBefore") ? { contextTokensBefore: asNumber(obj["contextTokensBefore"], "EventSystem.contextTokensBefore") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contextTokensAfter") ? { contextTokensAfter: asNumber(obj["contextTokensAfter"], "EventSystem.contextTokensAfter") } : {}),
   };
 }
 
 export function validateTodoItem(raw: ValidatorInput): TodoItem {
   const obj = asObject(raw, "TodoItem");
+  if (!Object.prototype.hasOwnProperty.call(obj, "content")) throw new TypeError("missing required field: TodoItem.content");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: TodoItem.status");
   return {
     content: asString(obj["content"], "TodoItem.content"),
     status: asString(obj["status"], "TodoItem.status"),
-    activeForm: (obj["activeForm"] === undefined || obj["activeForm"] === null ? undefined : asString(obj["activeForm"], "TodoItem.activeForm")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "activeForm") ? { activeForm: asString(obj["activeForm"], "TodoItem.activeForm") } : {}),
   };
 }
 
 export function validateEventTodo(raw: ValidatorInput): EventTodo {
   const obj = asObject(raw, "EventTodo");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventTodo.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "todos")) throw new TypeError("missing required field: EventTodo.todos");
   return {
     toolUseID: asString(obj["toolUseID"], "EventTodo.toolUseID"),
-    todos: validateArray(obj["todos"], "EventTodo.todos", validateTodoItem) as TodoItem[],
+    todos: (obj["todos"] === null ? null : validateArray(obj["todos"], "EventTodo.todos", (v) => validateTodoItem(v))),
   };
 }
 
 export function validateEventDiffStat(raw: ValidatorInput): EventDiffStat {
   const obj = asObject(raw, "EventDiffStat");
   return {
-    diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "EventDiffStat.diffStat", validateDiffFileStat) as DiffFileStat[]),
+    ...(Object.prototype.hasOwnProperty.call(obj, "diffStat") ? { diffStat: validateArray(obj["diffStat"], "EventDiffStat.diffStat", (v) => validateDiffFileStat(v)) } : {}),
   };
 }
 
 export function validateEventError(raw: ValidatorInput): EventError {
   const obj = asObject(raw, "EventError");
+  if (!Object.prototype.hasOwnProperty.call(obj, "err")) throw new TypeError("missing required field: EventError.err");
   return {
     err: asString(obj["err"], "EventError.err"),
   };
@@ -614,6 +764,7 @@ export function validateEventError(raw: ValidatorInput): EventError {
 
 export function validateEventThinking(raw: ValidatorInput): EventThinking {
   const obj = asObject(raw, "EventThinking");
+  if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventThinking.text");
   return {
     text: asString(obj["text"], "EventThinking.text"),
   };
@@ -621,6 +772,7 @@ export function validateEventThinking(raw: ValidatorInput): EventThinking {
 
 export function validateEventThinkingDelta(raw: ValidatorInput): EventThinkingDelta {
   const obj = asObject(raw, "EventThinkingDelta");
+  if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventThinkingDelta.text");
   return {
     text: asString(obj["text"], "EventThinkingDelta.text"),
   };
@@ -628,6 +780,8 @@ export function validateEventThinkingDelta(raw: ValidatorInput): EventThinkingDe
 
 export function validateEventSubagentStart(raw: ValidatorInput): EventSubagentStart {
   const obj = asObject(raw, "EventSubagentStart");
+  if (!Object.prototype.hasOwnProperty.call(obj, "taskID")) throw new TypeError("missing required field: EventSubagentStart.taskID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "description")) throw new TypeError("missing required field: EventSubagentStart.description");
   return {
     taskID: asString(obj["taskID"], "EventSubagentStart.taskID"),
     description: asString(obj["description"], "EventSubagentStart.description"),
@@ -636,6 +790,8 @@ export function validateEventSubagentStart(raw: ValidatorInput): EventSubagentSt
 
 export function validateEventSubagentEnd(raw: ValidatorInput): EventSubagentEnd {
   const obj = asObject(raw, "EventSubagentEnd");
+  if (!Object.prototype.hasOwnProperty.call(obj, "taskID")) throw new TypeError("missing required field: EventSubagentEnd.taskID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: EventSubagentEnd.status");
   return {
     taskID: asString(obj["taskID"], "EventSubagentEnd.taskID"),
     status: asString(obj["status"], "EventSubagentEnd.status"),
@@ -644,34 +800,39 @@ export function validateEventSubagentEnd(raw: ValidatorInput): EventSubagentEnd 
 
 export function validateEventNativeSubagent(raw: ValidatorInput): EventNativeSubagent {
   const obj = asObject(raw, "EventNativeSubagent");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: EventNativeSubagent.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: EventNativeSubagent.status");
   return {
-    toolUseID: (obj["toolUseID"] === undefined || obj["toolUseID"] === null ? undefined : asString(obj["toolUseID"], "EventNativeSubagent.toolUseID")),
-    scope: (obj["scope"] === undefined || obj["scope"] === null ? undefined : (asString(obj["scope"], "EventNativeSubagent.scope") as EventNativeSubagentScope)),
+    ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "EventNativeSubagent.toolUseID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "scope") ? { scope: (asString(obj["scope"], "EventNativeSubagent.scope") as EventNativeSubagentScope) } : {}),
     id: asString(obj["id"], "EventNativeSubagent.id"),
-    groupID: (obj["groupID"] === undefined || obj["groupID"] === null ? undefined : asString(obj["groupID"], "EventNativeSubagent.groupID")),
-    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "EventNativeSubagent.label")),
-    prompt: (obj["prompt"] === undefined || obj["prompt"] === null ? undefined : asString(obj["prompt"], "EventNativeSubagent.prompt")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "groupID") ? { groupID: asString(obj["groupID"], "EventNativeSubagent.groupID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "label") ? { label: asString(obj["label"], "EventNativeSubagent.label") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "prompt") ? { prompt: asString(obj["prompt"], "EventNativeSubagent.prompt") } : {}),
     status: (asString(obj["status"], "EventNativeSubagent.status") as EventNativeSubagentStatus),
-    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "EventNativeSubagent.result")),
-    background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventNativeSubagent.background")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "result") ? { result: asString(obj["result"], "EventNativeSubagent.result") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "background") ? { background: asBoolean(obj["background"], "EventNativeSubagent.background") } : {}),
   };
 }
 
 export function validateEventBackgroundCommand(raw: ValidatorInput): EventBackgroundCommand {
   const obj = asObject(raw, "EventBackgroundCommand");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: EventBackgroundCommand.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: EventBackgroundCommand.status");
   return {
     id: asString(obj["id"], "EventBackgroundCommand.id"),
-    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "EventBackgroundCommand.label")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "label") ? { label: asString(obj["label"], "EventBackgroundCommand.label") } : {}),
     status: asString(obj["status"], "EventBackgroundCommand.status"),
-    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "EventBackgroundCommand.result")),
-    exitCode: (obj["exitCode"] === undefined || obj["exitCode"] === null ? undefined : asNumber(obj["exitCode"], "EventBackgroundCommand.exitCode")),
-    outputRef: (obj["outputRef"] === undefined || obj["outputRef"] === null ? undefined : asString(obj["outputRef"], "EventBackgroundCommand.outputRef")),
-    toolUseID: (obj["toolUseID"] === undefined || obj["toolUseID"] === null ? undefined : asString(obj["toolUseID"], "EventBackgroundCommand.toolUseID")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "result") ? { result: asString(obj["result"], "EventBackgroundCommand.result") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "EventBackgroundCommand.exitCode") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "EventBackgroundCommand.outputRef") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "EventBackgroundCommand.toolUseID") } : {}),
   };
 }
 
 export function validateEventLog(raw: ValidatorInput): EventLog {
   const obj = asObject(raw, "EventLog");
+  if (!Object.prototype.hasOwnProperty.call(obj, "line")) throw new TypeError("missing required field: EventLog.line");
   return {
     line: asString(obj["line"], "EventLog.line"),
   };
@@ -679,16 +840,21 @@ export function validateEventLog(raw: ValidatorInput): EventLog {
 
 export function validateEventToolOutputDelta(raw: ValidatorInput): EventToolOutputDelta {
   const obj = asObject(raw, "EventToolOutputDelta");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventToolOutputDelta.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "delta")) throw new TypeError("missing required field: EventToolOutputDelta.delta");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolOutputDelta.toolUseID"),
     delta: asString(obj["delta"], "EventToolOutputDelta.delta"),
-    contentType: (obj["contentType"] === undefined || obj["contentType"] === null ? undefined : (asString(obj["contentType"], "EventToolOutputDelta.contentType") as ToolOutputContentType)),
-    formatted: (obj["formatted"] === undefined || obj["formatted"] === null ? undefined : asString(obj["formatted"], "EventToolOutputDelta.formatted")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "contentType") ? { contentType: (asString(obj["contentType"], "EventToolOutputDelta.contentType") as ToolOutputContentType) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "formatted") ? { formatted: asString(obj["formatted"], "EventToolOutputDelta.formatted") } : {}),
   };
 }
 
 export function validateEventWidget(raw: ValidatorInput): EventWidget {
   const obj = asObject(raw, "EventWidget");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventWidget.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "title")) throw new TypeError("missing required field: EventWidget.title");
+  if (!Object.prototype.hasOwnProperty.call(obj, "html")) throw new TypeError("missing required field: EventWidget.html");
   return {
     toolUseID: asString(obj["toolUseID"], "EventWidget.toolUseID"),
     title: asString(obj["title"], "EventWidget.title"),
@@ -698,6 +864,8 @@ export function validateEventWidget(raw: ValidatorInput): EventWidget {
 
 export function validateEventWidgetDelta(raw: ValidatorInput): EventWidgetDelta {
   const obj = asObject(raw, "EventWidgetDelta");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventWidgetDelta.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "delta")) throw new TypeError("missing required field: EventWidgetDelta.delta");
   return {
     toolUseID: asString(obj["toolUseID"], "EventWidgetDelta.toolUseID"),
     delta: asString(obj["delta"], "EventWidgetDelta.delta"),
@@ -706,18 +874,24 @@ export function validateEventWidgetDelta(raw: ValidatorInput): EventWidgetDelta 
 
 export function validateEventRateLimit(raw: ValidatorInput): EventRateLimit {
   const obj = asObject(raw, "EventRateLimit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: EventRateLimit.status");
+  if (!Object.prototype.hasOwnProperty.call(obj, "rateLimitType")) throw new TypeError("missing required field: EventRateLimit.rateLimitType");
+  if (!Object.prototype.hasOwnProperty.call(obj, "utilization")) throw new TypeError("missing required field: EventRateLimit.utilization");
   return {
     status: (asString(obj["status"], "EventRateLimit.status") as EventRateLimitStatus),
-    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "EventRateLimit.resetsAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "resetsAt") ? { resetsAt: asString(obj["resetsAt"], "EventRateLimit.resetsAt") as ISOTimestamp } : {}),
     rateLimitType: asString(obj["rateLimitType"], "EventRateLimit.rateLimitType"),
     utilization: asNumber(obj["utilization"], "EventRateLimit.utilization"),
-    isUsingOverage: (obj["isUsingOverage"] === undefined || obj["isUsingOverage"] === null ? undefined : asBoolean(obj["isUsingOverage"], "EventRateLimit.isUsingOverage")),
-    overageResetsAt: (obj["overageResetsAt"] === undefined || obj["overageResetsAt"] === null ? undefined : asString(obj["overageResetsAt"], "EventRateLimit.overageResetsAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "isUsingOverage") ? { isUsingOverage: asBoolean(obj["isUsingOverage"], "EventRateLimit.isUsingOverage") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "overageResetsAt") ? { overageResetsAt: asString(obj["overageResetsAt"], "EventRateLimit.overageResetsAt") as ISOTimestamp } : {}),
   };
 }
 
 export function validateEventRepositoryCommit(raw: ValidatorInput): EventRepositoryCommit {
   const obj = asObject(raw, "EventRepositoryCommit");
+  if (!Object.prototype.hasOwnProperty.call(obj, "repositoryPath")) throw new TypeError("missing required field: EventRepositoryCommit.repositoryPath");
+  if (!Object.prototype.hasOwnProperty.call(obj, "branchName")) throw new TypeError("missing required field: EventRepositoryCommit.branchName");
+  if (!Object.prototype.hasOwnProperty.call(obj, "commitHash")) throw new TypeError("missing required field: EventRepositoryCommit.commitHash");
   return {
     repositoryPath: asString(obj["repositoryPath"], "EventRepositoryCommit.repositoryPath"),
     branchName: asString(obj["branchName"], "EventRepositoryCommit.branchName"),
@@ -727,6 +901,10 @@ export function validateEventRepositoryCommit(raw: ValidatorInput): EventReposit
 
 export function validateEventChangeStat(raw: ValidatorInput): EventChangeStat {
   const obj = asObject(raw, "EventChangeStat");
+  if (!Object.prototype.hasOwnProperty.call(obj, "files")) throw new TypeError("missing required field: EventChangeStat.files");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesAdded")) throw new TypeError("missing required field: EventChangeStat.linesAdded");
+  if (!Object.prototype.hasOwnProperty.call(obj, "linesDeleted")) throw new TypeError("missing required field: EventChangeStat.linesDeleted");
+  if (!Object.prototype.hasOwnProperty.call(obj, "binaryFiles")) throw new TypeError("missing required field: EventChangeStat.binaryFiles");
   return {
     files: asNumber(obj["files"], "EventChangeStat.files"),
     linesAdded: asNumber(obj["linesAdded"], "EventChangeStat.linesAdded"),
@@ -737,106 +915,136 @@ export function validateEventChangeStat(raw: ValidatorInput): EventChangeStat {
 
 export function validateEventCommitSnapshot(raw: ValidatorInput): EventCommitSnapshot {
   const obj = asObject(raw, "EventCommitSnapshot");
+  if (!Object.prototype.hasOwnProperty.call(obj, "repositoryCommits")) throw new TypeError("missing required field: EventCommitSnapshot.repositoryCommits");
   return {
-    repositoryCommits: validateArray(obj["repositoryCommits"], "EventCommitSnapshot.repositoryCommits", validateEventRepositoryCommit) as EventRepositoryCommit[],
-    baseline: (obj["baseline"] === undefined || obj["baseline"] === null ? undefined : asBoolean(obj["baseline"], "EventCommitSnapshot.baseline")),
-    changeStat: (obj["changeStat"] === undefined || obj["changeStat"] === null ? undefined : validateEventChangeStat(obj["changeStat"])),
+    repositoryCommits: (obj["repositoryCommits"] === null ? null : validateArray(obj["repositoryCommits"], "EventCommitSnapshot.repositoryCommits", (v) => validateEventRepositoryCommit(v))),
+    ...(Object.prototype.hasOwnProperty.call(obj, "baseline") ? { baseline: asBoolean(obj["baseline"], "EventCommitSnapshot.baseline") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "changeStat") ? { changeStat: validateEventChangeStat(obj["changeStat"]) } : {}),
   };
 }
 
 export function validateEventSkillLoad(raw: ValidatorInput): EventSkillLoad {
   const obj = asObject(raw, "EventSkillLoad");
+  if (!Object.prototype.hasOwnProperty.call(obj, "skill")) throw new TypeError("missing required field: EventSkillLoad.skill");
   return {
     skill: asString(obj["skill"], "EventSkillLoad.skill"),
-    path: (obj["path"] === undefined || obj["path"] === null ? undefined : asString(obj["path"], "EventSkillLoad.path")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "path") ? { path: asString(obj["path"], "EventSkillLoad.path") } : {}),
   };
 }
 
 export function validateEventMessage(raw: ValidatorInput): EventMessage {
   const obj = asObject(raw, "EventMessage");
+  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: kind");
+  if (!Object.prototype.hasOwnProperty.call(obj, "ts")) throw new TypeError("missing required field: EventMessage.ts");
   const result: EventMessage = {
     kind: (asString(obj["kind"], "EventMessage.kind") as EventKind),
-    source: (obj["source"] === undefined || obj["source"] === null ? undefined : validateEventMessageSource(obj["source"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "source") ? { source: validateEventMessageSource(obj["source"]) } : {}),
     ts: asNumber(obj["ts"], "EventMessage.ts"),
   };
   switch (result.kind) {
     case "init":
-      result.init = validateEventInit(obj["init"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "init")) throw new TypeError("missing required field: EventMessage.init");
+      Object.defineProperty(result, "init", { value: validateEventInit(obj["init"]), enumerable: true, writable: true, configurable: true });
       break;
     case "text":
-      result.text = validateEventText(obj["text"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "text")) throw new TypeError("missing required field: EventMessage.text");
+      Object.defineProperty(result, "text", { value: validateEventText(obj["text"]), enumerable: true, writable: true, configurable: true });
       break;
     case "textDelta":
-      result.textDelta = validateEventTextDelta(obj["textDelta"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "textDelta")) throw new TypeError("missing required field: EventMessage.textDelta");
+      Object.defineProperty(result, "textDelta", { value: validateEventTextDelta(obj["textDelta"]), enumerable: true, writable: true, configurable: true });
       break;
     case "toolUse":
-      result.toolUse = validateEventToolUse(obj["toolUse"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "toolUse")) throw new TypeError("missing required field: EventMessage.toolUse");
+      Object.defineProperty(result, "toolUse", { value: validateEventToolUse(obj["toolUse"]), enumerable: true, writable: true, configurable: true });
       break;
     case "toolResult":
-      result.toolResult = validateEventToolResult(obj["toolResult"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "toolResult")) throw new TypeError("missing required field: EventMessage.toolResult");
+      Object.defineProperty(result, "toolResult", { value: validateEventToolResult(obj["toolResult"]), enumerable: true, writable: true, configurable: true });
       break;
     case "ask":
-      result.ask = validateEventAsk(obj["ask"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "ask")) throw new TypeError("missing required field: EventMessage.ask");
+      Object.defineProperty(result, "ask", { value: validateEventAsk(obj["ask"]), enumerable: true, writable: true, configurable: true });
       break;
     case "usage":
-      result.usage = validateEventUsage(obj["usage"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "usage")) throw new TypeError("missing required field: EventMessage.usage");
+      Object.defineProperty(result, "usage", { value: validateEventUsage(obj["usage"]), enumerable: true, writable: true, configurable: true });
       break;
     case "result":
-      result.result = validateEventResult(obj["result"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "result")) throw new TypeError("missing required field: EventMessage.result");
+      Object.defineProperty(result, "result", { value: validateEventResult(obj["result"]), enumerable: true, writable: true, configurable: true });
       break;
     case "system":
-      result.system = validateEventSystem(obj["system"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "system")) throw new TypeError("missing required field: EventMessage.system");
+      Object.defineProperty(result, "system", { value: validateEventSystem(obj["system"]), enumerable: true, writable: true, configurable: true });
       break;
     case "userInput":
-      result.userInput = validatePrompt(obj["userInput"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "userInput")) throw new TypeError("missing required field: EventMessage.userInput");
+      Object.defineProperty(result, "userInput", { value: validatePrompt(obj["userInput"]), enumerable: true, writable: true, configurable: true });
       break;
     case "todo":
-      result.todo = validateEventTodo(obj["todo"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "todo")) throw new TypeError("missing required field: EventMessage.todo");
+      Object.defineProperty(result, "todo", { value: validateEventTodo(obj["todo"]), enumerable: true, writable: true, configurable: true });
       break;
     case "diffStat":
-      result.diffStat = validateEventDiffStat(obj["diffStat"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "diffStat")) throw new TypeError("missing required field: EventMessage.diffStat");
+      Object.defineProperty(result, "diffStat", { value: validateEventDiffStat(obj["diffStat"]), enumerable: true, writable: true, configurable: true });
       break;
     case "error":
-      result.error = validateEventError(obj["error"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "error")) throw new TypeError("missing required field: EventMessage.error");
+      Object.defineProperty(result, "error", { value: validateEventError(obj["error"]), enumerable: true, writable: true, configurable: true });
       break;
     case "thinking":
-      result.thinking = validateEventThinking(obj["thinking"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "thinking")) throw new TypeError("missing required field: EventMessage.thinking");
+      Object.defineProperty(result, "thinking", { value: validateEventThinking(obj["thinking"]), enumerable: true, writable: true, configurable: true });
       break;
     case "thinkingDelta":
-      result.thinkingDelta = validateEventThinkingDelta(obj["thinkingDelta"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "thinkingDelta")) throw new TypeError("missing required field: EventMessage.thinkingDelta");
+      Object.defineProperty(result, "thinkingDelta", { value: validateEventThinkingDelta(obj["thinkingDelta"]), enumerable: true, writable: true, configurable: true });
       break;
     case "subagentStart":
-      result.subagentStart = validateEventSubagentStart(obj["subagentStart"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "subagentStart")) throw new TypeError("missing required field: EventMessage.subagentStart");
+      Object.defineProperty(result, "subagentStart", { value: validateEventSubagentStart(obj["subagentStart"]), enumerable: true, writable: true, configurable: true });
       break;
     case "subagentEnd":
-      result.subagentEnd = validateEventSubagentEnd(obj["subagentEnd"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "subagentEnd")) throw new TypeError("missing required field: EventMessage.subagentEnd");
+      Object.defineProperty(result, "subagentEnd", { value: validateEventSubagentEnd(obj["subagentEnd"]), enumerable: true, writable: true, configurable: true });
       break;
     case "nativeSubagent":
-      result.nativeSubagent = validateEventNativeSubagent(obj["nativeSubagent"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "nativeSubagent")) throw new TypeError("missing required field: EventMessage.nativeSubagent");
+      Object.defineProperty(result, "nativeSubagent", { value: validateEventNativeSubagent(obj["nativeSubagent"]), enumerable: true, writable: true, configurable: true });
       break;
     case "backgroundCommand":
-      result.backgroundCommand = validateEventBackgroundCommand(obj["backgroundCommand"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "backgroundCommand")) throw new TypeError("missing required field: EventMessage.backgroundCommand");
+      Object.defineProperty(result, "backgroundCommand", { value: validateEventBackgroundCommand(obj["backgroundCommand"]), enumerable: true, writable: true, configurable: true });
       break;
     case "log":
-      result.log = validateEventLog(obj["log"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "log")) throw new TypeError("missing required field: EventMessage.log");
+      Object.defineProperty(result, "log", { value: validateEventLog(obj["log"]), enumerable: true, writable: true, configurable: true });
       break;
     case "toolOutputDelta":
-      result.toolOutputDelta = validateEventToolOutputDelta(obj["toolOutputDelta"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "toolOutputDelta")) throw new TypeError("missing required field: EventMessage.toolOutputDelta");
+      Object.defineProperty(result, "toolOutputDelta", { value: validateEventToolOutputDelta(obj["toolOutputDelta"]), enumerable: true, writable: true, configurable: true });
       break;
     case "widget":
-      result.widget = validateEventWidget(obj["widget"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "widget")) throw new TypeError("missing required field: EventMessage.widget");
+      Object.defineProperty(result, "widget", { value: validateEventWidget(obj["widget"]), enumerable: true, writable: true, configurable: true });
       break;
     case "widgetDelta":
-      result.widgetDelta = validateEventWidgetDelta(obj["widgetDelta"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "widgetDelta")) throw new TypeError("missing required field: EventMessage.widgetDelta");
+      Object.defineProperty(result, "widgetDelta", { value: validateEventWidgetDelta(obj["widgetDelta"]), enumerable: true, writable: true, configurable: true });
       break;
     case "rateLimit":
-      result.rateLimit = validateEventRateLimit(obj["rateLimit"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "rateLimit")) throw new TypeError("missing required field: EventMessage.rateLimit");
+      Object.defineProperty(result, "rateLimit", { value: validateEventRateLimit(obj["rateLimit"]), enumerable: true, writable: true, configurable: true });
       break;
     case "commitSnapshot":
-      result.commitSnapshot = validateEventCommitSnapshot(obj["commitSnapshot"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "commitSnapshot")) throw new TypeError("missing required field: EventMessage.commitSnapshot");
+      Object.defineProperty(result, "commitSnapshot", { value: validateEventCommitSnapshot(obj["commitSnapshot"]), enumerable: true, writable: true, configurable: true });
       break;
     case "skillLoad":
-      result.skillLoad = validateEventSkillLoad(obj["skillLoad"]);
+      if (!Object.prototype.hasOwnProperty.call(obj, "skillLoad")) throw new TypeError("missing required field: EventMessage.skillLoad");
+      Object.defineProperty(result, "skillLoad", { value: validateEventSkillLoad(obj["skillLoad"]), enumerable: true, writable: true, configurable: true });
       break;
     // Unknown kinds pass through.
   }
@@ -845,6 +1053,9 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
 
 export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
   const obj = asObject(raw, "HistoryEvent");
+  if (!Object.prototype.hasOwnProperty.call(obj, "recordID")) throw new TypeError("missing required field: HistoryEvent.recordID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "index")) throw new TypeError("missing required field: HistoryEvent.index");
+  if (!Object.prototype.hasOwnProperty.call(obj, "message")) throw new TypeError("missing required field: HistoryEvent.message");
   return {
     recordID: asNumber(obj["recordID"], "HistoryEvent.recordID"),
     index: asNumber(obj["index"], "HistoryEvent.index"),
@@ -854,6 +1065,13 @@ export function validateHistoryEvent(raw: ValidatorInput): HistoryEvent {
 
 export function validateHistoryBootstrap(raw: ValidatorInput): HistoryBootstrap {
   const obj = asObject(raw, "HistoryBootstrap");
+  if (!Object.prototype.hasOwnProperty.call(obj, "projectionVersion")) throw new TypeError("missing required field: HistoryBootstrap.projectionVersion");
+  if (!Object.prototype.hasOwnProperty.call(obj, "generation")) throw new TypeError("missing required field: HistoryBootstrap.generation");
+  if (!Object.prototype.hasOwnProperty.call(obj, "scope")) throw new TypeError("missing required field: HistoryBootstrap.scope");
+  if (!Object.prototype.hasOwnProperty.call(obj, "recordsPerChunk")) throw new TypeError("missing required field: HistoryBootstrap.recordsPerChunk");
+  if (!Object.prototype.hasOwnProperty.call(obj, "through")) throw new TypeError("missing required field: HistoryBootstrap.through");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cursor")) throw new TypeError("missing required field: HistoryBootstrap.cursor");
+  if (!Object.prototype.hasOwnProperty.call(obj, "resourceBase")) throw new TypeError("missing required field: HistoryBootstrap.resourceBase");
   return {
     projectionVersion: asString(obj["projectionVersion"], "HistoryBootstrap.projectionVersion"),
     generation: asString(obj["generation"], "HistoryBootstrap.generation"),
@@ -867,6 +1085,8 @@ export function validateHistoryBootstrap(raw: ValidatorInput): HistoryBootstrap 
 
 export function validateHistoryPosition(raw: ValidatorInput): HistoryPosition {
   const obj = asObject(raw, "HistoryPosition");
+  if (!Object.prototype.hasOwnProperty.call(obj, "recordID")) throw new TypeError("missing required field: HistoryPosition.recordID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "index")) throw new TypeError("missing required field: HistoryPosition.index");
   return {
     recordID: asNumber(obj["recordID"], "HistoryPosition.recordID"),
     index: asNumber(obj["index"], "HistoryPosition.index"),
@@ -875,6 +1095,8 @@ export function validateHistoryPosition(raw: ValidatorInput): HistoryPosition {
 
 export function validateHistorySlice(raw: ValidatorInput): HistorySlice {
   const obj = asObject(raw, "HistorySlice");
+  if (!Object.prototype.hasOwnProperty.call(obj, "first")) throw new TypeError("missing required field: HistorySlice.first");
+  if (!Object.prototype.hasOwnProperty.call(obj, "last")) throw new TypeError("missing required field: HistorySlice.last");
   return {
     first: validateHistoryPosition(obj["first"]),
     last: validateHistoryPosition(obj["last"]),
@@ -883,31 +1105,47 @@ export function validateHistorySlice(raw: ValidatorInput): HistorySlice {
 
 export function validateHistorySection(raw: ValidatorInput): HistorySection {
   const obj = asObject(raw, "HistorySection");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: HistorySection.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "turnCount")) throw new TypeError("missing required field: HistorySection.turnCount");
+  if (!Object.prototype.hasOwnProperty.call(obj, "textCount")) throw new TypeError("missing required field: HistorySection.textCount");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolCount")) throw new TypeError("missing required field: HistorySection.toolCount");
+  if (!Object.prototype.hasOwnProperty.call(obj, "durationMs")) throw new TypeError("missing required field: HistorySection.durationMs");
+  if (!Object.prototype.hasOwnProperty.call(obj, "skills")) throw new TypeError("missing required field: HistorySection.skills");
   return {
     id: asString(obj["id"], "HistorySection.id"),
-    body: (obj["body"] === undefined || obj["body"] === null ? undefined : validateHistorySlice(obj["body"])),
-    boundary: (obj["boundary"] === undefined || obj["boundary"] === null ? undefined : validateHistoryEvent(obj["boundary"])),
-    endBoundary: (obj["endBoundary"] === undefined || obj["endBoundary"] === null ? undefined : validateHistoryEvent(obj["endBoundary"])),
-    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "HistorySection.reportedModel")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "body") ? { body: validateHistorySlice(obj["body"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "boundary") ? { boundary: validateHistoryEvent(obj["boundary"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "endBoundary") ? { endBoundary: validateHistoryEvent(obj["endBoundary"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "reportedModel") ? { reportedModel: asString(obj["reportedModel"], "HistorySection.reportedModel") } : {}),
     turnCount: asNumber(obj["turnCount"], "HistorySection.turnCount"),
     textCount: asNumber(obj["textCount"], "HistorySection.textCount"),
     toolCount: asNumber(obj["toolCount"], "HistorySection.toolCount"),
     durationMs: asNumber(obj["durationMs"], "HistorySection.durationMs"),
-    skills: validateArray(obj["skills"], "HistorySection.skills", validateEventSkillLoad) as EventSkillLoad[],
+    skills: (obj["skills"] === null ? null : validateArray(obj["skills"], "HistorySection.skills", (v) => validateEventSkillLoad(v))),
   };
 }
 
 export function validateHistoryRoute(raw: ValidatorInput): HistoryRoute {
   const obj = asObject(raw, "HistoryRoute");
+  if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: HistoryRoute.toolUseID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "namespace")) throw new TypeError("missing required field: HistoryRoute.namespace");
   return {
     toolUseID: asString(obj["toolUseID"], "HistoryRoute.toolUseID"),
     namespace: asString(obj["namespace"], "HistoryRoute.namespace"),
-    agentID: (obj["agentID"] === undefined || obj["agentID"] === null ? undefined : asString(obj["agentID"], "HistoryRoute.agentID")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "agentID") ? { agentID: asString(obj["agentID"], "HistoryRoute.agentID") } : {}),
   };
 }
 
 export function validateHistoryTurn(raw: ValidatorInput): HistoryTurn {
   const obj = asObject(raw, "HistoryTurn");
+  if (!Object.prototype.hasOwnProperty.call(obj, "recordID")) throw new TypeError("missing required field: HistoryTurn.recordID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "index")) throw new TypeError("missing required field: HistoryTurn.index");
+  if (!Object.prototype.hasOwnProperty.call(obj, "sectionID")) throw new TypeError("missing required field: HistoryTurn.sectionID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "at")) throw new TypeError("missing required field: HistoryTurn.at");
+  if (!Object.prototype.hasOwnProperty.call(obj, "model")) throw new TypeError("missing required field: HistoryTurn.model");
+  if (!Object.prototype.hasOwnProperty.call(obj, "usage")) throw new TypeError("missing required field: HistoryTurn.usage");
+  if (!Object.prototype.hasOwnProperty.call(obj, "durationMs")) throw new TypeError("missing required field: HistoryTurn.durationMs");
+  if (!Object.prototype.hasOwnProperty.call(obj, "durationAPIMs")) throw new TypeError("missing required field: HistoryTurn.durationAPIMs");
   return {
     recordID: asNumber(obj["recordID"], "HistoryTurn.recordID"),
     index: asNumber(obj["index"], "HistoryTurn.index"),
@@ -917,15 +1155,18 @@ export function validateHistoryTurn(raw: ValidatorInput): HistoryTurn {
     usage: validateEventUsage(obj["usage"]),
     durationMs: asNumber(obj["durationMs"], "HistoryTurn.durationMs"),
     durationAPIMs: asNumber(obj["durationAPIMs"], "HistoryTurn.durationAPIMs"),
-    waitInput: (obj["waitInput"] === undefined || obj["waitInput"] === null ? undefined : validateHistoryPosition(obj["waitInput"])),
-    waitMs: (obj["waitMs"] === undefined || obj["waitMs"] === null ? undefined : asNumber(obj["waitMs"], "HistoryTurn.waitMs")),
-    changeStat: (obj["changeStat"] === undefined || obj["changeStat"] === null ? undefined : validateEventChangeStat(obj["changeStat"])),
-    cost: (obj["cost"] === undefined || obj["cost"] === null ? undefined : validateEventCost(obj["cost"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "waitInput") ? { waitInput: validateHistoryPosition(obj["waitInput"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "waitMs") ? { waitMs: asNumber(obj["waitMs"], "HistoryTurn.waitMs") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "changeStat") ? { changeStat: validateEventChangeStat(obj["changeStat"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "cost") ? { cost: validateEventCost(obj["cost"]) } : {}),
   };
 }
 
 export function validateHistoryToolTiming(raw: ValidatorInput): HistoryToolTiming {
   const obj = asObject(raw, "HistoryToolTiming");
+  if (!Object.prototype.hasOwnProperty.call(obj, "name")) throw new TypeError("missing required field: HistoryToolTiming.name");
+  if (!Object.prototype.hasOwnProperty.call(obj, "calls")) throw new TypeError("missing required field: HistoryToolTiming.calls");
+  if (!Object.prototype.hasOwnProperty.call(obj, "durationMs")) throw new TypeError("missing required field: HistoryToolTiming.durationMs");
   return {
     name: asString(obj["name"], "HistoryToolTiming.name"),
     calls: asNumber(obj["calls"], "HistoryToolTiming.calls"),
@@ -935,56 +1176,75 @@ export function validateHistoryToolTiming(raw: ValidatorInput): HistoryToolTimin
 
 export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
   const obj = asObject(raw, "HistoryActivity");
+  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: HistoryActivity.kind");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: HistoryActivity.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "sectionID")) throw new TypeError("missing required field: HistoryActivity.sectionID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: HistoryActivity.status");
+  if (!Object.prototype.hasOwnProperty.call(obj, "anchorAt")) throw new TypeError("missing required field: HistoryActivity.anchorAt");
+  if (!Object.prototype.hasOwnProperty.call(obj, "first")) throw new TypeError("missing required field: HistoryActivity.first");
+  if (!Object.prototype.hasOwnProperty.call(obj, "bodyThrough")) throw new TypeError("missing required field: HistoryActivity.bodyThrough");
+  if (!Object.prototype.hasOwnProperty.call(obj, "ownershipThrough")) throw new TypeError("missing required field: HistoryActivity.ownershipThrough");
   return {
     kind: (asString(obj["kind"], "HistoryActivity.kind") as EventKind),
     id: asString(obj["id"], "HistoryActivity.id"),
     sectionID: asString(obj["sectionID"], "HistoryActivity.sectionID"),
-    source: (obj["source"] === undefined || obj["source"] === null ? undefined : validateEventMessageSource(obj["source"])),
-    toolUseID: (obj["toolUseID"] === undefined || obj["toolUseID"] === null ? undefined : asString(obj["toolUseID"], "HistoryActivity.toolUseID")),
-    scope: (obj["scope"] === undefined || obj["scope"] === null ? undefined : (asString(obj["scope"], "HistoryActivity.scope") as EventNativeSubagentScope)),
-    groupID: (obj["groupID"] === undefined || obj["groupID"] === null ? undefined : asString(obj["groupID"], "HistoryActivity.groupID")),
-    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "HistoryActivity.label")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "source") ? { source: validateEventMessageSource(obj["source"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "HistoryActivity.toolUseID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "scope") ? { scope: (asString(obj["scope"], "HistoryActivity.scope") as EventNativeSubagentScope) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "groupID") ? { groupID: asString(obj["groupID"], "HistoryActivity.groupID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "label") ? { label: asString(obj["label"], "HistoryActivity.label") } : {}),
     status: asString(obj["status"], "HistoryActivity.status"),
-    background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "HistoryActivity.background")),
-    startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "HistoryActivity.startedAt") as ISOTimestamp),
-    endedAt: (obj["endedAt"] === undefined || obj["endedAt"] === null ? undefined : asString(obj["endedAt"], "HistoryActivity.endedAt") as ISOTimestamp),
+    ...(Object.prototype.hasOwnProperty.call(obj, "background") ? { background: asBoolean(obj["background"], "HistoryActivity.background") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startedAt") ? { startedAt: asString(obj["startedAt"], "HistoryActivity.startedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "endedAt") ? { endedAt: asString(obj["endedAt"], "HistoryActivity.endedAt") as ISOTimestamp } : {}),
     anchorAt: asString(obj["anchorAt"], "HistoryActivity.anchorAt") as ISOTimestamp,
     first: validateHistoryPosition(obj["first"]),
     bodyThrough: asNumber(obj["bodyThrough"], "HistoryActivity.bodyThrough"),
     ownershipThrough: asNumber(obj["ownershipThrough"], "HistoryActivity.ownershipThrough"),
-    exitCode: (obj["exitCode"] === undefined || obj["exitCode"] === null ? undefined : asNumber(obj["exitCode"], "HistoryActivity.exitCode")),
-    outputRef: (obj["outputRef"] === undefined || obj["outputRef"] === null ? undefined : asString(obj["outputRef"], "HistoryActivity.outputRef")),
+    ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "HistoryActivity.exitCode") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "HistoryActivity.outputRef") } : {}),
   };
 }
 
 export function validateHistoryMetadata(raw: ValidatorInput): HistoryMetadata {
   const obj = asObject(raw, "HistoryMetadata");
+  if (!Object.prototype.hasOwnProperty.call(obj, "routingRevision")) throw new TypeError("missing required field: HistoryMetadata.routingRevision");
+  if (!Object.prototype.hasOwnProperty.call(obj, "routing")) throw new TypeError("missing required field: HistoryMetadata.routing");
+  if (!Object.prototype.hasOwnProperty.call(obj, "hasInitialPrompt")) throw new TypeError("missing required field: HistoryMetadata.hasInitialPrompt");
+  if (!Object.prototype.hasOwnProperty.call(obj, "turns")) throw new TypeError("missing required field: HistoryMetadata.turns");
+  if (!Object.prototype.hasOwnProperty.call(obj, "tools")) throw new TypeError("missing required field: HistoryMetadata.tools");
+  if (!Object.prototype.hasOwnProperty.call(obj, "activities")) throw new TypeError("missing required field: HistoryMetadata.activities");
   return {
     routingRevision: asNumber(obj["routingRevision"], "HistoryMetadata.routingRevision"),
-    routing: validateArray(obj["routing"], "HistoryMetadata.routing", validateHistoryRoute) as HistoryRoute[],
+    routing: (obj["routing"] === null ? null : validateArray(obj["routing"], "HistoryMetadata.routing", (v) => validateHistoryRoute(v))),
     hasInitialPrompt: asBoolean(obj["hasInitialPrompt"], "HistoryMetadata.hasInitialPrompt"),
-    setupEndedAt: (obj["setupEndedAt"] === undefined || obj["setupEndedAt"] === null ? undefined : asString(obj["setupEndedAt"], "HistoryMetadata.setupEndedAt") as ISOTimestamp),
-    turns: validateArray(obj["turns"], "HistoryMetadata.turns", validateHistoryTurn) as HistoryTurn[],
-    tools: validateArray(obj["tools"], "HistoryMetadata.tools", validateHistoryToolTiming) as HistoryToolTiming[],
-    activities: validateArray(obj["activities"], "HistoryMetadata.activities", validateHistoryActivity) as HistoryActivity[],
-    initialInit: (obj["initialInit"] === undefined || obj["initialInit"] === null ? undefined : validateHistoryEvent(obj["initialInit"])),
-    initialInput: (obj["initialInput"] === undefined || obj["initialInput"] === null ? undefined : validateHistoryPosition(obj["initialInput"])),
-    setup: (obj["setup"] === undefined || obj["setup"] === null ? undefined : validateHistorySlice(obj["setup"])),
-    todo: (obj["todo"] === undefined || obj["todo"] === null ? undefined : validateEventTodo(obj["todo"])),
+    ...(Object.prototype.hasOwnProperty.call(obj, "setupEndedAt") ? { setupEndedAt: asString(obj["setupEndedAt"], "HistoryMetadata.setupEndedAt") as ISOTimestamp } : {}),
+    turns: (obj["turns"] === null ? null : validateArray(obj["turns"], "HistoryMetadata.turns", (v) => validateHistoryTurn(v))),
+    tools: (obj["tools"] === null ? null : validateArray(obj["tools"], "HistoryMetadata.tools", (v) => validateHistoryToolTiming(v))),
+    activities: (obj["activities"] === null ? null : validateArray(obj["activities"], "HistoryMetadata.activities", (v) => validateHistoryActivity(v))),
+    ...(Object.prototype.hasOwnProperty.call(obj, "initialInit") ? { initialInit: validateHistoryEvent(obj["initialInit"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "initialInput") ? { initialInput: validateHistoryPosition(obj["initialInput"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "setup") ? { setup: validateHistorySlice(obj["setup"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "todo") ? { todo: validateEventTodo(obj["todo"]) } : {}),
   };
 }
 
 export function validateHistoryManifest(raw: ValidatorInput): HistoryManifest {
   const obj = asObject(raw, "HistoryManifest");
+  if (!Object.prototype.hasOwnProperty.call(obj, "bootstrap")) throw new TypeError("missing required field: HistoryManifest.bootstrap");
+  if (!Object.prototype.hasOwnProperty.call(obj, "sections")) throw new TypeError("missing required field: HistoryManifest.sections");
+  if (!Object.prototype.hasOwnProperty.call(obj, "metadata")) throw new TypeError("missing required field: HistoryManifest.metadata");
   return {
     bootstrap: validateHistoryBootstrap(obj["bootstrap"]),
-    sections: validateArray(obj["sections"], "HistoryManifest.sections", validateHistorySection) as HistorySection[],
+    sections: (obj["sections"] === null ? null : validateArray(obj["sections"], "HistoryManifest.sections", (v) => validateHistorySection(v))),
     metadata: validateHistoryMetadata(obj["metadata"]),
   };
 }
 
 export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoint {
   const obj = asObject(raw, "HistoryCheckpoint");
+  if (!Object.prototype.hasOwnProperty.call(obj, "cursor")) throw new TypeError("missing required field: HistoryCheckpoint.cursor");
+  if (!Object.prototype.hasOwnProperty.call(obj, "through")) throw new TypeError("missing required field: HistoryCheckpoint.through");
   return {
     cursor: asString(obj["cursor"], "HistoryCheckpoint.cursor"),
     through: asNumber(obj["through"], "HistoryCheckpoint.through"),
@@ -993,13 +1253,15 @@ export function validateHistoryCheckpoint(raw: ValidatorInput): HistoryCheckpoin
 
 export function validateHistoryStats(raw: ValidatorInput): HistoryStats {
   const obj = asObject(raw, "HistoryStats");
+  if (!Object.prototype.hasOwnProperty.call(obj, "samples")) throw new TypeError("missing required field: HistoryStats.samples");
   return {
-    samples: validateArray(obj["samples"], "HistoryStats.samples", validateEventStats) as EventStats[],
+    samples: (obj["samples"] === null ? null : validateArray(obj["samples"], "HistoryStats.samples", (v) => validateEventStats(v))),
   };
 }
 
 export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
   const obj = asObject(raw, "HistoryReset");
+  if (!Object.prototype.hasOwnProperty.call(obj, "manifestURL")) throw new TypeError("missing required field: HistoryReset.manifestURL");
   return {
     manifestURL: asString(obj["manifestURL"], "HistoryReset.manifestURL"),
   };
@@ -1007,6 +1269,7 @@ export function validateHistoryReset(raw: ValidatorInput): HistoryReset {
 
 export function validateTaskHistoryStreamError(raw: ValidatorInput): TaskHistoryStreamError {
   const obj = asObject(raw, "TaskHistoryStreamError");
+  if (!Object.prototype.hasOwnProperty.call(obj, "message")) throw new TypeError("missing required field: TaskHistoryStreamError.message");
   return {
     message: asString(obj["message"], "TaskHistoryStreamError.message"),
   };

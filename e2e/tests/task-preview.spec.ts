@@ -50,8 +50,8 @@ test("compacted bodies stay unloaded until disclosure while the current session 
   await api.sendInput(id, { prompt: { text: "FAKE_SKILLS compact" } });
   await waitForTaskState(api, id, "waiting");
   const manifest = await api.getHistoryManifest(id);
-  expect(manifest.sections.length).toBeGreaterThan(1);
-  const old = manifest.sections[0]?.body;
+  expect((manifest.sections ?? []).length).toBeGreaterThan(1);
+  const old = manifest.sections?.[0]?.body;
   expect(old).toBeDefined();
   const release = Promise.withResolvers<void>();
   const finished = Promise.withResolvers<void>();
@@ -254,8 +254,8 @@ for (const width of [390, 1280]) {
     await api.sendInput(id, { prompt: { text: "FAKE_SKILLS compact" } });
     await waitForTaskState(api, id, "waiting");
     const manifest = await api.getHistoryManifest(id);
-    const archived = manifest.sections[0];
-    const current = manifest.sections.at(-1);
+    const archived = manifest.sections?.[0];
+    const current = manifest.sections?.at(-1);
     if (!archived?.body || !current?.body) throw new Error("Missing section fixture");
     const oldFirst = archived.body.first.recordID;
     const oldLast = archived.body.last.recordID;
@@ -417,7 +417,7 @@ test("growing archived payload leaves current-context browser work bounded", asy
     await waitForTaskState(api, id, "waiting");
     if (count !== 1 && count !== 4) continue;
     const manifest = await api.getHistoryManifest(id);
-    const current = manifest.sections.at(-1)?.body;
+    const current = manifest.sections?.at(-1)?.body;
     if (!current) throw new Error("Missing current section");
     await page.goto(`/task/@${id}`);
     await expect(page.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false");
