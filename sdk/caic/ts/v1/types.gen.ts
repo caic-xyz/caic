@@ -2,11 +2,97 @@
 /** ISO 8601 timestamp string (e.g. "2026-04-13T12:00:00Z"). */
 export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 
-//////////
-// source: events.go
-/*
-SSE event types sent to the frontend for task event streams.
-*/
+export type BranchAction =
+  | "adopt"
+  | "branch_off";
+/**
+ * Supported values.
+ */
+export const BranchActionAdopt = "adopt";
+export const BranchActionBranchOff = "branch_off";
+
+export type CIStatus =
+  | "pending"
+  | "success"
+  | "failure";
+/**
+ * Supported values.
+ */
+export const CIStatusPending = "pending";
+export const CIStatusSuccess = "success";
+export const CIStatusFailure = "failure";
+
+export type CheckConclusion =
+  | "success"
+  | "failure"
+  | "neutral"
+  | "skipped"
+  | "cancelled"
+  | "timed_out"
+  | "action_required"
+  | "stale";
+/**
+ * Supported values.
+ */
+export const CheckConclusionSuccess = "success";
+export const CheckConclusionFailure = "failure";
+export const CheckConclusionNeutral = "neutral";
+export const CheckConclusionSkipped = "skipped";
+export const CheckConclusionCancelled = "cancelled";
+export const CheckConclusionTimedOut = "timed_out";
+export const CheckConclusionActionRequired = "action_required";
+export const CheckConclusionStale = "stale";
+
+export type CheckStatus =
+  | "queued"
+  | "in_progress"
+  | "completed";
+/**
+ * Supported values.
+ */
+export const CheckStatusQueued = "queued";
+export const CheckStatusInProgress = "in_progress";
+export const CheckStatusCompleted = "completed";
+
+export type ErrorCode =
+  | "BAD_REQUEST"
+  | "UNKNOWN_HARNESS"
+  | "UNKNOWN_REPOSITORY"
+  | "UNSUPPORTED_MODEL"
+  | "INVALID_OAUTH_STATE"
+  | "UNKNOWN_CACHE"
+  | "UNKNOWN_RUNTIME"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "OAUTH_GRANT_NOT_FOUND"
+  | "OAUTH_PROVIDER_UNAVAILABLE"
+  | "CONFLICT"
+  | "REPOSITORY_PATH_CONFLICT"
+  | "INTERNAL_ERROR"
+  | "UPDATE_CHECK_FAILED"
+  | "UPDATE_UNAVAILABLE"
+  | (string & {});
+/**
+ * Supported values.
+ */
+export const ErrorCodeBadRequest = "BAD_REQUEST";
+export const ErrorCodeUnknownHarness = "UNKNOWN_HARNESS";
+export const ErrorCodeUnknownRepository = "UNKNOWN_REPOSITORY";
+export const ErrorCodeUnsupportedModel = "UNSUPPORTED_MODEL";
+export const ErrorCodeInvalidOauthState = "INVALID_OAUTH_STATE";
+export const ErrorCodeUnknownCache = "UNKNOWN_CACHE";
+export const ErrorCodeUnknownRuntime = "UNKNOWN_RUNTIME";
+export const ErrorCodeUnauthorized = "UNAUTHORIZED";
+export const ErrorCodeForbidden = "FORBIDDEN";
+export const ErrorCodeNotFound = "NOT_FOUND";
+export const ErrorCodeOauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND";
+export const ErrorCodeOauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE";
+export const ErrorCodeConflict = "CONFLICT";
+export const ErrorCodeRepositoryPathConflict = "REPOSITORY_PATH_CONFLICT";
+export const ErrorCodeInternalError = "INTERNAL_ERROR";
+export const ErrorCodeUpdateCheckFailed = "UPDATE_CHECK_FAILED";
+export const ErrorCodeUpdateUnavailable = "UPDATE_UNAVAILABLE";
 
 export type EventCostSource =
   | "estimated"
@@ -119,521 +205,6 @@ export type EventToolInputKind =
  */
 export const EventToolInputFileChanges = "fileChanges";
 export const EventToolInputSubagents = "subagents";
-
-export type ToolOutputContentType =
-  | "text"
-  | "json"
-  | "markdown";
-/**
- * Supported values.
- */
-export const ToolOutputText = "text";
-export const ToolOutputJSON = "json";
-export const ToolOutputMarkdown = "markdown";
-
-/** EventStats is a runtime resource usage snapshot emitted periodically. */
-export interface EventStats {
-  ts: number /* int64 */;
-  /** 100% is one fully busy logical CPU. */
-  cpuPerc: number /* float64 */;
-  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
-  cpuCeiling: number /* float64 */ | null;
-  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
-  cpuQuota: number /* float64 */ | null;
-  /** Owning runtime's logical CPU count; null when unknown. */
-  runtimeCPUs: number /* int */ | null;
-  /** Runtime CPU metadata observation failure; usage samples remain usable. */
-  cpuError?: string;
-  memUsed: number /* uint64 */;
-  memLimit: number /* uint64 */;
-  memPerc: number /* float64 */;
-  netRx: number /* uint64 */;
-  netTx: number /* uint64 */;
-  blockRead: number /* uint64 */;
-  blockWrite: number /* uint64 */;
-  diskUsed: number /* int64 */;
-}
-
-/**
- * EventMessageSource identifies the provider origin of any normalized event.
- * AgentID and DelegationToolUseID identify child ownership independently of native
- * item identity. RootThreadID is an authoritative session owner when reported.
- * Fields remain absent when the harness does not supply them.
- */
-export interface EventMessageSource {
-  agentID?: string;
-  delegationToolUseID?: string;
-  threadID?: string;
-  turnID?: string;
-  itemID?: string;
-  rootThreadID?: string;
-}
-
-/**
- * EventInit is emitted once at the start of a session. It includes a Harness
- * field so the client knows which backend produced the stream.
- */
-export interface EventInit {
-  reportedModel: string;
-  /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
-  reportedEffort?: string;
-  agentVersion: string;
-  sessionID: string;
-  tools?: string[];
-  cwd: string;
-  harness: string;
-}
-
-/** EventText is an assistant text block. */
-export interface EventText {
-  text: string;
-}
-
-/** EventTextDelta is a streaming text fragment from --include-partial-messages. */
-export interface EventTextDelta {
-  text: string;
-}
-
-/** EventFileChange is one changed file rendered from a unified patch. */
-export interface EventFileChange {
-  path: string;
-  patch: string;
-}
-
-/** EventSubagentSpawn is one backend-normalized subagent invocation. */
-export interface EventSubagentSpawn {
-  agent: string;
-  task: string;
-  label?: string;
-  phase?: string;
-}
-
-/**
- * EventToolInputView is a backend-normalized rendering model for known tool
- * inputs. It keeps harness-specific tool schemas out of clients.
- */
-export interface EventToolInputView {
-  kind: EventToolInputKind;
-  files?: EventFileChange[];
-  subagents?: EventSubagentSpawn[];
-}
-
-/** EventToolUse is emitted when the assistant invokes a tool. */
-export interface EventToolUse {
-  toolUseID: string;
-  name: string;
-  input: any /* json.RawMessage */ | null;
-  /** Backend-normalized short display detail for tool headers. */
-  detail?: string;
-  /** Backend-normalized structured input for tool-card rendering. */
-  inputView?: EventToolInputView;
-  /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
-  inputTruncated?: boolean;
-  /** True when the tool runs in the background (Bash/Agent run_in_background). */
-  background?: boolean;
-}
-
-/** EventToolResult is emitted when a tool call completes. */
-export interface EventToolResult {
-  toolUseID: string;
-  /** Seconds; server-computed; 0 if unknown. */
-  duration: number /* float64 */;
-  error?: string;
-}
-
-/** AskOption is a single option in an AskUserQuestion. */
-export interface AskOption {
-  label: string;
-  description?: string;
-}
-
-/** AskQuestion is a single question from AskUserQuestion. */
-export interface AskQuestion {
-  question: string;
-  header?: string;
-  options: AskOption[] | null;
-  multiSelect?: boolean;
-}
-
-/** EventAsk is emitted when the agent asks the user a question. */
-export interface EventAsk {
-  toolUseID: string;
-  questions: AskQuestion[] | null;
-}
-
-/**
- * EventUsage reports token usage and independent native context occupancy.
- * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
- * or reasoning summaries (Codex). Zero when the harness does not report it.
- */
-export interface EventUsage {
-  inputTokens: number /* int */;
-  outputTokens: number /* int */;
-  cacheCreationInputTokens: number /* int */;
-  cacheReadInputTokens: number /* int */;
-  reasoningOutputTokens?: number /* int */;
-  reportedModel: string;
-  /** Absent when native occupancy is unknown. */
-  contextUsed?: number /* int */;
-  /** Active model context capacity. */
-  contextWindow?: number /* int */;
-}
-
-/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
-export interface EventCost {
-  usd: number /* float64 */;
-  source: EventCostSource;
-}
-
-/** EventResult is emitted when the task reaches a terminal state. */
-export interface EventResult {
-  cost?: EventCost;
-  subtype: string;
-  isError: boolean;
-  result: string;
-  diffStat?: DiffStat;
-  totalCostUSD: number /* float64 */;
-  /** Seconds. */
-  duration: number /* float64 */;
-  /** Seconds. */
-  durationAPI: number /* float64 */;
-  numTurns: number /* int */;
-  usage: EventUsage;
-}
-
-/** EventSystem is a system event (status, compact_boundary, etc.). */
-export interface EventSystem {
-  subtype: string;
-  /** Optional human-readable detail (e.g. model names for model_rerouted). */
-  detail?: string;
-  /**
-   * ContextTokensBefore is the context size the harness reported before a
-   * compact_boundary. Zero means the harness did not report it.
-   */
-  contextTokensBefore?: number /* int64 */;
-  /**
-   * ContextTokensAfter is the context size the harness reported after a
-   * compact_boundary, measured or estimated. Zero means it did not report it.
-   */
-  contextTokensAfter?: number /* int64 */;
-}
-
-/** TodoItem is a single todo entry from a TodoWrite tool call. */
-export interface TodoItem {
-  content: string;
-  /** "pending", "in_progress", "completed". */
-  status: string;
-  activeForm?: string;
-}
-
-/** EventTodo is emitted when the agent writes/updates its todo list. */
-export interface EventTodo {
-  toolUseID: string;
-  todos: TodoItem[] | null;
-}
-
-/** EventDiffStat is emitted when the relay reports updated diff statistics. */
-export interface EventDiffStat {
-  diffStat?: DiffStat;
-}
-
-/** EventError reports an agent subprocess failure. */
-export interface EventError {
-  err: string;
-}
-
-/** EventThinking is an assistant thinking block. */
-export interface EventThinking {
-  text: string;
-}
-
-/** EventThinkingDelta is a streaming thinking fragment. */
-export interface EventThinkingDelta {
-  text: string;
-}
-
-/**
- * EventSubagentStart is emitted when a subagent task begins. It is the legacy
- * harness-agnostic shape: no current parser produces it, and clients should
- * render EventNativeSubagent instead. It stays in the v1 event union and the
- * generated SDKs so existing clients that switch on these kinds keep compiling.
- */
-export interface EventSubagentStart {
-  taskID: string;
-  description: string;
-}
-
-/**
- * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
- * It is the legacy harness-agnostic shape: no current parser produces it, and
- * clients should render EventNativeSubagent instead. It stays in the v1 event
- * union and the generated SDKs so existing clients that switch on these kinds
- * keep compiling.
- */
-export interface EventSubagentEnd {
-  taskID: string;
-  /** "completed", "failed", "stopped" */
-  status: string;
-}
-
-/**
- * EventNativeSubagent is one lifecycle update for a harness native subagent.
- * ID and GroupID are opaque harness identities. Optional fields remain absent
- * when the harness did not expose them.
- */
-export interface EventNativeSubagent {
-  toolUseID?: string;
-  scope?: EventNativeSubagentScope;
-  id: string;
-  groupID?: string;
-  label?: string;
-  prompt?: string;
-  status: EventNativeSubagentStatus;
-  result?: string;
-  /**
-   * Background reports that the harness launched the delegation detached from
-   * the parent turn, so it can outlive that turn's result.
-   */
-  background?: boolean;
-}
-
-/**
- * EventBackgroundCommand reports one harness-native detached shell command's
- * folded lifecycle. ExitCode is the command's numeric outcome when the harness
- * reported one; OutputRef is an opaque harness-owned output reference, not a
- * caic resource.
- */
-export interface EventBackgroundCommand {
-  id: string;
-  label?: string;
-  status: string;
-  result?: string;
-  exitCode?: number /* int */;
-  outputRef?: string;
-  toolUseID?: string;
-}
-
-/** EventLog is a provisioning/startup log line from the runtime backend. */
-export interface EventLog {
-  line: string;
-}
-
-/**
- * EventToolOutputDelta is a streaming output fragment from a running tool.
- * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
- * MCP tool progress messages (item/mcpToolCall/progress).
- */
-export interface EventToolOutputDelta {
-  toolUseID: string;
-  delta: string;
-  contentType?: ToolOutputContentType;
-  /** Pretty-printed JSON or other transformation. */
-  formatted?: string;
-}
-
-/** EventWidget is emitted when the agent produces a complete HTML widget. */
-export interface EventWidget {
-  toolUseID: string;
-  title: string;
-  html: string;
-}
-
-/** EventWidgetDelta is a streaming HTML fragment for progressive widget rendering. */
-export interface EventWidgetDelta {
-  toolUseID: string;
-  delta: string;
-}
-
-/** EventRateLimit is emitted when the agent's rate limit status changes. */
-export interface EventRateLimit {
-  status: EventRateLimitStatus;
-  /** When the limit resets; zero if unknown. */
-  resetsAt?: ISOTimestamp;
-  /** "five_hour", "seven_day", etc. */
-  rateLimitType: string;
-  /** 0.0–1.0; -1 when unknown. */
-  utilization: number /* float64 */;
-  /** True when extra/overage usage is active. */
-  isUsingOverage?: boolean;
-  /** When overage resets; zero if not using overage. */
-  overageResetsAt?: ISOTimestamp;
-}
-
-/**
- * EventRepositoryCommit identifies one immutable repository branch tip in a
- * commit snapshot.
- */
-export interface EventRepositoryCommit {
-  /** RepositoryPath is the repository's absolute path inside the task runtime. */
-  repositoryPath: string;
-  /** BranchName is the short local branch name, such as "main" or "caic-1". */
-  branchName: string;
-  /** CommitHash is the full Git object ID of the branch tip. */
-  commitHash: string;
-}
-
-/** EventChangeStat summarizes a completed turn's net committed change. */
-export interface EventChangeStat {
-  files: number /* int */;
-  linesAdded: number /* int */;
-  linesDeleted: number /* int */;
-  binaryFiles: number /* int */;
-}
-
-/**
- * EventCommitSnapshot records the exact committed repository branch tips
- * fetched from the runtime when a turn finishes.
- */
-export interface EventCommitSnapshot {
-  repositoryCommits: EventRepositoryCommit[] | null;
-  baseline?: boolean;
-  changeStat?: EventChangeStat;
-}
-
-/**
- * EventSkillLoad is emitted when a skill enters the main agent's context. A
- * failed call and a subagent's load emit none; an inferred load is emitted
- * once the tool that opened the file succeeds.
- */
-export interface EventSkillLoad {
-  skill: string;
-  /** SKILL.md in the task runtime; empty when the harness did not report it. */
-  path?: string;
-}
-
-/** EventMessage is one backend-neutral message in cached history and its live stream. */
-export interface EventMessage {
-  source?: EventMessageSource;
-  kind: EventKind;
-  ts: number /* int64 */;
-  init?: EventInit;
-  text?: EventText;
-  textDelta?: EventTextDelta;
-  toolUse?: EventToolUse;
-  toolResult?: EventToolResult;
-  ask?: EventAsk;
-  usage?: EventUsage;
-  result?: EventResult;
-  system?: EventSystem;
-  userInput?: Prompt;
-  todo?: EventTodo;
-  diffStat?: EventDiffStat;
-  error?: EventError;
-  thinking?: EventThinking;
-  thinkingDelta?: EventThinkingDelta;
-  subagentStart?: EventSubagentStart;
-  subagentEnd?: EventSubagentEnd;
-  nativeSubagent?: EventNativeSubagent;
-  backgroundCommand?: EventBackgroundCommand;
-  log?: EventLog;
-  toolOutputDelta?: EventToolOutputDelta;
-  widget?: EventWidget;
-  widgetDelta?: EventWidgetDelta;
-  rateLimit?: EventRateLimit;
-  commitSnapshot?: EventCommitSnapshot;
-  skillLoad?: EventSkillLoad;
-}
-
-/** TaskHistoryStreamError reports that task history could not be replayed. */
-export interface TaskHistoryStreamError {
-  message: string;
-}
-
-
-//////////
-// source: types.go
-
-export type BranchAction =
-  | "adopt"
-  | "branch_off";
-/**
- * Supported values.
- */
-export const BranchActionAdopt = "adopt";
-export const BranchActionBranchOff = "branch_off";
-
-export type CIStatus =
-  | "pending"
-  | "success"
-  | "failure";
-/**
- * Supported values.
- */
-export const CIStatusPending = "pending";
-export const CIStatusSuccess = "success";
-export const CIStatusFailure = "failure";
-
-export type CheckConclusion =
-  | "success"
-  | "failure"
-  | "neutral"
-  | "skipped"
-  | "cancelled"
-  | "timed_out"
-  | "action_required"
-  | "stale";
-/**
- * Supported values.
- */
-export const CheckConclusionSuccess = "success";
-export const CheckConclusionFailure = "failure";
-export const CheckConclusionNeutral = "neutral";
-export const CheckConclusionSkipped = "skipped";
-export const CheckConclusionCancelled = "cancelled";
-export const CheckConclusionTimedOut = "timed_out";
-export const CheckConclusionActionRequired = "action_required";
-export const CheckConclusionStale = "stale";
-
-export type CheckStatus =
-  | "queued"
-  | "in_progress"
-  | "completed";
-/**
- * Supported values.
- */
-export const CheckStatusQueued = "queued";
-export const CheckStatusInProgress = "in_progress";
-export const CheckStatusCompleted = "completed";
-
-export type ErrorCode =
-  | "BAD_REQUEST"
-  | "UNKNOWN_HARNESS"
-  | "UNKNOWN_REPOSITORY"
-  | "UNSUPPORTED_MODEL"
-  | "INVALID_OAUTH_STATE"
-  | "UNKNOWN_CACHE"
-  | "UNKNOWN_RUNTIME"
-  | "UNAUTHORIZED"
-  | "FORBIDDEN"
-  | "NOT_FOUND"
-  | "OAUTH_GRANT_NOT_FOUND"
-  | "OAUTH_PROVIDER_UNAVAILABLE"
-  | "CONFLICT"
-  | "REPOSITORY_PATH_CONFLICT"
-  | "INTERNAL_ERROR"
-  | "UPDATE_CHECK_FAILED"
-  | "UPDATE_UNAVAILABLE"
-  | (string & {});
-/**
- * Supported values.
- */
-export const ErrorCodeBadRequest = "BAD_REQUEST";
-export const ErrorCodeUnknownHarness = "UNKNOWN_HARNESS";
-export const ErrorCodeUnknownRepository = "UNKNOWN_REPOSITORY";
-export const ErrorCodeUnsupportedModel = "UNSUPPORTED_MODEL";
-export const ErrorCodeInvalidOauthState = "INVALID_OAUTH_STATE";
-export const ErrorCodeUnknownCache = "UNKNOWN_CACHE";
-export const ErrorCodeUnknownRuntime = "UNKNOWN_RUNTIME";
-export const ErrorCodeUnauthorized = "UNAUTHORIZED";
-export const ErrorCodeForbidden = "FORBIDDEN";
-export const ErrorCodeNotFound = "NOT_FOUND";
-export const ErrorCodeOauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND";
-export const ErrorCodeOauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE";
-export const ErrorCodeConflict = "CONFLICT";
-export const ErrorCodeRepositoryPathConflict = "REPOSITORY_PATH_CONFLICT";
-export const ErrorCodeInternalError = "INTERNAL_ERROR";
-export const ErrorCodeUpdateCheckFailed = "UPDATE_CHECK_FAILED";
-export const ErrorCodeUpdateUnavailable = "UPDATE_UNAVAILABLE";
 
 export type Forge =
   | "github"
@@ -824,6 +395,17 @@ export const TaskStatePurging = "purging";
 export const TaskStateCrashed = "crashed";
 export const TaskStateFailed = "failed";
 export const TaskStatePurged = "purged";
+
+export type ToolOutputContentType =
+  | "text"
+  | "json"
+  | "markdown";
+/**
+ * Supported values.
+ */
+export const ToolOutputText = "text";
+export const ToolOutputJSON = "json";
+export const ToolOutputMarkdown = "markdown";
 
 export type VoiceGatewayMode =
   | "disabled"
@@ -1389,6 +971,29 @@ export interface RuntimeInstance {
   /** SudoPassword is the random sudo password, only populated when Sudo is true. */
   sudoPassword?: string;
   vncPort?: number /* int */;
+}
+
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
+export interface EventStats {
+  ts: number /* int64 */;
+  /** 100% is one fully busy logical CPU. */
+  cpuPerc: number /* float64 */;
+  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+  cpuCeiling: number /* float64 */ | null;
+  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+  cpuQuota: number /* float64 */ | null;
+  /** Owning runtime's logical CPU count; null when unknown. */
+  runtimeCPUs: number /* int */ | null;
+  /** Runtime CPU metadata observation failure; usage samples remain usable. */
+  cpuError?: string;
+  memUsed: number /* uint64 */;
+  memLimit: number /* uint64 */;
+  memPerc: number /* float64 */;
+  netRx: number /* uint64 */;
+  netTx: number /* uint64 */;
+  blockRead: number /* uint64 */;
+  blockWrite: number /* uint64 */;
+  diskUsed: number /* int64 */;
 }
 
 /** TaskRateLimit is the current quota block resolved by the backend for one task. */
@@ -2222,6 +1827,386 @@ export interface HistorySlice {
 }
 
 /**
+ * EventMessageSource identifies the provider origin of any normalized event.
+ * AgentID and DelegationToolUseID identify child ownership independently of native
+ * item identity. RootThreadID is an authoritative session owner when reported.
+ * Fields remain absent when the harness does not supply them.
+ */
+export interface EventMessageSource {
+  agentID?: string;
+  delegationToolUseID?: string;
+  threadID?: string;
+  turnID?: string;
+  itemID?: string;
+  rootThreadID?: string;
+}
+
+/**
+ * EventInit is emitted once at the start of a session. It includes a Harness
+ * field so the client knows which backend produced the stream.
+ */
+export interface EventInit {
+  reportedModel: string;
+  /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
+  reportedEffort?: string;
+  agentVersion: string;
+  sessionID: string;
+  tools?: string[];
+  cwd: string;
+  harness: string;
+}
+
+/** EventText is an assistant text block. */
+export interface EventText {
+  text: string;
+}
+
+/** EventTextDelta is a streaming text fragment from --include-partial-messages. */
+export interface EventTextDelta {
+  text: string;
+}
+
+/** EventFileChange is one changed file rendered from a unified patch. */
+export interface EventFileChange {
+  path: string;
+  patch: string;
+}
+
+/** EventSubagentSpawn is one backend-normalized subagent invocation. */
+export interface EventSubagentSpawn {
+  agent: string;
+  task: string;
+  label?: string;
+  phase?: string;
+}
+
+/**
+ * EventToolInputView is a backend-normalized rendering model for known tool
+ * inputs. It keeps harness-specific tool schemas out of clients.
+ */
+export interface EventToolInputView {
+  kind: EventToolInputKind;
+  files?: EventFileChange[];
+  subagents?: EventSubagentSpawn[];
+}
+
+/** EventToolUse is emitted when the assistant invokes a tool. */
+export interface EventToolUse {
+  toolUseID: string;
+  name: string;
+  input: any /* json.RawMessage */ | null;
+  /** Backend-normalized short display detail for tool headers. */
+  detail?: string;
+  /** Backend-normalized structured input for tool-card rendering. */
+  inputView?: EventToolInputView;
+  /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
+  inputTruncated?: boolean;
+  /** True when the tool runs in the background (Bash/Agent run_in_background). */
+  background?: boolean;
+}
+
+/** EventToolResult is emitted when a tool call completes. */
+export interface EventToolResult {
+  toolUseID: string;
+  /** Seconds; server-computed; 0 if unknown. */
+  duration: number /* float64 */;
+  error?: string;
+}
+
+/** AskOption is a single option in an AskUserQuestion. */
+export interface AskOption {
+  label: string;
+  description?: string;
+}
+
+/** AskQuestion is a single question from AskUserQuestion. */
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: AskOption[] | null;
+  multiSelect?: boolean;
+}
+
+/** EventAsk is emitted when the agent asks the user a question. */
+export interface EventAsk {
+  toolUseID: string;
+  questions: AskQuestion[] | null;
+}
+
+/**
+ * EventUsage reports token usage and independent native context occupancy.
+ * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+ * or reasoning summaries (Codex). Zero when the harness does not report it.
+ */
+export interface EventUsage {
+  inputTokens: number /* int */;
+  outputTokens: number /* int */;
+  cacheCreationInputTokens: number /* int */;
+  cacheReadInputTokens: number /* int */;
+  reasoningOutputTokens?: number /* int */;
+  reportedModel: string;
+  /** Absent when native occupancy is unknown. */
+  contextUsed?: number /* int */;
+  /** Active model context capacity. */
+  contextWindow?: number /* int */;
+}
+
+/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
+export interface EventCost {
+  usd: number /* float64 */;
+  source: EventCostSource;
+}
+
+/** EventResult is emitted when the task reaches a terminal state. */
+export interface EventResult {
+  cost?: EventCost;
+  subtype: string;
+  isError: boolean;
+  result: string;
+  diffStat?: DiffStat;
+  totalCostUSD: number /* float64 */;
+  /** Seconds. */
+  duration: number /* float64 */;
+  /** Seconds. */
+  durationAPI: number /* float64 */;
+  numTurns: number /* int */;
+  usage: EventUsage;
+}
+
+/** EventSystem is a system event (status, compact_boundary, etc.). */
+export interface EventSystem {
+  subtype: string;
+  /** Optional human-readable detail (e.g. model names for model_rerouted). */
+  detail?: string;
+  /**
+   * ContextTokensBefore is the context size the harness reported before a
+   * compact_boundary. Zero means the harness did not report it.
+   */
+  contextTokensBefore?: number /* int64 */;
+  /**
+   * ContextTokensAfter is the context size the harness reported after a
+   * compact_boundary, measured or estimated. Zero means it did not report it.
+   */
+  contextTokensAfter?: number /* int64 */;
+}
+
+/** TodoItem is a single todo entry from a TodoWrite tool call. */
+export interface TodoItem {
+  content: string;
+  /** "pending", "in_progress", "completed". */
+  status: string;
+  activeForm?: string;
+}
+
+/** EventTodo is emitted when the agent writes/updates its todo list. */
+export interface EventTodo {
+  toolUseID: string;
+  todos: TodoItem[] | null;
+}
+
+/** EventDiffStat is emitted when the relay reports updated diff statistics. */
+export interface EventDiffStat {
+  diffStat?: DiffStat;
+}
+
+/** EventError reports an agent subprocess failure. */
+export interface EventError {
+  err: string;
+}
+
+/** EventThinking is an assistant thinking block. */
+export interface EventThinking {
+  text: string;
+}
+
+/** EventThinkingDelta is a streaming thinking fragment. */
+export interface EventThinkingDelta {
+  text: string;
+}
+
+/**
+ * EventSubagentStart is emitted when a subagent task begins. It is the legacy
+ * harness-agnostic shape: no current parser produces it, and clients should
+ * render EventNativeSubagent instead. It stays in the v1 event union and the
+ * generated SDKs so existing clients that switch on these kinds keep compiling.
+ */
+export interface EventSubagentStart {
+  taskID: string;
+  description: string;
+}
+
+/**
+ * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+ * It is the legacy harness-agnostic shape: no current parser produces it, and
+ * clients should render EventNativeSubagent instead. It stays in the v1 event
+ * union and the generated SDKs so existing clients that switch on these kinds
+ * keep compiling.
+ */
+export interface EventSubagentEnd {
+  taskID: string;
+  /** "completed", "failed", "stopped" */
+  status: string;
+}
+
+/**
+ * EventNativeSubagent is one lifecycle update for a harness native subagent.
+ * ID and GroupID are opaque harness identities. Optional fields remain absent
+ * when the harness did not expose them.
+ */
+export interface EventNativeSubagent {
+  toolUseID?: string;
+  scope?: EventNativeSubagentScope;
+  id: string;
+  groupID?: string;
+  label?: string;
+  prompt?: string;
+  status: EventNativeSubagentStatus;
+  result?: string;
+  /**
+   * Background reports that the harness launched the delegation detached from
+   * the parent turn, so it can outlive that turn's result.
+   */
+  background?: boolean;
+}
+
+/**
+ * EventBackgroundCommand reports one harness-native detached shell command's
+ * folded lifecycle. ExitCode is the command's numeric outcome when the harness
+ * reported one; OutputRef is an opaque harness-owned output reference, not a
+ * caic resource.
+ */
+export interface EventBackgroundCommand {
+  id: string;
+  label?: string;
+  status: string;
+  result?: string;
+  exitCode?: number /* int */;
+  outputRef?: string;
+  toolUseID?: string;
+}
+
+/** EventLog is a provisioning/startup log line from the runtime backend. */
+export interface EventLog {
+  line: string;
+}
+
+/**
+ * EventToolOutputDelta is a streaming output fragment from a running tool.
+ * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+ * MCP tool progress messages (item/mcpToolCall/progress).
+ */
+export interface EventToolOutputDelta {
+  toolUseID: string;
+  delta: string;
+  contentType?: ToolOutputContentType;
+  /** Pretty-printed JSON or other transformation. */
+  formatted?: string;
+}
+
+/** EventWidget is emitted when the agent produces a complete HTML widget. */
+export interface EventWidget {
+  toolUseID: string;
+  title: string;
+  html: string;
+}
+
+/** EventWidgetDelta is a streaming HTML fragment for progressive widget rendering. */
+export interface EventWidgetDelta {
+  toolUseID: string;
+  delta: string;
+}
+
+/** EventRateLimit is emitted when the agent's rate limit status changes. */
+export interface EventRateLimit {
+  status: EventRateLimitStatus;
+  /** When the limit resets; zero if unknown. */
+  resetsAt?: ISOTimestamp;
+  /** "five_hour", "seven_day", etc. */
+  rateLimitType: string;
+  /** 0.0–1.0; -1 when unknown. */
+  utilization: number /* float64 */;
+  /** True when extra/overage usage is active. */
+  isUsingOverage?: boolean;
+  /** When overage resets; zero if not using overage. */
+  overageResetsAt?: ISOTimestamp;
+}
+
+/**
+ * EventRepositoryCommit identifies one immutable repository branch tip in a
+ * commit snapshot.
+ */
+export interface EventRepositoryCommit {
+  /** RepositoryPath is the repository's absolute path inside the task runtime. */
+  repositoryPath: string;
+  /** BranchName is the short local branch name, such as "main" or "caic-1". */
+  branchName: string;
+  /** CommitHash is the full Git object ID of the branch tip. */
+  commitHash: string;
+}
+
+/** EventChangeStat summarizes a completed turn's net committed change. */
+export interface EventChangeStat {
+  files: number /* int */;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  binaryFiles: number /* int */;
+}
+
+/**
+ * EventCommitSnapshot records the exact committed repository branch tips
+ * fetched from the runtime when a turn finishes.
+ */
+export interface EventCommitSnapshot {
+  repositoryCommits: EventRepositoryCommit[] | null;
+  baseline?: boolean;
+  changeStat?: EventChangeStat;
+}
+
+/**
+ * EventSkillLoad is emitted when a skill enters the main agent's context. A
+ * failed call and a subagent's load emit none; an inferred load is emitted
+ * once the tool that opened the file succeeds.
+ */
+export interface EventSkillLoad {
+  skill: string;
+  /** SKILL.md in the task runtime; empty when the harness did not report it. */
+  path?: string;
+}
+
+/** EventMessage is one backend-neutral message in cached history and its live stream. */
+export interface EventMessage {
+  source?: EventMessageSource;
+  kind: EventKind;
+  ts: number /* int64 */;
+  init?: EventInit;
+  text?: EventText;
+  textDelta?: EventTextDelta;
+  toolUse?: EventToolUse;
+  toolResult?: EventToolResult;
+  ask?: EventAsk;
+  usage?: EventUsage;
+  result?: EventResult;
+  system?: EventSystem;
+  userInput?: Prompt;
+  todo?: EventTodo;
+  diffStat?: EventDiffStat;
+  error?: EventError;
+  thinking?: EventThinking;
+  thinkingDelta?: EventThinkingDelta;
+  subagentStart?: EventSubagentStart;
+  subagentEnd?: EventSubagentEnd;
+  nativeSubagent?: EventNativeSubagent;
+  backgroundCommand?: EventBackgroundCommand;
+  log?: EventLog;
+  toolOutputDelta?: EventToolOutputDelta;
+  widget?: EventWidget;
+  widgetDelta?: EventWidgetDelta;
+  rateLimit?: EventRateLimit;
+  commitSnapshot?: EventCommitSnapshot;
+  skillLoad?: EventSkillLoad;
+}
+
+/**
  * HistoryEvent is an immutable normalized output; the identity is scoped to the
  * projection version and timeline generation supplied by HistoryBootstrap.
  */
@@ -2389,6 +2374,11 @@ export interface HistoryStats {
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
 export interface HistoryReset {
   manifestURL: string;
+}
+
+/** TaskHistoryStreamError reports that task history could not be replayed. */
+export interface TaskHistoryStreamError {
+  message: string;
 }
 
 export interface ErrorDetails {
