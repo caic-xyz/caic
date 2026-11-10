@@ -4,12 +4,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"iter"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"path"
@@ -19,8 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
+	"github.com/maruel/gomode"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -84,6 +87,8 @@ type taskService struct {
 	focusSubscribers map[chan string]focusKey
 	focusTasks       map[focusKey]retainedTaskFocus
 	focusClock       uint64
+	focusEpoch       string
+	contextVersion   int64
 }
 
 // subscribeTaskFocus delivers live user-directed tool focus changes. Only the
@@ -178,6 +183,36 @@ func (s *taskService) focusedTaskID(ctx context.Context) (ksid.ID, bool) {
 	return s.ownerFocusedTaskIDLocked(ownerID)
 }
 
+// conversationFocus captures identity and projection order under the existing
+// focus owner, then checks task visibility without holding that owner lock.
+// Stable task URIs avoid enumerating the item catalog to resolve display numbers.
+func (s *taskService) conversationFocus(ctx context.Context) (gomode.ConversationContext, error) {
+	s.focusMu.Lock()
+	var id ksid.ID
+	key := focusKey{owner: taskAccessFromContext(ctx).userID, session: mcpClientSessionFromContext(ctx)}
+	if key.session == "" {
+		id, _ = s.ownerFocusedTaskIDLocked(key.owner)
+	} else {
+		id = s.focusTasks[key].id
+	}
+	s.contextVersion++
+	out := gomode.ConversationContext{URI: "caic://conversation/context", Epoch: s.focusEpoch, Version: s.contextVersion, Dependencies: []gomode.ResourceDependency{}}
+	model := mcpschema.ConversationModel{}
+	s.focusMu.Unlock()
+	if id != 0 {
+		if _, ok := visibleTaskEntry(ctx, s, id); ok {
+			model.CurrentTask = &mcpschema.TaskContext{ID: id.String(), URI: "caic://tasks/" + id.String()}
+		}
+	}
+	encoded, err := json.MarshalIndent(model, "", "  ")
+	if err != nil {
+		return out, err
+	}
+	text := string(encoded)
+	out.Content = &text
+	return out, nil
+}
+
 func (s *taskService) ownerFocusedTaskIDLocked(owner string) (ksid.ID, bool) {
 	var match ksid.ID
 	for key, focus := range s.focusTasks {
@@ -231,7 +266,7 @@ func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Tas
 }
 
 func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
-	out, _, _ := s.taskListSnapshotWithReplay(ctx, nil, false)
+	out, _, _ := s.taskListSnapshotWithReplay(ctx, nil)
 	return out
 }
 
@@ -247,12 +282,11 @@ type taskStateReplay struct {
 // state transitions newer than its cursor, so a stream can replay short-lived
 // states a later snapshot would overwrite. It reads the history in the same
 // critical section as the DTO's state, so a replayed state is never newer than
-// the DTO reported alongside it. A nil cursors map skips the history. Authorized
-// With history disabled, a non-nil cursors map requests only the state revision
-// captured atomically with each DTO, without copying retained transitions.
+// the DTO reported alongside it. A nil cursors map skips replay; an empty
+// non-nil map requests all retained transitions.
 // Registered membership is independent of conversion success, so a failed DTO
 // cannot turn an existing task into an apparent deletion.
-func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64, history bool) (tasks []v1.Task, replays map[string]taskStateReplay, membership []string) {
+func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay, membership []string) {
 	access := taskAccessFromContext(ctx)
 	if cursors != nil {
 		replays = make(map[string]taskStateReplay)
@@ -267,11 +301,7 @@ func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors ma
 		var replay taskStateReplay
 		var err error
 		if cursors != nil {
-			after := uint64(math.MaxUint64)
-			if history {
-				after = cursors[id]
-			}
-			dto, replay, err = taskDTOWithReplay(ctx, e, after, s.taskMgr, s.checkouts, s.authStore)
+			dto, replay, err = taskDTOWithReplay(ctx, e, cursors[id], s.taskMgr, s.checkouts, s.authStore)
 		} else {
 			dto, err = taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
 		}
@@ -325,7 +355,7 @@ func taskDTOWithReplay(ctx context.Context, entry *taskmgr.Entry, after uint64, 
 	if err != nil {
 		return v1.Task{}, taskStateReplay{}, err
 	}
-	return dto, taskStateReplay{seq: seq, timelineID: entry.Task().TimelineID(), history: history}, nil
+	return dto, taskStateReplay{seq: seq, history: history}, nil
 }
 
 // taskDTOFromSnapshot projects a pre-read snapshot so callers can read the

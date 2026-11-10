@@ -1,4 +1,4 @@
-// Tests ordered turn barriers, transport replacement, and pre-ready recording ownership.
+// Tests ordered turn/title publication, transport replacement, and pre-ready recording ownership.
 
 package taskrun
 
@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 )
 
@@ -123,6 +124,65 @@ func (b *replacingTaskBackend) Start(ctx context.Context, opts *agent.Options) (
 
 func TestRun(t *testing.T) {
 	t.Parallel()
+	t.Run("DelayedTitlePublication", func(t *testing.T) {
+		t.Parallel()
+		for _, test := range []struct {
+			name, title string
+			supersede   bool
+			canceled    bool
+			want        int
+		}{
+			{name: "changed", title: "Derived", want: 1},
+			{name: "unchanged", title: "Current"},
+			{name: "superseded", title: "Derived", supersede: true},
+			{name: "canceled", title: "Derived", canceled: true},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				id := ksid.NewID()
+				synctest.Test(t, func(t *testing.T) {
+					r := newTestAgentRuntime(t, nil, "", nil)
+					notifications := make(chan struct{}, 16)
+					r.NotifyTaskChange = func() { notifications <- struct{}{} }
+					tk := mustNewTask(t, id, agent.Prompt{Text: "initial"}, harness.Claude, "", "")
+					tk.SetTitle("Current")
+					tk.SetState(task.StateRunning)
+					provider := &runTitleProvider{started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}, 1), title: test.title}
+					tk.Provider = provider
+					run := beginTestExecution(t, r, tk)
+					t.Cleanup(func() { close(provider.release) })
+					if err := taskNative(t.Context(), run.records, `{"type":"result","result":"done","num_turns":1}`); err != nil {
+						t.Fatal(err)
+					}
+					<-provider.started
+					synctest.Wait()
+					// The result's prior event is already delivered; only accepted title completion
+					// may publish another event after this barrier.
+					select {
+					case <-notifications:
+					default:
+						t.Fatal("result event missing")
+					}
+					if test.supersede {
+						tk.SetTitle("Manually replaced")
+					}
+					if test.canceled {
+						run.cancel(context.Canceled)
+					}
+					provider.done <- struct{}{}
+					synctest.Wait()
+					var count int
+					for len(notifications) > 0 {
+						<-notifications
+						count++
+					}
+					if count != test.want {
+						t.Fatalf("title=%q notifications=%d want=%d", tk.Title(), count, test.want)
+					}
+				})
+			})
+		}
+	})
 	t.Run("PrepareRecords", func(t *testing.T) {
 		t.Parallel()
 		t.Run("turn_snapshot_precedes_later_input", func(t *testing.T) {
@@ -295,4 +355,24 @@ func TestRun(t *testing.T) {
 			t.Fatalf("retained setup = %v, trailer = %+v", lines, rows[0].LastTrailer)
 		}
 	})
+}
+
+type runTitleProvider struct {
+	genai.Provider
+
+	started chan struct{}
+	release chan struct{}
+	done    chan struct{}
+	title   string
+}
+
+func (p *runTitleProvider) GenSync(ctx context.Context, _ genai.Messages, _ ...genai.GenOption) (genai.Result, error) {
+	close(p.started)
+	select {
+	case <-p.done:
+	case <-p.release:
+	case <-ctx.Done():
+		return genai.Result{}, ctx.Err()
+	}
+	return genai.Result{Replies: []genai.Reply{{Text: p.title}}}, nil
 }

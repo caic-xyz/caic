@@ -53,9 +53,6 @@ func handleTaskPrompt[In any, PtrIn interface {
 			return
 		}
 		out, err := fn(r.Context(), entry, in, images)
-		if err == nil {
-			resolver.notifyTaskChange(entry.Task().ID)
-		}
 		writeJSONResponse(r.Context(), w, out, err)
 	}
 }

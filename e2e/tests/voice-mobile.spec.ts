@@ -28,7 +28,7 @@ async function enableBrowserVoice(page: Page) {
   );
 }
 
-test("browser voice setup receives the conversation's active task from service items", async ({ page, api }) => {
+test("browser voice setup reads focus from shared conversation context", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Review the voice setup focus context");
   await waitForTaskState(api, id, "waiting", 30_000);
   await page.addInitScript(() => {
@@ -64,7 +64,7 @@ test("browser voice setup receives the conversation's active task from service i
   let conversation = "";
   await page.route("**/api/caic/v1/mcp", async (route) => {
     const request = route.request().postDataJSON();
-    if (request.method !== "resources/read" || request.params.uri !== "gomode://items") {
+    if (request.method !== "resources/read" || request.params.uri !== "caic://conversation/context") {
       await route.continue();
       return;
     }
@@ -75,16 +75,11 @@ test("browser voice setup receives the conversation's active task from service i
     const body = await response.json();
     expect(body.error).toBeUndefined();
     const contents = body.result.contents[0];
-    const items = JSON.parse(contents.text);
-    const tasks = (await api.listTasks()) ?? [];
-    const taskNumber = tasks.findIndex((task) => task.id === id) + 1;
-    expect(taskNumber).toBeGreaterThan(0);
-    // Overlay advisory focus on the actual projection. A real focus tool call
-    // would broadcast owner-scoped SSE navigation to other parallel test pages.
-    items.activeTaskId = id;
-    items.activeTaskNumber = taskNumber;
-    items.items = items.items.map((item: { id: string }) => ({ ...item, active: item.id === id }));
-    contents.text = JSON.stringify(items);
+    const projection = JSON.parse(contents.text);
+    // Overlay explicit generic focus on the real context projection. A focus
+    // tool would navigate other parallel test pages through owner-scoped SSE.
+    projection.currentTask = { id, uri: `caic://tasks/${id}` };
+    contents.text = JSON.stringify(projection);
     await route.fulfill({ response, json: body });
   });
   const setup = Promise.withResolvers<{ kind: string; context: { text: string } }>();
@@ -101,8 +96,12 @@ test("browser voice setup receives the conversation's active task from service i
   await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();
   const message = await setup.promise;
   expect(message.kind).toBe("session.setup");
-  expect(message.context.text.split("\n")[0]).toMatch(/^Active service item: /);
-  expect(message.context.text.split("\n")[0]).toContain(id);
+  const sections: unknown[] = message.context.text.split("\n").map((line: string) => JSON.parse(line));
+  expect(sections).toContainEqual({
+    resource: "caic://conversation/context",
+    status: "known",
+    content: JSON.stringify({ currentTask: { id, uri: `caic://tasks/${id}` } }),
+  });
   expect(message.context.text.length).toBeLessThanOrEqual(4000);
   expect(conversation).not.toBe("");
   expect(errors).toEqual([]);

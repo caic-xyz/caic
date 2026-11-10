@@ -68,10 +68,6 @@ func (h *taskHandlers) pollCI(ctx context.Context) {
 	})
 }
 
-func (h *taskHandlers) notifyTaskChange(id ksid.ID) {
-	h.taskMgr.NotifyTaskUpdate(id)
-}
-
 func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	stream := sse.New(w)
 	if err := stream.Flush(); err != nil {
@@ -136,7 +132,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		ch := h.taskMgr.Changed()
 		settledLoading, settledError := h.taskMgr.RestorationStatus()
 		complete := h.taskMgr.TaskListComplete()
-		out, replays, membership := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq, true)
+		out, replays, membership := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
 		focusID := ""
 		if id, ok := h.taskSvc.focusedTaskID(ctx); ok && taskNumberForID(out, id.String()) != 0 {
 			focusID = id.String()

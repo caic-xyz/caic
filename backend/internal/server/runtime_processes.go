@@ -63,9 +63,6 @@ func (h *runtimeProcessHandlers) HandleSignalProcess(w http.ResponseWriter, r *h
 		return
 	}
 	resp, err := h.signalProcess(r.Context(), entry, req)
-	if err == nil {
-		h.taskMgr.NotifyTaskUpdate(entry.Task().ID)
-	}
 	writeJSONResponse(r.Context(), w, resp, err)
 }
 

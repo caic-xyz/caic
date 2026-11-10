@@ -4,12 +4,15 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/maruel/gomode"
 
 	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -114,16 +117,24 @@ func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesRe
 	case uri == "caic://usage":
 		usage := m.usage.buildResp(ctx)
 		return m.resourceJSON(ctx, uri, mcpUsageInLocation(usage, mcpRequestLocation(&params.Meta)))
-	case uri == "gomode://items":
+	case uri == "caic://catalog":
 		taskList := m.taskSvc.taskListSnapshot(ctx)
-		items, err := boundedServiceItems(taskList, mcpResourceJSONMaxBytes, m.taskSvc.focusedTaskIDString(ctx))
+		items, err := boundedServiceItems(taskList, mcpResourceJSONMaxBytes)
 		if err != nil {
 			return mcp.ResourcesReadResult{}, err
 		}
 		return m.resourceJSON(ctx, uri, items)
+	case uri == "caic://conversation/context":
+		projection, err := m.taskSvc.conversationFocus(ctx)
+		if err != nil {
+			return mcp.ResourcesReadResult{}, err
+		}
+		result, err := m.resourceJSON(ctx, uri, json.RawMessage(*projection.Content))
+		projection.Content = nil
+		result.Meta = mcp.MetaObject{gomode.ConversationContextMetaKey: projection}
+		return result, err
 	case uri == "gomode://notifications":
-		taskList, replays, _ := m.taskSvc.taskListSnapshotWithReplay(ctx, map[string]uint64{}, false)
-		notifications := m.notifications.notifications(ctx, taskList, replays, m.usage.buildResp(ctx), m.taskSvc.focusedTaskIDString(ctx))
+		notifications := m.notifications.notifications(ctx, m.taskSvc, m.usage.buildResp(ctx), m.taskSvc.focusedTaskIDString(ctx))
 		return m.resourceJSON(ctx, uri, mcpNotificationsInLocation(notifications, mcpRequestLocation(&params.Meta)))
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
@@ -274,7 +285,10 @@ func (m *mcpResources) subscriptionSources(ctx context.Context, filter mcp.Subsc
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		case uri == "caic://system/health":
 			_, sources.healthC = m.serverConfig.systemStats.health()
-		case uri == "gomode://items":
+		case uri == "caic://catalog":
+			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
+			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
+		case uri == "caic://conversation/context":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
 			sources.focusResourceURIs = append(sources.focusResourceURIs, uri)
@@ -289,15 +303,27 @@ func (m *mcpResources) subscriptionSources(ctx context.Context, filter mcp.Subsc
 		}
 	}
 	if filter.ResourcesListChanged {
-		if !mcpHasScope(ctx, mcpScopeRead) {
-			return subscriptionSources{}, mcp.ErrInvalidParams("missing required MCP scope: %s", mcpScopeRead)
+		sources.taskCatalog = taskCatalogAuthorized(ctx)
+		repos := mcpHasScope(ctx, mcpScopeRead)
+		if !sources.taskCatalog && !repos {
+			return subscriptionSources{}, mcp.ErrInvalidParams("missing required MCP scope: %s or %s", mcpScopeRead, mcpScopeTasksRead)
 		}
-		sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
-		sources.repoC = m.serverConfig.checkouts.Changed()
-		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
-		sources.resourcesListChanged = true
+		if sources.taskCatalog {
+			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
+		}
+		if repos {
+			sources.repoC = m.serverConfig.checkouts.Changed()
+			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
+			sources.repoCatalog = true
+		}
 	}
 	return sources, nil
+}
+
+// taskCatalogAuthorized is shared by descriptor discovery and catalog delivery.
+func taskCatalogAuthorized(ctx context.Context) bool {
+	_, taskScoped := taskMCPTaskID(ctx)
+	return mcpHasScope(ctx, mcpScopeTasksRead) || taskScoped
 }
 
 func (m *mcpResources) resourceKeys(ctx context.Context) ([]mcpResourceKey, error) {
@@ -317,8 +343,7 @@ func (m *mcpResources) resourceKeys(ctx context.Context) ([]mcpResourceKey, erro
 			keys = append(keys, mcpResourceKey{URI: "caic://repos/" + url.PathEscape(checkout.RelPath), Kind: mcpResourceRepo, Value: checkout.RelPath})
 		}
 	}
-	_, taskScoped := taskMCPTaskID(ctx)
-	if mcpHasScope(ctx, mcpScopeTasksRead) || taskScoped {
+	if taskCatalogAuthorized(ctx) {
 		taskKeys, _ := taskKeys(ctx, m.taskSvc)
 		for _, taskKey := range taskKeys {
 			keys = append(keys, mcpResourceKey{URI: "caic://tasks/" + taskKey.ID.String(), Kind: mcpResourceTask, TaskID: taskKey.ID})
@@ -421,7 +446,7 @@ func (m *mcpResources) authorizeResource(ctx context.Context, uri string) (strin
 	if uri == "caic://system/health" {
 		required = mcpScopeServerAdmin
 	}
-	if uri == "gomode://items" || uri == "gomode://notifications" {
+	if uri == "caic://catalog" || uri == "gomode://notifications" || uri == "caic://conversation/context" {
 		required = mcpScopeTasksRead
 	}
 	if !mcpHasScope(ctx, required) {
@@ -440,12 +465,13 @@ type subscriptionSources struct {
 	repoStatusC  <-chan struct{}
 	usagePolling bool
 
-	resourcesListChanged bool
-	taskResourceIDs      []ksid.ID
-	taskUpdateURIs       []string
-	focusResourceURIs    []string
-	repoResourceURIs     []string
-	usageResourceURIs    []string
+	taskCatalog       bool
+	repoCatalog       bool
+	taskResourceIDs   []ksid.ID
+	taskUpdateURIs    []string
+	focusResourceURIs []string
+	repoResourceURIs  []string
+	usageResourceURIs []string
 }
 
 func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpResources, change taskmgr.TaskChange) mcp.ResourceUpdate {
@@ -461,11 +487,11 @@ func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpResou
 	}
 	var uris []string
 	for _, uri := range s.taskUpdateURIs {
-		if change.Resync || (uri == "gomode://items" && change.Summary) || (uri == "gomode://notifications" && change.Notifications) {
+		if change.Resync || (uri == "caic://catalog" && change.Summary) || (uri == "gomode://notifications" && change.Notifications) || (uri == "caic://conversation/context" && change.Removed && registry.taskSvc.focusedTaskIDString(ctx) == change.TaskID.String()) {
 			uris = append(uris, uri)
 		}
 	}
-	resourcesListChanged := s.resourcesListChanged && change.Catalog
+	resourcesListChanged := s.taskCatalog && change.Catalog
 	for _, id := range s.taskResourceIDs {
 		if global && !change.Resync {
 			continue
@@ -487,7 +513,7 @@ func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpResou
 }
 
 func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
-	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.repoResourceURIs}
+	return mcp.ResourceUpdate{ResourcesListChanged: s.repoCatalog, ResourceURIs: s.repoResourceURIs}
 }
 
 func (s *subscriptionSources) usageUpdate() mcp.ResourceUpdate {

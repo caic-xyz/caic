@@ -147,7 +147,7 @@ func BenchmarkTask(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
-					tk.GenerateTitle(b.Context(), log)
+					tk.GenerateTitle(b.Context(), log, func() {})
 				}
 				b.ReportMetric(float64(p.inputBytes), "input-bytes")
 			})
@@ -500,10 +500,10 @@ func TestTask(t *testing.T) {
 			tk.Provider = p
 			var work sync.WaitGroup
 			work.Go(func() {
-				tk.GenerateTitle(t.Context(), testLogger())
+				tk.GenerateTitle(t.Context(), testLogger(), func() {})
 			})
 			<-p.started
-			tk.GenerateTitle(t.Context(), testLogger())
+			tk.GenerateTitle(t.Context(), testLogger(), func() {})
 			close(p.release)
 			work.Wait()
 			if got := tk.Title(); got != "Newer title" {
@@ -526,7 +526,7 @@ func TestTask(t *testing.T) {
 			tk.SetTitle("Current title")
 			p := &titleSequenceProvider{replies: []string{"Recent subject"}}
 			tk.Provider = p
-			tk.GenerateTitle(t.Context(), testLogger())
+			tk.GenerateTitle(t.Context(), testLogger(), func() {})
 			input := p.requests[0][0].String()
 			for _, obsolete := range []string{"obsolete original subject", "prompt-01", "prompt-02", "answer-01", "answer-02", "child activity"} {
 				if strings.Contains(input, obsolete) {
@@ -552,7 +552,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
 			p := &titleSequenceProvider{replies: []string{"Short title"}}
 			tk.Provider = p
-			tk.GenerateTitle(t.Context(), testLogger())
+			tk.GenerateTitle(t.Context(), testLogger(), func() {})
 			input := p.requests[0][0].String()
 			if len(input) > 50000 || !utf8.ValidString(input) {
 				t.Fatalf("input bytes = %d, valid UTF-8 = %v", len(input), utf8.ValidString(input))
@@ -567,7 +567,7 @@ func TestTask(t *testing.T) {
 					tk.SetTitle("Previous title")
 					p := &titleSequenceProvider{replies: replies}
 					tk.Provider = p
-					tk.GenerateTitle(t.Context(), testLogger())
+					tk.GenerateTitle(t.Context(), testLogger(), func() {})
 					if got := tk.Title(); got != "Previous title" {
 						t.Fatalf("Title = %q after provider error", got)
 					}
@@ -596,7 +596,7 @@ func TestTask(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				p := &titleSequenceProvider{replies: tc.replies}
 				tk.Provider = p
-				tk.GenerateTitle(t.Context(), testLogger())
+				tk.GenerateTitle(t.Context(), testLogger(), func() {})
 				if got := tk.Title(); got != tc.want || !utf8.ValidString(got) {
 					t.Fatalf("Title = %q, want %q", got, tc.want)
 				}

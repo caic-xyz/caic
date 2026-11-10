@@ -858,7 +858,7 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
 
 func (r *Lifecycle) generateTitle() {
 	t := r.entry.Task()
-	r.wg.Go(func() { t.GenerateTitle(r.ctx, r.manager.log.With("task", t.ID)) })
+	r.wg.Go(func() { t.GenerateTitle(r.ctx, r.manager.log.With("task", t.ID), r.agentRuntime.NotifyTaskChange) })
 }
 
 var _ io.Closer = (*Lifecycle)(nil)

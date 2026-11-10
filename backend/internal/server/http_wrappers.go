@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -53,7 +51,6 @@ func handle[In any, PtrIn interface {
 
 type taskEntryResolver interface {
 	getTask(r *http.Request) (*taskmgr.Entry, error)
-	notifyTaskChange(id ksid.ID)
 }
 
 // handleWithTask wraps a typed handler that also needs the resolved *taskmgr.Entry.
@@ -78,9 +75,6 @@ func handleWithTask[In any, PtrIn interface {
 			return
 		}
 		out, err := fn(r.Context(), entry, in)
-		if err == nil {
-			resolver.notifyTaskChange(entry.Task().ID)
-		}
 		writeJSONResponse(r.Context(), w, out, err)
 	}
 }

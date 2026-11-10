@@ -218,24 +218,22 @@ type TaskCursor struct {
 	TaskID   string `json:"taskID"`
 }
 
-// ServiceItem is a task entry in the host-neutral baseline for native clients.
+// ServiceItem is caic public task context; MCP instructions own its interpretation.
 // References identify positions in the original task snapshot, independently
 // of the priority order in which items are delivered.
 type ServiceItem struct {
-	v1.ServiceActive
-
-	ID             string `json:"id"`
-	Reference      string `json:"reference,omitempty"`
-	Title          string `json:"title"`
-	State          string `json:"state,omitempty"`
-	NeedsAttention bool   `json:"needsAttention"`
+	CIStatus       v1.CIStatus `json:"ciStatus,omitempty"`
+	ForgePR        int         `json:"forgePR,omitempty"`
+	ID             string      `json:"id"`
+	Reference      string      `json:"reference,omitempty"`
+	Title          string      `json:"title"`
+	State          string      `json:"state,omitempty"`
+	NeedsAttention bool        `json:"needsAttention"`
 }
 
-// ServiceItemsOutput carries a bounded baseline, the focused task, and guidance
+// ServiceItemsOutput carries a bounded baseline and guidance
 // for fetching tasks omitted by either the item-count or encoded-byte limit.
 type ServiceItemsOutput struct {
-	v1.ServiceActiveTask
-
 	Items         []ServiceItem `json:"items"`
 	MoreItemsHint string        `json:"moreItemsHint"`
 	OmittedCount  int           `json:"omittedCount,omitempty"`

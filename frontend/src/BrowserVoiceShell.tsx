@@ -1,6 +1,6 @@
-// Adapts shared browser voice to caic task numbering and CI context.
+// Adapts shared browser voice to caic authorization and UI task numbering.
 
-import { createEffect, onCleanup, Show, untrack, type Accessor } from "solid-js";
+import { createEffect, onCleanup, Show, type Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 import SharedBrowserVoiceShell from "@maruel/gomode/web/BrowserVoiceShell";
 import type { ServiceAuthorization } from "@maruel/gomode/sdk/voicegateway/v2/types.gen.ts";
@@ -8,7 +8,6 @@ import type { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { useAppState } from "./AppState";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./voiceTaskState";
-import { buildTaskCIContext } from "./voiceTaskContext";
 
 export default function BrowserVoiceShell() {
   const s = useAppState();
@@ -34,39 +33,13 @@ export default function BrowserVoiceShell() {
 }
 
 export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]>; session: typeof voiceSession }) {
-  // Shared Go Mode owns MCP state/reference updates. This adapter owns UI
-  // numbering and CI fields that are absent from generic service items.
+  // The MCP server owns model context. This adapter only maintains screen-facing numbers.
   const numberMap = new TaskNumberMap();
-  let prevCIStatuses = new Map<string, string | undefined>();
-  let wasConnected = false;
-
-  // Seed current items at connection, without replaying them as new changes.
   createEffect(() => {
     const connected = props.session.state.connected;
+    numberMap.update(props.tasks());
     setVoiceConnected(connected);
-    if (connected && !wasConnected) {
-      const tasks = untrack(() => props.tasks());
-      setVoiceTaskNumberMap(numberMap);
-      prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
-    }
-    wasConnected = connected;
-  });
-
-  createEffect(() => {
-    const currentTasks = props.tasks();
-    numberMap.update(currentTasks);
-    if (props.session.state.connected) {
-      setVoiceTaskNumberMap(numberMap);
-      const numbered = currentTasks.length > 1;
-      for (const task of currentTasks) {
-        const taskNumber = numberMap.toNumber(task.id);
-        const prevCI = prevCIStatuses.get(task.id);
-        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
-          props.session.injectText(buildTaskCIContext(task, taskNumber, numbered));
-        }
-      }
-    }
-    prevCIStatuses = new Map(currentTasks.map((t) => [t.id, t.ciStatus]));
+    setVoiceTaskNumberMap(connected ? numberMap : null);
   });
 
   onCleanup(() => {

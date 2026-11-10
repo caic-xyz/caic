@@ -1,10 +1,12 @@
-// MCP notification feed retains bounded per-owner alerts and projects conversation focus for Go Mode clients.
+// Owns ordered task snapshots and bounded per-owner Go Mode alert reconciliation.
 
 package server
 
 import (
 	"context"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +14,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/maruel/ksid"
 )
 
 type serviceNotification struct {
@@ -56,15 +61,59 @@ func newNotificationFeed() *notificationFeed {
 // notifications returns the current snapshot. The focused task ID is attached
 // to each alert so voice clients receive the active task with the same flat JSON
 // fields as the service-item baseline.
-func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
+func (f *notificationFeed) notifications(ctx context.Context, svc *taskService, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Capture and reconcile together: an older membership/incarnation snapshot
+	// cannot arrive after a newer one. No publisher acquires the feed mutex.
+	var tasks []v1.Task
+	replays := make(map[string]taskStateReplay)
+	access := taskAccessFromContext(ctx)
+	// The full HTTP DTO can fetch runtime credentials. This projection reads
+	// only alert-owned fields and never performs runtime or provider I/O.
+	svc.taskMgr.Range(func(_ ksid.ID, entry *taskmgr.Entry) bool {
+		t := entry.Task()
+		if !access.canAccess(t) {
+			return true
+		}
+		snap, seq, _ := t.SnapshotWithStateHistory(math.MaxUint64)
+		var metadata v1.Task
+		if err := apiconv.PopulateTaskMetadata(&metadata, t, &snap, time.Now()); err != nil {
+			svc.log.ErrorContext(ctx, "convert notification metadata", "err", err)
+			return true
+		}
+		tasks = append(tasks, metadata)
+		replays[t.ID.String()] = taskStateReplay{seq: seq, timelineID: t.TimelineID()}
+		return true
+	})
+	// Match task-list numbering without copying the full DTO into comparisons.
+	sort.Slice(tasks, func(i, j int) bool {
+		aa, ba := taskStateActive(tasks[i].State), taskStateActive(tasks[j].State)
+		if aa != ba {
+			return aa
+		}
+		return tasks[i].ID < tasks[j].ID
+	})
+	return f.reconcileLocked(ctx, tasks, replays, usage, activeTaskID)
+}
+
+func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
 	unknownTaskIDs := make(map[string]struct{})
 	taskIndexes := make(map[string]int, len(tasks))
+	prior := f.states[owner]
 	for i := range tasks {
 		task := &tasks[i]
-		taskIndexes[task.ID.String()] = i
+		id := task.ID.String()
+		old, replay := prior[id], replays[id]
+		// Reject stale same-incarnation snapshots before reconciling any alert
+		// or quota baseline. Equal sequences can refresh metadata, not state.
+		if old.seen != 0 && old.timelineID == replay.timelineID && replay.seq < old.seq {
+			return f.outputLocked(owner, tasks, activeTaskID)
+		}
+		taskIndexes[id] = i
 		if task.State != v1.TaskStateWaiting {
 			continue
 		}
@@ -76,8 +125,6 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, r
 		}
 	}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.retainOwnerLocked(owner)
 	previouslyBlocked := f.blockedTaskIDs[owner]
 	// Unknown quota neither proves recovery nor erases a prior blocked observation.
@@ -165,6 +212,10 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, r
 	}
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)
+	return f.outputLocked(owner, tasks, activeTaskID)
+}
+
+func (f *notificationFeed) outputLocked(owner string, tasks []v1.Task, activeTaskID string) []mcpschema.ServiceNotification {
 	output := make([]mcpschema.ServiceNotification, len(f.events[owner]))
 	if len(output) > 0 {
 		active := newActiveTask(tasks, activeTaskID)

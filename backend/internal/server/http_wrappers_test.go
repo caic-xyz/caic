@@ -24,10 +24,14 @@ import (
 	"runtime"
 	"sync/atomic"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/maruel/gomode/sse"
+	"github.com/maruel/ksid"
 )
 
 func TestWriteError(t *testing.T) {
@@ -764,4 +768,58 @@ func TestRequestBodyPeak(t *testing.T) {
 		t.Fatal("decode failed")
 	}
 	t.Logf("sampled incremental allocated heap: %d bytes", peak.Load()-before.HeapAlloc)
+}
+
+func TestHandleWithTask(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "read only"}, harness.Claude)
+	insertTestTask(s, tk.ID, tk)
+	version, _ := s.taskMgr.ChangeSnapshot()
+	for _, suffix := range []string{"", "/handoff"} {
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+tk.ID.String()+suffix, http.NoBody)
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).routes().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", suffix, w.Code, w.Body.String())
+		}
+	}
+	_, _, changes, gap := s.taskMgr.TaskChanges(version)
+	if gap || len(changes) != 0 {
+		t.Fatalf("pure reads published task changes: %+v gap=%v", changes, gap)
+	}
+	tk.SetState(task.StateRunning)
+	entry, ok := s.taskMgr.GetEntry(tk.ID)
+	if !ok {
+		t.Fatal("missing task")
+	}
+	version, _ = s.taskMgr.ChangeSnapshot()
+	queueReq := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/tasks/"+tk.ID.String()+"/input", strings.NewReader(`{"prompt":{"text":"queued"},"queue":true}`))
+	queueW := httptest.NewRecorder()
+	testTaskHandlers(s).routes().ServeHTTP(queueW, queueReq)
+	if queueW.Code != http.StatusOK {
+		t.Fatalf("queue: %d %s", queueW.Code, queueW.Body.String())
+	}
+	_, _, changes, gap = s.taskMgr.TaskChanges(version)
+	if gap || len(changes) != 1 || changes[0].TaskID != tk.ID {
+		t.Fatalf("prompt owner published %+v gap=%v", changes, gap)
+	}
+	if entry.PendingInput() == nil {
+		t.Fatal("input did not queue")
+	}
+
+	version, _ = s.taskMgr.ChangeSnapshot()
+	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/tasks/"+tk.ID.String()+"/input/cancel", strings.NewReader(fmt.Sprintf(`{"id":%q}`, entry.PendingInput().ID)))
+	w := httptest.NewRecorder()
+	testTaskHandlers(s).routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", w.Code, w.Body.String())
+	}
+	_, _, changes, gap = s.taskMgr.TaskChanges(version)
+	if gap || len(changes) != 1 || changes[0].TaskID != tk.ID {
+		t.Fatalf("mutation owner published %+v gap=%v", changes, gap)
+	}
+	if entry.PendingInput() != nil {
+		t.Fatal("queue cancellation did not commit")
+	}
 }

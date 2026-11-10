@@ -209,7 +209,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if err := emptyStream.Body.Close(); err != nil {
 				t.Fatal(err)
 			}
-			for _, uri := range []string{"gomode://items", "gomode://notifications"} {
+			for _, uri := range []string{"caic://catalog", "gomode://notifications"} {
 				_, out, code := post(ownerToken.AccessToken, session, "resources/subscribe", `{"uri":"`+uri+`"}`)
 				if code != http.StatusOK || out.Error != nil {
 					t.Fatalf("subscribe %s: HTTP %d, %#v", uri, code, out)
@@ -301,7 +301,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 					}
 				}
 				slices.Sort(got)
-				if !slices.Equal(got, []string{"gomode://items", "gomode://notifications"}) {
+				if !slices.Equal(got, []string{"caic://catalog", "gomode://notifications"}) {
 					t.Fatalf("resource notifications = %q", got)
 				}
 			}
@@ -923,7 +923,7 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["gomode://items"]}`)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["caic://catalog"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
@@ -940,7 +940,7 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"resourcesListChanged":true`) {
 			t.Fatalf("subscription response = %s, want supported resources list changes acknowledged", data)
 		}
-		if !strings.Contains(data, `"resourceSubscriptions":["gomode://items"]`) {
+		if !strings.Contains(data, `"resourceSubscriptions":["caic://catalog"]`) {
 			t.Fatalf("subscription response = %s, want supported task resource acknowledged", data)
 		}
 		// Cancel after the initial resource update, so the body contains
@@ -971,8 +971,8 @@ func TestMCPHandlers(t *testing.T) {
 		} else {
 			t.Fatalf("encode initial state params: %v", err)
 		}
-		if initial.URI != "gomode://items" {
-			t.Fatalf("initial state uri = %q, want gomode://items", initial.URI)
+		if initial.URI != "caic://catalog" {
+			t.Fatalf("initial state uri = %q, want caic://catalog", initial.URI)
 		}
 		if len(initial.Contents) == 0 {
 			t.Fatalf("initial state contents = empty, want items read")
@@ -980,7 +980,7 @@ func TestMCPHandlers(t *testing.T) {
 
 		// The delivered initial state must equal what resources/read returns
 		// for the same target right after subscribing.
-		_, readResp := postMCP(t, s.mcpHandlers, "resources/read", "gomode://items", mcpRequestJSON("resources/read", `"uri":"gomode://items"`))
+		_, readResp := postMCP(t, s.mcpHandlers, "resources/read", "caic://catalog", mcpRequestJSON("resources/read", `"uri":"caic://catalog"`))
 		if readResp.Error != nil {
 			t.Fatalf("resources/read failed: %v", readResp.Error)
 		}
@@ -1049,7 +1049,7 @@ func TestMCPHandlers(t *testing.T) {
 		cancel()
 		ctx = newMCPPrincipalContext(ctx, &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
 		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["caic://catalog"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
@@ -1091,7 +1091,7 @@ func TestMCPHandlers(t *testing.T) {
 			seeded = append(seeded, id.String())
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["caic://catalog"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
@@ -1129,7 +1129,7 @@ func TestMCPHandlers(t *testing.T) {
 		}
 		// The delivered payload must be the same authorized read output the
 		// client gets from resources/read right after subscribing.
-		_, readResp := postMCP(t, s.mcpHandlers, "resources/read", "gomode://items", mcpRequestJSON("resources/read", `"uri":"gomode://items"`))
+		_, readResp := postMCP(t, s.mcpHandlers, "resources/read", "caic://catalog", mcpRequestJSON("resources/read", `"uri":"caic://catalog"`))
 		if readResp.Error != nil {
 			t.Fatalf("resources/read failed: %v", readResp.Error)
 		}
@@ -1202,7 +1202,7 @@ func TestMCPHandlers(t *testing.T) {
 		insertTestTask(s, otherID, other)
 		ctx, cancel := context.WithCancel(t.Context())
 		ctx = auth.NewContext(ctx, &user)
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["caic://catalog"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
@@ -1225,8 +1225,8 @@ func TestMCPHandlers(t *testing.T) {
 		if err := json.Unmarshal(b, &initial); err != nil {
 			t.Fatalf("decode initial state: %v", err)
 		}
-		if initial.URI != "gomode://items" {
-			t.Fatalf("initial state uri = %q, want gomode://items", initial.URI)
+		if initial.URI != "caic://catalog" {
+			t.Fatalf("initial state uri = %q, want caic://catalog", initial.URI)
 		}
 		if len(initial.Contents) != 1 {
 			t.Fatalf("initial state contents = %d, want 1", len(initial.Contents))
@@ -1278,7 +1278,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://catalog", "gomode://notifications"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1307,7 +1307,7 @@ func TestMCPHandlers(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for subscription change")
 		}
-		if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
+		if !slices.Equal(update.ResourceURIs, []string{"caic://catalog", "gomode://notifications"}) {
 			t.Fatalf("update resource uris = %#v, want task and notification resources", update.ResourceURIs)
 		}
 		cancel()
@@ -1328,7 +1328,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://conversation/context", "gomode://notifications"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1351,7 +1351,7 @@ func TestMCPHandlers(t *testing.T) {
 		testTaskHandlers(s).taskSvc.focusTask(t.Context(), id)
 		select {
 		case update := <-got:
-			if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
+			if !slices.Equal(update.ResourceURIs, []string{"caic://conversation/context", "gomode://notifications"}) {
 				t.Fatalf("focus update resource uris = %#v", update.ResourceURIs)
 			}
 		case <-time.After(time.Second):
@@ -1370,7 +1370,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://catalog"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1406,8 +1406,8 @@ func TestMCPHandlers(t *testing.T) {
 		for range 2 {
 			select {
 			case update := <-updates:
-				if !slices.Equal(update.ResourceURIs, []string{"gomode://items"}) {
-					t.Fatalf("update resource uris = %#v, want gomode://items", update.ResourceURIs)
+				if !slices.Equal(update.ResourceURIs, []string{"caic://catalog"}) {
+					t.Fatalf("update resource uris = %#v, want caic://catalog", update.ResourceURIs)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("timed out waiting for task state update")

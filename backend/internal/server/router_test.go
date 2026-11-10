@@ -1435,6 +1435,7 @@ func TestSignalProcess(t *testing.T) {
 			runtimes: newTestRuntime(t, backend),
 		}
 
+		version, _ := s.taskMgr.ChangeSnapshot()
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/processes/t1/123/signal", body)
 		req.SetPathValue("id", tk.ID.String())
@@ -1444,6 +1445,10 @@ func TestSignalProcess(t *testing.T) {
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		_, _, changes, gap := s.taskMgr.TaskChanges(version)
+		if gap || len(changes) != 0 {
+			t.Errorf("successful unrelated signal published %+v", changes)
 		}
 		sig, ok := backend.LastSignal("ctr")
 		if !ok {
@@ -2488,7 +2493,7 @@ func TestBuildHandler(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, resource := range raw.Result.Resources {
-					if strings.HasPrefix(resource.URI, "caic://tasks") || resource.URI == "gomode://items" || resource.URI == "gomode://notifications" {
+					if strings.HasPrefix(resource.URI, "caic://tasks") || resource.URI == "caic://catalog" || resource.URI == "gomode://notifications" {
 						t.Fatalf("resource %q is visible without %s", resource.URI, mcpScopeTasksRead)
 					}
 				}

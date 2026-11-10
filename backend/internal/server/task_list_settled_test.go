@@ -193,7 +193,7 @@ func TestTaskListDTOFailurePreservesMembership(t *testing.T) {
 	}
 	readNextTaskListEvent(t, r)
 	tk.SetState(task.State("invalid-state"))
-	out, _, membership := testTaskHandlers(s).taskSvc.taskListSnapshotWithReplay(testHTTPContext(t), map[string]uint64{}, true)
+	out, _, membership := testTaskHandlers(s).taskSvc.taskListSnapshotWithReplay(testHTTPContext(t), map[string]uint64{})
 	if len(out) != 0 {
 		t.Fatalf("failed DTO count = %d", len(out))
 	}

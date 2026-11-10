@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/maruel/genai"
+	"github.com/maruel/ksid"
 
 	"github.com/maruel/gomode"
 	"github.com/maruel/gomode/devicelogin"
@@ -170,18 +171,19 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	}()
 	ctx = workers.ctx
 	svc := &taskService{
-		history:   newTaskHistory(ctx, log.With("scope", "task-history"), d.TaskMgr, workers), //nolint:contextcheck // router context derives from the caller and ends at shutdown
-		ctx:       ctx,
-		workers:   workers,
-		taskMgr:   d.TaskMgr,
-		prefs:     d.Preferences,
-		checkouts: d.Checkouts,
-		forgeMgr:  d.ForgeMgr,
-		ciSvc:     d.CIService,
-		authStore: d.AuthStore,
-		fakeCI:    d.FakeCI,
-		runtimes:  d.Runtimes,
-		metrics:   d.Metrics,
+		history:    newTaskHistory(ctx, log.With("scope", "task-history"), d.TaskMgr, workers), //nolint:contextcheck // router context derives from the caller and ends at shutdown
+		ctx:        ctx,
+		workers:    workers,
+		taskMgr:    d.TaskMgr,
+		prefs:      d.Preferences,
+		checkouts:  d.Checkouts,
+		forgeMgr:   d.ForgeMgr,
+		ciSvc:      d.CIService,
+		authStore:  d.AuthStore,
+		fakeCI:     d.FakeCI,
+		runtimes:   d.Runtimes,
+		metrics:    d.Metrics,
+		focusEpoch: ksid.NewID().String(),
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)

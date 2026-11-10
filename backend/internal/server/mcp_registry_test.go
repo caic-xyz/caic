@@ -31,11 +31,25 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/maruel/gomode"
 	"github.com/maruel/gomode/mcp"
 )
 
 func TestMCPRegistry(t *testing.T) {
 	t.Parallel()
+	t.Run("model resource advertisement", func(t *testing.T) {
+		t.Parallel()
+		var marked []string
+		for _, resource := range mcpStaticResources() {
+			if resource.Meta[gomode.ModelContextMetaKey] == true {
+				marked = append(marked, resource.URI)
+			}
+		}
+		if !slices.Equal(marked, []string{"caic://conversation/context", "caic://catalog"}) {
+			t.Fatalf("model resources = %v", marked)
+		}
+	})
+
 	t.Run("oversizedConversation", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -54,12 +68,12 @@ func TestMCPRegistry(t *testing.T) {
 				return err
 			}},
 			{"resources", func() error {
-				_, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://items", Meta: meta})
+				_, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "caic://catalog", Meta: meta})
 				return err
 			}},
 			{"subscriptions", func() error {
 				_, err := registry.SubscribeResourceUpdates(t.Context(), &mcp.SubscriptionsListenParams{
-					Meta: meta, Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}},
+					Meta: meta, Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://catalog"}},
 				})
 				return err
 			}},
@@ -117,16 +131,16 @@ func TestMCPRegistry(t *testing.T) {
 			if want != 0 {
 				wantID = want.String()
 			}
-			items, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://items", Meta: requestMeta})
+			items, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "caic://conversation/context", Meta: requestMeta})
 			if err != nil {
 				t.Fatal(err)
 			}
-			var output mcpschema.ServiceItemsOutput
+			var output mcpschema.ConversationModel
 			if err := json.Unmarshal([]byte(items.Contents[0].Text), &output); err != nil {
 				t.Fatal(err)
 			}
-			if output.ActiveTaskID != wantID {
-				t.Fatalf("%q items focus=%q, want %q", session, output.ActiveTaskID, wantID)
+			if (wantID == "" && output.CurrentTask != nil) || (wantID != "" && (output.CurrentTask == nil || output.CurrentTask.ID != wantID)) {
+				t.Fatalf("%q generic context focus=%+v, want %q", session, output.CurrentTask, wantID)
 			}
 			alerts, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://notifications", Meta: requestMeta})
 			if err != nil {

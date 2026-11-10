@@ -67,14 +67,6 @@ func Task(in *TaskInput) (v1.Task, error) {
 	if costUSD != 0 {
 		costKnown = true
 	}
-	state, err := TaskState(snap.State)
-	if err != nil {
-		return v1.Task{}, fmt.Errorf("task %s state: %w", t.ID, err)
-	}
-	harnessName, err := Harness(t.Harness)
-	if err != nil {
-		return v1.Task{}, fmt.Errorf("task %s harness: %w", t.ID, err)
-	}
 	prState, err := ForgePRState(snap.ForgePRState)
 	if err != nil {
 		return v1.Task{}, fmt.Errorf("task %s forge PR state: %w", t.ID, err)
@@ -85,9 +77,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	}
 
 	out := v1.Task{
-		ID:               t.ID,
 		InitialPrompt:    t.InitialPrompt.Text,
-		Title:            snap.Title,
 		ForkedFromTaskID: t.ForkedFromTaskID,
 		ParentTaskID:     t.ParentTaskID,
 		CaicMCP:          t.CaicMCP,
@@ -102,12 +92,8 @@ func Task(in *TaskInput) (v1.Task, error) {
 			SudoPassword: in.SudoPassword,
 			VNCPort:      snap.VNCPort,
 		},
-		State:           state,
 		StateUpdatedAt:  snap.StateUpdatedAt,
-		Harness:         harnessName,
-		RequestedModel:  snap.RequestedModel,
 		RequestedEffort: snap.RequestedEffort,
-		ReportedModel:   snap.ReportedModel,
 		ReportedEffort:  snap.ReportedEffort,
 		AgentVersion:    snap.AgentVersion,
 		SessionID:       snap.SessionID,
@@ -127,21 +113,8 @@ func Task(in *TaskInput) (v1.Task, error) {
 		out.ResourceUsage = new(Stats(snap.ResourceUsage))
 	}
 	out.TurnStartedAt = snap.TurnStartedAt
-	if snap.RateLimit.Status == "rejected" && !snap.RateLimit.IsUsingOverage && snap.RateLimit.ResetsAt.After(time.Now()) {
-		quotaGroup, err := QuotaProvider(snap.RateLimit.QuotaProvider)
-		if err != nil {
-			return v1.Task{}, fmt.Errorf("convert task quota provider: %w", err)
-		}
-		window := snap.RateLimit.QuotaWindow
-		if window == "" {
-			window = snap.RateLimit.RateLimitType
-		}
-		out.RateLimit = v1.TaskRateLimit{
-			Blocked:    true,
-			QuotaGroup: quotaGroup,
-			Window:     window,
-			ResetsAt:   snap.RateLimit.ResetsAt,
-		}
+	if err := PopulateTaskMetadata(&out, t, &snap, time.Now()); err != nil {
+		return v1.Task{}, err
 	}
 	out.CumulativeInputTokens = cumulativeUsage.InputTokens
 	out.CumulativeOutputTokens = cumulativeUsage.OutputTokens
@@ -223,4 +196,39 @@ func tailscaleURLFromSnapshot(s *taskrun.Snapshot) string {
 		return "true"
 	}
 	return ""
+}
+
+// PopulateTaskMetadata projects alert-relevant identity, state, title, models and
+// native quota into both full task DTOs and notification snapshots. It reads
+// only the supplied snapshot and immutable task identity, without runtime I/O.
+func PopulateTaskMetadata(out *v1.Task, t *taskrun.Task, snap *taskrun.Snapshot, now time.Time) error {
+	state, err := TaskState(snap.State)
+	if err != nil {
+		return fmt.Errorf("task %s state: %w", t.ID, err)
+	}
+	h, err := Harness(t.Harness)
+	if err != nil {
+		return fmt.Errorf("task %s harness: %w", t.ID, err)
+	}
+	out.ID, out.Title, out.State, out.Harness = t.ID, snap.Title, state, h
+	out.RequestedModel, out.ReportedModel = snap.RequestedModel, snap.ReportedModel
+	out.RateLimit = v1.TaskRateLimit{}
+	r := &snap.RateLimit
+	if r.Status == "rejected" && !r.IsUsingOverage && r.ResetsAt.After(now) {
+		quotaGroup, err := QuotaProvider(r.QuotaProvider)
+		if err != nil {
+			return fmt.Errorf("convert task quota provider: %w", err)
+		}
+		window := r.QuotaWindow
+		if window == "" {
+			window = r.RateLimitType
+		}
+		out.RateLimit = v1.TaskRateLimit{
+			Blocked:    true,
+			QuotaGroup: quotaGroup,
+			Window:     window,
+			ResetsAt:   r.ResetsAt,
+		}
+	}
+	return nil
 }

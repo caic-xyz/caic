@@ -91,6 +91,31 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 func TestTaskService(t *testing.T) {
 	t.Parallel()
+	t.Run("taskListSnapshotWithReplay", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "replay"}, harness.Claude)
+		tk.SetState(task.StateRunning)
+		tk.SetState(task.StateWaiting)
+		insertTestTask(s, tk.ID, tk)
+		svc := testTaskHandlers(s).taskSvc
+		tasks, replays, _ := svc.taskListSnapshotWithReplay(t.Context(), nil)
+		if len(tasks) != 1 || replays != nil {
+			t.Fatalf("nil cursor: tasks=%d replays=%+v", len(tasks), replays)
+		}
+		tasks, replays, _ = svc.taskListSnapshotWithReplay(t.Context(), map[string]uint64{})
+		replay := replays[tk.ID.String()]
+		if len(tasks) != 1 || tasks[0].State != v1.TaskStateWaiting || len(replay.history) != 3 || replay.history[0].State != task.StatePending || replay.history[1].State != task.StateRunning || replay.history[2].State != task.StateWaiting || replay.history[2].Seq != replay.seq {
+			t.Fatalf("empty cursor: tasks=%+v replay=%+v", tasks, replay)
+		}
+		cursor := replay.seq
+		tk.SetState(task.StateRunning)
+		tasks, replays, _ = svc.taskListSnapshotWithReplay(t.Context(), map[string]uint64{tk.ID.String(): cursor})
+		replay = replays[tk.ID.String()]
+		if len(tasks) != 1 || tasks[0].State != v1.TaskStateRunning || len(replay.history) != 1 || replay.history[0].State != task.StateRunning || replay.history[0].Seq != replay.seq || replay.seq <= cursor {
+			t.Fatalf("advanced cursor: tasks=%+v replay=%+v", tasks, replay)
+		}
+	})
 	t.Run("focusTask/boundedSessions", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
@@ -475,7 +500,7 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors, true)
+		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
 		if len(out) != 10 || len(replays) != 10 {
 			b.Fatalf("task count = %d, replay count = %d, want 10", len(out), len(replays))
 		}

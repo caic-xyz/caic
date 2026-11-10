@@ -137,7 +137,7 @@ func (r *Run) ApplyRecords(ctx context.Context, messages []agent.TimedMessage) e
 	if title && t.titleRefreshDue() {
 		r.workMu.Lock()
 		if !r.workSealed {
-			r.work.Go(func() { t.generateTitle(r.ctx, r.runtime.Log, r) })
+			r.work.Go(func() { t.generateTitle(r.ctx, r.runtime.Log, r, r.runtime.NotifyTaskChange) })
 		}
 		r.workMu.Unlock()
 	}
@@ -257,6 +257,7 @@ type titleIntent struct {
 	task       *Task
 	generation uint64
 	title      string
+	notify     func()
 	accepted   bool
 }
 
@@ -266,11 +267,18 @@ func (i *titleIntent) PrepareRecords(context.Context) ([]agent.Message, error) {
 	i.task.mu.Unlock()
 	return nil, nil
 }
-func (i *titleIntent) ApplyRecords(context.Context) error {
+func (i *titleIntent) ApplyRecords(ctx context.Context) error {
+	i.task.mu.Lock()
+	i.accepted = i.accepted && i.generation == i.task.titleGeneration && ctx.Err() == nil
+	changed := false
 	if i.accepted {
-		i.task.mu.Lock()
+		previous := i.task.title
 		i.task.setTitleLocked(i.title)
-		i.task.mu.Unlock()
+		changed = previous != i.task.title
+	}
+	i.task.mu.Unlock()
+	if changed {
+		i.notify()
 	}
 	return nil
 }

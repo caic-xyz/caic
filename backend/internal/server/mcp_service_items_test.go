@@ -21,6 +21,15 @@ import (
 func TestServiceItems(t *testing.T) {
 	t.Parallel()
 
+	t.Run("CachedCIFacts", func(t *testing.T) {
+		t.Parallel()
+		id := ksid.NewID()
+		items := serviceItems([]v1.Task{{ID: id, Title: "Verification", State: v1.TaskStateRunning, CIStatus: v1.CIStatusFailure, ForgePR: 42}})
+		if len(items) != 1 || items[0].ID != id.String() || items[0].CIStatus != v1.CIStatusFailure || items[0].ForgePR != 42 || items[0].Reference != "" {
+			t.Fatalf("public CI facts: %+v", items)
+		}
+	})
+
 	t.Run("renumbered running tasks update native voice references", func(t *testing.T) {
 		t.Parallel()
 		tasks := []v1.Task{
@@ -42,19 +51,16 @@ func TestServiceItems(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				out, err := boundedServiceItems(tc.tasks, mcpResourceJSONMaxBytes, id)
+				out, err := boundedServiceItems(tc.tasks, mcpResourceJSONMaxBytes)
 				if err != nil {
 					t.Fatal(err)
-				}
-				if out.ActiveTaskID != id || out.ActiveTaskNumber != tc.number {
-					t.Fatalf("active task = %q #%d, want %q #%d", out.ActiveTaskID, out.ActiveTaskNumber, id, tc.number)
 				}
 				i := slices.IndexFunc(out.Items, func(item mcpschema.ServiceItem) bool { return item.ID == id })
 				if i < 0 {
 					t.Fatal("running task missing from native voice items")
 				}
 				item := out.Items[i]
-				if item.Reference != tc.reference || item.State != "running" || item.Title != "Second work" || !item.Active {
+				if item.Reference != tc.reference || item.State != "running" || item.Title != "Second work" {
 					t.Fatalf("native voice item = %#v, want running Second work with reference %q", item, tc.reference)
 				}
 			})
@@ -69,7 +75,7 @@ func TestServiceItems(t *testing.T) {
 			{ID: ksid.NewID(), Title: "Fix tests", State: v1.TaskStateStopped, Error: "lint failed"},
 		}
 
-		items := serviceItems(tasks, "")
+		items := serviceItems(tasks)
 		if len(items) != len(tasks) {
 			t.Fatalf("item count = %d, want %d", len(items), len(tasks))
 		}
@@ -91,54 +97,13 @@ func TestServiceItems(t *testing.T) {
 		t.Parallel()
 		task := v1.Task{ID: ksid.NewID(), State: v1.TaskStateRunning}
 
-		items := serviceItems([]v1.Task{task}, "")
+		items := serviceItems([]v1.Task{task})
 
 		if got := items[0].Title; got != task.ID.String() {
 			t.Fatalf("title = %q, want task ID %q", got, task.ID)
 		}
 		if got := items[0].Reference; got != "" {
 			t.Fatalf("reference = %q, want empty for a lone task", got)
-		}
-	})
-
-	t.Run("marks the focused task and reports its snapshot number", func(t *testing.T) {
-		t.Parallel()
-		tasks := []v1.Task{
-			{ID: ksid.NewID(), Title: "Build feature", State: v1.TaskStateRunning},
-			{ID: ksid.NewID(), Title: "Review plan", State: v1.TaskStateHasPlan},
-			{ID: ksid.NewID(), Title: "Fix tests", State: v1.TaskStateStopped},
-		}
-		activeID := tasks[1].ID.String()
-
-		items := serviceItems(tasks, activeID)
-		var active []string
-		for _, item := range items {
-			if item.Active {
-				active = append(active, item.ID)
-			}
-		}
-		if !slices.Equal(active, []string{activeID}) {
-			t.Fatalf("active items = %q, want %q", active, activeID)
-		}
-
-		output, err := boundedServiceItems(tasks, mcpResourceJSONMaxBytes, activeID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if output.ActiveTaskID != activeID || output.ActiveTaskNumber != 2 {
-			t.Fatalf("active task = %q #%d, want %q #2", output.ActiveTaskID, output.ActiveTaskNumber, activeID)
-		}
-
-		data, err := json.Marshal(output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded map[string]any
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			t.Fatal(err)
-		}
-		if decoded["activeTaskId"] != activeID || decoded["activeTaskNumber"] != float64(2) {
-			t.Fatalf("active task JSON = %s", data)
 		}
 	})
 }
@@ -162,7 +127,7 @@ func TestBoundedServiceItems(t *testing.T) {
 			}
 		}
 
-		output, err := boundedServiceItems(tasks, mcpResourceJSONMaxBytes, "")
+		output, err := boundedServiceItems(tasks, mcpResourceJSONMaxBytes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +152,7 @@ func TestBoundedServiceItems(t *testing.T) {
 			{ID: ksid.NewID(), Title: "two", State: v1.TaskStateRunning},
 			{ID: ksid.NewID(), Title: "three", State: v1.TaskStateRunning},
 		}
-		full, err := boundedServiceItems(tasks, mcpResourceJSONMaxBytes, "")
+		full, err := boundedServiceItems(tasks, mcpResourceJSONMaxBytes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +161,7 @@ func TestBoundedServiceItems(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		output, err := boundedServiceItems(tasks, len(data), "")
+		output, err := boundedServiceItems(tasks, len(data))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,22 +179,19 @@ func TestServiceItemsResourceFocus(t *testing.T) {
 	svc := testTaskHandlers(s).taskSvc
 	svc.focusTask(t.Context(), id)
 
-	result, err := s.mcpHandlers.protocol.Registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://items"})
+	result, err := s.mcpHandlers.protocol.Registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "caic://conversation/context"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Contents) != 1 {
 		t.Fatalf("contents = %d, want 1", len(result.Contents))
 	}
-	var output mcpschema.ServiceItemsOutput
+	var output mcpschema.ConversationModel
 	if err := json.Unmarshal([]byte(result.Contents[0].Text), &output); err != nil {
 		t.Fatalf("decode items: %v", err)
 	}
-	if output.ActiveTaskID != id.String() || output.ActiveTaskNumber != 1 {
-		t.Fatalf("active task = %q #%d, want %q #1", output.ActiveTaskID, output.ActiveTaskNumber, id)
-	}
-	if len(output.Items) != 1 || !output.Items[0].Active {
-		t.Fatalf("items = %#v, want the focused item marked active", output.Items)
+	if output.CurrentTask == nil || output.CurrentTask.ID != id.String() || output.CurrentTask.URI != "caic://tasks/"+id.String() {
+		t.Fatalf("generic conversation focus = %+v", output)
 	}
 }
 
@@ -244,28 +206,28 @@ func TestServiceItemsResourceSessionFocus(t *testing.T) {
 	svc.focusTask(withMCPClientSession(t.Context(), "tab-a"), first)
 	svc.focusTask(withMCPClientSession(t.Context(), "tab-b"), second)
 
-	read := func(session string) mcpschema.ServiceItemsOutput {
+	read := func(session string) mcpschema.ConversationModel {
 		result, err := s.mcpHandlers.protocol.Registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{
-			URI:  "gomode://items",
+			URI:  "caic://conversation/context",
 			Meta: mcp.RequestMeta{OpenAIRequestMeta: mcp.OpenAIRequestMeta{Session: session}},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		var output mcpschema.ServiceItemsOutput
+		var output mcpschema.ConversationModel
 		if err := json.Unmarshal([]byte(result.Contents[0].Text), &output); err != nil {
 			t.Fatalf("decode items: %v", err)
 		}
 		return output
 	}
 
-	if got := read("tab-a"); got.ActiveTaskID != first.String() {
-		t.Fatalf("tab-a active task = %q, want %q", got.ActiveTaskID, first)
+	if got := read("tab-a"); got.CurrentTask == nil || got.CurrentTask.ID != first.String() {
+		t.Fatalf("tab-a active task = %q, want %q", got.CurrentTask, first)
 	}
-	if got := read("tab-b"); got.ActiveTaskID != second.String() {
-		t.Fatalf("tab-b active task = %q, want %q", got.ActiveTaskID, second)
+	if got := read("tab-b"); got.CurrentTask == nil || got.CurrentTask.ID != second.String() {
+		t.Fatalf("tab-b active task = %q, want %q", got.CurrentTask, second)
 	}
-	if got := read(""); got.ActiveTaskID != "" {
-		t.Fatalf("ambiguous session active task = %q, want none", got.ActiveTaskID)
+	if got := read(""); got.CurrentTask != nil {
+		t.Fatalf("ambiguous session active task = %q, want none", got.CurrentTask)
 	}
 }

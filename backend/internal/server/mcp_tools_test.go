@@ -215,15 +215,23 @@ func TestMCPTools(t *testing.T) {
 			if spec.Name != "task_get_detail" {
 				continue
 			}
-			id, ok := spec.OutputSchema.Properties.Get("taskID")
+			schema := spec.OutputSchema
+			resolve := func(value *jsonschema.Schema) *jsonschema.Schema {
+				if after, ok := strings.CutPrefix(value.Ref, "#/$defs/"); ok {
+					return schema.Definitions[after]
+				}
+				return value
+			}
+			output := resolve(schema)
+			id, ok := output.Properties.Get("taskID")
 			if !ok || id.Type != "string" {
 				t.Fatal("task detail schema must expose stable taskID")
 			}
-			pending, ok := spec.OutputSchema.Properties.Get("pendingInput")
-			if !ok || len(pending.OneOf) != 2 || pending.OneOf[0].Type != "object" || pending.OneOf[1].Type != "null" {
+			pending, ok := output.Properties.Get("pendingInput")
+			if !ok || len(pending.OneOf) != 2 || resolve(pending.OneOf[0]).Type != "object" || pending.OneOf[1].Type != "null" {
 				t.Fatalf("pendingInput schema must allow absent pending state: %+v", pending)
 			}
-			state, ok := pending.OneOf[0].Properties.Get("state")
+			state, ok := resolve(pending.OneOf[0]).Properties.Get("state")
 			if !ok || !reflect.DeepEqual(state.Enum, []any{"delivered", "delivering", "queued"}) {
 				t.Fatalf("pending delivery state schema = %+v", state)
 			}

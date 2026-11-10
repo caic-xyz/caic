@@ -37,6 +37,25 @@ import (
 
 func TestLifecycle(t *testing.T) {
 	t.Parallel()
+	t.Run("DelayedTitlePublication", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
+		provider := &lifecycleTitleProvider{started: make(chan struct{}), release: make(chan struct{}, 1)}
+		tk.Provider = provider
+		entry := m.NewEntry(tk, nil)
+		m.Insert(tk.ID, entry)
+		t.Cleanup(func() { close(provider.release); entry.Lifecycle.wg.Wait() })
+		entry.Lifecycle.generateTitle()
+		<-provider.started
+		version, _ := m.ChangeSnapshot()
+		provider.release <- struct{}{}
+		entry.Lifecycle.wg.Wait()
+		_, _, changes, gap := m.TaskChanges(version)
+		if gap || len(changes) != 1 || !changes[0].Catalog || !changes[0].Summary || !changes[0].Notifications {
+			t.Fatalf("delayed title=%q events=%+v", tk.Title(), changes)
+		}
+	})
 	t.Run("Close", func(t *testing.T) {
 		t.Parallel()
 		for _, completed := range []bool{false, true} {

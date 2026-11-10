@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maruel/gomode"
+
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -95,6 +97,16 @@ func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (m
 		}
 		m.metrics.Record(ctx, "mcp.tool."+params.Name, outcome, metrics.Duration(time.Since(start)))
 		m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: "allow", Status: status})
+		if err == nil && mcpClientSessionFromContext(ctx) != "" {
+			projection, projectionErr := m.taskSvc.conversationFocus(ctx)
+			if projectionErr != nil {
+				return res, projectionErr
+			}
+			if res.Meta == nil {
+				res.Meta = mcp.MetaObject{}
+			}
+			res.Meta[gomode.ConversationContextMetaKey] = projection
+		}
 		return res, err
 	}
 	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", params.Name)
@@ -989,7 +1001,8 @@ func mcpStaticResources() []mcp.ResourceDescriptor {
 	return []mcp.ResourceDescriptor{
 		{URI: "caic://system/health", Name: "system-health", Title: "System health", Description: "Last-observed machine CPU and memory usage, overload warnings, and sampling errors", MimeType: "application/json"},
 		{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
-		{URI: "gomode://items", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
+		{Meta: mcp.MetaObject{gomode.ModelContextMetaKey: true}, URI: "caic://conversation/context", Name: "context", Title: "Conversation context", Description: "Authorized caic conversation state", MimeType: "application/json"},
+		{Meta: mcp.MetaObject{gomode.ModelContextMetaKey: true}, URI: "caic://catalog", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
 		{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
 	}
 }

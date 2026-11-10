@@ -25,10 +25,9 @@ func newActiveTask(tasks []v1.Task, activeTaskID string) v1.ServiceActiveTask {
 // serviceItems projects tasks with bounded titles and snapshot-based references.
 // The newest ID comes first, followed by other attention-needed tasks, preserving
 // snapshot order within each remaining priority group. A lone task has no reference.
-// The focused task ID marks its item without changing the priority order.
-func serviceItems(tasks []v1.Task, activeTaskID string) []mcpschema.ServiceItem {
+func serviceItems(tasks []v1.Task) []mcpschema.ServiceItem {
 	// The service owns ordering, stable references, and attention priority; see
-	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
+	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#server-owned-model-context.
 	// Number tasks only when more than one is visible: a lone task needs no
 	// disambiguating reference in voice context.
 	numbered := len(tasks) > 1
@@ -46,8 +45,9 @@ func serviceItems(tasks []v1.Task, activeTaskID string) []mcpschema.ServiceItem 
 			Title:          title,
 			State:          string(task.State),
 			NeedsAttention: taskNeedsAttention(task),
+			CIStatus:       task.CIStatus,
+			ForgePR:        task.ForgePR,
 		}
-		items[i].Active = task.ID.String() == activeTaskID
 	}
 	if len(items) == 0 {
 		return items
@@ -73,19 +73,18 @@ func serviceItems(tasks []v1.Task, activeTaskID string) []mcpschema.ServiceItem 
 }
 
 // boundedServiceItems caps the prioritized baseline by item count and encoded
-// JSON bytes, including the focused task, paging hint, and omitted count in the
+// JSON bytes, including the paging hint and omitted count in the
 // byte budget. It fails if even the empty response cannot fit maxBytes.
-func boundedServiceItems(tasks []v1.Task, maxBytes int, activeTaskID string) (mcpschema.ServiceItemsOutput, error) {
-	items := serviceItems(tasks, activeTaskID)
+func boundedServiceItems(tasks []v1.Task, maxBytes int) (mcpschema.ServiceItemsOutput, error) {
+	items := serviceItems(tasks)
 	if len(items) > mcpServiceItemMaxCount {
 		items = items[:mcpServiceItemMaxCount]
 	}
 	outputForItems := func(items []mcpschema.ServiceItem) mcpschema.ServiceItemsOutput {
 		return mcpschema.ServiceItemsOutput{
-			ServiceActiveTask: newActiveTask(tasks, activeTaskID),
-			Items:             items,
-			MoreItemsHint:     "For fuller or current detail, call tasks_list and follow nextCursor until it is absent.",
-			OmittedCount:      len(tasks) - len(items),
+			Items:         items,
+			MoreItemsHint: "For fuller or current detail, call tasks_list and follow nextCursor until it is absent.",
+			OmittedCount:  len(tasks) - len(items),
 		}
 	}
 	fitted, err := fitMCPJSONPrefix(items, maxBytes, func(items []mcpschema.ServiceItem) (any, error) {

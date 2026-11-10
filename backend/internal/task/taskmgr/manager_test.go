@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/forge"
+
 	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -894,6 +896,25 @@ func TestManager(t *testing.T) {
 			t.Fatalf("overflow count=%d gap=%v", len(events), gap)
 		}
 	})
+	t.Run("CISummaryInvalidation", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "CI facts"}, "", "")
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+		version, _ := m.ChangeSnapshot()
+		tk.SetCIStatus(forge.CIStatusFailure, nil)
+		m.NotifyTaskUpdate(tk.ID)
+		version, _, changes, gap := m.TaskChanges(version)
+		if gap || len(changes) != 1 || !changes[0].Summary || changes[0].Catalog || changes[0].Notifications {
+			t.Fatalf("CI quiet summary: %+v gap=%v", changes, gap)
+		}
+		m.NotifyTaskUpdate(tk.ID)
+		_, _, changes, gap = m.TaskChanges(version)
+		if gap || len(changes) != 1 || changes[0].Summary || changes[0].Notifications {
+			t.Fatalf("unchanged CI: %+v", changes)
+		}
+	})
+
 	t.Run("ErrorOnlyInvalidation", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -920,11 +941,11 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		version, _ := m.ChangeSnapshot()
 		id := ksid.NewID()
-		if err := m.LoadPurgedTasks([]*taskhistory.LoadedTask{{TaskID: id.String(), Prompt: "restored", State: task.StatePurged, Harness: harness.Claude, Title: "restored"}}); err != nil {
+		if err := m.LoadPurgedTasks([]*taskhistory.LoadedTask{{TaskID: id.String(), OwnerID: "owner", Prompt: "restored", State: task.StatePurged, Harness: harness.Claude, Title: "restored"}}); err != nil {
 			t.Fatal(err)
 		}
 		version, _, changes, _ := m.TaskChanges(version)
-		if len(changes) != 1 || !changes[0].Catalog {
+		if len(changes) != 1 || !changes[0].Catalog || changes[0].TaskID != id || changes[0].OwnerID != "owner" {
 			t.Fatalf("load catalog=%+v", changes)
 		}
 		m.NotifyTaskUpdate(id)

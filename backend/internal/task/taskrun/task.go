@@ -486,6 +486,8 @@ func (t *Task) GetState() task.State {
 // InvalidationState is bounded metadata needed to classify resource effects.
 // Sequence is task-incarnation-local, not an externally stable occurrence ID.
 type InvalidationState struct {
+	CIStatus  forge.CIStatus
+	ForgePR   int
 	State     task.State
 	Sequence  uint64
 	Title     string
@@ -497,7 +499,7 @@ type InvalidationState struct {
 func (t *Task) InvalidationState() InvalidationState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return InvalidationState{State: t.state, Sequence: t.stateSeq, Title: t.title, RateLimit: t.rateLimit}
+	return InvalidationState{State: t.state, Sequence: t.stateSeq, Title: t.title, RateLimit: t.rateLimit, CIStatus: t.ciStatus, ForgePR: t.forgePR}
 }
 
 // GetSessionID returns the agent session ID under the mutex.
@@ -1472,11 +1474,11 @@ func (t *Task) SetTitle(title string) {
 // GenerateTitle asks the LLM for a short title from the last ten root turns,
 // making up to two shortening requests when the title exceeds the
 // character limit and logging through the task-scoped log. No-op when the
-// provider is unconfigured.
-func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
+// provider is unconfigured. notify publishes only an accepted title change.
+func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger, notify func()) {
 	// Initial title generation belongs to the task, rather than whichever
 	// execution happens to be active during the provider request.
-	t.generateTitle(ctx, log, nil)
+	t.generateTitle(ctx, log, nil, notify)
 }
 
 // MarkSessionCrashed records operational health when a recoverable session ends.
@@ -1523,7 +1525,7 @@ func (t *Task) recordingAdmissionErrorLocked() error {
 	return nil
 }
 
-func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run) {
+func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run, notify func()) {
 	if t.Provider == nil {
 		return
 	}
@@ -1565,7 +1567,7 @@ func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run) {
 	if ctx.Err() != nil {
 		return
 	}
-	intent := &titleIntent{task: t, generation: generation, title: title}
+	intent := &titleIntent{task: t, generation: generation, title: title, notify: notify}
 	if run == nil {
 		// Resolve the current owner only when the task-wide title is ready,
 		// and keep its lifetime claim through admission. A completed execution

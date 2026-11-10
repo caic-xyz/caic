@@ -1252,12 +1252,11 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 		entry.Finish(lt.LastTrailer)
 		m.replaceEntryLocked(t.ID, entry)
 		m.taskDescriptors[t.ID] = taskDescriptor{entryInvalidationState: entry.invalidationState(), ownerID: t.OwnerID, parentTaskID: t.ParentTaskID}
+		// Seed before publishing membership so the first content-only update
+		// remains quiet. Retain each task's identity for subscriber visibility,
+		// including its owner and delegation parent if it is removed before read.
+		m.publishTaskChangeLocked(TaskChange{TaskID: t.ID, OwnerID: t.OwnerID, ParentTaskID: t.ParentTaskID, Catalog: true, Summary: true, Notifications: true})
 		loaded++
-	}
-	if loaded > 0 {
-		// Restored descriptors are quiet baselines. Publish their membership
-		// together, including a quiet refresh of existing summary/alert views.
-		m.publishTaskChangeLocked(TaskChange{Catalog: true, Summary: true, Notifications: true})
 	}
 	return loaded, nil
 }
@@ -2037,7 +2036,7 @@ func (m *Manager) taskChangedLocked(id ksid.ID) {
 			change.OwnerID, change.ParentTaskID = current.ownerID, current.parentTaskID
 			change.Catalog = !found || previous.Title != current.Title
 			metadataChanged := !found || previous.Title != current.Title || previous.State != current.State
-			change.Summary = metadataChanged || previous.HasError != current.HasError
+			change.Summary = metadataChanged || previous.HasError != current.HasError || previous.CIStatus != current.CIStatus || previous.ForgePR != current.ForgePR
 			change.Notifications = metadataChanged || previous.Sequence != current.Sequence || previous.RateLimit != current.RateLimit
 			m.taskDescriptors[id] = current
 		} else {

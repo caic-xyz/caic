@@ -22,13 +22,12 @@ func TestWireContracts(t *testing.T) {
 		{"empty task list", TaskListOutput{Tasks: []TaskSummary{}}, `{"tasks":[]}`},
 		{"empty alerts", []ServiceNotification{}, `[]`},
 		{
-			"focused service items",
+			"service items with attention",
 			ServiceItemsOutput{
-				ActiveTaskID: "task-id", ActiveTaskNumber: 2,
-				Items:         []ServiceItem{{Active: true, ID: "task-id", Reference: "Task #2", Title: "Title", State: "waiting", NeedsAttention: true}},
+				Items:         []ServiceItem{{ID: "task-id", Reference: "Task #2", Title: "Title", State: "waiting", NeedsAttention: true}},
 				MoreItemsHint: "more", OmittedCount: 1,
 			},
-			`{"activeTaskId":"task-id","activeTaskNumber":2,"items":[{"active":true,"id":"task-id","reference":"Task #2","title":"Title","state":"waiting","needsAttention":true}],"moreItemsHint":"more","omittedCount":1}`,
+			`{"items":[{"id":"task-id","reference":"Task #2","title":"Title","state":"waiting","needsAttention":true}],"moreItemsHint":"more","omittedCount":1}`,
 		},
 		{
 			"focused task list",

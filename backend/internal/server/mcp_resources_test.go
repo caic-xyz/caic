@@ -84,6 +84,153 @@ func TestMCPResources(t *testing.T) {
 			}
 		})
 	})
+	t.Run("CatalogAuthorization", func(t *testing.T) {
+		t.Parallel()
+		for _, test := range []struct {
+			name                          string
+			scopes                        []string
+			delegated, wantTask, wantRepo bool
+		}{
+			{name: "reposOnly", scopes: []string{mcpScopeRead}, wantRepo: true},
+			{name: "tasksOnly", scopes: []string{mcpScopeTasksRead}, wantTask: true},
+			{name: "both", scopes: []string{mcpScopeRead, mcpScopeTasksRead}, wantTask: true, wantRepo: true},
+			{name: "delegated", delegated: true, wantTask: true},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				ownedID, foreignID, parentID, createdID := ksid.NewID(), ksid.NewID(), ksid.NewID(), ksid.NewID()
+				synctest.Test(t, func(t *testing.T) {
+					s := newTestRouter(t, nil)
+					reg, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+					if !ok {
+						t.Fatalf("registry=%T", s.mcpHandlers.protocol.Registry)
+					}
+					principal := &mcpPrincipal{Remote: true, Scopes: test.scopes}
+					ctx := t.Context()
+					if test.delegated {
+						principal.TaskID = parentID
+					} else {
+						ctx = auth.NewContext(ctx, &auth.User{ID: "owner"})
+					}
+					ctx, cancel := context.WithCancel(newMCPPrincipalContext(ctx, principal))
+					var workers sync.WaitGroup
+					t.Cleanup(func() { cancel(); workers.Wait() })
+					seq, err := reg.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourcesListChanged: true}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					updates := make(chan mcp.ResourceUpdate, 16)
+					workers.Go(func() {
+						for update, err := range seq {
+							if err != nil {
+								t.Error(err)
+								return
+							}
+							if update.ResourcesListChanged || len(update.ResourceURIs) > 0 {
+								updates <- update
+							}
+						}
+					})
+					synctest.Wait()
+					if err := s.taskMgr.LoadPurgedTasks([]*taskhistory.LoadedTask{{TaskID: foreignID.String(), OwnerID: "foreign", Prompt: "foreign", Title: "Foreign", State: task.StatePurged, Harness: harness.Claude}}); err != nil {
+						t.Fatal(err)
+					}
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						t.Errorf("foreign restoration delivered %+v", update)
+					default:
+					}
+					if err := s.taskMgr.LoadPurgedTasks([]*taskhistory.LoadedTask{{TaskID: ownedID.String(), OwnerID: "owner", ParentTaskID: parentID.String(), Prompt: "owned", Title: "Owned", State: task.StatePurged, Harness: harness.Claude}}); err != nil {
+						t.Fatal(err)
+					}
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						if !test.wantTask || !update.ResourcesListChanged {
+							t.Errorf("owned restoration delivered %+v", update)
+						}
+					default:
+						if test.wantTask {
+							t.Error("missing owned restoration")
+						}
+					}
+					entry, ok := s.taskMgr.GetEntry(ownedID)
+					if !ok {
+						t.Fatal("missing restored task")
+					}
+					entry.Task().SetTitle("Renamed")
+					s.taskMgr.NotifyTaskUpdate(ownedID)
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						if !test.wantTask || !update.ResourcesListChanged {
+							t.Errorf("rename delivered %+v", update)
+						}
+					default:
+						if test.wantTask {
+							t.Error("missing owned rename")
+						}
+					}
+					created := mustNewTask(t, createdID, agent.Prompt{Text: "newly created"}, harness.Claude)
+					created.OwnerID = "owner"
+					created.ParentTaskID = parentID
+					insertTestTask(s, createdID, created)
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						if !test.wantTask || !update.ResourcesListChanged {
+							t.Errorf("create delivered %+v", update)
+						}
+					default:
+						if test.wantTask {
+							t.Error("missing owned create")
+						}
+					}
+					listed, err := reg.ListResources(ctx, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					var foundOwned bool
+					for _, descriptor := range listed.Resources {
+						if descriptor.URI == "caic://tasks/"+foreignID.String() {
+							t.Error("foreign task was discoverable")
+						}
+						if descriptor.URI == "caic://tasks/"+createdID.String() {
+							foundOwned = true
+						}
+					}
+					if foundOwned != test.wantTask {
+						t.Errorf("discovery disagrees with catalog authorization: owned=%v", foundOwned)
+					}
+					// A detail-only update after restoration must remain quiet.
+					s.taskMgr.NotifyTaskUpdate(ownedID)
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						t.Errorf("detail delivered %+v", update)
+					default:
+					}
+					checkout := newRouterTestCheckout(t.TempDir())
+					checkout.RelPath = "independent-repository"
+					if err := s.serverHandlers.checkouts.RegisterCheckout(checkout); err != nil {
+						t.Fatal(err)
+					}
+					synctest.Wait()
+					select {
+					case update := <-updates:
+						if !test.wantRepo || !update.ResourcesListChanged {
+							t.Errorf("repository catalog=%+v", update)
+						}
+					default:
+						if test.wantRepo {
+							t.Error("missing repository catalog")
+						}
+					}
+				})
+			})
+		}
+	})
 	t.Run("SubscribeResourceUpdates/conversationFocus", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
@@ -98,7 +245,7 @@ func TestMCPResources(t *testing.T) {
 			for _, session := range []string{"tab-a", "tab-b"} {
 				changes, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{
 					Meta:          mcp.RequestMeta{OpenAIRequestMeta: mcp.OpenAIRequestMeta{Session: session}},
-					Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}},
+					Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://conversation/context", "gomode://notifications"}},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -122,7 +269,7 @@ func TestMCPResources(t *testing.T) {
 			synctest.Wait()
 			select {
 			case update := <-updates["tab-a"]:
-				if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
+				if !slices.Equal(update.ResourceURIs, []string{"caic://conversation/context", "gomode://notifications"}) {
 					t.Fatalf("conversation focus update=%+v", update)
 				}
 			default:
@@ -222,7 +369,7 @@ func TestMCPResources(t *testing.T) {
 				t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 			}
 			ctx, cancel := context.WithCancel(t.Context())
-			_, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}})
+			_, err := registry.SubscribeResourceUpdates(ctx, &mcp.SubscriptionsListenParams{Notifications: mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://conversation/context"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -377,8 +524,31 @@ func TestMCPResources(t *testing.T) {
 	t.Run("SubscribeResourceUpdates/taskScopeDenied", func(t *testing.T) {
 		t.Parallel()
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
-		if _, err := (&mcpResources{}).subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}); err == nil {
+		if _, err := (&mcpResources{}).subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://catalog"}}); err == nil {
 			t.Fatal("task-scoped subscription succeeded")
 		}
 	})
+}
+
+// BenchmarkMCPResources measures notification reads including authorized capture,
+// quota projection, owner reconciliation and wire JSON.
+func BenchmarkMCPResources(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for range 20 {
+		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Claude)
+		tk.SetState(task.StateWaiting)
+		insertTestTask(s, tk.ID, tk)
+	}
+	reg := s.mcpHandlers.protocol.Registry
+	request := &mcp.ResourcesReadParams{URI: "gomode://notifications"}
+	if _, err := reg.ReadResource(b.Context(), request); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := reg.ReadResource(b.Context(), request); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
