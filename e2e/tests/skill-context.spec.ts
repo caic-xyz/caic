@@ -127,7 +127,7 @@ for (const width of [390, 1280]) {
         await expect(page.getByTestId("task-detail-prompt")).toBeInViewport();
         await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_RECONNECT" } });
         await expect(area).toContainText("parent missed output");
-        expect(await viewport.evaluate((el) => el.scrollTop)).toBe(0);
+        await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
         await area.focus();
         await page.keyboard.press("Control+End");
         await atBottom();

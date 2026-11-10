@@ -89,7 +89,10 @@ export function createHistoryScroll(
       const prior = expansion ?? ((structural || returning || resized) && !following ? saved : null);
       if (prior) {
         const row = anchorRow(el, prior.key);
-        if (row && prior.top !== null)
+        // A reader at the beginning should also see newly inserted feedback.
+        // Explicit disclosure anchors still preserve the clicked row.
+        if (prior.scroll === 0 && expansion === null) write(el, 0);
+        else if (row && prior.top !== null)
           write(el, el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - prior.top);
         // Without a row, the height delta stands in for the hidden content only
         // while the pane width is unchanged: a reflow folds line wrapping into

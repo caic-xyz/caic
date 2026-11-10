@@ -237,22 +237,24 @@ it("continues following after completed-turn collapse clamps the viewport", asyn
   }
 });
 
-it("preserves an expansion anchor when a live append shares its render frame", async () => {
-  const f = fixture();
-  try {
-    await paint();
-    f.userScroll(100);
-    const before = f.row.getBoundingClientRect().top;
-    f.expand();
-    f.scroll.restoreAnchor("visible", before);
-    f.append();
-    await paint();
-    assert.equal(f.row.getBoundingClientRect().top, before);
-    assert.equal(f.el.scrollTop, 200);
-  } finally {
-    f.dispose();
-  }
-});
+for (const position of [0, 100]) {
+  it(`preserves a disclosure anchor at ${position}px when a live append shares its render frame`, async () => {
+    const f = fixture();
+    try {
+      await paint();
+      f.userScroll(position);
+      const before = f.row.getBoundingClientRect().top;
+      f.expand();
+      f.scroll.restoreAnchor("visible", before);
+      f.append();
+      await paint();
+      assert.equal(f.row.getBoundingClientRect().top, before);
+      assert.equal(f.el.scrollTop, position + 100);
+    } finally {
+      f.dispose();
+    }
+  });
+}
 
 it("keeps the reading position through structural growth at a constant width", async () => {
   const f = fixture();
@@ -262,6 +264,23 @@ it("keeps the reading position through structural growth at a constant width", a
     f.backfill();
     await paint();
     assert.equal(f.el.scrollTop, 600);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("keeps the beginning visible when reconnect feedback pushes the first row down", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(0);
+    f.expand();
+    f.reflow(400, 0);
+    await paint();
+    assert.equal(f.el.scrollTop, 0);
+    f.backfill();
+    await paint();
+    assert.equal(f.el.scrollTop, 0);
   } finally {
     f.dispose();
   }

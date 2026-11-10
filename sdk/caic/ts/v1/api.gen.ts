@@ -39,8 +39,11 @@ export class APIError extends Error {
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 function makeRequester(fetchFn: FetchFn) {
-  return async function request<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
-    const init: RequestInit = { method, headers: { "Content-Type": "application/json", ...headers }, signal: AbortSignal.timeout(60_000) };
+  return async function request<T>(method: string, path: string, body: unknown, headers: Record<string, string> | undefined, callerSignal?: AbortSignal): Promise<T> {
+    const deadline = AbortSignal.timeout(60_000);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
+    signal.throwIfAborted();
+    const init: RequestInit = { method, headers: { "Content-Type": "application/json", ...headers }, signal };
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetchFn(path, init);
     if (!res.ok) {
@@ -60,99 +63,99 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
   const request = makeRequester(fetchFn);
   return {
     /** Returns server capabilities and feature flags. */
-    getConfig: (): Promise<Config> => request<Config>("GET", "/api/caic/v1/server/config"),
+    getConfig: (signal?: AbortSignal): Promise<Config> => request<Config>("GET", "/api/caic/v1/server/config", undefined, undefined, signal),
     /** Returns the current server version and checks for available updates. */
-    getVersion: (): Promise<VersionResp> => request<VersionResp>("GET", "/api/caic/v1/server/version"),
+    getVersion: (signal?: AbortSignal): Promise<VersionResp> => request<VersionResp>("GET", "/api/caic/v1/server/version", undefined, undefined, signal),
     /** Triggers a background server auto-update to the latest release. */
-    triggerUpdate: (): Promise<UpdateResp> => request<UpdateResp>("POST", "/api/caic/v1/server/update"),
+    triggerUpdate: (signal?: AbortSignal): Promise<UpdateResp> => request<UpdateResp>("POST", "/api/caic/v1/server/update", undefined, undefined, signal),
     /** Returns the authenticated user's profile. */
-    getMe: (): Promise<UserResp> => request<UserResp>("GET", "/auth/me"),
+    getMe: (signal?: AbortSignal): Promise<UserResp> => request<UserResp>("GET", "/auth/me", undefined, undefined, signal),
     /** Revokes an owned host login session. */
-    revokeSession: (sessionID: string): Promise<StatusResp> => request<StatusResp>("POST", `/auth/sessions/${encodeURIComponent(sessionID)}/revoke`),
+    revokeSession: (sessionID: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/auth/sessions/${encodeURIComponent(sessionID)}/revoke`, undefined, undefined, signal),
     /** Lists active host login sessions. */
-    listSessions: (): Promise<SessionsResp> => request<SessionsResp>("GET", "/auth/sessions"),
+    listSessions: (signal?: AbortSignal): Promise<SessionsResp> => request<SessionsResp>("GET", "/auth/sessions", undefined, undefined, signal),
     /** Invalidates the current session. */
-    logout: (): Promise<StatusResp> => request<StatusResp>("POST", "/auth/logout"),
+    logout: (signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", "/auth/logout", undefined, undefined, signal),
     /** Returns server and per-repository preferences. */
-    getPreferences: (): Promise<PreferencesResp> => request<PreferencesResp>("GET", "/api/caic/v1/server/preferences"),
+    getPreferences: (signal?: AbortSignal): Promise<PreferencesResp> => request<PreferencesResp>("GET", "/api/caic/v1/server/preferences", undefined, undefined, signal),
     /** Updates server settings and preferences. */
-    updatePreferences: (req: UpdatePreferencesReq): Promise<PreferencesResp> => request<PreferencesResp>("POST", "/api/caic/v1/server/preferences", req),
+    updatePreferences: (req: UpdatePreferencesReq, signal?: AbortSignal): Promise<PreferencesResp> => request<PreferencesResp>("POST", "/api/caic/v1/server/preferences", req, undefined, signal),
     /** Lists the authenticated user's connected OAuth clients. */
-    listOAuthGrants: (): Promise<OAuthGrantsResp> => request<OAuthGrantsResp>("GET", "/api/caic/v1/oauth/grants"),
+    listOAuthGrants: (signal?: AbortSignal): Promise<OAuthGrantsResp> => request<OAuthGrantsResp>("GET", "/api/caic/v1/oauth/grants", undefined, undefined, signal),
     /** Revokes one connected OAuth client grant for the authenticated user. */
-    revokeOAuthGrant: (grantID: string, req: RevokeOAuthGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/oauth/grants/${encodeURIComponent(grantID)}/revoke`, req),
+    revokeOAuthGrant: (grantID: string, req: RevokeOAuthGrantReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/oauth/grants/${encodeURIComponent(grantID)}/revoke`, req, undefined, signal),
     /** Lists available coding agent harnesses. */
-    listHarnesses: (): Promise<HarnessInfo[] | null> => request<HarnessInfo[] | null>("GET", "/api/caic/v1/server/harnesses"),
+    listHarnesses: (signal?: AbortSignal): Promise<HarnessInfo[] | null> => request<HarnessInfo[] | null>("GET", "/api/caic/v1/server/harnesses", undefined, undefined, signal),
     /** Refreshes one coding agent model inventory, bypassing its cache. */
-    refreshHarness: (harness: string, req: RefreshHarnessReq): Promise<HarnessInfo> => request<HarnessInfo>("POST", `/api/caic/v1/server/harnesses/${encodeURIComponent(harness)}/refresh`, req),
+    refreshHarness: (harness: string, req: RefreshHarnessReq, signal?: AbortSignal): Promise<HarnessInfo> => request<HarnessInfo>("POST", `/api/caic/v1/server/harnesses/${encodeURIComponent(harness)}/refresh`, req, undefined, signal),
     /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
-    startImageRefresh: (runtime: string, req: ImageRefreshReq): Promise<ImageRefreshStatus> => request<ImageRefreshStatus>("POST", `/api/caic/v1/server/runtimes/${encodeURIComponent(runtime)}/image/refresh`, req),
+    startImageRefresh: (runtime: string, req: ImageRefreshReq, signal?: AbortSignal): Promise<ImageRefreshStatus> => request<ImageRefreshStatus>("POST", `/api/caic/v1/server/runtimes/${encodeURIComponent(runtime)}/image/refresh`, req, undefined, signal),
     /** Returns one runtime's specialized image refresh progress. */
-    getImageRefresh: (runtime: string): Promise<ImageRefreshStatus> => request<ImageRefreshStatus>("GET", `/api/caic/v1/server/runtimes/${encodeURIComponent(runtime)}/image/refresh`),
+    getImageRefresh: (runtime: string, signal?: AbortSignal): Promise<ImageRefreshStatus> => request<ImageRefreshStatus>("GET", `/api/caic/v1/server/runtimes/${encodeURIComponent(runtime)}/image/refresh`, undefined, undefined, signal),
     /** Lists well-known cache configurations. */
-    listCaches: (): Promise<WellKnownCachesResp> => request<WellKnownCachesResp>("GET", "/api/caic/v1/server/caches"),
+    listCaches: (signal?: AbortSignal): Promise<WellKnownCachesResp> => request<WellKnownCachesResp>("GET", "/api/caic/v1/server/caches", undefined, undefined, signal),
     /** Returns the latest size snapshot for well-known caches. */
-    getCacheSizes: (): Promise<CacheSizesResp> => request<CacheSizesResp>("GET", "/api/caic/v1/server/cache-sizes"),
+    getCacheSizes: (signal?: AbortSignal): Promise<CacheSizesResp> => request<CacheSizesResp>("GET", "/api/caic/v1/server/cache-sizes", undefined, undefined, signal),
     /** Returns recent whole-machine utilization samples. */
-    getSystemStats: (): Promise<SystemStatsResp> => request<SystemStatsResp>("GET", "/api/caic/v1/server/system-stats"),
+    getSystemStats: (signal?: AbortSignal): Promise<SystemStatsResp> => request<SystemStatsResp>("GET", "/api/caic/v1/server/system-stats", undefined, undefined, signal),
     /** Returns aggregated operation latency statistics. */
-    getMetrics: (): Promise<MetricsResp> => request<MetricsResp>("GET", "/api/caic/v1/server/metrics"),
+    getMetrics: (signal?: AbortSignal): Promise<MetricsResp> => request<MetricsResp>("GET", "/api/caic/v1/server/metrics", undefined, undefined, signal),
     /** Lists all discovered repositories. */
-    listRepos: (): Promise<Repo[] | null> => request<Repo[] | null>("GET", "/api/caic/v1/server/repos"),
+    listRepos: (signal?: AbortSignal): Promise<Repo[] | null> => request<Repo[] | null>("GET", "/api/caic/v1/server/repos", undefined, undefined, signal),
     /** Clones a repository into the server's root directory. */
-    cloneRepo: (req: CloneRepoReq): Promise<Repo> => request<Repo>("POST", "/api/caic/v1/server/repos", req),
+    cloneRepo: (req: CloneRepoReq, signal?: AbortSignal): Promise<Repo> => request<Repo>("POST", "/api/caic/v1/server/repos", req, undefined, signal),
     /** Lists branches for a repository. */
-    listRepoBranches: (repo: string): Promise<RepoBranchesResp> => request<RepoBranchesResp>("GET", `/api/caic/v1/server/repos/branches?repo=${encodeURIComponent(repo)}`),
+    listRepoBranches: (repo: string, signal?: AbortSignal): Promise<RepoBranchesResp> => request<RepoBranchesResp>("GET", `/api/caic/v1/server/repos/branches?repo=${encodeURIComponent(repo)}`, undefined, undefined, signal),
     /** Creates a task to fix a failing CI pipeline. */
-    botFixCI: (req: BotFixCIReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/ci/fix-ci", req),
+    botFixCI: (req: BotFixCIReq, signal?: AbortSignal): Promise<Task> => request<Task>("POST", "/api/caic/v1/ci/fix-ci", req, undefined, signal),
     /** Injects a CI fix command into an existing task's PR. */
-    botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/ci/fix-pr", req),
+    botFixPR: (req: BotFixPRReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", "/api/caic/v1/ci/fix-pr", req, undefined, signal),
     /** Returns all tasks. */
-    listTasks: (): Promise<Task[] | null> => request<Task[] | null>("GET", "/api/caic/v1/tasks"),
+    listTasks: (signal?: AbortSignal): Promise<Task[] | null> => request<Task[] | null>("GET", "/api/caic/v1/tasks", undefined, undefined, signal),
     /** Returns a single task by id (404 if it does not exist). */
-    getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}`),
+    getTask: (id: string, signal?: AbortSignal): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}`, undefined, undefined, signal),
     /** Returns recorded and observed runtime metadata for a task. */
-    getTaskInfo: (id: string): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/info`),
+    getTaskInfo: (id: string, signal?: AbortSignal): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/info`, undefined, undefined, signal),
     /** Creates and starts a new coding agent task. Images use multipart/form-data; see InputImage. */
-    createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
+    createTask: (req: CreateTaskReq, signal?: AbortSignal): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req, undefined, signal),
     /** Cancels a queued prompt before delivery. */
-    cancelQueuedInput: (id: string, req: CancelQueuedInputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input/cancel`, req),
+    cancelQueuedInput: (id: string, req: CancelQueuedInputReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input/cancel`, req, undefined, signal),
     /** Sends user input immediately, or appends it to the pending prompt for the next waiting turn. Images use multipart/form-data; see InputImage. */
-    sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input`, req),
+    sendInput: (id: string, req: InputReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input`, req, undefined, signal),
     /** Restarts a completed or errored task with a new prompt. Images use multipart/form-data; see InputImage. */
-    restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/restart`, req),
+    restartTask: (id: string, req: RestartReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/restart`, req, undefined, signal),
     /** Clears context and restarts the agent session without a prompt. */
-    clearContext: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/clear-context`),
+    clearContext: (id: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/clear-context`, undefined, undefined, signal),
     /** Sends a compact command to reduce the agent's context window usage. */
-    compactContext: (id: string, req: CompactReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/compact`, req),
+    compactContext: (id: string, req: CompactReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/compact`, req, undefined, signal),
     /** Requests graceful stop of a running task. */
-    stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/stop`),
+    stopTask: (id: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/stop`, undefined, undefined, signal),
     /** Stops a task, then deletes its runtime instance after the configured recovery window unless revived. */
-    purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/purge`),
+    purgeTask: (id: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/purge`, undefined, undefined, signal),
     /** Reconnects to an orphaned task runtime instance. */
-    reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/revive`),
+    reviveTask: (id: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/revive`, undefined, undefined, signal),
     /** Returns the log tail of a failed CI check run. */
-    getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${encodeURIComponent(id)}?jobID=${encodeURIComponent(jobID)}`),
+    getTaskCILog: (id: string, jobID: string, signal?: AbortSignal): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${encodeURIComponent(id)}?jobID=${encodeURIComponent(jobID)}`, undefined, undefined, signal),
     /** Pushes task changes to the remote repository. */
-    syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/sync`, req),
+    syncTask: (id: string, req: SyncReq, signal?: AbortSignal): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/sync`, req, undefined, signal),
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
-    forkTask: (id: string, req: ForkTaskReq): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/fork`, req),
+    forkTask: (id: string, req: ForkTaskReq, signal?: AbortSignal): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/fork`, req, undefined, signal),
     /** Builds an editable handoff prompt for continuing a task in a fresh agent session. */
-    getTaskHandoff: (id: string): Promise<TaskHandoffResp> => request<TaskHandoffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/handoff`),
+    getTaskHandoff: (id: string, signal?: AbortSignal): Promise<TaskHandoffResp> => request<TaskHandoffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/handoff`, undefined, undefined, signal),
     /** Returns repository status and the unified diff for a task's branch. */
-    getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff?path=${encodeURIComponent(path)}`),
+    getTaskDiff: (id: string, path: string, signal?: AbortSignal): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff?path=${encodeURIComponent(path)}`, undefined, undefined, signal),
     /** Returns repository and changed-file metadata without loading patch bodies. */
-    getTaskDiffIndex: (id: string): Promise<TaskDiffIndexResp> => request<TaskDiffIndexResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/index`),
+    getTaskDiffIndex: (id: string, signal?: AbortSignal): Promise<TaskDiffIndexResp> => request<TaskDiffIndexResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/index`, undefined, undefined, signal),
     /** Returns one committed or uncommitted file patch. */
-    getTaskFileDiff: (id: string, repository: string, commit: string, path: string, originalPath: string): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/file?repository=${encodeURIComponent(repository)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`),
+    getTaskFileDiff: (id: string, repository: string, commit: string, path: string, originalPath: string, signal?: AbortSignal): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/file?repository=${encodeURIComponent(repository)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`, undefined, undefined, signal),
     /** Returns compact Git state for every repository mapped to a task. */
-    getTaskRepoStatus: (id: string): Promise<TaskRepoStatusResp> => request<TaskRepoStatusResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/repo-status`),
+    getTaskRepoStatus: (id: string, signal?: AbortSignal): Promise<TaskRepoStatusResp> => request<TaskRepoStatusResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/repo-status`, undefined, undefined, signal),
     /** Returns the list of running processes inside the task's runtime instance. */
-    getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${encodeURIComponent(id)}`),
+    getTaskProcesses: (id: string, signal?: AbortSignal): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${encodeURIComponent(id)}`, undefined, undefined, signal),
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
-    signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${encodeURIComponent(id)}/${encodeURIComponent(pid)}/signal`, req),
+    signalProcess: (id: string, pid: string, req: SignalProcessReq, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${encodeURIComponent(id)}/${encodeURIComponent(pid)}/signal`, req, undefined, signal),
     /** Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. */
-    getTaskToolInput: (id: string, toolUseID: string, agentID: string, delegationToolUseID: string, threadID: string, turnID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/tool/${encodeURIComponent(toolUseID)}?agentID=${encodeURIComponent(agentID)}&delegationToolUseID=${encodeURIComponent(delegationToolUseID)}&threadID=${encodeURIComponent(threadID)}&turnID=${encodeURIComponent(turnID)}`),
+    getTaskToolInput: (id: string, toolUseID: string, agentID: string, delegationToolUseID: string, threadID: string, turnID: string, signal?: AbortSignal): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/tool/${encodeURIComponent(toolUseID)}?agentID=${encodeURIComponent(agentID)}&delegationToolUseID=${encodeURIComponent(delegationToolUseID)}&threadID=${encodeURIComponent(threadID)}&turnID=${encodeURIComponent(turnID)}`, undefined, undefined, signal),
     /** Streams task list updates for all tasks via SSE. */
     globalTaskEvents: (handlers: GlobalTaskEventsHandlers): EventSource => {
       const es = new EventSource("/api/caic/v1/tasks/events");
@@ -178,21 +181,21 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       return es;
     },
     /** Returns current usage quota statistics. */
-    getUsage: (): Promise<UsageResp> => request<UsageResp>("GET", "/api/caic/v1/usage"),
+    getUsage: (signal?: AbortSignal): Promise<UsageResp> => request<UsageResp>("GET", "/api/caic/v1/usage", undefined, undefined, signal),
     /** Returns daily cross-task usage rollups for the usage dashboard. */
-    getUsageDashboard: (): Promise<UsageDashboardResp> => request<UsageDashboardResp>("GET", "/api/caic/v1/usage/dashboard"),
+    getUsageDashboard: (signal?: AbortSignal): Promise<UsageDashboardResp> => request<UsageDashboardResp>("GET", "/api/caic/v1/usage/dashboard", undefined, undefined, signal),
     /** Fetches a URL and returns its text content. */
-    webFetch: (req: WebFetchReq): Promise<WebFetchResp> => request<WebFetchResp>("POST", "/api/caic/v1/web/fetch", req),
+    webFetch: (req: WebFetchReq, signal?: AbortSignal): Promise<WebFetchResp> => request<WebFetchResp>("POST", "/api/caic/v1/web/fetch", req, undefined, signal),
     /** Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. */
-    getHistoryManifest: (id: string): Promise<HistoryManifest> => request<HistoryManifest>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/manifest`),
+    getHistoryManifest: (id: string, signal?: AbortSignal): Promise<HistoryManifest> => request<HistoryManifest>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/manifest`, undefined, undefined, signal),
     /** Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. */
-    getHistorySetup: (id: string, scope: string, version: string, generation: string, through: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/setup/${encodeURIComponent(through)}`),
+    getHistorySetup: (id: string, scope: string, version: string, generation: string, through: string, signal?: AbortSignal): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/setup/${encodeURIComponent(through)}`, undefined, undefined, signal),
     /** Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. */
-    getHistorySlice: (id: string, scope: string, version: string, generation: string, first: string, firstIndex: string, last: string, lastIndex: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/slice/${encodeURIComponent(first)}/${encodeURIComponent(firstIndex)}/${encodeURIComponent(last)}/${encodeURIComponent(lastIndex)}`),
+    getHistorySlice: (id: string, scope: string, version: string, generation: string, first: string, firstIndex: string, last: string, lastIndex: string, signal?: AbortSignal): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/slice/${encodeURIComponent(first)}/${encodeURIComponent(firstIndex)}/${encodeURIComponent(last)}/${encodeURIComponent(lastIndex)}`, undefined, undefined, signal),
     /** Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. */
-    getHistoryActivity: (id: string, scope: string, version: string, generation: string, kind: string, activity: string, through: string, afterRecordID: string, afterIndex: string): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/activity/${encodeURIComponent(kind)}/${encodeURIComponent(activity)}/${encodeURIComponent(through)}?afterRecordID=${encodeURIComponent(afterRecordID)}&afterIndex=${encodeURIComponent(afterIndex)}`),
+    getHistoryActivity: (id: string, scope: string, version: string, generation: string, kind: string, activity: string, through: string, afterRecordID: string, afterIndex: string, signal?: AbortSignal): Promise<HistoryEvent[] | null> => request<HistoryEvent[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/${encodeURIComponent(scope)}/${encodeURIComponent(version)}/${encodeURIComponent(generation)}/activity/${encodeURIComponent(kind)}/${encodeURIComponent(activity)}/${encodeURIComponent(through)}?afterRecordID=${encodeURIComponent(afterRecordID)}&afterIndex=${encodeURIComponent(afterIndex)}`, undefined, undefined, signal),
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
-    getHistoryCosts: (id: string, generation: string, through: string): Promise<HistoryTurnEstimate[] | null> => request<HistoryTurnEstimate[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/costs?generation=${encodeURIComponent(generation)}&through=${encodeURIComponent(through)}`),
+    getHistoryCosts: (id: string, generation: string, through: string, signal?: AbortSignal): Promise<HistoryTurnEstimate[] | null> => request<HistoryTurnEstimate[] | null>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/history/costs?generation=${encodeURIComponent(generation)}&through=${encodeURIComponent(through)}`, undefined, undefined, signal),
     /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
     historyEvents: (id: string, cursor: string, handlers: HistoryEventsHandlers): EventSource => {
       const es = new EventSource(`/api/caic/v1/tasks/${encodeURIComponent(id)}/history/events?cursor=${encodeURIComponent(cursor)}`);
