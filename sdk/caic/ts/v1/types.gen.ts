@@ -1626,6 +1626,12 @@ export interface UsageResp {
   local: LocalUsage;
 }
 
+/** StreamHeartbeat proves transport liveness independently of mutable observations. */
+export interface StreamHeartbeat {
+  /** UTC server observation time for this heartbeat. */
+  time: ISOTimestamp;
+}
+
 /**
  * UsageDashboardCacheWrite counts cache writes for one applied lifetime.
  * TTLSeconds zero means the provider did not report a lifetime.

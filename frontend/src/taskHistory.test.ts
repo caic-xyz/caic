@@ -7,7 +7,7 @@ import { createRoot, createEffect } from "solid-js";
 import { vi } from "@tests/expect";
 import { historyResponse, historyManifest, fixtureHistoryResponse } from "@tests/history";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
-import type { HistoryEvent, HistoryManifest } from "@sdk/types.gen";
+import type { HistoryEvent, HistoryManifest, ISOTimestamp } from "@sdk/types.gen";
 import { api } from "./api";
 import { createTaskEventTimeline, type TaskHistory } from "./taskEventTimeline";
 const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -26,12 +26,14 @@ function fixture(events: HistoryEvent[], value: HistoryManifest) {
   const connections: {
     handlers: HistoryEventsHandlers;
     close: ReturnType<typeof vi.fn>;
+    source: EventSource;
   }[] = [];
   const requests: string[] = [];
   streamMock.mockImplementation((_id, _cursor, handlers) => {
     const close = vi.fn();
-    connections.push({ handlers, close });
-    return { close } as unknown as EventSource;
+    const source = { close, readyState: 1, CLOSED: 2, onerror: null } as unknown as EventSource;
+    connections.push({ handlers, close, source });
+    return source;
   });
   fetchMock.mockImplementation(async (input, init) => {
     init?.signal?.throwIfAborted();
@@ -79,6 +81,124 @@ describe("section history owner", () => {
     window.dispatchEvent(new Event("online"));
     assert.equal(owner.connections.length, 2);
   });
+  it("keeps the published snapshot and message identities until rediscovery commits", async () => {
+    const events = [text(1, "retained", 0)];
+    const manifest = historyManifest(events, "");
+    const owner = fixture(events, manifest);
+    try {
+      await loaded(owner);
+      const first = owner.messages()[0];
+      const shown = owner.manifest();
+      const epoch = owner.epoch();
+      const gate = Promise.withResolvers<Response>();
+      const original = defined(fetchMock.getMockImplementation());
+      fetchMock.mockImplementation((input, init) =>
+        String(input).endsWith("/manifest") ? gate.promise : original(input, init),
+      );
+      owner.retry();
+      assert.deepEqual(values(owner), ["retained"]);
+      assert.equal(owner.messages()[0], first);
+      assert.equal(owner.manifest(), shown);
+      assert.equal(owner.epoch(), epoch);
+      const fresh = text(2, "fresh", 0);
+      events.push(fresh);
+      const next = historyManifest(events, "");
+      gate.resolve(Response.json(next));
+      await loaded(owner);
+      assert.deepEqual(values(owner), ["retained", "fresh"]);
+      assert.equal(owner.messages()[0], first);
+      assert.equal(owner.epoch(), epoch);
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("retains history through a failed rediscovery and an explicit retry", async () => {
+    vi.useFakeTimers();
+    const events = [text(1, "retained", 0)];
+    const owner = fixture(events, historyManifest(events, ""));
+    try {
+      await loaded(owner);
+      const first = owner.messages()[0];
+      const shown = owner.manifest();
+      const original = defined(fetchMock.getMockImplementation());
+      fetchMock.mockRejectedValueOnce(new Error("recovery read failed"));
+      owner.retry();
+      for (let i = 0; owner.loading() && i < 30; i++) await yieldToTasks();
+      assert.equal(owner.loading(), false);
+      assert.equal(owner.error(), "recovery read failed");
+      assert.deepEqual(values(owner), ["retained"]);
+      assert.equal(owner.manifest(), shown);
+      fetchMock.mockImplementation(original);
+      owner.retry();
+      await loaded(owner);
+      assert.equal(owner.messages()[0], first);
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  for (const boundary of ["generation", "section"]) {
+    it(`publishes a replacement ${boundary} atomically without reusing old positions`, async () => {
+      const events = [text(1, "retired context", 0)];
+      const owner = fixture(events, historyManifest(events, ""));
+      try {
+        await loaded(owner);
+        const first = owner.messages()[0];
+        const shown = owner.manifest();
+        const epoch = owner.epoch();
+        const nextEvents = [text(1, "replacement context", 0)];
+        const next = historyManifest(nextEvents, "");
+        if (boundary === "generation") {
+          next.bootstrap.generation = "replacement";
+          next.bootstrap.resourceBase = "/history/owner/3/replacement";
+        } else {
+          defined(next.sections?.[0]).id = "replacement";
+        }
+        const gate = Promise.withResolvers<Response>();
+        fetchMock.mockImplementation(async (input) =>
+          String(input).endsWith("/manifest") ? Response.json(next) : gate.promise,
+        );
+        owner.retry();
+        for (let i = 0; streamMock.mock.calls.length < 2 && i < 30; i++) await yieldToTasks();
+        assert.deepEqual(values(owner), ["retired context"]);
+        assert.equal(owner.manifest(), shown);
+        gate.resolve(historyResponse(nextEvents));
+        await loaded(owner);
+        assert.deepEqual(values(owner), ["replacement context"]);
+        assert.notEqual(owner.messages()[0], first);
+        assert.notEqual(owner.epoch(), epoch);
+        assert.equal(owner.manifest()?.bootstrap.generation, next.bootstrap.generation);
+        assert.equal(owner.manifest()?.sections?.[0]?.id, next.sections?.[0]?.id);
+      } finally {
+        owner.dispose();
+      }
+    });
+  }
+  it("replaces silent history streams and keeps healthy checkpoints alive", async () => {
+    vi.useFakeTimers();
+    const events = [text(1, "retained", 0)];
+    const manifest = historyManifest(events, "");
+    const owner = fixture(events, manifest);
+    try {
+      await loaded(owner);
+      const first = defined(owner.connections[0]);
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(15_000);
+        first.handlers.onCheckpoint?.({ cursor: manifest.bootstrap.cursor, through: 1 });
+      }
+      assert.equal(owner.connections.length, 1);
+      await vi.advanceTimersByTimeAsync(45_000);
+      await loaded(owner);
+      assert.equal(first.close.mock.calls.length, 1);
+      assert.equal(owner.connections.length, 2);
+    } finally {
+      owner.dispose();
+    }
+    await vi.advanceTimersByTimeAsync(90_000);
+    assert.equal(owner.connections.length, 2);
+  });
+
   it("requests only current context pages, retaining summaries without archived payloads", async () => {
     const events = [text(1, "archived", 0), text(513, "current", 0), text(520, "latest", 0)];
     const manifest = historyManifest(events, "");
@@ -223,6 +343,117 @@ describe("section history owner", () => {
       owner.dispose();
     }
   });
+  for (const kind of ["setup", "section", "activity", "pricing"]) {
+    it(`keeps pending published ${kind} reads alive through same-generation recovery`, async () => {
+      const events = [text(1, "published", 0)];
+      const manifest = historyManifest(events, "");
+      manifest.metadata.setup = { first: { recordID: 1, index: 0 }, last: { recordID: 1, index: 0 } };
+      const owner = fixture(events, manifest);
+      try {
+        await loaded(owner);
+        const gate = Promise.withResolvers<Response>();
+        let reading: AbortSignal | null = null;
+        let recovering = false;
+        fetchMock.mockImplementation(async (input, init) => {
+          const url = String(input);
+          if (url.endsWith("/manifest")) return Response.json(manifest);
+          if (recovering && url.includes("/slice/")) return historyResponse(events);
+          reading = init?.signal ?? null;
+          return gate.promise;
+        });
+        const signal = new AbortController().signal;
+        const read =
+          kind === "setup"
+            ? owner.readSetup(signal)
+            : kind === "section"
+              ? owner.readSection(defined(manifest.sections?.[0]), signal)
+              : kind === "pricing"
+                ? owner.readCosts(signal)
+                : owner.readActivity(
+                    {
+                      kind: "nativeSubagent",
+                      anchorAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+                      first: { recordID: 1, index: 0 },
+                      id: "child",
+                      sectionID: "1",
+                      ownershipThrough: 1,
+                      bodyThrough: 1,
+                      status: "running",
+                    },
+                    1,
+                    null,
+                    signal,
+                  );
+        recovering = true;
+        owner.retry();
+        await loaded(owner);
+        const aborted = (reading as AbortSignal | null)?.aborted;
+        gate.resolve(kind === "pricing" ? Response.json([]) : historyResponse(events));
+        const result = await read.then(
+          (value) => ({ value, error: null }),
+          (error: unknown) => ({ value: null, error }),
+        );
+        assert.equal(aborted, false);
+        assert.equal(result.error, null);
+        assert.notEqual(result.value, null);
+      } finally {
+        owner.dispose();
+      }
+    });
+  }
+  it("retires published disclosure reads only when a replacement resource is committed", async () => {
+    const events = [text(1, "old snapshot", 0)];
+    const manifest = historyManifest(events, "");
+    const owner = fixture(events, manifest);
+    try {
+      await loaded(owner);
+      const oldRead = Promise.withResolvers<Response>();
+      const newBody = Promise.withResolvers<Response>();
+      let reading: AbortSignal | null = null;
+      let recovering = false;
+      const next = historyManifest([text(1, "new snapshot", 0)], "");
+      next.bootstrap.generation = "replacement";
+      next.bootstrap.resourceBase = "/history/owner/3/replacement";
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/manifest")) return Response.json(next);
+        if (recovering) return newBody.promise;
+        reading = init?.signal ?? null;
+        return oldRead.promise;
+      });
+      const read = owner.readSection(defined(manifest.sections?.[0]), new AbortController().signal);
+      recovering = true;
+      owner.retry();
+      for (let i = 0; owner.connections.length < 2 && i < 30; i++) await yieldToTasks();
+      assert.equal((reading as AbortSignal | null)?.aborted, false);
+      newBody.resolve(historyResponse([text(1, "new snapshot", 0)]));
+      await loaded(owner);
+      assert.equal((reading as AbortSignal | null)?.aborted, true);
+      oldRead.resolve(historyResponse(events));
+      await assert.rejects(read, { name: "AbortError" });
+    } finally {
+      owner.dispose();
+    }
+  });
+  for (const state of [0, 2]) {
+    it(`keeps a native reconnect bounded but respects terminal state ${state}`, async () => {
+      vi.useFakeTimers();
+      const events = [text(1, "retained", 0)];
+      const owner = fixture(events, historyManifest(events, ""));
+      try {
+        await loaded(owner);
+        const first = defined(owner.connections[0]);
+        Object.defineProperty(first.source, "readyState", { value: state });
+        first.source.onerror?.call(first.source, new Event("error"));
+        await vi.advanceTimersByTimeAsync(45_000);
+        if (state === 0) await loaded(owner);
+        assert.equal(owner.connections.length, state === 0 ? 2 : 1);
+      } finally {
+        owner.dispose();
+      }
+      await vi.advanceTimersByTimeAsync(90_000);
+      assert.equal(owner.connections.length, state === 0 ? 2 : 1);
+    });
+  }
   it("aborts pending disclosure reads and rejects retired publications on disposal", async () => {
     const events = [text(1, "current", 0)];
     const manifest = historyManifest(events, "");

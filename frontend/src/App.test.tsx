@@ -4333,6 +4333,9 @@ it("retains warnings during silence and retries only when task-stream heartbeats
   vi.advanceTimersByTime(30_000);
   expect(link).toBeInTheDocument();
   dispatchSSE({ kind: "heartbeat" });
+  vi.mocked(api.globalUsageEvents)
+    .mock.calls.at(-1)?.[0]
+    .onHeartbeat?.({ time: "2026-01-01T00:00:00Z" as ISOTimestamp });
   vi.advanceTimersByTime(30_000);
   expect(link).toBeInTheDocument();
   dispatchUsageSSE({ providers: [] });
@@ -4365,6 +4368,48 @@ it("replaces task and usage streams on a route change and rejects retired usage 
     retiredUsage.onerror?.(new Event("error"));
     await vi.advanceTimersByTimeAsync(10_000);
     expect(api.globalUsageEvents).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+  }
+});
+
+it("replaces a silent usage stream without replacing a healthy task stream", async () => {
+  vi.useFakeTimers();
+  const view = renderApp();
+  try {
+    await vi.waitFor(() => expect(taskEventSubscriptions).toBeGreaterThan(0));
+    const usage = vi.mocked(api.globalUsageEvents).mock.results.at(-1)?.value as FakeEventSource;
+    const tasks = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource;
+    await vi.advanceTimersByTimeAsync(30_000);
+    dispatchSSE({ kind: "heartbeat" });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(usage.close).toHaveBeenCalledOnce();
+    expect(tasks.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(api.globalUsageEvents).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+  }
+});
+
+it("keeps usage heartbeat traffic alive and retires its timer offline", async () => {
+  vi.useFakeTimers();
+  const view = renderApp();
+  try {
+    await vi.waitFor(() => expect(taskEventSubscriptions).toBeGreaterThan(0));
+    const usage = vi.mocked(api.globalUsageEvents).mock.results.at(-1)?.value as FakeEventSource;
+    const handlers = vi.mocked(api.globalUsageEvents).mock.calls.at(-1)?.[0];
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(15_000);
+      dispatchSSE({ kind: "heartbeat" });
+      handlers?.onHeartbeat?.({ time: "2026-01-01T00:00:00Z" as ISOTimestamp });
+    }
+    expect(usage.close).not.toHaveBeenCalled();
+    networkOnline(false);
+    expect(usage.close).toHaveBeenCalledOnce();
+    handlers?.onHeartbeat?.({ time: "2026-01-01T00:00:00Z" as ISOTimestamp });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(api.globalUsageEvents).toHaveBeenCalledTimes(1);
   } finally {
     view.unmount();
   }

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -57,6 +58,41 @@ func historyHTTPFixture(t testing.TB) (*testRouter, *taskrun.Task, string) {
 
 func TestTaskHistoryHTTP(t *testing.T) {
 	t.Parallel()
+	t.Run("idle checkpoints prove liveness without moving the cursor", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			// IDs use a 2026 epoch; synctest starts its clock in 2000.
+			time.Sleep(time.Until(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)))
+			s, tk, _ := historyHTTPFixture(t)
+			bootstrap := historyBootstrap(t, s, tk, "")
+			ctx, cancel := context.WithCancel(t.Context())
+			writer := &deadlineResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+			request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/"+tk.ID.String()+"/history/events?cursor="+bootstrap.Cursor, http.NoBody)
+			var workers sync.WaitGroup
+			workers.Go(func() { s.taskHandlers.routes().ServeHTTP(writer, request) })
+			synctest.Wait()
+			time.Sleep(15 * time.Second)
+			synctest.Wait()
+			cancel()
+			workers.Wait()
+			frames := strings.Split(strings.TrimSpace(writer.Body.String()), "\n\n")
+			frame := readHistoryFrameIncludingMetadata(t, bufio.NewReader(strings.NewReader(frames[len(frames)-1]+"\n\n")))
+			if count := strings.Count(writer.Body.String(), "event: checkpoint\n"); count != 2 {
+				t.Fatalf("checkpoint count = %d, want initial plus heartbeat", count)
+			}
+			want, err := json.Marshal(v1.HistoryCheckpoint{Cursor: bootstrap.Cursor, Through: bootstrap.Through})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if frame.name != "checkpoint" || frame.id != bootstrap.Cursor || frame.data != string(want) {
+				t.Fatalf("idle frame = %+v", frame)
+			}
+			if len(writer.deadlines) < 2 || !writer.deadlines[len(writer.deadlines)-1].IsZero() {
+				t.Fatalf("stream retained a write deadline: %v", writer.deadlines)
+			}
+		})
+	})
+
 	t.Run("aligned chunks", func(t *testing.T) {
 		t.Parallel()
 		s, tk, _ := historyHTTPFixture(t)
@@ -476,6 +512,8 @@ func TestTaskResourceSnapshot(t *testing.T) {
 		for _, retained := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/retained=%v", state, retained), func(t *testing.T) {
 				t.Parallel()
+				// IDs use a 2026 epoch; synctest starts its clock in 2000.
+				time.Sleep(time.Until(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)))
 				s, tk, _ := historyHTTPFixture(t)
 				tk.SetState(state)
 				if retained {
@@ -605,6 +643,8 @@ func TestHistoryStream(t *testing.T) {
 	t.Run("stale and malformed cursors reset", func(t *testing.T) {
 		t.Parallel()
 		for _, cursor := range []string{"invalid", "1.expired.1.end", "1.expired.99999999999999999999.end"} {
+			// IDs use a 2026 epoch; synctest starts its clock in 2000.
+			time.Sleep(time.Until(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)))
 			s, tk, _ := historyHTTPFixture(t)
 			r, _ := historyStream(t, s, tk, cursor, "")
 			f := readHistoryFrame(t, r)

@@ -1,5 +1,5 @@
 // Reads server-owned numeric statistics and lazily refreshes prices by exact history position.
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { HistoryTurn, HistoryToolTiming, HistoryTurnEstimate } from "@sdk/types.gen";
 import type { TaskHistory } from "./taskEventTimeline";
 import { historyPositionKey } from "./historyPosition";
@@ -30,40 +30,61 @@ function sameTurn(a: HistoryTurn, b: HistoryTurn | undefined): boolean {
   );
 }
 
+interface PricingSnapshot {
+  resourceBase: string;
+  estimates: ReadonlyMap<string, HistoryTurnEstimate>;
+  pending: boolean;
+  error: string | null;
+}
+
 export function createTaskAnalytics(history: TaskHistory) {
-  const [estimates, setEstimates] = createSignal<ReadonlyMap<string, HistoryTurnEstimate>>(new Map());
-  const [pricing, setPricing] = createSignal(false);
-  const [pricingError, setPricingError] = createSignal<string | null>(null);
+  const [pricingSnapshot, setPricingSnapshot] = createSignal<PricingSnapshot | null>(null);
+  const resourceBase = createMemo(() => history.manifest()?.bootstrap.resourceBase ?? null);
+  const currentPricing = createMemo(() => {
+    const value = pricingSnapshot();
+    return value?.resourceBase === resourceBase() ? value : null;
+  });
   let request: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   async function prices() {
+    const resource = untrack(resourceBase);
+    if (resource === null) return;
     request?.abort();
     const controller = new AbortController();
     request = controller;
-    setPricing(true);
+    const previous = untrack(currentPricing);
+    const estimates = previous?.estimates ?? new Map<string, HistoryTurnEstimate>();
+    setPricingSnapshot({ resourceBase: resource, estimates, pending: true, error: previous?.error ?? null });
     try {
       const values = await history.readCosts(controller.signal);
       if (controller.signal.aborted) return;
-      setEstimates(new Map(values.map((value) => [historyPositionKey(value), value])));
-      setPricingError(null);
+      setPricingSnapshot({
+        resourceBase: resource,
+        estimates: new Map(values.map((value) => [historyPositionKey(value), value])),
+        pending: false,
+        error: null,
+      });
     } catch (error) {
-      if (!controller.signal.aborted) setPricingError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (request === controller && !controller.signal.aborted) setPricing(false);
+      if (!controller.signal.aborted)
+        setPricingSnapshot({
+          resourceBase: resource,
+          estimates,
+          pending: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
     }
   }
   const boundary = createMemo(() => {
     const value = history.manifest();
     const last = value?.metadata.turns?.at(-1);
-    return value ? `${value.bootstrap.generation}:${last ? historyPositionKey(last) : ""}` : null;
+    return value ? `${value.bootstrap.resourceBase}:${last ? historyPositionKey(last) : ""}` : null;
   });
   createEffect(() => {
     const value = boundary();
     request?.abort();
     if (timer !== null) clearTimeout(timer);
     if (value === null) {
-      setEstimates(new Map());
-      setPricing(false);
+      setPricingSnapshot(null);
       return;
     }
     timer = setTimeout(() => {
@@ -76,9 +97,9 @@ export function createTaskAnalytics(history: TaskHistory) {
     });
   });
   const turns = createMemo<readonly HistoryTurn[]>((previous) => {
-    const amounts = estimates();
+    const amounts = currentPricing()?.estimates;
     const next = (history.manifest()?.metadata.turns ?? []).map((turn) => {
-      const estimate = amounts.get(historyPositionKey(turn));
+      const estimate = amounts?.get(historyPositionKey(turn));
       return estimate ? { ...turn, model: estimate.model ?? turn.model, cost: estimate.cost ?? turn.cost } : turn;
     });
     return next.length === previous.length && next.every((turn, index) => sameTurn(turn, previous[index]))
@@ -101,8 +122,8 @@ export function createTaskAnalytics(history: TaskHistory) {
     snapshot,
     stats: history.stats,
     loading: () => history.manifest() === null,
-    pricing,
-    error: () => history.error() ?? pricingError(),
+    pricing: () => currentPricing()?.pending ?? false,
+    error: () => history.error() ?? currentPricing()?.error ?? null,
     retry: () => {
       if (history.error()) history.retry();
       else void prices();

@@ -2103,7 +2103,7 @@ describe("TaskDetail", () => {
     expect(getByText("fetch origin then rebase on origin/main")).toBeInTheDocument();
     expect(getByText("Setup logs")).toBeInTheDocument();
     expect(getByTestId("task-setup")).toHaveAttribute("open");
-    expect(getByTestId("task-setup-logs")).toHaveTextContent("starting runtime");
+    await waitFor(() => expect(getByTestId("task-setup-logs")).toHaveTextContent("starting runtime"));
     expect(getByTestId("task-message-area")).toContainElement(getByTestId("task-setup"));
     expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
   });

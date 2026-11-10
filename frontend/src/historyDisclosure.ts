@@ -99,7 +99,7 @@ export function createActivityHistory(activity: Accessor<HistoryActivity>) {
       (item) => item.id === activity().id && item.kind === activity().kind,
     );
     if (!value || !actor) return;
-    const identity = `${value.bootstrap.generation}:${actor.kind}:${actor.id}:${actor.ownershipThrough}:${attempt()}`;
+    const identity = `${value.bootstrap.resourceBase}:${actor.kind}:${actor.id}:${actor.ownershipThrough}:${attempt()}`;
     history.through();
     untrack(() => {
       if (identity !== revision) {

@@ -422,7 +422,7 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 			}
 			continue
 		case <-heartbeat.C:
-			if err := stream.KeepAlive(); err != nil {
+			if err := historyFrame(stream, "checkpoint", cursor.String(), v1.HistoryCheckpoint{Cursor: cursor.String(), Through: cursor.record}); err != nil {
 				return
 			}
 			continue

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/frontend"
@@ -40,6 +41,45 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(r.Context())
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+	var streamMu sync.Mutex
+	write := func(event string, data []byte) error {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := stream.Writef("event: %s\ndata: %s\n\n", event, data); err != nil {
+			return err
+		}
+		return stream.Flush()
+	}
+	// Provider refreshes can block; transport liveness must remain observable
+	// independently of them. Serialize complete frames with the snapshot writer.
+	workers.Go(func() {
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-heartbeat.C:
+				data, err := json.Marshal(v1.StreamHeartbeat{Time: time.Now().UTC()})
+				if err != nil {
+					h.log.WarnContext(ctx, "encode usage heartbeat", "err", err)
+					cancel()
+					return
+				}
+				if err := write("heartbeat", data); err != nil {
+					h.log.WarnContext(ctx, "write usage heartbeat", "err", err)
+					cancel()
+					return
+				}
+			}
+		}
+	})
 	ticker := time.NewTicker(usage.CacheTTL)
 	defer ticker.Stop()
 
@@ -53,19 +93,15 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 		data, err := json.Marshal(resp)
 		if err == nil && !bytes.Equal(data, prev) {
-			if err := stream.Writef("event: message\ndata: %s\n\n", data); err != nil {
+			if err := write("message", data); err != nil {
 				h.log.WarnContext(r.Context(), "write usage SSE event", "err", err)
-				return
-			}
-			if err := stream.Flush(); err != nil {
-				h.log.WarnContext(r.Context(), "flush usage SSE event", "err", err)
 				return
 			}
 			prev = data
 		}
 
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
 		case <-ch:
 		case <-ticker.C:

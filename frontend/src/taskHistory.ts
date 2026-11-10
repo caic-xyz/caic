@@ -1,6 +1,6 @@
-// Owns the current context, compact server metadata, immutable disclosure reads, and exact live handoff.
+// Publishes coherent current-context snapshots while owning exact live handoff, disclosure reads, and recovery.
 import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
-import { batch, createSignal, onCleanup } from "solid-js";
+import { batch, createSignal, onCleanup, untrack } from "solid-js";
 import type {
   EventMessage,
   EventStats,
@@ -17,7 +17,7 @@ import { api } from "./api";
 import { readHistoryBatches } from "./historyStream";
 import { compareHistoryPosition, historyChunkFirst } from "./historyPosition";
 
-export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
+export function createTaskHistory(id: string): TaskHistory {
   const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
   const [manifest, setManifest] = createSignal<HistoryManifest | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
@@ -32,6 +32,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   let lastLive: HistoryPosition | null = null;
   let source: EventSource | null = null;
   let controller = new AbortController();
+  let publishedReads = new AbortController();
   let bodyRequest: AbortController | null = null;
   let active = true;
   let complete = false;
@@ -39,6 +40,9 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = 500;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let incomingStats: EventStats[] | null = null;
+  let observedThrough = 0;
 
   const current = (signal: AbortSignal) => active && !signal.aborted && signal === controller.signal;
   const client = (signal: AbortSignal) => createApiClient((url, init) => fetch(url, { ...init, signal }));
@@ -131,9 +135,8 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     const section = value.sections?.at(-1);
     const changed = section?.id !== currentID;
     discovery = value;
+    observedThrough = Math.max(observedThrough, value.bootstrap.through);
     batch(() => {
-      setManifest(value);
-      setThrough((previous) => Math.max(previous, value.bootstrap.through));
       if (!complete) {
         if (changed || waitingManifest) {
           waitingManifest = false;
@@ -141,6 +144,8 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
         }
         return;
       }
+      setManifest(value);
+      setThrough(observedThrough);
       if (changed) {
         const first = section?.body?.first;
         const retained: EventMessage[] = [];
@@ -155,7 +160,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
         pending = pending.filter((event) => first && compareHistoryPosition(event, first) >= 0);
         positions = nextPositions;
         currentID = section?.id ?? null;
-        setEpoch((previous) => previous + 1);
+        setEpoch((revision) => revision + 1);
         setMessages(retained);
       }
       publish();
@@ -176,16 +181,39 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
         waitingManifest = true;
         return;
       }
+      const previous = untrack(messages);
+      const published = untrack(manifest);
+      const sameScope = published?.bootstrap.resourceBase === value.bootstrap.resourceBase;
+      const sameContext = sameScope && published?.sections?.at(-1)?.id === section?.id;
+      const retained = new Map<string, EventMessage>();
+      if (sameContext)
+        for (const message of previous) {
+          const position = positions.get(message);
+          if (position) retained.set(`${position.recordID}:${position.index}`, message);
+        }
       positions = new WeakMap();
       const decoded: EventMessage[] = [];
       for (const event of events) {
-        positions.set(event.message, { recordID: event.recordID, index: event.index });
-        decoded.push(event.message);
+        const message = retained.get(`${event.recordID}:${event.index}`) ?? event.message;
+        positions.set(message, { recordID: event.recordID, index: event.index });
+        decoded.push(message);
       }
       pending = pending.filter((event) => event.recordID > value.bootstrap.through);
       complete = true;
+      if (!sameScope) {
+        publishedReads.abort();
+        publishedReads = new AbortController();
+      }
       batch(() => {
-        setEpoch((previous) => previous + 1);
+        if (
+          !sameContext ||
+          decoded.length < previous.length ||
+          previous.some((message, index) => decoded[index] !== message)
+        )
+          setEpoch((revision) => revision + 1);
+        setManifest(discovery ?? value);
+        setStats(incomingStats ?? (sameScope ? untrack(stats) : []));
+        setThrough(observedThrough);
         setMessages(decoded);
         publish();
         setLoading(false);
@@ -201,14 +229,30 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   }
   function scheduleRetry(signal: AbortSignal) {
     if (!current(signal) || !navigator.onLine) return;
-    if (retryTimer !== null) clearTimeout(retryTimer);
+    retire();
+    controller = new AbortController();
+    const retrySignal = controller.signal;
     retryTimer = setTimeout(() => {
       retryTimer = null;
-      if (current(signal)) void discover();
+      if (current(retrySignal)) void discover();
     }, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 10_000);
   }
+  function clearWatchdog() {
+    if (watchdog !== null) clearTimeout(watchdog);
+    watchdog = null;
+  }
+  function alive(signal: AbortSignal) {
+    if (!current(signal)) return;
+    clearWatchdog();
+    // The server repeats the current checkpoint every 15 seconds. Three missed
+    // frames replace a connection that silently stopped delivering data.
+    watchdog = setTimeout(() => {
+      if (current(signal)) void discover();
+    }, 45_000);
+  }
   function retire() {
+    clearWatchdog();
     controller.abort();
     bodyRequest?.abort();
     source?.close();
@@ -231,15 +275,11 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     discovery = null;
     lastLive = null;
     pending = [];
-    positions = new WeakMap();
+    incomingStats = null;
+    observedThrough = 0;
     batch(() => {
-      setManifest(null);
-      setMessages([]);
-      setStats([]);
-      setThrough(0);
       setLoading(true);
       setError(null);
-      setEpoch((previous) => previous + 1);
     });
     try {
       const value = await client(signal).getHistoryManifest(id);
@@ -247,13 +287,11 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
       discovery = value;
       currentID = value.sections?.at(-1)?.id ?? null;
       lastLive = { recordID: value.bootstrap.through, index: Number.MAX_SAFE_INTEGER };
-      batch(() => {
-        setManifest(value);
-        setThrough(value.bootstrap.through);
-      });
+      observedThrough = value.bootstrap.through;
       source = api.historyEvents(id, value.bootstrap.cursor, {
         onMessage: (event) => {
           if (!current(signal) || (lastLive && compareHistoryPosition(event, lastLive) <= 0)) return;
+          alive(signal);
           lastLive = { recordID: event.recordID, index: event.index };
           pending.push(event);
           if (event.message.ask || event.message.error || event.message.userInput) publish();
@@ -264,18 +302,31 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
             }, 100);
         },
         onManifest: (next) => {
-          if (current(signal)) reconcile(next);
+          if (current(signal)) {
+            alive(signal);
+            reconcile(next);
+          }
         },
         onCheckpoint: (checkpoint) => {
           if (!current(signal)) return;
-          setThrough((previous) => Math.max(previous, checkpoint.through));
+          alive(signal);
+          observedThrough = Math.max(observedThrough, checkpoint.through);
+          if (complete) setThrough(observedThrough);
           if (complete) setError(null);
         },
         onStatsSnapshot: (snapshot) => {
-          if (current(signal)) setStats(mergeStats([], snapshot.samples ?? []));
+          if (current(signal)) {
+            alive(signal);
+            incomingStats = mergeStats([], snapshot.samples ?? []);
+            if (complete) setStats(incomingStats);
+          }
         },
         onStats: (sample) => {
-          if (current(signal)) setStats((previous) => mergeStats(previous, [sample]));
+          if (current(signal)) {
+            alive(signal);
+            incomingStats = mergeStats(incomingStats ?? [], [sample]);
+            if (complete) setStats(incomingStats);
+          }
         },
         onReset: () => {
           if (current(signal)) void discover();
@@ -283,21 +334,29 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
         onError: (err) => {
           if (current(signal)) {
             fail(err);
-            source?.close();
             scheduleRetry(signal);
           }
         },
         onHistoryError: (err) => {
           if (current(signal)) {
             fail(err.message);
-            source?.close();
             scheduleRetry(signal);
           }
         },
       });
-      source.onerror = (event) => {
-        if (current(signal) && !(event instanceof MessageEvent)) setError("Task history stream disconnected");
+      source.onopen = () => {
+        if (current(signal)) alive(signal);
       };
+      source.onerror = (event) => {
+        if (current(signal) && !(event instanceof MessageEvent)) {
+          // Native reconnect may hang before response headers. Its last-activity
+          // deadline remains armed until data arrives; terminal HTTP/auth errors
+          // close EventSource and must not be turned into rediscovery loops.
+          if (source?.readyState === source?.CLOSED) clearWatchdog();
+          setError("Task history stream disconnected");
+        }
+      };
+      alive(signal);
       void loadCurrent(discovery ?? value);
     } catch (err) {
       if (!current(signal)) return;
@@ -307,9 +366,9 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     }
   }
   function capture(signal: AbortSignal) {
-    const value = discovery;
+    const value = untrack(manifest);
     if (!value) throw new Error("Task history is still loading");
-    return { value, signal: AbortSignal.any([signal, controller.signal]) };
+    return { value, signal: AbortSignal.any([signal, publishedReads.signal]) };
   }
   const stopObserving = observeNetworkChanges(() => {
     if (navigator.onLine) void discover();
@@ -320,6 +379,7 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
   });
   onCleanup(() => {
     active = false;
+    publishedReads.abort();
     stopObserving();
     retire();
     pending = [];
@@ -340,6 +400,9 @@ export function createTaskHistory(id: string): Omit<TaskHistory, "retry"> {
     epoch,
     loading,
     error,
+    retry: () => {
+      void discover();
+    },
     position: (message) => positions.get(message) ?? null,
     readSection: (section, request) => {
       const { value, signal } = capture(request);

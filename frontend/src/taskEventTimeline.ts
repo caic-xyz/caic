@@ -1,5 +1,5 @@
 // Shares current-context history, server summaries, and disclosure reads across selected-task subviews.
-import { createMemo, createSignal, untrack, type Accessor } from "solid-js";
+import { createMemo, untrack, type Accessor } from "solid-js";
 import type {
   EventMessage,
   EventStats,
@@ -35,9 +35,7 @@ export interface TaskHistory {
 }
 
 export function createTaskEventTimeline(options: { taskId: Accessor<string> }): TaskHistory {
-  const [attempt, setAttempt] = createSignal(0);
   const source = createMemo(() => {
-    attempt();
     const id = options.taskId();
     return untrack(() => createTaskHistory(id));
   });
@@ -54,7 +52,7 @@ export function createTaskEventTimeline(options: { taskId: Accessor<string> }): 
     epoch,
     loading: () => source().loading(),
     error: () => source().error(),
-    retry: () => setAttempt((previous) => previous + 1),
+    retry: () => source().retry(),
     position: (message) => source().position(message),
     readSection: (section, signal) => source().readSection(section, signal),
     readSetup: (signal) => source().readSetup(signal),

@@ -608,7 +608,7 @@ export default function TaskDetail(props: Props) {
     return event ? turnForEvent(event) : undefined;
   };
   const statsHistory = timeline.stats;
-  const hasInitialPromptEvent = () => !timeline.loading() && (metadata()?.hasInitialPrompt ?? false);
+  const hasInitialPromptEvent = () => metadata()?.hasInitialPrompt ?? false;
   const currentSessionCompletedTurns = createMemo(() => conversation().turns);
   const currentBoundary = createMemo<HistoryEvent | null>((previous) => {
     const next = currentSection()?.boundary ?? null;
@@ -1949,7 +1949,7 @@ function ArchivedSessionBody(props: {
   const timeline = useTaskTimeline();
   const body = createHistoryDisclosure(
     () =>
-      `${timeline.manifest()?.bootstrap.generation}:${props.section.id}:${props.section.body ? historyPositionKey(props.section.body.first) + ":" + historyPositionKey(props.section.body.last) : "empty"}`,
+      `${timeline.manifest()?.bootstrap.resourceBase}:${props.section.id}:${props.section.body ? historyPositionKey(props.section.body.first) + ":" + historyPositionKey(props.section.body.last) : "empty"}`,
     (signal) => timeline.readSection(props.section, signal),
   );
   const positions = createMemo(() => new Map(body.events().map((event) => [event.message, historyPositionKey(event)])));
@@ -2081,7 +2081,7 @@ function SetupHistoryBody() {
   const body = createHistoryDisclosure(
     () => {
       const metadata = timeline.manifest()?.metadata;
-      return `${metadata?.setup ? historyPositionKey(metadata.setup.last) : ""}:${metadata?.initialInit ? historyPositionKey(metadata.initialInit) : ""}`;
+      return `${timeline.manifest()?.bootstrap.resourceBase}:${metadata?.setup ? historyPositionKey(metadata.setup.last) : ""}:${metadata?.initialInit ? historyPositionKey(metadata.initialInit) : ""}`;
     },
     (signal) => timeline.readSetup(signal),
   );

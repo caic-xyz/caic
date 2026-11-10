@@ -3416,6 +3416,16 @@ public struct UsageResp: Codable {
     }
 }
 
+/// StreamHeartbeat proves transport liveness independently of mutable observations.
+public struct StreamHeartbeat: Codable {
+    /// UTC server observation time for this heartbeat.
+    public let time: ISOTimestamp
+
+    public init(time: ISOTimestamp) {
+        self.time = time
+    }
+}
+
 /// UsageDashboardCacheWrite counts cache writes for one applied lifetime.
 /// TTLSeconds zero means the provider did not report a lifetime.
 public struct UsageDashboardCacheWrite: Codable {

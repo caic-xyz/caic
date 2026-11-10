@@ -210,9 +210,15 @@ class ApiClient(
     // SSE endpoints
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/tasks/events")
-    /** Streams usage quota updates via SSE. */
-    fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/caic/v1/usage/events")
-    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    /** Streams changed usage quota snapshots and a heartbeat every 15 seconds via SSE. */
+    fun globalUsageEvents(onHeartbeat: ((StreamHeartbeat) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<UsageResp> = namedSSEFlow("/api/caic/v1/usage/events", lastEventID, onEventID) { type, data ->
+        when (type) {
+            "message" -> json.decodeFromString<UsageResp>(data)
+            "heartbeat" -> { val payload = json.decodeFromString<StreamHeartbeat>(data); onHeartbeat?.invoke(payload); null }
+            else -> null
+        }
+    }
+    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records and repeat every 15 seconds to prove liveness. Close and rediscover bootstrap on reset/error. */
     fun historyEvents(id: String, cursor: String, onManifest: ((HistoryManifest) -> Unit)? = null, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = namedSSEFlow("/api/caic/v1/tasks/$id/history/events?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}", lastEventID, onEventID) { type, data ->
         when (type) {
             "message" -> json.decodeFromString<HistoryEvent>(data)
@@ -371,9 +377,13 @@ class ApiClient(
     // Reconnecting SSE wrappers with exponential backoff.
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }
-    /** Streams usage quota updates via SSE. */
-    fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
-    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. */
+    /** Streams changed usage quota snapshots and a heartbeat every 15 seconds via SSE. */
+    fun globalUsageEventsReconnecting(onHeartbeat: ((StreamHeartbeat) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<UsageResp> = flow {
+        // This cold flow starts a fresh cursor for each collection.
+        val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)
+        reconnectingFlow { globalUsageEvents(onHeartbeat = onHeartbeat, lastEventID = resumeID.get(), onEventID = { resumeID.set(it); onEventID?.invoke(it) }) }.collect { emit(it) }
+    }
+    /** Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records and repeat every 15 seconds to prove liveness. Close and rediscover bootstrap on reset/error. */
     fun historyEventsReconnecting(id: String, cursor: String, onManifest: ((HistoryManifest) -> Unit)? = null, onCheckpoint: ((HistoryCheckpoint) -> Unit)? = null, onStatsSnapshot: ((HistoryStats) -> Unit)? = null, onStats: ((EventStats) -> Unit)? = null, onReset: ((HistoryReset) -> Unit)? = null, onHistoryError: ((TaskHistoryStreamError) -> Unit)? = null, lastEventID: String? = null, onEventID: ((String) -> Unit)? = null): Flow<HistoryEvent> = flow {
         // This cold flow starts a fresh cursor for each collection.
         val resumeID = java.util.concurrent.atomic.AtomicReference<String?>(lastEventID)

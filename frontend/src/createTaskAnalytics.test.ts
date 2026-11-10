@@ -102,6 +102,101 @@ describe("server task analytics", () => {
       state.dispose();
     }
   });
+  it("isolates completed prices and failed refreshes by the published resource", async () => {
+    vi.useFakeTimers();
+    const replacement = Promise.withResolvers<HistoryTurnEstimate[]>();
+    let calls = 0;
+    const state = setup(async () => {
+      if (++calls === 1)
+        return [
+          {
+            recordID: 4,
+            index: 2,
+            model: "old estimated model",
+            cost: { usd: 500, source: "reported" },
+            totalUSD: 500,
+          },
+        ];
+      return replacement.promise;
+    });
+    try {
+      state.setManifest(manifestValue());
+      vi.advanceTimersByTime(250);
+      await yieldToTasks();
+      assert.equal(state.snapshot().costUSD, 500);
+      assert.equal(state.snapshot().costComplete, true);
+      assert.equal(state.snapshot().turns[0]?.model, "old estimated model");
+      state.setManifest(manifestValue());
+      assert.equal(state.snapshot().costUSD, 500);
+      assert.equal(calls, 1);
+      state.retry();
+      await yieldToTasks();
+      assert.equal(state.pricing(), true);
+      assert.equal(state.snapshot().costUSD, 500);
+      const next = manifestValue();
+      next.bootstrap.resourceBase = "/history/replacement/3/test";
+      defined(next.metadata.turns)[0] = {
+        ...defined(defined(next.metadata.turns)[0]),
+        model: "replacement reported model",
+      };
+      state.setManifest(next);
+      const checkReplacement = () => {
+        assert.equal(state.snapshot().costUSD, 0);
+        assert.equal(state.snapshot().costComplete, false);
+        assert.equal(state.snapshot().turns[0]?.model, "replacement reported model");
+        assert.equal(state.snapshot().turns[0]?.cost, undefined);
+      };
+      checkReplacement();
+      assert.equal(state.pricing(), false);
+      vi.advanceTimersByTime(250);
+      await yieldToTasks();
+      assert.equal(state.pricing(), true);
+      checkReplacement();
+      replacement.reject(new Error("replacement prices unavailable"));
+      await yieldToTasks();
+      assert.equal(state.error(), "replacement prices unavailable");
+      assert.equal(state.pricing(), false);
+      checkReplacement();
+      const third = manifestValue();
+      third.bootstrap.resourceBase = "/history/another/3/test";
+      state.setManifest(third);
+      assert.equal(state.error(), null);
+      assert.equal(state.pricing(), false);
+      assert.equal(state.snapshot().costComplete, false);
+    } finally {
+      state.dispose();
+    }
+  });
+  it("restarts prices when the published resource changes at the same raw positions", async () => {
+    vi.useFakeTimers();
+    const requests: { signal: AbortSignal; finish: (value: HistoryTurnEstimate[]) => void }[] = [];
+    const state = setup(
+      (signal) =>
+        new Promise((finish) => {
+          requests.push({ signal, finish });
+        }),
+    );
+    try {
+      const initial = manifestValue();
+      state.setManifest(initial);
+      vi.advanceTimersByTime(250);
+      await yieldToTasks();
+      const next = manifestValue();
+      next.bootstrap.resourceBase = "/history/replacement/3/test";
+      state.setManifest(next);
+      vi.advanceTimersByTime(250);
+      await yieldToTasks();
+      assert.equal(requests.length, 2);
+      assert.equal(requests[0]?.signal.aborted, true);
+      requests[0]?.finish([{ recordID: 4, index: 2, cost: { usd: 500, source: "reported" }, totalUSD: 500 }]);
+      requests[1]?.finish([]);
+      await yieldToTasks();
+      assert.equal(state.snapshot().costUSD, 0);
+      assert.equal(state.error(), null);
+    } finally {
+      state.dispose();
+    }
+  });
   it("ignores a retired generation's prices", async () => {
     vi.useFakeTimers();
     let finish: (value: HistoryTurnEstimate[]) => void = () => {};

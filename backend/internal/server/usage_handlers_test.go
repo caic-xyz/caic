@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
@@ -209,8 +210,57 @@ func (w *cancelAfterEventWriter) eventsWritten() int {
 	return bytes.Count(w.Body.Bytes(), []byte("event: message"))
 }
 
+type gatedUsageFetcher struct {
+	staticUsageFetcher
+
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *gatedUsageFetcher) Get(ctx context.Context) *usage.ProviderQuota {
+	close(f.entered)
+	<-f.release
+	return f.staticUsageFetcher.Get(ctx)
+}
+
 func TestUsageHandlersHandleEvents(t *testing.T) {
 	t.Parallel()
+
+	t.Run("heartbeat during provider refresh", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newTestRouter(t, nil)
+			fetcher := &gatedUsageFetcher{entered: make(chan struct{}), release: make(chan struct{})}
+			s.usageHandlers.fetchers = []usage.ProviderFetcher{fetcher}
+			ctx, cancel := context.WithCancel(t.Context())
+			writer := &deadlineResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+			var workers sync.WaitGroup
+			workers.Go(func() {
+				s.usageHandlers.handleEvents(writer, httptest.NewRequestWithContext(ctx, "GET", "/usage/events", nil))
+			})
+			<-fetcher.entered
+			time.Sleep(15 * time.Second)
+			synctest.Wait()
+			body := writer.Body.String()
+			deadlines := append([]time.Time(nil), writer.deadlines...)
+			cancel()
+			close(fetcher.release)
+			workers.Wait()
+			before := writer.Body.String()
+			time.Sleep(45 * time.Second)
+			synctest.Wait()
+			want := "event: heartbeat\ndata: {\"time\":\"2000-01-01T00:00:15Z\"}\n\n"
+			if body != want {
+				t.Fatalf("frames = %q, want %q", body, want)
+			}
+			if len(deadlines) < 2 || deadlines[len(deadlines)-2].IsZero() || !deadlines[len(deadlines)-1].IsZero() {
+				t.Fatalf("heartbeat deadlines = %v", deadlines)
+			}
+			if writer.Body.String() != before {
+				t.Fatal("retired heartbeat worker wrote after shutdown")
+			}
+		})
+	})
 
 	t.Run("HarnessQuotaUpdateDuringWriteEmitsImmediately", func(t *testing.T) {
 		t.Parallel()

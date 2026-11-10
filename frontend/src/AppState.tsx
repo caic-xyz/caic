@@ -825,6 +825,7 @@ function createAppStore() {
     let usageES: EventSource | null = null;
     let usageStreamGeneration = 0;
     let taskWatchdog: ReturnType<typeof setTimeout> | null = null;
+    let usageWatchdog: ReturnType<typeof setTimeout> | null = null;
     let taskTimer: ReturnType<typeof setTimeout> | null = null;
     let usageTimer: ReturnType<typeof setTimeout> | null = null;
     let taskDelay = 500;
@@ -1023,12 +1024,22 @@ function createAppStore() {
     }
 
     function connectUsage() {
+      if (!active || document.hidden || !navigator.onLine) return;
       const streamGeneration = ++usageStreamGeneration;
       const currentStream = () =>
         active && !accountController.signal.aborted && streamGeneration === usageStreamGeneration;
+      const alive = () => {
+        if (!currentStream()) return;
+        if (usageWatchdog !== null) clearTimeout(usageWatchdog);
+        usageWatchdog = setTimeout(disconnectUsage, 45_000);
+      };
       usageES = api.globalUsageEvents({
+        onHeartbeat: alive,
         onMessage: (event) => {
-          if (currentStream()) setUsage(event);
+          if (currentStream()) {
+            alive();
+            setUsage(event);
+          }
         },
         onError: (err) => {
           if (!currentStream()) return;
@@ -1038,10 +1049,13 @@ function createAppStore() {
       });
       usageES.addEventListener("open", () => {
         if (!currentStream()) return;
+        alive();
         usageDelay = 500;
       });
-      usageES.onerror = () => {
+      function disconnectUsage() {
         if (!currentStream()) return;
+        if (usageWatchdog !== null) clearTimeout(usageWatchdog);
+        usageWatchdog = null;
         usageStreamGeneration++;
         usageES?.close();
         usageES = null;
@@ -1054,10 +1068,14 @@ function createAppStore() {
             usageDelay = Math.min(usageDelay * 1.5, 30_000);
           })
           .catch((err: unknown) => showWarning(`Usage reconnect failed: ${String(err)}`));
-      };
+      }
+      usageES.onerror = disconnectUsage;
+      alive();
     }
 
     function closeAll() {
+      if (usageWatchdog !== null) clearTimeout(usageWatchdog);
+      usageWatchdog = null;
       if (taskWatchdog !== null) clearTimeout(taskWatchdog);
       taskWatchdog = null;
       generation++;

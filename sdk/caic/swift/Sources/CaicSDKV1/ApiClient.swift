@@ -587,11 +587,17 @@ public final class ApiClient {
     public func globalTaskEvents() -> AsyncThrowingStream<TaskListEvent, Error> {
         sseStream(path: "/api/caic/v1/tasks/events", decodeFailure: .discard)
     }
-    /// Streams usage quota updates via SSE.
-    public func globalUsageEvents() -> AsyncThrowingStream<UsageResp, Error> {
-        sseStream(path: "/api/caic/v1/usage/events", decodeFailure: .discard)
+    /// Streams changed usage quota snapshots and a heartbeat every 15 seconds via SSE.
+    public func globalUsageEvents(onHeartbeat: ((StreamHeartbeat) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<UsageResp, Error> {
+        namedSSEStream(path: "/api/caic/v1/usage/events", lastEventID: lastEventID, onEventID: onEventID) { type, data in
+            switch type {
+            case "message": return try self.decoder.decode(UsageResp.self, from: data)
+            case "heartbeat": let payload = try self.decoder.decode(StreamHeartbeat.self, from: data); onHeartbeat?(payload); return nil
+            default: return nil
+            }
+        }
     }
-    /// Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error.
+    /// Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records and repeat every 15 seconds to prove liveness. Close and rediscover bootstrap on reset/error.
     public func historyEvents(id: String, cursor: String, onManifest: ((HistoryManifest) -> Void)? = nil, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
         namedSSEStream(path: "/api/caic/v1/tasks/\(id)/history/events?cursor=\(cursor.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")", lastEventID: lastEventID, onEventID: onEventID) { type, data in
             switch type {
@@ -612,9 +618,10 @@ public final class ApiClient {
         // Reconnecting plain streams terminate on malformed payloads.
         reconnectingStream { self.sseStream(path: "/api/caic/v1/tasks/events", decodeFailure: .terminate) }
     }
-    public func globalUsageEventsReconnecting() -> AsyncThrowingStream<UsageResp, Error> {
-        // Reconnecting plain streams terminate on malformed payloads.
-        reconnectingStream { self.sseStream(path: "/api/caic/v1/usage/events", decodeFailure: .terminate) }
+    public func globalUsageEventsReconnecting(onHeartbeat: ((StreamHeartbeat) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<UsageResp, Error> {
+        // Each returned stream owns its cursor; create another stream for independent consumption.
+        let resumeID = SSECursor(lastEventID)
+        return reconnectingStream { self.globalUsageEvents(onHeartbeat: onHeartbeat, lastEventID: resumeID.get(), onEventID: { resumeID.set($0); onEventID?($0) }) }
     }
     public func historyEventsReconnecting(id: String, cursor: String, onManifest: ((HistoryManifest) -> Void)? = nil, onCheckpoint: ((HistoryCheckpoint) -> Void)? = nil, onStatsSnapshot: ((HistoryStats) -> Void)? = nil, onStats: ((EventStats) -> Void)? = nil, onReset: ((HistoryReset) -> Void)? = nil, onHistoryError: ((TaskHistoryStreamError) -> Void)? = nil, lastEventID: String? = nil, onEventID: ((String) -> Void)? = nil) -> AsyncThrowingStream<HistoryEvent, Error> {
         // Each returned stream owns its cursor; create another stream for independent consumption.

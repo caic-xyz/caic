@@ -49,6 +49,11 @@ const (
 	// EventMessage fields once SDK consumers no longer switch on the kinds.
 )
 
+// StreamHeartbeat proves transport liveness independently of mutable observations.
+type StreamHeartbeat struct {
+	Time time.Time `json:"time"` // UTC server observation time for this heartbeat.
+}
+
 // TaskHistoryStreamError reports that task history could not be replayed.
 type TaskHistoryStreamError struct {
 	Message string `json:"message"`

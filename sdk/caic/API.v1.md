@@ -83,7 +83,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}` | Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. |  | `HistoryEvent[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}` | Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[] \| null` |
-| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `manifest` (`HistoryManifest`), `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
+| GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records and repeat every 15 seconds to prove liveness. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `manifest` (`HistoryManifest`), `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
 ## Processes
 
@@ -96,7 +96,7 @@ Type notation: `JSONValue` means any valid JSON value.
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | `/api/caic/v1/usage/events` | Streams usage quota updates via SSE. |  | `UsageResp` SSE |
+| GET | `/api/caic/v1/usage/events` | Streams changed usage quota snapshots and a heartbeat every 15 seconds via SSE. |  | `UsageResp` SSE<br>Named events: `heartbeat` (`StreamHeartbeat`) |
 | GET | `/api/caic/v1/usage` | Returns current usage quota statistics. |  | `UsageResp` |
 | GET | `/api/caic/v1/usage/dashboard` | Returns daily cross-task usage rollups for the usage dashboard. |  | `UsageDashboardResp` |
 
@@ -1750,6 +1750,14 @@ UsageResp is the response for GET /api/caic/v1/usage.
 |-------|------|-------------|----------|
 | `providers` | `ProviderQuota[]` |  |  |
 | `local` | `LocalUsage` |  | yes |
+
+### StreamHeartbeat
+
+StreamHeartbeat proves transport liveness independently of mutable observations.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `time` | `ISOTimestamp` | UTC server observation time for this heartbeat. | yes |
 
 ### UsageDashboardCacheWrite
 

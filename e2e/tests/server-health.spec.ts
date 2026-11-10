@@ -14,6 +14,7 @@ for (const width of [320, 390, 1280]) {
     await page.clock.install();
     await page.clock.pauseAt(new Date());
     const clients = new Set<ServerResponse>();
+    const usageClients = new Set<ServerResponse>();
     let health: ServerHealth = {
       time: "2026-01-01T00:00:00Z" as ISOTimestamp,
       cpuPerc: 750,
@@ -27,8 +28,14 @@ for (const width of [320, 390, 1280]) {
       response.write(`data: ${JSON.stringify(event)}\n\n`);
     // A real open SSE response allows deterministic live updates and actual
     // EventSource disconnect handling, without changing application state/DOM.
-    const server = createServer((_request, response) => {
+    const server = createServer((request, response) => {
       response.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
+      if (request.url === "/usage") {
+        usageClients.add(response);
+        response.on("close", () => usageClients.delete(response));
+        response.write('event: heartbeat\ndata: {"time":"2026-01-01T00:00:00Z"}\n\n');
+        return;
+      }
       clients.add(response);
       response.on("close", () => clients.delete(response));
       send(response, { kind: "snapshot", snapshot: [], complete: true });
@@ -44,6 +51,9 @@ for (const width of [320, 390, 1280]) {
     try {
       await page.route("**/api/caic/v1/tasks/events", (route) =>
         route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/events` } }),
+      );
+      await page.route("**/api/caic/v1/usage/events", (route) =>
+        route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/usage` } }),
       );
       await page.goto("/");
       const link = page.getByRole("link", { name: /CPU .*memory .* — open System/ });
@@ -119,6 +129,7 @@ for (const width of [320, 390, 1280]) {
       await page.clock.fastForward(30_000);
       await expect(link).toBeVisible();
       for (const client of clients) send(client, { kind: "heartbeat" });
+      for (const client of usageClients) client.write('event: heartbeat\ndata: {"time":"2026-01-01T00:00:00Z"}\n\n');
       await expect(page.getByTestId("new-task-button")).toHaveAttribute("data-status", "connected");
       await page.clock.fastForward(30_000);
       await expect(link).toBeVisible();

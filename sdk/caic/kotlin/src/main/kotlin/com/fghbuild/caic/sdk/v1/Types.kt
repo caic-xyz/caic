@@ -2486,6 +2486,13 @@ data class LocalUsage(val windows: List<LocalWindow>?)
 @Serializable
 data class UsageResp(@kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
+/** StreamHeartbeat proves transport liveness independently of mutable observations. */
+@Serializable
+data class StreamHeartbeat(
+    /** UTC server observation time for this heartbeat. */
+    val time: Instant,
+)
+
 /**
  * UsageDashboardCacheWrite counts cache writes for one applied lifetime.
  * TTLSeconds zero means the provider did not report a lifetime.
