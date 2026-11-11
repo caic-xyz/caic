@@ -96,12 +96,9 @@ test("browser voice setup reads focus from shared conversation context", async (
   await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();
   const message = await setup.promise;
   expect(message.kind).toBe("session.setup");
-  const sections: unknown[] = message.context.text.split("\n").map((line: string) => JSON.parse(line));
-  expect(sections).toContainEqual({
-    resource: "caic://conversation/context",
-    status: "known",
-    content: JSON.stringify({ currentTask: { id, uri: `caic://tasks/${id}` } }),
-  });
+  // gomode sends each resource's text verbatim, separated by blank lines.
+  const sections: string[] = message.context.text.split("\n\n");
+  expect(sections).toContain(JSON.stringify({ currentTask: { id, uri: `caic://tasks/${id}` } }));
   expect(message.context.text.length).toBeLessThanOrEqual(4000);
   expect(conversation).not.toBe("");
   expect(errors).toEqual([]);
