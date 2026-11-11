@@ -2238,10 +2238,7 @@ function hasGroupTiming(group: MessageGroup): boolean {
         (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
     );
   }
-  return (
-    group.kind !== "other" ||
-    group.events.some((event) => event.kind !== "usage" && event.system?.subtype !== "step_start")
-  );
+  return group.kind !== "other" || group.events.some((event) => event.kind !== "usage");
 }
 
 // compactTokenSummary describes the harness-reported context transition on a
@@ -2449,17 +2446,11 @@ function MessageItem(props: {
           {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
         </div>
       </Match>
-      <Match when={props.ev.system?.subtype === "step_start"}>
-        <></>
-      </Match>
       <Match when={props.ev.system?.subtype === "model_rerouted"}>
         <div class={styles.systemMsg}>
           Model rerouted
           {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
         </div>
-      </Match>
-      <Match when={props.ev.system} keyed>
-        {(sys) => <div class={styles.systemMsg}>[{sys.subtype}]</div>}
       </Match>
       <Match when={props.ev.text} keyed>
         {(text) => (

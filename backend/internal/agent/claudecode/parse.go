@@ -429,12 +429,9 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 		}
 		return []agent.Message{m}, nil
 	default:
-		return []agent.Message{&agent.SystemMessage{
-			MessageType: string(w.Type),
-			Subtype:     string(w.Subtype),
-			SessionID:   w.SessionID,
-			UUID:        w.UUID,
-		}}, nil
+		// Subtypes without a presentation, including ones newer than the DTOs,
+		// stay out of the transcript like other harnesses' unrecognized records.
+		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
 	}
 }
 

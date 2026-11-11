@@ -9,6 +9,16 @@ import type {
   EventResult,
 } from "@sdk/types.gen";
 
+// System subtypes that TaskDetail's MessageItem renders in the transcript.
+const presentedSystemSubtypes = new Set([
+  "api_error",
+  "compact_error",
+  "compact_start",
+  "error",
+  "input_delivery_failed",
+  "model_rerouted",
+]);
+
 export interface MessageGroup {
   range?: { start: number; end: number } | null;
   tool?: ScopedTool;
@@ -595,12 +605,11 @@ function groupMessagesAfter(
       }
       case "system": {
         // Root context boundaries are supplied separately by the server manifest.
-        // Thread status changes (active, idle, etc.) duplicate information
-        // already in the task state — skip them to avoid noisy "other" groups.
-        // model_rerouted and other informational subtypes are rendered via MessageItem.
-        const sub = ev.system?.subtype;
-        if (sub === "active" || sub === "idle" || sub === "notLoaded" || sub === "system_error") break;
-        groups.push({ kind: "other", events: [ev], toolCalls: [] });
+        // Other subtypes, such as thread status changes, carry no transcript
+        // content, so they form no group.
+        if (presentedSystemSubtypes.has(ev.system?.subtype ?? "")) {
+          groups.push({ kind: "other", events: [ev], toolCalls: [] });
+        }
         break;
       }
       case "widgetDelta": {

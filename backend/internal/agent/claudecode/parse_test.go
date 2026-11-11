@@ -553,23 +553,26 @@ func TestParseMessage(t *testing.T) {
 			}
 		}
 	})
-	t.Run("SystemUsefulSubtypes", func(t *testing.T) {
+	t.Run("SystemUnpresentedSubtypesRaw", func(t *testing.T) {
 		t.Parallel()
-		for _, subtype := range []string{"compact_boundary", "context_cleared", "api_error"} {
-			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
+		lines := []string{
+			`{"type":"system","subtype":"api_retry","attempt":1,"session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"dev_intent","kind":"android_app","trigger":"project_scan","session_id":"s1","uuid":"u1"}`,
+		}
+		for _, line := range lines {
 			msgs, err := parseMessage([]byte(line))
 			if err != nil {
-				t.Fatalf("subtype %q: %v", subtype, err)
+				t.Fatalf("line %s: %v", line, err)
 			}
 			if len(msgs) != 1 {
-				t.Fatalf("subtype %q: got %d messages, want 1", subtype, len(msgs))
+				t.Fatalf("line %s: got %d messages, want 1", line, len(msgs))
 			}
-			sm, ok := msgs[0].(*agent.SystemMessage)
+			raw, ok := msgs[0].(*agent.RawMessage)
 			if !ok {
-				t.Fatalf("subtype %q: got %T, want *agent.SystemMessage", subtype, msgs[0])
+				t.Fatalf("line %s: got %T, want *agent.RawMessage", line, msgs[0])
 			}
-			if sm.Subtype != subtype {
-				t.Errorf("subtype = %q, want %q", sm.Subtype, subtype)
+			if raw.MessageType != "system" || string(raw.Raw) != line {
+				t.Errorf("raw = %q %s, want system %s", raw.MessageType, raw.Raw, line)
 			}
 		}
 	})

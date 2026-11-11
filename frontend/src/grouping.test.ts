@@ -288,6 +288,16 @@ describe("groupMessages", () => {
     expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
   });
 
+  it("groups only system subtypes with a transcript presentation", () => {
+    const groups = groupMessages([
+      { kind: "system", ts: 1, system: { subtype: "dev_intent" } },
+      { kind: "system", ts: 2, system: { subtype: "idle" } },
+      { kind: "system", ts: 3, system: { subtype: "model_rerouted", detail: "a → b" } },
+    ]);
+    expect(groups.map((g) => [g.kind, g.events.map((e) => e.system?.subtype)])).toEqual([
+      ["other", ["model_rerouted"]],
+    ]);
+  });
   it("consecutive tool uses form one group", () => {
     const groups = groupMessages([toolUseEvent("t1", "Read"), toolUseEvent("t2", "Bash")]);
     expect(groups).toHaveLength(1);
