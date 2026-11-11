@@ -2,8 +2,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { gzipSync } from "node:zlib";
+import { crc32, deflateRawSync, gzipSync } from "node:zlib";
 import { Zip, ZipDeflate, zipSync, strToU8 } from "three/addons/libs/fflate.module.js";
+import type { ZipInputFile } from "three/addons/libs/fflate.module.js";
 import { expect } from "@tests/expect";
 import { StepDecompressor } from "./stepCompression";
 
@@ -70,10 +71,16 @@ describe("StepDecompressor", () => {
     }
   });
 
-  it("bounds the aggregate output of concatenated gzip members", async () => {
+  it("bounds the aggregate output of concatenated gzip members", () => {
     const member = gzipSync(new Uint8Array(130 * 1024 * 1024));
     const gzip = Uint8Array.from(Buffer.concat([member, member, member, member]));
-    await expect(decompressStep(gzip, "part.step.gz", null)).rejects.toThrow("512 MiB");
+    let size = 0;
+    const decoder = new StepDecompressor("part.step.gz", (chunk) => {
+      size += chunk.length;
+    });
+    expect(() => decoder.push(gzip)).toThrow("512 MiB");
+    expect(size).toBeGreaterThan(3 * 130 * 1024 * 1024);
+    expect(size).toBeLessThanOrEqual(512 * 1024 * 1024);
   });
 
   it("rejects missing and ambiguous models", async () => {
@@ -127,7 +134,20 @@ describe("StepDecompressor", () => {
   });
 
   it("supports models larger than 128 MiB and archive subviews", async () => {
-    const zip = zipSync({ "part.stp": new Uint8Array(144 * 1024 * 1024) });
+    // Native zlib builds this large fixture without measuring JavaScript
+    // compression; the production decoder still processes every model byte.
+    const source = new Uint8Array(144 * 1024 * 1024);
+    const chunks: Uint8Array[] = [];
+    const archive = new Zip((error, chunk) => {
+      if (error) throw error;
+      chunks.push(chunk);
+    });
+    const model: ZipInputFile = { filename: "part.stp", compression: 8, size: source.length, crc: crc32(source) };
+    archive.add(model);
+    assert.ok(model.ondata);
+    model.ondata(null, deflateRawSync(source), true);
+    archive.end();
+    const zip = Buffer.concat(chunks);
     const storage = new Uint8Array(zip.length + 32);
     storage.set(zip, 16);
     const output = await decompressStep(storage.subarray(16, 16 + zip.length), "part.stpz", null);

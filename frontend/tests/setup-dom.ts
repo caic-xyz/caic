@@ -2,11 +2,8 @@
 // Loaded via `node --test --import ./frontend/tests/setup-dom.ts` so every test-file child
 // process gets a DOM before module evaluation, like vitest's environment: "jsdom".
 import { readFileSync } from "node:fs";
-import { registerHooks } from "node:module";
+import { createRequire, registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
-import babel from "@babel/core";
-import solidPreset from "babel-preset-solid";
-import typescriptPreset from "@babel/preset-typescript";
 import { JSDOM } from "jsdom";
 import { afterEach } from "node:test";
 
@@ -182,6 +179,7 @@ const isStubbedSpecifier = (specifier: string): boolean => {
 
 // Solid TSX must go through babel-preset-solid (the vite-plugin-solid transform);
 // esbuild cannot compile Solid's JSX, and solid-js ships no jsx-runtime functions.
+const loadModule = createRequire(import.meta.url);
 registerHooks({
   resolve(specifier, context, nextResolve) {
     // Match Vite's runtime deduplication when gomode is linked from a sibling checkout.
@@ -244,13 +242,19 @@ registerHooks({
       };
     }
     if (/\.tsx$/.test(url.split("?")[0]!)) {
+      // Pure TypeScript tests never compile TSX, so keep the Babel dependency
+      // graph out of those isolated processes.
+      const babel = loadModule("@babel/core") as typeof import("@babel/core");
       const filePath = fileURLToPath(url.split("?")[0]!);
       const result = babel.transformSync(readFileSync(filePath, "utf8"), {
         filename: filePath,
         sourceType: "module",
         presets: [
-          [solidPreset, { moduleName: "solid-js/web", generate: "dom", hydratable: false }],
-          [typescriptPreset, { isTSX: true, allExtensions: true }],
+          [
+            loadModule.resolve("babel-preset-solid"),
+            { moduleName: "solid-js/web", generate: "dom", hydratable: false },
+          ],
+          [loadModule.resolve("@babel/preset-typescript"), { isTSX: true, allExtensions: true }],
         ],
       });
       return { format: "module", shortCircuit: true, source: result?.code ?? "" };

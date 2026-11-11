@@ -1,4 +1,5 @@
 // Tests paged STEP byte ownership and UTF-8 record decoding across page boundaries.
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import { StepBytes } from "./stepBytes";
@@ -12,6 +13,6 @@ describe("StepBytes", () => {
     expect(bytes.length).toBe(source.length);
     expect(bytes.text(256 * 1024 - 2, 256 * 1024 + 4)).toBe("xéΩz");
     expect(bytes.text(0, source.length)).toBe(text);
-    expect(bytes.takeContiguous()).toEqual(source);
+    assert.deepEqual(bytes.takeContiguous(), source);
   });
 });
