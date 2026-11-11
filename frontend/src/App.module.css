@@ -33,6 +33,12 @@
   min-height: 0;
 }
 
+.voiceShell {
+  /* Keep overflowed mobile task cards below voice recovery controls. */
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
 .voiceHidden {
   display: none;
 }

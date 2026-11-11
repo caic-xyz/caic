@@ -22,5 +22,6 @@ declare const classes: {
   readonly "titleButton": string;
   readonly "visuallyHidden": string;
   readonly "voiceHidden": string;
+  readonly "voiceShell": string;
 };
 export default classes;

@@ -1,4 +1,4 @@
-// Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
+// Tests app-shell task creation, workspace navigation, account/connection isolation, image drafts, warnings, health, and preferences.
 
 import assert from "node:assert/strict";
 import { historyManifest } from "@tests/history";
@@ -388,8 +388,8 @@ afterEach(() => {
   delete window.goModeFrontendDocument;
   delete window.gomodeAuth;
   delete window.gomodeFrontendReadiness;
-  vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function preparationBridge() {
@@ -4413,6 +4413,97 @@ it("keeps usage heartbeat traffic alive and retires its timer offline", async ()
   } finally {
     view.unmount();
   }
+});
+
+for (const retirement of ["hidden", "offline", "dispose"] as const) {
+  it(`cancels an in-flight connection auth probe when ${retirement}`, async () => {
+    window.__CAIC_BOOTSTRAP__ = {
+      authProviders: ["github"],
+      user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
+    };
+    const probe = deferred<Response>();
+    const signals: AbortSignal[] = [];
+    const previousFetch = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (input !== "/auth/me") return previousFetch(input, init);
+      assert.ok(init?.signal);
+      signals.push(init.signal);
+      return probe.promise;
+    });
+    const view = renderApp();
+    await waitForTaskEventsSubscription();
+    const stream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value;
+    assert.ok(stream);
+    stream.onerror?.(new Event("error"));
+    expect(signals).toHaveLength(1);
+    if (retirement === "hidden") {
+      vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+      fireEvent(document, new Event("visibilitychange"));
+    } else if (retirement === "offline") networkOnline(false);
+    else view.unmount();
+    expect(signals[0]?.aborted).toBe(true);
+    probe.resolve(new Response(null, { status: 404 }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(taskEventSubscriptions).toBe(1);
+    if (retirement !== "dispose") {
+      expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+}
+
+it("ignores a retired retry callback after network replacement", async () => {
+  const view = renderApp();
+  await waitForTaskEventsSubscription();
+  vi.useFakeTimers();
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  const stream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value;
+  assert.ok(stream);
+  stream.onerror?.(new Event("error"));
+  await Promise.resolve();
+  await Promise.resolve();
+  const retry = timers.mock.calls.find(([, delay]) => delay !== undefined && delay >= 375 && delay <= 625)?.[0];
+  assert.equal(typeof retry, "function");
+  networkOnline(true);
+  expect(taskEventSubscriptions).toBe(2);
+  if (typeof retry === "function") retry();
+  expect(taskEventSubscriptions).toBe(2);
+  view.unmount();
+});
+
+it("ignores a superseded task watchdog callback after a heartbeat", async () => {
+  const view = renderApp();
+  await waitForTaskEventsSubscription();
+  vi.useFakeTimers();
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  dispatchSSE({ kind: "heartbeat" });
+  const watchdog = timers.mock.calls.find(([, delay]) => delay === 45_000)?.[0];
+  assert.equal(typeof watchdog, "function");
+  dispatchSSE({ kind: "heartbeat" });
+  const stream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource;
+  if (typeof watchdog === "function") watchdog();
+  expect(stream.close).not.toHaveBeenCalled();
+  view.unmount();
+});
+
+it("retries usage independently and coalesces repeated retired transport errors", async () => {
+  const view = renderApp();
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ title: "Keep this task" })], complete: true });
+  const taskStream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource;
+  const usageStream = vi.mocked(api.globalUsageEvents).mock.results.at(-1)?.value as FakeEventSource;
+  vi.useFakeTimers();
+  usageStream.onerror?.(new Event("error"));
+  usageStream.onerror?.(new Event("error"));
+  await Promise.resolve();
+  await Promise.resolve();
+  vi.advanceTimersByTime(1000);
+  expect(api.globalUsageEvents).toHaveBeenCalledTimes(2);
+  expect(taskEventSubscriptions).toBe(1);
+  expect(taskStream.close).not.toHaveBeenCalled();
+  expect(screen.getByText("Keep this task")).toBeInTheDocument();
+  view.unmount();
 });
 
 it("retains health across task reconnects and ignores retired streams", async () => {

@@ -218,7 +218,7 @@ function Shell(props: { children?: JSX.Element }) {
           />
           <VoiceTaskFocus mobile={mobile} />
           <div
-            class={`${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}
+            class={`${styles.voiceShell} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}
             inert={taskView() === "fullscreen"}
             aria-hidden={taskView() === "fullscreen"}
           >

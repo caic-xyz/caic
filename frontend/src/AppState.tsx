@@ -1,4 +1,4 @@
-// Account-owned task membership, initial voice data readiness, connection state, settings, actions, caches, and drafts.
+// Account-owned task membership, task/usage connection lifetimes, voice readiness, settings, actions, caches, and drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import {
@@ -80,6 +80,13 @@ function confirmImmediatePurge(task: Task): boolean {
 
 type PendingTaskUpdate = { kind: "patch"; patch: Record<string, unknown> } | { kind: "replace" } | { kind: "delete" };
 
+type EventConnectionAttempt = {
+  signal: AbortSignal;
+  current(): boolean;
+  opened(): void;
+  retry(): void;
+};
+
 type TaskRecovery = {
   updates: PendingTaskUpdate[];
 };
@@ -156,7 +163,7 @@ function createAppStore() {
   // tasks; ordinary deltas and partial reconnect snapshots do not revoke it.
   const [initialTasksReady, setInitialTasksReady] = createSignal(false);
   createEffect(() => frontendPreparation().setDataReady(initialTasksReady()));
-  let taskStreamGeneration = 0;
+  let taskAttempt: EventConnectionAttempt | null = null;
   let taskMembership = new Set<string>();
   const [tasksLoading, setTasksLoading] = createSignal(true);
   // Runtime and history restoration state, driven by the task-list stream.
@@ -698,7 +705,8 @@ function createAppStore() {
   const ensureTask = async (id: string) => {
     if (!taskStreamReady() || taskRecoveries.has(id)) return;
     if (!taskSnapshotComplete() && !taskMembership.has(id)) return;
-    const streamGeneration = taskStreamGeneration;
+    const attempt = taskAttempt;
+    if (attempt === null) return;
     const recovery: TaskRecovery = { updates: [] };
     taskRecoveries.set(id, recovery);
     try {
@@ -712,12 +720,7 @@ function createAppStore() {
       // A newer snapshot or upsert supplied the complete task while this GET
       // was in flight. Its response is now stale, and later patches were
       // applied directly after that authoritative event.
-      if (
-        accountController.signal.aborted ||
-        taskStreamGeneration !== streamGeneration ||
-        taskRecoveries.get(id) !== recovery
-      )
-        return;
+      if (accountController.signal.aborted || !attempt.current() || taskRecoveries.get(id) !== recovery) return;
 
       const updates = recovery.updates;
       let replayFrom = 0;
@@ -820,30 +823,19 @@ function createAppStore() {
   const [connected, setConnected] = createSignal(true);
   // Resource warnings retain the last observation; connection liveness is separate.
   const [serverHealth, setServerHealth] = createSignal<ServerHealth | null>(null);
-  {
-    let taskES: EventSource | null = null;
-    let usageES: EventSource | null = null;
-    let usageStreamGeneration = 0;
-    let taskWatchdog: ReturnType<typeof setTimeout> | null = null;
-    let usageWatchdog: ReturnType<typeof setTimeout> | null = null;
-    let taskTimer: ReturnType<typeof setTimeout> | null = null;
-    let usageTimer: ReturnType<typeof setTimeout> | null = null;
-    let taskDelay = 500;
-    let usageDelay = 500;
-    let active = false;
-    let generation = 0;
+  createEffect(() => {
+    if (!isAuthenticated()) return;
+    const lifetime = new AbortController();
 
-    /** Probe whether the session is gone. EventSource doesn't expose status codes. */
-    async function checkUnauthorized(probeGeneration: number): Promise<boolean> {
-      if (!active || generation !== probeGeneration) return true;
-      // Auth-disabled services have no missing session to probe: /auth/me can
-      // legitimately return 404 while cached frontend task tools remain usable.
+    // A transport error cannot confirm logout without a successful session probe.
+    async function checkUnauthorized(signal: AbortSignal): Promise<boolean> {
+      if (signal.aborted) return true;
       if (auth.ready() && auth.providers().length === 0) return false;
       try {
         const res = await fetch("/auth/me", {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
         });
-        if (!active || generation !== probeGeneration) return true;
+        if (signal.aborted) return true;
         if (res.status === 401 || res.status === 404) {
           auth.confirmLoggedOut();
           return true;
@@ -853,25 +845,103 @@ function createAppStore() {
       }
       return false;
     }
+
+    // Both streams own a transport followed by one cancellable probe/retry.
+    // Stream-specific snapshots and liveness stay with their callers.
+    function createConnection(open: (attempt: EventConnectionAttempt) => EventSource) {
+      type State =
+        | { kind: "stream"; controller: AbortController; source: EventSource | null }
+        | { kind: "retry"; controller: AbortController; timer: ReturnType<typeof setTimeout> | null };
+      let state: State | null = null;
+      let delay = 500;
+      const stop = () => {
+        const previous = state;
+        state = null;
+        if (previous === null) return;
+        previous.controller.abort();
+        if (previous.kind === "stream") previous.source?.close();
+        else if (previous.timer !== null) clearTimeout(previous.timer);
+      };
+      const connect = () => {
+        stop();
+        if (lifetime.signal.aborted || document.hidden || !navigator.onLine) return;
+        const stream: Extract<State, { kind: "stream" }> = {
+          kind: "stream",
+          controller: new AbortController(),
+          source: null,
+        };
+        state = stream;
+        const current = () => state === stream && !lifetime.signal.aborted && !accountController.signal.aborted;
+        const retry = () => {
+          if (!current()) return;
+          stop();
+          const pending: Extract<State, { kind: "retry" }> = {
+            kind: "retry",
+            controller: new AbortController(),
+            timer: null,
+          };
+          state = pending;
+          void checkUnauthorized(pending.controller.signal).then((loggedOut) => {
+            if (loggedOut || state !== pending || lifetime.signal.aborted) return;
+            pending.timer = setTimeout(() => {
+              if (state === pending) connect();
+            }, jitteredDelay(delay));
+            delay = Math.min(delay * 1.5, 30_000);
+          });
+        };
+        stream.source = open({
+          signal: stream.controller.signal,
+          current,
+          opened: () => {
+            delay = 500;
+          },
+          retry,
+        });
+        stream.source.onerror = retry;
+      };
+      return {
+        stop,
+        start() {
+          delay = 500;
+          connect();
+        },
+      };
+    }
     const initialScriptSrc = document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
 
-    function connectTasks() {
-      const streamGeneration = ++taskStreamGeneration;
+    const taskConnection = createConnection((attempt) => {
+      taskAttempt = attempt;
       setTaskStreamReady(false);
       setTaskSnapshotComplete(false);
       taskRecoveries.clear();
       setDetailTask(null);
-      const currentStream = () =>
-        active && !accountController.signal.aborted && streamGeneration === taskStreamGeneration;
-      // Any task-stream event proves liveness. Usage traffic cannot keep a
-      // stalled task connection alive. Three missed 15-second heartbeats retry.
+      const currentStream = attempt.current;
+      let watchdog: { timer: ReturnType<typeof setTimeout> } | null = null;
+      attempt.signal.addEventListener(
+        "abort",
+        () => {
+          if (watchdog !== null) clearTimeout(watchdog.timer);
+          watchdog = null;
+          taskAttempt = null;
+          setTaskStreamReady(false);
+          setTaskSnapshotComplete(false);
+          taskRecoveries.clear();
+          setDetailTask(null);
+          setConnected(false);
+        },
+        { once: true },
+      );
+      // Usage traffic cannot keep a stalled task connection alive.
       const armWatchdog = () => {
-        if (taskWatchdog !== null) clearTimeout(taskWatchdog);
-        taskWatchdog = setTimeout(() => {
-          if (currentStream()) disconnectTasks();
-        }, 45_000);
+        if (watchdog !== null) clearTimeout(watchdog.timer);
+        const pending = {
+          timer: setTimeout(() => {
+            if (watchdog === pending && currentStream()) attempt.retry();
+          }, 45_000),
+        };
+        watchdog = pending;
       };
-      taskES = api.globalTaskEvents({
+      const source = api.globalTaskEvents({
         onMessage: (event) => {
           if (!currentStream()) return;
           armWatchdog();
@@ -979,14 +1049,14 @@ function createAppStore() {
           showWarning(`Task list event error: ${msg}`);
         },
       });
-      taskES.addEventListener("open", () => {
+      source.addEventListener("open", () => {
         if (!currentStream()) return;
         armWatchdog();
         setConnected(true);
         void refreshServerConfig(currentStream);
-        taskDelay = 500;
+        attempt.opened();
         // Check if frontend was rebuilt while disconnected.
-        fetch("/index.html")
+        fetch("/index.html", { signal: attempt.signal })
           .then((r) => r.text())
           .then((html) => {
             if (!currentStream()) return;
@@ -997,43 +1067,32 @@ function createAppStore() {
           })
           .catch(() => {});
       });
-      function disconnectTasks() {
-        if (!currentStream()) return;
-        if (taskWatchdog !== null) clearTimeout(taskWatchdog);
-        taskWatchdog = null;
-        taskStreamGeneration++;
-        setTaskStreamReady(false);
-        setTaskSnapshotComplete(false);
-        taskRecoveries.clear();
-        setDetailTask(null);
-        taskES?.close();
-        taskES = null;
-        setConnected(false);
-        if (taskTimer !== null) clearTimeout(taskTimer);
-        const probeGeneration = generation;
-        checkUnauthorized(probeGeneration)
-          .then((loggedOut) => {
-            if (loggedOut || !active || generation !== probeGeneration) return;
-            taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
-            taskDelay = Math.min(taskDelay * 1.5, 30_000);
-          })
-          .catch((err: unknown) => showWarning(`Task reconnect failed: ${String(err)}`));
-      }
-      taskES.onerror = disconnectTasks;
       armWatchdog();
-    }
+      return source;
+    });
 
-    function connectUsage() {
-      if (!active || document.hidden || !navigator.onLine) return;
-      const streamGeneration = ++usageStreamGeneration;
-      const currentStream = () =>
-        active && !accountController.signal.aborted && streamGeneration === usageStreamGeneration;
+    const usageConnection = createConnection((attempt) => {
+      const currentStream = attempt.current;
+      let watchdog: { timer: ReturnType<typeof setTimeout> } | null = null;
+      attempt.signal.addEventListener(
+        "abort",
+        () => {
+          if (watchdog !== null) clearTimeout(watchdog.timer);
+          watchdog = null;
+        },
+        { once: true },
+      );
       const alive = () => {
         if (!currentStream()) return;
-        if (usageWatchdog !== null) clearTimeout(usageWatchdog);
-        usageWatchdog = setTimeout(disconnectUsage, 45_000);
+        if (watchdog !== null) clearTimeout(watchdog.timer);
+        const pending = {
+          timer: setTimeout(() => {
+            if (watchdog === pending && currentStream()) attempt.retry();
+          }, 45_000),
+        };
+        watchdog = pending;
       };
-      usageES = api.globalUsageEvents({
+      const source = api.globalUsageEvents({
         onHeartbeat: alive,
         onMessage: (event) => {
           if (currentStream()) {
@@ -1047,105 +1106,38 @@ function createAppStore() {
           showWarning(`Usage event error: ${msg}`);
         },
       });
-      usageES.addEventListener("open", () => {
+      source.addEventListener("open", () => {
         if (!currentStream()) return;
         alive();
-        usageDelay = 500;
+        attempt.opened();
       });
-      function disconnectUsage() {
-        if (!currentStream()) return;
-        if (usageWatchdog !== null) clearTimeout(usageWatchdog);
-        usageWatchdog = null;
-        usageStreamGeneration++;
-        usageES?.close();
-        usageES = null;
-        if (usageTimer !== null) clearTimeout(usageTimer);
-        const probeGeneration = generation;
-        checkUnauthorized(probeGeneration)
-          .then((loggedOut) => {
-            if (loggedOut || !active || generation !== probeGeneration) return;
-            usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
-            usageDelay = Math.min(usageDelay * 1.5, 30_000);
-          })
-          .catch((err: unknown) => showWarning(`Usage reconnect failed: ${String(err)}`));
-      }
-      usageES.onerror = disconnectUsage;
       alive();
-    }
-
-    function closeAll() {
-      if (usageWatchdog !== null) clearTimeout(usageWatchdog);
-      usageWatchdog = null;
-      if (taskWatchdog !== null) clearTimeout(taskWatchdog);
-      taskWatchdog = null;
-      generation++;
-      usageStreamGeneration++;
-      taskStreamGeneration++;
-      setTaskStreamReady(false);
-      setTaskSnapshotComplete(false);
-      taskRecoveries.clear();
-      setDetailTask(null);
-      taskES?.close();
-      taskES = null;
-      usageES?.close();
-      usageES = null;
-      if (taskTimer !== null) clearTimeout(taskTimer);
-      taskTimer = null;
-      if (usageTimer !== null) clearTimeout(usageTimer);
-      usageTimer = null;
-    }
+      return source;
+    });
 
     function connectAll() {
-      closeAll();
-      if (!active || document.hidden || !navigator.onLine) {
+      taskConnection.stop();
+      usageConnection.stop();
+      if (document.hidden || !navigator.onLine) {
         setConnected(false);
         return;
       }
-      taskDelay = 500;
-      usageDelay = 500;
-      connectTasks();
-      connectUsage();
+      taskConnection.start();
+      usageConnection.start();
     }
 
-    /** Pause reconnection when tab is hidden or offline; reconnect immediately when back. */
-    function onVisibilityChange() {
-      if (document.hidden) {
-        closeAll();
-        setConnected(false);
-      } else if (navigator.onLine) {
-        connectAll();
-      }
-    }
-
-    function onOnline() {
-      if (!document.hidden) connectAll();
-    }
-
-    function onOffline() {
-      closeAll();
-      setConnected(false);
-    }
-
-    createEffect(() => {
-      if (!isAuthenticated()) return;
-      active = true;
-      generation++;
-      connectAll();
-      document.addEventListener("visibilitychange", onVisibilityChange);
-      const stopObserving = observeNetworkChanges(() => {
-        if (navigator.onLine) onOnline();
-        else onOffline();
-      });
-      onCleanup(() => {
-        active = false;
-        generation++;
-        closeAll();
-        setServerHealth(null);
-        document.removeEventListener("visibilitychange", onVisibilityChange);
-        stopObserving();
-      });
+    connectAll();
+    document.addEventListener("visibilitychange", connectAll);
+    const stopObserving = observeNetworkChanges(connectAll);
+    onCleanup(() => {
+      lifetime.abort();
+      taskConnection.stop();
+      usageConnection.stop();
+      setServerHealth(null);
+      document.removeEventListener("visibilitychange", connectAll);
+      stopObserving();
     });
-  }
+  });
 
   // Clear stale actionId once the server state reflects the transition.
   createEffect(() => {

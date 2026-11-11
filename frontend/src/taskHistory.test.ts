@@ -1,4 +1,4 @@
-// Tests current-only paging, atomic live context changes, exact handoff, and disclosure cancellation.
+// Tests owned history bootstrap, boundary waits, exact live handoff, retries, and disclosure cancellation.
 import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
@@ -616,6 +616,185 @@ it("returns an empty setup disclosure before any setup or init without a request
       owner.requests.filter((url) => url.includes("/setup/")),
       [],
     );
+  } finally {
+    owner.dispose();
+  }
+});
+
+it("buffers ordinary live output during bootstrap and publishes its exact suffix once", async () => {
+  vi.useFakeTimers();
+  const events = [text(1, "bootstrap", 0)];
+  const value = historyManifest(events, "");
+  const owner = fixture(events, value);
+  const original = defined(fetchMock.getMockImplementation());
+  let release: (response: Response) => void = () => {};
+  let signal: AbortSignal | null = null;
+  fetchMock.mockImplementation((input, init) => {
+    if (!String(input).includes("/slice/")) return original(input, init);
+    signal = init?.signal ?? null;
+    return new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+  });
+  try {
+    for (let i = 0; !signal && i < 20; i++) await yieldToTasks();
+    assert.ok(signal);
+    const stream = defined(owner.connections[0]).handlers;
+    stream.onMessage(text(2, "live one", 0));
+    stream.onMessage(text(2, "duplicate", 0));
+    stream.onMessage(text(2, "live two", 1));
+    const next = structuredClone(value);
+    next.bootstrap.through = 2;
+    stream.onManifest?.(next);
+    vi.advanceTimersByTime(100);
+    assert.deepEqual(values(owner), []);
+    release(historyResponse(events));
+    await loaded(owner);
+    assert.deepEqual(values(owner), ["bootstrap", "live one", "live two"]);
+    assert.deepEqual(owner.position(defined(owner.messages().at(-1))), { recordID: 2, index: 1 });
+  } finally {
+    owner.dispose();
+  }
+});
+
+it("waits for the paired boundary manifest without rereading an obsolete bootstrap body", async () => {
+  vi.useFakeTimers();
+  const events = [text(1, "obsolete", 0)];
+  const value = historyManifest(events, "");
+  const owner = fixture(events, value);
+  const original = defined(fetchMock.getMockImplementation());
+  let release: (response: Response) => void = () => {};
+  let reads = 0;
+  fetchMock.mockImplementation((input, init) => {
+    if (!String(input).endsWith("/slice/1/0/1/0")) return original(input, init);
+    reads++;
+    return new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+  });
+  const boundary: HistoryEvent = {
+    recordID: 2,
+    index: 0,
+    message: { kind: "system", ts: 2, system: { subtype: "compact_boundary" } },
+  };
+  const current = text(3, "current", 0);
+  try {
+    for (let i = 0; !reads && i < 20; i++) await yieldToTasks();
+    assert.equal(reads, 1);
+    const stream = defined(owner.connections[0]).handlers;
+    stream.onMessage(boundary);
+    stream.onMessage(current);
+    release(historyResponse(events));
+    await yieldToTasks();
+    assert.equal(owner.loading(), true);
+    assert.deepEqual(values(owner), []);
+    stream.onManifest?.(structuredClone(value));
+    vi.advanceTimersByTime(100);
+    await yieldToTasks();
+    assert.equal(reads, 1);
+    assert.deepEqual(values(owner), []);
+    events.push(boundary, current);
+    const next = structuredClone(value);
+    next.bootstrap.through = 3;
+    defined(next.sections).push({
+      id: "2",
+      body: { first: boundary, last: current },
+      boundary,
+      turnCount: 1,
+      textCount: 1,
+      toolCount: 0,
+      durationMs: 1,
+      skills: [],
+    });
+    stream.onManifest?.(next);
+    await loaded(owner);
+    assert.deepEqual(values(owner), ["current"]);
+  } finally {
+    owner.dispose();
+  }
+});
+
+it("retires a pending bootstrap body when the stream replaces its history generation", async () => {
+  const events = [text(1, "old generation", 0)];
+  const first = historyManifest(events, "");
+  const owner = fixture(events, first);
+  const original = defined(fetchMock.getMockImplementation());
+  const nextEvents = [text(1, "new generation", 0)];
+  const next = historyManifest(nextEvents, "");
+  next.bootstrap.generation = "replacement";
+  next.bootstrap.resourceBase = "/history/owner/3/replacement";
+  let release: (response: Response) => void = () => {};
+  let signal: AbortSignal | null = null;
+  fetchMock.mockImplementation((input, init) => {
+    const url = String(input);
+    if (url.endsWith("/manifest")) return Promise.resolve(Response.json(next));
+    if (url.includes("/test/slice/")) {
+      signal = init?.signal ?? null;
+      return new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    }
+    if (url.includes("/replacement/slice/")) return Promise.resolve(historyResponse(nextEvents));
+    return original(input, init);
+  });
+  try {
+    for (let i = 0; !signal && i < 20; i++) await yieldToTasks();
+    assert.ok(signal);
+    const retired = defined(owner.connections[0]);
+    retired.handlers.onManifest?.(next);
+    assert.equal((signal as AbortSignal).aborted, true);
+    assert.equal(retired.close.mock.calls.length, 1);
+    await loaded(owner);
+    release(historyResponse(events));
+    retired.handlers.onMessage(text(2, "retired", 0));
+    await yieldToTasks();
+    assert.deepEqual(values(owner), ["new generation"]);
+    assert.equal(owner.connections.length, 2);
+  } finally {
+    owner.dispose();
+  }
+});
+
+it("does not let a retired retry callback replace a recovered attempt", async () => {
+  vi.useFakeTimers();
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  const events = [text(1, "retained", 0)];
+  const owner = fixture(events, historyManifest(events, ""));
+  try {
+    await loaded(owner);
+    defined(owner.connections[0]).handlers.onError?.(new Error("broken stream"));
+    const callback = defined(timers.mock.calls.find((call) => call[1] === 500)?.[0]);
+    assert.equal(typeof callback, "function");
+    owner.retry();
+    await loaded(owner);
+    assert.equal(owner.connections.length, 2);
+    if (typeof callback === "function") callback();
+    await yieldToTasks();
+    assert.equal(owner.connections.length, 2);
+    assert.deepEqual(values(owner), ["retained"]);
+  } finally {
+    owner.dispose();
+    timers.mockRestore();
+  }
+});
+
+it("keeps offline disclosures usable through their published resource", async (t) => {
+  let online = true;
+  t.mock.getter(navigator, "onLine", () => online);
+  const events = [text(1, "cached current", 0)];
+  const value = historyManifest(events, "");
+  const owner = fixture(events, value);
+  try {
+    await loaded(owner);
+    online = false;
+    window.dispatchEvent(new Event("offline"));
+    const reads: Promise<HistoryEvent[]>[] = [];
+    assert.doesNotThrow(() => {
+      reads.push(owner.readSection(defined(defined(value.sections)[0]), new AbortController().signal));
+    });
+    const decoded = await defined(reads[0]);
+    assert.equal(decoded[0]?.message.text?.text, "cached current");
+    assert.deepEqual(values(owner), ["cached current"]);
   } finally {
     owner.dispose();
   }

@@ -1,4 +1,4 @@
-// Publishes coherent current-context snapshots while owning exact live handoff, disclosure reads, and recovery.
+// Publishes coherent history snapshots through owned bootstrap attempts, live handoff, and resource-bound disclosures.
 import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
 import { batch, createSignal, onCleanup, untrack } from "solid-js";
 import type {
@@ -17,6 +17,27 @@ import { api } from "./api";
 import { readHistoryBatches } from "./historyStream";
 import { compareHistoryPosition, historyChunkFirst } from "./historyPosition";
 
+type Bootstrap =
+  | { kind: "discovering" }
+  | { kind: "reading"; controller: AbortController }
+  | { kind: "waiting" }
+  | { kind: "failed" }
+  | { kind: "live" };
+
+interface HistoryAttempt {
+  controller: AbortController;
+  manifest: HistoryManifest | null;
+  bootstrap: Bootstrap;
+  pending: HistoryEvent[];
+  lastLive: HistoryPosition | null;
+  source: EventSource | null;
+  publishTimer: ReturnType<typeof setTimeout> | null;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  watchdog: ReturnType<typeof setTimeout> | null;
+  incomingStats: EventStats[] | null;
+  observedThrough: number;
+}
+
 export function createTaskHistory(id: string): TaskHistory {
   const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
   const [manifest, setManifest] = createSignal<HistoryManifest | null>(null);
@@ -26,25 +47,12 @@ export function createTaskHistory(id: string): TaskHistory {
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
   let positions = new WeakMap<EventMessage, HistoryPosition>();
-  let pending: HistoryEvent[] = [];
-  let discovery: HistoryManifest | null = null;
-  let currentID: string | null = null;
-  let lastLive: HistoryPosition | null = null;
-  let source: EventSource | null = null;
-  let controller = new AbortController();
   let publishedReads = new AbortController();
-  let bodyRequest: AbortController | null = null;
-  let active = true;
-  let complete = false;
-  let waitingManifest = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let attempt: HistoryAttempt | null = null;
+  let disposed = false;
   let retryDelay = 500;
-  let watchdog: ReturnType<typeof setTimeout> | null = null;
-  let incomingStats: EventStats[] | null = null;
-  let observedThrough = 0;
 
-  const current = (signal: AbortSignal) => active && !signal.aborted && signal === controller.signal;
+  const current = (owner: HistoryAttempt) => attempt === owner && !owner.controller.signal.aborted;
   const client = (signal: AbortSignal) => createApiClient((url, init) => fetch(url, { ...init, signal }));
   function fail(value: unknown) {
     setError(value instanceof Error ? value.message : String(value));
@@ -100,23 +108,23 @@ export function createTaskHistory(id: string): TaskHistory {
     }
     return events;
   }
-  function awaitingBoundary() {
-    return pending.some(
+  function awaitingBoundary(owner: HistoryAttempt) {
+    return owner.pending.some(
       (event) =>
         !isChildEvent(event.message) &&
         (event.message.init ||
           event.message.system?.subtype === "compact_boundary" ||
           event.message.system?.subtype === "context_cleared") &&
-        event.recordID > (discovery?.bootstrap.through ?? 0),
+        event.recordID > (owner.manifest?.bootstrap.through ?? 0),
     );
   }
-  function publish() {
-    if (!complete || !discovery) return;
+  function publish(owner: HistoryAttempt) {
+    if (!current(owner) || owner.bootstrap.kind !== "live") return;
     // A boundary changes the owning section. Wait for its paired manifest so old
     // transcripts never briefly enter the current conversation DOM.
-    if (awaitingBoundary()) return;
-    const added = pending;
-    pending = [];
+    if (awaitingBoundary(owner)) return;
+    const added = owner.pending;
+    owner.pending = [];
     if (!added.length) return;
     setMessages((previous) => {
       for (const event of added) {
@@ -126,26 +134,29 @@ export function createTaskHistory(id: string): TaskHistory {
       return previous;
     });
   }
-  function reconcile(value: HistoryManifest) {
-    if (discovery && value.bootstrap.generation !== discovery.bootstrap.generation) {
+  function reconcile(owner: HistoryAttempt, value: HistoryManifest) {
+    const previous = owner.manifest;
+    if (previous && value.bootstrap.generation !== previous.bootstrap.generation) {
       void discover();
       return;
     }
-    if (discovery && value.bootstrap.through < discovery.bootstrap.through) return;
+    if (previous && value.bootstrap.through < previous.bootstrap.through) return;
     const section = value.sections?.at(-1);
-    const changed = section?.id !== currentID;
-    discovery = value;
-    observedThrough = Math.max(observedThrough, value.bootstrap.through);
+    const changed = section?.id !== previous?.sections?.at(-1)?.id;
+    owner.manifest = value;
+    owner.observedThrough = Math.max(owner.observedThrough, value.bootstrap.through);
     batch(() => {
-      if (!complete) {
-        if (changed || waitingManifest) {
-          waitingManifest = false;
-          void loadCurrent(value);
-        }
+      if (owner.bootstrap.kind !== "live") {
+        if (
+          changed ||
+          owner.bootstrap.kind === "discovering" ||
+          (owner.bootstrap.kind === "waiting" && !awaitingBoundary(owner))
+        )
+          void loadCurrent(owner, value);
         return;
       }
       setManifest(value);
-      setThrough(observedThrough);
+      setThrough(owner.observedThrough);
       if (changed) {
         const first = section?.body?.first;
         const retained: EventMessage[] = [];
@@ -157,28 +168,26 @@ export function createTaskHistory(id: string): TaskHistory {
             nextPositions.set(message, position);
           }
         }
-        pending = pending.filter((event) => first && compareHistoryPosition(event, first) >= 0);
+        owner.pending = owner.pending.filter((event) => first && compareHistoryPosition(event, first) >= 0);
         positions = nextPositions;
-        currentID = section?.id ?? null;
-        setEpoch((revision) => revision + 1);
+        setEpoch((before) => before + 1);
         setMessages(retained);
       }
-      publish();
+      publish(owner);
     });
   }
-  async function loadCurrent(value: HistoryManifest) {
-    bodyRequest?.abort();
-    const request = new AbortController();
-    bodyRequest = request;
-    const signal = AbortSignal.any([controller.signal, request.signal]);
+  async function loadCurrent(owner: HistoryAttempt, value: HistoryManifest) {
+    if (owner.bootstrap.kind === "reading") owner.bootstrap.controller.abort();
+    const reading: Bootstrap & { kind: "reading" } = { kind: "reading", controller: new AbortController() };
+    owner.bootstrap = reading;
+    const signal = AbortSignal.any([owner.controller.signal, reading.controller.signal]);
     const section = value.sections?.at(-1);
-    currentID = section?.id ?? null;
     try {
       const events = section ? await sectionBody(value, section, signal) : [];
       signal.throwIfAborted();
-      if (!active || bodyRequest !== request) return;
-      if (awaitingBoundary()) {
-        waitingManifest = true;
+      if (!current(owner) || owner.bootstrap !== reading) return;
+      if (awaitingBoundary(owner)) {
+        owner.bootstrap = { kind: "waiting" };
         return;
       }
       const previous = untrack(messages);
@@ -198,8 +207,8 @@ export function createTaskHistory(id: string): TaskHistory {
         positions.set(message, { recordID: event.recordID, index: event.index });
         decoded.push(message);
       }
-      pending = pending.filter((event) => event.recordID > value.bootstrap.through);
-      complete = true;
+      owner.pending = owner.pending.filter((event) => event.recordID > value.bootstrap.through);
+      owner.bootstrap = { kind: "live" };
       if (!sameScope) {
         publishedReads.abort();
         publishedReads = new AbortController();
@@ -211,158 +220,165 @@ export function createTaskHistory(id: string): TaskHistory {
           previous.some((message, index) => decoded[index] !== message)
         )
           setEpoch((revision) => revision + 1);
-        setManifest(discovery ?? value);
-        setStats(incomingStats ?? (sameScope ? untrack(stats) : []));
-        setThrough(observedThrough);
+        setManifest(owner.manifest ?? value);
+        setStats(owner.incomingStats ?? (sameScope ? untrack(stats) : []));
+        setThrough(owner.observedThrough);
         setMessages(decoded);
-        publish();
+        publish(owner);
         setLoading(false);
         setError(null);
       });
       retryDelay = 500;
     } catch (err) {
-      if (signal.aborted || !active) return;
+      if (signal.aborted || !current(owner)) return;
+      owner.bootstrap = { kind: "failed" };
       fail(err);
       setLoading(false);
-      scheduleRetry(controller.signal);
+      scheduleRetry(owner);
     }
   }
-  function scheduleRetry(signal: AbortSignal) {
-    if (!current(signal) || !navigator.onLine) return;
+  function scheduleRetry(owner: HistoryAttempt) {
+    if (!current(owner) || !navigator.onLine) return;
     retire();
-    controller = new AbortController();
-    const retrySignal = controller.signal;
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      if (current(retrySignal)) void discover();
+    owner.retryTimer = setTimeout(() => {
+      owner.retryTimer = null;
+      if (attempt === owner && !disposed) void discover();
     }, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 10_000);
   }
-  function clearWatchdog() {
-    if (watchdog !== null) clearTimeout(watchdog);
-    watchdog = null;
+  function clearWatchdog(owner: HistoryAttempt) {
+    if (owner.watchdog !== null) clearTimeout(owner.watchdog);
+    owner.watchdog = null;
   }
-  function alive(signal: AbortSignal) {
-    if (!current(signal)) return;
-    clearWatchdog();
+  function alive(owner: HistoryAttempt) {
+    if (!current(owner)) return;
+    clearWatchdog(owner);
     // The server repeats the current checkpoint every 15 seconds. Three missed
     // frames replace a connection that silently stopped delivering data.
-    watchdog = setTimeout(() => {
-      if (current(signal)) void discover();
+    owner.watchdog = setTimeout(() => {
+      if (current(owner)) void discover();
     }, 45_000);
   }
   function retire() {
-    clearWatchdog();
-    controller.abort();
-    bodyRequest?.abort();
-    source?.close();
-    source = null;
-    if (timer !== null) clearTimeout(timer);
-    if (retryTimer !== null) clearTimeout(retryTimer);
-    timer = retryTimer = null;
+    const owner = attempt;
+    if (!owner) return;
+    clearWatchdog(owner);
+    owner.controller.abort();
+    owner.source?.close();
+    owner.source = null;
+    if (owner.publishTimer !== null) clearTimeout(owner.publishTimer);
+    if (owner.retryTimer !== null) clearTimeout(owner.retryTimer);
+    owner.publishTimer = owner.retryTimer = null;
+    owner.pending = [];
   }
   async function discover() {
+    if (disposed) return;
     retire();
     if (!navigator.onLine) {
       setLoading(false);
       return;
     }
-    controller = new AbortController();
-    const signal = controller.signal;
-    complete = false;
-    waitingManifest = false;
-    currentID = null;
-    discovery = null;
-    lastLive = null;
-    pending = [];
-    incomingStats = null;
-    observedThrough = 0;
+    const owner: HistoryAttempt = {
+      controller: new AbortController(),
+      manifest: null,
+      bootstrap: { kind: "discovering" },
+      pending: [],
+      lastLive: null,
+      source: null,
+      publishTimer: null,
+      retryTimer: null,
+      watchdog: null,
+      incomingStats: null,
+      observedThrough: 0,
+    };
+    attempt = owner;
+    const signal = owner.controller.signal;
     batch(() => {
       setLoading(true);
       setError(null);
     });
     try {
       const value = await client(signal).getHistoryManifest(id);
-      if (!current(signal)) return;
-      discovery = value;
-      currentID = value.sections?.at(-1)?.id ?? null;
-      lastLive = { recordID: value.bootstrap.through, index: Number.MAX_SAFE_INTEGER };
-      observedThrough = value.bootstrap.through;
-      source = api.historyEvents(id, value.bootstrap.cursor, {
+      if (!current(owner)) return;
+      owner.manifest = value;
+      owner.lastLive = { recordID: value.bootstrap.through, index: Number.MAX_SAFE_INTEGER };
+      owner.observedThrough = value.bootstrap.through;
+      owner.source = api.historyEvents(id, value.bootstrap.cursor, {
         onMessage: (event) => {
-          if (!current(signal) || (lastLive && compareHistoryPosition(event, lastLive) <= 0)) return;
-          alive(signal);
-          lastLive = { recordID: event.recordID, index: event.index };
-          pending.push(event);
-          if (event.message.ask || event.message.error || event.message.userInput) publish();
-          if (timer === null)
-            timer = setTimeout(() => {
-              timer = null;
-              if (current(signal)) publish();
+          if (!current(owner) || (owner.lastLive && compareHistoryPosition(event, owner.lastLive) <= 0)) return;
+          alive(owner);
+          owner.lastLive = { recordID: event.recordID, index: event.index };
+          owner.pending.push(event);
+          if (event.message.ask || event.message.error || event.message.userInput) publish(owner);
+          if (owner.publishTimer === null)
+            owner.publishTimer = setTimeout(() => {
+              owner.publishTimer = null;
+              publish(owner);
             }, 100);
         },
         onManifest: (next) => {
-          if (current(signal)) {
-            alive(signal);
-            reconcile(next);
+          if (current(owner)) {
+            alive(owner);
+            reconcile(owner, next);
           }
         },
         onCheckpoint: (checkpoint) => {
-          if (!current(signal)) return;
-          alive(signal);
-          observedThrough = Math.max(observedThrough, checkpoint.through);
-          if (complete) setThrough(observedThrough);
-          if (complete) setError(null);
+          if (!current(owner)) return;
+          alive(owner);
+          owner.observedThrough = Math.max(owner.observedThrough, checkpoint.through);
+          if (owner.bootstrap.kind === "live") setThrough(owner.observedThrough);
+          if (owner.bootstrap.kind === "live") setError(null);
         },
         onStatsSnapshot: (snapshot) => {
-          if (current(signal)) {
-            alive(signal);
-            incomingStats = mergeStats([], snapshot.samples ?? []);
-            if (complete) setStats(incomingStats);
+          if (current(owner)) {
+            alive(owner);
+            owner.incomingStats = mergeStats([], snapshot.samples ?? []);
+            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats);
           }
         },
         onStats: (sample) => {
-          if (current(signal)) {
-            alive(signal);
-            incomingStats = mergeStats(incomingStats ?? [], [sample]);
-            if (complete) setStats(incomingStats);
+          if (current(owner)) {
+            alive(owner);
+            owner.incomingStats = mergeStats(owner.incomingStats ?? [], [sample]);
+            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats);
           }
         },
         onReset: () => {
-          if (current(signal)) void discover();
+          if (current(owner)) void discover();
         },
         onError: (err) => {
-          if (current(signal)) {
+          if (current(owner)) {
             fail(err);
-            scheduleRetry(signal);
+            scheduleRetry(owner);
           }
         },
         onHistoryError: (err) => {
-          if (current(signal)) {
+          if (current(owner)) {
             fail(err.message);
-            scheduleRetry(signal);
+            scheduleRetry(owner);
           }
         },
       });
-      source.onopen = () => {
-        if (current(signal)) alive(signal);
+      owner.source.onopen = () => {
+        if (current(owner)) alive(owner);
       };
-      source.onerror = (event) => {
-        if (current(signal) && !(event instanceof MessageEvent)) {
-          // Native reconnect may hang before response headers. Its last-activity
-          // deadline remains armed until data arrives; terminal HTTP/auth errors
-          // close EventSource and must not be turned into rediscovery loops.
-          if (source?.readyState === source?.CLOSED) clearWatchdog();
+      owner.source.onerror = (event) => {
+        if (current(owner) && !(event instanceof MessageEvent)) {
+          // Keep the deadline while native reconnect waits for headers. A
+          // terminal HTTP/auth failure must not become a rediscovery loop.
+          if (owner.source?.readyState === owner.source?.CLOSED) clearWatchdog(owner);
           setError("Task history stream disconnected");
         }
       };
-      alive(signal);
-      void loadCurrent(discovery ?? value);
+      alive(owner);
+      // A synchronous stream manifest can already have admitted a newer body.
+      if (owner.bootstrap.kind === "discovering") void loadCurrent(owner, owner.manifest);
     } catch (err) {
-      if (!current(signal)) return;
+      if (!current(owner)) return;
+      owner.bootstrap = { kind: "failed" };
       fail(err);
       setLoading(false);
-      scheduleRetry(signal);
+      scheduleRetry(owner);
     }
   }
   function capture(signal: AbortSignal) {
@@ -378,12 +394,11 @@ export function createTaskHistory(id: string): TaskHistory {
     }
   });
   onCleanup(() => {
-    active = false;
+    disposed = true;
     publishedReads.abort();
     stopObserving();
     retire();
-    pending = [];
-    discovery = null;
+    attempt = null;
     positions = new WeakMap();
     batch(() => {
       setMessages([]);
