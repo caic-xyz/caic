@@ -556,7 +556,8 @@ func TestParseMessage(t *testing.T) {
 	t.Run("SystemUnpresentedSubtypesRaw", func(t *testing.T) {
 		t.Parallel()
 		lines := []string{
-			`{"type":"system","subtype":"api_retry","attempt":1,"session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"hook_started","session_id":"s1","uuid":"u1"}`,
+			`{"type":"system","subtype":"informational","content":"tip","level":"suggestion","session_id":"s1","uuid":"u1"}`,
 			`{"type":"system","subtype":"dev_intent","kind":"android_app","trigger":"project_scan","session_id":"s1","uuid":"u1"}`,
 		}
 		for _, line := range lines {
@@ -573,6 +574,78 @@ func TestParseMessage(t *testing.T) {
 			}
 			if raw.MessageType != "system" || string(raw.Raw) != line {
 				t.Errorf("raw = %q %s, want system %s", raw.MessageType, raw.Raw, line)
+			}
+		}
+	})
+	t.Run("SystemFailuresAsErrors", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			line, detail string
+		}{
+			{
+				`{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":1250,"error_status":529,"error":"overloaded","session_id":"s1","uuid":"u1"}`,
+				"API request failed with HTTP 529 (overloaded); retry 2/10 in 1.3s",
+			},
+			{
+				`{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":500,"error_status":null,"error":"unknown","session_id":"s1","uuid":"u1"}`,
+				"API request failed (unknown); retry 1/10 in 500ms",
+			},
+			{
+				`{"type":"system","subtype":"model_refusal_no_fallback","original_model":"claude-a","request_id":null,"api_refusal_category":"cyber","content":"","session_id":"s1","uuid":"u1"}`,
+				"claude-a refused the request (refusal: cyber)",
+			},
+			{
+				`{"type":"system","subtype":"mirror_error","error":"disk full","key":{"projectKey":"p","sessionId":"s"},"session_id":"s1","uuid":"u1"}`,
+				"Transcript mirror write failed: disk full",
+			},
+			{
+				`{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"t1","message":"Denied by rule","session_id":"s1","uuid":"u1"}`,
+				"Denied by rule",
+			},
+			{
+				`{"type":"system","subtype":"informational","content":"Stop hook blocked","level":"warning","session_id":"s1","uuid":"u1"}`,
+				"Stop hook blocked",
+			},
+		} {
+			msgs, err := parseMessage([]byte(tc.line))
+			if err != nil {
+				t.Fatalf("line %s: %v", tc.line, err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("line %s: got %d messages, want 1", tc.line, len(msgs))
+			}
+			sm, ok := msgs[0].(*agent.SystemMessage)
+			if !ok {
+				t.Fatalf("line %s: got %T, want *agent.SystemMessage", tc.line, msgs[0])
+			}
+			if sm.Subtype != agent.SystemSubtypeError || sm.Detail != tc.detail {
+				t.Errorf("line %s: system = %q %q, want error %q", tc.line, sm.Subtype, sm.Detail, tc.detail)
+			}
+		}
+	})
+	t.Run("ModelRefusalFallbackReroutes", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			scope, reported string
+		}{
+			{`"scope":"session",`, "claude-b"},
+			{``, "claude-b"},
+			{`"scope":"local",`, ""},
+		} {
+			line := `{"type":"system","subtype":"model_refusal_fallback","trigger":"refusal","direction":"retry",` + tc.scope + `"original_model":"claude-a","fallback_model":"claude-b","request_id":null,"api_refusal_category":"bio","content":"","session_id":"s1","uuid":"u1"}`
+			msgs, err := parseMessage([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want 1", len(msgs))
+			}
+			sm, ok := msgs[0].(*agent.SystemMessage)
+			if !ok {
+				t.Fatalf("got %T, want *agent.SystemMessage", msgs[0])
+			}
+			if sm.Subtype != agent.SystemSubtypeModelRerouted || sm.Detail != "claude-a → claude-b (refusal: bio)" || sm.ReportedModel != tc.reported {
+				t.Errorf("scope %q: system = %q %q model %q, want reported %q", tc.scope, sm.Subtype, sm.Detail, sm.ReportedModel, tc.reported)
 			}
 		}
 	})

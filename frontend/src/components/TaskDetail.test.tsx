@@ -852,6 +852,7 @@ describe("TaskDetail", () => {
     });
     send?.({ kind: "system", ts: 4800, source: child, system: { subtype: "compact_boundary" } });
     await waitFor(() => expect(within(card).getByText("Provider child error detail")).toBeInTheDocument());
+    expect(within(card).getByText("Conversation compacted")).toBeInTheDocument();
     expect(within(card).getAllByTestId("tool-call")[0]).toBe(call);
     expect(call).toHaveAttribute("open");
     expect(summary).toHaveFocus();
@@ -1148,7 +1149,7 @@ describe("TaskDetail", () => {
     );
   });
 
-  for (const subtype of ["compact_boundary", "context_cleared"]) {
+  for (const subtype of ["compact_boundary", "context_cleared"] as const) {
     it(`keeps prior skill links at the ${subtype} separator and empties the header`, async () => {
       let send: ((message: EventMessage) => void) | undefined;
       taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {

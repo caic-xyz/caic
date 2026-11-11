@@ -33,7 +33,7 @@ import (
 //   - ToolUseMessage       — item/started commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall
 //   - ToolResultMessage    — item/completed commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall
 //   - ToolOutputDeltaMessage — commandExecution/outputDelta, mcpToolCall/progress
-//   - SystemMessage        — thread/status/changed, model/rerouted, item/completed contextCompaction
+//   - SystemMessage        — thread/status/changed systemError, model/rerouted, item/completed contextCompaction
 //   - ResultMessage        — turn/completed, error notification
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, decodedItem, error) {
@@ -194,11 +194,18 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("thread/status/changed params: %w", err)
 		}
+		item := decodedItem{statusChanged: &p, source: agent.MessageSource{ThreadID: p.ThreadID}}
+		// Task state and native subagent cards already track activity; only a
+		// system error carries information the transcript lacks.
+		if p.Status.Type != codex.ThreadStatusTypeSystemError {
+			return nil, item, nil
+		}
 		return []agent.Message{&agent.SystemMessage{
 			Source:      agent.MessageSource{ThreadID: p.ThreadID},
 			MessageType: "system",
-			Subtype:     string(p.Status.Type),
-		}}, decodedItem{statusChanged: &p, source: agent.MessageSource{ThreadID: p.ThreadID}}, nil
+			Subtype:     agent.SystemSubtypeError,
+			Detail:      "Codex thread entered a system error state",
+		}}, item, nil
 
 	case codex.MethodModelRerouted:
 		var p codex.ModelReroutedNotification

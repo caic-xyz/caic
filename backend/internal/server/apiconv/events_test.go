@@ -366,14 +366,20 @@ func TestToolTimingTracker(t *testing.T) {
 			gt := NewToolTimingTracker("", harness.Claude, "", nil)
 			msg := &agent.SystemMessage{
 				MessageType: "system",
-				Subtype:     "status",
+				Subtype:     agent.SystemSubtypeNotice,
+				Detail:      "Mode: plan",
 			}
 			events := gt.ConvertMessage(2, 0, msg, time.Now())
 			if len(events) != 1 {
 				t.Fatalf("got %d events, want 1", len(events))
 			}
-			if events[0].Kind != v1.EventKindSystem {
-				t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindSystem)
+			if events[0].Kind != v1.EventKindSystem || events[0].System.Subtype != v1.EventSystemSubtypeNotice || events[0].System.Detail != "Mode: plan" {
+				t.Errorf("event = %+v %+v, want notice", events[0], events[0].System)
+			}
+			for _, subtype := range []string{"status", agent.SystemSubtypeInputDeliveryStarted, agent.SystemSubtypeInputDeliveryCompleted} {
+				if events := gt.ConvertMessage(2, 0, &agent.SystemMessage{MessageType: "system", Subtype: subtype}, time.Now()); len(events) != 0 {
+					t.Errorf("%s: events = %+v, want none", subtype, events)
+				}
 			}
 		})
 		t.Run("GenericConvertThinking", func(t *testing.T) {
@@ -602,7 +608,7 @@ func TestToolTimingTracker(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"},
 				&agent.ToolResultMessage{ToolUseID: "tool"},
 				&agent.ToolOutputDeltaMessage{ToolUseID: "tool", Delta: "output"},
-				&agent.ResultMessage{}, &agent.UsageMessage{}, &agent.SystemMessage{},
+				&agent.ResultMessage{}, &agent.UsageMessage{}, &agent.SystemMessage{Subtype: agent.SystemSubtypeError},
 				&agent.UserInputMessage{Text: "input"}, &agent.LogMessage{Line: "log"},
 				&agent.DiffStatMessage{}, &agent.TurnCommitSnapshotMessage{},
 			} {

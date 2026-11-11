@@ -125,17 +125,18 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			},
 		}}
 	case *agent.SystemMessage:
-		if !m.Source.IsChild() && m.Subtype == "context_cleared" {
+		if !m.Source.IsChild() && m.Subtype == agent.SystemSubtypeContextCleared {
 			tt.presentedSession = ""
 		}
-		if agent.IsInputDeliveryControl(m) {
+		subtype, ok := systemSubtype(m.Subtype)
+		if !ok {
 			return nil
 		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindSystem,
 			Ts:   ts,
 			System: &v1.EventSystem{
-				Subtype:             m.Subtype,
+				Subtype:             subtype,
 				Detail:              m.Detail,
 				ContextTokensBefore: m.ContextTokensBefore,
 				ContextTokensAfter:  m.ContextTokensAfter,
@@ -534,4 +535,31 @@ func TodoItems(items []agent.TodoItem) []v1.TodoItem {
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.
 type toolInputProbe struct {
 	RunInBackground bool `json:"run_in_background"`
+}
+
+// systemSubtype maps a presented agent system subtype to its API value. Private
+// input-delivery controls have none.
+func systemSubtype(s string) (v1.EventSystemSubtype, bool) {
+	switch s {
+	case agent.SystemSubtypeAPIError:
+		return v1.EventSystemSubtypeAPIError, true
+	case agent.SystemSubtypeCompactBoundary:
+		return v1.EventSystemSubtypeCompactBoundary, true
+	case agent.SystemSubtypeCompactError:
+		return v1.EventSystemSubtypeCompactError, true
+	case agent.SystemSubtypeCompactStart:
+		return v1.EventSystemSubtypeCompactStart, true
+	case agent.SystemSubtypeContextCleared:
+		return v1.EventSystemSubtypeContextCleared, true
+	case agent.SystemSubtypeError:
+		return v1.EventSystemSubtypeError, true
+	case agent.SystemSubtypeInputDeliveryFailed:
+		return v1.EventSystemSubtypeInputDeliveryFailed, true
+	case agent.SystemSubtypeModelRerouted:
+		return v1.EventSystemSubtypeModelRerouted, true
+	case agent.SystemSubtypeNotice:
+		return v1.EventSystemSubtypeNotice, true
+	default:
+		return "", false
+	}
 }

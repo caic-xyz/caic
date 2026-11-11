@@ -527,11 +527,8 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
 		}
-		if sm.Subtype != "mode_update" {
-			t.Errorf("Subtype = %q", sm.Subtype)
-		}
-		if sm.Detail != "ask" {
-			t.Errorf("Detail = %q, want %q", sm.Detail, "ask")
+		if sm.Subtype != "notice" || sm.Detail != "Mode: ask" {
+			t.Errorf("system = %q %q, want notice %q", sm.Subtype, sm.Detail, "Mode: ask")
 		}
 	})
 

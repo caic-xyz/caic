@@ -139,7 +139,7 @@ func ClearsExitError(msg agent.Message) bool {
 	}
 	switch m := msg.(type) {
 	case *agent.SystemMessage:
-		return m.Subtype != agent.SystemSubtypeExternalActivity && !agent.IsInputDeliveryControl(m)
+		return !agent.IsInputDeliveryControl(m)
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
 		*agent.BackgroundCommandMessage,
 		*agent.PendingUserActionMessage,

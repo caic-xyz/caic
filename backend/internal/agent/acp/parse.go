@@ -29,7 +29,7 @@ import (
 //   - ToolOutputDeltaMessage — tool_call_update (in_progress with output)
 //   - TodoMessage          — plan update
 //   - UserInputMessage     — user_message_chunk
-//   - SystemMessage        — current_mode_update
+//   - SystemMessage        — current_mode_update as a mode notice
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *acp.ToolCallUpdateUpdate, error) {
 	// JSON-RPC response (has "id").
@@ -117,8 +117,8 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
-			Subtype:     "mode_update",
-			Detail:      u.CurrentModeID,
+			Subtype:     agent.SystemSubtypeNotice,
+			Detail:      "Mode: " + u.CurrentModeID,
 		}}, nil, nil
 
 	case acp.UpdateSessionInfoUpdate:

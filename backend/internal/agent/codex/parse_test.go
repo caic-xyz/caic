@@ -46,6 +46,29 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("model/effort = %q/%q, want gpt-5.6-terra/high", init.ReportedModel, init.ReportedEffort)
 		}
 	})
+	t.Run("ThreadStatusChanged", func(t *testing.T) {
+		t.Parallel()
+		for _, status := range []string{"active", "idle", "notLoaded"} {
+			msgs, err := parseTestMessage([]byte(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"t1","status":{"type":"` + status + `"}}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 0 {
+				t.Errorf("%s: msgs = %#v, want none", status, msgs)
+			}
+		}
+		msgs, err := parseTestMessage([]byte(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"t1","status":{"type":"systemError"}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok || sm.Subtype != agent.SystemSubtypeError || sm.Detail == "" || sm.Source.ThreadID != "t1" {
+			t.Errorf("systemError = %#v, want a thread error", msgs[0])
+		}
+	})
 	t.Run("ThreadStartedMissingSettings", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thread","model":null,"reasoningEffort":null}}}`

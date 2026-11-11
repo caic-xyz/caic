@@ -31,6 +31,8 @@ import MoreIcon from "@material-symbols/svg-400/outlined/more_vert.svg?solid";
 
 import type {
   EventMessage,
+  EventSystem,
+  EventSystemSubtype,
   HistoryActivity,
   HistoryEvent,
   HistorySection,
@@ -2288,7 +2290,6 @@ function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: st
 // These events are extracted from the message stream and shown as section separators.
 function SessionBoundaryItem(props: { event: EventMessage; grouped: boolean }) {
   const ev = () => props.event;
-  const compactSummary = () => compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
     <>
       <Switch>
@@ -2307,18 +2308,48 @@ function SessionBoundaryItem(props: { event: EventMessage; grouped: boolean }) {
             </div>
           )}
         </Match>
-        <Match when={ev().system?.subtype === "compact_boundary" && !props.grouped}>
-          <div class={styles.contextCleared}>
-            Conversation compacted
-            <Show when={compactSummary()}>{(summary) => ` · ${summary()}`}</Show>
-          </div>
+        <Match when={ev().system?.subtype === "compact_boundary" && props.grouped}>
+          <></>
         </Match>
-        <Match when={ev().system?.subtype === "context_cleared"}>
-          <div class={styles.contextCleared}>Context cleared</div>
+        <Match when={ev().system} keyed>
+          {(sys) => <SystemEventItem system={sys} />}
         </Match>
       </Switch>
     </>
   );
+}
+
+function agentError(sys: EventSystem): JSX.Element {
+  return <div class={styles.parseError}>{sys.detail || "Agent error"}</div>;
+}
+
+// systemPresentations renders every system subtype the server sends; a new API
+// subtype fails type checking until it has a presentation here.
+const systemPresentations: Record<EventSystemSubtype, (sys: EventSystem) => JSX.Element> = {
+  api_error: () => <div class={styles.parseError}>API error</div>,
+  compact_boundary: (sys) => {
+    const summary = compactTokenSummary(sys.contextTokensBefore, sys.contextTokensAfter);
+    return <div class={styles.contextCleared}>Conversation compacted{summary ? ` · ${summary}` : ""}</div>;
+  },
+  compact_error: (sys) => (
+    <div class={styles.parseError} data-testid="compact-error">
+      Context compaction failed{sys.detail ? `: ${sys.detail}` : ""}
+    </div>
+  ),
+  compact_start: (sys) => (
+    <div class={styles.systemMsg} data-testid="compact-start">
+      Compacting context…{sys.detail ? ` (${sys.detail})` : ""}
+    </div>
+  ),
+  context_cleared: () => <div class={styles.contextCleared}>Context cleared</div>,
+  error: agentError,
+  input_delivery_failed: agentError,
+  model_rerouted: (sys) => <div class={styles.systemMsg}>Model rerouted{sys.detail ? `: ${sys.detail}` : ""}</div>,
+  notice: (sys) => <div class={styles.systemMsg}>{sys.detail}</div>,
+};
+
+function SystemEventItem(props: { system: EventSystem }) {
+  return <>{systemPresentations[props.system.subtype](props.system)}</>;
 }
 
 function rateLimitLabel(rateLimitType: string | undefined): string {
@@ -2402,11 +2433,8 @@ function MessageItem(props: {
       <Match when={props.ev.rateLimit}>
         <RateLimitBanner ev={props.ev} />
       </Match>
-      <Match when={props.ev.system?.subtype === "api_error"}>
-        <div class={styles.parseError}>API error</div>
-      </Match>
-      <Match when={props.ev.system?.subtype === "error" || props.ev.system?.subtype === "input_delivery_failed"}>
-        <div class={styles.parseError}>{props.ev.system?.detail || "Agent error"}</div>
+      <Match when={props.ev.system} keyed>
+        {(sys) => <SystemEventItem system={sys} />}
       </Match>
       <Match when={props.ev.toolResult || props.ev.toolOutputDelta}>
         <details data-testid="orphan-tool">
@@ -2434,23 +2462,6 @@ function MessageItem(props: {
           skills={props.ev.skillLoad ? [props.ev.skillLoad] : []}
           label="Child loaded skill"
         />
-      </Match>
-      <Match when={props.ev.system?.subtype === "compact_start"}>
-        <div class={styles.systemMsg} data-testid="compact-start">
-          Compacting context…{props.ev.system?.detail ? ` (${props.ev.system.detail})` : ""}
-        </div>
-      </Match>
-      <Match when={props.ev.system?.subtype === "compact_error"}>
-        <div class={styles.parseError} data-testid="compact-error">
-          Context compaction failed
-          {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
-        </div>
-      </Match>
-      <Match when={props.ev.system?.subtype === "model_rerouted"}>
-        <div class={styles.systemMsg}>
-          Model rerouted
-          {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
-        </div>
       </Match>
       <Match when={props.ev.text} keyed>
         {(text) => (

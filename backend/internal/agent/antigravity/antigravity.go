@@ -304,9 +304,9 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 			source.ItemID = strconv.FormatInt(s.StepIndex, 10)
 		}
 		if w.foreignConversation(&source) {
-			// A different conversation is not proven to be a task child.
-			// Retain its activity visibly without applying root tool/usage effects.
-			return []agent.Message{&agent.SystemMessage{Source: source, MessageType: "system", Subtype: agent.SystemSubtypeExternalActivity, Detail: string(line)}}, nil
+			// A different conversation is not proven to be a task child. Retain
+			// the record without applying root tool/usage effects or presenting it.
+			return []agent.Message{&agent.RawMessage{Source: source, MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
 		}
 		usage, accepted := w.observeStep(s)
 		if !accepted {
@@ -321,7 +321,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		r := &ev.Result
 		source := w.conversationSource(r.ConversationID)
 		if w.foreignConversation(&source) {
-			return []agent.Message{&agent.SystemMessage{Source: source, MessageType: "system", Subtype: agent.SystemSubtypeExternalActivity, Detail: string(line)}}, nil
+			return []agent.Message{&agent.RawMessage{Source: source, MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
 		}
 		m := &agent.ResultMessage{Source: source, MessageType: "result", Subtype: string(r.Status), SessionID: r.ConversationID, Result: r.Response}
 		if err := r.AsError(); err != nil {
@@ -341,8 +341,12 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		w.finishConversation(r.ConversationID)
 		if source.IsChild() {
 			// Declared child completion cannot finish the root turn or consume
-			// its inclusive usage. No native lifecycle status is inferred.
-			return append(messages, &agent.SystemMessage{Source: source, MessageType: "system", Subtype: "antigravity", Detail: m.Result}), nil
+			// its inclusive usage. No native lifecycle status is inferred; the
+			// response text above already carries a successful outcome.
+			if m.IsError {
+				messages = append(messages, &agent.SystemMessage{Source: source, MessageType: "system", Subtype: agent.SystemSubtypeError, Detail: m.Result})
+			}
+			return messages, nil
 		}
 		// Result usage, duration, and turn count are conversation-wide, including
 		// resumed processes. Only DONE steps from the task's proven conversations
@@ -397,7 +401,7 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 		}
 	case antigravity.StepSystemMessage:
 		if s.TextDelta != "" {
-			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: "antigravity", Detail: s.TextDelta})
+			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeNotice, Detail: s.TextDelta})
 		}
 	case antigravity.StepUserInput, antigravity.StepFinish:
 		// User text is retained by the recorded stdin; finish is followed by result.

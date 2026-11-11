@@ -27,6 +27,11 @@ import (
 	pidto "github.com/maruel/genai/providers/pi"
 )
 
+// TODO: Add Claude Code's dev_intent subtype (fields kind, trigger) to genai's
+// claudecode.SystemSubtype, then register it here together with the genai
+// subtypes this map omits: control_request_progress, informational,
+// memory_recall, mirror_error, notification, permission_denied,
+// plugin_install, and worker_shutting_down.
 var knownClaudeSystemSubtypes = map[claudedto.SystemSubtype]struct{}{
 	claudedto.SystemInit:        {},
 	claudedto.SystemTaskStarted: {}, claudedto.SystemTaskNotification: {},

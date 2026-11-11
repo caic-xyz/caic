@@ -276,10 +276,10 @@ type EventRepositoryCommit struct {
 	CommitHash string `json:"commitHash"`
 }
 
-// EventSystem is a system event (status, compact_boundary, etc.).
+// EventSystem is a harness or caic system event that clients present.
 type EventSystem struct {
-	Subtype string `json:"subtype"`
-	Detail  string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for model_rerouted).
+	Subtype EventSystemSubtype `json:"subtype"`
+	Detail  string             `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for model_rerouted).
 	// ContextTokensBefore is the context size the harness reported before a
 	// compact_boundary. Zero means the harness did not report it.
 	ContextTokensBefore int64 `json:"contextTokensBefore,omitempty"`
@@ -287,6 +287,32 @@ type EventSystem struct {
 	// compact_boundary, measured or estimated. Zero means it did not report it.
 	ContextTokensAfter int64 `json:"contextTokensAfter,omitempty"`
 }
+
+// EventSystemSubtype identifies a system event. The server sends only these
+// values, so clients can present every one of them.
+type EventSystemSubtype string
+
+// Event system subtypes.
+const (
+	// EventSystemSubtypeAPIError reports a failed model API request.
+	EventSystemSubtypeAPIError EventSystemSubtype = "api_error"
+	// EventSystemSubtypeCompactBoundary marks a context compaction.
+	EventSystemSubtypeCompactBoundary EventSystemSubtype = "compact_boundary"
+	// EventSystemSubtypeCompactError reports a failed or cancelled compaction.
+	EventSystemSubtypeCompactError EventSystemSubtype = "compact_error"
+	// EventSystemSubtypeCompactStart reports a compaction in progress.
+	EventSystemSubtypeCompactStart EventSystemSubtype = "compact_start"
+	// EventSystemSubtypeContextCleared marks a cleared conversation context.
+	EventSystemSubtypeContextCleared EventSystemSubtype = "context_cleared"
+	// EventSystemSubtypeError reports a harness failure described by Detail.
+	EventSystemSubtypeError EventSystemSubtype = "error"
+	// EventSystemSubtypeInputDeliveryFailed reports a prompt that was not delivered.
+	EventSystemSubtypeInputDeliveryFailed EventSystemSubtype = "input_delivery_failed"
+	// EventSystemSubtypeModelRerouted reports a model change described by Detail.
+	EventSystemSubtypeModelRerouted EventSystemSubtype = "model_rerouted"
+	// EventSystemSubtypeNotice reports informational text held in Detail.
+	EventSystemSubtypeNotice EventSystemSubtype = "notice"
+)
 
 // TodoItem is a single todo entry from a TodoWrite tool call.
 type TodoItem struct {

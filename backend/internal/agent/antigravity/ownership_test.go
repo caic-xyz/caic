@@ -4,6 +4,7 @@ package antigravity
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -91,6 +92,21 @@ func TestConversationProvenance(t *testing.T) {
 			}
 			if result, ok := messages[1].(*agent.ResultMessage); !ok || result.Usage.InputTokens != 8 {
 				t.Fatalf("inclusive proven usage = %#v", messages[1])
+			}
+			messages = feed(`{"event":"step_update","step_update":{"conversation_id":"parent","step_index":10,"state":"DONE","step_type":"system_message","text_delta":"Retrying model call"}}`)
+			if len(messages) != 1 {
+				t.Fatalf("system step = %#v", messages)
+			}
+			if sm, ok := messages[0].(*agent.SystemMessage); !ok || sm.Subtype != agent.SystemSubtypeNotice || sm.Detail != "Retrying model call" {
+				t.Fatalf("system step = %#v, want notice", messages[0])
+			}
+			feed(`{"event":"step_update","step_update":{"conversation_id":"parent","step_index":11,"state":"DONE","step_type":"tool","tool_name":"invoke_subagent","subagent_info":{"subagents":[{"conversation_id":"child2","role":"researcher"}]}}}`)
+			messages = feed(`{"event":"result","result":{"conversation_id":"child2","status":"ERROR","error":"child failure"}}`)
+			if len(messages) != 1 {
+				t.Fatalf("child failure = %#v", messages)
+			}
+			if sm, ok := messages[0].(*agent.SystemMessage); !ok || sm.Subtype != agent.SystemSubtypeError || !strings.Contains(sm.Detail, "child failure") || !sm.Source.IsChild() {
+				t.Fatalf("child failure = %#v, want child error", messages[0])
 			}
 			messages = feed(`{"event":"step_update","step_update":{"state":"ACTIVE","step_type":"agent_response","text_delta":"missing metadata"}}`)
 			if len(messages) != 1 || !messages[0].Provenance().IsZero() {

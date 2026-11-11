@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -428,11 +429,97 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 			m.ContextTokensAfter = int64(w.CompactMetadata.PostTokens)
 		}
 		return []agent.Message{m}, nil
+	case claudecode.SystemModelRefusalFallback:
+		// TODO: Remove the messages listed in w.RetractedMessageUUIDs from the
+		// transcript. Claude Code retracts the refused partial response and
+		// tombstoned tool results; caic still presents them.
+		m := &agent.SystemMessage{
+			MessageType: string(w.Type),
+			Subtype:     agent.SystemSubtypeModelRerouted,
+			Detail:      w.OriginalModel + " → " + w.FallbackModel + " (" + refusalReason(&w) + ")",
+			SessionID:   w.SessionID,
+			UUID:        w.UUID,
+		}
+		// A local fallback served one subagent or side response; the session
+		// model is unchanged. Older CLIs omit the scope for session swaps.
+		if w.Scope != "local" {
+			m.ReportedModel = w.FallbackModel
+		}
+		return []agent.Message{m}, nil
+	case claudecode.SystemAPIRetry, claudecode.SystemModelRefusalNoFallback, claudecode.SystemMirrorError, claudecode.SystemPermissionDenied:
+		return []agent.Message{&agent.SystemMessage{
+			MessageType: string(w.Type),
+			Subtype:     agent.SystemSubtypeError,
+			Detail:      systemErrorDetail(&w),
+			SessionID:   w.SessionID,
+			UUID:        w.UUID,
+		}}, nil
+	case claudecode.SystemInformational:
+		if w.Level == "warning" {
+			return []agent.Message{&agent.SystemMessage{
+				MessageType: string(w.Type),
+				Subtype:     agent.SystemSubtypeError,
+				Detail:      w.Content,
+				SessionID:   w.SessionID,
+				UUID:        w.UUID,
+			}}, nil
+		}
+		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
 	default:
 		// Subtypes without a presentation, including ones newer than the DTOs,
 		// stay out of the transcript like other harnesses' unrecognized records.
 		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
 	}
+}
+
+// systemErrorDetail describes a Claude Code system record that reports a
+// failure: a retried API request, a refusal without fallback, a transcript
+// mirror write failure, or an automatically denied tool call.
+func systemErrorDetail(w *claudecode.OutputSystemMsg) string {
+	switch w.Subtype {
+	case claudecode.SystemAPIRetry:
+		cause := "API request failed"
+		if w.ErrorStatus != 0 {
+			cause += " with HTTP " + strconv.Itoa(w.ErrorStatus)
+		}
+		if reason := jsonStringOrRaw(w.Error); reason != "" {
+			cause += " (" + reason + ")"
+		}
+		return fmt.Sprintf("%s; retry %d/%d in %s", cause, w.Attempt, w.MaxRetries, w.RetryDelay.AsDuration().Round(time.Second/10))
+	case claudecode.SystemModelRefusalNoFallback:
+		if w.Content != "" {
+			return w.Content
+		}
+		return w.OriginalModel + " refused the request (" + refusalReason(w) + ")"
+	case claudecode.SystemMirrorError:
+		return "Transcript mirror write failed: " + jsonStringOrRaw(w.Error)
+	default:
+		if w.Message != "" {
+			return w.Message
+		}
+		return "Permission denied: " + w.ToolName
+	}
+}
+
+// refusalReason names a model refusal's category and explanation when reported.
+func refusalReason(w *claudecode.OutputSystemMsg) string {
+	reason := "refusal"
+	if w.APIRefusalCategory != "" {
+		reason += ": " + w.APIRefusalCategory
+	}
+	if w.APIRefusalExplanation != "" {
+		reason += ", " + w.APIRefusalExplanation
+	}
+	return reason
+}
+
+// jsonStringOrRaw returns a JSON string's value, or other JSON verbatim.
+func jsonStringOrRaw(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return string(raw)
 }
 
 func parseAssistant(line []byte) ([]agent.Message, error) {
@@ -852,7 +939,7 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 	case "error":
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
-			Subtype:     "api_error",
+			Subtype:     agent.SystemSubtypeAPIError,
 		}}, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil

@@ -791,10 +791,6 @@ func (s *summaryCounter) group(m *v1.EventMessage) {
 					return
 				}
 			}
-		case v1.EventKindSystem:
-			if m.System != nil && (m.System.Subtype == "active" || m.System.Subtype == "idle" || m.System.Subtype == "notLoaded" || m.System.Subtype == "system_error") {
-				return
-			}
 		default:
 		}
 	}
@@ -929,7 +925,7 @@ type summaryFact struct {
 	ts               int64
 	end              int64
 	tool             string
-	system           string
+	system           v1.EventSystemSubtype
 	text             bool
 	duration         float64
 	globalQuota      bool

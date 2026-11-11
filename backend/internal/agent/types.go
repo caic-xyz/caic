@@ -19,7 +19,6 @@ import (
 
 const (
 	messageTypeSystem                = "system"
-	messageSubtypeContextCleared     = "context_cleared"
 	messageTypeText                  = "text"
 	messageTypeUserInput             = "user_input"
 	messageTypeProvisioningLog       = "log"
@@ -54,10 +53,22 @@ const SystemSubtypeCompactBoundary = "compact_boundary"
 // so the context was left unchanged.
 const SystemSubtypeCompactError = "compact_error"
 
-// SystemSubtypeExternalActivity retains informational provider activity outside
-// the root conversation without claiming it belongs to a task child. It cannot
-// start a root turn, replace its answer, or clear its result/error state.
-const SystemSubtypeExternalActivity = "external_activity"
+// SystemSubtypeContextCleared marks a cleared conversation context.
+//
+// TODO: Replace the remaining "compact_boundary" and "context_cleared" string
+// literals with SystemSubtypeCompactBoundary and SystemSubtypeContextCleared
+// in agent/codex, agent/export.go, server/history, task, task/history, and
+// task/taskrun.
+const SystemSubtypeContextCleared = "context_cleared"
+
+// SystemSubtypeAPIError reports a failed model API request without detail.
+const SystemSubtypeAPIError = "api_error"
+
+// SystemSubtypeError reports a harness failure; Detail holds the message.
+const SystemSubtypeError = "error"
+
+// SystemSubtypeNotice reports informational harness text held in Detail.
+const SystemSubtypeNotice = "notice"
 
 // SystemSubtypeInputDeliveryFailed marks the preceding root input as an
 // attempted prompt whose transport failed. It is not accepted-input evidence.
@@ -167,7 +178,7 @@ type SystemMessage v3.SystemMessage
 
 // ContextCleared creates the persisted context-clear system marker.
 func ContextCleared() *SystemMessage {
-	return &SystemMessage{MessageType: messageTypeSystem, Subtype: messageSubtypeContextCleared}
+	return &SystemMessage{MessageType: messageTypeSystem, Subtype: SystemSubtypeContextCleared}
 }
 
 // InputDeliveryFailed makes a visible failure marker for the preceding input.
@@ -1283,7 +1294,7 @@ func v3ControlToken(m Message) (taskslog.Kind, error) {
 	case messageTypeSystem:
 		if m, ok := m.(*SystemMessage); ok {
 			switch m.Subtype {
-			case messageSubtypeContextCleared:
+			case SystemSubtypeContextCleared:
 				return taskslog.KindContextCleared, nil
 			case SystemSubtypeInputDeliveryFailed:
 				return taskslog.KindInputDeliveryFailed, nil

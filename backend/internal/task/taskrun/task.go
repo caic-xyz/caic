@@ -2602,9 +2602,6 @@ func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 			if m.Subtype == agent.SystemSubtypeInputDeliveryFailed || agent.IsInputDeliveryControl(m) {
 				continue
 			}
-			if m.Subtype == agent.SystemSubtypeExternalActivity {
-				continue // Informational activity cannot replace the root result.
-			}
 			return nil
 		case *agent.ResultMessage:
 			return m

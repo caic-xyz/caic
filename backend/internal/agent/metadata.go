@@ -39,7 +39,7 @@ func (m *SessionMetadata) Apply(msg Message) {
 			if src.ReportedModel != "" {
 				m.ReportedModel = src.ReportedModel
 			}
-		case messageSubtypeContextCleared:
+		case SystemSubtypeContextCleared:
 			m.SessionID = ""
 		}
 	case *UsageMessage:

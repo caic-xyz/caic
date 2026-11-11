@@ -594,6 +594,69 @@ object EventRateLimitStatusSerializer : KSerializer<EventRateLimitStatus> {
     }
 }
 
+@Serializable(with = EventSystemSubtypeSerializer::class)
+sealed interface EventSystemSubtype {
+    val value: String
+    @Serializable
+    data object APIError : EventSystemSubtype {
+        override val value = "api_error"
+    }
+    @Serializable
+    data object CompactBoundary : EventSystemSubtype {
+        override val value = "compact_boundary"
+    }
+    @Serializable
+    data object CompactError : EventSystemSubtype {
+        override val value = "compact_error"
+    }
+    @Serializable
+    data object CompactStart : EventSystemSubtype {
+        override val value = "compact_start"
+    }
+    @Serializable
+    data object ContextCleared : EventSystemSubtype {
+        override val value = "context_cleared"
+    }
+    @Serializable
+    data object Error : EventSystemSubtype {
+        override val value = "error"
+    }
+    @Serializable
+    data object InputDeliveryFailed : EventSystemSubtype {
+        override val value = "input_delivery_failed"
+    }
+    @Serializable
+    data object ModelRerouted : EventSystemSubtype {
+        override val value = "model_rerouted"
+    }
+    @Serializable
+    data object Notice : EventSystemSubtype {
+        override val value = "notice"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventSystemSubtype
+}
+
+object EventSystemSubtypeSerializer : KSerializer<EventSystemSubtype> {
+    override val descriptor = PrimitiveSerialDescriptor("EventSystemSubtype", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventSystemSubtype) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventSystemSubtype {
+        val v = decoder.decodeString()
+        return when (v) {
+            "api_error" -> EventSystemSubtype.APIError
+            "compact_boundary" -> EventSystemSubtype.CompactBoundary
+            "compact_error" -> EventSystemSubtype.CompactError
+            "compact_start" -> EventSystemSubtype.CompactStart
+            "context_cleared" -> EventSystemSubtype.ContextCleared
+            "error" -> EventSystemSubtype.Error
+            "input_delivery_failed" -> EventSystemSubtype.InputDeliveryFailed
+            "model_rerouted" -> EventSystemSubtype.ModelRerouted
+            "notice" -> EventSystemSubtype.Notice
+            else -> EventSystemSubtype.Other(v)
+        }
+    }
+}
+
 @Serializable(with = EventToolInputKindSerializer::class)
 sealed interface EventToolInputKind {
     val value: String
@@ -2839,10 +2902,10 @@ data class EventResult(
     val usage: EventUsage,
 )
 
-/** EventSystem is a system event (status, compact_boundary, etc.). */
+/** EventSystem is a harness or caic system event that clients present. */
 @Serializable
 data class EventSystem(
-    val subtype: String,
+    val subtype: EventSystemSubtype,
     /** Optional human-readable detail (e.g. model names for model_rerouted). */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val detail: String? = null,
     /**

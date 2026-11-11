@@ -197,6 +197,29 @@ export const EventRateLimitStatusAllowed = "allowed";
 export const EventRateLimitStatusAllowedWarning = "allowed_warning";
 export const EventRateLimitStatusRejected = "rejected";
 
+export type EventSystemSubtype =
+  | "api_error"
+  | "compact_boundary"
+  | "compact_error"
+  | "compact_start"
+  | "context_cleared"
+  | "error"
+  | "input_delivery_failed"
+  | "model_rerouted"
+  | "notice";
+/**
+ * Supported values.
+ */
+export const EventSystemSubtypeAPIError = "api_error";
+export const EventSystemSubtypeCompactBoundary = "compact_boundary";
+export const EventSystemSubtypeCompactError = "compact_error";
+export const EventSystemSubtypeCompactStart = "compact_start";
+export const EventSystemSubtypeContextCleared = "context_cleared";
+export const EventSystemSubtypeError = "error";
+export const EventSystemSubtypeInputDeliveryFailed = "input_delivery_failed";
+export const EventSystemSubtypeModelRerouted = "model_rerouted";
+export const EventSystemSubtypeNotice = "notice";
+
 export type EventToolInputKind =
   | "fileChanges"
   | "subagents";
@@ -1981,9 +2004,9 @@ export interface EventResult {
   usage: EventUsage;
 }
 
-/** EventSystem is a system event (status, compact_boundary, etc.). */
+/** EventSystem is a harness or caic system event that clients present. */
 export interface EventSystem {
-  subtype: string;
+  subtype: EventSystemSubtype;
   /** Optional human-readable detail (e.g. model names for model_rerouted). */
   detail?: string;
   /**

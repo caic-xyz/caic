@@ -869,25 +869,6 @@ func TestSectionIndex(t *testing.T) {
 			t.Fatal("captured anchor mutated")
 		}
 	})
-	t.Run("hidden status does not extend invocation fallback", func(t *testing.T) {
-		t.Parallel()
-		s := newSectionIndex()
-		messages := []v1.EventMessage{
-			{Kind: v1.EventKindInit, Ts: 100, Init: &v1.EventInit{SessionID: "root"}},
-			{Kind: v1.EventKindSystem, Ts: 120, System: &v1.EventSystem{Subtype: "active"}},
-			{Kind: v1.EventKindUserInput, Ts: 140, UserInput: &v1.Prompt{Text: "continue"}},
-			{Kind: v1.EventKindResult, Ts: 200, Result: &v1.EventResult{}},
-			{Kind: v1.EventKindCommitSnapshot, Ts: 220, CommitSnapshot: &v1.EventCommitSnapshot{}},
-			{Kind: v1.EventKindSystem, Ts: 240, System: &v1.EventSystem{Subtype: "compact_boundary"}},
-		}
-		for i, m := range messages {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
-		}
-		sections, _ := s.snapshot()
-		if len(sections) != 2 || sections[0].DurationMS != 60 {
-			t.Fatalf("fallback summary = %#v", sections)
-		}
-	})
 	t.Run("late and ambiguous ownership revises closed headers", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()

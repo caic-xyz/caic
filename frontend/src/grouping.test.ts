@@ -288,15 +288,14 @@ describe("groupMessages", () => {
     expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
   });
 
-  it("groups only system subtypes with a transcript presentation", () => {
+  it("groups system events except root context boundaries", () => {
+    const child = { delegationToolUseID: "agent-1" };
     const groups = groupMessages([
-      { kind: "system", ts: 1, system: { subtype: "dev_intent" } },
-      { kind: "system", ts: 2, system: { subtype: "idle" } },
+      { kind: "system", ts: 1, system: { subtype: "compact_boundary" } },
+      { kind: "system", ts: 2, source: child, system: { subtype: "compact_boundary" } },
       { kind: "system", ts: 3, system: { subtype: "model_rerouted", detail: "a → b" } },
     ]);
-    expect(groups.map((g) => [g.kind, g.events.map((e) => e.system?.subtype)])).toEqual([
-      ["other", ["model_rerouted"]],
-    ]);
+    expect(groups.map((g) => g.events.map((e) => e.ts))).toEqual([[2], [3]]);
   });
   it("consecutive tool uses form one group", () => {
     const groups = groupMessages([toolUseEvent("t1", "Read"), toolUseEvent("t2", "Bash")]);

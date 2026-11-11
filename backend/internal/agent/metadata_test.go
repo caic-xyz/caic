@@ -24,7 +24,7 @@ func TestSessionMetadata(t *testing.T) {
 		child := MessageProvenance{Source: MessageSource{DelegationToolUseID: "child"}}
 		for _, msg := range []Message{
 			&SystemMessage{MessageProvenance: child, Subtype: SystemSubtypeModelRerouted, ReportedModel: "child-model"},
-			&SystemMessage{MessageProvenance: child, Subtype: messageSubtypeContextCleared},
+			&SystemMessage{MessageProvenance: child, Subtype: SystemSubtypeContextCleared},
 		} {
 			m.Apply(msg)
 			if m.SessionID != "root" || m.ReportedModel != "first" {

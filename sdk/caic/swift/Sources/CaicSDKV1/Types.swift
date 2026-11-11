@@ -320,6 +320,34 @@ public struct EventRateLimitStatus: Codable, Equatable, Hashable {
     }
 }
 
+public struct EventSystemSubtype: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let APIError = EventSystemSubtype("api_error")
+    public static let CompactBoundary = EventSystemSubtype("compact_boundary")
+    public static let CompactError = EventSystemSubtype("compact_error")
+    public static let CompactStart = EventSystemSubtype("compact_start")
+    public static let ContextCleared = EventSystemSubtype("context_cleared")
+    public static let Error = EventSystemSubtype("error")
+    public static let InputDeliveryFailed = EventSystemSubtype("input_delivery_failed")
+    public static let ModelRerouted = EventSystemSubtype("model_rerouted")
+    public static let Notice = EventSystemSubtype("notice")
+
+    public static func other(_ value: String) -> EventSystemSubtype { EventSystemSubtype(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct EventToolInputKind: Codable, Equatable, Hashable {
     public let value: String
 
@@ -4270,9 +4298,9 @@ public struct EventResult: Codable {
     }
 }
 
-/// EventSystem is a system event (status, compact_boundary, etc.).
+/// EventSystem is a harness or caic system event that clients present.
 public struct EventSystem: Codable {
-    public let subtype: String
+    public let subtype: EventSystemSubtype
     /// Optional human-readable detail (e.g. model names for model_rerouted).
     public let detail: String?
     /// ContextTokensBefore is the context size the harness reported before a
@@ -4282,7 +4310,7 @@ public struct EventSystem: Codable {
     /// compact_boundary, measured or estimated. Zero means it did not report it.
     public let contextTokensAfter: Int?
 
-    public init(subtype: String, detail: String? = nil, contextTokensBefore: Int? = nil, contextTokensAfter: Int? = nil) {
+    public init(subtype: EventSystemSubtype, detail: String? = nil, contextTokensBefore: Int? = nil, contextTokensAfter: Int? = nil) {
         self.subtype = subtype
         self.detail = detail
         self.contextTokensBefore = contextTokensBefore

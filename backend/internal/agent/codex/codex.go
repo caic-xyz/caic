@@ -725,7 +725,7 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 		// Inject accumulated usage into ResultMessage and reset for next turn.
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			if rm.Source.IsChild() {
-				out = append(out, &agent.SystemMessage{Source: rm.Source, MessageType: "system", Subtype: "error", Detail: rm.Result})
+				out = append(out, &agent.SystemMessage{Source: rm.Source, MessageType: "system", Subtype: agent.SystemSubtypeError, Detail: rm.Result})
 				continue
 			}
 			w.mu.Lock()

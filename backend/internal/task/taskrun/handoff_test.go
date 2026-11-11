@@ -228,8 +228,8 @@ func assertHandoffGolden(t *testing.T, name, got string) {
 	}
 }
 
-// TestExternalConversationCannotReplaceRoot exercises the adapter's actual
-// informational messages through root result, error, fallback and handoff folds.
+// TestExternalConversationCannotReplaceRoot exercises the adapter's retained
+// foreign records through root result, error, fallback and handoff folds.
 func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 	t.Parallel()
 	wire := antigravity.New("", nil).NewWire()
@@ -247,7 +247,7 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 		messages = append(messages, out...)
 	}
 	foreign := messages[len(messages)-1]
-	if _, ok := foreign.(*agent.SystemMessage); !ok || foreign.Provenance().IsChild() {
+	if _, ok := foreign.(*agent.RawMessage); !ok || foreign.Provenance().IsChild() {
 		t.Fatalf("foreign message=%#v", foreign)
 	}
 	if task.ClearsExitError(foreign) {

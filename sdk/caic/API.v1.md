@@ -282,6 +282,23 @@ or rejected.
 | `allowed_warning` |  |
 | `rejected` |  |
 
+### EventSystemSubtype
+
+EventSystemSubtype identifies a system event. The server sends only these
+values, so clients can present every one of them.
+
+| Value | Description |
+|-------|-------------|
+| `api_error` | EventSystemSubtypeAPIError reports a failed model API request. |
+| `compact_boundary` | EventSystemSubtypeCompactBoundary marks a context compaction. |
+| `compact_error` | EventSystemSubtypeCompactError reports a failed or cancelled compaction. |
+| `compact_start` | EventSystemSubtypeCompactStart reports a compaction in progress. |
+| `context_cleared` | EventSystemSubtypeContextCleared marks a cleared conversation context. |
+| `error` | EventSystemSubtypeError reports a harness failure described by Detail. |
+| `input_delivery_failed` | EventSystemSubtypeInputDeliveryFailed reports a prompt that was not delivered. |
+| `model_rerouted` | EventSystemSubtypeModelRerouted reports a model change described by Detail. |
+| `notice` | EventSystemSubtypeNotice reports informational text held in Detail. |
+
 ### EventToolInputKind
 
 EventToolInputKind identifies a normalized tool input view.
@@ -2158,11 +2175,11 @@ EventResult is emitted when the task reaches a terminal state.
 
 ### EventSystem
 
-EventSystem is a system event (status, compact_boundary, etc.).
+EventSystem is a harness or caic system event that clients present.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `subtype` | `string` |  | yes |
+| `subtype` | `EventSystemSubtype` |  | yes |
 | `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
 | `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a
 compact_boundary. Zero means the harness did not report it. |  |
