@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -1409,6 +1411,44 @@ func TestReadMessages(t *testing.T) {
 			})
 		}
 	})
+	t.Run("cancel while receiving a large record", func(t *testing.T) {
+		t.Parallel()
+		stdout, output := io.Pipe()
+		log := &testLogSink{}
+		conn := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, newTestRecords(t, t.Context(), log, nil), nil)
+		readDone := make(chan error, 1)
+		var workers sync.WaitGroup
+		workers.Go(func() { readDone <- conn.ReadMessages(stdout, nil) })
+		t.Cleanup(func() { conn.Cancel(); _ = output.Close(); workers.Wait() })
+		if _, err := io.WriteString(output, strings.Repeat("x", 2<<20)); err != nil {
+			t.Fatal(err)
+		}
+		conn.Cancel()
+		select {
+		case err := <-readDone:
+			if err != nil {
+				t.Fatalf("cancel reader: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancel did not release the reader")
+		}
+		if _, err := output.Write([]byte("\n")); !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("output remained open: %v", err)
+		}
+		if log.Len() != 0 {
+			t.Fatal("partial record was persisted")
+		}
+	})
+	t.Run("large malformed record is not persisted", func(t *testing.T) {
+		t.Parallel()
+		log := &testLogSink{}
+		owner := newTestRecordsWithHandler(t, t.Context(), log, &testMessageParser{}, &testRecordHandler{consumer: t.Context()})
+		input := `{"t":"agent","ts":1.000,"msg":{"text":"` + strings.Repeat("x", 2<<20) + `","bad":}}` + "\n"
+		err := NewConn(t.Context(), testLogger(), &closeErrorWriter{}, owner, nil).ReadMessages(io.NopCloser(strings.NewReader(input)), nil)
+		if err == nil || log.Len() != 0 {
+			t.Fatalf("malformed record: error=%v persisted=%d", err, log.Len())
+		}
+	})
 	t.Run("physical structural corruption is not persisted", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{}
@@ -1426,8 +1466,103 @@ func TestReadMessages(t *testing.T) {
 	})
 }
 
+type recordFillReader struct{}
+
+func (recordFillReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+func TestReadNDJSONRecord(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		input := strings.Repeat("a", (2<<20)+73) + "\nsecond\n"
+		reader := bufio.NewReaderSize(strings.NewReader(input), 1<<20)
+		first, err := readNDJSONRecord(reader)
+		if err != nil || string(first) != input[:len(input)-len("second\n")] {
+			t.Fatalf("first record length=%d, error=%v", len(first), err)
+		}
+		second, err := readNDJSONRecord(reader)
+		if err != nil || string(second) != "second\n" {
+			t.Fatalf("second record=%q, error=%v", second, err)
+		}
+		if string(first) != input[:len(input)-len("second\n")] {
+			t.Fatal("subsequent reads changed first record")
+		}
+		size := taskslog.MaxRecordSize - 1
+		large := io.MultiReader(io.LimitReader(recordFillReader{}, int64(size-1)), strings.NewReader("\n"))
+		record, err := readNDJSONRecord(bufio.NewReaderSize(large, 1<<20))
+		if err != nil || len(record) != size || record[0] != 'x' || record[size-1] != '\n' {
+			t.Fatalf("maximum accepted record: length=%d error=%v", len(record), err)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("exclusive physical size limit", func(t *testing.T) {
+			t.Parallel()
+			size := taskslog.MaxRecordSize
+			input := io.MultiReader(io.LimitReader(recordFillReader{}, int64(size-1)), strings.NewReader("\n"))
+			record, err := readNDJSONRecord(bufio.NewReaderSize(input, 1<<20))
+			if err == nil || len(record) != size || record[0] != 'x' || record[size-1] != '\n' {
+				t.Fatalf("at exclusive limit: length=%d error=%v", len(record), err)
+			}
+		})
+		t.Run("interrupted record returns its exact bytes", func(t *testing.T) {
+			t.Parallel()
+			input := strings.Repeat("z", (2<<20)+73)
+			record, err := readNDJSONRecord(bufio.NewReaderSize(strings.NewReader(input), 1<<20))
+			if !errors.Is(err, io.ErrUnexpectedEOF) || string(record) != input {
+				t.Fatalf("record length=%d, error=%v", len(record), err)
+			}
+		})
+		t.Run("reader failure is propagated", func(t *testing.T) {
+			t.Parallel()
+			failure := errors.New("transport failed")
+			input := io.MultiReader(strings.NewReader(strings.Repeat("z", 2<<20)), iotest.ErrReader(failure))
+			record, err := readNDJSONRecord(bufio.NewReaderSize(input, 1<<20))
+			if !errors.Is(err, failure) || record != nil {
+				t.Fatalf("record length=%d, error=%v", len(record), err)
+			}
+		})
+	})
+}
+
 func TestRelayRecordReader(t *testing.T) {
 	t.Parallel()
+	t.Run("large physical record survives replay", func(t *testing.T) {
+		t.Parallel()
+		native := `{"text":"` + strings.Repeat("a", (2<<20)+37) + `","nested":[1,2]}`
+		physical := `{"t":"agent","ts":1.000,"msg":` + native + "}\n"
+		log := &testLogSink{}
+		live := newTestRecordsWithHandler(t, t.Context(), log, &testMessageParser{}, &testRecordHandler{consumer: t.Context()})
+		reader := NewRelayRecordReader(t.Context(), strings.NewReader(physical), live)
+		if _, _, err := reader.ReadRecord(); err != nil {
+			t.Fatal(err)
+		}
+		if log.String() != physical {
+			t.Fatal("persisted record bytes changed")
+		}
+		header := `{"t":"caic_meta","version":3,"prompt":"test","harness":"claude"}` + "\n"
+		path := filepath.Join(t.TempDir(), "history.jsonl")
+		if err := os.WriteFile(path, append([]byte(header), log.Bytes()...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var replayed []byte
+		wire := &testMessageParser{output: func(line []byte) ([]Message, error) {
+			replayed = bytes.Clone(line)
+			return nil, nil
+		}}
+		replay := newTestRecordsWithHandler(t, t.Context(), DiscardLogSink{}, wire, &testRecordHandler{consumer: t.Context()})
+		if err := replay.Replay(t.Context(), path); err != nil {
+			t.Fatal(err)
+		}
+		if string(replayed) != native {
+			t.Fatal("replay changed native record bytes")
+		}
+	})
 	t.Run("ReadRecord", func(t *testing.T) {
 		t.Parallel()
 		t.Run("rejects unterminated record without persistence", func(t *testing.T) {
@@ -2326,15 +2461,37 @@ func TestRelayRecordAdmission(t *testing.T) {
 
 // BenchmarkLiveRelayRecord measures live record dispatch for large tool output.
 func BenchmarkLiveRelayRecord(b *testing.B) {
-	data := fmt.Appendf(nil, "{\"t\":\"agent\",\"ts\":1.000,\"msg\":{\"text\":%q}}\n", strings.Repeat("x", 8<<20))
-	owner := newTestRecordsWithHandler(b, b.Context(), DiscardLogSink{}, &testMessageParser{}, &testRecordHandler{consumer: b.Context()})
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		if result := owner.submit(b.Context(), &recordWork{op: recordRelay, data: data}); result.err != nil {
-			b.Fatal(result.err)
+	b.Run("Dispatch8388608", func(b *testing.B) {
+		data := fmt.Appendf(nil, "{\"t\":\"agent\",\"ts\":1.000,\"msg\":{\"text\":%q}}\n", strings.Repeat("x", 8<<20))
+		owner := newTestRecordsWithHandler(b, b.Context(), DiscardLogSink{}, &testMessageParser{}, &testRecordHandler{consumer: b.Context()})
+		b.SetBytes(int64(len(data)))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if result := owner.submit(b.Context(), &recordWork{op: recordRelay, data: data}); result.err != nil {
+				b.Fatal(result.err)
+			}
 		}
+	})
+	for _, size := range []int{1024, 8 << 20} {
+		b.Run(fmt.Sprintf("ReadDispatch%d", size), func(b *testing.B) {
+			data := fmt.Appendf(nil, "{\"t\":\"agent\",\"ts\":1.000,\"msg\":{\"text\":%q}}\n", strings.Repeat("x", size))
+			owner := newTestRecordsWithHandler(b, b.Context(), DiscardLogSink{}, &testMessageParser{}, &testRecordHandler{consumer: b.Context()})
+			reader := bufio.NewReaderSize(nil, 1<<20)
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				reader.Reset(bytes.NewReader(data))
+				record, err := readNDJSONRecord(reader)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if result := owner.submit(b.Context(), &recordWork{op: recordRelay, data: record}); result.err != nil {
+					b.Fatal(result.err)
+				}
+			}
+		})
 	}
 }
 

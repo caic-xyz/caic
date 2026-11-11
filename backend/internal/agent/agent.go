@@ -1259,27 +1259,41 @@ func relaySnapshotCommand(ctx context.Context, container string, tailBytes, size
 // readNDJSONRecord reads one LF-terminated physical record without inventing a
 // delimiter. The task-log limit includes the physical LF terminator.
 func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
-	var record []byte
+	var fragments [][]byte
+	size := 0
 	for {
 		fragment, err := r.ReadSlice('\n')
-		record = append(record, fragment...)
-		if len(record) >= taskslog.MaxRecordSize {
-			return record, fmt.Errorf("NDJSON record must be smaller than %d bytes", taskslog.MaxRecordSize)
+		size += len(fragment)
+		if size >= taskslog.MaxRecordSize {
+			return joinRecordFragments(fragments, fragment, size), fmt.Errorf("NDJSON record must be smaller than %d bytes", taskslog.MaxRecordSize)
 		}
 		switch {
 		case err == nil:
-			return record, nil
+			return joinRecordFragments(fragments, fragment, size), nil
 		case errors.Is(err, bufio.ErrBufferFull):
-			continue
+			// ReadSlice's storage is reused on the next read. Keep each full
+			// fragment once and assemble only after the final size is known.
+			fragments = append(fragments, bytes.Clone(fragment))
 		case errors.Is(err, io.EOF):
-			if len(record) == 0 {
+			if size == 0 {
 				return nil, io.EOF
 			}
-			return record, io.ErrUnexpectedEOF
+			return joinRecordFragments(fragments, fragment, size), io.ErrUnexpectedEOF
 		default:
 			return nil, err
 		}
 	}
+}
+
+func joinRecordFragments(fragments [][]byte, last []byte, size int) []byte {
+	if len(fragments) == 0 {
+		return bytes.Clone(last)
+	}
+	record := make([]byte, 0, size)
+	for _, fragment := range fragments {
+		record = append(record, fragment...)
+	}
+	return append(record, last...)
 }
 
 // isSignalExit reports whether err indicates the process was killed by a

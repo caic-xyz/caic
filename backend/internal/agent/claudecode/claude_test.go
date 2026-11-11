@@ -1319,3 +1319,36 @@ func (o *dispatchObserver) ApplyRecords(ctx context.Context, messages []agent.Ti
 	}
 	return o.RecordHandler.ApplyRecords(ctx, messages)
 }
+
+// BenchmarkRelayIngestion measures a complete live connection with real Claude decoding.
+func BenchmarkRelayIngestion(b *testing.B) {
+	for _, size := range []int{1024, 8 << 20} {
+		b.Run(fmt.Sprintf("ToolResult%d", size), func(b *testing.B) {
+			line := fmt.Appendf(nil, `{"t":"agent","ts":1.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":%q}]},"parent_tool_use_id":null,"session_id":"test-session","uuid":"test-uuid"}}`+"\n", strings.Repeat("x", size))
+			owner := claudeProtocolRecords(b, b.Context(), &relayBenchmarkHandler{})
+			logger := slog.New(slog.DiscardHandler)
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				conn := agent.NewConn(b.Context(), logger, relayBenchmarkWriter{}, owner, nil)
+				if err := conn.ReadMessages(io.NopCloser(bytes.NewReader(line)), nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+type relayBenchmarkHandler struct{}
+
+func (*relayBenchmarkHandler) RecordAppended(agent.PhysicalRecord) {}
+func (*relayBenchmarkHandler) PrepareRecords(context.Context, []agent.TimedMessage) ([]agent.Message, error) {
+	return nil, nil
+}
+func (*relayBenchmarkHandler) ApplyRecords(context.Context, []agent.TimedMessage) error { return nil }
+
+type relayBenchmarkWriter struct{}
+
+func (relayBenchmarkWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (relayBenchmarkWriter) Close() error                { return nil }

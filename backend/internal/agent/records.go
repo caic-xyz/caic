@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -409,16 +408,16 @@ func marshalRecordMessages(messages []Message) ([]byte, error) {
 }
 
 func marshalInputRecords(data []byte) ([]byte, error) {
-	reader := bufio.NewReader(bytes.NewReader(data))
 	var out []byte
 	for {
-		line, err := readNDJSONRecord(reader)
+		line, rest, err := nextInputRecord(data)
 		if errors.Is(err, io.EOF) {
 			return out, nil
 		}
 		if err != nil {
 			return nil, err
 		}
+		data = rest
 		if len(line) == 1 {
 			continue
 		}
@@ -432,20 +431,42 @@ func marshalInputRecords(data []byte) ([]byte, error) {
 }
 
 func validateRecordBatch(data []byte) ([]taskslog.Frame, error) {
-	reader := bufio.NewReader(bytes.NewReader(data))
 	var frames []taskslog.Frame
 	for {
-		line, err := readNDJSONRecord(reader)
+		line, rest, err := nextInputRecord(data)
 		if errors.Is(err, io.EOF) {
 			return frames, nil
 		}
 		if err != nil {
 			return nil, err
 		}
+		data = rest
 		frame, err := taskslog.DecodeFrame(line[:len(line)-1])
 		if err != nil {
 			return nil, err
 		}
 		frames = append(frames, frame)
 	}
+}
+
+// nextInputRecord borrows a complete physical line from immutable in-memory input.
+func nextInputRecord(data []byte) (line, rest []byte, err error) {
+	if len(data) == 0 {
+		return nil, nil, io.EOF
+	}
+	search := data
+	if len(search) > taskslog.MaxRecordSize {
+		search = search[:taskslog.MaxRecordSize]
+	}
+	end := bytes.IndexByte(search, '\n')
+	if end < 0 {
+		if len(data) >= taskslog.MaxRecordSize {
+			return nil, nil, fmt.Errorf("NDJSON record must be smaller than %d bytes", taskslog.MaxRecordSize)
+		}
+		return nil, nil, io.ErrUnexpectedEOF
+	}
+	if end+1 >= taskslog.MaxRecordSize {
+		return nil, nil, fmt.Errorf("NDJSON record must be smaller than %d bytes", taskslog.MaxRecordSize)
+	}
+	return data[:end+1], data[end+1:], nil
 }

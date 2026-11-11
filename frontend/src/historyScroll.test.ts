@@ -537,3 +537,44 @@ it("honors keyboard scrolling while a context replacement is pending", async () 
     f.dispose();
   }
 });
+
+it("leaves Control+Shift+End text selection to the browser", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    const select = new KeyboardEvent("keydown", { key: "End", ctrlKey: true, shiftKey: true, cancelable: true });
+    f.el.dispatchEvent(select);
+    assert.equal(select.defaultPrevented, false);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("keeps Control+End following when live output grows during native keyboard scrolling", async () => {
+  const f = fixture();
+  try {
+    await paint();
+    f.userScroll(100);
+    const end = new KeyboardEvent("keydown", { key: "End", ctrlKey: true, cancelable: true });
+    f.el.dispatchEvent(end);
+    // Chrome may animate toward the old end while live output changes the height.
+    if (!end.defaultPrevented) {
+      f.el.scrollTop = 400;
+      f.el.dispatchEvent(new Event("scroll"));
+    }
+    f.grow();
+    await paint();
+    if (!end.defaultPrevented) {
+      f.el.scrollTop = 800;
+      f.el.dispatchEvent(new Event("scroll"));
+    }
+    await paint();
+    assert.equal(f.el.scrollTop, 1100);
+    f.userScroll(300);
+    f.append();
+    await paint();
+    assert.equal(f.el.scrollTop, 300);
+  } finally {
+    f.dispose();
+  }
+});

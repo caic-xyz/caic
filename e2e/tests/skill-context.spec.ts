@@ -94,11 +94,22 @@ for (const width of [390, 1280]) {
         .poll(() => viewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
         .toBeLessThan(2);
     };
-    for (let cycle = 0; cycle < 3; cycle++) {
-      if (width === 390) await page.keyboard.press("Escape");
-      const card = page.locator(`[data-task-id='${id}']`);
+    await expect(area).toBeVisible();
+    async function selectTask(taskId: string, previous: Awaited<ReturnType<typeof area.elementHandle>>) {
+      const card = page.locator(`[data-task-id='${taskId}']`);
       await card.focus();
       await card.press("Enter");
+      await expect(page).toHaveURL(new RegExp(`/task/@${taskId}(?:\\+[^/?]+)?(?:\\?.*)?$`));
+      await expect.poll(() => previous.evaluate((el) => el.isConnected)).toBe(false);
+      await expect(area).toBeVisible();
+    }
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const previous = await area.elementHandle();
+      if (width === 390) {
+        await page.keyboard.press("Escape");
+        await expect(area).toHaveCount(0);
+      }
+      await selectTask(id, previous);
       await expect(page.getByRole("button", { name: /Compacted session/ })).toHaveCount(12);
       await expect.poll(() => viewport.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
       await atBottom();
@@ -132,10 +143,12 @@ for (const width of [390, 1280]) {
         await page.keyboard.press("Control+End");
         await atBottom();
       }
-      if (width === 390) await page.keyboard.press("Escape");
-      const otherCard = page.locator(`[data-task-id='${other}']`);
-      await otherCard.focus();
-      await otherCard.press("Enter");
+      const current = await area.elementHandle();
+      if (width === 390) {
+        await page.keyboard.press("Escape");
+        await expect(area).toHaveCount(0);
+      }
+      await selectTask(other, current);
       await atBottom();
     }
     expect(errors).toEqual([]);

@@ -156,11 +156,25 @@ export function createHistoryScroll(
       scrollInput = true;
     };
     const keyInput = (event: KeyboardEvent) => {
+      if (event.target !== el && event.target !== container?.parentElement) return;
       if (
-        (event.target === el || event.target === container?.parentElement) &&
-        ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key)
-      )
+        event.key === "End" &&
+        event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.defaultPrevented
+      ) {
+        // Native keyboard scrolling may aim at an old bottom while live output grows.
+        event.preventDefault();
+        correction = null;
+        scrollInput = false;
+        intent = { kind: "following", anchor: null };
+        write(el, el.scrollHeight);
+        schedule();
+      } else if (["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key)) {
         input();
+      }
     };
     const pointerInput = (event: PointerEvent) => {
       const left = el.getBoundingClientRect().left + el.clientLeft;

@@ -1,184 +1,109 @@
-// Tests accepted-byte ordering, terminal interpretation failures, and derived-record publication barriers.
+// Tests ordered record admission, in-memory framing, and prompt ingestion performance.
 
-package agent_test
+package agent
 
 import (
 	"bytes"
-	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-func TestRecords(t *testing.T) {
+func TestMarshalInputRecords(t *testing.T) {
 	t.Parallel()
-	t.Run("AppendMessage", func(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		t.Run("large host record persists unchanged", func(t *testing.T) {
-			t.Parallel()
-			text := strings.Repeat("x", 33<<20)
-			log := &agenttest.LogSink{}
-			owner, err := agent.NewRecords(t.Context(), &agenttest.Wire{}, log, &agenttest.RecordHandler{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := owner.Close(); err != nil {
-					t.Error(err)
-				}
-			})
-			if err := owner.AppendMessage(t.Context(), &agent.TextMessage{Text: text}); err != nil {
-				t.Fatal(err)
-			}
-			frame, err := taskslog.DecodeFrame(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}))
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, ok := frame.Control.(*v3.TextMessage)
-			if !ok || got.Text != text {
-				t.Fatal("large host text changed")
-			}
-		})
+		encoded, err := marshalInputRecords([]byte("\n{\"type\":\"first\"}\n{\"type\":\"second\",\"n\":2}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		frames, err := validateRecordBatch(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(frames) != 2 || frames[0].Kind != taskslog.KindInput || frames[1].Kind != taskslog.KindInput ||
+			string(frames[0].Native) != `{"type":"first"}` || string(frames[1].Native) != `{"type":"second","n":2}` {
+			t.Fatalf("unexpected input records: %+v", frames)
+		}
 	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		if _, err := marshalInputRecords([]byte("{}\n{}")); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("partial record: %v", err)
+		}
+		encoded, err := marshalInputRecords([]byte("{bad}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := validateRecordBatch(encoded); err == nil {
+			t.Fatal("malformed native input accepted")
+		}
+	})
+}
 
-	t.Run("Close", func(t *testing.T) {
+func TestValidateRecordBatch(t *testing.T) {
+	t.Parallel()
+	t.Run("error", func(t *testing.T) {
 		t.Parallel()
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			t.Run("failed_append_does_not_interpret", func(t *testing.T) {
-				t.Parallel()
-				failure := errors.New("journal unavailable")
-				sink := &rejectedRecords{failure: failure, at: 1}
-				observer := &agenttest.RecordHandler{}
-				parsed := 0
-				wire := &agenttest.Wire{Output: func([]byte) ([]agent.Message, error) {
-					parsed++
-					return []agent.Message{&agent.TextMessage{Text: "unrecorded"}}, nil
-				}}
-				owner, err := agent.NewRecords(t.Context(), wire, sink, observer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := owner.Close(); !errors.Is(err, failure) {
-						t.Errorf("close = %v", err)
-					}
-				})
-				reader := agent.NewRelayRecordReader(t.Context(), strings.NewReader(`{"t":"agent","ts":1.000,"msg":{}}`+"\n"), owner)
-				if _, _, err := reader.ReadRecord(); !errors.Is(err, failure) {
-					t.Fatalf("read error = %v", err)
-				}
-				if parsed != 0 || len(observer.Events()) != 0 {
-					t.Fatalf("parsed=%d events=%v", parsed, observer.Events())
-				}
-				if err := owner.AppendMessage(t.Context(), &agent.LogMessage{Line: "later"}); !errors.Is(err, failure) {
-					t.Fatalf("terminal failure = %v", err)
-				}
-			})
-			t.Run("derived_append_retains_evidence_without_publishing_result", func(t *testing.T) {
-				t.Parallel()
-				failure := errors.New("derived record unavailable")
-				sink := &rejectedRecords{failure: failure, at: 2}
-				observer := &derivedRecords{}
-				owner, err := agent.NewRecords(t.Context(), claudecode.New().NewWire(), sink, observer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := owner.Close(); !errors.Is(err, failure) {
-						t.Errorf("close = %v", err)
-					}
-				})
-				input := `{"t":"agent","ts":1.000,"msg":{"type":"result","subtype":"success","result":"done","num_turns":1}}` + "\n"
-				reader := agent.NewRelayRecordReader(t.Context(), strings.NewReader(input), owner)
-				if _, _, err := reader.ReadRecord(); !errors.Is(err, failure) {
-					t.Fatalf("read error = %v", err)
-				}
-				if sink.String() != input || len(observer.Events()) != 0 {
-					t.Fatalf("evidence=%q events=%v", sink.String(), observer.Events())
-				}
-			})
-			t.Run("interpretation_is_terminal_and_retains_exact_evidence", func(t *testing.T) {
-				t.Parallel()
-				var first error
-				sink := &agenttest.LogSink{}
-				observer := &agenttest.RecordHandler{}
-				owner, err := agent.NewRecords(t.Context(), claudecode.New().NewWire(), sink, observer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := owner.Close(); !errors.Is(err, first) {
-						t.Errorf("close = %v", err)
-					}
-				})
-				input := `{"t":"agent","ts":1.000,"msg":[]}` + "\n"
-				reader := agent.NewRelayRecordReader(t.Context(), strings.NewReader(input), owner)
-				_, _, first = reader.ReadRecord()
-				if first == nil {
-					t.Fatal("expected native schema error")
-				}
-				next := agent.NewRelayRecordReader(t.Context(), strings.NewReader(`{"t":"log","line":"later"}`+"\n"), owner)
-				if _, _, err := next.ReadRecord(); !errors.Is(err, first) {
-					t.Fatalf("next error = %v, want %v", err, first)
-				}
-				if sink.String() != input || len(observer.Events()) != 0 {
-					t.Fatalf("evidence=%q events=%v", sink.String(), observer.Events())
-				}
-			})
-		})
+		if _, err := validateRecordBatch([]byte("{\"t\":\"agent\",\"ts\":1.000,\"msg\":{}}")); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("partial record: %v", err)
+		}
+		if _, err := validateRecordBatch([]byte("\n")); err == nil {
+			t.Fatal("empty physical record accepted")
+		}
 	})
-	t.Run("WriteInput", func(t *testing.T) {
+}
+
+func TestNextInputRecord(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		t.Run("error_failed_input_append_does_not_write_transport", func(t *testing.T) {
+		data := bytes.Repeat([]byte{'x'}, taskslog.MaxRecordSize)
+		data[len(data)-2] = '\n'
+		line, rest, err := nextInputRecord(data)
+		if err != nil || len(line) != taskslog.MaxRecordSize-1 || len(rest) != 1 {
+			t.Fatalf("maximum accepted record: line=%d rest=%d error=%v", len(line), len(rest), err)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("terminated at limit", func(t *testing.T) {
 			t.Parallel()
-			failure := errors.New("input journal unavailable")
-			sink := &rejectedRecords{failure: failure, at: 1}
-			observer := &agenttest.RecordHandler{}
-			owner, err := agent.NewRecords(t.Context(), &agenttest.Wire{}, sink, observer)
-			if err != nil {
-				t.Fatal(err)
+			data := bytes.Repeat([]byte{'x'}, taskslog.MaxRecordSize)
+			data[len(data)-1] = '\n'
+			if _, _, err := nextInputRecord(data); err == nil {
+				t.Fatal("exclusive limit accepted")
 			}
-			t.Cleanup(func() {
-				if err := owner.Close(); !errors.Is(err, failure) {
-					t.Errorf("close = %v", err)
-				}
-			})
-			var output strings.Builder
-			if err := owner.WriteInput(t.Context(), &output, []byte("{}\n")); !errors.Is(err, failure) {
-				t.Fatalf("input error = %v", err)
-			}
-			if output.Len() != 0 || len(observer.Events()) != 0 {
-				t.Fatalf("transport=%q events=%v", output.String(), observer.Events())
+		})
+		t.Run("unterminated at limit", func(t *testing.T) {
+			t.Parallel()
+			data := bytes.Repeat([]byte{'x'}, taskslog.MaxRecordSize)
+			if _, _, err := nextInputRecord(data); err == nil || errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("oversized unterminated record: %v", err)
 			}
 		})
 	})
 }
 
-type rejectedRecords struct {
-	agenttest.LogSink
-
-	failure error
-	at      int
-	calls   int
-}
-
-func (s *rejectedRecords) AppendRecord(record agent.PhysicalRecord) error {
-	s.calls++
-	if s.calls == s.at {
-		return s.failure
+// BenchmarkPromptRecord measures ordered prompt admission for encoded image input.
+func BenchmarkPromptRecord(b *testing.B) {
+	for _, size := range []int{1024, 8 << 20} {
+		b.Run(fmt.Sprintf("Image%d", size), func(b *testing.B) {
+			data := fmt.Appendf(nil, `{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":%q}}]}}`+"\n", strings.Repeat("a", size))
+			owner := newTestRecordsWithHandler(b, b.Context(), DiscardLogSink{}, &testMessageParser{}, &testRecordHandler{consumer: b.Context()})
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				result := owner.submit(b.Context(), &recordWork{op: recordPrompt, data: data})
+				if result.err != nil {
+					b.Fatal(result.err)
+				}
+			}
+		})
 	}
-	return s.LogSink.AppendRecord(record)
-}
-
-type derivedRecords struct{ agenttest.RecordHandler }
-
-func (*derivedRecords) PrepareRecords(context.Context, []agent.TimedMessage) ([]agent.Message, error) {
-	return []agent.Message{&agent.DiffStatMessage{MessageType: "caic_diff_stat"}}, nil
 }
