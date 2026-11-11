@@ -531,7 +531,7 @@ VersionResp is the response for GET /api/caic/v1/server/version.
 | `latest` | `string` | empty when check failed |  |
 | `updateAvailable` | `boolean` | true when Latest > Current | yes |
 | `checkError` | `string` | non-empty when the GitHub check failed |  |
-| `autoUpdateEnabled` | `boolean` | true when autoupdate schedule is configured | yes |
+| `autoUpdateEnabled` | `boolean` | true when manual updates are available for this build | yes |
 
 ### UpdateResp
 

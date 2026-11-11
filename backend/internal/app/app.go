@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/gomode/autoupdate"
 	"github.com/maruel/gomode/httpserver"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -31,7 +32,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -72,6 +72,10 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, errors.New("logger is required")
 	}
 	appLog := log.With("cmp", "app")
+	version := cfg.Version
+	if version == "" {
+		version = strings.TrimPrefix(autoupdate.Version(), "v")
+	}
 	if cfg.Dirs.ConfigDir == "" {
 		return nil, errors.New("ConfigDir is required")
 	}
@@ -113,7 +117,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 	resource := metrics.Resource{
 		ServiceName:    "caic",
-		ServiceVersion: autoupdate.Version,
+		ServiceVersion: version,
 		Host:           host,
 	}
 	metricsStore := metrics.NewStore(resource)
@@ -358,6 +362,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	s, err := server.New(ctx, log, server.Dependencies{
+		Version:                    version,
+		Updater:                    cfg.Updater,
+		UpdateInstalled:            cfg.UpdateInstalled,
 		Checkouts:                  checkoutRegistry,
 		PushCacheDir:               cfg.Dirs.CacheDir,
 		CheckoutRoot:               absRoot,

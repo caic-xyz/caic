@@ -29,9 +29,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/maruel/gomode/autoupdate"
 )
 
 // expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.
@@ -67,11 +67,20 @@ func mainImpl() (err error) {
 	ctx, cancel := context.WithCancelCause(signalCtx)
 	group, ctx := errgroup.WithContext(ctx)
 	var watcher *fsnotify.Watcher
+	var updater *autoupdate.Updater
+	installed := make(chan struct{}, 1)
 	defer func() {
 		cancel(nil)
 		err = errors.Join(err, group.Wait())
 		if watcher != nil {
 			err = errors.Join(err, watcher.Close())
+		}
+		select {
+		case <-installed:
+			if err == nil || isNormalShutdown(err) {
+				err = errors.Join(err, updater.Restart())
+			}
+		default:
 		}
 	}()
 
@@ -96,7 +105,7 @@ Flags:
 	traceFlag := flag.String("trace", "", "preload a JSONL trace file as a terminal task (fake mode only)")
 	flag.Parse()
 	if *versionFlag {
-		fmt.Println(autoupdate.Version)
+		fmt.Println(autoupdate.Version())
 		return nil
 	}
 	if args := flag.Args(); len(args) > 0 {
@@ -235,21 +244,56 @@ Flags:
 	if err != nil {
 		return fmt.Errorf("failed to set up file watcher: %w", err)
 	}
-	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
-	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
-		sched, err := autoUpdateSchedule(&tc)
-		if err != nil {
-			return err
-		}
-		if sched != nil {
-			group.Go(func() error {
-				autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
-				return nil
-			})
-		}
+	// Construct even when scheduling is disabled to clean up committed Windows replacements.
+	sched, err := autoUpdateSchedule(&tc)
+	if err != nil {
+		return err
+	}
+	binary := "caic"
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	updater, err = autoupdate.New(autoupdate.Config{
+		Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: binary,
+		ArchiveName: releaseArchiveName,
+		Client:      github.NewClient(cfg.GitHub.Token, http.DefaultTransport).HTTPClient,
+		Log:         log,
+	})
+	if err != nil {
+		return err
+	}
+	cfg.Updater = updater
+	cfg.UpdateInstalled = func() {
+		installed <- struct{}{}
+		cancel(nil)
+	}
+	if sched != nil {
+		group.Go(func() error {
+			version, updateErr := updater.Run(ctx, *sched)
+			if version != "" {
+				cfg.UpdateInstalled()
+			}
+			if updateErr != nil && !errors.Is(updateErr, context.Canceled) {
+				return updateErr
+			}
+			return nil
+		})
 	}
 	err = serveHTTP(ctx, log, ln, root, cfg)
 	return errors.Join(err, context.Cause(ctx))
+}
+
+// releaseArchiveName matches the published GoReleaser asset contract.
+func releaseArchiveName(version string) string {
+	arch := runtime.GOARCH
+	ext := ".tar.gz"
+	switch runtime.GOOS {
+	case "darwin":
+		arch = "all"
+	case "windows":
+		ext = ".zip"
+	}
+	return "caic_" + version + "_" + runtime.GOOS + "_" + arch + ext
 }
 
 // roundDur rounds d to 3 significant digits.

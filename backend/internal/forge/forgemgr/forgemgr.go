@@ -211,15 +211,6 @@ func newThrottle() http.RoundTripper {
 	return &roundtrippers.Throttle{QPS: 1, Transport: http.DefaultTransport}
 }
 
-// GitHubClient returns a GitHub API client authenticated with the configured PAT.
-// Returns nil when no GitHub token is configured.
-func (m *Manager) GitHubClient() *github.Client {
-	if m.githubToken == "" {
-		return nil
-	}
-	return github.NewClient(m.githubToken, m.githubPATThrottle)
-}
-
 // githubOAuthThrottle returns the per-user throttle for GitHub OAuth.
 // Each OAuth user has a separate GitHub rate-limit bucket; throttles must not be shared.
 func (m *Manager) githubOAuthThrottle(userID string) http.RoundTripper {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -149,4 +150,20 @@ func TestExpandTilde(t *testing.T) {
 func TestMain(m *testing.M) {
 	gittest.Isolate()
 	os.Exit(m.Run())
+}
+
+func TestReleaseArchiveName(t *testing.T) {
+	t.Parallel()
+	contracts := map[string]string{
+		"darwin/amd64":  "caic_1.2.3_darwin_all.tar.gz",
+		"darwin/arm64":  "caic_1.2.3_darwin_all.tar.gz",
+		"linux/amd64":   "caic_1.2.3_linux_amd64.tar.gz",
+		"linux/arm64":   "caic_1.2.3_linux_arm64.tar.gz",
+		"windows/amd64": "caic_1.2.3_windows_amd64.zip",
+	}
+	if want, ok := contracts[runtime.GOOS+"/"+runtime.GOARCH]; ok {
+		if got := releaseArchiveName("1.2.3"); got != want {
+			t.Fatalf("archive = %q, want %q", got, want)
+		}
+	}
 }

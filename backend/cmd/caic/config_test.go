@@ -13,8 +13,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/config/data"
+	"github.com/maruel/gomode/autoupdate"
 	"github.com/maruel/gomode/voicegateway"
 )
 
@@ -570,10 +572,10 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.Runtime.TailscaleAPIKey != "tskey_from_core_env" {
 			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.Runtime.TailscaleAPIKey)
 		}
-		if cfg.Runtime.ImagePruneSchedule == nil || len(cfg.Runtime.ImagePruneSchedule.Hour) != 1 || cfg.Runtime.ImagePruneSchedule.Hour[0] != 6 {
+		if cfg.Runtime.ImagePruneSchedule == nil || cfg.Runtime.ImagePruneSchedule.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) != time.Date(2026, 1, 1, 6, 0, 0, 0, time.UTC) {
 			t.Errorf("ImagePruneSchedule = %+v, want daily at 06:00", cfg.Runtime.ImagePruneSchedule)
 		}
-		if cfg.Runtime.RepoRepackSchedule == nil || len(cfg.Runtime.RepoRepackSchedule.Hour) != 1 || cfg.Runtime.RepoRepackSchedule.Hour[0] != 7 {
+		if cfg.Runtime.RepoRepackSchedule == nil || cfg.Runtime.RepoRepackSchedule.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) != time.Date(2026, 1, 1, 7, 0, 0, 0, time.UTC) {
 			t.Errorf("RepoRepackSchedule = %+v, want daily at 07:00", cfg.Runtime.RepoRepackSchedule)
 		}
 	})
@@ -768,133 +770,57 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 	})
 }
 
-func TestAutoUpdateSchedule(t *testing.T) {
+func TestMaintenanceSchedules(t *testing.T) {
 	t.Parallel()
-	t.Run("default schedule", func(t *testing.T) {
-		t.Parallel()
-		s, err := autoUpdateSchedule(&data.Config{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s == nil {
-			t.Fatal("expected non-nil schedule for default")
-		}
-	})
-
-	t.Run("empty disables", func(t *testing.T) {
-		t.Parallel()
-		s, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: new(string)}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s != nil {
-			t.Error("expected nil schedule for empty string")
-		}
-	})
-
-	t.Run("custom cron", func(t *testing.T) {
-		t.Parallel()
-		cron := "0 3 * * *"
-		s, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: &cron}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s == nil {
-			t.Fatal("expected non-nil schedule")
-		}
-		if len(s.Hour) != 1 || s.Hour[0] != 3 {
-			t.Errorf("Hour = %v, want [3]", s.Hour)
-		}
-	})
-
-	t.Run("invalid cron", func(t *testing.T) {
-		t.Parallel()
-		cron := "not a cron"
-		_, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: &cron}})
-		if err == nil {
-			t.Error("expected error for invalid cron")
-		}
-	})
-}
-
-func TestPruneSchedule(t *testing.T) {
-	t.Parallel()
-	t.Run("default schedule", func(t *testing.T) {
-		t.Parallel()
-		s, err := pruneSchedule(&data.Config{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s == nil {
-			t.Fatal("expected non-nil schedule for default")
-		}
-		if len(s.Hour) != 1 || s.Hour[0] != 5 {
-			t.Errorf("Hour = %v, want [5]", s.Hour)
-		}
-	})
-
-	t.Run("empty disables", func(t *testing.T) {
-		t.Parallel()
-		s, err := pruneSchedule(&data.Config{Core: data.Core{Prune: new(string)}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s != nil {
-			t.Error("expected nil schedule for empty string")
-		}
-	})
-
-	t.Run("custom cron", func(t *testing.T) {
-		t.Parallel()
-		cron := "0 3 * * *"
-		s, err := pruneSchedule(&data.Config{Core: data.Core{Prune: &cron}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s == nil {
-			t.Fatal("expected non-nil schedule")
-		}
-		if len(s.Hour) != 1 || s.Hour[0] != 3 {
-			t.Errorf("Hour = %v, want [3]", s.Hour)
-		}
-	})
-
-	t.Run("invalid cron", func(t *testing.T) {
-		t.Parallel()
-		cron := "not a cron"
-		_, err := pruneSchedule(&data.Config{Core: data.Core{Prune: &cron}})
-		if err == nil {
-			t.Error("expected error for invalid cron")
-		}
-	})
-}
-
-func TestRepoRepackSchedule(t *testing.T) {
-	t.Parallel()
-	t.Run("default nightly", func(t *testing.T) {
-		t.Parallel()
-		s, err := repoRepackSchedule(&data.Config{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s == nil || len(s.Hour) != 1 || s.Hour[0] != 2 {
-			t.Fatalf("schedule = %+v, want daily at 02:00", s)
-		}
-	})
-	t.Run("disabled", func(t *testing.T) {
-		t.Parallel()
-		s, err := repoRepackSchedule(&data.Config{Core: data.Core{RepoRepack: new(string)}})
-		if err != nil || s != nil {
-			t.Fatalf("schedule = %+v, %v; want disabled", s, err)
-		}
-	})
-	t.Run("invalid", func(t *testing.T) {
-		t.Parallel()
-		cron := "invalid"
-		if _, err := repoRepackSchedule(&data.Config{Core: data.Core{RepoRepack: &cron}}); err == nil {
-			t.Fatal("expected invalid schedule error")
-		}
-	})
+	for _, tc := range []struct {
+		name         string
+		parse        func(*data.Config) (*autoupdate.Schedule, error)
+		config       func(*string) *data.Config
+		hour, minute int
+	}{
+		{"auto_update", autoUpdateSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{AutoUpdate: s}} }, 4, 50},
+		{"prune", pruneSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{Prune: s}} }, 5, 0},
+		{"repo_repack", repoRepackSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{RepoRepack: s}} }, 2, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			t.Run("default", func(t *testing.T) {
+				t.Parallel()
+				s, err := tc.parse(tc.config(nil))
+				if err != nil || s == nil {
+					t.Fatalf("schedule = %v, %v", s, err)
+				}
+				if got := s.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); got != time.Date(2026, 1, 1, tc.hour, tc.minute, 0, 0, time.UTC) {
+					t.Fatalf("default occurrence = %v", got)
+				}
+			})
+			t.Run("empty disables", func(t *testing.T) {
+				t.Parallel()
+				s, err := tc.parse(tc.config(new(string)))
+				if err != nil || s != nil {
+					t.Fatalf("disabled schedule = %v, %v", s, err)
+				}
+			})
+			t.Run("custom", func(t *testing.T) {
+				t.Parallel()
+				cron := "15 3 * * *"
+				s, err := tc.parse(tc.config(&cron))
+				if err != nil || s == nil {
+					t.Fatalf("schedule = %v, %v", s, err)
+				}
+				if got := s.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); got != time.Date(2026, 1, 1, 3, 15, 0, 0, time.UTC) {
+					t.Fatalf("custom occurrence = %v", got)
+				}
+			})
+			t.Run("invalid", func(t *testing.T) {
+				t.Parallel()
+				cron := "not a cron"
+				if _, err := tc.parse(tc.config(&cron)); err == nil || !strings.Contains(err.Error(), "core."+tc.name) {
+					t.Fatalf("schedule error = %v", err)
+				}
+			})
+		})
+	}
 }
 
 func TestAllowOriginsOrDefault(t *testing.T) {

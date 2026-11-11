@@ -1676,7 +1676,7 @@ type VersionResp struct {
 	Latest       string `json:"latest,omitempty"`     // empty when check failed
 	UpdateAvail  bool   `json:"updateAvailable"`      // true when Latest > Current
 	CheckError   string `json:"checkError,omitempty"` // non-empty when the GitHub check failed
-	AutoUpdateOn bool   `json:"autoUpdateEnabled"`    // true when autoupdate schedule is configured
+	AutoUpdateOn bool   `json:"autoUpdateEnabled"`    // true when manual updates are available for this build
 }
 
 // UpdateResp is the response for POST /api/caic/v1/server/update.

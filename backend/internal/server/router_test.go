@@ -2164,7 +2164,7 @@ func TestExternalVoiceToken(t *testing.T) {
 		InstanceID: "caic-main",
 		SigningKey: key,
 	}
-	settings := newGoModeSettings(voiceGatewayMetadata(&s.voiceGateway, s.voiceBridge), true)
+	settings := newGoModeSettings("test", voiceGatewayMetadata(&s.voiceGateway, s.voiceBridge), true)
 	s.goModeHandler, err = gomode.NewHandler(&settings)
 	if err != nil {
 		t.Fatal(err)
@@ -2242,7 +2242,7 @@ func TestGoModeSettings(t *testing.T) {
 		AuthRequired: true,
 		Capabilities: []string{"voice.gatewayGeminiLive"},
 	}
-	got := newGoModeSettings(voice, true)
+	got := newGoModeSettings("test", voice, true)
 	if got.Service != "caic" {
 		t.Fatalf("Service = %q, want caic", got.Service)
 	}
@@ -2268,7 +2268,7 @@ func TestGoModeSettings(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 
-	embedded := newGoModeSettings(v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeEmbedded}, false)
+	embedded := newGoModeSettings("test", v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeEmbedded}, false)
 	if embedded.WebShell.VoiceGateway.URL != "/" || embedded.WebShell.VoiceGateway.AuthRequired {
 		t.Fatalf("Embedded VoiceGateway = %+v", embedded.WebShell.VoiceGateway)
 	}

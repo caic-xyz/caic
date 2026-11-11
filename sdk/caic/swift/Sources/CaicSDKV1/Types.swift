@@ -802,7 +802,7 @@ public struct VersionResp: Codable {
     public let updateAvailable: Bool
     /// non-empty when the GitHub check failed
     public let checkError: String?
-    /// true when autoupdate schedule is configured
+    /// true when manual updates are available for this build
     public let autoUpdateEnabled: Bool
 
     public init(current: String, latest: String? = nil, updateAvailable: Bool, checkError: String? = nil, autoUpdateEnabled: Bool) {

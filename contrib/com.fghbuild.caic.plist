@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- caic macOS launchd user agent with system-path defaults and per-user installer overrides -->
-<!-- Install: configure executable and log paths with plutil; see contrib/README.md. -->
+<!-- caic macOS launchd user agent configured with per-user paths by the installer -->
+<!-- Install: run contrib/install.sh; see contrib/README.md. -->
 <!--          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml -->
 <!--          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation). -->
 <!--          caic loads the user's shell environment unless core.shell_env is false. -->
 <!-- Enable:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist -->
 <!-- Disable: launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.fghbuild.caic.plist -->
-<!-- Logs:    defaults to /var/log/caic/; installer uses ~/Library/Logs/caic/. -->
+<!-- Logs:    ~/Library/Logs/caic/. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -15,7 +15,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/caic</string>
+    <string>~/.local/bin/caic</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -25,10 +25,10 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/var/log/caic/stdout.log</string>
+  <string>~/Library/Logs/caic/stdout.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/var/log/caic/stderr.log</string>
+  <string>~/Library/Logs/caic/stderr.log</string>
 
   <key>ProcessType</key>
   <string>Background</string>

@@ -9,9 +9,9 @@ import (
 
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/maruel/gomode/autoupdate"
 )
 
 // warmupInterval controls how often scheduled warmup re-checks for new base image

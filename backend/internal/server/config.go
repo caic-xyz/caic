@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/maruel/gomode/autoupdate"
 	"github.com/maruel/gomode/httpserver"
 	"github.com/maruel/gomode/httpserver/geoip"
 	"github.com/maruel/gomode/voicegateway"
@@ -22,6 +22,10 @@ import (
 // Config bundles values read once at startup from config.toml, environment
 // variables, and CLI flags, then threaded into the server.
 type Config struct {
+	Version         string              // Optional display identity override for fake fixtures.
+	Updater         *autoupdate.Updater // Shared by manual and scheduled updates; nil in embedded/fake hosts.
+	UpdateInstalled func()              // Requests host shutdown after a committed installation.
+
 	Dirs    DirsConfig
 	Runtime RuntimeConfig
 	Agent   AgentConfig

@@ -23,7 +23,6 @@ import (
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
@@ -35,10 +34,15 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/maruel/gomode/autoupdate"
 	"github.com/maruel/gomode/oauth/oauthclient"
 )
 
 type serverHandlers struct {
+	version         string
+	updater         *autoupdate.Updater
+	updateInstalled func()
+
 	log                *slog.Logger
 	serverCtx          context.Context
 	workers            *backgroundWorkers
@@ -72,7 +76,7 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 	displayName, _, _ = strings.Cut(displayName, ".")
 	cfg := &v1.Config{
 		ImageConstraints:     v1.ImageUploadConstraints(),
-		Version:              autoupdate.Version,
+		Version:              h.version,
 		DisplayName:          displayName,
 		TailscaleAvailable:   h.tailscaleAvailable,
 		USBAvailable:         runtime.GOOS == "linux",
@@ -110,14 +114,14 @@ func (h *serverHandlers) authProviders() []string {
 
 // getVersion returns the current server version and checks GitHub for the latest release.
 func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
-	current := autoupdate.Version
-	gh := h.forgeMgr.GitHubClient()
+	current := h.version
+	available := h.updater != nil && h.forgeMgr.GitHubToken() != ""
 	resp := &v1.VersionResp{
 		Current:      current,
-		AutoUpdateOn: gh != nil && current != "" && !strings.HasPrefix(current, "devel-"),
+		AutoUpdateOn: available && autoupdate.IsStable(autoupdate.Version()),
 	}
-	if gh != nil {
-		latest, err := autoupdate.CheckLatest(ctx, gh)
+	if available {
+		latest, err := h.updater.Latest(ctx)
 		if err != nil {
 			resp.CheckError = err.Error()
 		} else {
@@ -130,22 +134,26 @@ func (h *serverHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.V
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
 func (h *serverHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
-	gh := h.forgeMgr.GitHubClient()
-	if gh == nil {
+	available := h.updater != nil && h.forgeMgr.GitHubToken() != ""
+	if !available {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeUpdateUnavailable, Message: "GitHub token not configured; cannot check for updates"}
 	}
-	current := autoupdate.Version
-	latest, err := autoupdate.CheckLatest(ctx, gh)
+	current := h.version
+	latest, err := h.updater.Latest(ctx)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeUpdateCheckFailed, Message: "check latest version: " + err.Error()}
 	}
-	if !autoupdate.IsNewer(latest, current) {
+	if !autoupdate.IsStable(autoupdate.Version()) || !autoupdate.IsNewer(latest, autoupdate.Version()) {
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
 	}
 	h.workers.Go(func() {
 		h.log.InfoContext(h.serverCtx, "update triggered by user", "current", current, "latest", latest)
-		if err := autoupdate.CheckAndUpdate(h.serverCtx, gh); err != nil {
+		installed, err := h.updater.Update(h.serverCtx)
+		if err != nil {
 			h.log.WarnContext(h.serverCtx, "background update failed", "err", err)
+		}
+		if installed != "" {
+			h.updateInstalled()
 		}
 	})
 	return &v1.UpdateResp{Status: "started"}, nil

@@ -1309,7 +1309,7 @@ data class VersionResp(
     val updateAvailable: Boolean,
     /** non-empty when the GitHub check failed */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val checkError: String? = null,
-    /** true when autoupdate schedule is configured */
+    /** true when manual updates are available for this build */
     val autoUpdateEnabled: Boolean,
 )
 

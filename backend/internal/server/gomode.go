@@ -3,7 +3,6 @@
 package server
 
 import (
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/maruel/gomode"
 	"github.com/maruel/gomode/mcp"
@@ -19,10 +18,10 @@ const (
 	goModeVoiceTokenEndpoint      = "/api/caic/v1/voice/token" //nolint:gosec // HTTP route, not a credential.
 )
 
-func newGoModeSettings(voice v1.VoiceGatewayMetadata, authRequired bool) gomode.Settings {
+func newGoModeSettings(version string, voice v1.VoiceGatewayMetadata, authRequired bool) gomode.Settings {
 	return gomode.Settings{
 		Service:        goModeServiceCaic,
-		ServiceVersion: autoupdate.Version,
+		ServiceVersion: version,
 		APIVersion:     goModeAPIVersion,
 		WebShell: gomode.WebShellSettings{
 			BridgeVersion: goModeBridge,

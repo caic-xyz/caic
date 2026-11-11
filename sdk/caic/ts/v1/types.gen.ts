@@ -477,7 +477,7 @@ export interface VersionResp {
   updateAvailable: boolean;
   /** non-empty when the GitHub check failed */
   checkError?: string;
-  /** true when autoupdate schedule is configured */
+  /** true when manual updates are available for this build */
   autoUpdateEnabled: boolean;
 }
 

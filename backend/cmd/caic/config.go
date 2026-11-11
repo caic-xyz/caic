@@ -19,9 +19,9 @@ import (
 	"github.com/maruel/gomode/voicegateway"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/config/data"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/maruel/gomode/autoupdate"
 )
 
 // defaultConfig returns a data.Config with sensible defaults pre-populated.
@@ -283,9 +283,6 @@ func coreEnvOrDefault(env map[string]string, key string) string {
 	return os.Getenv(key)
 }
 
-// defaultAutoUpdate is the default cron schedule: daily at 04:50 local time.
-const defaultAutoUpdate = "50 4 * * *"
-
 // defaultPrune is the default cron schedule: daily at 05:00 local time.
 const defaultPrune = "0 5 * * *"
 
@@ -297,7 +294,7 @@ const defaultRepoRepack = "0 2 * * *"
 // schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
 func autoUpdateSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.AutoUpdate == nil {
-		s, err := autoupdate.ParseSchedule(defaultAutoUpdate)
+		s, err := autoupdate.ParseSchedule(autoupdate.DefaultSchedule)
 		if err != nil {
 			return nil, fmt.Errorf("core.auto_update: %w", err)
 		}

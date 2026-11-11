@@ -28,7 +28,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -40,6 +39,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/maruel/gomode/autoupdate"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,
@@ -95,6 +95,9 @@ type Router struct {
 // the injected services into HTTP handler concerns and the webhook endpoint; it
 // does not construct or own application services.
 func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retErr error) { //nolint:gocritic // Dependencies is a startup value bag.
+	if d.Updater != nil && d.UpdateInstalled == nil {
+		return nil, errors.New("updater requires an installation callback")
+	}
 	if log == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -149,7 +152,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 		}
 	}
 	voiceMetadata := voiceGatewayMetadata(&d.VoiceGateway, d.VoiceBridge)
-	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
+	goModeSettings := newGoModeSettings(d.Version, voiceMetadata, d.AuthStore != nil)
 	goModeHandler, err := gomode.NewHandler(&goModeSettings)
 	if err != nil {
 		return nil, err
@@ -217,6 +220,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			runtimes: d.Runtimes,
 		},
 		serverHandlers: &serverHandlers{
+			version:            d.Version,
+			updater:            d.Updater,
+			updateInstalled:    d.UpdateInstalled,
 			log:                log.With("handler", "server"),
 			serverCtx:          ctx,
 			workers:            workers,
@@ -326,7 +332,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	s.mcpHandlers.protocol = &mcp.Handler{
 		Registry:   registry,
 		Sessions:   mcp.NewSessionStore(mcpSessionOwner),
-		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
+		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: d.Version},
 	}
 	// The webhook concern owns the forge webhook secrets and the GitHub App
 	// owner allowlist, and dispatches to the app-owned bot and CI service.
@@ -641,6 +647,10 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
+	Version         string
+	Updater         *autoupdate.Updater
+	UpdateInstalled func()
+
 	// PushCacheDir is the configured application cache root for cloned checkouts.
 	PushCacheDir               string
 	Checkouts                  *repo.Registry

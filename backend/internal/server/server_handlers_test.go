@@ -1,14 +1,17 @@
-// Tests server configuration, API contract parity, preference handlers, and runtime settings mappings.
+// Tests release controls, server configuration, API parity, preferences, and runtime mappings.
 
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,9 +19,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/maruel/gomode/autoupdate"
 )
 
 func TestServerHandlers(t *testing.T) {
@@ -387,6 +392,93 @@ func TestServerAPIV1EnumParity(t *testing.T) {
 			if _, ok := got[forgeKind]; !ok {
 				t.Errorf("forge kind %q is missing from the v1 API", forgeKind)
 			}
+		}
+	})
+}
+
+// updateTransport exercises the API-only HTTP boundary without public downloads.
+type updateTransport struct {
+	request func(*http.Request) (*http.Response, error)
+}
+
+func (tr updateTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return tr.request(r)
+}
+
+func TestServerUpdates(t *testing.T) {
+	t.Parallel()
+	t.Run("unavailable", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		v, err := s.serverHandlers.getVersion(t.Context(), &api.EmptyReq{})
+		if err != nil || v.AutoUpdateOn || v.Latest != "" {
+			t.Fatalf("version = %+v, %v", v, err)
+		}
+		_, err = s.serverHandlers.triggerUpdate(t.Context(), &api.EmptyReq{})
+		var ae *api.Error
+		if !errors.As(err, &ae) || ae.Code != api.CodeUpdateUnavailable {
+			t.Fatalf("update error = %v", err)
+		}
+	})
+	t.Run("check failure", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		h := s.serverHandlers
+		h.forgeMgr = forgemgr.New(h.log, "fixture-token", "", nil, forgemgr.NoOAuthTokenSource())
+		u, err := autoupdate.New(autoupdate.Config{
+			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic",
+			ArchiveName: func(string) string { return "caic.tar.gz" },
+			Client: &http.Client{Transport: updateTransport{request: func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("release API unavailable")
+			}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.updater = u
+		v, err := h.getVersion(t.Context(), &api.EmptyReq{})
+		if err != nil || v.CheckError == "" || v.Latest != "" {
+			t.Fatalf("version = %+v, %v", v, err)
+		}
+		_, err = h.triggerUpdate(t.Context(), &api.EmptyReq{})
+		var ae *api.Error
+		if !errors.As(err, &ae) || ae.Code != api.CodeUpdateCheckFailed {
+			t.Fatalf("update error = %v", err)
+		}
+	})
+	t.Run("development identity survives display override", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		h := s.serverHandlers
+		h.forgeMgr = forgemgr.New(h.log, "fixture-token", "", nil, forgemgr.NoOAuthTokenSource())
+		// Display fixtures must never turn development binaries into eligible releases.
+		h.version = "0.0.0"
+		var requests atomic.Int32
+		u, err := autoupdate.New(autoupdate.Config{
+			Repository: "caic-xyz/caic", CurrentVersion: autoupdate.Version(), Binary: "caic",
+			ArchiveName: func(string) string { return "caic.tar.gz" },
+			Client: &http.Client{Transport: updateTransport{request: func(r *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"tag_name":"v99.0.0"}`)), Header: make(http.Header)}, nil
+			}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.updater = u
+		h.updateInstalled = func() { t.Error("failed update requested restart") }
+		v, err := h.getVersion(t.Context(), &api.EmptyReq{})
+		if err != nil || v.Current != "0.0.0" || v.Latest != "99.0.0" || v.AutoUpdateOn {
+			t.Fatalf("version = %+v, %v", v, err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		resp, err := h.triggerUpdate(ctx, &api.EmptyReq{})
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != "already_up_to_date" || requests.Load() != 2 {
+			t.Fatalf("development update = %+v, requests = %d", resp, requests.Load())
 		}
 	})
 }

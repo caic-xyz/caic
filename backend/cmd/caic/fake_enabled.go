@@ -21,7 +21,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -100,7 +99,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	names := [2]string{"clone", "clone2"}
 	if visualFixtures {
 		// Settings captures must stay identical after committing the baselines.
-		autoupdate.Version = "0.0.0"
+		cfg.Version = "0.0.0"
 		// Host gh credentials must not enable live release checks or updates.
 		cfg.GitHub.Token = ""
 		names = [2]string{"caic", "gomode"}
