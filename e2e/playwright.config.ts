@@ -14,18 +14,27 @@
 // Never run this suite concurrently with itself or with frontend builds
 // (`make build`, screenshots targets): they share backend/frontend/dist, so
 // simultaneous builds can delete or replace one another's generated assets.
-// Always run through this config (`make test-e2e`); a bare
-// `pnpm playwright test` bypasses it. For a targeted run keep the explicit
-// configuration:
-//   pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/account-menu.spec.ts
+// Run through `make test-e2e`, which builds the frontend first; a targeted run
+// takes SPEC, which may also carry Playwright options:
+//   make test-e2e SPEC=e2e/tests/account-menu.spec.ts
+// The fake server embeds the last built bundle, so this config refuses to start
+// when the bundle predates its inputs (see bundle.ts).
 // Local behavioral tests detect installed Chrome on Linux, macOS, and Windows.
 // CI and screenshot generation always use bundled Chromium for consistent rendering.
 //
 // The webServer dynamically allocates a port for the fake backend and verifies
 // it before running instrumented tests.
 
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { chromeExecutable } from "./browser";
+import { staleBundle } from "./bundle";
+
+// Workers reload this config; the runner process checks once.
+if (process.env.TEST_WORKER_INDEX === undefined) {
+  const stale = staleBundle(path.resolve(import.meta.dirname, ".."));
+  if (stale !== null) throw new Error(`Stale frontend bundle: ${stale}. Rebuild with pnpm build or run make test-e2e.`);
+}
 
 const seed = process.env.CAIC_E2E_SEED ?? Date.now().toString(36);
 const includeVisuals = process.env.CAIC_E2E_VISUALS === "1";

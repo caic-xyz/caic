@@ -5,7 +5,7 @@
 
 HTTP?=:2242
 
-FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
+FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
 
 help:
@@ -15,7 +15,7 @@ help:
 	@printf '  %-34s - %s\n' 'make fix' 'Apply every autofix, then refresh generated indexes'
 	@printf '  %-34s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
 	@printf '  %-34s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
-	@printf '  %-34s - %s\n' 'make test-e2e' 'Run Playwright end-to-end tests (slow)'
+	@printf '  %-34s - %s\n' 'make test-e2e [SPEC=...]' 'Run Playwright end-to-end tests, or one spec (slow)'
 	@printf '  %-34s - %s\n' 'make test-e2e-repeat' 'Repeat one Playwright spec with a fresh fake backend per round'
 	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
@@ -116,10 +116,11 @@ test: frontend-deps
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
 # backend/frontend/dist with build targets, so never run it concurrently with
-# them. CI runs it; verify and test do not.
+# them. CI runs it; verify and test do not. SPEC limits the run to one spec
+# and may carry Playwright options.
 test-e2e: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@pnpm --silent exec playwright test --config e2e/playwright.config.ts; \
+	@pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC); \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
 	  echo ""; echo "=== Failed trace summary ==="; \
@@ -191,22 +192,19 @@ screenshots-check screenshots-generate-frontend screenshots-update: export CAIC_
 # development container's font stack.
 screenshots-check: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py check --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py check
 
 # Platform-specific variants. Check compares against the tracked baselines, which
 # encode the development container's font stack, so it is a maintainer check.
 # Generate only renders, which is what CI runs so a stale generator cannot rot
-# silently without pretending the baselines are portable. The renderer refuses
-# to compare a bundle that predates uncommitted frontend inputs, so it would
-# otherwise catch a bare script invocation that forgot to build; these targets
-# build immediately above and declare that with --rebuilt.
+# silently without pretending the baselines are portable.
 screenshots-generate-frontend: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py generate --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py generate
 
 screenshots-update: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py update --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py update
 
 upgrade:
 	@go get -u ./... && go mod tidy

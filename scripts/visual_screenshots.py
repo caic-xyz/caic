@@ -25,23 +25,6 @@ from screenshot_publish import publish_images, recover_images, validate_images
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_VISUAL_PORTS = (41741, 41742)
 FRONTEND_VISUAL_HOST = "127.0.0.1"
-# The frontend platform renders whatever bundle `pnpm build` last wrote, so a
-# comparison says nothing about the working tree once these inputs move ahead of
-# it. The preflight in main() refuses that case instead of rendering the
-# committed bundle and reporting a misleading result. Test files are excluded
-# because they are not bundled.
-FRONTEND_BUILD_INPUTS = (
-    "frontend/src",
-    "frontend/index.html",
-    "vite.config.ts",
-    "package.json",
-    "sdk/caic/ts",
-    "sdk/mcp/ts",
-    "sdk/voicegateway/ts",
-    ":(exclude,glob)frontend/src/**/*.test.ts",
-    ":(exclude,glob)frontend/src/**/*.test.tsx",
-)
-FRONTEND_BUNDLE = "backend/frontend/dist"
 BASELINE_DIR = ROOT_DIR / "e2e" / "screenshots" / "frontend"
 IMAGE_SUFFIXES = frozenset({".avif", ".png", ".webp"})
 # Every declared documentation scene is required, including prompt and animation captures.
@@ -216,27 +199,6 @@ def compare_images(actual_dir: Path, expected_dir: Path, label: str) -> list[str
     return differences
 
 
-def changed_paths(paths: tuple[str, ...]) -> list[str]:
-    """Return the uncommitted paths under paths, keeping pathspec magic intact."""
-    result = subprocess.run(
-        ["git", "-C", str(ROOT_DIR), "status", "--porcelain", "--", *paths],
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    return [line[3:] for line in result.stdout.splitlines() if line.strip()]
-
-
-def frontend_bundle_staleness(source_changes: list[str], bundle_changes: list[str]) -> str | None:
-    """Return why the built bundle cannot contain the tree, or None when it can."""
-    if not source_changes or bundle_changes:
-        return None
-    return (
-        f"{len(source_changes)} frontend input(s) changed while the built bundle stayed untouched, "
-        f"starting with {source_changes[0]}"
-    )
-
-
 def require_available_loopback_ports(ports: tuple[int, ...]) -> None:
     """Fail clearly if a reserved frontend visual-test port is unavailable."""
     listeners: list[socket.socket] = []
@@ -349,26 +311,12 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("check", "update", "generate"))
-    parser.add_argument(
-        "--rebuilt",
-        action="store_true",
-        help="the caller rebuilt the frontend bundle immediately before rendering",
-    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     started = time.monotonic()
-    if not args.rebuilt:
-        problem = frontend_bundle_staleness(
-            changed_paths(FRONTEND_BUILD_INPUTS),
-            changed_paths((FRONTEND_BUNDLE,)),
-        )
-        if problem:
-            print(f"Refusing to render frontend screenshots: {problem}.", file=sys.stderr)
-            print("Run a screenshots make target, which builds the bundle first.", file=sys.stderr)
-            return 1
     if args.mode != "generate":
         # Only the comparison modes decode images, so this precheck belongs to
         # them. The renderers need ffmpeg independently (the documentation
