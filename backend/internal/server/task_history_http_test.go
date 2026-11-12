@@ -185,7 +185,7 @@ func TestTaskHistoryHTTP(t *testing.T) {
 		appendHistory(t, path, `{"t":"agent","ts":2.000,"msg":{"type":"system","subtype":"task_started","task_id":"child","tool_use_id":"spawn","task_type":"local_agent","description":"Native child"}}`)
 		appendHistory(t, path, `{"t":"agent","ts":3.000,"msg":{"type":"assistant","parent_tool_use_id":"spawn","message":{"content":[{"type":"text","text":"child body"},{"type":"text","text":"child tail"}]}}}`)
 		b := historyBootstrap(t, s, tk, "")
-		target := b.ResourceBase + "/activity/nativeSubagent/claude:task:child/5"
+		target := b.ResourceBase + "/activity/claude:task:child/5"
 		body := historyRequest(t, s, target, "")
 		if body.Code != http.StatusOK {
 			t.Fatalf("activity %d: %s", body.Code, body.Body)

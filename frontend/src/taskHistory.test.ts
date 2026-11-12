@@ -371,7 +371,6 @@ describe("section history owner", () => {
                 ? owner.readCosts(signal)
                 : owner.readActivity(
                     {
-                      kind: "nativeSubagent",
                       anchorAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
                       first: { recordID: 1, index: 0 },
                       id: "child",

@@ -101,7 +101,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
   await page.route("**/api/caic/v1/tasks/*/history/manifest", historyResponse);
   await page.route("**/api/caic/v1/tasks/*/history/**/slice/*/*/*/*", historyResponse);
   await page.route("**/api/caic/v1/tasks/*/history/**/setup/*", historyResponse);
-  await page.route("**/api/caic/v1/tasks/*/history/**/activity/*/*/*?*", historyResponse);
+  await page.route("**/api/caic/v1/tasks/*/history/**/activity/*/*?*", historyResponse);
   // Preserve real SSE ordering and checkpoints while matching finite fixture
   // bodies and payload-free metadata to the same deterministic raw positions.
   // The health events are replaced too: the server samples the real host, so a

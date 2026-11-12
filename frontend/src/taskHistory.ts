@@ -432,7 +432,7 @@ export function createTaskHistory(id: string): TaskHistory {
       const { value, signal } = capture(request);
       const query = after ? `?afterRecordID=${after.recordID}&afterIndex=${after.index}` : "";
       return resource(
-        `${value.bootstrap.resourceBase}/activity/${activity.kind}/${encodeURIComponent(activity.id)}/${end}${query}`,
+        `${value.bootstrap.resourceBase}/activity/${encodeURIComponent(activity.id)}/${end}${query}`,
         signal,
       );
     },

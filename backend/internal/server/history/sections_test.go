@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -470,7 +471,6 @@ func TestSourceSections(t *testing.T) {
 						&agent.ToolUseMessage{ToolUseID: "spawn", Name: "Agent"},
 						&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "child", ToolUseID: "spawn", Status: agent.NativeSubagentStatusRunning}},
 						&agent.TextMessage{Source: agent.MessageSource{AgentID: "child"}, Text: "child transcript"},
-						&agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "shell", Status: agent.BackgroundCommandStatusRunning}},
 					}
 					var opening agent.Message = &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}
 					if boundary == "changed init" {
@@ -480,7 +480,6 @@ func TestSourceSections(t *testing.T) {
 						&agent.TextMessage{Text: "second turn"},
 						&agent.ResultMessage{DurationMs: 1000},
 						&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "child", Status: agent.NativeSubagentStatusCompleted}},
-						&agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "shell", Status: agent.BackgroundCommandStatusCompleted}},
 					}
 					batches := [][]agent.Message{prefix, suffix, append(slices.Clone(prefix), suffix...)}
 					resolver := agent.Backends{harness.Claude: &agenttest.FakeBackend{WireFactory: func() agent.WireFormat {
@@ -540,8 +539,6 @@ func TestSourceSections(t *testing.T) {
 								switch {
 								case event.Message.NativeSubagent != nil:
 									id = event.Message.NativeSubagent.ID
-								case event.Message.BackgroundCommand != nil:
-									id = event.Message.BackgroundCommand.ID
 								case event.Message.Source.AgentID != "":
 									id = event.Message.Source.AgentID
 								}
@@ -552,7 +549,7 @@ func TestSourceSections(t *testing.T) {
 								}
 							}
 						}
-						if len(metadata.Activities) != 2 {
+						if len(metadata.Activities) != 1 {
 							t.Fatalf("activities = %#v", metadata.Activities)
 						}
 						for _, activity := range metadata.Activities {
@@ -810,10 +807,8 @@ func TestSectionIndex(t *testing.T) {
 		s := newSectionIndex()
 		s.append(&Event{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindInit, Ts: 1000, Init: &v1.EventInit{SessionID: "a"}}})
 		s.append(&Event{RecordID: 2, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Ts: 1000, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "delegated origin"}}})
-		s.append(&Event{RecordID: 2, Index: 1, Message: v1.EventMessage{Kind: v1.EventKindBackgroundCommand, Ts: 1000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "shell", Status: "running"}}})
 		s.append(&Event{RecordID: 2, Index: 2, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 1000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
 		s.append(&Event{RecordID: 2, Index: 3, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 1000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
-		s.append(&Event{RecordID: 3, Message: v1.EventMessage{Kind: v1.EventKindBackgroundCommand, Ts: 2000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "shell", Status: "completed"}}})
 		s.append(&Event{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusRunning}}})
 		s.append(&Event{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 2000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
 		s.append(&Event{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusCompleted}}})
@@ -938,6 +933,31 @@ func TestSectionIndex(t *testing.T) {
 		// The repeated strings are actual transcript payloads, not metadata.
 		if bytes.Contains(encoded, []byte(strings.Repeat("prompt", 100))) || bytes.Contains(encoded, []byte(strings.Repeat("result", 100))) || bytes.Contains(encoded, []byte(strings.Repeat("payload", 100))) {
 			t.Fatal("manifest retained transcript payload")
+		}
+	})
+	t.Run("background commands fold outside native activities", func(t *testing.T) {
+		t.Parallel()
+		s := newSectionIndex()
+		source := v1.EventMessageSource{ThreadID: "root"}
+		exit := 2
+		for i, b := range []v1.EventBackgroundCommand{
+			{ID: "watch", ToolUseID: "watch-tool", Status: "running"},
+			{ID: "lint", ToolUseID: "lint-tool", Label: "make lint", Status: "running"},
+			{ID: "lint", Status: "failed", ExitCode: &exit, OutputRef: "/tmp/lint.output"},
+		} {
+			s.append(&Event{RecordID: uint64(i + 1), Message: v1.EventMessage{Kind: v1.EventKindBackgroundCommand, Ts: int64(i+1) * 1000, Source: source, BackgroundCommand: &b}})
+		}
+		_, meta := s.snapshot()
+		if len(meta.Activities) != 0 {
+			t.Fatalf("activities = %#v", meta.Activities)
+		}
+		started, watchStarted, ended := time.UnixMilli(2000).UTC(), time.UnixMilli(1000).UTC(), time.UnixMilli(3000).UTC()
+		want := []v1.HistoryBackgroundCommand{
+			{ID: "watch", Source: source, ToolUseID: "watch-tool", Status: "running", StartedAt: &watchStarted},
+			{ID: "lint", Source: source, ToolUseID: "lint-tool", Label: "make lint", Status: "failed", StartedAt: &started, EndedAt: &ended, ExitCode: &exit, OutputRef: "/tmp/lint.output"},
+		}
+		if !reflect.DeepEqual(meta.BackgroundCommands, want) {
+			t.Fatalf("background commands = %#v, want %#v", meta.BackgroundCommands, want)
 		}
 	})
 }

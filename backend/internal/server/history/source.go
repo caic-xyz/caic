@@ -434,9 +434,9 @@ func (s *Source) WriteSetup(ctx context.Context, snap Snapshot, through uint64, 
 	return writeHistoryEvents(w, events)
 }
 
-// ActivityStart locates one known activity's earliest observed position. It
-// bounds a disclosure scan independently of the task's earlier raw history.
-func (s *Source) ActivityStart(ctx context.Context, kind v1.EventKind, id string) (Position, error) {
+// ActivityStart locates one known native subagent's earliest observed position.
+// It bounds a disclosure scan independently of the task's earlier raw history.
+func (s *Source) ActivityStart(ctx context.Context, id string) (Position, error) {
 	if err := s.lock(ctx); err != nil {
 		return Position{}, err
 	}
@@ -444,19 +444,20 @@ func (s *Source) ActivityStart(ctx context.Context, kind v1.EventKind, id string
 	if s.err != nil {
 		return Position{}, s.err
 	}
-	a, ok := s.sections.activities[string(kind)+":"+id]
+	a, ok := s.sections.activities[id]
 	if !ok {
 		return Position{}, errors.New("unknown history activity")
 	}
 	return a.First, nil
 }
 
-// WriteActivity streams one actor's lifecycle payloads and transcript through a
-// finite record. It reads only indexed direct/delegated actor records from the
-// projected spool. After is an exclusive normalized bound; RecordEndIndex skips
-// all outputs of its record, including outputless checkpoints. A zero bound
-// selects the full prefix. Current status remains manifest metadata.
-func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, kind v1.EventKind, id string, through uint64, after Position, w io.Writer) error {
+// WriteActivity streams one native subagent's lifecycle payloads and transcript
+// through a finite record. It reads only indexed direct/delegated actor records
+// from the projected spool. After is an exclusive normalized bound;
+// RecordEndIndex skips all outputs of its record, including outputless
+// checkpoints. A zero bound selects the full prefix. Current status remains
+// manifest metadata.
+func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, through uint64, after Position, w io.Writer) error {
 	if err := s.lock(ctx); err != nil {
 		return err
 	}
@@ -465,7 +466,7 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, kind v1.Event
 		s.unlock()
 		return err
 	}
-	a, ok := s.sections.activities[string(kind)+":"+id]
+	a, ok := s.sections.activities[id]
 	if !ok || through < a.First.RecordID || through > snap.Through || after.RecordID > through {
 		s.unlock()
 		return errors.New("invalid history activity prefix")
@@ -490,16 +491,14 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, kind v1.Event
 	if after.Index == RecordEndIndex {
 		firstRecord++
 	}
-	records := appendRecordRange(nil, s.sections.actorRecords[string(kind)+":"+id], firstRecord, through)
-	if kind == v1.EventKindNativeSubagent {
-		for key, ids := range s.sections.delegationRecords {
-			for _, route := range routes {
-				if route.id != id || route.tool != key.tool || route.namespace != "" && key.namespace != "" && route.namespace != key.namespace {
-					continue
-				}
-				records = appendRecordRange(records, ids, firstRecord, through)
-				break
+	records := appendRecordRange(nil, s.sections.actorRecords[id], firstRecord, through)
+	for key, ids := range s.sections.delegationRecords {
+		for _, route := range routes {
+			if route.id != id || route.tool != key.tool || route.namespace != "" && key.namespace != "" && route.namespace != key.namespace {
+				continue
 			}
+			records = appendRecordRange(records, ids, firstRecord, through)
+			break
 		}
 	}
 	s.unlock()
@@ -515,10 +514,7 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, kind v1.Event
 				continue
 			}
 			m := &e.Message
-			matches := kind == v1.EventKindNativeSubagent && m.NativeSubagent != nil && m.NativeSubagent.ID == id || kind == v1.EventKindBackgroundCommand && m.BackgroundCommand != nil && m.BackgroundCommand.ID == id
-			if !matches && kind == v1.EventKindNativeSubagent {
-				matches = activityOwner(&m.Source, routes, pending) == id
-			}
+			matches := m.NativeSubagent != nil && m.NativeSubagent.ID == id || activityOwner(&m.Source, routes, pending) == id
 			if matches && !yield(e, nil) {
 				return
 			}

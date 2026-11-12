@@ -511,7 +511,7 @@ func (h *taskHandlers) routes() http.Handler {
 	hh := &historyHandlers{taskHandlers: h}
 	m.HandleFunc("GET /tasks/{id}/history/manifest", hh.handleHistoryManifest)
 	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}", hh.handleHistorySlice)
-	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}", hh.handleHistoryActivity)
+	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/activity/{activity}/{through}", hh.handleHistoryActivity)
 	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}", hh.handleHistorySetup)
 	m.HandleFunc("GET /tasks/{id}/history/costs", hh.handleHistoryCosts)
 	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)

@@ -81,7 +81,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/history/manifest` | Returns root context summaries, compact task metadata, and exact discovery without downloading archived transcripts. |  | `HistoryManifest` |
 | GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}` | Returns only root provisioning logs and the initial session init through a finite prefix, excluding interleaved conversation payloads. |  | `HistoryEvent[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/slice/{first}/{firstIndex}/{last}/{lastIndex}` | Returns an immutable inclusive normalized-position slice, excluding adjacent outputs within the same raw record. FirstIndex zero starts at a physical record even when it has no outputs. LastIndex may be end to include the entire last physical record, including one with no outputs. This permits stable fixed-record pages inside a section; use exact section positions at its edges. |  | `HistoryEvent[] \| null` |
-| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{kind}/{activity}/{through}` | Returns an actor body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[] \| null` |
+| GET | `/api/caic/v1/tasks/{id}/history/{scope}/{version}/{generation}/activity/{activity}/{through}` | Returns a native subagent body through a finite raw prefix. Optional afterRecordID and afterIndex must be paired and select an exclusive suffix; index 4294967295 skips the whole record. Current status belongs to manifest metadata. |  | `HistoryEvent[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/costs` | Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. |  | `HistoryTurnEstimate[] \| null` |
 | GET | `/api/caic/v1/tasks/{id}/history/events` | Streams strictly after an opaque raw-record cursor. Initial cursor query is overridden by Last-Event-ID on reconnect. Every connection sends a bounded statsSnapshot before history, followed by live stats revisions; neither carries a raw ID. Checkpoints advance through outputless records and repeat every 15 seconds to prove liveness. Close and rediscover bootstrap on reset/error. |  | `HistoryEvent` SSE<br>Named events: `manifest` (`HistoryManifest`), `checkpoint` (`HistoryCheckpoint`), `statsSnapshot` (`HistoryStats`), `stats` (`EventStats`), `reset` (`HistoryReset`), `error` (`TaskHistoryStreamError`) |
 
@@ -2504,18 +2504,17 @@ HistoryToolTiming aggregates completed tools across root and child actors.
 
 ### HistoryActivity
 
-HistoryActivity is payload-free lifecycle and routing state. Kind is
-nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
-are fetched through the finite activity resource only on disclosure.
-BodyThrough is a stable finite prefix containing all actor payload and
-ownership observations known at the manifest snapshot. Unrelated task
-records do not change it, allowing disclosures to reuse the HTTP cache.
-OwnershipThrough advances only for related routing/namespace observations;
-clients use it to distinguish ownership revisions from new actor output.
+HistoryActivity is one native subagent's payload-free lifecycle and routing
+state. Prompt, result, and child transcripts are fetched through the finite
+activity resource only on disclosure. BodyThrough is a stable finite prefix
+containing all actor payload and ownership observations known at the
+manifest snapshot. Unrelated task records do not change it, allowing
+disclosures to reuse the HTTP cache. OwnershipThrough advances only for
+related routing/namespace observations; clients use it to distinguish
+ownership revisions from new actor output.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `kind` | `EventKind` |  | yes |
 | `id` | `string` |  | yes |
 | `sectionID` | `string` | SectionID identifies the body containing the earliest actual lifecycle or
 resolved transcript origin, including an unfinished turn carried forward. | yes |
@@ -2532,6 +2531,22 @@ resolved transcript origin, including an unfinished turn carried forward. | yes 
 | `first` | `HistoryPosition` |  | yes |
 | `bodyThrough` | `uint64` |  | yes |
 | `ownershipThrough` | `uint64` |  | yes |
+
+### HistoryBackgroundCommand
+
+HistoryBackgroundCommand is a detached command's folded, payload-free
+lifecycle. Clients attach it to the tool call identified by Source and
+ToolUseID; OutputRef names the container file holding its output.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `source` | `EventMessageSource` |  |  |
+| `toolUseID` | `string` |  |  |
+| `label` | `string` |  |  |
+| `status` | `string` |  | yes |
+| `startedAt` | `ISOTimestamp` |  |  |
+| `endedAt` | `ISOTimestamp` |  |  |
 | `exitCode` | `int` |  |  |
 | `outputRef` | `string` |  |  |
 
@@ -2551,6 +2566,7 @@ identifies the first root input, permitting prompt deduplication by position.
 | `turns` | `HistoryTurn[] \| null` |  | yes |
 | `tools` | `HistoryToolTiming[] \| null` |  | yes |
 | `activities` | `HistoryActivity[] \| null` |  | yes |
+| `backgroundCommands` | `HistoryBackgroundCommand[] \| null` |  | yes |
 | `initialInit` | `HistoryEvent` |  |  |
 | `initialInput` | `HistoryPosition` |  |  |
 | `setup` | `HistorySlice` |  |  |

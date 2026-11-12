@@ -2302,17 +2302,16 @@ export interface HistoryToolTiming {
 }
 
 /**
- * HistoryActivity is payload-free lifecycle and routing state. Kind is
- * nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
- * are fetched through the finite activity resource only on disclosure.
- * BodyThrough is a stable finite prefix containing all actor payload and
- * ownership observations known at the manifest snapshot. Unrelated task
- * records do not change it, allowing disclosures to reuse the HTTP cache.
- * OwnershipThrough advances only for related routing/namespace observations;
- * clients use it to distinguish ownership revisions from new actor output.
+ * HistoryActivity is one native subagent's payload-free lifecycle and routing
+ * state. Prompt, result, and child transcripts are fetched through the finite
+ * activity resource only on disclosure. BodyThrough is a stable finite prefix
+ * containing all actor payload and ownership observations known at the
+ * manifest snapshot. Unrelated task records do not change it, allowing
+ * disclosures to reuse the HTTP cache. OwnershipThrough advances only for
+ * related routing/namespace observations; clients use it to distinguish
+ * ownership revisions from new actor output.
  */
 export interface HistoryActivity {
-  kind: EventKind;
   id: string;
   /**
    * SectionID identifies the body containing the earliest actual lifecycle or
@@ -2332,6 +2331,21 @@ export interface HistoryActivity {
   first: HistoryPosition;
   bodyThrough: number /* uint64 */;
   ownershipThrough: number /* uint64 */;
+}
+
+/**
+ * HistoryBackgroundCommand is a detached command's folded, payload-free
+ * lifecycle. Clients attach it to the tool call identified by Source and
+ * ToolUseID; OutputRef names the container file holding its output.
+ */
+export interface HistoryBackgroundCommand {
+  id: string;
+  source?: EventMessageSource;
+  toolUseID?: string;
+  label?: string;
+  status: string;
+  startedAt?: ISOTimestamp;
+  endedAt?: ISOTimestamp;
   exitCode?: number /* int */;
   outputRef?: string;
 }
@@ -2351,6 +2365,7 @@ export interface HistoryMetadata {
   turns: HistoryTurn[] | null;
   tools: HistoryToolTiming[] | null;
   activities: HistoryActivity[] | null;
+  backgroundCommands: HistoryBackgroundCommand[] | null;
   initialInit?: HistoryEvent;
   initialInput?: HistoryPosition;
   setup?: HistorySlice;

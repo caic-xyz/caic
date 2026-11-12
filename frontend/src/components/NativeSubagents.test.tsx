@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { expect, vi } from "@tests/expect";
 import { fixtureHistoryResponse, historyManifest, historyResponse } from "@tests/history";
-import type { HistoryEvent, HistoryActivity, ISOTimestamp } from "@sdk/types.gen";
+import type { HistoryEvent, HistoryBackgroundCommand, ISOTimestamp } from "@sdk/types.gen";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
 import { api } from "../api";
@@ -124,7 +124,7 @@ describe("native disclosures", () => {
     fixture.publish(manifest);
     await waitFor(() => expect(screen.getByTestId("child-transcript")).toHaveTextContent("Second response"));
     const prefixes = fixture.requests.filter((url) => url.includes("/activity/") && !url.includes("afterRecordID"));
-    assert.deepEqual(prefixes, ["/history/owner/3/test/activity/nativeSubagent/child/2"]);
+    assert.deepEqual(prefixes, ["/history/owner/3/test/activity/child/2"]);
     assert.equal(screen.getByTestId("child-transcript"), transcript);
     expect(link).toHaveFocus();
     assert.ok(fixture.requests.some((url) => url.includes("afterRecordID=2&afterIndex=4294967295")));
@@ -158,10 +158,7 @@ describe("native disclosures", () => {
     });
     await waitFor(() => {
       const prefixes = fixture.requests.filter((url) => url.includes("/activity/") && !url.includes("afterRecordID"));
-      assert.deepEqual(prefixes, [
-        "/history/owner/3/test/activity/nativeSubagent/child/2",
-        "/history/owner/3/test/activity/nativeSubagent/child/2",
-      ]);
+      assert.deepEqual(prefixes, ["/history/owner/3/test/activity/child/2", "/history/owner/3/test/activity/child/2"]);
     });
     expect(screen.getByText("Cached response")).toBeInTheDocument();
     fixture.view.unmount();
@@ -189,11 +186,7 @@ describe("native disclosures", () => {
       message: { kind: "text", ts: 3000, source: { agentID: "child" }, text: { text: "Second response" } },
     });
     await waitFor(() => expect(screen.getByTestId("child-transcript")).toHaveTextContent("Second response"));
-    assert.ok(
-      fixture.requests.some((url) =>
-        url.includes("/activity/nativeSubagent/child/3?afterRecordID=2&afterIndex=4294967295"),
-      ),
-    );
+    assert.ok(fixture.requests.some((url) => url.includes("/activity/child/3?afterRecordID=2&afterIndex=4294967295")));
     await user.click(summary);
     expect(screen.queryByTestId("child-transcript")).not.toBeInTheDocument();
     fixture.advance(lifecycle(4, "completed", "Finished research"));
@@ -245,16 +238,10 @@ describe("native disclosures", () => {
     fixture.view.unmount();
   });
 });
-const command: HistoryActivity = {
-  sectionID: "1",
-  kind: "backgroundCommand",
+const command: HistoryBackgroundCommand = {
   id: "shell",
   status: "running",
-  first: { recordID: 1, index: 0 },
-  bodyThrough: 1,
-  ownershipThrough: 0,
   startedAt: new Date(2000).toISOString() as ISOTimestamp,
-  anchorAt: new Date(2000).toISOString() as ISOTimestamp,
 };
 describe("background summaries", () => {
   it("keeps a running chip distinct from terminal exit evidence and unknown outcomes", () => {

@@ -124,17 +124,16 @@ type HistoryToolTiming struct {
 	DurationMS int64  `json:"durationMs"`
 }
 
-// HistoryActivity is payload-free lifecycle and routing state. Kind is
-// nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
-// are fetched through the finite activity resource only on disclosure.
-// BodyThrough is a stable finite prefix containing all actor payload and
-// ownership observations known at the manifest snapshot. Unrelated task
-// records do not change it, allowing disclosures to reuse the HTTP cache.
-// OwnershipThrough advances only for related routing/namespace observations;
-// clients use it to distinguish ownership revisions from new actor output.
+// HistoryActivity is one native subagent's payload-free lifecycle and routing
+// state. Prompt, result, and child transcripts are fetched through the finite
+// activity resource only on disclosure. BodyThrough is a stable finite prefix
+// containing all actor payload and ownership observations known at the
+// manifest snapshot. Unrelated task records do not change it, allowing
+// disclosures to reuse the HTTP cache. OwnershipThrough advances only for
+// related routing/namespace observations; clients use it to distinguish
+// ownership revisions from new actor output.
 type HistoryActivity struct {
-	Kind EventKind `json:"kind"`
-	ID   string    `json:"id"`
+	ID string `json:"id"`
 	// SectionID identifies the body containing the earliest actual lifecycle or
 	// resolved transcript origin, including an unfinished turn carried forward.
 	SectionID        string                   `json:"sectionID"`
@@ -151,8 +150,21 @@ type HistoryActivity struct {
 	First            HistoryPosition          `json:"first"`
 	BodyThrough      uint64                   `json:"bodyThrough"`
 	OwnershipThrough uint64                   `json:"ownershipThrough"`
-	ExitCode         *int                     `json:"exitCode,omitempty"`
-	OutputRef        string                   `json:"outputRef,omitempty"`
+}
+
+// HistoryBackgroundCommand is a detached command's folded, payload-free
+// lifecycle. Clients attach it to the tool call identified by Source and
+// ToolUseID; OutputRef names the container file holding its output.
+type HistoryBackgroundCommand struct {
+	ID        string             `json:"id"`
+	Source    EventMessageSource `json:"source,omitzero"`
+	ToolUseID string             `json:"toolUseID,omitempty"`
+	Label     string             `json:"label,omitempty"`
+	Status    string             `json:"status"`
+	StartedAt *time.Time         `json:"startedAt,omitempty"`
+	EndedAt   *time.Time         `json:"endedAt,omitempty"`
+	ExitCode  *int               `json:"exitCode,omitempty"`
+	OutputRef string             `json:"outputRef,omitempty"`
 }
 
 // HistoryRoute is one authoritative delegation relation or namespace observation.
@@ -169,15 +181,16 @@ type HistoryRoute struct {
 // identifies the first root input, permitting prompt deduplication by position.
 type HistoryMetadata struct {
 	// RoutingRevision changes when earlier delegated ownership may have changed.
-	RoutingRevision  uint64              `json:"routingRevision"`
-	Routing          []HistoryRoute      `json:"routing"`
-	HasInitialPrompt bool                `json:"hasInitialPrompt"`
-	SetupEndedAt     time.Time           `json:"setupEndedAt,omitzero"`
-	Turns            []HistoryTurn       `json:"turns"`
-	Tools            []HistoryToolTiming `json:"tools"`
-	Activities       []HistoryActivity   `json:"activities"`
-	InitialInit      *HistoryEvent       `json:"initialInit,omitempty"`
-	InitialInput     *HistoryPosition    `json:"initialInput,omitempty"`
-	Setup            *HistorySlice       `json:"setup,omitempty"`
-	Todo             *EventTodo          `json:"todo,omitempty"`
+	RoutingRevision    uint64                     `json:"routingRevision"`
+	Routing            []HistoryRoute             `json:"routing"`
+	HasInitialPrompt   bool                       `json:"hasInitialPrompt"`
+	SetupEndedAt       time.Time                  `json:"setupEndedAt,omitzero"`
+	Turns              []HistoryTurn              `json:"turns"`
+	Tools              []HistoryToolTiming        `json:"tools"`
+	Activities         []HistoryActivity          `json:"activities"`
+	BackgroundCommands []HistoryBackgroundCommand `json:"backgroundCommands"`
+	InitialInit        *HistoryEvent              `json:"initialInit,omitempty"`
+	InitialInput       *HistoryPosition           `json:"initialInput,omitempty"`
+	Setup              *HistorySlice              `json:"setup,omitempty"`
+	Todo               *EventTodo                 `json:"todo,omitempty"`
 }

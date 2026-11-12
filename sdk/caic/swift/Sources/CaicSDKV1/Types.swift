@@ -4844,16 +4844,15 @@ public struct HistoryToolTiming: Codable {
     }
 }
 
-/// HistoryActivity is payload-free lifecycle and routing state. Kind is
-/// nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
-/// are fetched through the finite activity resource only on disclosure.
-/// BodyThrough is a stable finite prefix containing all actor payload and
-/// ownership observations known at the manifest snapshot. Unrelated task
-/// records do not change it, allowing disclosures to reuse the HTTP cache.
-/// OwnershipThrough advances only for related routing/namespace observations;
-/// clients use it to distinguish ownership revisions from new actor output.
+/// HistoryActivity is one native subagent's payload-free lifecycle and routing
+/// state. Prompt, result, and child transcripts are fetched through the finite
+/// activity resource only on disclosure. BodyThrough is a stable finite prefix
+/// containing all actor payload and ownership observations known at the
+/// manifest snapshot. Unrelated task records do not change it, allowing
+/// disclosures to reuse the HTTP cache. OwnershipThrough advances only for
+/// related routing/namespace observations; clients use it to distinguish
+/// ownership revisions from new actor output.
 public struct HistoryActivity: Codable {
-    public let kind: EventKind
     public let id: String
     /// SectionID identifies the body containing the earliest actual lifecycle or
     /// resolved transcript origin, including an unfinished turn carried forward.
@@ -4871,11 +4870,8 @@ public struct HistoryActivity: Codable {
     public let first: HistoryPosition
     public let bodyThrough: Int
     public let ownershipThrough: Int
-    public let exitCode: Int?
-    public let outputRef: String?
 
-    public init(kind: EventKind, id: String, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int, exitCode: Int? = nil, outputRef: String? = nil) {
-        self.kind = kind
+    public init(id: String, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int) {
         self.id = id
         self.sectionID = sectionID
         self.source = source
@@ -4891,6 +4887,31 @@ public struct HistoryActivity: Codable {
         self.first = first
         self.bodyThrough = bodyThrough
         self.ownershipThrough = ownershipThrough
+    }
+}
+
+/// HistoryBackgroundCommand is a detached command's folded, payload-free
+/// lifecycle. Clients attach it to the tool call identified by Source and
+/// ToolUseID; OutputRef names the container file holding its output.
+public struct HistoryBackgroundCommand: Codable {
+    public let id: String
+    public let source: EventMessageSource?
+    public let toolUseID: String?
+    public let label: String?
+    public let status: String
+    public let startedAt: ISOTimestamp?
+    public let endedAt: ISOTimestamp?
+    public let exitCode: Int?
+    public let outputRef: String?
+
+    public init(id: String, source: EventMessageSource? = nil, toolUseID: String? = nil, label: String? = nil, status: String, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, exitCode: Int? = nil, outputRef: String? = nil) {
+        self.id = id
+        self.source = source
+        self.toolUseID = toolUseID
+        self.label = label
+        self.status = status
+        self.startedAt = startedAt
+        self.endedAt = endedAt
         self.exitCode = exitCode
         self.outputRef = outputRef
     }
@@ -4909,6 +4930,7 @@ public struct HistoryMetadata: Codable {
     public let turns: [HistoryTurn]?
     public let tools: [HistoryToolTiming]?
     public let activities: [HistoryActivity]?
+    public let backgroundCommands: [HistoryBackgroundCommand]?
     public let initialInit: HistoryEvent?
     public let initialInput: HistoryPosition?
     public let setup: HistorySlice?
@@ -4922,13 +4944,14 @@ public struct HistoryMetadata: Codable {
         case turns
         case tools
         case activities
+        case backgroundCommands
         case initialInit
         case initialInput
         case setup
         case todo
     }
 
-    public init(routingRevision: Int, routing: [HistoryRoute]?, hasInitialPrompt: Bool, setupEndedAt: ISOTimestamp? = nil, turns: [HistoryTurn]?, tools: [HistoryToolTiming]?, activities: [HistoryActivity]?, initialInit: HistoryEvent? = nil, initialInput: HistoryPosition? = nil, setup: HistorySlice? = nil, todo: EventTodo? = nil) {
+    public init(routingRevision: Int, routing: [HistoryRoute]?, hasInitialPrompt: Bool, setupEndedAt: ISOTimestamp? = nil, turns: [HistoryTurn]?, tools: [HistoryToolTiming]?, activities: [HistoryActivity]?, backgroundCommands: [HistoryBackgroundCommand]?, initialInit: HistoryEvent? = nil, initialInput: HistoryPosition? = nil, setup: HistorySlice? = nil, todo: EventTodo? = nil) {
         self.routingRevision = routingRevision
         self.routing = routing
         self.hasInitialPrompt = hasInitialPrompt
@@ -4936,6 +4959,7 @@ public struct HistoryMetadata: Codable {
         self.turns = turns
         self.tools = tools
         self.activities = activities
+        self.backgroundCommands = backgroundCommands
         self.initialInit = initialInit
         self.initialInput = initialInput
         self.setup = setup
@@ -4951,6 +4975,7 @@ public struct HistoryMetadata: Codable {
         self.turns = try c.decode([HistoryTurn]?.self, forKey: .turns)
         self.tools = try c.decode([HistoryToolTiming]?.self, forKey: .tools)
         self.activities = try c.decode([HistoryActivity]?.self, forKey: .activities)
+        self.backgroundCommands = try c.decode([HistoryBackgroundCommand]?.self, forKey: .backgroundCommands)
         self.initialInit = try c.decodeIfPresent(HistoryEvent.self, forKey: .initialInit)
         self.initialInput = try c.decodeIfPresent(HistoryPosition.self, forKey: .initialInput)
         self.setup = try c.decodeIfPresent(HistorySlice.self, forKey: .setup)
@@ -4966,6 +4991,7 @@ public struct HistoryMetadata: Codable {
         try c.encode(self.turns, forKey: .turns)
         try c.encode(self.tools, forKey: .tools)
         try c.encode(self.activities, forKey: .activities)
+        try c.encode(self.backgroundCommands, forKey: .backgroundCommands)
         try c.encodeIfPresent(self.initialInit, forKey: .initialInit)
         try c.encodeIfPresent(self.initialInput, forKey: .initialInput)
         try c.encodeIfPresent(self.setup, forKey: .setup)

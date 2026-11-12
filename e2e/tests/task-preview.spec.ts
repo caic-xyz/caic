@@ -318,9 +318,7 @@ for (const width of [390, 1280]) {
       expect(entries.some((entry) => archivedRequest(entry.url))).toBe(true);
     };
     const actorPrefixRequests = () =>
-      requests.filter(
-        (url) => url.includes("/activity/nativeSubagent/codex%3Athread%3Achild-a/") && !url.includes("afterRecordID"),
-      );
+      requests.filter((url) => url.includes("/activity/codex%3Athread%3Achild-a/") && !url.includes("afterRecordID"));
     const beforeRouting = (await api.getHistoryManifest(id)).metadata.routingRevision;
     const childSummary = section.locator('[data-native-id="codex:thread:child-a"] > summary');
     await childSummary.focus();

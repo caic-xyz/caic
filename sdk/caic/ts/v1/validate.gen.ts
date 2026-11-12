@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -1185,7 +1185,6 @@ export function validateHistoryToolTiming(raw: ValidatorInput): HistoryToolTimin
 
 export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
   const obj = asObject(raw, "HistoryActivity");
-  if (!Object.prototype.hasOwnProperty.call(obj, "kind")) throw new TypeError("missing required field: HistoryActivity.kind");
   if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: HistoryActivity.id");
   if (!Object.prototype.hasOwnProperty.call(obj, "sectionID")) throw new TypeError("missing required field: HistoryActivity.sectionID");
   if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: HistoryActivity.status");
@@ -1194,7 +1193,6 @@ export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
   if (!Object.prototype.hasOwnProperty.call(obj, "bodyThrough")) throw new TypeError("missing required field: HistoryActivity.bodyThrough");
   if (!Object.prototype.hasOwnProperty.call(obj, "ownershipThrough")) throw new TypeError("missing required field: HistoryActivity.ownershipThrough");
   return {
-    kind: (asString(obj["kind"], "HistoryActivity.kind") as EventKind),
     id: asString(obj["id"], "HistoryActivity.id"),
     sectionID: asString(obj["sectionID"], "HistoryActivity.sectionID"),
     ...(Object.prototype.hasOwnProperty.call(obj, "source") ? { source: validateEventMessageSource(obj["source"]) } : {}),
@@ -1210,8 +1208,23 @@ export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
     first: validateHistoryPosition(obj["first"]),
     bodyThrough: asNumber(obj["bodyThrough"], "HistoryActivity.bodyThrough"),
     ownershipThrough: asNumber(obj["ownershipThrough"], "HistoryActivity.ownershipThrough"),
-    ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "HistoryActivity.exitCode") } : {}),
-    ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "HistoryActivity.outputRef") } : {}),
+  };
+}
+
+export function validateHistoryBackgroundCommand(raw: ValidatorInput): HistoryBackgroundCommand {
+  const obj = asObject(raw, "HistoryBackgroundCommand");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: HistoryBackgroundCommand.id");
+  if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: HistoryBackgroundCommand.status");
+  return {
+    id: asString(obj["id"], "HistoryBackgroundCommand.id"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "source") ? { source: validateEventMessageSource(obj["source"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "HistoryBackgroundCommand.toolUseID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "label") ? { label: asString(obj["label"], "HistoryBackgroundCommand.label") } : {}),
+    status: asString(obj["status"], "HistoryBackgroundCommand.status"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "startedAt") ? { startedAt: asString(obj["startedAt"], "HistoryBackgroundCommand.startedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "endedAt") ? { endedAt: asString(obj["endedAt"], "HistoryBackgroundCommand.endedAt") as ISOTimestamp } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "HistoryBackgroundCommand.exitCode") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "HistoryBackgroundCommand.outputRef") } : {}),
   };
 }
 
@@ -1223,6 +1236,7 @@ export function validateHistoryMetadata(raw: ValidatorInput): HistoryMetadata {
   if (!Object.prototype.hasOwnProperty.call(obj, "turns")) throw new TypeError("missing required field: HistoryMetadata.turns");
   if (!Object.prototype.hasOwnProperty.call(obj, "tools")) throw new TypeError("missing required field: HistoryMetadata.tools");
   if (!Object.prototype.hasOwnProperty.call(obj, "activities")) throw new TypeError("missing required field: HistoryMetadata.activities");
+  if (!Object.prototype.hasOwnProperty.call(obj, "backgroundCommands")) throw new TypeError("missing required field: HistoryMetadata.backgroundCommands");
   return {
     routingRevision: asNumber(obj["routingRevision"], "HistoryMetadata.routingRevision"),
     routing: (obj["routing"] === null ? null : validateArray(obj["routing"], "HistoryMetadata.routing", (v) => validateHistoryRoute(v))),
@@ -1231,6 +1245,7 @@ export function validateHistoryMetadata(raw: ValidatorInput): HistoryMetadata {
     turns: (obj["turns"] === null ? null : validateArray(obj["turns"], "HistoryMetadata.turns", (v) => validateHistoryTurn(v))),
     tools: (obj["tools"] === null ? null : validateArray(obj["tools"], "HistoryMetadata.tools", (v) => validateHistoryToolTiming(v))),
     activities: (obj["activities"] === null ? null : validateArray(obj["activities"], "HistoryMetadata.activities", (v) => validateHistoryActivity(v))),
+    backgroundCommands: (obj["backgroundCommands"] === null ? null : validateArray(obj["backgroundCommands"], "HistoryMetadata.backgroundCommands", (v) => validateHistoryBackgroundCommand(v))),
     ...(Object.prototype.hasOwnProperty.call(obj, "initialInit") ? { initialInit: validateHistoryEvent(obj["initialInit"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "initialInput") ? { initialInput: validateHistoryPosition(obj["initialInput"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "setup") ? { setup: validateHistorySlice(obj["setup"]) } : {}),

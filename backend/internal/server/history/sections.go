@@ -34,6 +34,8 @@ type sectionIndex struct {
 	totals             map[string]v1.HistoryToolTiming
 	activities         map[string]v1.HistoryActivity
 	activityOrigins    map[string]Position
+	backgroundCommands []v1.HistoryBackgroundCommand
+	backgroundIndex    map[string]int
 	transcripts        map[string]struct{}
 	routing            map[activityRoute]uint64
 	pendingScopes      map[string]map[string]uint64
@@ -55,7 +57,7 @@ func newSectionIndex() sectionIndex {
 	return sectionIndex{
 		current: v1.HistorySection{ID: "1", Skills: []v1.EventSkillLoad{}},
 		tools:   map[toolKey]toolStart{}, totals: map[string]v1.HistoryToolTiming{},
-		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]Position{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1,
+		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]Position{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1,
 		turns: []v1.HistoryTurn{}, lastResultFact: -1, actorRecords: map[string][]uint64{}, delegationRecords: map[delegationScope][]uint64{},
 	}
 }
@@ -171,17 +173,11 @@ func (s *sectionIndex) append(e *Event) {
 
 func (s *sectionIndex) indexRecords(e *Event) {
 	m := &e.Message
-	if m.Source.AgentID != "" {
-		key := string(v1.EventKindNativeSubagent) + ":" + m.Source.AgentID
-		s.actorRecords[key] = appendRecord(s.actorRecords[key], e.RecordID)
+	if id := m.Source.AgentID; id != "" {
+		s.actorRecords[id] = appendRecord(s.actorRecords[id], e.RecordID)
 	}
 	if n := m.NativeSubagent; n != nil {
-		key := string(v1.EventKindNativeSubagent) + ":" + n.ID
-		s.actorRecords[key] = appendRecord(s.actorRecords[key], e.RecordID)
-	}
-	if b := m.BackgroundCommand; b != nil {
-		key := string(v1.EventKindBackgroundCommand) + ":" + b.ID
-		s.actorRecords[key] = appendRecord(s.actorRecords[key], e.RecordID)
+		s.actorRecords[n.ID] = appendRecord(s.actorRecords[n.ID], e.RecordID)
 	}
 	if m.Source.AgentID == "" && m.Source.DelegationToolUseID != "" {
 		namespace := m.Source.RootThreadID
@@ -315,9 +311,9 @@ func (s *sectionIndex) snapshot() ([]v1.HistorySection, v1.HistoryMetadata) {
 		return strings.Compare(a.Name, b.Name)
 	})
 	metadata.Activities = make([]v1.HistoryActivity, 0, len(s.activities))
-	for key := range s.activities {
-		a := s.activities[key]
-		a.BodyThrough, a.OwnershipThrough = s.activityBounds(key, &a)
+	for id := range s.activities {
+		a := s.activities[id]
+		a.BodyThrough, a.OwnershipThrough = s.activityBounds(&a)
 		metadata.Activities = append(metadata.Activities, a)
 	}
 	slices.SortFunc(metadata.Activities, func(a, b v1.HistoryActivity) int {
@@ -329,18 +325,16 @@ func (s *sectionIndex) snapshot() ([]v1.HistorySection, v1.HistoryMetadata) {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	metadata.BackgroundCommands = slices.Clone(s.backgroundCommands)
 	return out, metadata
 }
 
 // activityBounds separates payload growth from related ownership observations.
 // Both bounds are independent of unrelated root activity and snapshot timing.
-func (s *sectionIndex) activityBounds(key string, a *v1.HistoryActivity) (body, ownership uint64) {
+func (s *sectionIndex) activityBounds(a *v1.HistoryActivity) (body, ownership uint64) {
 	body = a.First.RecordID
-	if records := s.actorRecords[key]; len(records) > 0 {
+	if records := s.actorRecords[a.ID]; len(records) > 0 {
 		body = max(body, records[len(records)-1])
-	}
-	if a.Kind != v1.EventKindNativeSubagent {
-		return body, 0
 	}
 	for route, at := range s.routing {
 		if route.id != a.ID {
@@ -428,30 +422,29 @@ func (s *sectionIndex) observeActivity(e *Event) {
 			}
 		}
 	}
-	kind, id := m.Kind, ""
+	id := ""
 	switch {
 	case m.NativeSubagent != nil:
 		id = m.NativeSubagent.ID
 	case m.BackgroundCommand != nil:
-		id = m.BackgroundCommand.ID
-	case body && m.Source.AgentID != "":
-		kind = v1.EventKindNativeSubagent
+		s.observeBackgroundCommand(m)
+		return
+	case body:
 		id = m.Source.AgentID
 	}
 	if id == "" {
 		return
 	}
-	key := string(kind) + ":" + id
-	a, ok := s.activities[key]
+	a, ok := s.activities[id]
 	if !ok {
-		s.activityOrigins[key] = eventPosition(e)
+		s.activityOrigins[id] = eventPosition(e)
 		s.activityHomesDirty = true
-		a = v1.HistoryActivity{Kind: kind, ID: id, Status: "unknown", First: eventPosition(e), AnchorAt: historyTime(m.Ts), Source: m.Source}
+		a = v1.HistoryActivity{ID: id, Status: "unknown", First: eventPosition(e), AnchorAt: historyTime(m.Ts), Source: m.Source}
 		if body {
 			a.Source = v1.EventMessageSource{}
 		}
 	}
-	if m.NativeSubagent == nil && m.BackgroundCommand == nil {
+	if m.NativeSubagent == nil {
 		if _, seen := s.transcripts[id]; !seen {
 			if a.StartedAt != nil {
 				a.AnchorAt = *a.StartedAt
@@ -501,32 +494,17 @@ func (s *sectionIndex) observeActivity(e *Event) {
 		if !terminal(a.Status) && n.Status != v1.EventNativeSubagentStatusUnknown {
 			a.Status = string(n.Status)
 		}
-	} else if b := m.BackgroundCommand; b != nil {
-		if a.ToolUseID == "" {
-			a.ToolUseID = b.ToolUseID
-		}
-		if a.Label == "" {
-			a.Label = b.Label
-		}
-		if !terminal(a.Status) && b.Status != "unknown" {
-			a.Status = b.Status
-		}
-		a.ExitCode = b.ExitCode
-		a.OutputRef = b.OutputRef
 	}
 	at := historyTime(m.Ts)
 	if !at.IsZero() {
-		if a.StartedAt == nil && (m.NativeSubagent != nil && m.NativeSubagent.Status == v1.EventNativeSubagentStatusRunning || m.BackgroundCommand != nil && m.BackgroundCommand.Status == "running") {
+		if a.StartedAt == nil && m.NativeSubagent != nil && m.NativeSubagent.Status == v1.EventNativeSubagentStatusRunning {
 			a.StartedAt = &at
-			if kind == v1.EventKindNativeSubagent {
-				s.runningPositions[id] = transcriptObservation{position: eventPosition(e), at: at}
-			}
+			s.runningPositions[id] = transcriptObservation{position: eventPosition(e), at: at}
 		}
-		if a.EndedAt == nil && (m.NativeSubagent != nil && terminal(string(m.NativeSubagent.Status)) || m.BackgroundCommand != nil && terminal(m.BackgroundCommand.Status)) {
+		if a.EndedAt == nil && m.NativeSubagent != nil && terminal(string(m.NativeSubagent.Status)) {
 			a.EndedAt = &at
 		}
-		_, hasTranscript := s.transcripts[id]
-		if previous != a.Status && (kind == v1.EventKindBackgroundCommand || !hasTranscript) {
+		if _, hasTranscript := s.transcripts[id]; previous != a.Status && !hasTranscript {
 			a.AnchorAt = at
 		}
 	}
@@ -535,7 +513,39 @@ func (s *sectionIndex) observeActivity(e *Event) {
 			s.lifecycleAnchors[id] = at
 		}
 	}
-	s.activities[key] = a
+	s.activities[id] = a
+}
+
+// observeBackgroundCommand folds one detached-command lifecycle observation.
+// Commands keep first-observation order; the first terminal status stands.
+func (s *sectionIndex) observeBackgroundCommand(m *v1.EventMessage) {
+	b := m.BackgroundCommand
+	i, ok := s.backgroundIndex[b.ID]
+	if !ok {
+		i = len(s.backgroundCommands)
+		s.backgroundIndex[b.ID] = i
+		s.backgroundCommands = append(s.backgroundCommands, v1.HistoryBackgroundCommand{ID: b.ID, Source: m.Source, Status: "unknown"})
+	}
+	c := &s.backgroundCommands[i]
+	if c.ToolUseID == "" {
+		c.ToolUseID = b.ToolUseID
+	}
+	if c.Label == "" {
+		c.Label = b.Label
+	}
+	if !terminal(c.Status) && b.Status != "unknown" {
+		c.Status = b.Status
+	}
+	c.ExitCode = b.ExitCode
+	c.OutputRef = b.OutputRef
+	if at := historyTime(m.Ts); !at.IsZero() {
+		if c.StartedAt == nil && b.Status == "running" {
+			c.StartedAt = &at
+		}
+		if c.EndedAt == nil && terminal(b.Status) {
+			c.EndedAt = &at
+		}
+	}
 }
 
 func (s *sectionIndex) reanchorActivities() {
@@ -559,25 +569,23 @@ func (s *sectionIndex) reanchorActivities() {
 		}
 	}
 	clear(s.transcripts)
-	for key := range s.activities {
-		a := s.activities[key]
-		origin := s.activityOrigins[key]
-		if a.Kind == v1.EventKindNativeSubagent {
-			if observation, seen := first[a.ID]; seen {
-				if positionBefore(observation.position, origin) {
-					origin = observation.position
-				}
-				s.transcripts[a.ID] = struct{}{}
-				a.AnchorAt = observation.at
-				if running, seen := s.runningPositions[a.ID]; seen && positionBefore(running.position, observation.position) {
-					a.AnchorAt = running.at
-				}
-			} else if anchor, seen := s.lifecycleAnchors[a.ID]; seen {
-				a.AnchorAt = anchor
+	for id := range s.activities {
+		a := s.activities[id]
+		origin := s.activityOrigins[id]
+		if observation, seen := first[id]; seen {
+			if positionBefore(observation.position, origin) {
+				origin = observation.position
 			}
+			s.transcripts[id] = struct{}{}
+			a.AnchorAt = observation.at
+			if running, seen := s.runningPositions[id]; seen && positionBefore(running.position, observation.position) {
+				a.AnchorAt = running.at
+			}
+		} else if anchor, seen := s.lifecycleAnchors[id]; seen {
+			a.AnchorAt = anchor
 		}
 		a.SectionID = s.sectionAt(origin)
-		s.activities[key] = a
+		s.activities[id] = a
 	}
 }
 

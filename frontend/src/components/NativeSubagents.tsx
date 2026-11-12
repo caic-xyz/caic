@@ -2,7 +2,7 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
-import type { HistoryActivity } from "@sdk/types.gen";
+import type { HistoryActivity, HistoryBackgroundCommand } from "@sdk/types.gen";
 import { createActivityHistory } from "../historyDisclosure";
 import { NativeActivityTracker } from "../nativeSubagents";
 import Button from "./Button";
@@ -174,7 +174,7 @@ export default function NativeAgents(props: {
 // BackgroundCommandStatusChip is the compact tool-row indicator: it resolves a
 // detached shell's outcome instead of leaving a perpetual "running in
 // background" badge on the tool call that spawned it.
-export function BackgroundCommandStatusChip(props: { command: HistoryActivity; settled: boolean }) {
+export function BackgroundCommandStatusChip(props: { command: HistoryBackgroundCommand; settled: boolean }) {
   return (
     <span class={styles.status} data-state={props.command.status} data-testid="background-command-chip">
       <Show

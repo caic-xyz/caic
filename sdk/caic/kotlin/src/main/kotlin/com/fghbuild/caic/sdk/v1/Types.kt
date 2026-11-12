@@ -3218,18 +3218,17 @@ data class HistoryToolTiming(
 )
 
 /**
- * HistoryActivity is payload-free lifecycle and routing state. Kind is
- * nativeSubagent or backgroundCommand. Prompt, result, and child transcripts
- * are fetched through the finite activity resource only on disclosure.
- * BodyThrough is a stable finite prefix containing all actor payload and
- * ownership observations known at the manifest snapshot. Unrelated task
- * records do not change it, allowing disclosures to reuse the HTTP cache.
- * OwnershipThrough advances only for related routing/namespace observations;
- * clients use it to distinguish ownership revisions from new actor output.
+ * HistoryActivity is one native subagent's payload-free lifecycle and routing
+ * state. Prompt, result, and child transcripts are fetched through the finite
+ * activity resource only on disclosure. BodyThrough is a stable finite prefix
+ * containing all actor payload and ownership observations known at the
+ * manifest snapshot. Unrelated task records do not change it, allowing
+ * disclosures to reuse the HTTP cache. OwnershipThrough advances only for
+ * related routing/namespace observations; clients use it to distinguish
+ * ownership revisions from new actor output.
  */
 @Serializable
 data class HistoryActivity(
-    val kind: EventKind,
     val id: String,
     /**
      * SectionID identifies the body containing the earliest actual lifecycle or
@@ -3249,6 +3248,22 @@ data class HistoryActivity(
     val first: HistoryPosition,
     val bodyThrough: Long,
     val ownershipThrough: Long,
+)
+
+/**
+ * HistoryBackgroundCommand is a detached command's folded, payload-free
+ * lifecycle. Clients attach it to the tool call identified by Source and
+ * ToolUseID; OutputRef names the container file holding its output.
+ */
+@Serializable
+data class HistoryBackgroundCommand(
+    val id: String,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val source: EventMessageSource? = null,
+    @SerialName("toolUseID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolUseID: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val label: String? = null,
+    val status: String,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val startedAt: Instant? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val endedAt: Instant? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val exitCode: Int? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val outputRef: String? = null,
 )
@@ -3269,6 +3284,7 @@ data class HistoryMetadata(
     val turns: List<HistoryTurn>?,
     val tools: List<HistoryToolTiming>?,
     val activities: List<HistoryActivity>?,
+    val backgroundCommands: List<HistoryBackgroundCommand>?,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val initialInit: HistoryEvent? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val initialInput: HistoryPosition? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val setup: HistorySlice? = null,

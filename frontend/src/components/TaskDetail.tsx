@@ -34,6 +34,7 @@ import type {
   EventSystem,
   EventSystemSubtype,
   HistoryActivity,
+  HistoryBackgroundCommand,
   HistoryEvent,
   HistorySection,
   HistoryTurn,
@@ -264,7 +265,7 @@ export default function TaskDetail(props: Props) {
     setOpenActivityIDs(new Set<string>());
   });
   const pinActivity = (id: string, open: boolean) => {
-    const activity = metadata()?.activities?.find((value) => value.kind === "nativeSubagent" && value.id === id);
+    const activity = metadata()?.activities?.find((value) => value.id === id);
     const home = activity ? activity.sectionID : null;
     const focused =
       document.activeElement instanceof HTMLElement
@@ -285,15 +286,13 @@ export default function TaskDetail(props: Props) {
         anchorRow(area, sessionAnchor(home))?.querySelector("button")?.focus();
       });
   };
-  const currentActivities = () =>
+  const nativeActivities = createMemo(() =>
     (metadata()?.activities ?? []).filter(
       (activity) =>
         activity.status === "running" ||
-        (activity.kind === "nativeSubagent" && openActivityIDs().has(activity.id)) ||
+        openActivityIDs().has(activity.id) ||
         activity.sectionID === currentSection()?.id,
-    );
-  const nativeActivities = createMemo(() =>
-    currentActivities().filter((activity) => activity.kind === "nativeSubagent"),
+    ),
   );
   const displayedAtRoot = (event: EventMessage) => historyRoot(event, metadata()?.routing ?? []);
   const [sending, setSending] = createSignal(false);
@@ -935,7 +934,7 @@ export default function TaskDetail(props: Props) {
   // Correlate canonical native activity with the tool card that spawned it.
   const nativeByToolUseID = createMemo(() => {
     const byTool = new Map<string, HistoryActivity[]>();
-    for (const activity of (metadata()?.activities ?? []).filter((value) => value.kind === "nativeSubagent")) {
+    for (const activity of metadata()?.activities ?? []) {
       if (!activity.toolUseID) continue;
       const key = toolIdentity(activity.source, activity.toolUseID);
       const list = byTool.get(key);
@@ -1003,8 +1002,8 @@ export default function TaskDetail(props: Props) {
   const backgroundSettled = () => !isActive();
   // Each detached command belongs to the one tool call that launched it.
   const backgroundByToolUseID = createMemo(() => {
-    const byTool = new Map<string, HistoryActivity>();
-    for (const command of (metadata()?.activities ?? []).filter((value) => value.kind === "backgroundCommand")) {
+    const byTool = new Map<string, HistoryBackgroundCommand>();
+    for (const command of metadata()?.backgroundCommands ?? []) {
       if (command.toolUseID) byTool.set(toolIdentity(command.source, command.toolUseID), command);
     }
     return byTool;
@@ -1064,11 +1063,7 @@ export default function TaskDetail(props: Props) {
   const renderArchivedActivities = (id: string) => {
     const activities = () =>
       (metadata()?.activities ?? []).filter(
-        (activity) =>
-          activity.kind === "nativeSubagent" &&
-          activity.status !== "running" &&
-          activity.sectionID === id &&
-          !openActivityIDs().has(activity.id),
+        (activity) => activity.status !== "running" && activity.sectionID === id && !openActivityIDs().has(activity.id),
       );
     return (
       <NativeAgents activities={activities()} settled={nativeSettled()} renderTranscript={renderNativeTranscript} />
@@ -2080,7 +2075,7 @@ function GroupContent(props: {
   turnTiming: (event: EventMessage) => HistoryTurn | undefined;
   nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryBackgroundCommand>;
   backgroundSettled: () => boolean;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
@@ -2493,7 +2488,7 @@ function ResultCard(props: {
 
 // toolCallRunning reports whether a tool row's duration ticks: its folded
 // background command runs, or the call itself has not returned.
-function toolCallRunning(call: ToolCall, command: HistoryActivity | undefined, settled: boolean): boolean {
+function toolCallRunning(call: ToolCall, command: HistoryBackgroundCommand | undefined, settled: boolean): boolean {
   return !settled && (command ? command.status === "running" : !call.done);
 }
 
@@ -2501,7 +2496,7 @@ function toolCallRunning(call: ToolCall, command: HistoryActivity | undefined, s
 // events, so the group duration covers what its rows show.
 function toolGroupWork(
   calls: readonly ToolCall[],
-  background: ReadonlyMap<string, HistoryActivity>,
+  background: ReadonlyMap<string, HistoryBackgroundCommand>,
   settled: boolean,
 ): { running: boolean; end: number | undefined } {
   let running = false;
@@ -2521,7 +2516,7 @@ function GroupTiming(props: {
   segments?: readonly (readonly EventMessage[])[];
   userWaitMs?: ReadonlyMap<EventMessage, number>;
   previousEventTs?: ReadonlyMap<EventMessage, number>;
-  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryBackgroundCommand>;
   backgroundSettled: () => boolean;
 }) {
   const work = createMemo(() =>
@@ -2549,7 +2544,7 @@ function ToolMessageGroup(props: {
   pendingAction?: () => string | null;
   nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryBackgroundCommand>;
   backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
@@ -2873,7 +2868,7 @@ function ToolCallCard(props: {
   outputDeltaEvents?: EventMessage[];
   nativeActivity?: HistoryActivity[];
   nativeSettled?: () => boolean;
-  backgroundCommand?: HistoryActivity;
+  backgroundCommand?: HistoryBackgroundCommand;
   backgroundSettled?: () => boolean;
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);

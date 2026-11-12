@@ -146,9 +146,8 @@ func (h *historyHandlers) handleHistoryActivity(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer release()
-	kind := v1.EventKind(r.PathValue("kind"))
 	through, err := historyUint(r.PathValue("through"))
-	if err != nil || kind != v1.EventKindNativeSubagent && kind != v1.EventKindBackgroundCommand {
+	if err != nil {
 		writeError(r.Context(), w, historyBadRange())
 		return
 	}
@@ -172,7 +171,7 @@ func (h *historyHandlers) handleHistoryActivity(w http.ResponseWriter, r *http.R
 		writeError(r.Context(), w, err)
 		return
 	}
-	first, err := s.ActivityStart(r.Context(), kind, r.PathValue("activity"))
+	first, err := s.ActivityStart(r.Context(), r.PathValue("activity"))
 	if err != nil || first.RecordID > through {
 		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "history activity not found"})
 		return
@@ -180,7 +179,7 @@ func (h *historyHandlers) handleHistoryActivity(w http.ResponseWriter, r *http.R
 	if immutableHistory(w, r) {
 		return
 	}
-	if err = s.WriteActivity(r.Context(), snap, kind, r.PathValue("activity"), through, after, w); err != nil {
+	if err = s.WriteActivity(r.Context(), snap, r.PathValue("activity"), through, after, w); err != nil {
 		panic(http.ErrAbortHandler)
 	}
 }

@@ -145,15 +145,14 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
       );
   }
   const uniqueRoutes = [...routing.values()].map((observed) => observed.route);
-  const activitySection = (kind: "nativeSubagent" | "backgroundCommand", id: string) => {
-    const origin = events.findIndex(({ message }) =>
-      kind === "backgroundCommand"
-        ? message.backgroundCommand?.id === id
-        : message.nativeSubagent?.id === id ||
-          (!message.nativeSubagent &&
-            !message.backgroundCommand &&
-            (message.kind !== "rateLimit" || message.rateLimit?.rateLimitType === "thread_goal") &&
-            native.ownerFor(message) === id),
+  const activitySection = (id: string) => {
+    const origin = events.findIndex(
+      ({ message }) =>
+        message.nativeSubagent?.id === id ||
+        (!message.nativeSubagent &&
+          !message.backgroundCommand &&
+          (message.kind !== "rateLimit" || message.rateLimit?.rateLimitType === "thread_goal") &&
+          native.ownerFor(message) === id),
     );
     const event = events[origin];
     if (!event) throw new Error(`Activity has no origin: ${id}`);
@@ -165,31 +164,27 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
     return home.id;
   };
   const through = events.at(-1)?.recordID ?? 0;
-  const activityBounds = (kind: "nativeSubagent" | "backgroundCommand", id: string) => {
+  const activityBounds = (id: string) => {
     const tools = new Set(
       events.flatMap(({ message }) =>
         message.nativeSubagent?.id === id && message.nativeSubagent.toolUseID ? [message.nativeSubagent.toolUseID] : [],
       ),
     );
-    const ownershipThrough =
-      kind === "backgroundCommand"
-        ? 0
-        : Math.max(
-            0,
-            ...[...routing.values()]
-              .filter((observed) => tools.has(observed.route.toolUseID))
-              .map((observed) => observed.recordID),
-          );
+    const ownershipThrough = Math.max(
+      0,
+      ...[...routing.values()]
+        .filter((observed) => tools.has(observed.route.toolUseID))
+        .map((observed) => observed.recordID),
+    );
     const bodyThrough = Math.max(
       ownershipThrough,
       ...events
-        .filter(({ message }) =>
-          kind === "backgroundCommand"
-            ? message.backgroundCommand?.id === id
-            : message.nativeSubagent?.id === id ||
-              native.ownerFor(message) === id ||
-              (message.nativeSubagent?.toolUseID && tools.has(message.nativeSubagent.toolUseID)) ||
-              (message.source?.delegationToolUseID && tools.has(message.source.delegationToolUseID)),
+        .filter(
+          ({ message }) =>
+            message.nativeSubagent?.id === id ||
+            native.ownerFor(message) === id ||
+            (message.nativeSubagent?.toolUseID && tools.has(message.nativeSubagent.toolUseID)) ||
+            (message.source?.delegationToolUseID && tools.has(message.source.delegationToolUseID)),
         )
         .map((event) => event.recordID),
     );
@@ -232,43 +227,34 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
             last: { recordID: logs.at(-1)!.recordID, index: logs.at(-1)!.index },
           }
         : undefined,
-      activities: [
-        ...activities.map((activity) => ({
-          kind: "nativeSubagent" as const,
-          sectionID: activitySection("nativeSubagent", activity.id),
-          id: activity.id,
-          ...activityBounds("nativeSubagent", activity.id),
-          status: activity.status,
-          first: { recordID: 1, index: 0 },
-          source: activity.source,
-          toolUseID: activity.toolUseID,
-          scope: activity.scope,
-          groupID: activity.groupID,
-          label: activity.label,
-          background: activity.background,
-          startedAt:
-            activity.startedAt !== null ? (new Date(activity.startedAt).toISOString() as ISOTimestamp) : undefined,
-          endedAt: activity.endedAt !== null ? (new Date(activity.endedAt).toISOString() as ISOTimestamp) : undefined,
-          anchorAt: new Date(activity.anchorTs).toISOString() as ISOTimestamp,
-        })),
-        ...foldBackgroundCommands(messages).map((activity) => ({
-          kind: "backgroundCommand" as const,
-          sectionID: activitySection("backgroundCommand", activity.id),
-          id: activity.id,
-          ...activityBounds("backgroundCommand", activity.id),
-          status: activity.status,
-          first: { recordID: 1, index: 0 },
-          source: activity.source,
-          toolUseID: activity.toolUseID,
-          label: activity.label,
-          exitCode: activity.exitCode ?? undefined,
-          outputRef: activity.outputRef,
-          startedAt:
-            activity.startedAt !== null ? (new Date(activity.startedAt).toISOString() as ISOTimestamp) : undefined,
-          endedAt: activity.endedAt !== null ? (new Date(activity.endedAt).toISOString() as ISOTimestamp) : undefined,
-          anchorAt: new Date(activity.anchorTs).toISOString() as ISOTimestamp,
-        })),
-      ],
+      activities: activities.map((activity) => ({
+        sectionID: activitySection(activity.id),
+        id: activity.id,
+        ...activityBounds(activity.id),
+        status: activity.status,
+        first: { recordID: 1, index: 0 },
+        source: activity.source,
+        toolUseID: activity.toolUseID,
+        scope: activity.scope,
+        groupID: activity.groupID,
+        label: activity.label,
+        background: activity.background,
+        startedAt:
+          activity.startedAt !== null ? (new Date(activity.startedAt).toISOString() as ISOTimestamp) : undefined,
+        endedAt: activity.endedAt !== null ? (new Date(activity.endedAt).toISOString() as ISOTimestamp) : undefined,
+        anchorAt: new Date(activity.anchorTs).toISOString() as ISOTimestamp,
+      })),
+      backgroundCommands: foldBackgroundCommands(messages).map((command) => ({
+        id: command.id,
+        status: command.status,
+        source: command.source,
+        toolUseID: command.toolUseID,
+        label: command.label,
+        exitCode: command.exitCode ?? undefined,
+        outputRef: command.outputRef,
+        startedAt: command.startedAt !== null ? (new Date(command.startedAt).toISOString() as ISOTimestamp) : undefined,
+        endedAt: command.endedAt !== null ? (new Date(command.endedAt).toISOString() as ISOTimestamp) : undefined,
+      })),
     },
   };
 }
@@ -290,9 +276,9 @@ export function fixtureHistoryResponse(url: string, events: readonly HistoryEven
     );
   if (url.includes("/setup/"))
     return historyResponse(events.filter((event) => event.message.log || event.message.init));
-  const actor = url.match(/\/activity\/(nativeSubagent|backgroundCommand)\/([^/]+)\//);
+  const actor = url.match(/\/activity\/([^/]+)\//);
   if (actor) {
-    const id = decodeURIComponent(actor[2]!);
+    const id = decodeURIComponent(actor[1]!);
     const request = new URL(url, "https://fixture.invalid");
     const through = Number(request.pathname.split("/").at(-1));
     const after = {
@@ -306,9 +292,7 @@ export function fixtureHistoryResponse(url: string, events: readonly HistoryEven
         (event) =>
           event.recordID <= through &&
           compareHistoryPosition(event, after) > 0 &&
-          (event.message.nativeSubagent?.id === id ||
-            event.message.backgroundCommand?.id === id ||
-            tracker.ownerFor(event.message) === id),
+          (event.message.nativeSubagent?.id === id || tracker.ownerFor(event.message) === id),
       ),
     );
   }
@@ -324,11 +308,10 @@ interface FixtureBackgroundCommand extends EventBackgroundCommand {
   source?: EventMessageSource;
   startedAt: number | null;
   endedAt: number | null;
-  anchorTs: number;
 }
 
 // foldBackgroundCommands mirrors the server's lifecycle fold: the first
-// terminal status wins, and the anchor moves only when the status changes.
+// terminal status wins.
 function foldBackgroundCommands(messages: readonly EventMessage[]): FixtureBackgroundCommand[] {
   const terminal = (status: EventBackgroundCommand["status"]) =>
     status === "completed" || status === "failed" || status === "interrupted";
@@ -346,7 +329,6 @@ function foldBackgroundCommands(messages: readonly EventMessage[]): FixtureBackg
       outputRef: old?.outputRef || s.outputRef,
       exitCode: old?.exitCode ?? s.exitCode,
       status,
-      anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
       startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
       endedAt: old?.endedAt ?? (terminal(s.status) && ev.ts > 0 ? ev.ts : null),
     });
