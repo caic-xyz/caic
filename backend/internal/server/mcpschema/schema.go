@@ -34,13 +34,12 @@ func (id *TaskReference) UnmarshalJSON(data []byte) error {
 type ServiceNotification struct {
 	v1.ServiceActiveTask
 
-	ID         string    `json:"id"`
-	ItemID     string    `json:"itemId"`
-	URL        string    `json:"url"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	OccurredAt time.Time `json:"occurredAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	ID        string    `json:"id"`
+	ItemID    string    `json:"itemId"`
+	URL       string    `json:"url"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // TaskListArgs selects a bounded tasks_list page.

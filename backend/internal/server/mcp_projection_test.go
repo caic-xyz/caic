@@ -512,10 +512,10 @@ func TestMCPUsageInLocation(t *testing.T) {
 func TestMCPNotificationsInLocation(t *testing.T) {
 	t.Parallel()
 	stamp := time.Date(2099, 1, 19, 13, 30, 0, 0, time.UTC)
-	input := []mcpschema.ServiceNotification{{ID: "ready-2099-01-19T13:30:00Z", OccurredAt: stamp, ExpiresAt: stamp.Add(time.Hour)}}
+	input := []mcpschema.ServiceNotification{{ID: "ready-2099-01-19T13:30:00Z", ExpiresAt: stamp.Add(time.Hour)}}
 	loc := mcpRequestLocation(&mcp.RequestMeta{UserLocation: mcp.OpenAIUserLocation{Timezone: "America/Toronto"}})
 	got := mcpNotificationsInLocation(input, loc)
-	if got[0].ID != input[0].ID || got[0].OccurredAt.Format(time.RFC3339) != "2099-01-19T08:30:00-05:00" || got[0].ExpiresAt.Format(time.RFC3339) != "2099-01-19T09:30:00-05:00" || input[0].OccurredAt.Location() != time.UTC {
+	if got[0].ID != input[0].ID || got[0].ExpiresAt.Format(time.RFC3339) != "2099-01-19T09:30:00-05:00" || input[0].ExpiresAt.Location() != time.UTC {
 		t.Fatalf("notification timestamps or source changed: %+v", got)
 	}
 }

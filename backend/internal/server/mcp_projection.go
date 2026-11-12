@@ -889,7 +889,6 @@ func mcpTaskInLocation(source *v1.Task, loc *time.Location) v1.Task {
 func mcpNotificationsInLocation(events []mcpschema.ServiceNotification, loc *time.Location) []mcpschema.ServiceNotification {
 	events = slices.Clone(events)
 	for i := range events {
-		events[i].OccurredAt = mcpTimeInLocation(events[i].OccurredAt, loc)
 		events[i].ExpiresAt = mcpTimeInLocation(events[i].ExpiresAt, loc)
 	}
 	return events

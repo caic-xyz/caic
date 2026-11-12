@@ -41,9 +41,9 @@ func TestWireContracts(t *testing.T) {
 			"focused alert array",
 			[]ServiceNotification{{
 				ActiveTaskID: "task-id", ActiveTaskNumber: 2,
-				ID: "alert-id", ItemID: "task-id", URL: "/task/@task-id", Title: "Title", Body: "Body", OccurredAt: stamp, ExpiresAt: stamp.Add(time.Hour),
+				ID: "alert-id", ItemID: "task-id", URL: "/task/@task-id", Title: "Title", Body: "Body", ExpiresAt: stamp.Add(time.Hour),
 			}},
-			`[{"activeTaskId":"task-id","activeTaskNumber":2,"id":"alert-id","itemId":"task-id","url":"/task/@task-id","title":"Title","body":"Body","occurredAt":"2099-01-01T12:00:00Z","expiresAt":"2099-01-01T13:00:00Z"}]`,
+			`[{"activeTaskId":"task-id","activeTaskNumber":2,"id":"alert-id","itemId":"task-id","url":"/task/@task-id","title":"Title","body":"Body","expiresAt":"2099-01-01T13:00:00Z"}]`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

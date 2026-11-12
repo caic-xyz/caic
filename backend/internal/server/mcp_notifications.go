@@ -180,14 +180,13 @@ func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task,
 		// activity and request timing cannot manufacture another one.
 		if old.seen != 0 && old.timelineID == replay.timelineID && (old.state != task.State || old.seq != seq) && taskNotificationTitle(task.State, i+1) != "" {
 			f.events[owner] = append(f.events[owner], serviceNotification{
-				ID:         fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
-				ItemID:     id,
-				URL:        "/task/@" + id,
-				Title:      taskNotificationTitle(task.State, i+1),
-				Body:       taskTitle(task),
-				OccurredAt: now,
-				ExpiresAt:  now.Add(24 * time.Hour),
-				state:      task.State,
+				ID:        fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
+				ItemID:    id,
+				URL:       "/task/@" + id,
+				Title:     taskNotificationTitle(task.State, i+1),
+				Body:      taskTitle(task),
+				ExpiresAt: now.Add(24 * time.Hour),
+				state:     task.State,
 			})
 		}
 		if task.State != v1.TaskStateWaiting || !wasBlocked(previouslyBlocked, id) || isBlocked(blockedTaskIDs, id) {
@@ -199,7 +198,6 @@ func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task,
 			URL:           "/task/@" + id,
 			Title:         "Quota available",
 			Body:          taskTitle(task) + " can continue.",
-			OccurredAt:    now,
 			ExpiresAt:     now.Add(24 * time.Hour),
 			state:         task.State,
 			quotaRecovery: true,
