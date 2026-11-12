@@ -85,13 +85,13 @@ verify: custom-gcl frontend-deps git-hooks
 fix: custom-gcl frontend-deps
 	@./custom-gcl run --show-stats=false ./... --fix
 	@go tool golangci-lint fmt
+	@pnpm exec stylelint --fix "frontend/src/**/*.css"
+	@pnpm exec node scripts/css_module_types.mjs --source-path frontend/src --write
 	@pnpm exec eslint . --fix
 	@pnpm exec prettier --write --log-level warn .
 	@uv run --locked ruff check --quiet --fix .
 	@uv run --locked ruff format . >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
-	@pnpm exec stylelint --fix "frontend/src/**/*.css"
-	@pnpm exec node scripts/css_module_types.mjs --source-path frontend/src --write
 	@uv run --locked python scripts/update_agents_file_index.py
 	@uv run --locked python scripts/update_backend_architecture.py
 
