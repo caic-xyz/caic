@@ -1,4 +1,4 @@
-// Claude Code stdio control requests preserve ownership when answering root permission prompts.
+// Claude Code stdio control requests preserve ownership when answering root permission prompts, including after reconnect.
 
 package claudecode
 
@@ -65,7 +65,9 @@ func (p *pendingControlAsk) same(other pendingControlAsk) bool {
 //
 // It auto-allows non-AskUserQuestion tool permission requests, records
 // AskUserQuestion control requests, and sends the next user prompt as the
-// corresponding control_response.
+// corresponding control_response. Permission requests stay in task history,
+// paired with their recorded replies, so a reconnect can answer one whose
+// reply was never recorded.
 type controlConn struct {
 	agent.Conn
 
@@ -125,6 +127,8 @@ func (c *controlConn) HandleMessage(m agent.Message) (response []byte, handled b
 	}
 }
 
+// handleControlRequest answers every request except a valid AskUserQuestion.
+// The request stays published so task history pairs it with its reply.
 func (c *controlConn) handleControlRequest(raw []byte) (response []byte, handled bool, err error) {
 	var msg claudecode.OutputControlRequestMsg
 	if err := json.Unmarshal(raw, &msg); err != nil {
@@ -132,17 +136,20 @@ func (c *controlConn) handleControlRequest(raw []byte) (response []byte, handled
 	}
 	can, err := msg.DecodeCanUseTool()
 	if err != nil {
-		return controlError(msg.RequestID, "invalid can_use_tool request")
+		response, err = controlError(msg.RequestID, "invalid can_use_tool request")
+		return response, false, err
 	}
 	if can.Subtype != claudecode.ControlCanUseTool {
-		return controlError(msg.RequestID, "unsupported control request subtype: "+string(can.Subtype))
+		response, err = controlError(msg.RequestID, "unsupported control request subtype: "+string(can.Subtype))
+		return response, false, err
 	}
 	if can.ToolName != "AskUserQuestion" {
 		updatedInput, err := rawObjectOrEmpty(can.Input)
 		if err != nil {
 			return nil, true, fmt.Errorf("marshal %s input: %w", can.ToolName, err)
 		}
-		return allowControlResponse(msg.RequestID, updatedInput)
+		response, err = allowControlResponse(msg.RequestID, updatedInput)
+		return response, false, err
 	}
 	inputRaw, err := rawObject(can.Input)
 	if err != nil {
@@ -150,7 +157,8 @@ func (c *controlConn) handleControlRequest(raw []byte) (response []byte, handled
 	}
 	var input claudecode.AskUserQuestionInput
 	if err := json.Unmarshal(inputRaw, &input); err != nil || len(input.Questions) == 0 {
-		return controlError(msg.RequestID, "invalid AskUserQuestion input")
+		response, err = controlError(msg.RequestID, "invalid AskUserQuestion input")
+		return response, false, err
 	}
 	// Valid actionable Asks arrive as normalized PendingUserActionMessage.
 	// A valid Ask retained as raw has unresolved ownership; preserve it for
@@ -212,17 +220,60 @@ func (c *controlConn) setPendingAsk(p pendingControlAsk) error {
 	return nil
 }
 
-func allowControlResponse(requestID string, updatedInput json.RawMessage) (response []byte, handled bool, err error) {
+// unansweredReplies returns the automatic replies owed for root control
+// requests in raw that have neither a recorded reply nor a cancellation.
+// A restarted caic imports such requests from the relay snapshot without
+// answering them, and Claude Code then waits forever.
+func (c *controlConn) unansweredReplies(raw []*agent.RawMessage) ([][]byte, error) {
+	settled := map[string]struct{}{}
+	for _, m := range raw {
+		switch m.MessageType {
+		case string(claudecode.InputControlResponse):
+			var msg claudecode.InputControlResponseMsg
+			if err := json.Unmarshal(m.Raw, &msg); err != nil {
+				return nil, fmt.Errorf("unmarshal control_response: %w", err)
+			}
+			settled[msg.Response.RequestID] = struct{}{}
+		case string(claudecode.OutputControlCancelRequest):
+			var msg claudecode.OutputControlCancelRequestMsg
+			if err := json.Unmarshal(m.Raw, &msg); err != nil {
+				return nil, fmt.Errorf("unmarshal control_cancel_request: %w", err)
+			}
+			settled[msg.RequestID] = struct{}{}
+		}
+	}
+	var replies [][]byte
+	for _, m := range raw {
+		if m.MessageType != string(claudecode.OutputControlRequest) {
+			continue
+		}
+		var msg claudecode.OutputControlRequestMsg
+		if err := json.Unmarshal(m.Raw, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal control_request: %w", err)
+		}
+		if _, ok := settled[msg.RequestID]; ok {
+			continue
+		}
+		response, _, err := c.HandleMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		if len(response) > 0 {
+			replies = append(replies, response)
+		}
+	}
+	return replies, nil
+}
+
+func allowControlResponse(requestID string, updatedInput json.RawMessage) ([]byte, error) {
 	if len(updatedInput) == 0 {
 		updatedInput = json.RawMessage(`{}`)
 	}
-	data, err := marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseSuccess, RequestID: requestID, Response: claudecode.ControlResponsePayload{Behavior: claudecode.ControlCanUseToolBehaviorAllow, UpdatedInput: updatedInput}})
-	return data, true, err
+	return marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseSuccess, RequestID: requestID, Response: claudecode.ControlResponsePayload{Behavior: claudecode.ControlCanUseToolBehaviorAllow, UpdatedInput: updatedInput}})
 }
 
-func controlError(requestID, msg string) (response []byte, handled bool, err error) {
-	data, err := marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseError, RequestID: requestID, Error: msg})
-	return data, true, err
+func controlError(requestID, msg string) ([]byte, error) {
+	return marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseError, RequestID: requestID, Error: msg})
 }
 
 func rawObjectOrEmpty(m map[string]json.RawMessage) (json.RawMessage, error) {

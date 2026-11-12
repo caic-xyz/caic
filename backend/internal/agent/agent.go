@@ -86,9 +86,13 @@ type Options struct {
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []v3.PendingUserAction
-	Records            *Records     // Required ordered record owner; created before any startup output.
-	StripEnv           []string     // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
-	MCP                mcp.Registry // Optional task-scoped CAIC MCP registry.
+	// CurrentTurnRawMessages holds the root provider messages without a
+	// canonical form from the restored current turn, oldest first. AttachRelay
+	// answers protocol requests among them whose replies were never recorded.
+	CurrentTurnRawMessages []*RawMessage
+	Records                *Records     // Required ordered record owner; created before any startup output.
+	StripEnv               []string     // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	MCP                    mcp.Registry // Optional task-scoped CAIC MCP registry.
 }
 
 // MCPRequest is one task-local MCP bridge request.

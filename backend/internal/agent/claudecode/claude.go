@@ -88,7 +88,13 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--permission-mode", "acceptEdits",
+		// The container is the isolation boundary, so tools run without
+		// approval. Auto mode is disabled so neither a mode switch nor plan
+		// approval can reintroduce a classifier. AskUserQuestion and the
+		// requests no mode auto-approves still reach the stdio prompt tool:
+		// https://code.claude.com/docs/en/permission-modes#actions-no-mode-auto-approves
+		"--permission-mode", "bypassPermissions",
+		"--settings", `{"disableAutoMode":"disable"}`,
 		"--permission-prompt-tool", "stdio",
 		"--include-partial-messages",
 		"--plugin-dir", agent.WidgetPluginDir,
@@ -112,13 +118,26 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 
 // AttachRelay implements agent.Backend.
 func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
+	var replies [][]byte
+	s, err := agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
 		cc := &controlConn{Conn: c}
 		if err := cc.restorePendingActions(opts.PendingUserActions); err != nil {
 			return nil, err
 		}
-		return cc, nil
+		var err error
+		replies, err = cc.unansweredReplies(opts.CurrentTurnRawMessages)
+		return cc, err
 	})
+	if err != nil {
+		return nil, err
+	}
+	for _, reply := range replies {
+		if err := s.SendRaw(reply); err != nil {
+			s.Cancel()
+			return nil, fmt.Errorf("answer restored control request: %w", errors.Join(err, s.Wait()))
+		}
+	}
+	return s, nil
 }
 
 // NewWire implements agent.Backend.

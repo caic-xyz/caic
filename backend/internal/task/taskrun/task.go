@@ -892,6 +892,27 @@ func (t *Task) PendingUserActions() []v3.PendingUserAction {
 	return pendingUserActionsFromMessages(t.timelineViewLocked())
 }
 
+// CurrentTurnRawMessages returns the root provider messages without a
+// canonical form since the last result, oldest first.
+func (t *Task) CurrentTurnRawMessages() []*agent.RawMessage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var raw []*agent.RawMessage
+	for _, entry := range t.timelineViewLocked().Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
+		if _, ok := entry.Message.(*agent.ResultMessage); ok {
+			break
+		}
+		if m, ok := entry.Message.(*agent.RawMessage); ok {
+			raw = append(raw, m)
+		}
+	}
+	slices.Reverse(raw)
+	return raw
+}
+
 // SeedTimelineParts fills an empty task with the message history from previously
 // saved logs, then derives session metadata, plan state, live stats and task
 // state from it.

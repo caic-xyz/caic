@@ -501,23 +501,27 @@ func TestHasOAuth(t *testing.T) {
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
-	t.Run("AgentArgsUsesDeterministicPermissionMode", func(t *testing.T) {
+	t.Run("AgentArgsBypassesApprovals", func(t *testing.T) {
 		t.Parallel()
 		got := (&Backend{}).AgentArgs(agent.HarnessArgs{})
 		if !containsArgPair(got, "--permission-prompt-tool", "stdio") {
 			t.Fatalf("AgentArgs = %v, want --permission-prompt-tool stdio", got)
 		}
-		if !containsArgPair(got, "--permission-mode", "acceptEdits") {
-			t.Fatalf("AgentArgs = %v, want --permission-mode acceptEdits", got)
+		if !containsArgPair(got, "--permission-mode", "bypassPermissions") {
+			t.Fatalf("AgentArgs = %v, want --permission-mode bypassPermissions", got)
 		}
-		if slices.Contains(got, "--dangerously-skip-permissions") {
-			t.Fatalf("AgentArgs = %v, want no --dangerously-skip-permissions", got)
+		i := slices.Index(got, "--settings")
+		if i < 0 || i+1 == len(got) {
+			t.Fatalf("AgentArgs = %v, want --settings", got)
 		}
-		if containsArgPair(got, "--permission-mode", "auto") {
-			t.Fatalf("AgentArgs = %v, want explicit non-auto permission mode", got)
+		var settings struct {
+			DisableAutoMode string `json:"disableAutoMode"`
 		}
-		if containsArgPair(got, "--permission-mode", "default") {
-			t.Fatalf("AgentArgs = %v, want deterministic permission mode", got)
+		if err := json.Unmarshal([]byte(got[i+1]), &settings); err != nil {
+			t.Fatal(err)
+		}
+		if settings.DisableAutoMode != "disable" {
+			t.Fatalf("--settings %s, want disableAutoMode disable", got[i+1])
 		}
 	})
 
@@ -700,7 +704,9 @@ func TestControlConn(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				stdin := agenttest.NewStdinPipe()
 				stdout, output := io.Pipe()
-				messages := make(chan agent.TimedMessage, 16)
+				// Permission requests stay in history: overload_count publishes
+				// each of its 100 requests before the reply queue overflows.
+				messages := make(chan agent.TimedMessage, 128)
 				if end == "blocked_dispatch" {
 					messages = make(chan agent.TimedMessage)
 				}
@@ -814,6 +820,41 @@ func TestControlConn(t *testing.T) {
 		}
 		if len(inner.sent) != 0 || len(inner.prompts) != 1 || inner.prompts[0].Text != "next turn" {
 			t.Fatalf("reconnected routing: controls=%q prompts=%#v", inner.sent, inner.prompts)
+		}
+	})
+
+	t.Run("unansweredReplies", func(t *testing.T) {
+		t.Parallel()
+		request := func(id string) *agent.RawMessage {
+			return &agent.RawMessage{MessageType: "control_request", Raw: fmt.Appendf(nil, `{"type":"control_request","request_id":%q,"request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"go test ./..."}}}`, id)}
+		}
+		tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+			request("previous-turn"),
+			&agent.ResultMessage{},
+			request("answered"),
+			&agent.RawMessage{MessageType: "control_response", Raw: []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"answered","response":{"behavior":"allow"}}}`)},
+			request("canceled"),
+			&agent.RawMessage{MessageType: "control_cancel_request", Raw: []byte(`{"type":"control_cancel_request","request_id":"canceled"}`)},
+			request("lost"),
+		}))
+		c := &controlConn{Conn: &fakeConn{}}
+		replies, err := c.unansweredReplies(tk.CurrentTurnRawMessages())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(replies) != 1 {
+			t.Fatalf("replies = %q, want one", replies)
+		}
+		got := decodeControlResponse(t, replies[0])
+		if got.Response.RequestID != "lost" || got.Response.Response.Behavior != claudecode.ControlCanUseToolBehaviorAllow {
+			t.Fatalf("reply = %#v", got)
+		}
+		if string(got.Response.Response.UpdatedInput) != `{"command":"go test ./..."}` {
+			t.Fatalf("updatedInput = %s", got.Response.Response.UpdatedInput)
 		}
 	})
 
@@ -1028,8 +1069,12 @@ func TestControlConn(t *testing.T) {
 			t.Fatal(err)
 		}
 		close(msgCh)
+		var forwarded []agent.Message
 		for m := range msgCh {
-			t.Fatalf("forwarded %T, want no forwarded messages", m)
+			forwarded = append(forwarded, m.Message)
+		}
+		if len(forwarded) != 1 || forwarded[0] != inner.messages[0] {
+			t.Fatalf("forwarded = %#v, want the request kept in history", forwarded)
 		}
 		if len(inner.sent) != 1 {
 			t.Fatalf("SendRaw calls = %d, want 1", len(inner.sent))
