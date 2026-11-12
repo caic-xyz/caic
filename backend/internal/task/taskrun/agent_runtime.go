@@ -94,7 +94,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		return nil, err
 	}
 	defer close(run.startupDone)
-	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), RelayOffset: t.RelayOffsetValue(), ResumeSessionID: sessionID, Effort: t.RequestedEffort, PendingUserActions: t.PendingUserActions(), CurrentTurnRawMessages: t.CurrentTurnRawMessages(), Records: run.records}
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), RelayOffset: t.RelayOffsetValue(), ResumeSessionID: sessionID, Effort: t.RequestedEffort, PendingUserActions: t.PendingUserActions(), CurrentTurnProtocolMessages: t.CurrentTurnProtocolMessages(), Records: run.records}
 	if err = r.configureTaskMCP(t, opts); err != nil {
 		return nil, errors.Join(err, r.closeRun(t, run)) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	}

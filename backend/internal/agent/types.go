@@ -74,10 +74,12 @@ const SystemSubtypeNotice = "notice"
 // attempted prompt whose transport failed. It is not accepted-input evidence.
 const SystemSubtypeInputDeliveryFailed = "input_delivery_failed"
 
-// SystemSubtypeInputDeliveryStarted marks a prompt whose delivery is unresolved.
+// SystemSubtypeInputDeliveryStarted marks a prompt or automatic reply whose
+// delivery is unresolved. The native input it identifies follows immediately.
 const SystemSubtypeInputDeliveryStarted = "input_delivery_started"
 
-// SystemSubtypeInputDeliveryCompleted confirms a prompt's stdin write completed.
+// SystemSubtypeInputDeliveryCompleted confirms the started input's stdin write
+// completed. A failed automatic reply has no outcome.
 const SystemSubtypeInputDeliveryCompleted = "input_delivery_completed"
 
 // IsInputDeliveryControl identifies private delivery bookkeeping, not UI events.

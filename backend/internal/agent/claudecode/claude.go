@@ -125,7 +125,7 @@ func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Se
 			return nil, err
 		}
 		var err error
-		replies, err = cc.unansweredReplies(opts.CurrentTurnRawMessages)
+		replies, err = cc.unansweredReplies(opts.CurrentTurnProtocolMessages)
 		return cc, err
 	})
 	if err != nil {

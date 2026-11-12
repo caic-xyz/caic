@@ -892,25 +892,31 @@ func (t *Task) PendingUserActions() []v3.PendingUserAction {
 	return pendingUserActionsFromMessages(t.timelineViewLocked())
 }
 
-// CurrentTurnRawMessages returns the root provider messages without a
-// canonical form since the last result, oldest first.
-func (t *Task) CurrentTurnRawMessages() []*agent.RawMessage {
+// CurrentTurnProtocolMessages returns the provider messages without a
+// canonical form, the pending user actions of every owner, and the
+// input-delivery controls since the last root result, oldest first. A delivery
+// start keeps its adjacency to the input it identifies.
+func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var raw []*agent.RawMessage
+	var msgs []agent.Message
 	for _, entry := range t.timelineViewLocked().Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		if _, ok := entry.Message.(*agent.ResultMessage); ok {
-			break
-		}
-		if m, ok := entry.Message.(*agent.RawMessage); ok {
-			raw = append(raw, m)
+		switch m := entry.Message.(type) {
+		case *agent.ResultMessage:
+			if !m.Source.IsChild() {
+				slices.Reverse(msgs)
+				return msgs
+			}
+		case *agent.RawMessage, *agent.PendingUserActionMessage:
+			msgs = append(msgs, m)
+		default:
+			if agent.IsInputDeliveryControl(m) {
+				msgs = append(msgs, m)
+			}
 		}
 	}
-	slices.Reverse(raw)
-	return raw
+	slices.Reverse(msgs)
+	return msgs
 }
 
 // SeedTimelineParts fills an empty task with the message history from previously

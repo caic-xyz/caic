@@ -86,13 +86,14 @@ type Options struct {
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
 	PendingUserActions []v3.PendingUserAction
-	// CurrentTurnRawMessages holds the root provider messages without a
-	// canonical form from the restored current turn, oldest first. AttachRelay
-	// answers protocol requests among them whose replies were never recorded.
-	CurrentTurnRawMessages []*RawMessage
-	Records                *Records     // Required ordered record owner; created before any startup output.
-	StripEnv               []string     // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
-	MCP                    mcp.Registry // Optional task-scoped CAIC MCP registry.
+	// CurrentTurnProtocolMessages holds the RawMessage and
+	// PendingUserActionMessage values of every owner and the input-delivery
+	// controls from the restored current turn, oldest first. AttachRelay answers
+	// protocol requests among them whose replies were never delivered.
+	CurrentTurnProtocolMessages []Message
+	Records                     *Records     // Required ordered record owner; created before any startup output.
+	StripEnv                    []string     // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
+	MCP                         mcp.Registry // Optional task-scoped CAIC MCP registry.
 }
 
 // MCPRequest is one task-local MCP bridge request.
@@ -204,7 +205,8 @@ type Conn interface {
 	// RecordInputFailure makes a failed attempt durable when a wrapper rejected
 	// it before the connection's regular prompt writer ran.
 	RecordInputFailure(p Prompt, err error) error
-	// SendRaw writes pre-encoded NDJSON bytes to the agent's stdin.
+	// SendRaw writes pre-encoded NDJSON bytes to the agent's stdin. A recorded
+	// reply's delivery start precedes it and its completion follows the write.
 	SendRaw(data []byte) error
 	// SendCompact sends a compact/context-reduction command.
 	SendCompact(instructions string) error
@@ -387,7 +389,7 @@ func (c *conn) writeInputs() {
 			case inputRaw:
 				result.data = w.data
 				if !isMCPResponse(w.data) {
-					result = c.records.submit(c.ctx, &recordWork{op: recordInput, data: w.data})
+					result = c.records.submit(c.ctx, &recordWork{op: recordReply, data: w.data})
 					result.data = w.data
 				}
 			case inputCompact:
@@ -402,12 +404,18 @@ func (c *conn) writeInputs() {
 				if err == nil && n != len(result.data) {
 					err = io.ErrShortWrite
 				}
-				if w.op == inputPrompt {
+				switch {
+				case w.op == inputPrompt:
 					outcome := InputDeliveryCompleted()
 					if err != nil {
 						outcome = InputDeliveryFailed(err)
 					}
 					err = errors.Join(err, c.records.AppendMessage(context.WithoutCancel(c.ctx), result.delivery.stamp(outcome)))
+				case result.delivery.uuid != "" && err == nil:
+					// A failed reply records no outcome: its unconfirmed start lets
+					// reconnect recovery re-send it, whereas a visible failure marker
+					// would reject the turn's accepted prompt in task folds.
+					err = c.records.AppendMessage(context.WithoutCancel(c.ctx), result.delivery.stamp(InputDeliveryCompleted()))
 				}
 			}
 			if w.op == inputPrompt && err != nil {

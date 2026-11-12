@@ -185,8 +185,11 @@ func (r *Records) process(w *recordWork) recordResult {
 		encoded = w.data
 	case recordInput:
 		encoded, err = marshalInputRecords(w.data)
+	case recordReply:
+		delivery = r.newInputDelivery()
+		encoded, err = startedInputRecords(&delivery, w.data)
 	case recordPrompt:
-		delivery = inputDelivery{sessionID: r.parser.session.SessionID, uuid: ksid.NewID().String()}
+		delivery = r.newInputDelivery()
 		data := w.data
 		err = w.failure
 		if err == nil && data == nil {
@@ -197,12 +200,7 @@ func (r *Records) process(w *recordWork) recordResult {
 			encoded, err = marshalRecordMessages([]Message{delivery.stamp(InputDeliveryStarted()), &UserInputMessage{Text: w.prompt.Text, Images: w.prompt.Images, Ts: float64(time.Now().UnixMilli()) / 1000}, delivery.stamp(InputDeliveryFailed(operationErr))})
 			break
 		}
-		encoded, err = marshalRecordMessages([]Message{delivery.stamp(InputDeliveryStarted())})
-		if err == nil {
-			var native []byte
-			native, err = marshalInputRecords(data)
-			encoded = append(encoded, native...)
-		}
+		encoded, err = startedInputRecords(&delivery, data)
 		w.data = data
 	case recordCompact:
 		encoder, ok := r.wire.(CompactCommand)
@@ -348,12 +346,17 @@ func (r *Records) replay(ctx context.Context, path string) (retErr error) {
 	return scanner.Err()
 }
 
+func (r *Records) newInputDelivery() inputDelivery {
+	return inputDelivery{sessionID: r.parser.session.SessionID, uuid: ksid.NewID().String()}
+}
+
 type recordOperation uint8
 
 const (
 	recordHost recordOperation = iota
 	recordRelay
 	recordInput
+	recordReply
 	recordPrompt
 	recordCompact
 	recordReplay
@@ -382,8 +385,9 @@ type recordResult struct {
 	nonfatal bool
 }
 
-// inputDelivery is the identity captured at one ordered prompt admission.
-// Transport completion retains it even if the active native session changes.
+// inputDelivery is the identity captured at one ordered prompt or reply
+// admission. Transport completion retains it even if the active native session
+// changes.
 type inputDelivery struct {
 	sessionID string
 	uuid      string
@@ -392,6 +396,20 @@ type inputDelivery struct {
 func (d *inputDelivery) stamp(m *SystemMessage) *SystemMessage {
 	m.SessionID, m.UUID = d.sessionID, d.uuid
 	return m
+}
+
+// startedInputRecords encodes a delivery start immediately followed by the
+// native input it identifies.
+func startedInputRecords(d *inputDelivery, data []byte) ([]byte, error) {
+	encoded, err := marshalRecordMessages([]Message{d.stamp(InputDeliveryStarted())})
+	if err != nil {
+		return nil, err
+	}
+	native, err := marshalInputRecords(data)
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, native...), nil
 }
 
 func marshalRecordMessages(messages []Message) ([]byte, error) {

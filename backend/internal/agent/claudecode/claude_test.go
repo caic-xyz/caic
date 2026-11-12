@@ -825,36 +825,133 @@ func TestControlConn(t *testing.T) {
 
 	t.Run("unansweredReplies", func(t *testing.T) {
 		t.Parallel()
-		request := func(id string) *agent.RawMessage {
-			return &agent.RawMessage{MessageType: "control_request", Raw: fmt.Appendf(nil, `{"type":"control_request","request_id":%q,"request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"go test ./..."}}}`, id)}
+		child := v3.MessageSource{AgentID: "claude:task:child", DelegationToolUseID: "spawn"}
+		request := func(id string, source v3.MessageSource) *agent.RawMessage {
+			return &agent.RawMessage{Source: source, MessageType: "control_request", Raw: fmt.Appendf(nil, `{"type":"control_request","request_id":%q,"request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"go test ./..."}}}`, id)}
+		}
+		ask := func(id string, source v3.MessageSource) *agent.PendingUserActionMessage {
+			return &agent.PendingUserActionMessage{Source: source, Action: v3.PendingUserAction{Kind: agent.PendingUserActionAskUserQuestion, RequestID: id, ToolUseID: id, Ask: v3.PendingAskAction{Questions: []v3.AskQuestion{{Question: "Which?"}}}}}
+		}
+		response := func(id string) *agent.RawMessage {
+			return &agent.RawMessage{MessageType: "control_response", Raw: fmt.Appendf(nil, `{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":{"behavior":"allow"}}}`, id)}
+		}
+		delivery := func(m *agent.SystemMessage, uuid string) *agent.SystemMessage {
+			m.UUID = uuid
+			return m
 		}
 		tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
-			request("previous-turn"),
+			request("previous-turn", v3.MessageSource{}),
 			&agent.ResultMessage{},
-			request("answered"),
-			&agent.RawMessage{MessageType: "control_response", Raw: []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"answered","response":{"behavior":"allow"}}}`)},
-			request("canceled"),
+			request("answered", v3.MessageSource{}),
+			response("answered"),
+			request("canceled", v3.MessageSource{}),
 			&agent.RawMessage{MessageType: "control_cancel_request", Raw: []byte(`{"type":"control_cancel_request","request_id":"canceled"}`)},
-			request("lost"),
+			ask("child-denied", child),
+			&agent.RawMessage{MessageType: "control_response", Raw: []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"child-denied","response":{"behavior":"deny","message":"no"}}}`)},
+			// A child result does not end the root turn.
+			&agent.ResultMessage{Source: child},
+			ask("root-ask", v3.MessageSource{}),
+			request("lost", v3.MessageSource{}),
+			request("child-lost", child),
+			ask("child-ask", child),
+			request("retried", v3.MessageSource{}),
+			delivery(agent.InputDeliveryStarted(), "failed-attempt"), response("retried"),
+			delivery(agent.InputDeliveryStarted(), "retry"), response("retried"),
+			delivery(agent.InputDeliveryCompleted(), "retry"),
+			request("unconfirmed", v3.MessageSource{}),
+			delivery(agent.InputDeliveryStarted(), "unconfirmed"), response("unconfirmed"),
 		}))
 		c := &controlConn{Conn: &fakeConn{}}
-		replies, err := c.unansweredReplies(tk.CurrentTurnRawMessages())
+		replies, err := c.unansweredReplies(tk.CurrentTurnProtocolMessages())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(replies) != 1 {
-			t.Fatalf("replies = %q, want one", replies)
+		type reply struct {
+			id       string
+			behavior claudecode.ControlCanUseToolBehavior
 		}
-		got := decodeControlResponse(t, replies[0])
-		if got.Response.RequestID != "lost" || got.Response.Response.Behavior != claudecode.ControlCanUseToolBehaviorAllow {
-			t.Fatalf("reply = %#v", got)
+		got := make([]reply, 0, len(replies))
+		for _, r := range replies {
+			msg := decodeControlResponse(t, r)
+			got = append(got, reply{msg.Response.RequestID, msg.Response.Response.Behavior})
+			if msg.Response.Response.Behavior == claudecode.ControlCanUseToolBehaviorAllow && string(msg.Response.Response.UpdatedInput) != `{"command":"go test ./..."}` {
+				t.Errorf("%s updatedInput = %s", msg.Response.RequestID, msg.Response.Response.UpdatedInput)
+			}
 		}
-		if string(got.Response.Response.UpdatedInput) != `{"command":"go test ./..."}` {
-			t.Fatalf("updatedInput = %s", got.Response.Response.UpdatedInput)
+		want := []reply{
+			{"lost", claudecode.ControlCanUseToolBehaviorAllow},
+			{"child-lost", claudecode.ControlCanUseToolBehaviorAllow},
+			{"child-ask", claudecode.ControlCanUseToolBehaviorDeny},
+			{"unconfirmed", claudecode.ControlCanUseToolBehaviorAllow},
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("replies = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("unansweredReplies/RecordedReplyDelivery", func(t *testing.T) {
+		t.Parallel()
+		// A reply is recorded before its stdin write, so only a delivery
+		// outcome tells a reconnect whether Claude Code received it.
+		for name, delivered := range map[string]bool{"delivered": true, "write_failure": false} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				stdin := agenttest.NewStdinPipe()
+				stdout, output := io.Pipe()
+				handler := &agenttest.RecordHandler{}
+				owner := claudeProtocolRecords(t, t.Context(), handler)
+				c := &controlConn{Conn: agent.NewConn(t.Context(), slog.New(slog.DiscardHandler), stdin, owner, nil)}
+				var workers sync.WaitGroup
+				t.Cleanup(func() { c.Cancel(); _ = output.Close(); _ = stdin.Reader.Close(); workers.Wait() })
+				read := make(chan error, 1)
+				workers.Go(func() { read <- c.ReadMessages(stdout, c) })
+				if _, err := io.WriteString(output, `{"t":"agent","ts":1.000,"msg":{"type":"control_request","request_id":"allow","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}}`+"\n"); err != nil {
+					t.Fatal(err)
+				}
+				if delivered {
+					line, err := bufio.NewReader(stdin.Reader).ReadBytes('\n')
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := decodeControlResponse(t, line); got.Response.RequestID != "allow" {
+						t.Fatalf("reply = %#v", got)
+					}
+					if err := output.Close(); err != nil {
+						t.Fatal(err)
+					}
+					if err := <-read; err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					<-stdin.Started
+					_ = stdin.Reader.CloseWithError(io.ErrUnexpectedEOF)
+					if err := <-read; !errors.Is(err, agent.ErrResponsesAborted) {
+						t.Fatalf("read = %v", err)
+					}
+				}
+				tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "", "", "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				tk.SeedTimelineParts(nil, handler.Events())
+				replies, err := (&controlConn{Conn: &fakeConn{}}).unansweredReplies(tk.CurrentTurnProtocolMessages())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if delivered {
+					if len(replies) != 0 {
+						t.Fatalf("delivered reply re-sent: %q", replies)
+					}
+					return
+				}
+				if len(replies) != 1 || decodeControlResponse(t, replies[0]).Response.RequestID != "allow" {
+					t.Fatalf("replies = %q, want the undelivered allow", replies)
+				}
+			})
 		}
 	})
 

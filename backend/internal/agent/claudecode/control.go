@@ -1,4 +1,4 @@
-// Claude Code stdio control requests preserve ownership when answering root permission prompts, including after reconnect.
+// Claude Code stdio control requests: answer every permission request, route root questions to the next prompt, and deny subagent questions, including after reconnect.
 
 package claudecode
 
@@ -15,6 +15,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
+
+// subagentAskDenial tells a subagent why its AskUserQuestion was rejected.
+const subagentAskDenial = "caic cannot route a subagent's question to the user. Continue without asking, or return the question to the parent agent."
 
 // pendingControlAsk keeps the request metadata needed to answer a Claude Code
 // AskUserQuestion control request on the next user prompt.
@@ -63,11 +66,12 @@ func (p *pendingControlAsk) same(other pendingControlAsk) bool {
 
 // controlConn adapts Claude Code's stdio permission protocol into caic prompts.
 //
-// It auto-allows non-AskUserQuestion tool permission requests, records
-// AskUserQuestion control requests, and sends the next user prompt as the
-// corresponding control_response. Permission requests stay in task history,
-// paired with their recorded replies, so a reconnect can answer one whose
-// reply was never recorded.
+// It auto-allows non-AskUserQuestion tool permission requests of every owner,
+// denies subagent AskUserQuestion requests, records the root AskUserQuestion
+// request, and sends the next user prompt as the corresponding
+// control_response. Permission requests stay in task history, paired with
+// their recorded replies and delivery outcomes, so a reconnect can answer one
+// whose reply was never delivered.
 type controlConn struct {
 	agent.Conn
 
@@ -101,30 +105,31 @@ func (c *controlConn) SendPrompt(p agent.Prompt, data []byte) error {
 }
 
 // HandleMessage intercepts controls without writing stdin.
+//
+// Claude Code blocks on every can_use_tool request until it reads the reply,
+// whichever agent owns the tool call, so permission replies ignore ownership.
+// Ownership only routes AskUserQuestion: the single prompt channel answers the
+// root agent, and a subagent's question is denied.
 func (c *controlConn) HandleMessage(m agent.Message) (response []byte, handled bool, err error) {
-	if m.Provenance().IsChild() {
-		return nil, false, nil
-	}
-	if pending, ok := m.(*agent.PendingUserActionMessage); ok {
-		switch pending.Action.Kind {
-		case agent.PendingUserActionAskUserQuestion:
-			return nil, false, c.setPendingAsk(pendingAskFromUserAction(pending.Action))
-		default:
-			return nil, false, fmt.Errorf("unsupported pending user action kind %q", pending.Action.Kind)
+	switch m := m.(type) {
+	case *agent.PendingUserActionMessage:
+		if m.Action.Kind != agent.PendingUserActionAskUserQuestion {
+			return nil, false, fmt.Errorf("unsupported pending user action kind %q", m.Action.Kind)
+		}
+		if m.Source.IsChild() {
+			response, err = denyControlResponse(m.Action.RequestID, subagentAskDenial)
+			return response, false, err
+		}
+		return nil, false, c.setPendingAsk(pendingAskFromUserAction(m.Action))
+	case *agent.RawMessage:
+		switch m.MessageType {
+		case string(claudecode.OutputControlRequest):
+			return c.handleControlRequest(m.Raw)
+		case string(claudecode.OutputControlCancelRequest):
+			return nil, true, c.handleControlCancelRequest(m.Raw)
 		}
 	}
-	raw, ok := m.(*agent.RawMessage)
-	if !ok {
-		return nil, false, nil
-	}
-	switch raw.MessageType {
-	case string(claudecode.OutputControlRequest):
-		return c.handleControlRequest(raw.Raw)
-	case string(claudecode.OutputControlCancelRequest):
-		return nil, true, c.handleControlCancelRequest(raw.Raw)
-	default:
-		return nil, false, nil
-	}
+	return nil, false, nil
 }
 
 // handleControlRequest answers every request except a valid AskUserQuestion.
@@ -220,38 +225,79 @@ func (c *controlConn) setPendingAsk(p pendingControlAsk) error {
 	return nil
 }
 
-// unansweredReplies returns the automatic replies owed for root control
-// requests in raw that have neither a recorded reply nor a cancellation.
-// A restarted caic imports such requests from the relay snapshot without
-// answering them, and Claude Code then waits forever.
-func (c *controlConn) unansweredReplies(raw []*agent.RawMessage) ([][]byte, error) {
+// unansweredReplies returns the automatic replies owed for control requests in
+// msgs that have neither a delivered reply nor a cancellation. A restarted caic
+// imports such requests from the relay snapshot without answering them, and a
+// transport failure can lose a recorded reply; Claude Code then waits forever.
+// Root questions are excluded: they await the next prompt through
+// restorePendingActions.
+//
+// A reply recorded directly after a delivery start counts only once that
+// delivery completed, so a reply whose write failed or was never confirmed is
+// sent again. A reply without a delivery start counts as delivered.
+func (c *controlConn) unansweredReplies(msgs []agent.Message) ([][]byte, error) {
 	settled := map[string]struct{}{}
-	for _, m := range raw {
-		switch m.MessageType {
+	attempts := map[string]string{} // delivery UUID to request ID
+	started := ""
+	for _, m := range msgs {
+		start := started
+		started = ""
+		if s, ok := m.(*agent.SystemMessage); ok {
+			switch s.Subtype {
+			case agent.SystemSubtypeInputDeliveryStarted:
+				started = s.UUID
+			case agent.SystemSubtypeInputDeliveryCompleted:
+				if id, ok := attempts[s.UUID]; ok {
+					settled[id] = struct{}{}
+				}
+			}
+			continue
+		}
+		raw, ok := m.(*agent.RawMessage)
+		if !ok {
+			continue
+		}
+		switch raw.MessageType {
 		case string(claudecode.InputControlResponse):
 			var msg claudecode.InputControlResponseMsg
-			if err := json.Unmarshal(m.Raw, &msg); err != nil {
+			if err := json.Unmarshal(raw.Raw, &msg); err != nil {
 				return nil, fmt.Errorf("unmarshal control_response: %w", err)
 			}
-			settled[msg.Response.RequestID] = struct{}{}
+			if start == "" {
+				settled[msg.Response.RequestID] = struct{}{}
+			} else {
+				attempts[start] = msg.Response.RequestID
+			}
 		case string(claudecode.OutputControlCancelRequest):
 			var msg claudecode.OutputControlCancelRequestMsg
-			if err := json.Unmarshal(m.Raw, &msg); err != nil {
+			if err := json.Unmarshal(raw.Raw, &msg); err != nil {
 				return nil, fmt.Errorf("unmarshal control_cancel_request: %w", err)
 			}
 			settled[msg.RequestID] = struct{}{}
 		}
 	}
 	var replies [][]byte
-	for _, m := range raw {
-		if m.MessageType != string(claudecode.OutputControlRequest) {
+	for _, m := range msgs {
+		var requestID string
+		switch m := m.(type) {
+		case *agent.PendingUserActionMessage:
+			if !m.Source.IsChild() {
+				continue
+			}
+			requestID = m.Action.RequestID
+		case *agent.RawMessage:
+			if m.MessageType != string(claudecode.OutputControlRequest) {
+				continue
+			}
+			var msg claudecode.OutputControlRequestMsg
+			if err := json.Unmarshal(m.Raw, &msg); err != nil {
+				return nil, fmt.Errorf("unmarshal control_request: %w", err)
+			}
+			requestID = msg.RequestID
+		default:
 			continue
 		}
-		var msg claudecode.OutputControlRequestMsg
-		if err := json.Unmarshal(m.Raw, &msg); err != nil {
-			return nil, fmt.Errorf("unmarshal control_request: %w", err)
-		}
-		if _, ok := settled[msg.RequestID]; ok {
+		if _, ok := settled[requestID]; ok {
 			continue
 		}
 		response, _, err := c.HandleMessage(m)
@@ -270,6 +316,12 @@ func allowControlResponse(requestID string, updatedInput json.RawMessage) ([]byt
 		updatedInput = json.RawMessage(`{}`)
 	}
 	return marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseSuccess, RequestID: requestID, Response: claudecode.ControlResponsePayload{Behavior: claudecode.ControlCanUseToolBehaviorAllow, UpdatedInput: updatedInput}})
+}
+
+// denyControlResponse rejects a tool call. A denial requires msg, which
+// explains the rejection to the model.
+func denyControlResponse(requestID, msg string) ([]byte, error) {
+	return marshalControlResponse(&claudecode.ControlResponse{Subtype: claudecode.ControlResponseSuccess, RequestID: requestID, Response: claudecode.ControlResponsePayload{Behavior: claudecode.ControlCanUseToolBehaviorDeny, Message: msg}})
 }
 
 func controlError(requestID, msg string) ([]byte, error) {

@@ -29,7 +29,7 @@ type Backend interface {
 	// opts.PendingUserActions contains user-facing actions restored before
 	// reconnect, such as unanswered AskUserQuestion requests. It excludes
 	// backend-only control protocol state; the backend derives that state from
-	// opts.CurrentTurnRawMessages.
+	// opts.CurrentTurnProtocolMessages.
 	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
 	// Harness returns the harness identifier ("claude", "codex", etc.)

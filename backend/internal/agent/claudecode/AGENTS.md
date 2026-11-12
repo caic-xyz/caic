@@ -173,3 +173,8 @@ hardcoded alias list in `claude.go`
 - Cancel a queued async message — `cancel_async_message`
 
 caic answers the CLI's own `can_use_tool` requests and sends no other subtype.
+Claude Code blocks on each request until it reads the reply, including a
+subagent's. Recorded subagent requests (Claude Code 2.1, `Bash`, `WebFetch`,
+`WebSearch`) carry `request.agent_id` and no top-level `session_id` or
+`parent_tool_use_id`. No recorded log holds a subagent `AskUserQuestion`
+request.

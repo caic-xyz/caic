@@ -349,6 +349,24 @@ func TestNewConn(t *testing.T) {
 	})
 	t.Run("SendRaw", func(t *testing.T) {
 		t.Parallel()
+		// frames decodes every physical record and returns its kind and, for
+		// delivery controls, its identity.
+		frames := func(t *testing.T, log []byte) (kinds []taskslog.Kind, uuids []string, native []byte) {
+			for line := range bytes.SplitSeq(bytes.TrimSpace(log), []byte{'\n'}) {
+				frame, err := taskslog.DecodeFrame(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				kinds = append(kinds, frame.Kind)
+				if m, ok := frame.Control.(*v3.SystemMessage); ok && frame.Kind == taskslog.KindInputDelivery {
+					uuids = append(uuids, m.UUID)
+				}
+				if frame.Kind == taskslog.KindInput {
+					native = frame.Native
+				}
+			}
+			return kinds, uuids, native
+		}
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
@@ -375,27 +393,32 @@ func TestNewConn(t *testing.T) {
 			if !bytes.Equal(got, payload) {
 				t.Errorf("stdin = %q, want %q", got, payload)
 			}
-			var record struct {
-				Type string          `json:"t"`
-				Msg  json.RawMessage `json:"msg"`
+			kinds, uuids, native := frames(t, logBuf.Bytes())
+			if want := []taskslog.Kind{taskslog.KindInputDelivery, taskslog.KindInput, taskslog.KindInputDelivery}; !slices.Equal(kinds, want) {
+				t.Fatalf("records = %v, want %v", kinds, want)
 			}
-			if err := json.Unmarshal(logBuf.Bytes(), &record); err != nil {
-				t.Fatal(err)
+			if len(uuids) != 2 || uuids[0] == "" || uuids[1] != uuids[0] {
+				t.Fatalf("delivery identities = %q", uuids)
 			}
-			if record.Type != "input" || !bytes.Equal(record.Msg, bytes.TrimSuffix(payload, []byte{'\n'})) {
-				t.Errorf("log record = %#v, want canonical input envelope for %s", record, payload)
+			if !bytes.Equal(native, bytes.TrimSuffix(payload, []byte{'\n'})) {
+				t.Errorf("input = %s, want %s", native, payload)
 			}
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
-			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), DiscardLogSink{}, nil), nil)
+			logBuf := &testLogSink{}
+			c := NewConn(t.Context(), testLogger(), stdinW, newTestRecords(t, t.Context(), logBuf, nil), nil)
 			if err := c.SendRaw([]byte(`{"type":"test"}` + "\n")); !errors.Is(err, io.ErrClosedPipe) {
 				t.Fatalf("SendRaw = %v, want closed pipe", err)
 			}
 			if err := c.ReadMessages(io.NopCloser(strings.NewReader("")), nil); err != nil {
 				t.Fatal(err)
+			}
+			// The failed reply stays unconfirmed: no visible failure, no completion.
+			if kinds, _, _ := frames(t, logBuf.Bytes()); !slices.Equal(kinds, []taskslog.Kind{taskslog.KindInputDelivery, taskslog.KindInput}) {
+				t.Fatalf("records = %v", kinds)
 			}
 		})
 	})

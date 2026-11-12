@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/genai/providers/claudecode"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -448,12 +450,62 @@ func TestControlConnOwnership(t *testing.T) {
 					if err := conn.SendPrompt(agent.Prompt{Text: "Yes"}, nil); err != nil {
 						t.Fatal(err)
 					}
-					if kind == "root" {
+					switch kind {
+					case "root":
 						if len(inner.sent) != 1 || len(inner.prompts) != 0 || decodeControlResponse(t, inner.sent[0]).Response.RequestID != "permission" {
 							t.Fatalf("root control not answered: raw=%q prompts=%#v", inner.sent, inner.prompts)
 						}
-					} else if len(inner.sent) != 0 || len(inner.prompts) != 1 || inner.prompts[0].Text != "Yes" {
-						t.Fatalf("root prompt answered unresolved/child control: raw=%q prompts=%#v", inner.sent, inner.prompts)
+					case "child":
+						// The root prompt channel cannot answer a subagent, so the
+						// Ask is denied at once instead of blocking Claude Code.
+						if len(inner.sent) != 1 || len(inner.prompts) != 1 || inner.prompts[0].Text != "Yes" {
+							t.Fatalf("child control: raw=%q prompts=%#v", inner.sent, inner.prompts)
+						}
+						got := decodeControlResponse(t, inner.sent[0]).Response
+						if got.RequestID != "permission" || got.Subtype != claudecode.ControlResponseSuccess || got.Response.Behavior != claudecode.ControlCanUseToolBehaviorDeny || got.Response.Message == "" {
+							t.Fatalf("child Ask reply = %+v", got)
+						}
+					default:
+						if len(inner.sent) != 0 || len(inner.prompts) != 1 || inner.prompts[0].Text != "Yes" {
+							t.Fatalf("root prompt answered unresolved control: raw=%q prompts=%#v", inner.sent, inner.prompts)
+						}
+					}
+				})
+			}
+			// Claude Code blocks on every can_use_tool request until it gets a
+			// reply, whichever agent owns the tool call.
+			for _, kind := range []string{"child agent_id", "child metadata", "root"} {
+				t.Run("permission/"+kind, func(t *testing.T) {
+					t.Parallel()
+					feed := ownershipParser(t, physical, New().NewWire())
+					feed(`{"type":"system","subtype":"init","session_id":"root"}`)
+					feed(`{"type":"system","subtype":"task_started","session_id":"root","task_type":"local_agent","task_id":"child","tool_use_id":"spawn"}`)
+					owner, agentID := "", ""
+					switch kind {
+					case "child agent_id":
+						// Recorded Claude Code shape: agent_id inside the request only.
+						agentID = `,"agent_id":"child"`
+					case "child metadata":
+						owner = `,"session_id":"root","parent_tool_use_id":"spawn"`
+					}
+					control := feed(`{"type":"control_request"` + owner + `,"request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"bash"` + agentID + `,"input":{"command":"ls"}}}`)
+					if len(control) != 1 {
+						t.Fatalf("control = %#v", control)
+					}
+					if kind == "child metadata" && !control[0].Provenance().IsChild() {
+						t.Fatalf("child metadata lost: %+v", control[0].Provenance())
+					}
+					conn := &controlConn{Conn: &fakeConn{}}
+					response, handled, err := conn.HandleMessage(control[0])
+					if err != nil || handled {
+						t.Fatalf("handled=%t err=%v", handled, err)
+					}
+					if len(response) == 0 {
+						t.Fatal("permission request left unanswered")
+					}
+					got := decodeControlResponse(t, response).Response
+					if got.RequestID != "permission" || got.Response.Behavior != claudecode.ControlCanUseToolBehaviorAllow || string(got.Response.UpdatedInput) != `{"command":"ls"}` {
+						t.Fatalf("reply = %+v", got)
 					}
 				})
 			}
