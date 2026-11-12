@@ -1,6 +1,6 @@
 // Folds native lifecycles and routes canonical child messages without building undisclosed transcripts.
 
-import type { EventBackgroundCommand, EventMessage, EventMessageSource, EventNativeSubagent } from "@sdk/types.gen";
+import type { EventMessage, EventMessageSource, EventNativeSubagent } from "@sdk/types.gen";
 
 import type { MessageGroup, MsgItem, Turn } from "./grouping";
 import { childAgentID } from "./grouping";
@@ -250,85 +250,9 @@ export function assignNativeAnchors<T extends { anchorTs: number }>(
   return byAnchor;
 }
 
-export interface BackgroundCommandActivity extends EventBackgroundCommand {
-  source?: EventMessageSource;
-  startedAt: number | null;
-  endedAt: number | null;
-  // anchorTs positions the card in the transcript: the observation that created
-  // it or last changed its folded lifecycle status. A running card therefore
-  // stays at its spawn while the command runs, and moves once when it settles.
-  // 0 when no observation carried a timestamp.
-  anchorTs: number;
-}
-
-export function backgroundTerminal(status: EventBackgroundCommand["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "interrupted";
-}
-
 // Missing terminal evidence is not success or interruption. A settled parent or
 // incomplete historical window makes a running observation stale, not terminal.
 export function backgroundCommandStatus(activity: { status: string }, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
-}
-
-export class BackgroundCommandTracker {
-  private processed = 0;
-  private firstEvent: EventMessage | null = null;
-  private lastEvent: EventMessage | null = null;
-  private byID = new Map<string, BackgroundCommandActivity>();
-  private snapshot: BackgroundCommandActivity[] = [];
-
-  derive(messages: readonly EventMessage[]): BackgroundCommandActivity[] {
-    const reset =
-      messages.length < this.processed ||
-      (this.processed > 0 && (messages[0] !== this.firstEvent || messages[this.processed - 1] !== this.lastEvent));
-    let changed = reset;
-    if (reset) {
-      this.byID.clear();
-      this.processed = 0;
-    }
-    for (let i = this.processed; i < messages.length; i++) {
-      const ev = messages[i];
-      if (!ev) throw new Error("Missing timeline event");
-      const s = ev.backgroundCommand;
-      if (ev.kind !== "backgroundCommand" || !s?.id) continue;
-      const old = this.byID.get(s.id);
-      const status = old && (backgroundTerminal(old.status) || s.status === "running") ? old.status : s.status;
-      const next: BackgroundCommandActivity = {
-        ...s,
-        source: old?.source ?? ev.source,
-        toolUseID: old?.toolUseID || s.toolUseID,
-        label: old?.label || s.label,
-        // A terminal observation upgrades an interim result, but terminal
-        // results do not overwrite each other.
-        result:
-          s.result && (!old?.result || (!backgroundTerminal(old.status) && backgroundTerminal(s.status)))
-            ? s.result
-            : old?.result || s.result,
-        outputRef: old?.outputRef || s.outputRef,
-        exitCode: old?.exitCode ?? s.exitCode,
-        status,
-        // Reposition only on creation or a folded status change, so repeated
-        // running observations do not drag an active card toward newer content.
-        anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
-        startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
-        endedAt: old?.endedAt ?? (backgroundTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
-      };
-      if (
-        old &&
-        Object.keys(next).every(
-          (key) => next[key as keyof BackgroundCommandActivity] === old[key as keyof BackgroundCommandActivity],
-        )
-      )
-        continue;
-      this.byID.set(s.id, next);
-      changed = true;
-    }
-    this.processed = messages.length;
-    this.firstEvent = messages[0] ?? null;
-    this.lastEvent = messages.at(-1) ?? null;
-    if (changed) this.snapshot = [...this.byID.values()];
-    return this.snapshot;
-  }
 }

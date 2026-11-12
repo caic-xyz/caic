@@ -630,6 +630,7 @@ def emit_background_commands_turn(turns: int) -> None:
     )
     emit_tool_result("bgtool", 120)
     # A second detached command the turn never waits on.
+    emit_tool_use("bgwatch", "Bash", {"command": "pnpm build --watch", "run_in_background": True})
     emit(
         {
             "type": "background_command",
@@ -637,10 +638,11 @@ def emit_background_commands_turn(turns: int) -> None:
                 "id": "claude:shell:watch1",
                 "label": "Watch build output",
                 "status": "running",
-                "tool_use_id": "bgtool",
+                "tool_use_id": "bgwatch",
             },
         }
     )
+    emit_tool_result("bgwatch", 120)
     emit_text("The lint command finished while I kept working.")
     emit(
         {

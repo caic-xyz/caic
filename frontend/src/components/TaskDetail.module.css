@@ -1126,6 +1126,19 @@ a.ciStatus:hover {
   border-radius: var(--radius-sm);
 }
 
+.toolOutputLink {
+  display: block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-link);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.toolOutputLink:hover {
+  text-decoration: underline;
+}
+
 .loadInputBtn {
   padding: 0.25rem 0.75rem;
   margin: 0.25rem 0.5rem;

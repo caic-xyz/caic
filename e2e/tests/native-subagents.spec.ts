@@ -36,41 +36,39 @@ for (const width of [390, 1280]) {
 }
 
 for (const width of [390, 1280]) {
-  test(`background command lifecycle survives reload at ${width}px`, async ({ page, uniquePrompt }) => {
+  test(`background command lifecycle survives reload at ${width}px`, async ({ page, uniquePrompt }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
     await page.getByTestId("prompt-input").fill(uniquePrompt("FAKE_BACKGROUND_COMMANDS"));
     await page.getByTestId("submit-task").click();
     await expect(page).toHaveURL(/\/task\//);
-    // The spawning tool row resolves its chip to the command's exit code.
-    const chip = page.getByTestId("background-command-chip");
-    await expect(chip.first()).toContainText(/exit 0|running in background/);
-    // Cards render inline in the transcript, where each lifecycle settled.
-    const cards = page.getByTestId("background-command-card");
-    await expect(cards).toHaveCount(2);
-    const lintCard = page.locator('[data-command-id="claude:shell:lint1"]');
-    await expect(lintCard.getByTestId("background-command-exit")).toHaveText("exit 0");
-    await lintCard.locator("summary").press("Enter");
-    await expect(lintCard).toHaveAttribute("open", "");
-    await expect(lintCard.getByText("claude:shell:lint1")).toBeVisible();
-    await expect(lintCard.getByText("/tmp/tasks/lint1.output")).toBeVisible();
-    for (const card of await cards.all()) {
-      await expect(card.getByRole("link")).toHaveCount(0);
-      expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
+    // The tool group counts the still-running command as unfinished.
+    const tools = page.getByText(/^1\/2 tools: /);
+    await tools.click();
+    // Each detached command renders on the Bash row that launched it.
+    const lint = page.locator(`[data-testid="tool-call"][data-tool-key$='"bgtool"]']`);
+    const watch = page.locator(`[data-testid="tool-call"][data-tool-key$='"bgwatch"]']`);
+    await expect(lint.getByTestId("background-command-chip")).toHaveText("exit 0");
+    await expect(watch.getByTestId("background-command-chip")).toHaveText("running in background");
+    for (const row of [lint, watch]) {
+      expect(await row.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
     }
-    // One command settled (exit 0); the other is still running, and the replay
-    // keeps reporting it as running instead of inventing an outcome.
-    const watchCard = page.locator('[data-command-id="claude:shell:watch1"]');
-    const duration = watchCard.getByTestId("background-command-duration");
+    // The still-running command keeps ticking on its row past the result.
+    const duration = watch.getByTestId("tool-duration");
     await expect(duration).toBeVisible();
     const initialDuration = await duration.textContent();
     await expect(duration).not.toHaveText(initialDuration ?? "");
     await page.reload();
-    await expect(cards).toHaveCount(2);
-    await expect(page.getByText("exit 0").first()).toBeVisible();
-    await expect(watchCard.locator("summary")).toContainText("Running");
-    await expect(watchCard.getByTestId("background-command-exit")).toHaveCount(0);
+    await tools.click();
+    await expect(lint.getByTestId("background-command-chip")).toHaveText("exit 0");
+    await expect(watch.getByTestId("background-command-chip")).toHaveText("running in background");
     await expect(duration).toBeVisible();
+    // The settled command's output file opens in the document viewer.
+    await lint.locator("summary").press("Enter");
+    await expect(lint).toHaveAttribute("open", "");
+    await page.screenshot({ path: testInfo.outputPath("background-commands.png") });
+    await lint.getByTestId("background-command-output").click();
+    await expect(page).toHaveURL(/\/view\?path=%2Ftmp%2Ftasks%2Flint1\.output$/);
   });
 }

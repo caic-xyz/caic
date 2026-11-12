@@ -146,6 +146,7 @@ declare const classes: {
   readonly "toolInputList": string;
   readonly "toolInputRow": string;
   readonly "toolOutputDelta": string;
+  readonly "toolOutputLink": string;
   readonly "toolPatchFile": string;
   readonly "toolPatchPath": string;
   readonly "toolPending": string;

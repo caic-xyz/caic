@@ -100,7 +100,7 @@ import Button from "./Button";
 import Markdown, { MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
-import NativeAgents, { BackgroundCommands, BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
+import NativeAgents, { BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
 import { assignNativeAnchors } from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import ActionButton from "./ActionButton";
@@ -997,32 +997,16 @@ export default function TaskDetail(props: Props) {
     Object.fromEntries(items().map((item) => [item.key, item])),
   );
   const itemKeys = createMemo(() => items().map((item) => item.key));
-  // Detached command summaries share the server-owned lifecycle metadata.
-  const backgroundCommands = createMemo(() =>
-    currentActivities().filter((activity) => activity.kind === "backgroundCommand"),
-  );
+  // Detached commands render on the tool row that launched them, like any
+  // command that outlives its call, from the server-owned lifecycle metadata.
   const backgroundSettled = () => !isActive();
+  // Each detached command belongs to the one tool call that launched it.
   const backgroundByToolUseID = createMemo(() => {
-    const byTool = new Map<string, HistoryActivity[]>();
+    const byTool = new Map<string, HistoryActivity>();
     for (const command of (metadata()?.activities ?? []).filter((value) => value.kind === "backgroundCommand")) {
-      if (!command.toolUseID) continue;
-      const key = toolIdentity(command.source, command.toolUseID);
-      const list = byTool.get(key);
-      if (list) list.push(command);
-      else byTool.set(key, [command]);
+      if (command.toolUseID) byTool.set(toolIdentity(command.source, command.toolUseID), command);
     }
     return byTool;
-  });
-  const backgroundByAnchor = createMemo(() =>
-    assignNativeAnchors(
-      transcriptItems(),
-      backgroundCommands().map((activity) => ({ ...activity, anchorTs: Date.parse(activity.anchorAt) })),
-    ),
-  );
-  const backgroundUnanchored = createMemo(() => {
-    const anchored = new Set<string>();
-    for (const list of backgroundByAnchor().values()) for (const c of list) anchored.add(c.id);
-    return backgroundCommands().filter((command) => !anchored.has(command.id));
   });
 
   const renderArchivedGroups = (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => {
@@ -1079,22 +1063,13 @@ export default function TaskDetail(props: Props) {
     const activities = () =>
       (metadata()?.activities ?? []).filter(
         (activity) =>
+          activity.kind === "nativeSubagent" &&
           activity.status !== "running" &&
           activity.sectionID === id &&
-          !(activity.kind === "nativeSubagent" && openActivityIDs().has(activity.id)),
+          !openActivityIDs().has(activity.id),
       );
     return (
-      <>
-        <NativeAgents
-          activities={activities().filter((activity) => activity.kind === "nativeSubagent")}
-          settled={nativeSettled()}
-          renderTranscript={renderNativeTranscript}
-        />
-        <BackgroundCommands
-          commands={activities().filter((activity) => activity.kind === "backgroundCommand")}
-          settled={backgroundSettled()}
-        />
-      </>
+      <NativeAgents activities={activities()} settled={nativeSettled()} renderTranscript={renderNativeTranscript} />
     );
   };
 
@@ -1493,147 +1468,125 @@ export default function TaskDetail(props: Props) {
                   item().kind === "expandedHeader" ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>) : null;
                 const grpItem = () =>
                   item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null;
-                // Canonical native activity anchored to this item: a settled card
-                // renders where it settled, a running one where it spawned.
-                const anchorIndent = () => {
-                  const current = item();
-                  if (current.kind === "group") {
-                    return current.indent === "turn" ? styles.indentTurn : undefined;
-                  }
-                  return undefined;
-                };
                 return (
-                  <>
-                    <Switch>
-                      <Match when={item().kind === "native"}>
-                        <NativeAgents
-                          activities={
-                            item().kind === "native"
-                              ? [(item() as Extract<TranscriptItem, { kind: "native" }>).activity]
-                              : []
-                          }
-                          settled={nativeSettled()}
-                          renderTranscript={renderNativeTranscript}
-                          onOpenChange={pinActivity}
+                  <Switch>
+                    <Match when={item().kind === "native"}>
+                      <NativeAgents
+                        activities={
+                          item().kind === "native"
+                            ? [(item() as Extract<TranscriptItem, { kind: "native" }>).activity]
+                            : []
+                        }
+                        settled={nativeSettled()}
+                        renderTranscript={renderNativeTranscript}
+                        onOpenChange={pinActivity}
+                      />
+                    </Match>
+                    {/* Session boundary: init, compaction, or clear rendered as a separator. */}
+                    <Match when={sessBoundary()} keyed>
+                      {(sb) => (
+                        <SessionBoundaryItem
+                          event={sb.event}
+                          grouped={sb.event === currentSessionBoundaryEvent() && archivedIDs().length > 0}
                         />
-                      </Match>
-                      {/* Session boundary: init, compaction, or clear rendered as a separator. */}
-                      <Match when={sessBoundary()} keyed>
-                        {(sb) => (
-                          <SessionBoundaryItem
-                            event={sb.event}
-                            grouped={sb.event === currentSessionBoundaryEvent() && archivedIDs().length > 0}
-                          />
-                        )}
-                      </Match>
-                      {/* Collapsed past turn: single clickable row. */}
-                      <Match when={elided()} keyed>
-                        {(e) => (
-                          <div class={styles.elidedTurn} data-anchor-key={turnAnchor(e.key)}>
-                            <button
-                              type="button"
-                              class={styles.turnToggle}
-                              onClick={(ev) => anchoredToggleTurn(ev, e.key)}
-                            >
-                              <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
-                              <span class={styles.turnDuration}>
-                                {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
-                              </span>
-                            </button>
-                            <Show when={turnTiming(e.turn)}>
-                              {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
-                            </Show>
-                          </div>
-                        )}
-                      </Match>
-                      {/* Expanded past turn header: click to collapse. */}
-                      <Match when={expHdr()} keyed>
-                        {(h) => (
-                          <div
-                            class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}`}
-                            data-anchor-key={turnAnchor(h.turnKey)}
+                      )}
+                    </Match>
+                    {/* Collapsed past turn: single clickable row. */}
+                    <Match when={elided()} keyed>
+                      {(e) => (
+                        <div class={styles.elidedTurn} data-anchor-key={turnAnchor(e.key)}>
+                          <button
+                            type="button"
+                            class={styles.turnToggle}
+                            onClick={(ev) => anchoredToggleTurn(ev, e.key)}
                           >
-                            <button
-                              type="button"
-                              class={styles.turnToggle}
-                              onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
-                            >
-                              <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
-                              <span class={styles.turnDuration}>
-                                {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
-                              </span>
-                            </button>
-                            <Show when={turnTiming(h.turn)}>
-                              {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
-                            </Show>
-                          </div>
-                        )}
-                      </Match>
-                      {/* Message group: non-keyed to preserve iframe state in WidgetCard. The
+                            <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                            <span class={styles.turnDuration}>
+                              {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                            </span>
+                          </button>
+                          <Show when={turnTiming(e.turn)}>
+                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
+                          </Show>
+                        </div>
+                      )}
+                    </Match>
+                    {/* Expanded past turn header: click to collapse. */}
+                    <Match when={expHdr()} keyed>
+                      {(h) => (
+                        <div
+                          class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}`}
+                          data-anchor-key={turnAnchor(h.turnKey)}
+                        >
+                          <button
+                            type="button"
+                            class={styles.turnToggle}
+                            onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
+                          >
+                            <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                            <span class={styles.turnDuration}>
+                              {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                            </span>
+                          </button>
+                          <Show when={turnTiming(h.turn)}>
+                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
+                          </Show>
+                        </div>
+                      )}
+                    </Match>
+                    {/* Message group: non-keyed to preserve iframe state in WidgetCard. The
                           message identity survives canonical history replacement, so it also
                           anchors the visible conversation row. */}
-                      <Match when={grpItem()}>
-                        {(gi) => (
-                          <div
-                            class={gi().indent === "turn" ? styles.indentTurn : undefined}
-                            data-testid={gi().group.messageKey ? "stream-message" : undefined}
-                            data-message-key={gi().group.messageKey}
-                            data-anchor-key={groupAnchor(gi().group)}
-                          >
-                            <div class={styles.timedItemContent}>
-                              <Show
-                                when={
-                                  hasGroupTiming(gi().group) &&
-                                  !gi().group.events.some((event) => event.kind === "result") &&
-                                  (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
-                                }
-                              >
-                                <span class={styles.messageTiming}>
-                                  <TimingIcon
-                                    events={gi().group.events}
-                                    range={gi().group.content?.range ?? gi().group.tool?.range ?? gi().group.range}
-                                    segments={gi().group.timingSegments}
-                                    userWaitMs={userWaits()}
-                                    previousEventTs={previousVisualTimes()}
-                                  />
-                                </span>
-                              </Show>
-                              <GroupContent
-                                group={() => gi().group}
-                                taskId={props.taskId}
-                                isWaiting={isWaiting}
-                                lastAskGroup={lastAskGroup}
-                                onAskAnswer={sendAskAnswer}
-                                currentPlan={props.currentPlan}
-                                onClearAndExecutePlan={clearAndExecutePlan}
-                                pendingAction={pendingAction}
-                                model={props.model ?? null}
-                                turnTiming={(event) => turnForEvent(event)}
-                                nativeByToolUseID={nativeByToolUseID}
-                                nativeSettled={nativeSettled}
-                                backgroundByToolUseID={backgroundByToolUseID}
-                                backgroundSettled={backgroundSettled}
-                              />
-                            </div>
+                    <Match when={grpItem()}>
+                      {(gi) => (
+                        <div
+                          class={gi().indent === "turn" ? styles.indentTurn : undefined}
+                          data-testid={gi().group.messageKey ? "stream-message" : undefined}
+                          data-message-key={gi().group.messageKey}
+                          data-anchor-key={groupAnchor(gi().group)}
+                        >
+                          <div class={styles.timedItemContent}>
+                            <Show
+                              when={
+                                hasGroupTiming(gi().group) &&
+                                !gi().group.events.some((event) => event.kind === "result") &&
+                                (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
+                              }
+                            >
+                              <span class={styles.messageTiming}>
+                                <TimingIcon
+                                  events={gi().group.events}
+                                  range={gi().group.content?.range ?? gi().group.tool?.range ?? gi().group.range}
+                                  segments={gi().group.timingSegments}
+                                  userWaitMs={userWaits()}
+                                  previousEventTs={previousVisualTimes()}
+                                />
+                              </span>
+                            </Show>
+                            <GroupContent
+                              group={() => gi().group}
+                              taskId={props.taskId}
+                              isWaiting={isWaiting}
+                              lastAskGroup={lastAskGroup}
+                              onAskAnswer={sendAskAnswer}
+                              currentPlan={props.currentPlan}
+                              onClearAndExecutePlan={clearAndExecutePlan}
+                              pendingAction={pendingAction}
+                              model={props.model ?? null}
+                              turnTiming={(event) => turnForEvent(event)}
+                              nativeByToolUseID={nativeByToolUseID}
+                              nativeSettled={nativeSettled}
+                              backgroundByToolUseID={backgroundByToolUseID}
+                              backgroundSettled={backgroundSettled}
+                            />
                           </div>
-                        )}
-                      </Match>
-                    </Switch>
-                    <Show when={backgroundByAnchor().get(item().key)?.length}>
-                      <div class={anchorIndent()}>
-                        <BackgroundCommands
-                          commands={backgroundByAnchor().get(item().key) ?? []}
-                          settled={backgroundSettled()}
-                        />
-                      </div>
-                    </Show>
-                  </>
+                        </div>
+                      )}
+                    </Match>
+                  </Switch>
                 );
               }}
             </For>
-            <Show when={backgroundUnanchored().length > 0}>
-              <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
-            </Show>
             <Show when={messages().length === 0 && !timeline.loading()}>
               <p class={styles.placeholder}>Waiting for agent output...</p>
             </Show>
@@ -2124,7 +2077,7 @@ function GroupContent(props: {
   turnTiming: (event: EventMessage) => HistoryTurn | undefined;
   nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
   backgroundSettled: () => boolean;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
@@ -2544,7 +2497,7 @@ function ToolMessageGroup(props: {
   pendingAction?: () => string | null;
   nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
-  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
   backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
@@ -2563,6 +2516,13 @@ function ToolMessageGroup(props: {
     return `${props.taskId}:group:${first?.source ? toolIdentity(first.source, "") : first?.use.toolUseID}`;
   };
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
+  // A call whose detached command still runs is not done, even though its
+  // launch already returned, like a command that has not returned yet.
+  const finished = (call: ToolCall) => {
+    if (!call.done) return false;
+    const command = props.backgroundByToolUseID().get(toolIdentity(call.source, call.use.toolUseID));
+    return command?.status !== "running" || props.backgroundSettled();
+  };
   const thinkingEvents = () => (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
@@ -2585,9 +2545,7 @@ function ToolMessageGroup(props: {
                 onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
                 nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                 nativeSettled={props.nativeSettled}
-                backgroundCommands={props
-                  .backgroundByToolUseID()
-                  .get(toolIdentity(call().source, call().use.toolUseID))}
+                backgroundCommand={props.backgroundByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                 backgroundSettled={props.backgroundSettled}
               />
             )}
@@ -2601,7 +2559,7 @@ function ToolMessageGroup(props: {
             onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
           >
             <summary>
-              {calls().filter((c) => c.done).length}/{calls().length} tools: {toolCountSummary(calls())}
+              {calls().filter(finished).length}/{calls().length} tools: {toolCountSummary(calls())}
             </summary>
             <div class={styles.toolGroupInner}>
               <Show when={thinkingEvents().length > 0}>
@@ -2618,7 +2576,7 @@ function ToolMessageGroup(props: {
                     onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
                     nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                     nativeSettled={props.nativeSettled}
-                    backgroundCommands={props
+                    backgroundCommand={props
                       .backgroundByToolUseID()
                       .get(toolIdentity(call().source, call().use.toolUseID))}
                     backgroundSettled={props.backgroundSettled}
@@ -2863,7 +2821,7 @@ function ToolCallCard(props: {
   outputDeltaEvents?: EventMessage[];
   nativeActivity?: HistoryActivity[];
   nativeSettled?: () => boolean;
-  backgroundCommands?: HistoryActivity[];
+  backgroundCommand?: HistoryActivity;
   backgroundSettled?: () => boolean;
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
@@ -2882,7 +2840,7 @@ function ToolCallCard(props: {
   });
   onCleanup(() => inputRequest++);
 
-  const timedCommand = () => props.backgroundCommands?.[0];
+  const timedCommand = () => props.backgroundCommand;
   const durationMs = createLiveDuration(
     () => {
       const command = timedCommand();
@@ -2948,7 +2906,7 @@ function ToolCallCard(props: {
                   // chip resolves to the command's outcome instead of leaving a
                   // perpetual "running in background" mark on a finished call.
                   <Show
-                    when={props.backgroundCommands?.[0]}
+                    when={props.backgroundCommand}
                     keyed
                     fallback={
                       <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
@@ -3007,6 +2965,17 @@ function ToolCallCard(props: {
           <pre class={styles.toolOutputDelta}>
             {props.call.output ?? props.outputDeltaEvents?.map((e) => e.toolOutputDelta?.delta ?? "").join("")}
           </pre>
+        </Show>
+        <Show when={timedCommand()?.outputRef}>
+          {(path) => (
+            <A
+              class={styles.toolOutputLink}
+              href={taskViewURL(props.taskId, path())}
+              data-testid="background-command-output"
+            >
+              Output: {path()}
+            </A>
+          )}
         </Show>
       </details>
     </>

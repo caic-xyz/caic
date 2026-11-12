@@ -1,4 +1,4 @@
-// Tests canonical native and background-command lifecycle folding, replay identity, timing, and partial observability.
+// Tests canonical native lifecycle folding, replay identity, timing, partial observability, and background status labels.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -6,12 +6,10 @@ import { expect } from "@tests/expect";
 import type { EventBackgroundCommand, EventMessage, EventNativeSubagent } from "@sdk/types.gen";
 import type { MessageGroup, MsgItem } from "./grouping";
 import {
-  BackgroundCommandTracker,
   NativeActivityTracker,
   assignNativeAnchors,
   backgroundCommandStatus,
   nativeActivityStatus,
-  type BackgroundCommandActivity,
   type NativeActivity,
 } from "./nativeSubagents";
 
@@ -374,119 +372,19 @@ describe("assignNativeAnchors", () => {
   });
 });
 
+describe("backgroundCommandStatus", () => {
+  it("never invents a terminal outcome when the parent settles first", () => {
+    expect(backgroundCommandStatus({ status: "running" }, true)).toBe("Last observed running · outcome unknown");
+    expect(backgroundCommandStatus({ status: "running" }, false)).toBe("Running");
+    expect(backgroundCommandStatus({ status: "completed" }, true)).toBe("Completed");
+  });
+});
+
 function bgEvent(
   id: string,
   status: EventBackgroundCommand["status"],
   ts: number,
   fields: Partial<EventBackgroundCommand>,
 ): EventMessage {
-  return {
-    kind: "backgroundCommand",
-    ts,
-    backgroundCommand: { id, status, ...fields },
-  };
+  return { kind: "backgroundCommand", ts, backgroundCommand: { id, status, ...fields } };
 }
-
-describe("BackgroundCommandTracker", () => {
-  it("folds concurrent commands across a result and later notifications", () => {
-    const tracker = new BackgroundCommandTracker();
-    const messages: EventMessage[] = [
-      bgEvent("cmd-a", "running", 1000, { label: "Install and run lint", toolUseID: "t1" }),
-      bgEvent("cmd-b", "running", 1010, { label: "Wait for lint", toolUseID: "t2" }),
-      { kind: "result", ts: 1100 },
-      bgEvent("cmd-a", "completed", 1200, { exitCode: 0, result: "completed (exit code 0)" }),
-    ];
-    const folded = tracker.derive(messages);
-    expect(folded).toHaveLength(2);
-    expect(folded[0]).toMatchObject({
-      id: "cmd-a",
-      status: "completed",
-      exitCode: 0,
-      toolUseID: "t1",
-      startedAt: 1000,
-      endedAt: 1200,
-      anchorTs: 1200,
-    });
-    expect(folded[1]).toMatchObject({ id: "cmd-b", status: "running", endedAt: null });
-    const restored = new BackgroundCommandTracker().derive(messages.map((ev) => ({ ...ev })));
-    expect(restored).toEqual(folded);
-    expect(tracker.derive(messages)).toBe(folded);
-  });
-
-  it("keeps a running card at its spawn and repositions it once when it settles", () => {
-    const tracker = new BackgroundCommandTracker();
-    const spawn = bgEvent("cmd", "running", 100, {});
-    const repeat = bgEvent("cmd", "running", 500, {});
-    const done = bgEvent("cmd", "completed", 900, { exitCode: 0 });
-    const spawnActivity = tracker.derive([spawn])[0];
-    assert.ok(spawnActivity !== undefined);
-    expect(spawnActivity.anchorTs).toBe(100);
-    const runningActivity = tracker.derive([spawn, repeat])[0];
-    assert.ok(runningActivity !== undefined);
-    expect(runningActivity.anchorTs).toBe(100);
-    const completedActivity = tracker.derive([spawn, repeat, done])[0];
-    assert.ok(completedActivity !== undefined);
-    expect(completedActivity.anchorTs).toBe(900);
-  });
-
-  it("never invents a terminal outcome when the parent settles first", () => {
-    const tracker = new BackgroundCommandTracker();
-    const folded = tracker.derive([bgEvent("cmd", "running", 1, {}), { kind: "result", ts: 3 } as EventMessage]);
-    assert.ok(folded[0] !== undefined);
-    expect(folded[0].status).toBe("running");
-    expect(backgroundCommandStatus(folded[0], true)).toBe("Last observed running · outcome unknown");
-    expect(backgroundCommandStatus(folded[0], false)).toBe("Running");
-  });
-
-  it("freezes a terminal lifecycle and lets the first terminal result stand", () => {
-    const tracker = new BackgroundCommandTracker();
-    const folded = tracker.derive([
-      bgEvent("cmd", "running", 1000, {}),
-      bgEvent("cmd", "completed", 2000, { result: "completed (exit code 0)", exitCode: 0 }),
-      bgEvent("cmd", "failed", 3000, { result: "a noisier repeat" }),
-      bgEvent("cmd", "running", 4000, {}),
-    ]);
-    expect(folded[0]).toMatchObject({ status: "completed", result: "completed (exit code 0)", exitCode: 0 });
-  });
-
-  it("upgrades an interim result with the terminal one", () => {
-    const tracker = new BackgroundCommandTracker();
-    const folded = tracker.derive([
-      bgEvent("cmd", "running", 1000, { result: "started" }),
-      bgEvent("cmd", "completed", 2000, { result: "completed (exit code 0)" }),
-    ]);
-    assert.ok(folded[0] !== undefined);
-    expect(folded[0].result).toBe("completed (exit code 0)");
-  });
-
-  it("carries toolUseID, label, and outputRef from whichever observation reported them", () => {
-    const tracker = new BackgroundCommandTracker();
-    const folded = tracker.derive([
-      bgEvent("cmd", "running", 1000, { toolUseID: "t1", label: "Re-run lint" }),
-      bgEvent("cmd", "completed", 2000, { outputRef: "/tmp/tasks/cmd.output" }),
-    ]);
-    expect(folded[0]).toMatchObject({ toolUseID: "t1", label: "Re-run lint", outputRef: "/tmp/tasks/cmd.output" });
-  });
-
-  it("resets on history replacement and ignores uncorrelatable observations", () => {
-    const tracker = new BackgroundCommandTracker();
-    tracker.derive([bgEvent("a", "running", 1, {})]);
-    expect(
-      tracker.derive([bgEvent("b", "completed", 2, { exitCode: 1 }), bgEvent("", "running", 3, {})]).map((s) => s.id),
-    ).toEqual(["b"]);
-    expect(tracker.derive([])).toEqual([]);
-  });
-});
-
-function command(anchorTs: number): BackgroundCommandActivity {
-  return { id: "cmd", status: "running", startedAt: null, endedAt: null, anchorTs };
-}
-
-describe("assignNativeAnchors for background commands", () => {
-  it("anchors a running card at its spawn and a settled card where it settled", () => {
-    const items = [group("spawn", 100), group("settle", 200)];
-    const byAnchor = assignNativeAnchors(items, [command(150), { ...command(250), status: "completed" }]);
-    expect(byAnchor.get("spawn")).toHaveLength(1);
-    expect(byAnchor.get("settle")).toHaveLength(1);
-  });
-});

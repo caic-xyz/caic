@@ -6,12 +6,14 @@ import type {
   HistoryTurn,
   HistoryRoute,
   ISOTimestamp,
+  EventBackgroundCommand,
   EventMessage,
+  EventMessageSource,
 } from "@sdk/types.gen";
 
 import { SessionGrouper } from "./sessionGrouping";
 import { isChildEvent } from "../src/grouping";
-import { NativeActivityTracker, BackgroundCommandTracker } from "../src/nativeSubagents";
+import { NativeActivityTracker } from "../src/nativeSubagents";
 import { ContextSkillsTracker } from "./contextSkills";
 import { compareHistoryPosition } from "../src/historyPosition";
 
@@ -249,7 +251,7 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
           endedAt: activity.endedAt !== null ? (new Date(activity.endedAt).toISOString() as ISOTimestamp) : undefined,
           anchorAt: new Date(activity.anchorTs).toISOString() as ISOTimestamp,
         })),
-        ...new BackgroundCommandTracker().derive(messages).map((activity) => ({
+        ...foldBackgroundCommands(messages).map((activity) => ({
           kind: "backgroundCommand" as const,
           sectionID: activitySection("backgroundCommand", activity.id),
           id: activity.id,
@@ -316,4 +318,38 @@ export function fixtureHistoryResponse(url: string, events: readonly HistoryEven
 export function defined<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error("Missing fixture value");
   return value;
+}
+
+interface FixtureBackgroundCommand extends EventBackgroundCommand {
+  source?: EventMessageSource;
+  startedAt: number | null;
+  endedAt: number | null;
+  anchorTs: number;
+}
+
+// foldBackgroundCommands mirrors the server's lifecycle fold: the first
+// terminal status wins, and the anchor moves only when the status changes.
+function foldBackgroundCommands(messages: readonly EventMessage[]): FixtureBackgroundCommand[] {
+  const terminal = (status: EventBackgroundCommand["status"]) =>
+    status === "completed" || status === "failed" || status === "interrupted";
+  const byID = new Map<string, FixtureBackgroundCommand>();
+  for (const ev of messages) {
+    const s = ev.backgroundCommand;
+    if (ev.kind !== "backgroundCommand" || !s?.id) continue;
+    const old = byID.get(s.id);
+    const status = old && (terminal(old.status) || s.status === "running") ? old.status : s.status;
+    byID.set(s.id, {
+      ...s,
+      source: old?.source ?? ev.source,
+      toolUseID: old?.toolUseID || s.toolUseID,
+      label: old?.label || s.label,
+      outputRef: old?.outputRef || s.outputRef,
+      exitCode: old?.exitCode ?? s.exitCode,
+      status,
+      anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
+      startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
+      endedAt: old?.endedAt ?? (terminal(s.status) && ev.ts > 0 ? ev.ts : null),
+    });
+  }
+  return [...byID.values()];
 }

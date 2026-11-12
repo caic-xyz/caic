@@ -11,12 +11,7 @@ import type { HistoryEvent, HistoryActivity, ISOTimestamp } from "@sdk/types.gen
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
 import { api } from "../api";
-import {
-  BackgroundCommandCard,
-  BackgroundCommandStatusChip,
-  BackgroundCommands,
-  NativeAgentCard,
-} from "./NativeSubagents";
+import { BackgroundCommandStatusChip, NativeAgentCard } from "./NativeSubagents";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -262,28 +257,16 @@ const command: HistoryActivity = {
   anchorAt: new Date(2000).toISOString() as ISOTimestamp,
 };
 describe("background summaries", () => {
-  it("ticks running work, freezes a completed duration, and reports unknown outcomes honestly", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(5000);
+  it("keeps a running chip distinct from terminal exit evidence and unknown outcomes", () => {
     const [activity, setActivity] = createSignal(command);
     const [settled, setSettled] = createSignal(false);
-    render(() => <BackgroundCommandCard command={activity()} settled={settled()} />);
-    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:03");
-    vi.advanceTimersByTime(2000);
-    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:05");
+    render(() => <BackgroundCommandStatusChip command={activity()} settled={settled()} />);
+    const chip = screen.getByTestId("background-command-chip");
+    expect(chip).toHaveTextContent("running in background");
     setSettled(true);
-    expect(screen.queryByTestId("background-command-duration")).not.toBeInTheDocument();
-    expect(screen.getByText("Last observed running · outcome unknown")).toBeInTheDocument();
-    setActivity({ ...command, status: "failed", exitCode: 137, endedAt: new Date(8000).toISOString() as ISOTimestamp });
-    expect(screen.getByText("exit 137")).toBeInTheDocument();
-    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:06");
-  });
-  it("keeps a running chip distinct from terminal exit evidence", () => {
-    const [activity, setActivity] = createSignal(command);
-    render(() => <BackgroundCommandStatusChip command={activity()} settled={false} />);
-    expect(screen.getByTestId("background-command-chip")).toHaveTextContent("running in background");
+    expect(chip).toHaveTextContent("Last observed running · outcome unknown");
     setActivity({ ...command, status: "completed", exitCode: 0 });
-    expect(screen.getByTestId("background-command-chip")).toHaveTextContent("exit 0");
+    expect(chip).toHaveTextContent("exit 0");
   });
 });
 it("reloads the finite actor once when a delayed manifest resolves earlier delegation ownership", async () => {
@@ -333,47 +316,4 @@ it("reloads the finite actor once when a delayed manifest resolves earlier deleg
   expect(screen.getAllByText("Recovered earlier delegation")).toHaveLength(1);
   expect(screen.getByTestId("native-subagent-card")).toBe(card);
   fixture.view.unmount();
-});
-
-it("keeps a disclosed background card mounted across equivalent manifest copies", async () => {
-  const events: HistoryEvent[] = [
-    {
-      recordID: 1,
-      index: 0,
-      message: {
-        kind: "backgroundCommand",
-        ts: 1000,
-        backgroundCommand: { id: "shell", status: "completed", result: "Lint finished", exitCode: 0 },
-      },
-    },
-  ];
-  let stream: HistoryEventsHandlers | null = null;
-  vi.spyOn(api, "historyEvents").mockImplementation((_id, _cursor, handlers) => {
-    stream = handlers;
-    return { close: vi.fn() } as unknown as EventSource;
-  });
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => fixtureHistoryResponse(String(input), events, ""));
-  const first = historyManifest(events, "").metadata.activities ?? [];
-  const [commands, setCommands] = createSignal(first);
-  render(() => (
-    <TaskTimelineProvider taskId="background-identity">
-      <BackgroundCommands commands={commands()} settled={true} />
-    </TaskTimelineProvider>
-  ));
-  const card = screen.getByTestId("background-command-card");
-  await userEvent.setup().click(defined(card.querySelector("summary")));
-  await screen.findByText("Lint finished");
-  const summary = defined(card.querySelector("summary"));
-  summary.focus();
-  const reads = vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => String(input).includes("/activity/")).length;
-  defined(stream as HistoryEventsHandlers | null).onManifest?.(historyManifest(events, ""));
-  setCommands(first.map((value) => ({ ...value })));
-  expect(screen.getByTestId("background-command-card")).toBe(card);
-  expect(card).toHaveAttribute("open");
-  expect(summary).toHaveFocus();
-  assert.equal(
-    vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => String(input).includes("/activity/")).length,
-    reads,
-  );
-  expect(screen.getByText("Lint finished")).toBeVisible();
 });

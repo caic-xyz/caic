@@ -38,6 +38,14 @@ beforeEach(() => {
 let fixtureRecord = 0;
 let fixtureEvents: HistoryEvent[] = [];
 let fixturePrompt = "";
+// toolRow returns the rendered row of a root tool call.
+function toolRow(toolUseID: string): HTMLElement {
+  const row = screen
+    .getAllByTestId("tool-call")
+    .find((el) => (JSON.parse(el.dataset.toolKey ?? "[]") as string[]).at(-1) === toolUseID);
+  assert.ok(row, `missing tool row ${toolUseID}`);
+  return row;
+}
 function emit(handlers: HistoryEventsHandlers, message: EventMessage) {
   if (message.result)
     message = {
@@ -408,10 +416,10 @@ it("automatically restores completed activity timing while keeping live observat
     await vi.waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
     const beforeTick = requests.length;
     expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
-    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    expect(within(toolRow("shell-tool")).getByTestId("tool-duration")).toHaveTextContent("0:01");
     await vi.advanceTimersByTimeAsync(3_000);
     expect(screen.getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
-    expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    expect(within(toolRow("shell-tool")).getByTestId("tool-duration")).toHaveTextContent("0:01");
     expect(requests).toHaveLength(beforeTick);
     const stream = streams[0];
     assert.ok(stream);
@@ -424,9 +432,18 @@ it("automatically restores completed activity timing while keeping live observat
       recordID: 260,
       index: 0,
       message: {
+        kind: "toolUse",
+        ts: Date.now() - 1_000,
+        toolUse: { toolUseID: "ongoing-tool", name: "Bash", input: {}, background: true },
+      },
+    });
+    stream.onMessage({
+      recordID: 261,
+      index: 0,
+      message: {
         kind: "backgroundCommand",
         ts: Date.now() - 1_000,
-        backgroundCommand: { id: "ongoing-shell", status: "running" },
+        backgroundCommand: { id: "ongoing-shell", toolUseID: "ongoing-tool", status: "running" },
       },
     });
     historyEvents.push(
@@ -443,22 +460,30 @@ it("automatically restores completed activity timing while keeping live observat
         recordID: 260,
         index: 0,
         message: {
+          kind: "toolUse",
+          ts: Date.now() - 1000,
+          toolUse: { toolUseID: "ongoing-tool", name: "Bash", input: {}, background: true },
+        },
+      },
+      {
+        recordID: 261,
+        index: 0,
+        message: {
           kind: "backgroundCommand",
           ts: Date.now() - 1000,
-          backgroundCommand: { id: "ongoing-shell", status: "running" },
+          backgroundCommand: { id: "ongoing-shell", toolUseID: "ongoing-tool", status: "running" },
         },
       },
     );
     stream.onManifest?.(historyManifest(historyEvents, ""));
     await vi.advanceTimersByTimeAsync(100);
     const native = view.container.querySelector('[data-native-id="ongoing"]');
-    const background = view.container.querySelector('[data-command-id="ongoing-shell"]');
-    assert.ok(native instanceof HTMLElement && background instanceof HTMLElement);
+    assert.ok(native instanceof HTMLElement);
     expect(within(native).getByTestId("native-subagent-duration")).toHaveTextContent("0:01");
-    expect(within(background).getByTestId("background-command-duration")).toHaveTextContent("0:01");
+    expect(within(toolRow("ongoing-tool")).getByTestId("tool-duration")).toHaveTextContent("0:01");
     await vi.advanceTimersByTimeAsync(2_000);
     expect(within(native).getByTestId("native-subagent-duration")).toHaveTextContent("0:03");
-    expect(within(background).getByTestId("background-command-duration")).toHaveTextContent("0:03");
+    expect(within(toolRow("ongoing-tool")).getByTestId("tool-duration")).toHaveTextContent("0:03");
   } finally {
     view.unmount();
     fetchMock.mockRestore();
@@ -2991,7 +3016,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   expect(screen.getByTestId("native-subagent-card")).toHaveTextContent("Completed");
 });
 
-it("keeps completed background work in its origin section across equal-time compaction", async () => {
+it("settles background work on its archived tool row across equal-time compaction", async () => {
   taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
     for (const message of [
       {
@@ -2999,23 +3024,63 @@ it("keeps completed background work in its origin section across equal-time comp
         ts: 1000,
         init: { sessionID: "a", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
       },
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "origin-tool", name: "Bash", input: {}, background: true } },
+      { kind: "toolResult", ts: 1000, toolResult: { toolUseID: "origin-tool", duration: 0 } },
       {
         kind: "backgroundCommand",
         ts: 1000,
-        backgroundCommand: { id: "origin-shell", label: "Old shell", status: "running" },
+        backgroundCommand: { id: "origin-shell", toolUseID: "origin-tool", label: "Old shell", status: "running" },
       },
       resultEvent(1000),
       { kind: "system", ts: 1000, system: { subtype: "compact_boundary" } },
-      { kind: "backgroundCommand", ts: 2000, backgroundCommand: { id: "origin-shell", status: "completed" } },
+      {
+        kind: "backgroundCommand",
+        ts: 2000,
+        backgroundCommand: { id: "origin-shell", status: "completed", outputRef: "/tmp/tasks/origin-shell.output" },
+      },
       { kind: "text", ts: 2000, text: { text: "Current context" } },
     ] satisfies EventMessage[])
       emit(handlers, message);
     return { close: vi.fn() } as unknown as EventSource;
   });
   await renderTaskDetail({ taskId: "background-origin" });
-  expect(screen.queryByTestId("background-command-card")).not.toBeInTheDocument();
-  await userEvent.setup().click(screen.getByRole("button", { name: /^Compacted session/ }));
-  expect(await screen.findByTestId("background-command-card")).toHaveTextContent("Old shell");
+  expect(screen.queryByTestId("tool-call")).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+  await user.click(await screen.findByRole("button", { name: /^1 tool call/ }));
+  await waitFor(() =>
+    expect(within(toolRow("origin-tool")).getByTestId("background-command-chip")).toHaveTextContent("Completed"),
+  );
+  expect(within(toolRow("origin-tool")).getByTestId("background-command-output")).toHaveAttribute(
+    "href",
+    "/task/@background-origin/view?path=%2Ftmp%2Ftasks%2Forigin-shell.output",
+  );
+});
+
+it("counts a tool call as unfinished while its background command runs", async () => {
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    for (const message of [
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "lint-tool", name: "Bash", input: {}, background: true } },
+      { kind: "toolResult", ts: 1000, toolResult: { toolUseID: "lint-tool", duration: 0 } },
+      {
+        kind: "backgroundCommand",
+        ts: 1000,
+        backgroundCommand: { id: "lint", toolUseID: "lint-tool", status: "running" },
+      },
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "watch-tool", name: "Bash", input: {}, background: true } },
+      { kind: "toolResult", ts: 1000, toolResult: { toolUseID: "watch-tool", duration: 0 } },
+      {
+        kind: "backgroundCommand",
+        ts: 1000,
+        backgroundCommand: { id: "watch", toolUseID: "watch-tool", status: "running" },
+      },
+      { kind: "backgroundCommand", ts: 2000, backgroundCommand: { id: "lint", status: "completed" } },
+    ] satisfies EventMessage[])
+      emit(handlers, message);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  await renderTaskDetail({ taskId: "background-count" });
+  expect(await screen.findByText(/^1\/2 tools: /)).toBeInTheDocument();
 });
 
 for (const boundary of ["compaction", "changed init"]) {
@@ -3040,9 +3105,20 @@ for (const boundary of ["compaction", "changed init"]) {
         },
         { kind: "text", ts: 1000, source: { agentID: "carried-child" }, text: { text: "Carried child transcript" } },
         {
+          kind: "toolUse",
+          ts: 1000,
+          toolUse: { toolUseID: "carried-tool", name: "Bash", input: {}, background: true },
+        },
+        { kind: "toolResult", ts: 1000, toolResult: { toolUseID: "carried-tool", duration: 0 } },
+        {
           kind: "backgroundCommand",
           ts: 1000,
-          backgroundCommand: { id: "carried-shell", label: "Carried shell", status: "running" },
+          backgroundCommand: {
+            id: "carried-shell",
+            toolUseID: "carried-tool",
+            label: "Carried shell",
+            status: "running",
+          },
         },
       ] satisfies EventMessage[])
         emit(handlers, message);
@@ -3064,15 +3140,15 @@ for (const boundary of ["compaction", "changed init"]) {
     send?.({ kind: "nativeSubagent", ts: 1000, nativeSubagent: { id: "carried-child", status: "completed" } });
     send?.({ kind: "backgroundCommand", ts: 1000, backgroundCommand: { id: "carried-shell", status: "completed" } });
     await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+    expect(within(toolRow("carried-tool")).getByTestId("background-command-chip")).toHaveTextContent("Completed");
     expect(screen.getByTestId("native-subagent-card")).toBe(card);
     expect(summary).toHaveFocus();
     const archive = screen.getByTestId("history-section");
     const archived = within(archive).getByRole("button", { name: /^Compacted session/ });
     await user.click(archived);
     expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1);
-    expect(screen.getAllByTestId("background-command-card")).toHaveLength(1);
+    expect(screen.getAllByTestId("background-command-chip")).toHaveLength(1);
     expect(within(archive).queryByTestId("native-subagent-card")).not.toBeInTheDocument();
-    expect(within(archive).queryByTestId("background-command-card")).not.toBeInTheDocument();
     await user.click(summary);
     expect(screen.getByTestId("native-subagent-card")).toBe(card);
     expect(card).not.toHaveAttribute("open");
