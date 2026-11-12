@@ -2056,7 +2056,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// follows a cleanly completed turn: it is a spurious termination artifact
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
 	// persisted replay, so the live stream must match to avoid a transient
-	// "Parse error" that disappears when the task log is reloaded.
+	// "Agent exited" error that disappears when the task log is reloaded.
 	if !visible {
 		return stateChanged
 	}

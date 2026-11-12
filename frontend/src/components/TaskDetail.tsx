@@ -2271,19 +2271,19 @@ function SessionBoundaryItem(props: { event: EventMessage; grouped: boolean }) {
 }
 
 function agentError(sys: EventSystem): JSX.Element {
-  return <div class={styles.parseError}>{sys.detail || "Agent error"}</div>;
+  return <div class={styles.agentError}>{sys.detail || "Agent error"}</div>;
 }
 
 // systemPresentations renders every system subtype the server sends; a new API
 // subtype fails type checking until it has a presentation here.
 const systemPresentations: Record<EventSystemSubtype, (sys: EventSystem) => JSX.Element> = {
-  api_error: () => <div class={styles.parseError}>API error</div>,
+  api_error: () => <div class={styles.agentError}>API error</div>,
   compact_boundary: (sys) => {
     const summary = compactTokenSummary(sys.contextTokensBefore, sys.contextTokensAfter);
     return <div class={styles.contextCleared}>Conversation compacted{summary ? ` · ${summary}` : ""}</div>;
   },
   compact_error: (sys) => (
-    <div class={styles.parseError} data-testid="compact-error">
+    <div class={styles.agentError} data-testid="compact-error">
       Context compaction failed{sys.detail ? `: ${sys.detail}` : ""}
     </div>
   ),
@@ -2432,7 +2432,7 @@ function MessageItem(props: {
         )}
       </Match>
       <Match when={props.ev.error} keyed>
-        {(err) => <div class={styles.parseError}>Parse error: {err.err}</div>}
+        {(err) => <div class={styles.agentError}>Agent exited: {err.err}</div>}
       </Match>
       <Match when={props.ev.log} keyed>
         {(log) => <div class={styles.logLine}>{log.line}</div>}

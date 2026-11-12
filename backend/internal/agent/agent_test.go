@@ -617,6 +617,13 @@ func TestExitMessage(t *testing.T) {
 			t.Errorf("ExitError = %q, want exit-code diagnostic", got)
 		}
 	})
+	t.Run("valid_names_signal", func(t *testing.T) {
+		t.Parallel()
+		exit := &ExitMessage{ExitCode: -6, Signal: 6}
+		if got := exit.ExitError(); got != "agent subprocess killed by signal 6 (aborted)" {
+			t.Errorf("ExitError = %q, want signal diagnostic", got)
+		}
+	})
 }
 
 func TestSession(t *testing.T) {

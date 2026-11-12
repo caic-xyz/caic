@@ -312,7 +312,7 @@ a.headerPR:hover {
   color: var(--color-text-muted);
 }
 
-.parseError {
+.agentError {
   padding: 0.4rem 0.6rem;
   margin-bottom: 0.25rem;
   font-size: 0.8rem;

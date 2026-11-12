@@ -377,14 +377,10 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		if m.ExitCode == 0 {
 			return nil
 		}
-		err := m.Error
-		if err == "" {
-			err = fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
-		}
 		return []v1.EventMessage{{
 			Kind:  v1.EventKindError,
 			Ts:    ts,
-			Error: &v1.EventError{Err: err},
+			Error: &v1.EventError{Err: m.ExitError()},
 		}}
 	case *agent.LogMessage:
 		return []v1.EventMessage{{

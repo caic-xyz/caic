@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -1134,6 +1135,9 @@ func (m *ExitMessage) Type() string { return messageTypeExit }
 func (m *ExitMessage) ExitError() string {
 	if m.Error != "" {
 		return m.Error
+	}
+	if m.Signal != 0 {
+		return fmt.Sprintf("agent subprocess killed by signal %d (%s)", m.Signal, syscall.Signal(m.Signal))
 	}
 	return fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
 }
