@@ -525,6 +525,14 @@ func TestBackend(t *testing.T) {
 		}
 	})
 
+	t.Run("AgentArgsSetsAutoCompactWindow", func(t *testing.T) {
+		t.Parallel()
+		got := (&Backend{}).AgentArgs(agent.HarnessArgs{})
+		if !containsArgPair(got, "--autocompact", "400000") {
+			t.Fatalf("AgentArgs = %v, want --autocompact 400000", got)
+		}
+	})
+
 	t.Run("NewExposesClaudeModelAliases", func(t *testing.T) {
 		t.Parallel()
 		got := New().ModelInventory().IDs()
