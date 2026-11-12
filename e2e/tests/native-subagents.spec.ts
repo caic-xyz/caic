@@ -59,6 +59,10 @@ for (const width of [390, 1280]) {
     await expect(duration).toBeVisible();
     const initialDuration = await duration.textContent();
     await expect(duration).not.toHaveText(initialDuration ?? "");
+    // The group's duration covers its rows, so it ticks with the running command.
+    const groupDuration = tools.locator("xpath=ancestor::details/..").getByTestId("timing-duration");
+    const initialGroupDuration = await groupDuration.textContent();
+    await expect(groupDuration).not.toHaveText(initialGroupDuration ?? "");
     await page.reload();
     await tools.click();
     await expect(lint.getByTestId("background-command-chip")).toHaveText("exit 0");

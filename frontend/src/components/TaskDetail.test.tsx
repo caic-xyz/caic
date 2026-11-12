@@ -3083,6 +3083,73 @@ it("counts a tool call as unfinished while its background command runs", async (
   expect(await screen.findByText(/^1\/2 tools: /)).toBeInTheDocument();
 });
 
+// Claude reports a detached shell as an immediate placeholder result plus a
+// folded command; Codex keeps the call open until the command returns.
+const unfinishedToolGroups: { harness: string; start: EventMessage[]; finish: (ts: number) => EventMessage }[] = [
+  {
+    harness: "claude",
+    start: [
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "lint-tool", name: "Bash", input: {}, background: true } },
+      { kind: "toolResult", ts: 1005, toolResult: { toolUseID: "lint-tool", duration: 0 } },
+      {
+        kind: "backgroundCommand",
+        ts: 1005,
+        backgroundCommand: { id: "lint", toolUseID: "lint-tool", status: "running" },
+      },
+      { kind: "toolUse", ts: 1005, toolUse: { toolUseID: "watch-tool", name: "Bash", input: {}, background: true } },
+      { kind: "toolResult", ts: 1010, toolResult: { toolUseID: "watch-tool", duration: 0 } },
+      {
+        kind: "backgroundCommand",
+        ts: 1010,
+        backgroundCommand: { id: "watch", toolUseID: "watch-tool", status: "running" },
+      },
+      { kind: "backgroundCommand", ts: 3000, backgroundCommand: { id: "lint", status: "completed" } },
+    ],
+    finish: (ts) => ({ kind: "backgroundCommand", ts, backgroundCommand: { id: "watch", status: "completed" } }),
+  },
+  {
+    harness: "codex",
+    start: [
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "lint-tool", name: "Bash", input: {} } },
+      { kind: "toolResult", ts: 3000, toolResult: { toolUseID: "lint-tool", duration: 0 } },
+      { kind: "toolUse", ts: 3000, toolUse: { toolUseID: "watch-tool", name: "Bash", input: {} } },
+    ],
+    finish: (ts) => ({ kind: "toolResult", ts, toolResult: { toolUseID: "watch-tool", duration: 0 } }),
+  },
+];
+
+for (const { harness, start, finish } of unfinishedToolGroups) {
+  it(`ticks a ${harness} tool group's duration until its last command returns`, async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    let send: ((message: EventMessage) => void) | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      send = (message) => emit(handlers, message);
+      for (const message of start) send(message);
+      return { close: vi.fn() } as unknown as EventSource;
+    });
+    const view = await renderTaskDetail({ taskId: `${harness}-group-timing`, harness });
+    try {
+      // The group's timing sits beside its disclosure, outside the rows.
+      const groupTiming = (summary: RegExp) => {
+        const item = screen.getByText(summary).closest("details")?.parentElement;
+        assert.ok(item);
+        return within(item).getByTestId("timing-duration");
+      };
+      await vi.waitFor(() => expect(groupTiming(/^1\/2 tools: /)).toHaveTextContent("0:09"));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(groupTiming(/^1\/2 tools: /)).toHaveTextContent("0:11");
+      send?.(finish(12_000));
+      await vi.waitFor(() => expect(screen.getByText(/^2\/2 tools: /)).toBeInTheDocument());
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(groupTiming(/^2\/2 tools: /)).toHaveTextContent("0:11");
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+}
+
 for (const boundary of ["compaction", "changed init"]) {
   it(`keeps carried native and background work current after ${boundary}`, async () => {
     let send: ((message: EventMessage) => void) | undefined;

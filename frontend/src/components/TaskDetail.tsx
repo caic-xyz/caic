@@ -906,9 +906,10 @@ export default function TaskDetail(props: Props) {
           <Show when={hasGroupTiming(group())}>
             <div class={styles.timedItemContent}>
               <span class={styles.messageTiming}>
-                <TimingIcon
-                  events={group().events}
-                  range={group().content?.range ?? group().tool?.range ?? group().range}
+                <GroupTiming
+                  group={group()}
+                  backgroundByToolUseID={backgroundByToolUseID}
+                  backgroundSettled={backgroundSettled}
                 />
               </span>
               <GroupContent
@@ -1027,11 +1028,12 @@ export default function TaskDetail(props: Props) {
           <div class={styles.timedItemContent}>
             <Show when={hasGroupTiming(group()) && !group().events.some((event) => event.kind === "result")}>
               <span class={styles.messageTiming}>
-                <TimingIcon
-                  events={group().events}
-                  range={group().content?.range ?? group().tool?.range ?? group().range}
+                <GroupTiming
+                  group={group()}
                   segments={group().timingSegments}
                   userWaitMs={waits()}
+                  backgroundByToolUseID={backgroundByToolUseID}
+                  backgroundSettled={backgroundSettled}
                 />
               </span>
             </Show>
@@ -1554,12 +1556,13 @@ export default function TaskDetail(props: Props) {
                               }
                             >
                               <span class={styles.messageTiming}>
-                                <TimingIcon
-                                  events={gi().group.events}
-                                  range={gi().group.content?.range ?? gi().group.tool?.range ?? gi().group.range}
+                                <GroupTiming
+                                  group={gi().group}
                                   segments={gi().group.timingSegments}
                                   userWaitMs={userWaits()}
                                   previousEventTs={previousVisualTimes()}
+                                  backgroundByToolUseID={backgroundByToolUseID}
+                                  backgroundSettled={backgroundSettled}
                                 />
                               </span>
                             </Show>
@@ -2488,6 +2491,55 @@ function ResultCard(props: {
   );
 }
 
+// toolCallRunning reports whether a tool row's duration ticks: its folded
+// background command runs, or the call itself has not returned.
+function toolCallRunning(call: ToolCall, command: HistoryActivity | undefined, settled: boolean): boolean {
+  return !settled && (command ? command.status === "running" : !call.done);
+}
+
+// toolGroupWork summarizes the commands a group's rows own beyond the group's
+// events, so the group duration covers what its rows show.
+function toolGroupWork(
+  calls: readonly ToolCall[],
+  background: ReadonlyMap<string, HistoryActivity>,
+  settled: boolean,
+): { running: boolean; end: number | undefined } {
+  let running = false;
+  let end: number | undefined;
+  for (const call of calls) {
+    const command = background.get(toolIdentity(call.source, call.use.toolUseID));
+    running ||= toolCallRunning(call, command, settled);
+    const ended = command?.endedAt ? Date.parse(command.endedAt) : Number.NaN;
+    if (ended > (end ?? 0)) end = ended;
+  }
+  return { running, end };
+}
+
+// GroupTiming times a message group, including commands its tool rows own.
+function GroupTiming(props: {
+  group: MessageGroup;
+  segments?: readonly (readonly EventMessage[])[];
+  userWaitMs?: ReadonlyMap<EventMessage, number>;
+  previousEventTs?: ReadonlyMap<EventMessage, number>;
+  backgroundByToolUseID: () => ReadonlyMap<string, HistoryActivity>;
+  backgroundSettled: () => boolean;
+}) {
+  const work = createMemo(() =>
+    toolGroupWork(props.group.toolCalls, props.backgroundByToolUseID(), props.backgroundSettled()),
+  );
+  return (
+    <TimingIcon
+      events={props.group.events}
+      range={props.group.content?.range ?? props.group.tool?.range ?? props.group.range}
+      segments={props.segments}
+      userWaitMs={props.userWaitMs}
+      previousEventTs={props.previousEventTs}
+      workEnd={work().end}
+      running={work().running}
+    />
+  );
+}
+
 function ToolMessageGroup(props: {
   toolCalls: ToolCall[];
   taskId: string;
@@ -2854,10 +2906,7 @@ function ToolCallCard(props: {
         ? Math.max(0, Date.parse(command.endedAt) - Date.parse(command.startedAt))
         : null;
     },
-    () => {
-      const command = timedCommand();
-      return !(props.backgroundSettled?.() ?? false) && (command ? command.status === "running" : !props.call.done);
-    },
+    () => toolCallRunning(props.call, timedCommand(), props.backgroundSettled?.() ?? false),
   );
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
