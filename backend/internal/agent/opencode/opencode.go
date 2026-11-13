@@ -24,6 +24,11 @@ type Backend struct{ *agentacp.Backend }
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.OpenCode, &agentacp.Config{
 		Args: []string{"opencode", "acp"},
+		// caic owns task titles. Removing OpenCode's hidden title agent skips
+		// the extra model call it makes on each session's first prompt. The
+		// inline configuration merges over the user's configuration files.
+		// https://github.com/anomalyco/opencode/blob/ba77ff9/packages/core/src/session/context.ts#L99-L101
+		Env: []string{`OPENCODE_CONFIG_CONTENT={"agent":{"title":{"disable":true}}}`},
 		// session/load needs OpenCode's persisted ~/.local/share/opencode state.
 		// Md mounts it across containers; custom storage must also stay accessible.
 		// https://opencode.ai/docs/troubleshooting/#storage

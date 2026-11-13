@@ -882,11 +882,11 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		USB:       opts.USB,
 		Sudo:      opts.Sudo,
 		Labels:    metadataLabels(opts.Metadata),
-		// baseExtraEnv keeps forks consistent with new instances: the forked
-		// container's ~/.env is rewritten from scratch, so the target harness's
-		// config env (e.g. its API keys) must be re-injected here. opts.ExtraEnv
-		// stays last so caller-set vars (e.g. GITHUB_TOKEN) win on conflict.
-		ExtraEnv:     append(b.baseExtraEnv(opts.Harness), opts.ExtraEnv...),
+		// The forked container's ~/.env is rewritten from scratch, so the target
+		// harness's config env (e.g. its API keys) must be re-injected here, as
+		// for new instances. opts.ExtraEnv stays last so caller-set vars (e.g.
+		// GITHUB_TOKEN) win on conflict.
+		ExtraEnv:     slices.Concat(b.HarnessEnv[string(opts.Harness)], opts.ExtraEnv),
 		Mounts:       mounts,
 		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
 		ExtraRunArgs: extraRunArgs,
@@ -1466,17 +1466,6 @@ var harnessMap = map[harness.Name]md.Harness{
 	harness.Pi:          md.HarnessPi,
 }
 
-// baseExtraEnv returns the ~/.env entries every instance gets: the editor
-// guards (preventing agents from spawning interactive editors during git
-// commit, git mergetool, or any command invoking $EDITOR or $GIT_EDITOR)
-// and the per-harness env vars from config.
-func (b *Backend) baseExtraEnv(h harness.Name) []string {
-	harnessEnv := b.HarnessEnv[string(h)]
-	env := make([]string, 0, 2+len(harnessEnv))
-	env = append(env, "EDITOR=true", "GIT_EDITOR=true")
-	return append(env, harnessEnv...)
-}
-
 // containerMemoryLimit reserves runtime RAM headroom outside each task container.
 func (b *Backend) containerMemoryLimit(ctx context.Context) (uint64, error) {
 	info, err := b.client.Info(ctx)
@@ -1504,7 +1493,8 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	if err != nil {
 		return nil, err
 	}
-	extraEnv := b.baseExtraEnv(opts.Harness)
+	// Clone so appends never alias the shared configuration.
+	extraEnv := slices.Clone(b.HarnessEnv[string(opts.Harness)])
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
 	}

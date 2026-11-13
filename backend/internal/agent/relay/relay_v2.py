@@ -859,7 +859,7 @@ def _configure_caic_mcp(harness: str, cmd_args: list[str]) -> list[str]:
     return cmd_args
 
 
-def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, caic_mcp):
+def serve(cmd_args, work_dir, log_stdin, strip_env, set_env, shutdown_grace, harness, caic_mcp):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -881,6 +881,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, cai
       strip_env: List of environment variable names to strip from the
         subprocess environment. Their names (values redacted) are reported in
         a stripped_env event after the first subprocess output.
+      set_env: KEY=VALUE pairs set in the subprocess environment, replacing
+        inherited values.
       shutdown_grace: Seconds to wait after SIGINT before escalating to
         SIGTERM, then SIGKILL.
       harness: Harness identity, independent of optional integrations.
@@ -986,8 +988,9 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, cai
     if pending_env:
         logging.info("stripped env vars: %s", pending_env)
 
-    # EDITOR=true prevents git commit (and similar) from opening a text editor.
-    env["EDITOR"] = "true"
+    for pair in set_env:
+        key, _, value = pair.partition("=")
+        env[key] = value
 
     # Listen before spawning the subprocess so the first client can queue its
     # connection even if the subprocess fails during startup. The queue must
@@ -1332,6 +1335,14 @@ def caic_mcp():
         sys.stdout.flush()
 
 
+def _env_pair(value):
+    """Validate one KEY=VALUE argument with a non-empty key."""
+    key, sep, _ = value.partition("=")
+    if not key or not sep:
+        raise argparse.ArgumentTypeError(f"expected KEY=VALUE, got {value!r}")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="relay_v2.py")
     sub = parser.add_subparsers(dest="mode")
@@ -1342,6 +1353,7 @@ def main() -> int:
     sa.add_argument("--harness", choices=("antigravity", "claude", "codex", "dsh", "opencode", "pi"))
     sa.add_argument("--caic-mcp", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
+    sa.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", type=_env_pair, dest="set_env")
     sa.add_argument(
         "--shutdown-grace",
         type=int,
@@ -1368,6 +1380,7 @@ def main() -> int:
             args.work_dir,
             log_stdin=not args.no_log_stdin,
             strip_env=args.strip_env,
+            set_env=args.set_env,
             shutdown_grace=args.shutdown_grace,
             harness=args.harness,
             caic_mcp=args.caic_mcp,

@@ -1147,7 +1147,7 @@ func TestBackend(t *testing.T) {
 		if src.forkOpts == nil {
 			t.Fatal("Fork options not recorded")
 		}
-		for _, want := range []string{"EDITOR=true", "GIT_EDITOR=true", "FOO=bar", "GITHUB_TOKEN=tok"} {
+		for _, want := range []string{"FOO=bar", "GITHUB_TOKEN=tok"} {
 			if !slices.Contains(src.forkOpts.ExtraEnv, want) {
 				t.Errorf("ExtraEnv missing %s: %v", want, src.forkOpts.ExtraEnv)
 			}
@@ -1216,12 +1216,6 @@ func TestBackend(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("mdStartOpts: %v", err)
-		}
-		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
-			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
-		}
-		if !slices.Contains(opts.ExtraEnv, "GIT_EDITOR=true") {
-			t.Errorf("ExtraEnv missing GIT_EDITOR=true: %v", opts.ExtraEnv)
 		}
 		if !slices.Contains(opts.ExtraEnv, "FOO=bar") {
 			t.Errorf("ExtraEnv missing harness env FOO=bar: %v", opts.ExtraEnv)

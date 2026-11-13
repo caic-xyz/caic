@@ -13,6 +13,9 @@ import (
 type Config struct {
 	// Args is the native executable and argument vector passed to the relay.
 	Args []string
+	// Env holds KEY=VALUE pairs the relay sets in the native process
+	// environment, replacing inherited values.
+	Env []string
 	// ResumeMethod selects the native method for reopening persisted sessions.
 	ResumeMethod acp.Method
 	// EffortID is the native reasoning-effort configuration option ID.

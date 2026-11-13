@@ -425,10 +425,12 @@ tts = "gemini"
 # ── AI ───────────────────────────────────────────────────────────────────────
 
 [ai]
-# LLM provider for title generation, commit descriptions, etc. Empty =
-# auto-detect in order: codex, opencode, claudecode, then any available.
+# LLM provider for task titles and CI failure summaries. Empty = auto-detect
+# in order: codex, opencode, claudecode, pi, then any available.
+# Command-line agents: "codex", "claudecode", "dsh", "antigravity", "opencode",
+# "pi". APIs: "anthropic", "gemini", "openai", "openrouter", etc.
 # https://pkg.go.dev/github.com/maruel/genai/providers
-#provider = ""  # e.g. "codex"
+#provider = ""
 
 # Model name or alias. Empty = the provider's auto-detected cheapest model.
 #model = ""  # e.g. "claude-haiku-4-5-20251001"

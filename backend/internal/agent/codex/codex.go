@@ -242,9 +242,17 @@ func codexAppServerArgs() []string {
 	// depends on actual input size, not the configured window capacity.
 	// https://learn.chatgpt.com/docs/config-file/config-reference
 	// https://learn.chatgpt.com/docs/pricing
+	//
+	// approval_policy="never" leaves the auto-review subagent nothing to review
+	// for commands, but guardian_approval defaults on and also reviews MCP
+	// elicitations, so pin both the reviewer and the feature off.
+	// https://github.com/openai/codex/blob/69231e1/codex-rs/features/src/lib.rs#L2140-L2143
+	// https://github.com/openai/codex/blob/69231e1/codex-rs/core/src/session/mcp.rs#L1173-L1197
 	return []string{
 		"codex", "--no-daemon", "app-server",
 		"-c", `approval_policy="never"`,
+		"-c", `approvals_reviewer="user"`,
+		"-c", "features.guardian_approval=false",
 		"-c", fmt.Sprintf("model_auto_compact_token_limit=%d", autoCompactTokenLimit),
 		"-c", `model_auto_compact_token_limit_scope="total"`,
 		"-c", `sandbox_mode="danger-full-access"`,

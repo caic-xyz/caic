@@ -65,6 +65,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agen
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 	}
+	for _, kv := range b.Config.Env {
+		relayArgs = append(relayArgs, "--env", kv)
+	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, agentArgs)
 	if err != nil {
 		return nil, err

@@ -934,12 +934,13 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
         _cleanup(relay_dir)
 
 
-def test_exit_and_stripped_environment_controls() -> None:
+def test_exit_and_environment_controls() -> None:
     relay_dir = tempfile.mkdtemp(prefix="caic-relay-v2-test-")
     output_path = os.path.join(relay_dir, "output.jsonl")
     release_path = os.path.join(relay_dir, "release-child")
     env = _make_env(relay_dir)
     env["CAIC_RELAY_TEST_SECRET"] = "not-persisted"
+    env["CAIC_RELAY_TEST_INHERITED"] = "inherited"
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
@@ -951,6 +952,10 @@ def test_exit_and_stripped_environment_controls() -> None:
                 relay_dir,
                 "--strip-env",
                 "CAIC_RELAY_TEST_SECRET",
+                "--env",
+                "CAIC_RELAY_TEST_SET=relay=value",
+                "--env",
+                "CAIC_RELAY_TEST_INHERITED=relay",
                 "--",
                 sys.executable,
                 "-c",
@@ -961,7 +966,9 @@ def test_exit_and_stripped_environment_controls() -> None:
                     "    if time.monotonic() >= deadline: raise SystemExit('child was not released')\n"
                     "    time.sleep(0.01)\n"
                     "print('{\"ready\":true}')\n"
-                    "raise SystemExit(2 if 'CAIC_RELAY_TEST_SECRET' in os.environ else 0)\n"
+                    "if 'CAIC_RELAY_TEST_SECRET' in os.environ: raise SystemExit(2)\n"
+                    "if os.environ.get('CAIC_RELAY_TEST_SET') != 'relay=value': raise SystemExit(3)\n"
+                    "raise SystemExit(4 if os.environ.get('CAIC_RELAY_TEST_INHERITED') != 'relay' else 0)\n"
                 ),
                 release_path,
             ],
@@ -1235,7 +1242,7 @@ def main() -> int:
         test_unlogged_stdin_is_forwarded_without_persistence,
         test_concurrent_controls_keep_destination_order_and_v3_tokens,
         test_real_relay_output_superset_no_stdin_echo_and_attach_offset,
-        test_exit_and_stripped_environment_controls,
+        test_exit_and_environment_controls,
         test_harness_caic_mcp_integrations,
         test_harness_without_caic_mcp,
         test_oom_adjusted_command,

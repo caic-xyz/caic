@@ -1041,8 +1041,11 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	}
 	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 10+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
+	sshArgs := make([]string, 0, 10+2*len(relayEnv)+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
 	sshArgs = append(sshArgs, sshHost, "PYTHONDONTWRITEBYTECODE=1", "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
+	for _, kv := range relayEnv {
+		sshArgs = append(sshArgs, "--env", kv)
+	}
 	sshArgs = append(sshArgs, relayArgs...)
 	for _, key := range opts.StripEnv {
 		sshArgs = append(sshArgs, "--strip-env", key)
@@ -1073,6 +1076,11 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	opts.Logger.InfoContext(ctx, "startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
 	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
 }
+
+// relayEnv is set in every agent's environment regardless of runtime, so
+// git commit, git mergetool, and other $EDITOR or $GIT_EDITOR users never
+// wait on an interactive editor.
+var relayEnv = []string{"EDITOR=true", "GIT_EDITOR=true"}
 
 // sshTimeoutArgs are the default SSH options for relay operations.
 var sshTimeoutArgs = []string{"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2"}

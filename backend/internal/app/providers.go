@@ -67,6 +67,15 @@ func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]s
 	return fetchers
 }
 
+// TODO: Auto-detection never selects a preferred command-line provider. Since
+// genai b8206079 (2026-10-02), every CLI provider factory rejects
+// genai.ModelCheap, which pingProvider and initProvider pass, so detection
+// falls through to the first API provider whose key is set, in random map
+// order. Task headers show the effect: titles equal to the prompt rose from
+// 19/202 tasks in 2026-08 to 210/325 in 2026-10. A fix needs a cheap model
+// per CLI provider (scoreboard rows marked Cheap; none for opencode or pi), a
+// real availability check (genai CLI providers implement no Ping and locate
+// their binary lazily), and a deterministic fallback order.
 func autoDetectLLMProvider(ctx context.Context, log *slog.Logger, coreEnv map[string]string) string {
 	preferred := []string{
 		"codex",

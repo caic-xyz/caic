@@ -68,7 +68,7 @@ func TestPrepareRelay(t *testing.T) {
 	if err := rp.Cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{RelayScriptPath, "serve-attach", "--dir", "/workspace with spaces", "--no-log-stdin", "--", "claude", "--resume", id}
+	want := []string{RelayScriptPath, "serve-attach", "--dir", "/workspace with spaces", "--no-log-stdin", "--env", "EDITOR=true", "--env", "GIT_EDITOR=true", "--", "claude", "--resume", id}
 	if got := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("remote argv = %q, want %q", got, want)
 	}

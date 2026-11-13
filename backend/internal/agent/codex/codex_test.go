@@ -193,6 +193,8 @@ exit 0
 			want := []string{
 				"codex", "--no-daemon", "app-server",
 				"-c", `approval_policy="never"`,
+				"-c", `approvals_reviewer="user"`,
+				"-c", "features.guardian_approval=false",
 				"-c", `model_auto_compact_token_limit=350000`,
 				"-c", `model_auto_compact_token_limit_scope="total"`,
 				"-c", `sandbox_mode="danger-full-access"`,
