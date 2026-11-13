@@ -39,10 +39,8 @@ logs, caches, and temporary disk spools. See the
 
 ### Professionalism
 
-After changes, run `make fix`, `make verify`, and `make test`.
-Run `make refresh-generated` after
-changing API DTOs/routes, generated SDK inputs, file-indexed source comments,
-or backend package layout.
+After changes, run `make fix`, `make verify`, and `make test`. `make fix` also
+regenerates the API SDKs, AGENTS indexes, and backend architecture docs.
 
 ### Git Hooks
 

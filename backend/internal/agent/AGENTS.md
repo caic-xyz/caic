@@ -5,7 +5,7 @@
 Runtime harness parsers ignore wire fields they do not consume. Do not add live
 unknown-field warnings or `UnmarshalJSON` overflow tracking.
 
-Use `make check-agent-logs` to delete unsupported v1/v2 task logs and detect
+Use `go run ./backend/internal/cmd/check-agent-logs` to delete unsupported v1/v2 task logs and detect
 schema drift. It strictly validates recent v3 task-log records against the corresponding genai DTOs and reports the
 DTO and provider file to update. When a wire protocol changes, update both the
 genai DTO and the command's type-dispatch registry.

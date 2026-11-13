@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Render or update deterministic frontend documentation screenshots.
+"""Render and publish deterministic frontend documentation screenshots.
 
-Update renders twice, requires both passes to match, and publishes the first.
-The tracked images encode the development container's font stack. Generate
-renders once without publishing, which is what CI runs so a stale generator
-cannot rot silently."""
+Renders twice, requires both passes to match, and publishes the first. The
+tracked images encode the development container's font stack, so publish them
+from that container."""
 
 import argparse
 import concurrent.futures
@@ -67,7 +66,7 @@ FRONTEND_SCENE_FILES = frozenset(
 VISUAL_SEED = "caic-visual-v1"
 # Playwright deletes test-results/ at the start of every run, so failed renders
 # live beside it instead of inside it: they have to survive a re-run to be
-# inspected, and CI uploads this directory when a check fails.
+# inspected.
 FAILURE_DIR = ROOT_DIR / "visual-screenshots-failures"
 MAX_LUMA_DELTA = 2
 MAX_LUMA_ERROR_PER_MILLION_PIXELS = 20
@@ -236,12 +235,13 @@ def run_frontend_spec(command: list[str], env: dict[str, str]) -> None:
     result.check_returncode()
 
 
-def render_frontend(output_dir: Path, port: int = FRONTEND_VISUAL_PORTS[0], binary: Path | None = None) -> None:
+def render_frontend(output_dir: Path, port: int, binary: Path) -> None:
     """Render the frontend visual tests into output_dir."""
     output_dir.mkdir(parents=True)
     env = os.environ.copy()
     env.update(
         {
+            "CAIC_E2E_BINARY": str(binary),
             "CAIC_E2E_OUTPUT_DIR": str(FAILURE_DIR / "playwright" / output_dir.parent.name / output_dir.name),
             "CAIC_E2E_HOST": FRONTEND_VISUAL_HOST,
             "CAIC_E2E_PORT": str(port),
@@ -253,15 +253,13 @@ def render_frontend(output_dir: Path, port: int = FRONTEND_VISUAL_PORTS[0], bina
             "TZ": "UTC",
         },
     )
-    if binary is not None:
-        env["CAIC_E2E_BINARY"] = str(binary)
     run_frontend_spec(
         ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.config.ts", *FRONTEND_SPECS, "--workers=1"],
         env,
     )
 
 
-def render_frontend_passes(first: Path, second: Path, binary: Path | None = None) -> None:
+def render_frontend_passes(first: Path, second: Path, binary: Path) -> None:
     """Render both isolated frontend passes concurrently."""
     require_available_loopback_ports(FRONTEND_VISUAL_PORTS)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -305,28 +303,15 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
     return destination
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("generate", "update"))
-    return parser.parse_args()
-
-
 def main() -> int:
-    args = parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     started = time.monotonic()
-    if args.mode == "update":
-        # Only the repeatability comparison decodes images, so this precheck
-        # belongs to update. The renderers need ffmpeg independently (the
-        # documentation screenshots are encoded to webp), so every environment
-        # that runs a renderer, including the generate target in CI, installs it.
-        for executable in ("ffmpeg", "ffprobe"):
-            if shutil.which(executable) is None:
-                print(
-                    f"{executable} is required for deterministic screenshot comparison",
-                    file=sys.stderr,
-                )
-                return 1
-        recover_images(ROOT_DIR, SCREENSHOT_DIR, partial(validate_frontend_images, expected_files=None))
+    # The renderers encode webp and the repeatability comparison decodes it.
+    for executable in ("ffmpeg", "ffprobe"):
+        if shutil.which(executable) is None:
+            print(f"{executable} is required for documentation screenshots", file=sys.stderr)
+            return 1
+    recover_images(ROOT_DIR, SCREENSHOT_DIR, partial(validate_frontend_images, expected_files=None))
 
     with tempfile.TemporaryDirectory(prefix="caic-visual-") as tmp:
         tmp_dir = Path(tmp)
@@ -336,11 +321,6 @@ def main() -> int:
         )
         first = tmp_dir / "frontend" / "first"
         second = tmp_dir / "frontend" / "second"
-        if args.mode == "generate":
-            print("Rendering frontend screenshots...")
-            render_frontend(first, binary=binary)
-            print("frontend screenshots rendered.")
-            return 0
         print("Rendering frontend screenshots (passes 1/2 and 2/2)...")
         render_frontend_passes(first, second, binary)
 
@@ -353,7 +333,7 @@ def main() -> int:
 
         publish_screenshots(first)
         print("Updated frontend screenshots.")
-    print(f"Frontend screenshots {args.mode}: {time.monotonic() - started:.2f}s")
+    print(f"Frontend screenshots update: {time.monotonic() - started:.2f}s")
     return 0
 
 

@@ -1,6 +1,6 @@
 // Generate screenshots for the documentation site.
 //
-// Run with: make screenshots-update (CI runs make screenshots-generate-frontend)
+// Run with: make screenshots-update
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
 import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";

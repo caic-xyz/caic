@@ -1,9 +1,7 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-e2e-repeat test-smoke upgrade verify screenshots-generate-frontend screenshots-update
-
-HTTP?=:2242
+.PHONY: help benchmark build coverage custom-gcl fix generate-sdks git-hooks frontend-build frontend-deps playwright-browser screenshots-update test test-e2e test-smoke upgrade verify
 
 FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
@@ -12,24 +10,16 @@ help:
 	@echo 'caic - Manage multiple coding agents'
 	@echo ''
 	@echo 'Available targets:'
-	@printf '  %-34s - %s\n' 'make fix' 'Apply every autofix, then refresh generated indexes'
-	@printf '  %-34s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
-	@printf '  %-34s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
-	@printf '  %-34s - %s\n' 'make test-e2e [SPEC=...]' 'Run Playwright end-to-end tests, or one spec (slow)'
-	@printf '  %-34s - %s\n' 'make test-e2e-repeat' 'Repeat one Playwright spec with a fresh fake backend per round'
-	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
-	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
-	@printf '  %-34s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
-	@printf '  %-34s - %s\n' 'make check-agent-logs' 'Delete v1/v2 task logs and validate recent v3 logs against genai DTOs'
-	@printf '  %-34s - %s\n' 'make build' 'Build Go server (includes frontend build)'
-	@printf '  %-34s - %s\n' 'make fake-dev' 'Run the server with fake backend (no containers)'
-	@printf '  %-34s - %s\n' 'make frontend-deps' 'Install dependencies from the frozen lockfile'
-	@printf '  %-34s - %s\n' 'make frontend-dev' 'Run frontend dev server (http://localhost:5173)'
-	@printf '  %-34s - %s\n' 'make refresh-generated' 'Regenerate API SDKs, AGENTS indexes, and backend architecture docs'
-	@printf '  %-34s - %s\n' 'make screenshots-generate-frontend' 'Render the frontend screenshots without publishing'
-	@printf '  %-34s - %s\n' 'make screenshots-update' 'Render twice and publish the documentation screenshots'
-	@printf '  %-34s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
-	@printf '  %-34s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
+	@printf '  %-36s - %s\n' 'make fix' 'Apply every autofix and regenerate SDKs, indexes, and architecture docs'
+	@printf '  %-36s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
+	@printf '  %-36s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
+	@printf '  %-36s - %s\n' 'make test-e2e [SPEC=...] [ROUNDS=N]' 'Run Playwright end-to-end tests, or one spec, N times (slow)'
+	@printf '  %-36s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
+	@printf '  %-36s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
+	@printf '  %-36s - %s\n' 'make build' 'Build Go server (includes frontend build)'
+	@printf '  %-36s - %s\n' 'make screenshots-update' 'Render twice and publish the documentation screenshots'
+	@printf '  %-36s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
+	@printf '  %-36s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
 
 # Reconcile dependencies once per Make invocation before checks start. Warm
 # frozen installs reuse pnpm's caches; missing packages require downloads.
@@ -38,10 +28,6 @@ frontend-deps:
 
 generate-sdks:
 	@go generate ./...
-
-refresh-generated: generate-sdks
-	@uv run --locked python scripts/update_agents_file_index.py
-	@uv run --locked python scripts/update_backend_architecture.py
 
 frontend-build: frontend-deps generate-sdks
 	@pnpm --silent build
@@ -76,12 +62,12 @@ verify: custom-gcl frontend-deps git-hooks
 		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
 		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && uv run --locked python scripts/update_backend_architecture.py --check'
 
-# Apply every autofix, then refresh the generated file index and architecture
-# diagram. Order matters: the stylelint fixer runs last because its
+# Regenerate the SDKs, apply every autofix, then refresh the generated file
+# index and architecture diagram. Order matters: the stylelint fixer runs last because its
 # cascade-sensitive rewrites must not be undone by another formatter, and the
 # index refresh runs after fixes so the index matches the fixed tree. Does not
 # re-check; run verify for that.
-fix: custom-gcl frontend-deps
+fix: custom-gcl frontend-deps generate-sdks
 	@./custom-gcl run --show-stats=false ./... --fix
 	@go tool golangci-lint fmt
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
@@ -94,15 +80,9 @@ fix: custom-gcl frontend-deps
 	@uv run --locked python scripts/update_agents_file_index.py
 	@uv run --locked python scripts/update_backend_architecture.py
 
-check-agent-logs:
-	@go run ./backend/internal/cmd/check-agent-logs
-
 benchmark: frontend-deps
 	@go test ./... -run '^$$' -bench . -benchmem
 	@pnpm exec tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'
-
-fake-dev: frontend-build
-	@uv run --locked python scripts/run-dev.py --http $(HTTP) --fake
 
 # Independent Go, frontend, and Python suites run after dependency installation.
 test: frontend-deps
@@ -116,11 +96,20 @@ test: frontend-deps
 # slow, needs a frontend build and the Playwright chromium build, and shares
 # backend/frontend/dist with build targets, so never run it concurrently with
 # them. CI runs it; verify and test do not. SPEC limits the run to one spec
-# and may carry Playwright options.
+# and may carry Playwright options. ROUNDS repeats the run until the first
+# failure; Playwright starts a fresh fake backend per round, so in-memory fake
+# state (device-code limits, fixtures) resets, unlike --repeat-each.
+ROUNDS ?= 1
 test-e2e: frontend-deps generate-sdks playwright-browser
+	@case "$(ROUNDS)" in \
+	  ''|*[!0-9]*|0) echo "ROUNDS must be a positive integer, got '$(ROUNDS)'"; exit 2 ;; \
+	esac
 	@pnpm --silent build
-	@pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC); \
-	status=$$?; \
+	@status=0; \
+	for round in $$(seq 1 $(ROUNDS)); do \
+	  [ $(ROUNDS) -eq 1 ] || echo "=== e2e round $$round/$(ROUNDS)"; \
+	  pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC) || { status=$$?; break; }; \
+	done; \
 	if [ $$status -ne 0 ]; then \
 	  echo ""; echo "=== Failed trace summary ==="; \
 	  uv run --locked python scripts/summarize_playwright_trace.py test-results; \
@@ -131,25 +120,6 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 	  tail -n 100 "test-results/e2e-auth-server-$$auth_port.log" 2>/dev/null; \
 	fi; \
 	exit $$status
-
-# Repeat one spec against a fresh fake backend per round. Playwright starts a
-# server per invocation, so in-memory fake state (device-code limits, fixtures)
-# resets between rounds; a plain --repeat-each keeps one server and trips those
-# limits instead of reproducing the original failure.
-ROUNDS ?= 3
-test-e2e-repeat: frontend-deps generate-sdks playwright-browser
-	@if [ -z "$(SPEC)" ]; then \
-	  echo "SPEC is required: make test-e2e-repeat SPEC=e2e/tests/<name>.spec.ts [ROUNDS=N]"; \
-	  exit 2; \
-	fi
-	@case "$(ROUNDS)" in \
-	  ''|*[!0-9]*|0) echo "ROUNDS must be a positive integer, got '$(ROUNDS)'"; exit 2 ;; \
-	esac
-	@pnpm --silent build
-	@for round in $$(seq 1 $(ROUNDS)); do \
-	  echo "=== e2e round $$round/$(ROUNDS): $(SPEC)"; \
-	  pnpm --silent exec playwright test --config e2e/playwright.config.ts $(SPEC) || exit $$?; \
-	done
 
 # Real runtime smoke tests exercise the md container path and cannot run
 # without that runtime (see the smoke build tag sources for what they need).
@@ -175,27 +145,18 @@ git-hooks:
 	    echo "core.hooksPath is '$$hooks', want scripts/hooks; run make git-hooks" >&2; exit 1; \
 	  }
 
-frontend-dev: frontend-deps
-	@pnpm --silent dev
-
 # Local behavioral tests reuse installed Chrome; CI and visuals use pinned
 # Chromium. Download only its headless shell when the shared detector needs it.
 playwright-browser: frontend-deps
 	@pnpm --silent exec tsx e2e/browser.ts --install
 
 # Browser setup and screenshot rendering must both select the bundled shell.
-screenshots-generate-frontend screenshots-update: export CAIC_E2E_VISUALS := 1
-
-# Generate only renders, which is what CI runs so a stale generator cannot rot
-# silently. The tracked images encode the development container's font stack,
-# so publish them with screenshots-update from that container.
-screenshots-generate-frontend: frontend-deps generate-sdks playwright-browser
-	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py generate
-
+# The tracked images encode the development container's font stack, so publish
+# them from that container.
+screenshots-update: export CAIC_E2E_VISUALS := 1
 screenshots-update: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py update
+	@uv run --locked python scripts/visual_screenshots.py
 
 upgrade:
 	@go get -u ./... && go mod tidy

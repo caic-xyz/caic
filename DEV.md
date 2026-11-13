@@ -51,7 +51,7 @@ fixtures resets; `--repeat-each` keeps one server and trips those limits instead
 of reproducing the failure:
 
 ```bash
-make test-e2e-repeat SPEC=e2e/tests/device-login.spec.ts ROUNDS=5
+make test-e2e SPEC=e2e/tests/device-login.spec.ts ROUNDS=5
 ```
 
 ## Profiling

@@ -35,5 +35,5 @@ DONE-step usage `PerCall`: agy sets usage once per model call, so caic prices
 it at the vendor's API rates while the result's conversation-wide usage stays
 out of the estimate.
 
-Run `make check-agent-logs` for offline DTO drift checks. Live parsers accept
+Run `go run ./backend/internal/cmd/check-agent-logs` for offline DTO drift checks. Live parsers accept
 unknown fields.

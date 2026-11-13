@@ -5,7 +5,7 @@ Shared client SDKs live here.
 ## Generated API SDKs
 
 Do not edit generated SDK files directly. Update the source declarations and
-run `make generate-sdks`.
+run `make fix`.
 
 - `caic/`: generated from `backend/internal/server/api/v1`.
 The standalone `github.com/maruel/gomode` repository owns Go Mode, MCP, voice

@@ -17,7 +17,7 @@ cd ~/src/gomode
 pnpm install
 cd ~/src/caic
 pnpm link ../gomode
-make frontend-dev
+pnpm dev
 ```
 
 The link uses local TypeScript source, including uncommitted edits. Go Mode
