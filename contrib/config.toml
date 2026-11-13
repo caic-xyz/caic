@@ -297,6 +297,8 @@ label = "Gemma 4 26B A4B"
 provider = "llamacpp"
 llamacppsrv = true
 model = "unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q4_K_XL"
+# Supports up to 262144 tokens.
+context_size = 131072
 effort = "low"
 
 # Reusable ASR/LLM/TTS stages. Prerequisites: https://github.com/maruel/gomode/blob/main/docs/VOICE_LOCAL_STACK.md.
@@ -308,6 +310,7 @@ label = "Gemma 4 E2B"
 provider = "llamacpp"
 llamacppsrv = true
 model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+context_size = 131072
 effort = "low"
 
 # External speech server (start separately):
@@ -338,12 +341,14 @@ id = "qwen"
 label = "Qwen3 ASR"
 provider = "llamacpp"
 model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
+context_size = 32768
 
 [[voice-gateway.config.asr]]
 id = "voxtral"
 label = "Voxtral Realtime"
 provider = "llamacpp"
 model = "ggml-org/Voxtral-Mini-4B-Realtime-2602-GGUF:Q4_K_M"
+context_size = 32768
 streaming = true
 
 [[voice-gateway.config.asr]]
@@ -378,6 +383,7 @@ label = "LFM3 TTS"
 provider = "llamacpp"
 model = "LiquidAI/LFM3-Audio-2B-GGUF:Q4_K_M"
 voice = "female"
+context_size = 32768
 
 [[voice-gateway.config.voice]]
 label = "llama.cpp speech with GPT 6 Luna"

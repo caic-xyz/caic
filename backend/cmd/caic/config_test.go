@@ -902,6 +902,7 @@ label="Local model"
 provider="llamacpp"
 llamacppsrv=true
 model="local-model"
+context_size=32768
 [[voice-gateway.config.tts]]
 id = "local"
 engine="openai-audio"
@@ -943,7 +944,7 @@ tts="local"
 		Realtime: []voicegateway.RealtimeConfig{{Label: "Native audio", Provider: "llamacpp", LlamaCPPServer: true, Model: "Fixture/Audio/model.gguf", CacheDir: "/tmp/audio-models", Threads: 4, Slots: 2, ContextSize: 65536, MaxOutputTokens: 2048}},
 		LLM: []voicegateway.LLMConfig{
 			{Label: "Remote chat", Provider: "openaicompatible", Remote: "https://llm.example/v1/chat/completions", Model: "chat-model", APIKeyName: "CHAT_KEY"},
-			{Label: "Local model", Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"},
+			{Label: "Local model", Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model", ContextSize: 32768},
 		},
 		Recognition: []voicegateway.ASRConfig{
 			{Label: "asr-model", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"},
@@ -953,7 +954,7 @@ tts="local"
 			{Label: "tts-model", Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"},
 			{Label: "alternate-tts", Engine: "openai-audio", Remote: "http://localhost:8084", Model: "alternate-tts", Voice: "alternate-voice"},
 		},
-		Pipelines: []voicegateway.PipelineConfig{{Label: "Speech stack", ASR: voicegateway.ASRConfig{Label: "asr-model", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, TTS: voicegateway.TTSConfig{Label: "tts-model", Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
+		Pipelines: []voicegateway.PipelineConfig{{Label: "Speech stack", ASR: voicegateway.ASRConfig{Label: "asr-model", Engine: "genai", Provider: "llamacpp", Remote: "http://localhost:8081", Model: "asr-model"}, LLM: voicegateway.LLMConfig{Label: "Local model", ModelConfig: voicegateway.ModelConfig{Provider: "llamacpp", LlamaCPPServer: true, Model: "local-model"}, ContextSize: 32768}, TTS: voicegateway.TTSConfig{Label: "tts-model", Engine: "openai-audio", Remote: "http://localhost:8082", Model: "tts-model", Voice: "voice-name"}}},
 	}
 	if !reflect.DeepEqual(cfg.Voice.Gateway.Config, want) {
 		t.Fatalf("voice config = %#v, want %#v", cfg.Voice.Gateway.Config, want)
