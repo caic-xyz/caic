@@ -4430,6 +4430,8 @@ public struct EventSubagentEnd: Codable {
 /// ID and GroupID are opaque harness identities. Optional fields remain absent
 /// when the harness did not expose them.
 public struct EventNativeSubagent: Codable {
+    /// RunID distinguishes resumed runs and sorts in execution order per ID.
+    public let runID: String?
     public let toolUseID: String?
     public let scope: EventNativeSubagentScope?
     public let id: String
@@ -4442,7 +4444,8 @@ public struct EventNativeSubagent: Codable {
     /// the parent turn, so it can outlive that turn's result.
     public let background: Bool?
 
-    public init(toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, id: String, groupID: String? = nil, label: String? = nil, prompt: String? = nil, status: EventNativeSubagentStatus, result: String? = nil, background: Bool? = nil) {
+    public init(runID: String? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, id: String, groupID: String? = nil, label: String? = nil, prompt: String? = nil, status: EventNativeSubagentStatus, result: String? = nil, background: Bool? = nil) {
+        self.runID = runID
         self.toolUseID = toolUseID
         self.scope = scope
         self.id = id
@@ -4854,6 +4857,8 @@ public struct HistoryToolTiming: Codable {
 /// ownership revisions from new actor output.
 public struct HistoryActivity: Codable {
     public let id: String
+    /// RunID distinguishes resumed runs and sorts in execution order per ID.
+    public let runID: String?
     /// SectionID identifies the body containing the earliest actual lifecycle or
     /// resolved transcript origin, including an unfinished turn carried forward.
     public let sectionID: String
@@ -4871,8 +4876,9 @@ public struct HistoryActivity: Codable {
     public let bodyThrough: Int
     public let ownershipThrough: Int
 
-    public init(id: String, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int) {
+    public init(id: String, runID: String? = nil, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int) {
         self.id = id
+        self.runID = runID
         self.sectionID = sectionID
         self.source = source
         self.toolUseID = toolUseID

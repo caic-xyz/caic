@@ -400,6 +400,8 @@ const (
 // ID and GroupID are opaque harness identities. Optional fields remain absent
 // when the harness did not expose them.
 type EventNativeSubagent struct {
+	// RunID distinguishes resumed runs and sorts in execution order per ID.
+	RunID     string                    `json:"runID,omitempty"`
 	ToolUseID string                    `json:"toolUseID,omitempty"`
 	Scope     EventNativeSubagentScope  `json:"scope,omitempty"`
 	ID        string                    `json:"id"`

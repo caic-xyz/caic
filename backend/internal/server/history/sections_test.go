@@ -28,6 +28,50 @@ import (
 
 func TestSourceSections(t *testing.T) {
 	t.Parallel()
+	t.Run("resumed transcript anchor survives routing changes and rebuilds", func(t *testing.T) {
+		t.Parallel()
+		for _, incremental := range []bool{true, false} {
+			s := newSectionIndex()
+			for i, m := range []v1.EventMessage{
+				{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusRunning}},
+				{Kind: v1.EventKindText, Ts: 2000, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "checking"}},
+				{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusCompleted}},
+				{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "002", Status: v1.EventNativeSubagentStatusRunning}},
+				{Kind: v1.EventKindNativeSubagent, Ts: 5000, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "new-route", Status: v1.EventNativeSubagentStatusRunning}},
+			} {
+				s.append(&Event{RecordID: uint64(i + 1), Message: m})
+				if incremental {
+					s.snapshot()
+				}
+			}
+			_, meta := s.snapshot()
+			for _, a := range meta.Activities {
+				if a.ID == "child" && !a.AnchorAt.Equal(time.UnixMilli(1000)) {
+					t.Fatalf("incremental=%v: anchor = %v, want original spawn", incremental, a.AnchorAt)
+				}
+			}
+		}
+	})
+	t.Run("resumed native runs reopen manifest activity", func(t *testing.T) {
+		t.Parallel()
+		s := newSectionIndex()
+		for i, m := range []v1.EventMessage{
+			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusRunning}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusCompleted}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "002", Status: v1.EventNativeSubagentStatusRunning}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusCompleted}},
+		} {
+			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+		}
+		_, meta := s.snapshot()
+		if len(meta.Activities) != 1 {
+			t.Fatalf("activities = %#v", meta.Activities)
+		}
+		a := meta.Activities[0]
+		if a.RunID != "002" || a.Status != "running" || a.EndedAt != nil || a.StartedAt == nil || !a.StartedAt.Equal(time.UnixMilli(3000)) {
+			t.Fatalf("activity = %#v, want the reopened run", a)
+		}
+	})
 	t.Run("native settings preserve session sections across restart", func(t *testing.T) {
 		t.Parallel()
 		path := writeFixture(t,

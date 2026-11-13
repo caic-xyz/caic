@@ -12,6 +12,22 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
 
+func TestNativeSubagentResumedRun(t *testing.T) {
+	t.Parallel()
+	// Claude 2.1.319 task 4V6FPSTTU000 completed a child while its shell
+	// checks ran, then woke the same child with a newer run_id.
+	observations := historyObservations(t, [][]byte{
+		[]byte(`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"001","is_backgrounded":true}`),
+		[]byte(`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Waiting for checks"}`),
+		[]byte(`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"002","is_backgrounded":true}`),
+		[]byte(`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Stale completion"}`),
+	})
+	cards, active := agenttest.FoldNativeSubagents(observations)
+	if len(cards) != 1 || cards[0].Status != agent.NativeSubagentStatusRunning || cards[0].Result != "" || active != 1 {
+		t.Fatalf("cards = %#v, active = %d, want one reopened child without its previous result", cards, active)
+	}
+}
+
 // TestNativeSubagentJokeEvidence replays the minimized Claude 2.1.270
 // recording of the standardized delegation request ("Use a native subagent to
 // tell a joke about README.md...") through the live wire parser and both task

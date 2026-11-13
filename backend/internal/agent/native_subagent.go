@@ -12,8 +12,8 @@ type NativeSubagentTimeline struct {
 // Apply records an observation. Empty identities cannot be correlated safely
 // and are ignored. Repeated observations enrich missing optional information,
 // except that a terminal observation's result upgrades an earlier interim one;
-// once terminal, a lifecycle cannot be reopened by replayed history and its result
-// is not replaced by a later terminal report.
+// terminal outcomes are retained within a run. A newer ordered RunID reopens
+// the same card; observations from older runs cannot change it.
 func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 	observed := *s
 	if observed.ID == "" {
@@ -28,6 +28,16 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 		t.byID[observed.ID] = observed
 		t.order = append(t.order, observed.ID)
 		return
+	}
+	if observed.RunID != "" {
+		if observed.RunID < old.RunID {
+			return
+		}
+		if observed.RunID != old.RunID {
+			old.RunID = observed.RunID
+			old.Status = NativeSubagentStatusUnknown
+			old.Result = ""
+		}
 	}
 	if old.ToolUseID == "" {
 		old.ToolUseID = observed.ToolUseID
@@ -97,9 +107,9 @@ func (t *NativeSubagentTimeline) Active() int {
 }
 
 // ActiveBackground returns the number of detached cards whose latest observed
-// status is running. Only a delegation the harness launched independently of
-// the parent turn can outlive that turn, so only these justify keeping a task
-// running after its trailing result. A foreground card that is still reported
+// status is running. A delegation launched independently of the parent turn can
+// outlive that turn and keep a task running after its trailing result.
+// A foreground card that is still reported
 // running then is stale or unread lifecycle evidence, not detached work.
 func (t *NativeSubagentTimeline) ActiveBackground() int {
 	active := 0
@@ -134,8 +144,7 @@ func (t *NativeSubagentTimeline) Observe(s *NativeSubagent) []Message {
 
 // BackgroundCommandTimeline folds background-command observations into one
 // stable card per harness identity. It deliberately mirrors NativeSubagentTimeline
-// instead of generalizing it: a shell command has no resumable semantics, no
-// scope, and never influences task state, so the two invariants stay separate.
+// instead of generalizing it: a shell command has no resumable semantics or scope.
 type BackgroundCommandTimeline struct {
 	byID  map[string]BackgroundCommand
 	order []string
@@ -152,6 +161,7 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 		return
 	}
 	if observed.Status != BackgroundCommandStatusRunning &&
+		observed.Status != BackgroundCommandStatusUnknown &&
 		observed.Status != BackgroundCommandStatusCompleted &&
 		observed.Status != BackgroundCommandStatusFailed &&
 		observed.Status != BackgroundCommandStatusInterrupted {
@@ -188,6 +198,28 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 		old.Status = observed.Status
 	}
 	t.byID[observed.ID] = old
+}
+
+// Active returns the number of detached commands reported as running.
+func (t *BackgroundCommandTimeline) Active() int {
+	active := 0
+	for _, s := range t.byID {
+		if s.Status == BackgroundCommandStatusRunning {
+			active++
+		}
+	}
+	return active
+}
+
+// HostExited retires active commands without claiming a successful outcome.
+// The host can no longer report whether its detached commands finished.
+func (t *BackgroundCommandTimeline) HostExited() {
+	for id, s := range t.byID {
+		if s.Status == BackgroundCommandStatusRunning {
+			s.Status = BackgroundCommandStatusUnknown
+			t.byID[id] = s
+		}
+	}
 }
 
 // Commands returns the replayed cards in first-observed order. The returned

@@ -935,12 +935,12 @@ func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking
-//   - Trailing ResultMessage and an active native subagent → StateRunning
-//   - Trailing ResultMessage (no ask, no active subagent) → StateWaiting
+//   - Trailing ResultMessage and active detached work → StateRunning
+//   - Trailing ResultMessage (no ask, no detached work) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
 // Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// NativeSubagentMessage, RawMessage) after the ResultMessage are skipped during inference. For
+// NativeSubagentMessage, BackgroundCommandMessage, RawMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
 // The owned durable prefix and live suffix remain logically contiguous without
@@ -995,6 +995,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		t.observeUsageLocked(msg)
 		if _, ok := msg.(*agent.ExitMessage); ok {
 			t.nativeSubagents.HostExited()
+			t.backgroundCommands.HostExited()
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
 		}
@@ -1011,7 +1012,6 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		case *agent.NativeSubagentMessage:
 			t.nativeSubagents.Apply(&m.Subagent)
 		case *agent.BackgroundCommandMessage:
-			// Informational only: a detached shell command never drives task state.
 			t.backgroundCommands.Apply(&m.Command)
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
@@ -1842,10 +1842,10 @@ func (t *Task) recordStateTransition(s task.State, at time.Time) {
 
 // settledTurnStateLocked returns the state a parent turn settles into once its
 // trailing ResultMessage has arrived: asking or presenting a plan when the user
-// still owes input, running while a harness-native subagent is still active
-// detached from the turn, and waiting otherwise. A harness can end the parent
-// turn when it delegates in the background, so a running background card keeps
-// the task busy after the parent stops producing output; a foreground card that
+// still owes input, running while a detached subagent or shell command is
+// active, and waiting otherwise. A harness can end the parent turn while
+// background work continues, so a running background card keeps the task busy
+// after the parent stops producing output; a foreground card that
 // is still running then is stale evidence and falls back to waiting.
 //
 // The caller must hold t.mu.
@@ -1855,7 +1855,7 @@ func (t *Task) settledTurnStateLocked() task.State {
 		return task.StateAsking
 	case lastTurnHasExitPlan(t.timelineViewLocked()) && t.planContent != "":
 		return task.StateHasPlan
-	case t.nativeSubagents.ActiveBackground() > 0:
+	case t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
 		return task.StateRunning
 	default:
 		return task.StateWaiting
@@ -1989,28 +1989,24 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// last detached child settling returns it to waiting.
 	if ns, ok := m.(*agent.NativeSubagentMessage); ok {
 		t.nativeSubagents.Apply(&ns.Subagent)
-		if lastAgentMessage(t.timelineViewLocked()) != nil {
-			switch {
-			case t.nativeSubagents.ActiveBackground() > 0 && t.state == task.StateWaiting:
-				t.setState(task.StateRunning)
-			case t.nativeSubagents.ActiveBackground() == 0 && t.state == task.StateRunning:
-				t.setState(t.settledTurnStateLocked())
-			}
-		}
 	}
 	// The root harness process hosts its native subagents, so its exit ends
 	// their observable lifecycle and they no longer keep the task running.
 	if _, ok := m.(*agent.ExitMessage); ok && !child {
 		t.nativeSubagents.HostExited()
-		if t.state == task.StateRunning && lastAgentMessage(t.timelineViewLocked()) != nil {
-			t.setState(t.settledTurnStateLocked())
-		}
+		t.backgroundCommands.HostExited()
 	}
-	// Fold detached shell activity into its card set. Unlike a background
-	// subagent, a shell command never justifies settling the task as running,
-	// so no state transition reads it.
+	// Detached shell checks keep the task busy after the agent ends its turn.
 	if bc, ok := m.(*agent.BackgroundCommandMessage); ok {
 		t.backgroundCommands.Apply(&bc.Command)
+	}
+	switch m.(type) {
+	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.ExitMessage:
+		if (t.state == task.StateWaiting || t.state == task.StateRunning) && lastAgentMessage(t.timelineViewLocked()) != nil {
+			if next := t.settledTurnStateLocked(); next != t.state {
+				t.setState(next)
+			}
+		}
 	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {

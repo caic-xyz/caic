@@ -812,6 +812,7 @@ export function validateEventNativeSubagent(raw: ValidatorInput): EventNativeSub
   if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: EventNativeSubagent.id");
   if (!Object.prototype.hasOwnProperty.call(obj, "status")) throw new TypeError("missing required field: EventNativeSubagent.status");
   return {
+    ...(Object.prototype.hasOwnProperty.call(obj, "runID") ? { runID: asString(obj["runID"], "EventNativeSubagent.runID") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "EventNativeSubagent.toolUseID") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "scope") ? { scope: (asString(obj["scope"], "EventNativeSubagent.scope") as EventNativeSubagentScope) } : {}),
     id: asString(obj["id"], "EventNativeSubagent.id"),
@@ -1194,6 +1195,7 @@ export function validateHistoryActivity(raw: ValidatorInput): HistoryActivity {
   if (!Object.prototype.hasOwnProperty.call(obj, "ownershipThrough")) throw new TypeError("missing required field: HistoryActivity.ownershipThrough");
   return {
     id: asString(obj["id"], "HistoryActivity.id"),
+    ...(Object.prototype.hasOwnProperty.call(obj, "runID") ? { runID: asString(obj["runID"], "HistoryActivity.runID") } : {}),
     sectionID: asString(obj["sectionID"], "HistoryActivity.sectionID"),
     ...(Object.prototype.hasOwnProperty.call(obj, "source") ? { source: validateEventMessageSource(obj["source"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "HistoryActivity.toolUseID") } : {}),

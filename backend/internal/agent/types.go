@@ -751,6 +751,9 @@ const (
 // GroupID are opaque harness identities. Optional fields are omitted when the
 // harness does not expose them.
 type NativeSubagent struct {
+	// RunID distinguishes resumed runs of the same identity. When exposed by
+	// the harness, run IDs must sort in execution order for that identity.
+	RunID     string               `json:"run_id,omitempty"`
 	ToolUseID string               `json:"tool_use_id,omitempty"`
 	Scope     NativeSubagentScope  `json:"scope,omitempty"`
 	ID        string               `json:"id"`
@@ -761,8 +764,7 @@ type NativeSubagent struct {
 	Result    string               `json:"result,omitempty"`
 	// Background reports that the harness launched the delegation independently
 	// of the parent turn, so it can still be running after that turn's result.
-	// Only such a card justifies keeping a task running past its trailing result;
-	// a foreground delegation always settles before the parent result arrives.
+	// A foreground delegation always settles before the parent result arrives.
 	Background bool `json:"background,omitempty"`
 }
 
@@ -780,8 +782,8 @@ func (m *NativeSubagentMessage) Type() string { return "native_subagent" }
 
 // BackgroundCommandStatus describes the lifecycle state a harness actually
 // reported for a detached shell command. The vocabulary is deliberately
-// minimal: a shell command only runs and then settles, so there is no paused
-// or unknown state and none of NativeSubagentStatus's resumable semantics.
+// minimal: a shell command runs, settles, or loses its observable host; it has
+// none of NativeSubagentStatus's resumable semantics.
 type BackgroundCommandStatus string
 
 // Terminal reports whether the status ends a background-command lifecycle.
@@ -795,6 +797,8 @@ func (s BackgroundCommandStatus) Terminal() bool {
 }
 
 const (
+	// BackgroundCommandStatusUnknown means the host exited without an outcome.
+	BackgroundCommandStatusUnknown BackgroundCommandStatus = "unknown"
 	// BackgroundCommandStatusRunning means the harness reported the command as active.
 	BackgroundCommandStatusRunning BackgroundCommandStatus = "running"
 	// BackgroundCommandStatusCompleted means the harness reported the command finished.

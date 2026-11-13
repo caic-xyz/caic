@@ -37,8 +37,8 @@ state, `completed`/`failed` settle, `killed`/`stopped`/`interrupted` are
 interruptions, and `pending` or anything unrecognized stays unknown. The Agent
 tool's `run_in_background` and a task record's `is_backgrounded`
 (`patch.is_backgrounded` repeats it) mark the card `Background`: a background
-card is the only native activity that can keep a task running after the parent
-result.
+card can keep a task running after the parent result, as can a detached shell
+command.
 
 A sanitized v3 task record proves the observable lifecycle:
 `system/task_started` carries `task_id`, `tool_use_id`, `description`,

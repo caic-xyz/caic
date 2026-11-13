@@ -9,6 +9,21 @@ import (
 
 func TestNativeSubagentTimeline(t *testing.T) {
 	t.Parallel()
+	t.Run("newer run reopens a card and rejects older runs", func(t *testing.T) {
+		t.Parallel()
+		var timeline NativeSubagentTimeline
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Status: NativeSubagentStatusCompleted, Result: "waiting"})
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "002", Status: NativeSubagentStatusRunning, Background: true})
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Status: NativeSubagentStatusCompleted, Result: "stale"})
+		cards := timeline.Subagents()
+		if len(cards) != 1 || cards[0].Status != NativeSubagentStatusRunning || cards[0].Result != "" || timeline.ActiveBackground() != 1 {
+			t.Fatalf("cards = %#v, want one active new run", cards)
+		}
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "002", Status: NativeSubagentStatusCompleted, Result: "checked"})
+		if got := timeline.Subagents()[0]; got.Result != "checked" || got.Status != NativeSubagentStatusCompleted {
+			t.Fatalf("settled card = %#v", got)
+		}
+	})
 
 	t.Run("single lifecycle preserves reported fields", func(t *testing.T) {
 		t.Parallel()

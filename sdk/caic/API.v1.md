@@ -2270,6 +2270,7 @@ when the harness did not expose them.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `runID` | `string` | RunID distinguishes resumed runs and sorts in execution order per ID. |  |
 | `toolUseID` | `string` |  |  |
 | `scope` | `EventNativeSubagentScope` |  |  |
 | `id` | `string` |  | yes |
@@ -2516,6 +2517,7 @@ ownership revisions from new actor output.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `id` | `string` |  | yes |
+| `runID` | `string` | RunID distinguishes resumed runs and sorts in execution order per ID. |  |
 | `sectionID` | `string` | SectionID identifies the body containing the earliest actual lifecycle or
 resolved transcript origin, including an unfinished turn carried forward. | yes |
 | `source` | `EventMessageSource` |  |  |

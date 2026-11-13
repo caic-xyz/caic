@@ -27,6 +27,23 @@ function event(
 }
 
 describe("NativeActivityTracker", () => {
+  it("reopens a newer native run without retaining the old result or end time", () => {
+    const tracker = new NativeActivityTracker();
+    const messages = [
+      event("child", "running", 1000, { runID: "001" }),
+      event("child", "completed", 2000, { runID: "001", result: "Waiting for tests" }),
+    ];
+    expect(tracker.derive(messages)[0]?.endedAt).toBe(2000);
+    messages.push(event("child", "running", 3000, { runID: "002" }));
+    messages.push(event("child", "completed", 4000, { runID: "001", result: "stale" }));
+    const reopened = tracker.derive(messages);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]).toMatchObject({ runID: "002", status: "running", startedAt: 3000, endedAt: null });
+    expect(reopened[0]?.result).toBeUndefined();
+    expect(new NativeActivityTracker().derive(messages)).toEqual(reopened);
+    messages.push(event("child", "completed", 5000, { runID: "002", result: "Tests passed" }));
+    expect(tracker.derive(messages)[0]).toMatchObject({ status: "completed", result: "Tests passed", endedAt: 5000 });
+  });
   it("keeps repeated delegation IDs in separate root namespaces and leaves ambiguous history unattributed", () => {
     const a: EventMessage = {
       kind: "text",

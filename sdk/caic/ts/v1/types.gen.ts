@@ -2085,6 +2085,8 @@ export interface EventSubagentEnd {
  * when the harness did not expose them.
  */
 export interface EventNativeSubagent {
+  /** RunID distinguishes resumed runs and sorts in execution order per ID. */
+  runID?: string;
   toolUseID?: string;
   scope?: EventNativeSubagentScope;
   id: string;
@@ -2313,6 +2315,8 @@ export interface HistoryToolTiming {
  */
 export interface HistoryActivity {
   id: string;
+  /** RunID distinguishes resumed runs and sorts in execution order per ID. */
+  runID?: string;
   /**
    * SectionID identifies the body containing the earliest actual lifecycle or
    * resolved transcript origin, including an unfinished turn carried forward.

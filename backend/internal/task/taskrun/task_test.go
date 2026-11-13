@@ -3609,15 +3609,79 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("BackgroundCommandState", func(t *testing.T) {
 			t.Parallel()
-			// A detached shell command is informational: it is folded into its card
-			// set, but unlike a background subagent it never justifies keeping the
-			// task running, live or replayed.
+			// Detached checks keep the task busy even when the agent turn ends.
 			command := func(id string, status agent.BackgroundCommandStatus) *agent.BackgroundCommandMessage {
 				return &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: id, Status: status}}
 			}
 			result := func() *agent.ResultMessage { return &agent.ResultMessage{MessageType: "result"} }
+			t.Run("ShellOutlivesSubagentAndHostExitRetiresIt", func(t *testing.T) {
+				t.Parallel()
+				messages := []agent.Message{
+					&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "child", Status: agent.NativeSubagentStatusRunning, Background: true}},
+					command("shell", agent.BackgroundCommandStatusRunning),
+					result(),
+					&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "child", Status: agent.NativeSubagentStatusCompleted}},
+					&agent.ExitMessage{ExitCode: -1},
+				}
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(task.StateRunning)
+				for _, m := range messages[:len(messages)-1] {
+					addTaskMessage(live, m)
+				}
+				if got := live.GetState(); got != task.StateRunning {
+					t.Fatalf("state = %v, want running while the child's shell still runs", got)
+				}
+				addTaskMessage(live, messages[len(messages)-1])
+				replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				replay.SetState(task.StateRunning)
+				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				for _, tk := range []*Task{live, replay} {
+					if tk.GetState() != task.StateWaiting || tk.backgroundCommands.Commands()[0].Status != agent.BackgroundCommandStatusUnknown {
+						t.Fatalf("state = %v, commands = %#v after host exit", tk.GetState(), tk.backgroundCommands.Commands())
+					}
+				}
+			})
+			t.Run("CommandBeforeResultAndFailureSettlement", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(task.StateRunning)
+				addTaskMessage(tk, command("shell", agent.BackgroundCommandStatusRunning))
+				addTaskMessage(tk, result())
+				if got := tk.GetState(); got != task.StateRunning {
+					t.Fatalf("state = %v, want running while the shell runs", got)
+				}
+				addTaskMessage(tk, command("shell", agent.BackgroundCommandStatusFailed))
+				if got := tk.GetState(); got != task.StateWaiting {
+					t.Fatalf("state = %v, want waiting after the shell failed", got)
+				}
+			})
+			t.Run("SameStateLifecycleKeepsStateClock", func(t *testing.T) {
+				t.Parallel()
+				for _, state := range []task.State{task.StateRunning, task.StateWaiting} {
+					t.Run(string(state), func(t *testing.T) {
+						t.Parallel()
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+						tk.SetState(task.StateRunning)
+						if state == task.StateRunning {
+							addTaskMessage(tk, command("shell", agent.BackgroundCommandStatusRunning))
+						}
+						addTaskMessage(tk, result())
+						at := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+						tk.SetStateAt(state, at)
+						addTaskMessage(tk, &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "foreground", Status: agent.NativeSubagentStatusCompleted}})
+						if state == task.StateWaiting {
+							addTaskMessage(tk, &agent.ExitMessage{ExitCode: 0})
+						} else {
+							addTaskMessage(tk, command("shell", agent.BackgroundCommandStatusRunning))
+						}
+						if snap := tk.Snapshot(); snap.State != state || !snap.StateUpdatedAt.Equal(at) {
+							t.Fatalf("state = %v at %v, want %v at %v", snap.State, snap.StateUpdatedAt, state, at)
+						}
+					})
+				}
+			})
 
-			t.Run("SeedTimelineKeepsWaitingForRunningCommand", func(t *testing.T) {
+			t.Run("SeedTimelineKeepsRunningForRunningCommand", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(task.StateRunning)
@@ -3625,18 +3689,22 @@ func TestTask(t *testing.T) {
 					result(),
 					command("shell-1", agent.BackgroundCommandStatusRunning),
 				}))
-				if got := tk.GetState(); got != task.StateWaiting {
-					t.Errorf("state = %v, want %v (a shell command never drives state)", got, task.StateWaiting)
+				if got := tk.GetState(); got != task.StateRunning {
+					t.Errorf("state = %v, want running while a detached command runs", got)
 				}
 			})
-			t.Run("LateRunningCommandAfterResultKeepsWaiting", func(t *testing.T) {
+			t.Run("LateRunningCommandAfterResultKeepsRunning", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(task.StateRunning)
 				addTaskMessage(tk, result())
 				addTaskMessage(tk, command("shell-1", agent.BackgroundCommandStatusRunning))
+				if got := tk.GetState(); got != task.StateRunning {
+					t.Errorf("state = %v, want running after the parent settled", got)
+				}
+				addTaskMessage(tk, command("shell-1", agent.BackgroundCommandStatusCompleted))
 				if got := tk.GetState(); got != task.StateWaiting {
-					t.Errorf("state = %v, want %v after the parent settled", got, task.StateWaiting)
+					t.Errorf("state = %v, want waiting after the command settled", got)
 				}
 			})
 			t.Run("CommandUpdateBetweenResultAndExitKeepsExitSpurious", func(t *testing.T) {

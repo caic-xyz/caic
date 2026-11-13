@@ -2985,6 +2985,8 @@ data class EventSubagentEnd(
  */
 @Serializable
 data class EventNativeSubagent(
+    /** RunID distinguishes resumed runs and sorts in execution order per ID. */
+    @SerialName("runID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val runID: String? = null,
     @SerialName("toolUseID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolUseID: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val scope: EventNativeSubagentScope? = null,
     val id: String,
@@ -3230,6 +3232,8 @@ data class HistoryToolTiming(
 @Serializable
 data class HistoryActivity(
     val id: String,
+    /** RunID distinguishes resumed runs and sorts in execution order per ID. */
+    @SerialName("runID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val runID: String? = null,
     /**
      * SectionID identifies the body containing the earliest actual lifecycle or
      * resolved transcript origin, including an unfinished turn carried forward.

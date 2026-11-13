@@ -460,6 +460,17 @@ func (s *sectionIndex) observeActivity(e *Event) {
 	}
 	previous := a.Status
 	if n := m.NativeSubagent; n != nil {
+		if n.RunID != "" {
+			if n.RunID < a.RunID {
+				return
+			}
+			if n.RunID != a.RunID {
+				a.RunID = n.RunID
+				a.Status = "unknown"
+				a.StartedAt = nil
+				a.EndedAt = nil
+			}
+		}
 		if a.Source.IsZero() {
 			a.Source = m.Source
 		}
@@ -503,7 +514,11 @@ func (s *sectionIndex) observeActivity(e *Event) {
 	if !at.IsZero() {
 		if a.StartedAt == nil && m.NativeSubagent != nil && m.NativeSubagent.Status == v1.EventNativeSubagentStatusRunning {
 			a.StartedAt = &at
-			s.runningPositions[id] = transcriptObservation{position: eventPosition(e), at: at}
+			// Run timing restarts, but a card with a transcript stays anchored
+			// to its first spawn across routing rebuilds.
+			if _, seen := s.runningPositions[id]; !seen {
+				s.runningPositions[id] = transcriptObservation{position: eventPosition(e), at: at}
+			}
 		}
 		if a.EndedAt == nil && m.NativeSubagent != nil && terminal(string(m.NativeSubagent.Status)) {
 			a.EndedAt = &at

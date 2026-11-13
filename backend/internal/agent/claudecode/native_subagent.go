@@ -116,6 +116,12 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 		}
 		s = agent.NativeSubagent{ID: canonicalID}
 	}
+	if ev.RunID != "" {
+		if ev.RunID < s.RunID {
+			return nil, nil
+		}
+		s.RunID = ev.RunID
+	}
 	if ev.ToolUseID != "" {
 		s.ToolUseID = ev.ToolUseID
 		key := delegationKey{sessionID: sessionID, toolUseID: ev.ToolUseID}
@@ -296,8 +302,7 @@ var exitCodePattern = regexp.MustCompile(`\(exit code (\d+)\)`)
 // backgroundCommands folds Claude's detached shell evidence into canonical
 // lifecycles. It shares the nativeSubagents adapter's decoded records but keeps
 // its own card set: a background bash command is not a subagent, and folding it
-// through the subagent timeline would feed the task state machine that only
-// detached delegations may drive.
+// through the subagent timeline would misidentify shell work as a model agent.
 // Its card set is allocated with the wire, created once per session, instead of
 // by the first record that stores a card.
 type backgroundCommands struct {

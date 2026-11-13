@@ -134,6 +134,8 @@ type HistoryToolTiming struct {
 // ownership revisions from new actor output.
 type HistoryActivity struct {
 	ID string `json:"id"`
+	// RunID distinguishes resumed runs and sorts in execution order per ID.
+	RunID string `json:"runID,omitempty"`
 	// SectionID identifies the body containing the earliest actual lifecycle or
 	// resolved transcript origin, including an unfinished turn carried forward.
 	SectionID        string                   `json:"sectionID"`

@@ -127,9 +127,12 @@ export class NativeActivityTracker {
       const s = ev.nativeSubagent;
       if (ev.kind !== "nativeSubagent" || !s?.id) continue;
       const old = this.byID.get(s.id);
-      const status = old && (nativeTerminal(old.status) || s.status === "unknown") ? old.status : s.status;
+      if (s.runID && old?.runID && s.runID < old.runID) continue;
+      const resumed = !!s.runID && s.runID !== old?.runID;
+      const status = old && !resumed && (nativeTerminal(old.status) || s.status === "unknown") ? old.status : s.status;
       const next: NativeActivity = {
         ...s,
+        runID: s.runID || old?.runID,
         source: old?.source ?? ev.source,
         messages: old?.messages,
         toolUseID: old?.toolUseID || s.toolUseID,
@@ -139,8 +142,9 @@ export class NativeActivityTracker {
         prompt: old?.prompt || s.prompt,
         // A terminal observation upgrades an interim result, but terminal
         // results do not overwrite each other.
-        result:
-          s.result && (!old?.result || (!nativeTerminal(old.status) && nativeTerminal(s.status)))
+        result: resumed
+          ? s.result
+          : s.result && (!old?.result || (!nativeTerminal(old.status) && nativeTerminal(s.status)))
             ? s.result
             : old?.result || s.result,
         status,
@@ -156,8 +160,8 @@ export class NativeActivityTracker {
                 ? ev.ts
                 : (old?.anchorTs ?? 0)
               : old.anchorTs,
-        startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
-        endedAt: old?.endedAt ?? (nativeTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
+        startedAt: (!resumed ? old?.startedAt : null) ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
+        endedAt: (!resumed ? old?.endedAt : null) ?? (nativeTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
       };
       if (
         old &&
