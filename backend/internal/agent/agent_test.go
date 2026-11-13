@@ -624,6 +624,21 @@ func TestExitMessage(t *testing.T) {
 			t.Errorf("ExitError = %q, want signal diagnostic", got)
 		}
 	})
+	t.Run("valid_names_linux_signal", func(t *testing.T) {
+		t.Parallel()
+		// Linux SIGBUS is 7; macOS uses 7 for SIGEMT.
+		exit := &ExitMessage{ExitCode: -7, Signal: 7}
+		if got := exit.ExitError(); got != "agent subprocess killed by signal 7 (bus error)" {
+			t.Errorf("ExitError = %q, want Linux signal name", got)
+		}
+	})
+	t.Run("valid_unknown_signal", func(t *testing.T) {
+		t.Parallel()
+		exit := &ExitMessage{ExitCode: -64, Signal: 64}
+		if got := exit.ExitError(); got != "agent subprocess killed by signal 64" {
+			t.Errorf("ExitError = %q, want bare signal number", got)
+		}
+	})
 }
 
 func TestSession(t *testing.T) {
