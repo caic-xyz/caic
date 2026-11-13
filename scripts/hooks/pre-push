@@ -12,6 +12,10 @@ repo_root="$(git rev-parse --show-toplevel)"
 readonly repo_root
 
 cd -- "$repo_root"
+# Git exports GIT_DIR to hooks in linked worktrees, which makes Git treat any
+# directory a check runs from as the top level. The worktree root rediscovers
+# the same repository.
+unset GIT_DIR
 
 zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
 readonly zero

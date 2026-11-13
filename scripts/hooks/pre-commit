@@ -9,4 +9,8 @@ repo_root="$(CDPATH='' cd -- "$script_dir/../.." && pwd)"
 readonly repo_root
 
 cd -- "$repo_root"
+# Git exports GIT_DIR to hooks in linked worktrees, which makes Git treat any
+# directory a check runs from as the top level. The worktree root rediscovers
+# the same repository; GIT_INDEX_FILE still selects the index being committed.
+unset GIT_DIR
 ./scripts/check-staged.sh
