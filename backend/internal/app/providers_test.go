@@ -52,6 +52,9 @@ func TestPingProvider(t *testing.T) {
 					if !slices.Contains(opts, genai.ProviderOption(genai.ModelCheap)) {
 						return nil, errors.New("model marker is required")
 					}
+					if !slices.Contains(opts, genai.ProviderOption(genai.ProviderOptionBare{})) {
+						return nil, errors.New("bare is required")
+					}
 					if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
 						return o == genai.ProviderOptionAPIKey("test-key")
 					}) {

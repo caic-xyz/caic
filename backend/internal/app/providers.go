@@ -115,13 +115,16 @@ func pingProvider(ctx context.Context, log *slog.Logger, name string, model gena
 }
 
 // newProvider constructs the named provider for model with its configured API
-// key.
+// key. Its callers only request plain completions, such as titles, CI log
+// summaries, and commit messages, so command-line providers run bare: without
+// their coding-agent prompt, tools, and user configuration.
 func newProvider(ctx context.Context, name string, model genai.ProviderOptionModel, coreEnv map[string]string) (genai.Provider, error) {
 	c, ok := providers.All[name]
 	if !ok || c.Factory == nil {
 		return nil, errors.New("unknown provider")
 	}
-	return c.Factory(ctx, appendProviderAPIKey([]genai.ProviderOption{model}, name, coreEnv)...)
+	opts := []genai.ProviderOption{model, genai.ProviderOptionBare{}}
+	return c.Factory(ctx, appendProviderAPIKey(opts, name, coreEnv)...)
 }
 
 func appendProviderAPIKey(
