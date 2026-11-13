@@ -62,12 +62,11 @@ verify: custom-gcl frontend-deps git-hooks
 		'files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files' \
 		'uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && uv run --locked python scripts/update_backend_architecture.py --check'
 
-# Regenerate the SDKs, apply every autofix, then refresh the generated file
-# index and architecture diagram. Order matters: the stylelint fixer runs last because its
-# cascade-sensitive rewrites must not be undone by another formatter, and the
-# index refresh runs after fixes so the index matches the fixed tree. Does not
-# re-check; run verify for that.
+# Order matters: stylelint fixes feed the generated CSS Module declarations,
+# which eslint type-checks TSX against, and the index and architecture refresh
+# runs last so it matches the fixed tree.
 fix: custom-gcl frontend-deps generate-sdks
+	@go mod tidy
 	@./custom-gcl run --show-stats=false ./... --fix
 	@go tool golangci-lint fmt
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
