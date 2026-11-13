@@ -25,7 +25,6 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/voicegateway/voicertc"
 	"golang.org/x/sync/errgroup"
@@ -834,32 +833,21 @@ func runtimeTaskID(ctx context.Context, inventory *runtime.Router, id runtime.ID
 }
 
 func initProvider(ctx context.Context, log *slog.Logger, cfg *server.Config) genai.Provider {
-	llmProvider := cfg.LLM.Provider
-	if !cfg.LLM.Disable && llmProvider == "" {
-		llmProvider = autoDetectLLMProvider(ctx, log, cfg.Agent.CoreEnv)
-		if llmProvider != "" {
-			log.InfoContext(ctx, "auto-detected LLM provider", "prov", llmProvider)
-		}
-	}
-
-	if cfg.LLM.Disable || llmProvider == "" {
+	if cfg.LLM.Disable {
 		return nil
 	}
-	c, ok := providers.All[llmProvider]
-	if !ok || c.Factory == nil {
-		log.WarnContext(ctx, "unknown LLM provider for title generation", "prov", llmProvider)
-		return nil
-	}
-	var opts []genai.ProviderOption
+	model := genai.ModelCheap
 	if cfg.LLM.Model != "" {
-		opts = append(opts, genai.ProviderOptionModel(cfg.LLM.Model))
-	} else {
-		opts = append(opts, genai.ModelCheap)
+		model = genai.ProviderOptionModel(cfg.LLM.Model)
 	}
-	opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv)
-	p, err := c.Factory(ctx, opts...)
-	if err != nil {
-		log.WarnContext(ctx, "LLM provider init failed", "prov", llmProvider, "err", err)
+	var p genai.Provider
+	if name := cfg.LLM.Provider; name != "" {
+		var err error
+		if p, err = newProvider(ctx, name, model, cfg.Agent.CoreEnv); err != nil {
+			log.WarnContext(ctx, "LLM provider init failed", "prov", name, "err", err)
+			return nil
+		}
+	} else if p = autoDetectLLMProvider(ctx, log, model, cfg.Agent.CoreEnv); p == nil {
 		return nil
 	}
 	log.InfoContext(ctx, "title provider initialized", "prov", p.Name(), "mdl", p.ModelID())

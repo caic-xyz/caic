@@ -426,7 +426,8 @@ tts = "gemini"
 
 [ai]
 # LLM provider for task titles and CI failure summaries. Empty = auto-detect
-# in order: codex, opencode, claudecode, pi, then any available.
+# in order: codex, claudecode, opencode, pi, antigravity, then the others by
+# name.
 # Command-line agents: "codex", "claudecode", "dsh", "antigravity", "opencode",
 # "pi". APIs: "anthropic", "gemini", "openai", "openrouter", etc.
 # https://pkg.go.dev/github.com/maruel/genai/providers

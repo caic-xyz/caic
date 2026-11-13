@@ -39,9 +39,8 @@ func TestPingProvider(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
-		want bool
 	}{
-		{name: "success", want: true},
+		{name: "success"},
 		{name: "error", err: errors.New("ping failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +49,9 @@ func TestPingProvider(t *testing.T) {
 			providers.All[name] = providers.Config{
 				APIKeyEnvVar: "TEST_KEY",
 				Factory: func(_ context.Context, opts ...genai.ProviderOption) (genai.Provider, error) {
+					if !slices.Contains(opts, genai.ProviderOption(genai.ModelCheap)) {
+						return nil, errors.New("model marker is required")
+					}
 					if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
 						return o == genai.ProviderOptionAPIKey("test-key")
 					}) {
@@ -59,11 +61,13 @@ func TestPingProvider(t *testing.T) {
 				},
 			}
 			t.Cleanup(func() { delete(providers.All, name) })
-			if got := pingProvider(t.Context(), slog.New(slog.DiscardHandler), name, nil); got != tc.want {
-				t.Errorf("pingProvider() = %v, want %v", got, tc.want)
-			}
-			if !p.closed {
-				t.Error("provider was not closed")
+			got := pingProvider(t.Context(), slog.New(slog.DiscardHandler), name, genai.ModelCheap, nil)
+			if tc.err == nil {
+				if got != p || p.closed {
+					t.Errorf("pingProvider() = %v, closed = %v, want the open provider", got, p.closed)
+				}
+			} else if got != nil || !p.closed {
+				t.Errorf("pingProvider() = %v, closed = %v, want nil and closed", got, p.closed)
 			}
 		})
 	}

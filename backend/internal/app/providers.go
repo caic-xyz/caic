@@ -4,8 +4,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,60 +70,58 @@ func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]s
 	return fetchers
 }
 
-// TODO: Auto-detection never selects a preferred command-line provider. Since
-// genai b8206079 (2026-10-02), every CLI provider factory rejects
-// genai.ModelCheap, which pingProvider and initProvider pass, so detection
-// falls through to the first API provider whose key is set, in random map
-// order. Task headers show the effect: titles equal to the prompt rose from
-// 19/202 tasks in 2026-08 to 210/325 in 2026-10. A fix needs a cheap model
-// per CLI provider (scoreboard rows marked Cheap; none for opencode or pi), a
-// real availability check (genai CLI providers implement no Ping and locate
-// their binary lazily), and a deterministic fallback order.
-func autoDetectLLMProvider(ctx context.Context, log *slog.Logger, coreEnv map[string]string) string {
+// autoDetectLLMProvider opens the first available provider: the preferred
+// subscription-backed command-line agents, then every other registered
+// provider in name order. Opening a command-line provider with a model marker
+// lists its models, which proves the CLI is installed and logged in.
+func autoDetectLLMProvider(ctx context.Context, log *slog.Logger, model genai.ProviderOptionModel, coreEnv map[string]string) genai.Provider {
 	preferred := []string{
 		"codex",
-		"opencode",
 		"claudecode",
+		"opencode",
 		"pi",
+		"antigravity",
 	}
-	for _, name := range preferred {
-		if pingProvider(ctx, log, name, coreEnv) {
-			return name
+	rest := slices.DeleteFunc(slices.Sorted(maps.Keys(providers.All)), func(name string) bool {
+		return slices.Contains(preferred, name)
+	})
+	for _, name := range slices.Concat(preferred, rest) {
+		if p := pingProvider(ctx, log, name, model, coreEnv); p != nil {
+			return p
 		}
 	}
-	for name := range providers.All {
-		if pingProvider(ctx, log, name, coreEnv) {
-			return name
-		}
-	}
-	return ""
+	return nil
 }
 
-func pingProvider(ctx context.Context, log *slog.Logger, name string, coreEnv map[string]string) bool {
-	c, ok := providers.All[name]
-	if !ok || c.Factory == nil {
-		return false
-	}
-	opts := []genai.ProviderOption{genai.ModelCheap}
-	opts = appendProviderAPIKey(opts, name, coreEnv)
-	p, err := c.Factory(ctx, opts...)
+// pingProvider opens the named provider and pings it when supported. It
+// returns nil when the provider is unavailable.
+func pingProvider(ctx context.Context, log *slog.Logger, name string, model genai.ProviderOptionModel, coreEnv map[string]string) genai.Provider {
+	p, err := newProvider(ctx, name, model, coreEnv)
 	if err != nil {
-		log.DebugContext(ctx, "provider factory failed", "prov", name, "err", err)
-		return false
+		log.DebugContext(ctx, "provider unavailable", "prov", name, "err", err)
+		return nil
 	}
-	defer func() {
-		if err := p.Close(); err != nil {
-			log.WarnContext(ctx, "close detected provider", "prov", name, "err", err)
-		}
-	}()
 	if pinger, ok := p.(genai.ProviderPing); ok {
 		if err := pinger.Ping(ctx); err != nil {
 			log.DebugContext(ctx, "provider ping failed", "prov", name, "err", err)
-			return false
+			if err := p.Close(); err != nil {
+				log.WarnContext(ctx, "close detected provider", "prov", name, "err", err)
+			}
+			return nil
 		}
 	}
 	log.InfoContext(ctx, "provider detected", "prov", name)
-	return true
+	return p
+}
+
+// newProvider constructs the named provider for model with its configured API
+// key.
+func newProvider(ctx context.Context, name string, model genai.ProviderOptionModel, coreEnv map[string]string) (genai.Provider, error) {
+	c, ok := providers.All[name]
+	if !ok || c.Factory == nil {
+		return nil, errors.New("unknown provider")
+	}
+	return c.Factory(ctx, appendProviderAPIKey([]genai.ProviderOption{model}, name, coreEnv)...)
 }
 
 func appendProviderAPIKey(
