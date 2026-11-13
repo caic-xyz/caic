@@ -422,6 +422,10 @@ func (s *sectionIndex) observeActivity(e *Event) {
 			}
 		}
 	}
+	if m.Error != nil && !historyChild(&m.Source) {
+		s.hostExited(historyTime(m.Ts))
+		return
+	}
 	id := ""
 	switch {
 	case m.NativeSubagent != nil:
@@ -514,6 +518,34 @@ func (s *sectionIndex) observeActivity(e *Event) {
 		}
 	}
 	s.activities[id] = a
+}
+
+// hostExited folds a failed root harness process exit. The process hosts its
+// native subagents and detached commands, so no further lifecycle report can
+// arrive for a running one; its outcome becomes unknown rather than invented.
+// A clean exit emits no event and leaves running cards untouched.
+func (s *sectionIndex) hostExited(at time.Time) {
+	for id := range s.activities {
+		a := s.activities[id]
+		if a.Status != string(v1.EventNativeSubagentStatusRunning) {
+			continue
+		}
+		a.Status = string(v1.EventNativeSubagentStatusUnknown)
+		if !at.IsZero() {
+			if _, hasTranscript := s.transcripts[id]; !hasTranscript {
+				a.AnchorAt = at
+			}
+			s.lifecycleAnchors[id] = at
+		}
+		s.activities[id] = a
+		s.revision++
+	}
+	for i := range s.backgroundCommands {
+		if c := &s.backgroundCommands[i]; c.Status == "running" {
+			c.Status = "unknown"
+			s.revision++
+		}
+	}
 }
 
 // observeBackgroundCommand folds one detached-command lifecycle observation.

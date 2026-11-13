@@ -3497,6 +3497,30 @@ func TestTask(t *testing.T) {
 					t.Errorf("state = %v, want %v after the last subagent settled", got, task.StateWaiting)
 				}
 			})
+			t.Run("HostExitSettlesBackgroundSubagent", func(t *testing.T) {
+				t.Parallel()
+				// The harness process hosts its subagents: after it exits, no
+				// lifecycle report can arrive, so the task must not stay running.
+				exit := func() *agent.ExitMessage { return &agent.ExitMessage{MessageType: "exit", ExitCode: -1, Signal: 6} }
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(task.StateRunning)
+				addTaskMessage(live, native("child-1", agent.NativeSubagentStatusRunning))
+				addTaskMessage(live, result())
+				addTaskMessage(live, exit())
+				if got := live.GetState(); got != task.StateWaiting {
+					t.Errorf("live state = %v, want %v after the host exited", got, task.StateWaiting)
+				}
+				replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				replay.SetState(task.StateRunning)
+				replay.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+					native("child-1", agent.NativeSubagentStatusRunning),
+					result(),
+					exit(),
+				}))
+				if got := replay.GetState(); got != task.StateWaiting {
+					t.Errorf("replay state = %v, want %v after the host exited", got, task.StateWaiting)
+				}
+			})
 			t.Run("ResultAnchorsLiveDeltaAtResult", func(t *testing.T) {
 				t.Parallel()
 				// Duration covers the turn that just settled, so the live delta must

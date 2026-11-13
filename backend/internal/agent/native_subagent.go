@@ -61,6 +61,19 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 	t.byID[observed.ID] = old
 }
 
+// HostExited records that the root harness process ended. Every running card
+// becomes unknown: its host can no longer report an outcome, and the exit
+// proves neither completion nor interruption. Unknown is not terminal, so a
+// later running observation from a resumed host reopens the card.
+func (t *NativeSubagentTimeline) HostExited() {
+	for _, id := range t.order {
+		if s := t.byID[id]; s.Status == NativeSubagentStatusRunning {
+			s.Status = NativeSubagentStatusUnknown
+			t.byID[id] = s
+		}
+	}
+}
+
 // Subagents returns the replayed cards in first-observed order. The returned
 // slice is independent of the timeline's internal ordering.
 func (t *NativeSubagentTimeline) Subagents() []NativeSubagent {

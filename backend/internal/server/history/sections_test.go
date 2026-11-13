@@ -935,6 +935,44 @@ func TestSectionIndex(t *testing.T) {
 			t.Fatal("manifest retained transcript payload")
 		}
 	})
+	t.Run("root exit ends running lifecycles with unknown outcome", func(t *testing.T) {
+		t.Parallel()
+		s := newSectionIndex()
+		child := v1.EventMessageSource{AgentID: "done"}
+		for i, m := range []v1.EventMessage{
+			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "running", Status: v1.EventNativeSubagentStatusRunning, Background: true}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "done", Status: v1.EventNativeSubagentStatusRunning}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "done", Status: v1.EventNativeSubagentStatusCompleted}},
+			{Kind: v1.EventKindBackgroundCommand, Ts: 2000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "watch", Status: "running"}},
+			// A child's own exit does not end its siblings.
+			{Kind: v1.EventKindError, Ts: 2500, Source: child, Error: &v1.EventError{Err: "child exited"}},
+			{Kind: v1.EventKindError, Ts: 3000, Error: &v1.EventError{Err: "agent subprocess killed by signal 6 (aborted)"}},
+		} {
+			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+		}
+		_, meta := s.snapshot()
+		statuses := map[string]string{}
+		for _, a := range meta.Activities {
+			statuses[a.ID] = a.Status
+			if a.ID == "running" && !a.AnchorAt.Equal(time.UnixMilli(3000).UTC()) {
+				t.Errorf("running anchor = %v, want the exit time", a.AnchorAt)
+			}
+		}
+		if want := map[string]string{"running": "unknown", "done": "completed"}; !reflect.DeepEqual(statuses, want) {
+			t.Fatalf("activity statuses = %v, want %v", statuses, want)
+		}
+		if len(meta.BackgroundCommands) != 1 || meta.BackgroundCommands[0].Status != "unknown" {
+			t.Fatalf("background commands = %#v", meta.BackgroundCommands)
+		}
+		// A resumed host reporting the card again reopens it.
+		s.append(&Event{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "running", Status: v1.EventNativeSubagentStatusRunning}}})
+		_, meta = s.snapshot()
+		for _, a := range meta.Activities {
+			if a.ID == "running" && a.Status != "running" {
+				t.Fatalf("reopened status = %q, want running", a.Status)
+			}
+		}
+	})
 	t.Run("background commands fold outside native activities", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()

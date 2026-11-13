@@ -994,6 +994,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		t.sessionMetadata.Apply(msg)
 		t.observeUsageLocked(msg)
 		if _, ok := msg.(*agent.ExitMessage); ok {
+			t.nativeSubagents.HostExited()
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
 		}
@@ -1995,6 +1996,14 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 			case t.nativeSubagents.ActiveBackground() == 0 && t.state == task.StateRunning:
 				t.setState(t.settledTurnStateLocked())
 			}
+		}
+	}
+	// The root harness process hosts its native subagents, so its exit ends
+	// their observable lifecycle and they no longer keep the task running.
+	if _, ok := m.(*agent.ExitMessage); ok && !child {
+		t.nativeSubagents.HostExited()
+		if t.state == task.StateRunning && lastAgentMessage(t.timelineViewLocked()) != nil {
+			t.setState(t.settledTurnStateLocked())
 		}
 	}
 	// Fold detached shell activity into its card set. Unlike a background

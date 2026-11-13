@@ -122,6 +122,32 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		}
 	})
 
+	t.Run("HostExited ends running cards without inventing an outcome", func(t *testing.T) {
+		t.Parallel()
+		var timeline NativeSubagentTimeline
+		timeline.Apply(&NativeSubagent{ID: "running", Status: NativeSubagentStatusRunning, Background: true})
+		timeline.Apply(&NativeSubagent{ID: "paused", Status: NativeSubagentStatusPaused, Background: true})
+		timeline.Apply(&NativeSubagent{ID: "done", Status: NativeSubagentStatusCompleted, Background: true})
+		timeline.HostExited()
+		cards := timeline.Subagents()
+		statuses := make([]NativeSubagentStatus, 0, len(cards))
+		for _, s := range cards {
+			statuses = append(statuses, s.Status)
+		}
+		want := []NativeSubagentStatus{NativeSubagentStatusUnknown, NativeSubagentStatusPaused, NativeSubagentStatusCompleted}
+		if !slices.Equal(statuses, want) {
+			t.Fatalf("statuses = %v, want %v", statuses, want)
+		}
+		if got := timeline.ActiveBackground(); got != 0 {
+			t.Fatalf("ActiveBackground() = %d, want 0 after the host exited", got)
+		}
+		// A resumed host that reports the card running again reopens it.
+		timeline.Apply(&NativeSubagent{ID: "running", Status: NativeSubagentStatusRunning})
+		if got := timeline.ActiveBackground(); got != 1 {
+			t.Fatalf("ActiveBackground() = %d, want 1 after a new running report", got)
+		}
+	})
+
 	t.Run("partial observability remains unknown instead of active", func(t *testing.T) {
 		t.Parallel()
 		var timeline NativeSubagentTimeline
