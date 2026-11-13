@@ -44,7 +44,8 @@ const (
 	// builds and browsers while bounding runaway process creation.
 	//
 	// TODO: Probably move to md.
-	containerPIDsLimit = "4096"
+	// TODO: Make the container PID limit configurable per user.
+	containerPIDsLimit = "8192"
 
 	// Reserve runtime RAM headroom for processes outside each task container.
 	// TODO: Make the container memory percentage configurable per user.
