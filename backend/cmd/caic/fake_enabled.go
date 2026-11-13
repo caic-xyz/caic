@@ -98,7 +98,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	visualFixtures := os.Getenv(visualFixturesEnv) == "1"
 	names := [2]string{"clone", "clone2"}
 	if visualFixtures {
-		// Settings captures must stay identical after committing the baselines.
+		// Settings captures must not change with the build version.
 		cfg.Version = "0.0.0"
 		// Host gh credentials must not enable live release checks or updates.
 		cfg.GitHub.Token = ""

@@ -269,8 +269,13 @@ export default function TaskList(props: TaskListProps) {
     });
   });
 
-  // Keep the selected task summary visible when navigation changes the detail pane.
+  // A task URL can resolve before the task stream lists it; the card appears later.
+  const selectedTaskListed = createMemo(() => props.tasks().some((t) => t.id === props.selectedId));
+
+  // Keep the selected task summary visible when navigation changes the detail
+  // pane or its card first appears, but not on later task updates.
   createEffect(() => {
+    selectedTaskListed();
     scrollSelectedTaskIntoView();
   });
 

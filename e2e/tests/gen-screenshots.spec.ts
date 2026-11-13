@@ -1,6 +1,6 @@
 // Generate screenshots for the documentation site.
 //
-// Run with: make screenshots-check (or make screenshots-update to accept changes)
+// Run with: make screenshots-update (CI runs make screenshots-generate-frontend)
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
 import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
@@ -645,6 +645,20 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.goto(`/task/@${id1}/stats`);
   await expect(page.getByTestId("resource-charts")).toBeVisible();
   await expect(page.getByTestId("task-analytics-charts")).toBeVisible();
+  // The list scrolls the selected card into view a frame after the tasks load.
+  const statsTaskCard = page.locator(`[data-task-id="${id1}"]`);
+  await expect
+    .poll(() =>
+      statsTaskCard.evaluate((card) => {
+        const list = card.closest("[data-testid='task-list']");
+        if (!list) throw new Error("selected task card is outside the task list");
+        const cardBox = card.getBoundingClientRect();
+        const listBox = list.getBoundingClientRect();
+        // Fractional card heights can end a subpixel past the scrollport.
+        return cardBox.top >= listBox.top - 1 && cardBox.bottom <= listBox.bottom + 1;
+      }),
+    )
+    .toBe(true);
   await captureScreenshot(page, "desktop", "task-stats.png");
   await page.setViewportSize({ width: 390, height: 844 });
   await captureScreenshot(page, "mobile", "task-stats.png");

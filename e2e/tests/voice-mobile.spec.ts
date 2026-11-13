@@ -161,7 +161,7 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
   await overlay.getByRole("tab", { name: "Select parts", exact: true }).click();
   await expect(choice).toHaveValue("text");
-  await expect(overlay.getByRole("alert")).toBeEmpty();
+  await expect(overlay.getByRole("alert")).toHaveCount(0);
   await overlay.getByRole("button", { name: "Close voice settings", exact: true }).click();
   includeTextChoice = false;
   await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();

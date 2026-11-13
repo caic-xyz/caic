@@ -248,6 +248,21 @@ describe("TaskList", () => {
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
   });
 
+  it("scrolls to a selected task that arrives after the selection", () => {
+    const [tasks, setTasks] = createSignal([task("1")]);
+    renderList(() => <TaskList {...taskListProps([])} tasks={tasks} selectedId="2" />);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    setTasks([task("1"), task("2")]);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
+    scrollIntoView.mockClear();
+
+    // Later updates must not pull a list the user scrolled back to the selection.
+    setTasks([task("1"), { ...task("2"), state: "waiting" }, task("3")]);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("keeps the selected task visible when the open sidebar resizes", async () => {
     renderList(() => <TaskList {...taskListProps([task("1"), task("2")])} selectedId="2" />);
 

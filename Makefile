@@ -1,7 +1,7 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-e2e-repeat test-smoke upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-e2e-repeat test-smoke upgrade verify screenshots-generate-frontend screenshots-update
 
 HTTP?=:2242
 
@@ -26,9 +26,8 @@ help:
 	@printf '  %-34s - %s\n' 'make frontend-deps' 'Install dependencies from the frozen lockfile'
 	@printf '  %-34s - %s\n' 'make frontend-dev' 'Run frontend dev server (http://localhost:5173)'
 	@printf '  %-34s - %s\n' 'make refresh-generated' 'Regenerate API SDKs, AGENTS indexes, and backend architecture docs'
-	@printf '  %-34s - %s\n' 'make screenshots-check' 'Verify deterministic frontend screenshots'
-	@printf '  %-34s - %s\n' 'make screenshots-generate-frontend' 'Render the frontend screenshots without comparing'
-	@printf '  %-34s - %s\n' 'make screenshots-update' 'Explicitly update deterministic screenshot baselines'
+	@printf '  %-34s - %s\n' 'make screenshots-generate-frontend' 'Render the frontend screenshots without publishing'
+	@printf '  %-34s - %s\n' 'make screenshots-update' 'Render twice and publish the documentation screenshots'
 	@printf '  %-34s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
 	@printf '  %-34s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
 
@@ -185,19 +184,11 @@ playwright-browser: frontend-deps
 	@pnpm --silent exec tsx e2e/browser.ts --install
 
 # Browser setup and screenshot rendering must both select the bundled shell.
-screenshots-check screenshots-generate-frontend screenshots-update: export CAIC_E2E_VISUALS := 1
+screenshots-generate-frontend screenshots-update: export CAIC_E2E_VISUALS := 1
 
-# Slow, maintainer-only: renders frontend visuals twice and
-# compares decoded pixels against tracked baselines that encode the
-# development container's font stack.
-screenshots-check: frontend-deps generate-sdks playwright-browser
-	@pnpm --silent build
-	@uv run --locked python scripts/visual_screenshots.py check
-
-# Platform-specific variants. Check compares against the tracked baselines, which
-# encode the development container's font stack, so it is a maintainer check.
 # Generate only renders, which is what CI runs so a stale generator cannot rot
-# silently without pretending the baselines are portable.
+# silently. The tracked images encode the development container's font stack,
+# so publish them with screenshots-update from that container.
 screenshots-generate-frontend: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
 	@uv run --locked python scripts/visual_screenshots.py generate

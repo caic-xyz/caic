@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Render, check, or update deterministic frontend documentation screenshots.
+"""Render or update deterministic frontend documentation screenshots.
 
-Baseline comparison is a maintainer check: the tracked images encode the
-development container's font stack, so comparing renders from a different host
-reports typeface differences that are not product regressions. The generate mode
-renders without comparing, which is what CI gates so a stale generator cannot
-rot silently."""
+Update renders twice, requires both passes to match, and publishes the first.
+The tracked images encode the development container's font stack. Generate
+renders once without publishing, which is what CI runs so a stale generator
+cannot rot silently."""
 
 import argparse
 import concurrent.futures
@@ -25,7 +24,7 @@ from screenshot_publish import publish_images, recover_images, validate_images
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_VISUAL_PORTS = (41741, 41742)
 FRONTEND_VISUAL_HOST = "127.0.0.1"
-BASELINE_DIR = ROOT_DIR / "e2e" / "screenshots" / "frontend"
+SCREENSHOT_DIR = ROOT_DIR / "e2e" / "screenshots" / "frontend"
 IMAGE_SUFFIXES = frozenset({".avif", ".png", ".webp"})
 # Every declared documentation scene is required, including prompt and animation captures.
 FRONTEND_SCENE_FILES = frozenset(
@@ -285,14 +284,12 @@ def validate_frontend_images(directory: Path, expected_files: frozenset[str] | N
     validate_images(directory, expected_files, IMAGE_SUFFIXES, image_dimensions)
 
 
-def replace_baselines(source_dir: Path, baseline_dir: Path) -> None:
+def publish_screenshots(source_dir: Path) -> None:
     """Publish validated frontend images while retaining recoverable prior images."""
-    if baseline_dir != BASELINE_DIR:
-        raise RuntimeError("Only the managed frontend baseline directory may be published")
     publish_images(
         source_dir,
         ROOT_DIR,
-        baseline_dir,
+        SCREENSHOT_DIR,
         partial(validate_frontend_images, expected_files=FRONTEND_SCENE_FILES),
         partial(validate_frontend_images, expected_files=None),
     )
@@ -310,18 +307,18 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("check", "update", "generate"))
+    parser.add_argument("mode", choices=("generate", "update"))
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     started = time.monotonic()
-    if args.mode != "generate":
-        # Only the comparison modes decode images, so this precheck belongs to
-        # them. The renderers need ffmpeg independently (the documentation
-        # screenshots are encoded to webp), so every environment that runs a
-        # renderer, including the generate targets in CI, installs it.
+    if args.mode == "update":
+        # Only the repeatability comparison decodes images, so this precheck
+        # belongs to update. The renderers need ffmpeg independently (the
+        # documentation screenshots are encoded to webp), so every environment
+        # that runs a renderer, including the generate target in CI, installs it.
         for executable in ("ffmpeg", "ffprobe"):
             if shutil.which(executable) is None:
                 print(
@@ -329,11 +326,7 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 1
-
-    if args.mode == "check":
-        validate_frontend_images(BASELINE_DIR)
-    elif args.mode == "update":
-        recover_images(ROOT_DIR, BASELINE_DIR, partial(validate_frontend_images, expected_files=None))
+        recover_images(ROOT_DIR, SCREENSHOT_DIR, partial(validate_frontend_images, expected_files=None))
 
     with tempfile.TemporaryDirectory(prefix="caic-visual-") as tmp:
         tmp_dir = Path(tmp)
@@ -358,18 +351,8 @@ def main() -> int:
             print(f"Failed render artifacts: {artifacts}", file=sys.stderr)
             return 1
 
-        if args.mode == "check":
-            differences = compare_images(first, BASELINE_DIR, "frontend baseline")
-            if differences:
-                print("\n".join(differences), file=sys.stderr)
-                artifacts = preserve_failure("frontend", first, second)
-                print(f"Failed render artifacts: {artifacts}", file=sys.stderr)
-                print("Run 'make screenshots-update' to accept intentional changes.", file=sys.stderr)
-                return 1
-            print("frontend screenshots are deterministic and match their baselines.")
-        else:
-            replace_baselines(first, BASELINE_DIR)
-            print("Updated frontend screenshot baselines.")
+        publish_screenshots(first)
+        print("Updated frontend screenshots.")
     print(f"Frontend screenshots {args.mode}: {time.monotonic() - started:.2f}s")
     return 0
 
