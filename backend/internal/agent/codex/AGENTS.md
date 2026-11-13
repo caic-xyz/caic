@@ -97,6 +97,7 @@ Documentation:
 - https://developers.openai.com/codex/cli/reference: CLI reference
 - https://developers.openai.com/api/docs/guides/prompt-caching: prompt-cache behavior and retention
 - https://developers.openai.com/api/reference/cli/resources/responses/methods/create: prompt-cache options, retention, and usage fields
+- https://community.openai.com/t/28-days-of-quality-of-life-improvements-and-or-a-full-reset/1403525/85: 12-hour default prompt caching in Codex
 
 ## Prompt Cache Controls
 
@@ -107,6 +108,11 @@ OpenAI service therefore selects the default from the model, organization, and
 data-retention policy. Authentication and endpoint environment variables may
 change which account or provider handles a request, but they are not TTL
 controls and must not be interpreted as an applied cache duration.
+
+OpenAI announced on 2026-10-21 that Codex and ChatGPT Work enable 12-hour
+prompt caching by default:
+https://community.openai.com/t/28-days-of-quality-of-life-improvements-and-or-a-full-reset/1403525/85
+The announcement is a service policy, not a per-response report.
 
 Do not confuse the Codex model-catalog cache with model prompt caching.
 `DEFAULT_MODEL_CACHE_TTL = 300` and the behavior changed by

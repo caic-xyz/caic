@@ -418,9 +418,18 @@ func normalizeUsage(u *claudecode.MsgUsage) agent.Usage {
 		CacheReadInputTokens:     int(u.CacheReadInputTokens),
 		ReasoningOutputTokens:    int(u.OutputTokensDetails.ThinkingTokens),
 	}
+	// A stream_event message_delta omits the top-level breakdown and reports
+	// it only per iteration; iterations partition the top-level totals.
+	created := u.CacheCreation
+	if created.IsZero() {
+		for i := range u.Iterations {
+			created.Ephemeral1hInputTokens += u.Iterations[i].CacheCreation.Ephemeral1hInputTokens
+			created.Ephemeral5mInputTokens += u.Iterations[i].CacheCreation.Ephemeral5mInputTokens
+		}
+	}
 	usage.CacheWrites = tokens.NewCacheWrites(int64(usage.CacheCreationInputTokens), 0,
-		tokens.CacheWrite{TTL: time.Hour, Tokens: int64(u.CacheCreation.Ephemeral1hInputTokens)},
-		tokens.CacheWrite{TTL: 5 * time.Minute, Tokens: int64(u.CacheCreation.Ephemeral5mInputTokens)})
+		tokens.CacheWrite{TTL: time.Hour, Tokens: int64(created.Ephemeral1hInputTokens)},
+		tokens.CacheWrite{TTL: 5 * time.Minute, Tokens: int64(created.Ephemeral5mInputTokens)})
 
 	// Claude Code normally gives a subscription's main conversation a one-hour
 	// cache. Named subagents have separate five-minute caches. A fork can read
@@ -435,9 +444,9 @@ func normalizeUsage(u *claudecode.MsgUsage) agent.Usage {
 	// https://platform.claude.com/docs/en/build-with-claude/prompt-caching#1-hour-cache-duration
 	// Wire schema: https://github.com/maruel/genai/blob/main/providers/claudecode/dto.go
 	// A mixed response has both durations, so its first expiry is five minutes.
-	if u.CacheCreation.Ephemeral5mInputTokens > 0 {
+	if created.Ephemeral5mInputTokens > 0 {
 		usage.CacheTTLSeconds = 300
-	} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
+	} else if created.Ephemeral1hInputTokens > 0 {
 		usage.CacheTTLSeconds = 3600
 	}
 	return usage

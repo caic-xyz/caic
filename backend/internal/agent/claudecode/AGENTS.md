@@ -100,7 +100,9 @@ caching by forwarding, rejecting, or removing `cache_control` fields.
 Do not infer an applied TTL from any setting, environment variable,
 authentication method, or agent role. Populate `agent.Usage.CacheTTLSeconds`
 only from the response's `cache_creation.ephemeral_5m_input_tokens` and
-`cache_creation.ephemeral_1h_input_tokens` fields.
+`cache_creation.ephemeral_1h_input_tokens` fields. A `message_delta` stream
+event omits the top-level `cache_creation` and reports it per entry of
+`iterations`.
 
 ## Widget Plugin
 
