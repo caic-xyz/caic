@@ -141,7 +141,7 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   const overlay = page.getByTestId("voice-overlay");
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
   await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
-  await overlay.getByRole("tab", { name: "Select parts", exact: true }).click();
+  await overlay.getByRole("radio", { name: "Separate stages", exact: true }).check();
   const choice = overlay.getByRole("combobox", { name: "Language model", exact: true });
   await expect(choice).toBeEnabled();
   await expect(choice).toHaveValue("text");
@@ -152,20 +152,17 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   await page.screenshot({ path: test.info().outputPath("voice-parts-mobile.png") });
   await page.reload();
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
-  await expect(overlay.getByRole("tab", { name: "Select parts", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(overlay.getByRole("radio", { name: "Separate stages", exact: true })).toBeChecked();
   await expect(choice).toHaveValue("text");
-  await overlay.getByRole("tab", { name: "All-in-one model", exact: true }).click();
+  await overlay.getByRole("radio", { name: "All-in-one", exact: true }).check();
   await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
-  await overlay.getByRole("tab", { name: "Select parts", exact: true }).click();
+  await overlay.getByRole("radio", { name: "Separate stages", exact: true }).check();
   await expect(choice).toHaveValue("text");
   await expect(overlay.getByRole("alert")).toHaveCount(0);
   await overlay.getByRole("button", { name: "Close voice settings", exact: true }).click();
   includeTextChoice = false;
   await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();
-  const failure = overlay.getByText("The selected voice choice is unavailable. Choose another voice choice.", {
+  const failure = overlay.getByText("The voice gateway has no model for the selected recognition and speech output", {
     exact: true,
   });
   await expect(failure.filter({ visible: true })).toHaveCount(1);
