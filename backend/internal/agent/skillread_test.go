@@ -75,8 +75,8 @@ func TestSkillFromPath(t *testing.T) {
 
 func TestSkillsFromCommand(t *testing.T) {
 	t.Parallel()
-	codeQuality := agent.SkillFile{Name: "code-quality", Path: ""}
-	review := agent.SkillFile{Name: "review", Path: ""}
+	codeQuality := agent.SkillFile{Name: "code-quality", Path: "~/.agents/skills/code-quality/SKILL.md"}
+	review := agent.SkillFile{Name: "review", Path: "~/.agents/skills/review/SKILL.md"}
 
 	data := []struct {
 		name string
@@ -135,7 +135,7 @@ func TestSkillsFromCommand(t *testing.T) {
 		{
 			name: "pipeline in a semicolon list",
 			in:   "cat ~/.claude/skills/phased-implementation-planning/SKILL.md | sed -n 1,20p; cd ~/src/gomode && cat docs/PLAN.md",
-			want: []agent.SkillFile{{Name: "phased-implementation-planning"}},
+			want: []agent.SkillFile{{Name: "phased-implementation-planning", Path: "~/.claude/skills/phased-implementation-planning/SKILL.md"}},
 		},
 		// The next four inputs are recorded from real harness sessions: Codex,
 		// Claude Code, and Pi batch reads into one command, and OpenCode reads a
@@ -148,7 +148,10 @@ func TestSkillsFromCommand(t *testing.T) {
 		{
 			name: "recorded claude code semicolon list",
 			in:   "cat ~/.claude/skills/web-frontend-quality/SKILL.md; ls ~/.claude/skills/web-frontend-quality ~/.claude/skills/procedural-music-generation; cat ~/.claude/skills/procedural-music-generation/SKILL.md",
-			want: []agent.SkillFile{{Name: "web-frontend-quality"}, {Name: "procedural-music-generation"}},
+			want: []agent.SkillFile{
+				{Name: "web-frontend-quality", Path: "~/.claude/skills/web-frontend-quality/SKILL.md"},
+				{Name: "procedural-music-generation", Path: "~/.claude/skills/procedural-music-generation/SKILL.md"},
+			},
 		},
 		{
 			name: "recorded claude code cd",
@@ -161,7 +164,8 @@ func TestSkillsFromCommand(t *testing.T) {
 			want: nil,
 		},
 		{name: "quoted hash is not a comment", in: "cat '/tmp/#notes' && cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
-		{name: "quoted path", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{review}},
+		{name: "quoted tilde is relative", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{{Name: "review"}}},
+		{name: "named home has no path", in: "cat ~bob/.agents/skills/review/SKILL.md", want: []agent.SkillFile{{Name: "review"}}},
 		{name: "sed script mentions a skill", in: "sed -n '/~/.agents/skills/review/SKILL.md/p' /tmp/notes", want: nil},
 		{name: "read before output redirection", in: "cat ~/.agents/skills/review/SKILL.md > /tmp/notes", want: []agent.SkillFile{review}},
 		{name: "subshell home-relative", in: "(cat ~/.agents/skills/review/SKILL.md)", want: []agent.SkillFile{review}},
@@ -244,7 +248,8 @@ func TestInferredSkillReadsFromCommand(t *testing.T) {
 		{name: "cd dependent", cmd: "cd /other && cat .agents/skills/review/SKILL.md", cwd: "/repo", path: "/other/.agents/skills/review/SKILL.md"},
 		{name: "cd into a skills root", cmd: "cd /home/user/.agents/skills && cat review/SKILL.md", cwd: "/repo", path: "/home/user/.agents/skills/review/SKILL.md"},
 		{name: "absolute after cd", cmd: "cd /other && cat /home/user/.agents/skills/review/SKILL.md", cwd: "/repo", path: "/home/user/.agents/skills/review/SKILL.md"},
-		{name: "home expansion unavailable", cmd: "cat ~/.agents/skills/review/SKILL.md", cwd: "/repo"},
+		{name: "home-relative", cmd: "cat ~/.agents/skills/review/SKILL.md", cwd: "/repo", path: "~/.agents/skills/review/SKILL.md"},
+		{name: "quoted tilde with cwd", cmd: `cat "~/.agents/skills/review/SKILL.md"`, cwd: "/repo", path: "/repo/~/.agents/skills/review/SKILL.md"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

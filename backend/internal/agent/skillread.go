@@ -42,7 +42,8 @@ var installedSkillPath = regexp.MustCompile(
 type SkillFile struct {
 	// Name is the directory holding SKILL.md.
 	Name string
-	// Path is the literal file-tool path or a resolved shell operand. Shell
+	// Path is the literal file-tool path or a resolved shell operand. A `~/`
+	// operand stays home-relative; the task runtime resolves it. Shell
 	// inference omits it when expansion makes it unknown, or when a relative
 	// operand lacks an absolute cwd or follows a directory-changing command.
 	Path string
@@ -223,10 +224,13 @@ func (s *commandScanner) reads(verb string, args []*syntax.Word) {
 			continue
 		}
 		// Resolve before matching so a cd into a skills root reveals a relative
-		// name/SKILL.md operand. An unresolved or expanded operand names the
-		// skill without a path.
+		// name/SKILL.md operand. Only an unquoted leading ~ expands; `~/` keeps
+		// its home-relative path for the runtime to resolve. Any other
+		// unresolved or expanded operand names the skill without a path.
+		lead, _ := args[i].Parts[0].(*syntax.Lit)
+		tilde := lead != nil && strings.HasPrefix(lead.Value, "~")
 		operand := word
-		if s.cwdKnown && !dynamic && !strings.HasPrefix(word, "~") && !path.IsAbs(word) {
+		if s.cwdKnown && !dynamic && !tilde && !path.IsAbs(word) {
 			if path.IsAbs(s.cwd) {
 				operand = path.Join(s.cwd, word)
 			}
@@ -235,7 +239,7 @@ func (s *commandScanner) reads(verb string, args []*syntax.Word) {
 		if f.Name == "" {
 			continue
 		}
-		if dynamic || !path.IsAbs(f.Path) {
+		if dynamic || (!path.IsAbs(f.Path) && (!tilde || !strings.HasPrefix(lead.Value, "~/"))) {
 			f.Path = ""
 		}
 		s.files = append(s.files, f)
