@@ -1,8 +1,6 @@
 // Package data defines caic's TOML configuration schema.
 package data
 
-import "github.com/maruel/gomode/voicegateway" //nolint:depguard // Reuse the gateway-owned configuration schema instead of duplicating it.
-
 // Config mirrors the TOML file layout at ~/.config/caic/config.toml.
 // Zero values mean "not set in file".
 // IMPORTANT: When adding or modifying configuration fields, update contrib/config.toml
@@ -101,13 +99,12 @@ type OAuth struct {
 
 // VoiceGateway is the persisted VoiceGateway section.
 type VoiceGateway struct {
-	WebRTCUDPPort        int                 `toml:"webrtc_udp_port"`
-	Mode                 VoiceGatewayMode    `toml:"mode"`
-	URL                  string              `toml:"url"`
-	InstanceID           string              `toml:"instance_id"`
-	TokenMode            string              `toml:"token_mode"`
-	SigningPrivateKeyPEM string              `toml:"signing_private_key_pem"`
-	Config               voicegateway.Config `toml:"config"`
+	WebRTCUDPPort        int              `toml:"webrtc_udp_port"`
+	Mode                 VoiceGatewayMode `toml:"mode"`
+	URL                  string           `toml:"url"`
+	InstanceID           string           `toml:"instance_id"`
+	TokenMode            string           `toml:"token_mode"`
+	SigningPrivateKeyPEM string           `toml:"signing_private_key_pem"`
 }
 
 // VoiceGatewayMode selects whether and where the host serves voice.

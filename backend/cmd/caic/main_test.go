@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/gittest"
+	"github.com/maruel/gomode/voicegateway"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -43,14 +45,18 @@ func TestIsNormalShutdown(t *testing.T) {
 
 func TestWatchForRestart(t *testing.T) {
 	t.Parallel()
-	for _, action := range []string{"create", "directory creation", "remove", "replace", "watcher failure", "write"} {
-		t.Run(action, func(t *testing.T) {
+	for _, name := range []string{"create", "directory creation", "remove", "replace", "voice create", "voice remove", "watcher failure", "write"} {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if action == "directory creation" {
+			if name == "directory creation" {
 				dir = filepath.Join(dir, "missing", "nested")
 			}
 			p := filepath.Join(dir, "config.toml")
+			action, voice := strings.CutPrefix(name, "voice ")
+			if voice {
+				p = filepath.Join(dir, voicegateway.ConfigFileName)
+			}
 			if action != "create" && action != "directory creation" {
 				if err := os.WriteFile(p, []byte("old config"), 0o600); err != nil {
 					t.Fatal(err)

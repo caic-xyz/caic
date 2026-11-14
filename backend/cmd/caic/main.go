@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/maruel/gomode/autoupdate"
+	"github.com/maruel/gomode/voicegateway"
 )
 
 // expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.
@@ -444,8 +445,8 @@ func isNormalShutdown(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
 
-// watchForRestart watches the executable and config.toml for modifications and
-// cancels to trigger graceful shutdown when either changes. Runtime watcher
+// watchForRestart watches the executable, config.toml, and the voice gateway
+// declarations for modifications and cancels to trigger graceful shutdown when either changes. Runtime watcher
 // failures cancel with an error cause so the process exits 1. Combined with
 // systemd's Restart=always or launchd's KeepAlive, this enables seamless
 // restarts after a rebuild or config change.
@@ -471,6 +472,9 @@ func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, group 
 	}
 	// Watch the directory so config creation and rename-into-place writes work.
 	configTarget := configPath
+	// The voice declarations are optional, so watch their name whether or not
+	// the file exists.
+	voiceTarget := filepath.Join(filepath.Dir(configPath), voicegateway.ConfigFileName)
 	for dir := filepath.Dir(configPath); ; dir = filepath.Dir(dir) {
 		if err := w.Add(dir); err != nil {
 			if !errors.Is(err, os.ErrNotExist) || dir == filepath.Dir(dir) {
@@ -510,7 +514,7 @@ func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, group 
 						}
 					}
 					reason = "executable modified"
-				case filepath.Clean(event.Name) == configTarget:
+				case filepath.Clean(event.Name) == configTarget, filepath.Clean(event.Name) == voiceTarget:
 					if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
 						continue
 					}

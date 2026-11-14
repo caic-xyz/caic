@@ -129,9 +129,12 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 
 	var voiceConfig voicegateway.ResolvedConfig
 	if voiceGatewayMode == server.VoiceGatewayModeEmbedded {
-		voiceConfig, err = tc.VoiceGateway.Config.Resolve()
+		decl, err := voicegateway.ReadConfig(cfgDir)
 		if err != nil {
-			return nil, "", "", "", fmt.Errorf("voice-gateway.config: %w", err)
+			return nil, "", "", "", err
+		}
+		if voiceConfig, err = decl.Resolve(); err != nil {
+			return nil, "", "", "", fmt.Errorf("voice gateway: %w", err)
 		}
 	}
 
