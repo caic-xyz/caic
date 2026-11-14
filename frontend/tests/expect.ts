@@ -29,6 +29,10 @@ const tracked = <T>(mock: T): T => {
   mocks.add(mock as Mock<Procedure>);
   return mock;
 };
+// A restored spy is dropped: restoring it again would reinstall the value the
+// property held when it was spied on, such as a fake setTimeout after
+// useRealTimers.
+const spies = new Set<Mock<Procedure>>();
 
 const globalStubs = new Map<string, unknown>();
 
@@ -46,7 +50,11 @@ export const vi = {
   fn: (<T extends Procedure = Procedure>(implementation?: T) => tracked(spyFn(implementation))) as {
     <T extends Procedure = Procedure>(implementation?: T): Mock<T>;
   },
-  spyOn: ((...args: Parameters<typeof spySpyOn>) => tracked(spySpyOn(...args))) as unknown as typeof spySpyOn,
+  spyOn: ((...args: Parameters<typeof spySpyOn>) => {
+    const spy = tracked(spySpyOn(...args));
+    spies.add(spy as Mock<Procedure>);
+    return spy;
+  }) as unknown as typeof spySpyOn,
   stubGlobal: (name: string, value: unknown): void => {
     if (!globalStubs.has(name)) globalStubs.set(name, (globalThis as Record<string, unknown>)[name]);
     (globalThis as Record<string, unknown>)[name] = value;
@@ -63,6 +71,8 @@ export const vi = {
   },
   restoreAllMocks: (): void => {
     for (const mock of mocks) mock.mockRestore();
+    for (const spy of spies) mocks.delete(spy);
+    spies.clear();
   },
   mocked: <T extends Procedure>(mock: T): Mock<T> => mock as unknown as Mock<T>,
   useFakeTimers: (): void => {
