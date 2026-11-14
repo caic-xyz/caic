@@ -23,6 +23,7 @@ import (
 const realTaskLogDirEnv = "CAIC_REAL_TASK_LOG_DIR"
 
 func TestCopyRealTaskLogCorpusLinksSameFilesystemLogs(t *testing.T) {
+	t.Parallel()
 	source := t.TempDir()
 	destination := filepath.Join(t.TempDir(), "tasks")
 	sourcePath := filepath.Join(source, "0123456789AB-test-main.jsonl")
@@ -53,8 +54,10 @@ func TestCopyRealTaskLogCorpusLinksSameFilesystemLogs(t *testing.T) {
 // TestRealTaskLogCorpus verifies that the production loader accepts every
 // copied log it recognizes and skips corrupt historical files. It is disabled
 // by default because the corpus is large. Run it with: go test
-// -tags=real_task_logs ./backend/internal/taskslog -run '^TestRealTaskLogCorpus$'
+// -tags=real_task_logs ./backend/internal/task/history -run '^TestRealTaskLogCorpus$'
 // -timeout=10m.
+//
+//nolint:paralleltest // Replaying the corpus can need several GiB of memory.
 func TestRealTaskLogCorpus(t *testing.T) {
 	source, err := realTaskLogSource()
 	if err != nil {
@@ -87,7 +90,7 @@ func TestRealTaskLogCorpus(t *testing.T) {
 
 // BenchmarkRealTaskLogCorpus measures inventory loading of a copied production
 // task-log corpus. It is disabled by default; run it with: go test
-// -tags=real_task_logs ./backend/internal/taskslog -run '^$' -bench
+// -tags=real_task_logs ./backend/internal/task/history -run '^$' -bench
 // '^BenchmarkRealTaskLogCorpus$' -benchtime=1x -timeout=10m.
 func BenchmarkRealTaskLogCorpus(b *testing.B) {
 	source, err := realTaskLogSource()
@@ -157,11 +160,11 @@ func linkOrCopyRealTaskLog(source, destination string) error {
 	if err := os.Link(source, destination); err == nil {
 		return nil
 	}
-	in, err := os.Open(source)
+	in, err := os.Open(source) //nolint:gosec // Paths come from the operator's corpus and a test-owned directory.
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // Paths come from the operator's corpus and a test-owned directory.
 	if err != nil {
 		return errors.Join(err, in.Close())
 	}
@@ -178,7 +181,7 @@ func linkOrCopyRealTaskLog(source, destination string) error {
 
 // BenchmarkRealTaskLogReplay measures complete semantic replay of one frozen
 // production log. Set CAIC_REAL_TASK_LOG_FILE to a snapshot, then run:
-// go test -tags=real_task_logs ./backend/internal/taskslog -run '^$'
+// go test -tags=real_task_logs ./backend/internal/task/history -run '^$'
 // -bench '^BenchmarkRealTaskLogReplay$' -benchtime=1x -benchmem -timeout=10m.
 // Large logs can require several GiB of memory; this is outside make benchmark.
 func BenchmarkRealTaskLogReplay(b *testing.B) {
@@ -186,7 +189,7 @@ func BenchmarkRealTaskLogReplay(b *testing.B) {
 	if path == "" {
 		b.Skip("set CAIC_REAL_TASK_LOG_FILE to a frozen production log")
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) //nolint:gosec // The operator names the frozen log.
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -210,6 +213,8 @@ func BenchmarkRealTaskLogReplay(b *testing.B) {
 // ends on a question and is skipped. It is disabled by default; run it with: go
 // test -tags=real_task_logs ./backend/internal/task/history -run
 // '^TestRealTaskLogRecordedResultParity$' -timeout=30m.
+//
+//nolint:paralleltest // Replaying the corpus can need several GiB of memory.
 func TestRealTaskLogRecordedResultParity(t *testing.T) {
 	checked := 0
 	for _, c := range realTaskLogColdQueryFixture(t, realTaskLogColdQueryLogs*4) {

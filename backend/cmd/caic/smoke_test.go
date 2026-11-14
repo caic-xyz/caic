@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,8 @@ import (
 )
 
 // TestSmoke groups the runtime scenarios and their container-free helper checks.
+//
+//nolint:paralleltest // The Lifecycle fixture sets process-wide XDG_CONFIG_HOME.
 func TestSmoke(t *testing.T) {
 	// The FailureDiagnostics scenario verifies bounded log tails and immediate launch
 	// failure reporting, including the terminal-state classification used by task
@@ -208,7 +211,7 @@ func TestSmoke(t *testing.T) {
 			postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
 
 			// Create a task on codex so the fork below switches harness (codex -> pi).
-			initialPrompt := "smoke test " + fmt.Sprint(time.Now().UnixNano())
+			initialPrompt := "smoke test " + strconv.FormatInt(time.Now().UnixNano(), 10)
 			createReq := v1.CreateTaskReq{
 				InitialPrompt: v1.Prompt{Text: initialPrompt},
 				Repos:         []v1.RepoSpec{{Name: repos[0].Path}},
@@ -246,7 +249,7 @@ func TestSmoke(t *testing.T) {
 			if logPath == "" {
 				t.Fatalf("task %s has no raw log in %s", taskID, logDir)
 			}
-			logData, err := os.ReadFile(logPath)
+			logData, err := os.ReadFile(logPath) //nolint:gosec // The path is the task log under the smoke fixture's log directory.
 			if err != nil {
 				t.Fatalf("read task log: %v", err)
 			}
@@ -286,7 +289,7 @@ func TestSmoke(t *testing.T) {
 			forkReq := v1.ForkTaskReq{
 				// Switch harness on the fork so the test verifies the target
 				// harness's env is injected, not the source harness's.
-				Prompt:  v1.Prompt{Text: "fork smoke test " + fmt.Sprint(time.Now().UnixNano())},
+				Prompt:  v1.Prompt{Text: "fork smoke test " + strconv.FormatInt(time.Now().UnixNano(), 10)},
 				Harness: v1.HarnessPi,
 				Sudo:    &disableSudo,
 			}
@@ -391,7 +394,6 @@ func TestSmoke(t *testing.T) {
 					}
 				}
 			})
-
 		})
 
 		// --- Frontend serving ---
@@ -435,11 +437,11 @@ func TestSmoke(t *testing.T) {
 		if got, want := reflect.TypeFor[v1.EventNativeSubagent]().NumField(), reflect.TypeFor[agent.NativeSubagent]().NumField(); got != want {
 			t.Fatalf("v1.EventNativeSubagent has %d fields, agent.NativeSubagent has %d; update nativeSubagent to map the new field", got, want)
 		}
-		cases := make(map[string]smokeReplayCase, len(smokeReplayRecordings))
+		cases := make(map[string]*smokeReplayCase, len(smokeReplayRecordings))
 		byHarness := map[harness.Name][]smoketest.ReplayRecording{}
 		for _, rec := range smokeReplayRecordings {
 			c := newSmokeReplayCase(t, rec.harness, rec.file)
-			cases[rec.name()] = c
+			cases[rec.name()] = &c
 			byHarness[rec.harness] = append(byHarness[rec.harness], c.recording)
 		}
 		// One fixture for every recording: the container image and the server start
@@ -479,7 +481,7 @@ func TestSmoke(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-push"), hook, 0o700); err != nil {
+		if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-push"), hook, 0o700); err != nil { //nolint:gosec // Git requires an executable hook in the test-owned repository.
 			t.Fatal(err)
 		}
 		before, err := g.RevParse(t.Context(), "HEAD")
@@ -527,7 +529,7 @@ func TestSmoke(t *testing.T) {
 		if len(task.DiffStat) != 0 || len(task.RepoStates) != 1 || task.RepoStates[0].Ahead != 0 {
 			t.Fatalf("post-push task statistics: diff=%+v repos=%+v", task.DiffStat, task.RepoStates)
 		}
-		verified, err := os.ReadFile(audit)
+		verified, err := os.ReadFile(audit) //nolint:gosec // The path is in a test-owned directory.
 		if err != nil || strings.TrimSpace(string(verified)) != tip {
 			t.Fatalf("hook verified %q, want %s: %v", verified, tip, err)
 		}
@@ -539,7 +541,7 @@ func TestSmoke(t *testing.T) {
 		if err != nil || head != before {
 			t.Fatalf("host HEAD changed: %q, %v", head, err)
 		}
-		if dirty, err := os.ReadFile(filepath.Join(root, "host-dirty")); err != nil || string(dirty) != "keep" {
+		if dirty, err := os.ReadFile(filepath.Join(root, "host-dirty")); err != nil || string(dirty) != "keep" { //nolint:gosec // The path is inside the test-owned repository.
 			t.Fatalf("host untracked file changed: %q, %v", dirty, err)
 		}
 		entries, err := os.ReadDir(filepath.Join(smoke.cfg.Dirs.CacheDir, "push"))
@@ -689,7 +691,7 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 	if path := os.Getenv("CAIC_SMOKE_LOG"); path != "" {
 		s.serverLogPath = path
 	}
-	serverLog, err := os.OpenFile(s.serverLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is a temp dir or the operator's CAIC_SMOKE_LOG.
+	serverLog, err := os.OpenFile(s.serverLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		t.Fatalf("open server log %s: %v", s.serverLogPath, err)
 	}
@@ -898,9 +900,9 @@ func findTask(t *testing.T, s *smokeServer, taskID string) v1.Task {
 	t.Helper()
 	var tasks []v1.Task
 	getJSON(t, s.baseURL, "/api/caic/v1/tasks", &tasks)
-	for _, task := range tasks {
-		if task.ID.String() == taskID {
-			return task
+	for i := range tasks {
+		if tasks[i].ID.String() == taskID {
+			return tasks[i]
 		}
 	}
 	return v1.Task{}
@@ -909,14 +911,16 @@ func findTask(t *testing.T, s *smokeServer, taskID string) v1.Task {
 // waitForReady polls GET /api/caic/v1/server/config until it returns 200.
 func waitForReady(ctx context.Context, baseURL string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/server/config", http.NoBody)
 		if err != nil {
 			return err
 		}
 		resp, err := client.Do(req)
 		if err == nil {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				return err
+			}
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

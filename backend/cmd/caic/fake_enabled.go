@@ -208,7 +208,8 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
-	defer ln.Close()
+	// Serving closes the listener; this closes it on paths that never serve.
+	defer func() { _ = ln.Close() }()
 
 	// Authentication is opt-in for a separate e2e server; ordinary fake tests
 	// intentionally keep their no-auth behavior. This fixture exists only in e2e builds.
@@ -228,7 +229,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 					q.Set("code", "fixture-reviewer")
 				}
 				target.RawQuery = q.Encode()
-				http.Redirect(w, r, target.String(), http.StatusFound)
+				http.Redirect(w, r, target.String(), http.StatusFound) //nolint:gosec // The e2e OAuth provider fixture redirects to the client's redirect_uri like a real provider.
 			case "/oauth/token":
 				w.Header().Set("Content-Type", "application/json")
 				access := "fixture-access"

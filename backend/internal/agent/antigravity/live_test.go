@@ -34,7 +34,9 @@ import (
 // conversation state in the container's ~/.gemini, which md mounts from the
 // host. CAIC_AGY_MODEL optionally selects a model.
 //
-// Run: CAIC_AGY_SSH=<host> go test -tags=smoke -run TestLiveRelay -v -timeout=10m ./backend/internal/agent/antigravity/
+// Run: CAIC_AGY_SSH=<host> go test -tags=smoke -run TestLiveRelay -v -timeout=10m ./backend/internal/agent/antigravity/.
+//
+//nolint:paralleltest // The relay owns /tmp/caic-relay on the shared CAIC_AGY_SSH container.
 func TestLiveRelay(t *testing.T) {
 	host := os.Getenv("CAIC_AGY_SSH")
 	if host == "" {
@@ -63,7 +65,7 @@ func TestLiveRelay(t *testing.T) {
 	if !slices.ContainsFunc(inv.Models, func(m agent.Model) bool { return m.ID == model }) {
 		t.Fatalf("model %q is unavailable", model)
 	}
-	out, err := exec.CommandContext(ctx, "ssh", host, "mktemp -d /tmp/caic-agy-live.XXXXXX").Output()
+	out, err := liveSSH(ctx, host, "mktemp -d /tmp/caic-agy-live.XXXXXX").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func TestLiveRelay(t *testing.T) {
 		if err := agent.CleanRelayState(cleanup, host); err != nil {
 			t.Errorf("remove relay state: %v", err)
 		}
-		if err := exec.CommandContext(cleanup, "ssh", host, "rm -rf -- "+dir).Run(); err != nil {
+		if err := liveSSH(cleanup, host, "rm -rf -- "+dir).Run(); err != nil {
 			t.Errorf("remove workspace: %v", err)
 		}
 	})
@@ -119,7 +121,7 @@ func TestLiveRelay(t *testing.T) {
 	if first.SessionID == "" || tools == 0 {
 		t.Fatalf("first turn: session ID=%q, completed tools=%d", first.SessionID, tools)
 	}
-	marker, err := exec.CommandContext(ctx, "ssh", host, "cat "+dir+"/marker").Output()
+	marker, err := liveSSH(ctx, host, "cat "+dir+"/marker").Output()
 	if err != nil || strings.TrimSpace(string(marker)) != "relay-tool-ok" {
 		t.Fatalf("tool marker=%q, err=%v", marker, err)
 	}
@@ -190,6 +192,8 @@ func TestLiveRelay(t *testing.T) {
 // TestLiveTaskMCP spends subscription quota on two distinct task registries.
 // It uses the same disposable CAIC_AGY_SSH target as TestLiveRelay, never writes
 // shared ~/.gemini settings, and checks fresh calls across reconnect/resume.
+//
+//nolint:paralleltest // The relay owns /tmp/caic-relay on the shared CAIC_AGY_SSH container.
 func TestLiveTaskMCP(t *testing.T) {
 	host := os.Getenv("CAIC_AGY_SSH")
 	if host == "" {
@@ -200,7 +204,7 @@ func TestLiveTaskMCP(t *testing.T) {
 	if alive, err := agent.IsRelayRunning(ctx, host); err != nil || alive {
 		t.Fatalf("disposable target readiness: alive=%v, err=%v", alive, err)
 	}
-	out, err := exec.CommandContext(ctx, "ssh", host, "mktemp -d /tmp/caic-agy-mcp-live.XXXXXX").Output()
+	out, err := liveSSH(ctx, host, "mktemp -d /tmp/caic-agy-mcp-live.XXXXXX").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +212,7 @@ func TestLiveTaskMCP(t *testing.T) {
 	if !strings.HasPrefix(dir, "/tmp/caic-agy-mcp-live.") || strings.ContainsAny(dir, "\n\r '\"") {
 		t.Fatalf("unexpected workspace path %q", dir)
 	}
-	if err := exec.CommandContext(ctx, "ssh", host, "git init -q "+dir).Run(); err != nil {
+	if err := liveSSH(ctx, host, "git init -q "+dir).Run(); err != nil {
 		t.Fatal(err)
 	}
 	settingsHash := liveGlobalSettingsHash(t, ctx, host)
@@ -231,7 +235,7 @@ func TestLiveTaskMCP(t *testing.T) {
 		if err := agent.CleanRelayState(cleanup, host); err != nil {
 			t.Errorf("remove task MCP relay state: %v", err)
 		}
-		if err := exec.CommandContext(cleanup, "ssh", host, "rm -rf -- "+dir).Run(); err != nil {
+		if err := liveSSH(cleanup, host, "rm -rf -- "+dir).Run(); err != nil {
 			t.Errorf("remove task MCP workspace: %v", err)
 		}
 	})
@@ -240,7 +244,7 @@ func TestLiveTaskMCP(t *testing.T) {
 	if model == "" {
 		model = "gemini-3.8-flash-low"
 	}
-	for _, task := range []string{"task-a", "task-b"} {
+	for _, task := range []string{"task-a", "task-b"} { //nolint:paralleltest // Both tasks share one relay on the target container.
 		t.Run(task, func(t *testing.T) {
 			registry := &liveTaskRegistry{task: task}
 			ch := make(chan agent.TimedMessage, 256)
@@ -339,7 +343,7 @@ func TestLiveTaskMCP(t *testing.T) {
 	if got := liveGlobalSettingsHash(t, ctx, host); got != settingsHash {
 		t.Fatal("task MCP modified shared global settings")
 	}
-	out, err = exec.CommandContext(ctx, "ssh", host, "git -C "+dir+" status --porcelain").Output()
+	out, err = liveSSH(ctx, host, "git -C "+dir+" status --porcelain").Output()
 	if err != nil || len(out) != 0 {
 		t.Fatalf("task MCP left workspace changes: %q, %v", out, err)
 	}
@@ -347,6 +351,7 @@ func TestLiveTaskMCP(t *testing.T) {
 
 type liveTaskRegistry struct {
 	mcptest.FakeRegistry
+
 	task string
 
 	mu    sync.Mutex
@@ -378,9 +383,14 @@ func (r *liveTaskRegistry) verify(t *testing.T, result *agent.ResultMessage, cal
 	}
 }
 
+// liveSSH runs script on the operator's disposable CAIC_AGY_SSH container.
+func liveSSH(ctx context.Context, host, script string) *exec.Cmd {
+	return exec.CommandContext(ctx, "ssh", host, script) //nolint:gosec // The operator names the disposable container.
+}
+
 func liveGlobalSettingsHash(t *testing.T, ctx context.Context, host string) string {
 	// Only compare hashes; never dump credentials, shared config or history.
-	out, err := exec.CommandContext(ctx, "ssh", host, `python3 -c 'import hashlib,json,pathlib; p=pathlib.Path.home()/".gemini/config"; print(json.dumps({n:hashlib.sha256((p/n).read_bytes()).hexdigest() if (p/n).exists() else "absent" for n in ["mcp_config.json","plugins.json","config.json"]},sort_keys=True))'`).Output()
+	out, err := liveSSH(ctx, host, `python3 -c 'import hashlib,json,pathlib; p=pathlib.Path.home()/".gemini/config"; print(json.dumps({n:hashlib.sha256((p/n).read_bytes()).hexdigest() if (p/n).exists() else "absent" for n in ["mcp_config.json","plugins.json","config.json"]},sort_keys=True))'`).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,10 +400,10 @@ func liveGlobalSettingsHash(t *testing.T, ctx context.Context, host string) stri
 func liveMCPRemoved(t *testing.T, ctx context.Context, host string) {
 	// Client EOF can precede daemon cleanup briefly; wait for its owned files.
 	cmd := `for i in $(seq 1 50); do if [ ! -e /tmp/caic-relay/antigravity-mcp ] && [ ! -e /tmp/caic-relay/caic-mcp.sock ]; then exit 0; fi; sleep 0.1; done; exit 1`
-	if err := exec.CommandContext(ctx, "ssh", host, cmd).Run(); err != nil {
+	if err := liveSSH(ctx, host, cmd).Run(); err != nil {
 		t.Fatalf("task MCP config/access survived shutdown: %v", err)
 	}
-	out, err := exec.CommandContext(ctx, "ssh", host, `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | python3 /tmp/caic-relay/relay.py caic-mcp`).Output()
+	out, err := liveSSH(ctx, host, `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | python3 /tmp/caic-relay/relay.py caic-mcp`).Output()
 	var response struct {
 		Error json.RawMessage `json:"error"`
 	}
@@ -402,7 +412,7 @@ func liveMCPRemoved(t *testing.T, ctx context.Context, host string) {
 	}
 }
 
-func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan agent.TimedMessage) (*agent.ResultMessage, int) {
+func liveResult(t *testing.T, ctx context.Context, s *agent.Session, ch <-chan agent.TimedMessage) (result *agent.ResultMessage, toolCalls int) {
 	tools := make(map[string]string)
 	started := 0
 	for {

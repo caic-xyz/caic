@@ -111,7 +111,7 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 
 // runSmokeReplay creates one task, restarts caic mid-turn, and verifies that the
 // replay delivered exactly the recorded lifecycle.
-func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc smokeReplayCase) {
+func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smokeReplayCase) {
 	t.Helper()
 	var repos []v1.Repo
 	getJSON(t, fixture.baseURL, "/api/caic/v1/server/repos", &repos)
