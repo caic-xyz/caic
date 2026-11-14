@@ -83,13 +83,12 @@ func (f *SkillFile) inferred(msgs []Message, sourceID string) []Message {
 // against cwd and a literal cd target; unresolved paths retain only the skill
 // name.
 //
-// A read counts when its statement certainly ran and its status stays visible:
-// a `;` list, a newline, and an `&&` chain all count. A pipeline masks the
-// read's status behind its last stage, the right side of `||` may be skipped,
-// and a background statement outlives the result, so those contribute nothing.
-// A failing read inside the accepted forms still counts, because the shell
-// reports no per-statement status and the confirming tool result gates the
-// credit.
+// A read counts when its statement certainly ran before the result: a `;` list,
+// a newline, an `&&` chain, every pipeline stage, and the left side of `||`
+// all count. The right side of `||` may be skipped and a background statement
+// outlives the result, so those contribute nothing. A failing read inside the accepted forms still
+// counts, because neither a list nor a pipeline reports per-statement status
+// and the confirming tool result gates the credit.
 func SkillsFromCommand(cmd, cwd string) []SkillFile {
 	if !strings.Contains(cmd, "SKILL.md") {
 		return nil // most commands open no skill, and a parse cannot change that
@@ -126,11 +125,14 @@ func (s *commandScanner) statement(st *syntax.Stmt) {
 	case *syntax.CallExpr:
 		s.call(cmd)
 	case *syntax.BinaryCmd:
-		// `&&` proves both sides ran once the tool result succeeds. A pipeline
-		// masks each side's status, and an `||` right side may be skipped.
-		if cmd.Op == syntax.AndStmt {
-			s.statement(cmd.X)
+		// `&&` proves both sides ran once the tool result succeeds, and every
+		// pipeline stage runs. An `||` left side always runs; its right side
+		// may be skipped.
+		s.statement(cmd.X)
+		switch cmd.Op {
+		case syntax.AndStmt, syntax.Pipe, syntax.PipeAll:
 			s.statement(cmd.Y)
+		case syntax.OrStmt:
 		}
 	case *syntax.Subshell:
 		s.statements(cmd.Stmts)

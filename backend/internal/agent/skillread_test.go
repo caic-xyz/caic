@@ -119,6 +119,7 @@ func TestSkillsFromCommand(t *testing.T) {
 		{name: "shell comment mentions a skill", in: "cat /tmp/notes # ~/.agents/skills/review/SKILL.md", want: nil},
 		{name: "shell comment covers later operators", in: "cat /tmp/notes # ignored && cat ~/.agents/skills/review/SKILL.md", want: nil},
 		{name: "OR branch may be skipped", in: "true || cat ~/.agents/skills/review/SKILL.md", want: nil},
+		{name: "OR left side always runs", in: "cat ~/.agents/skills/review/SKILL.md || true", want: []agent.SkillFile{review}},
 		{name: "semicolon list runs every read", in: "cat ~/.agents/skills/review/SKILL.md; true", want: []agent.SkillFile{review}},
 		{name: "semicolon list keeps a later read", in: "cat /tmp/notes; cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
 		{
@@ -129,7 +130,13 @@ func TestSkillsFromCommand(t *testing.T) {
 				{Name: "web-frontend-quality", Path: "/home/user/.agents/skills/web-frontend-quality/SKILL.md"},
 			},
 		},
-		{name: "pipeline hides read failure", in: "cat ~/.agents/skills/review/SKILL.md | head", want: nil},
+		{name: "pipeline runs every stage", in: "cat ~/.agents/skills/review/SKILL.md | head", want: []agent.SkillFile{review}},
+		{name: "pipeline stage reads a file", in: "true |& sed -n 1,20p ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
+		{
+			name: "pipeline in a semicolon list",
+			in:   "cat ~/.claude/skills/phased-implementation-planning/SKILL.md | sed -n 1,20p; cd ~/src/gomode && cat docs/PLAN.md",
+			want: []agent.SkillFile{{Name: "phased-implementation-planning"}},
+		},
 		// The next four inputs are recorded from real harness sessions: Codex,
 		// Claude Code, and Pi batch reads into one command, and OpenCode reads a
 		// skill directory outside the installed roots.
