@@ -1423,6 +1423,63 @@ data class RepoPrefsResp(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val requestedModel: String? = null,
 )
 
+/** AntigravitySettings holds account settings for Antigravity tasks. */
+@Serializable
+class AntigravitySettings
+
+/** ClaudeSettings configures Claude Code sessions. */
+@Serializable
+data class ClaudeSettings(
+    /**
+     * AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
+     * default; changes apply to new tasks.
+     */
+    val autoCompactTokenLimit: Int,
+)
+
+/** CodexSettings configures Codex sessions. */
+@Serializable
+data class CodexSettings(
+    /**
+     * AutoCompactTokenLimit is the total active context threshold in tokens.
+     * Zero uses the harness default; changes apply to new tasks.
+     */
+    val autoCompactTokenLimit: Int,
+)
+
+/** DshSettings holds account settings for DeepSeek Harness tasks. */
+@Serializable
+class DshSettings
+
+/** PiSettings configures native Pi compaction budgets for new tasks. */
+@Serializable
+data class PiSettings(
+    /** ReserveTokens leaves this many context tokens free before compaction. Null uses native configuration. */
+    val reserveTokens: Int?,
+    /** KeepRecentTokens is the recent history retained verbatim. Null uses native configuration. */
+    val keepRecentTokens: Int?,
+)
+
+/** OpenCodeSettings configures native OpenCode compaction budgets for new tasks. */
+@Serializable
+data class OpenCodeSettings(
+    /** BufferTokens reserves context headroom before compaction. Null uses native configuration. */
+    val bufferTokens: Int?,
+    /** KeepRecentTokens is the recent history retained alongside the summary. Null uses native configuration. */
+    val keepRecentTokens: Int?,
+)
+
+/** HarnessSettings groups the independently configurable agent harnesses. */
+@Serializable
+data class HarnessSettings(
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val antigravity: AntigravitySettings? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val claude: ClaudeSettings? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val codex: CodexSettings? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val dsh: DshSettings? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val pi: PiSettings? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val opencode: OpenCodeSettings? = null,
+)
+
 /** RuntimeSettings holds CPU configuration for a single runtime. */
 @Serializable
 data class RuntimeSettings(
@@ -1481,6 +1538,8 @@ data class UserSettings(
      * the default.
      */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val baseImage: String? = null,
+    /** Harnesses holds the settings for each configured agent harness. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val harnesses: HarnessSettings? = null,
     /** RuntimeSettings stores CPU architecture and limits by runtime name. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val runtimeSettings: Map<String, RuntimeSettings>? = null,
     /**

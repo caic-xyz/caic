@@ -78,30 +78,32 @@ type Task struct {
 	shuttingDown atomic.Bool
 
 	// Immutable fields — set at creation, never modified.
-	ID                ksid.ID
-	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
-	Harness           harness.Name         // Agent harness ("claude", "codex", etc.).
-	RequestedModel    string               // User-requested model; passed to agent CLI.
-	RequestedEffort   string               // Thinking effort; passed to agent CLI. Empty = default.
-	RuntimeName       runtime.Name         // Runtime backend used for this task.
-	BaseImage         string               // Custom runtime base image; empty means use the default.
-	ContainerPlatform string               // Container CPU architecture; empty means use the host default.
-	MaxCPUs           int                  // Max CPU cores for the instance; 0 means use the default.
-	CacheMounts       []runtime.CacheMount // Build cache mounts baked into the runtime image.
-	Mounts            []runtime.Mount      // Host directories bind-mounted into the runtime instance.
-	Tailscale         bool                 // Enable Tailscale networking in the instance.
-	USB               bool                 // Enable USB passthrough in the instance.
-	Display           bool                 // Enable Xvfb display in the instance.
-	Sudo              bool                 // Enable root access (password-based sudo) in the instance.
-	StartedAt         time.Time            // When the task was created.
-	OwnerID           string               // Human authorization principal; distinct from the delegating task's identity.
-	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
-	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
-	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
-	CaicMCP           bool                 // Enables task-scoped CAIC MCP delegation.
-	Pricer            usage.ModelPricer    // Quota-provider per-model pricing for cost reporting; set by the task manager before the task runs. Nil keeps harness-reported totals only.
-	Rollup            task.RollupSink      // Cross-task usage rollup sink; NewTask defaults to DiscardRollup, the task manager replaces it with the wired store.
-	Provider          genai.Provider
+	ID                             ksid.ID
+	InitialPrompt                  agent.Prompt // Initial prompt text and optional images.
+	Harness                        harness.Name // Agent harness ("claude", "codex", etc.).
+	RequestedModel                 string       // User-requested model; passed to agent CLI.
+	RequestedCompactionBudget      agent.CompactionBudget
+	RequestedAutoCompactTokenLimit int                  // Captured launch threshold; zero uses the backend default.
+	RequestedEffort                string               // Thinking effort; passed to agent CLI. Empty = default.
+	RuntimeName                    runtime.Name         // Runtime backend used for this task.
+	BaseImage                      string               // Custom runtime base image; empty means use the default.
+	ContainerPlatform              string               // Container CPU architecture; empty means use the host default.
+	MaxCPUs                        int                  // Max CPU cores for the instance; 0 means use the default.
+	CacheMounts                    []runtime.CacheMount // Build cache mounts baked into the runtime image.
+	Mounts                         []runtime.Mount      // Host directories bind-mounted into the runtime instance.
+	Tailscale                      bool                 // Enable Tailscale networking in the instance.
+	USB                            bool                 // Enable USB passthrough in the instance.
+	Display                        bool                 // Enable Xvfb display in the instance.
+	Sudo                           bool                 // Enable root access (password-based sudo) in the instance.
+	StartedAt                      time.Time            // When the task was created.
+	OwnerID                        string               // Human authorization principal; distinct from the delegating task's identity.
+	ForgeIssue                     int                  // Originating issue number for bot comment callbacks; 0 = none.
+	ForkedFromTaskID               ksid.ID              // Parent task ID when created by fork; zero otherwise.
+	ParentTaskID                   ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
+	CaicMCP                        bool                 // Enables task-scoped CAIC MCP delegation.
+	Pricer                         usage.ModelPricer    // Quota-provider per-model pricing for cost reporting; set by the task manager before the task runs. Nil keeps harness-reported totals only.
+	Rollup                         task.RollupSink      // Cross-task usage rollup sink; NewTask defaults to DiscardRollup, the task manager replaces it with the wired store.
+	Provider                       genai.Provider
 
 	timelineID string
 
@@ -349,30 +351,32 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		parentTaskID = t.ParentTaskID.String()
 	}
 	return &agent.MetaMessage{
-		MessageType:       "caic_meta",
-		Prompt:            t.InitialPrompt.Text,
-		Title:             t.Title(),
-		Repos:             metaRepos,
-		Harness:           string(t.Harness),
-		RequestedModel:    t.RequestedModel,
-		RequestedEffort:   t.RequestedEffort,
-		StartedAt:         t.StartedAt,
-		ForgeIssue:        t.ForgeIssue,
-		OwnerID:           t.OwnerID,
-		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
-		ParentTaskID:      parentTaskID,
-		CaicMCP:           t.CaicMCP,
-		Tailscale:         t.Tailscale,
-		USB:               t.USB,
-		Display:           t.Display,
-		Sudo:              t.Sudo,
-		GitHubToken:       t.GitHubTokenEnabled(),
-		RuntimeName:       string(t.RuntimeName),
-		BaseImage:         t.BaseImage,
-		ContainerPlatform: t.ContainerPlatform,
-		MaxCPUs:           t.MaxCPUs,
-		CacheMounts:       metaCacheMountsFromRuntime(t.CacheMounts),
-		Mounts:            metaMountsFromRuntime(t.Mounts),
+		MessageType:                    "caic_meta",
+		Prompt:                         t.InitialPrompt.Text,
+		Title:                          t.Title(),
+		Repos:                          metaRepos,
+		Harness:                        string(t.Harness),
+		RequestedModel:                 t.RequestedModel,
+		RequestedEffort:                t.RequestedEffort,
+		RequestedAutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit,
+		RequestedCompactionBudget:      v3.CompactionBudget(t.RequestedCompactionBudget),
+		StartedAt:                      t.StartedAt,
+		ForgeIssue:                     t.ForgeIssue,
+		OwnerID:                        t.OwnerID,
+		ForkedFromTaskID:               t.ForkedFromTaskID.String(),
+		ParentTaskID:                   parentTaskID,
+		CaicMCP:                        t.CaicMCP,
+		Tailscale:                      t.Tailscale,
+		USB:                            t.USB,
+		Display:                        t.Display,
+		Sudo:                           t.Sudo,
+		GitHubToken:                    t.GitHubTokenEnabled(),
+		RuntimeName:                    string(t.RuntimeName),
+		BaseImage:                      t.BaseImage,
+		ContainerPlatform:              t.ContainerPlatform,
+		MaxCPUs:                        t.MaxCPUs,
+		CacheMounts:                    metaCacheMountsFromRuntime(t.CacheMounts),
+		Mounts:                         metaMountsFromRuntime(t.Mounts),
 	}
 }
 
@@ -2197,38 +2201,40 @@ func (t *Task) terminalLogSummary(res *task.Result) *taskhistory.LoadedTask {
 		parentTaskID = t.ParentTaskID.String()
 	}
 	return &taskhistory.LoadedTask{
-		SessionMetadata:   snapshot.SessionMetadata,
-		TaskID:            t.ID.String(),
-		Prompt:            t.InitialPrompt.Text,
-		Title:             snapshot.Title,
-		Repos:             snapshot.Repos,
-		Harness:           t.Harness,
-		StartedAt:         t.StartedAt,
-		LastActivityAt:    snapshot.StateUpdatedAt,
-		State:             res.State,
-		ForgeIssue:        snapshot.ForgeIssue,
-		OwnerID:           t.OwnerID,
-		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
-		ParentTaskID:      parentTaskID,
-		CaicMCP:           t.CaicMCP,
-		ForgeOwner:        snapshot.ForgeOwner,
-		ForgeRepo:         snapshot.ForgeRepo,
-		ForgePR:           snapshot.ForgePR,
-		Tailscale:         snapshot.Tailscale,
-		USB:               snapshot.USB,
-		Display:           snapshot.Display,
-		Sudo:              snapshot.Sudo,
-		GitHubToken:       snapshot.GitHubToken,
-		RuntimeName:       snapshot.RuntimeName,
-		BaseImage:         t.BaseImage,
-		ContainerPlatform: t.ContainerPlatform,
-		MaxCPUs:           t.MaxCPUs,
-		CacheMounts:       slices.Clone(t.CacheMounts),
-		Mounts:            slices.Clone(t.Mounts),
-		RequestedModel:    t.RequestedModel,
-		RequestedEffort:   t.RequestedEffort,
-		DiffCreated:       t.DiffCreated(),
-		LastTrailer:       res,
+		SessionMetadata:                snapshot.SessionMetadata,
+		TaskID:                         t.ID.String(),
+		Prompt:                         t.InitialPrompt.Text,
+		Title:                          snapshot.Title,
+		Repos:                          snapshot.Repos,
+		Harness:                        t.Harness,
+		StartedAt:                      t.StartedAt,
+		LastActivityAt:                 snapshot.StateUpdatedAt,
+		State:                          res.State,
+		ForgeIssue:                     snapshot.ForgeIssue,
+		OwnerID:                        t.OwnerID,
+		ForkedFromTaskID:               t.ForkedFromTaskID.String(),
+		ParentTaskID:                   parentTaskID,
+		CaicMCP:                        t.CaicMCP,
+		ForgeOwner:                     snapshot.ForgeOwner,
+		ForgeRepo:                      snapshot.ForgeRepo,
+		ForgePR:                        snapshot.ForgePR,
+		Tailscale:                      snapshot.Tailscale,
+		USB:                            snapshot.USB,
+		Display:                        snapshot.Display,
+		Sudo:                           snapshot.Sudo,
+		GitHubToken:                    snapshot.GitHubToken,
+		RuntimeName:                    snapshot.RuntimeName,
+		BaseImage:                      t.BaseImage,
+		ContainerPlatform:              t.ContainerPlatform,
+		MaxCPUs:                        t.MaxCPUs,
+		CacheMounts:                    slices.Clone(t.CacheMounts),
+		Mounts:                         slices.Clone(t.Mounts),
+		RequestedModel:                 t.RequestedModel,
+		RequestedEffort:                t.RequestedEffort,
+		RequestedAutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit,
+		RequestedCompactionBudget:      t.RequestedCompactionBudget,
+		DiffCreated:                    t.DiffCreated(),
+		LastTrailer:                    res,
 	}
 }
 

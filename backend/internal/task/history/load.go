@@ -68,39 +68,41 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 type LoadedTask struct {
 	agent.SessionMetadata
 
-	TaskID            string // Task ID parsed from log filename; empty if unparseable.
-	Prompt            string
-	Title             string
-	Repos             []repo.Mount // GitRoot will be empty for purged tasks loaded from logs.
-	Harness           harness.Name
-	StartedAt         time.Time
-	LastActivityAt    time.Time // Best-known state or activity time: latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State             task.State
-	ForgeIssue        int // Originating issue number for bot comment callbacks.
-	OwnerID           string
-	ForkedFromTaskID  string
-	ParentTaskID      string
-	CaicMCP           bool
-	ForgeOwner        string
-	ForgeRepo         string
-	ForgePR           int // PR number created during the task; 0 if none.
-	Tailscale         bool
-	USB               bool
-	Display           bool
-	Sudo              bool
-	GitHubToken       bool
-	RuntimeName       runtime.Name
-	BaseImage         string
-	ContainerPlatform string
-	MaxCPUs           int
-	CacheMounts       []runtime.CacheMount
-	Mounts            []runtime.Mount
-	RequestedModel    string       // User-requested model.
-	RequestedEffort   string       // User-requested reasoning effort.
-	LogSize           int64        // Byte size of the log file on disk; populated by Store.Load.
-	DiffCreated       bool         // True if any non-empty diff was recorded in the log; sticky across the run.
-	LastTrailer       *task.Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
-	Timeline          []agent.TimedMessage
+	TaskID                         string // Task ID parsed from log filename; empty if unparseable.
+	Prompt                         string
+	Title                          string
+	Repos                          []repo.Mount // GitRoot will be empty for purged tasks loaded from logs.
+	Harness                        harness.Name
+	StartedAt                      time.Time
+	LastActivityAt                 time.Time // Best-known state or activity time: latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	State                          task.State
+	ForgeIssue                     int // Originating issue number for bot comment callbacks.
+	OwnerID                        string
+	ForkedFromTaskID               string
+	ParentTaskID                   string
+	CaicMCP                        bool
+	ForgeOwner                     string
+	ForgeRepo                      string
+	ForgePR                        int // PR number created during the task; 0 if none.
+	Tailscale                      bool
+	USB                            bool
+	Display                        bool
+	Sudo                           bool
+	GitHubToken                    bool
+	RuntimeName                    runtime.Name
+	BaseImage                      string
+	ContainerPlatform              string
+	MaxCPUs                        int
+	CacheMounts                    []runtime.CacheMount
+	Mounts                         []runtime.Mount
+	RequestedModel                 string // User-requested model.
+	RequestedCompactionBudget      agent.CompactionBudget
+	RequestedAutoCompactTokenLimit int          // Captured launch threshold from the log header.
+	RequestedEffort                string       // User-requested reasoning effort.
+	LogSize                        int64        // Byte size of the log file on disk; populated by Store.Load.
+	DiffCreated                    bool         // True if any non-empty diff was recorded in the log; sticky across the run.
+	LastTrailer                    *task.Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
+	Timeline                       []agent.TimedMessage
 
 	path           string         // Absolute path for lazy message loading via LoadMessages.
 	resolver       ParserResolver // Fresh parser factory supplied by the task owner.
@@ -132,34 +134,36 @@ func loadedTaskFromMeta(path, taskID string, meta *v3.MetaMessage, modified time
 		repos[i] = repo.Mount{Name: mr.Name, BaseBranch: mr.BaseBranch, Branch: mr.Branch, ContainerPath: mr.ContainerPath}
 	}
 	return &LoadedTask{
-		path:              path,
-		TaskID:            taskID,
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		Harness:           harness.Name(meta.Harness),
-		RequestedModel:    meta.RequestedModel,
-		RequestedEffort:   meta.RequestedEffort,
-		StartedAt:         meta.StartedAt,
-		LastActivityAt:    modified,
-		State:             task.StateRunning,
-		ForgeIssue:        meta.ForgeIssue,
-		OwnerID:           meta.OwnerID,
-		ForkedFromTaskID:  meta.ForkedFromTaskID,
-		ParentTaskID:      meta.ParentTaskID,
-		CaicMCP:           meta.CaicMCP,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-		RuntimeName:       runtime.Name(meta.RuntimeName),
-		BaseImage:         meta.BaseImage,
-		ContainerPlatform: meta.ContainerPlatform,
-		MaxCPUs:           meta.MaxCPUs,
-		CacheMounts:       runtimeCacheMountsFromMeta(meta.CacheMounts),
-		Mounts:            runtimeMountsFromMeta(meta.Mounts),
-		LogSize:           size,
+		path:                           path,
+		TaskID:                         taskID,
+		Prompt:                         meta.Prompt,
+		Title:                          meta.Title,
+		Repos:                          repos,
+		Harness:                        harness.Name(meta.Harness),
+		RequestedModel:                 meta.RequestedModel,
+		RequestedEffort:                meta.RequestedEffort,
+		RequestedAutoCompactTokenLimit: meta.RequestedAutoCompactTokenLimit,
+		RequestedCompactionBudget:      agent.CompactionBudget(meta.RequestedCompactionBudget),
+		StartedAt:                      meta.StartedAt,
+		LastActivityAt:                 modified,
+		State:                          task.StateRunning,
+		ForgeIssue:                     meta.ForgeIssue,
+		OwnerID:                        meta.OwnerID,
+		ForkedFromTaskID:               meta.ForkedFromTaskID,
+		ParentTaskID:                   meta.ParentTaskID,
+		CaicMCP:                        meta.CaicMCP,
+		Tailscale:                      meta.Tailscale,
+		USB:                            meta.USB,
+		Display:                        meta.Display,
+		Sudo:                           meta.Sudo,
+		GitHubToken:                    meta.GitHubToken,
+		RuntimeName:                    runtime.Name(meta.RuntimeName),
+		BaseImage:                      meta.BaseImage,
+		ContainerPlatform:              meta.ContainerPlatform,
+		MaxCPUs:                        meta.MaxCPUs,
+		CacheMounts:                    runtimeCacheMountsFromMeta(meta.CacheMounts),
+		Mounts:                         runtimeMountsFromMeta(meta.Mounts),
+		LogSize:                        size,
 	}
 }
 

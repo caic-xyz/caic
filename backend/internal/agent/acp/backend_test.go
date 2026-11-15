@@ -526,7 +526,7 @@ func testBackend() *Backend {
 }
 
 func testConfig() *Config {
-	return &Config{Args: []string{"opencode", "acp"}, ResumeMethod: acp.MethodSessionLoad, EffortID: "effort", Images: true, CompactPrompt: "/compact"}
+	return &Config{ResumeMethod: acp.MethodSessionLoad, EffortID: "effort", Images: true, CompactPrompt: "/compact"}
 }
 
 type requestObserver struct{ method string }

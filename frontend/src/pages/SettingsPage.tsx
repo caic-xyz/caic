@@ -20,6 +20,8 @@ export default function SettingsPage() {
       <SettingsForm
         selectedImage={s.selectedImage}
         setSelectedImage={s.setSelectedImage}
+        harnessSettings={s.harnessSettings}
+        setHarnessSettings={s.setHarnessSettings}
         runtimeSettings={s.runtimeSettings}
         updateRuntimeSettings={s.updateRuntimeSettings}
         purgeDelay={s.purgeDelay}

@@ -20,6 +20,7 @@ import type {
   Config,
   Harness,
   HarnessInfo,
+  HarnessSettings,
   ImageRefreshStatus,
   Repo,
   PendingInput,
@@ -56,6 +57,15 @@ import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
 import { ImageDraftOwner, type DraftImage } from "./images";
 import { harnessLabel } from "./harnessLabels";
+
+const emptyHarnessSettings: Required<HarnessSettings> = {
+  antigravity: {},
+  claude: { autoCompactTokenLimit: 0 },
+  codex: { autoCompactTokenLimit: 0 },
+  dsh: {},
+  pi: { reserveTokens: null, keepRecentTokens: null },
+  opencode: { bufferTokens: null, keepRecentTokens: null },
+};
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -204,6 +214,7 @@ function createAppStore() {
   const updateRuntimeSettings = (name: string, config: Partial<RuntimeSettings>) => {
     setRuntimeSettings((current) => ({ ...current, [name]: { ...current[name], ...config } }));
   };
+  const [harnessSettings, setHarnessSettings] = createSignal<Required<HarnessSettings>>(emptyHarnessSettings);
   const [purgeDelay, setPurgeDelay] = createSignal(0);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<NonNullable<WellKnownCachesResp["wellKnown"]>>([]);
@@ -255,6 +266,7 @@ function createAppStore() {
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
       runtimeSettings: runtimeSettings(),
+      harnesses: harnessSettings(),
       purgeDelay: purgeDelay(),
       runtimeName: selectedRuntimeName(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
@@ -379,6 +391,7 @@ function createAppStore() {
     setAutoFixCI(settings.autoFixOnCIFailure);
     setAutoFixPR(settings.autoFixOnPROpen);
     setRuntimeSettings(settings.runtimeSettings ?? {});
+    setHarnessSettings({ ...emptyHarnessSettings, ...settings.harnesses });
     setPurgeDelay(settings.purgeDelay);
     setSelectedRuntimeName(settings.runtimeName ?? selectedRuntimeName());
     setWellKnownCaches(settings.wellKnownCaches ?? {});
@@ -1892,6 +1905,8 @@ function createAppStore() {
     // settings
     selectedImage,
     setSelectedImage,
+    harnessSettings,
+    setHarnessSettings,
     runtimeSettings,
     updateRuntimeSettings,
     purgeDelay,

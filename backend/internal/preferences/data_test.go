@@ -119,4 +119,18 @@ func TestPreferencesPersistence(t *testing.T) {
 			t.Fatal("empty and null collection distinctions changed")
 		}
 	})
+	t.Run("harness_sections", func(t *testing.T) {
+		t.Parallel()
+		p := preferencesToData(&Preferences{Settings: Settings{Harnesses: HarnessSettings{
+			Codex: CodexSettings{AutoCompactTokenLimit: 90000},
+			Pi:    PiSettings{ReserveTokens: new(0)},
+		}}})
+		raw, err := json.Marshal(p.Settings.Harnesses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != `{"codex":{"autoCompactTokenLimit":90000},"pi":{"reserveTokens":0,"keepRecentTokens":null}}` {
+			t.Fatalf("encoded harnesses = %s", raw)
+		}
+	})
 }

@@ -50,6 +50,7 @@ test("desktop quota recovery continues in a fork and preserves the source", asyn
     "codex — Available · Recommended",
     "antigravity — Quota status unknown",
     "DeepSeek Harness — Quota status unknown",
+    "opencode — Quota status unknown",
     "pi — Quota status unknown",
     "claude — Same exhausted quota",
   ]);
@@ -87,6 +88,7 @@ test("mobile quota recovery opens from task detail and navigates to the fork", a
     "codex — Available · Recommended",
     "antigravity — Quota status unknown",
     "DeepSeek Harness — Quota status unknown",
+    "opencode — Quota status unknown",
     "pi — Quota status unknown",
     "claude — Same exhausted quota",
   ]);

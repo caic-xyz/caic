@@ -36,7 +36,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
-	v12 "github.com/caic-xyz/caic/backend/internal/task/history/data/headercache/v12"
+	v13 "github.com/caic-xyz/caic/backend/internal/task/history/data/headercache/v13"
 )
 
 const (
@@ -47,7 +47,7 @@ const (
 
 	// currentVersion guards both the schema and its projection semantics.
 	// Bump it when either changes so older entries rebuild from the journal.
-	currentVersion = 12
+	currentVersion = 13
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid
 	// entry is a few kilobytes; anything larger is treated as corrupt.
@@ -114,14 +114,14 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 	// preserves its rejection of explicit null/unknown states, while omitted
 	// states retain their historical zero value.
 	var entry struct {
-		v12.Entry
+		v13.Entry
 
 		Task *struct {
-			v12.Task
+			v13.Task
 
 			State  task.State `json:"state"`
 			Result *struct {
-				v12.Result
+				v13.Result
 
 				State task.State `json:"state"`
 			} `json:"result"`
@@ -156,7 +156,7 @@ func writeHeaderCache(path string, lt *LoadedTask) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(v12.Entry{
+	data, err := json.Marshal(v13.Entry{
 		Version:      currentVersion,
 		LogSize:      info.Size(),
 		LogMTimeNano: info.ModTime().UnixNano(),

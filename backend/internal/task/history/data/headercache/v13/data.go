@@ -1,5 +1,5 @@
-// Package v12 defines the independent version 12 task-header cache schema.
-package v12
+// Package v13 defines the independent version 13 task-header cache schema.
+package v13
 
 import "time"
 
@@ -13,43 +13,45 @@ type Entry struct {
 
 // Task is the bounded snapshot reconstructed from a task log.
 type Task struct {
-	TaskID                string       `json:"task_id"`
-	Prompt                string       `json:"prompt"`
-	Title                 string       `json:"title"`
-	Repos                 []Repo       `json:"repos"`
-	Harness               string       `json:"harness"`
-	StartedAt             time.Time    `json:"started_at"`
-	LastActivityAt        time.Time    `json:"last_activity_at"`
-	State                 string       `json:"state"`
-	ForgeIssue            int          `json:"forge_issue"`
-	OwnerID               string       `json:"owner_id"`
-	ForkedFromTaskID      string       `json:"forked_from_task_id"`
-	ParentTaskID          string       `json:"parent_task_id"`
-	CaicMCP               bool         `json:"caic_mcp"`
-	ForgeOwner            string       `json:"forge_owner"`
-	ForgeRepo             string       `json:"forge_repo"`
-	ForgePR               int          `json:"forge_pr"`
-	Tailscale             bool         `json:"tailscale"`
-	USB                   bool         `json:"usb"`
-	Display               bool         `json:"display"`
-	Sudo                  bool         `json:"sudo"`
-	GitHubToken           bool         `json:"github_token"`
-	RuntimeName           string       `json:"runtime_name"`
-	BaseImage             string       `json:"base_image"`
-	ContainerPlatform     string       `json:"container_platform"`
-	MaxCPUs               int          `json:"max_cpus"`
-	CacheMounts           []CacheMount `json:"cache_mounts"`
-	Mounts                []Mount      `json:"mounts"`
-	RequestedModel        string       `json:"model"`
-	RequestedEffort       string       `json:"effort"`
-	ReportedModel         string       `json:"reported_model"`
-	ReportedEffort        string       `json:"reported_effort"`
-	SessionID             string       `json:"session_id"`
-	AgentVersion          string       `json:"agent_version"`
-	AutoCompactTokenLimit int          `json:"auto_compact_token_limit,omitempty"`
-	LogSize               int64        `json:"log_size"`
-	DiffCreated           bool         `json:"diff_created"`
-	LastTrailer           *Result      `json:"result"`
+	TaskID                         string           `json:"task_id"`
+	Prompt                         string           `json:"prompt"`
+	Title                          string           `json:"title"`
+	Repos                          []Repo           `json:"repos"`
+	Harness                        string           `json:"harness"`
+	StartedAt                      time.Time        `json:"started_at"`
+	LastActivityAt                 time.Time        `json:"last_activity_at"`
+	State                          string           `json:"state"`
+	ForgeIssue                     int              `json:"forge_issue"`
+	OwnerID                        string           `json:"owner_id"`
+	ForkedFromTaskID               string           `json:"forked_from_task_id"`
+	ParentTaskID                   string           `json:"parent_task_id"`
+	CaicMCP                        bool             `json:"caic_mcp"`
+	ForgeOwner                     string           `json:"forge_owner"`
+	ForgeRepo                      string           `json:"forge_repo"`
+	ForgePR                        int              `json:"forge_pr"`
+	Tailscale                      bool             `json:"tailscale"`
+	USB                            bool             `json:"usb"`
+	Display                        bool             `json:"display"`
+	Sudo                           bool             `json:"sudo"`
+	GitHubToken                    bool             `json:"github_token"`
+	RuntimeName                    string           `json:"runtime_name"`
+	BaseImage                      string           `json:"base_image"`
+	ContainerPlatform              string           `json:"container_platform"`
+	MaxCPUs                        int              `json:"max_cpus"`
+	CacheMounts                    []CacheMount     `json:"cache_mounts"`
+	Mounts                         []Mount          `json:"mounts"`
+	RequestedModel                 string           `json:"model"`
+	RequestedCompactionBudget      CompactionBudget `json:"requested_compaction_budget,omitzero"`
+	RequestedAutoCompactTokenLimit int              `json:"requested_auto_compact_token_limit"`
+	RequestedEffort                string           `json:"effort"`
+	ReportedModel                  string           `json:"reported_model"`
+	ReportedEffort                 string           `json:"reported_effort"`
+	SessionID                      string           `json:"session_id"`
+	AgentVersion                   string           `json:"agent_version"`
+	AutoCompactTokenLimit          int              `json:"auto_compact_token_limit,omitempty"`
+	LogSize                        int64            `json:"log_size"`
+	DiffCreated                    bool             `json:"diff_created"`
+	LastTrailer                    *Result          `json:"result"`
 }
 
 // Repo preserves the cached RepoMount fields.
@@ -126,4 +128,10 @@ type Result struct {
 	AgentResult    string          `json:"agent_result"`
 	StartupFailure *StartupFailure `json:"startup_failure,omitempty"`
 	Error          string          `json:"error,omitempty"`
+}
+
+// CompactionBudget stores selected native headroom and retained-history overrides.
+type CompactionBudget struct {
+	ReserveTokens    *int `json:"reserve_tokens,omitempty"`
+	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
 }

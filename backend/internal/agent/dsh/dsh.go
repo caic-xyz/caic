@@ -28,8 +28,14 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // New creates a DeepSeek Harness backend sharing the standard ACP transport.
 // Native dsh sessions use session/resume and opaque JSON model-route values.
 // Image input depends on the selected route and durable store support; those
-// capabilities and compaction are not yet verified for caic task sessions, so
-// neither capability is advertised by this backend.
+// capabilities and manual ACP compaction are not yet verified for caic task
+// sessions, so neither capability is advertised by this backend.
+// Native automatic compaction already runs through the ACP profile's
+// compaction-basic plugin (verified with dsh 0.2.2-rc.1 --dump-config).
+// Its threshold is floor(min(context*thresholdRatio, context-output-headroomTokens));
+// retention uses retainTokens or retainRatio. It has no absolute used-token
+// threshold, so a caic override needs its own native settings design.
+// See https://github.com/deepseek-ai/deepseek-harness/blob/39163dd30f703a79079e2d2446545cff3c453738/packages/compaction/compaction-basic/README.md.
 //
 // TODO: Enable images after selecting the exact route before initialize,
 // verifying its durable image store, and accepting native prompt/history behavior.
@@ -40,8 +46,8 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // upstream reports prompt usage or usage_update.cost.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.Dsh, &agentacp.Config{
-		Args: []string{"dsh", "--profile", "acp"}, ResumeMethod: acp.MethodSessionResume,
-		EffortID: dshEffortID, Models: modelCodec{}, NewTools: newTools, Permissions: agentacp.PermissionApprover{},
+		ResumeMethod: acp.MethodSessionResume,
+		EffortID:     dshEffortID, Models: modelCodec{}, NewTools: newTools, Permissions: agentacp.PermissionApprover{},
 	})}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Dsh, envVars))
 	return b
@@ -70,10 +76,22 @@ func decodeDSHModel(value string) (string, error) {
 // Backend implements DeepSeek Harness independently of other ACP harnesses.
 type Backend struct{ *agentacp.Backend }
 
+// Start supplies DeepSeek's native command to shared ACP startup.
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return b.Backend.Start(ctx, opts, agentacp.Launch{Args: b.AgentArgs(agent.HarnessArgs{})})
+}
+
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"dsh", "--profile", "acp"}
+}
+
 // FetchModelInventory discovers native DeepSeek model routes and their effort choices.
 func (b *Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
 	return fetchDSHModels(ctx, target, extraEnv)
 }
+
+var _ agent.Backend = (*Backend)(nil)
 
 type modelCodec struct{}
 

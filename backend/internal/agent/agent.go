@@ -73,14 +73,16 @@ type Prompt struct {
 
 // Options configures an agent session launch.
 type Options struct {
-	Logger          *slog.Logger // Non-nil session logger.
-	Target          runtime.ConnectionTarget
-	Dir             string // Working directory inside the runtime.
-	Model           string // Model alias ("opus", "sonnet", "haiku", "fable") or full ID. Empty = default.
-	Effort          string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
-	ResumeSessionID string
-	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
+	CompactionBudget      CompactionBudget
+	Logger                *slog.Logger // Non-nil session logger.
+	Target                runtime.ConnectionTarget
+	Dir                   string // Working directory inside the runtime.
+	Model                 string // Model alias ("opus", "sonnet", "haiku", "fable") or full ID. Empty = default.
+	AutoCompactTokenLimit int    // Requested threshold in tokens; zero uses the backend default.
+	Effort                string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+	InitialPrompt         Prompt // Initial prompt; never mutated after creation.
+	ResumeSessionID       string
+	RelayOffset           int64 // Byte offset into relay output.jsonl for AttachRelay.
 	// PendingUserActions is the restored user-facing work that still needs
 	// input after AttachRelay reconnects. It must not contain backend-only
 	// protocol state such as keepalive, auto-allow, or environment control

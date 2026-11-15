@@ -70,10 +70,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	// Record the configured threshold before the relay starts so a failed
 	// write needs no process cleanup.
-	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{AutoCompactTokenLimit: autoCompactTokenLimit}); err != nil {
+	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{AutoCompactTokenLimit: new(opts.AutoCompactTokenLimit)}); err != nil {
 		return nil, fmt.Errorf("write compaction configuration: %w", err)
 	}
-	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
+	args := b.AgentArgs(agent.HarnessArgs{AutoCompactTokenLimit: opts.AutoCompactTokenLimit, Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
 	relayArgs := []string{"--harness", "claude"}
 	if opts.MCP != nil {
 		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath)
@@ -86,12 +86,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	c := agent.Conn(&controlConn{Conn: agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP)})
 	return agent.StartSession(ctx, rp, c, opts)
 }
-
-// autoCompactTokenLimit is the Claude Code auto-compact window: compaction
-// triggers when the context reaches it. Claude Code caps the window at the
-// model's context size, so a 200K-context model compacts near 200K.
-// https://code.claude.com/docs/en/settings-reference
-const autoCompactTokenLimit = 400000
 
 // AgentArgs implements agent.Backend.
 func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
@@ -108,9 +102,11 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 		"--permission-mode", "bypassPermissions",
 		"--settings", `{"disableAutoMode":"disable"}`,
 		"--permission-prompt-tool", "stdio",
-		"--autocompact", strconv.Itoa(autoCompactTokenLimit),
 		"--include-partial-messages",
 		"--plugin-dir", agent.WidgetPluginDir,
+	}
+	if a.AutoCompactTokenLimit > 0 {
+		args = append(args, "--autocompact", strconv.Itoa(a.AutoCompactTokenLimit))
 	}
 	if a.Model != "" {
 		args = append(args, "--model", a.Model)

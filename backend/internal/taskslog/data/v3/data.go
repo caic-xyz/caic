@@ -256,47 +256,57 @@ type ExitMessage struct {
 	Ts              float64  `json:"ts,omitempty"`
 }
 
+// CompactionBudget stores selected native headroom and retained-history overrides.
+type CompactionBudget struct {
+	ReserveTokens    *int `json:"reserve_tokens,omitempty"`
+	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
+}
+
 // MetaMessage is the persisted MetaMessage representation.
 type MetaMessage struct {
 	MessageProvenance
 
-	MessageType       string           `json:"t"`
-	Version           int              `json:"version"`
-	Prompt            string           `json:"prompt"`
-	Title             string           `json:"title,omitempty"`
-	Repos             []MetaRepo       `json:"repos"`
-	Harness           string           `json:"harness"`
-	RequestedModel    string           `json:"model,omitempty"`
-	RequestedEffort   string           `json:"effort,omitempty"`
-	StartedAt         time.Time        `json:"started_at"`
-	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
-	OwnerID           string           `json:"owner_id,omitempty"`    // Human authorization principal; distinct from task lineage.
-	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
-	ParentTaskID      string           `json:"parent_task_id,omitempty"` // Delegating task identity; empty for roots and ordinary forks.
-	CaicMCP           bool             `json:"caic_mcp,omitempty"`       // Enables task-scoped CAIC MCP delegation.
-	Tailscale         bool             `json:"tailscale,omitempty"`
-	USB               bool             `json:"usb,omitempty"`
-	Display           bool             `json:"display,omitempty"`
-	Sudo              bool             `json:"sudo,omitempty"`
-	GitHubToken       bool             `json:"gitHubToken,omitempty"`
-	RuntimeName       string           `json:"runtimeName,omitempty"`
-	BaseImage         string           `json:"baseImage,omitempty"`
-	ContainerPlatform string           `json:"containerPlatform,omitempty"`
-	MaxCPUs           int              `json:"maxCPUs,omitempty"`
-	CacheMounts       []MetaCacheMount `json:"cacheMounts,omitempty"`
-	Mounts            []MetaMount      `json:"mounts,omitempty"`
+	MessageType                    string           `json:"t"`
+	Version                        int              `json:"version"`
+	Prompt                         string           `json:"prompt"`
+	Title                          string           `json:"title,omitempty"`
+	Repos                          []MetaRepo       `json:"repos"`
+	Harness                        string           `json:"harness"`
+	RequestedModel                 string           `json:"model,omitempty"`
+	RequestedCompactionBudget      CompactionBudget `json:"compaction_budget,omitzero"`
+	RequestedAutoCompactTokenLimit int              `json:"auto_compact_token_limit,omitempty"`
+	RequestedEffort                string           `json:"effort,omitempty"`
+	StartedAt                      time.Time        `json:"started_at"`
+	ForgeIssue                     int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
+	OwnerID                        string           `json:"owner_id,omitempty"`    // Human authorization principal; distinct from task lineage.
+	ForkedFromTaskID               string           `json:"forked_from_task_id,omitempty"`
+	ParentTaskID                   string           `json:"parent_task_id,omitempty"` // Delegating task identity; empty for roots and ordinary forks.
+	CaicMCP                        bool             `json:"caic_mcp,omitempty"`       // Enables task-scoped CAIC MCP delegation.
+	Tailscale                      bool             `json:"tailscale,omitempty"`
+	USB                            bool             `json:"usb,omitempty"`
+	Display                        bool             `json:"display,omitempty"`
+	Sudo                           bool             `json:"sudo,omitempty"`
+	GitHubToken                    bool             `json:"gitHubToken,omitempty"`
+	RuntimeName                    string           `json:"runtimeName,omitempty"`
+	BaseImage                      string           `json:"baseImage,omitempty"`
+	ContainerPlatform              string           `json:"containerPlatform,omitempty"`
+	MaxCPUs                        int              `json:"maxCPUs,omitempty"`
+	CacheMounts                    []MetaCacheMount `json:"cacheMounts,omitempty"`
+	Mounts                         []MetaMount      `json:"mounts,omitempty"`
 }
 
 // MetaSessionMessage is the persisted MetaSessionMessage representation.
 type MetaSessionMessage struct {
 	MessageProvenance
 
-	MessageType           string `json:"t"`
-	SessionID             string `json:"session_id"`
-	ReportedModel         string `json:"model,omitempty"`
-	ReportedEffort        string `json:"reported_effort,omitempty"`
-	AgentVersion          string `json:"agent_version,omitempty"`
-	AutoCompactTokenLimit int    `json:"auto_compact_token_limit,omitempty"`
+	MessageType    string `json:"t"`
+	SessionID      string `json:"session_id"`
+	ReportedModel  string `json:"model,omitempty"`
+	ReportedEffort string `json:"reported_effort,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
+	// AutoCompactTokenLimit replaces the configured threshold when present;
+	// zero means native default, while omission preserves earlier metadata.
+	AutoCompactTokenLimit *int `json:"auto_compact_token_limit,omitempty"`
 }
 
 // RelayGenerationMessage is the persisted RelayGenerationMessage representation.

@@ -9,6 +9,8 @@ declare const classes: {
   readonly "cacheName": string;
   readonly "cachePath": string;
   readonly "cacheSize": string;
+  readonly "compactionBudget": string;
+  readonly "compactionSettings": string;
   readonly "modelRefreshFeedback": string;
   readonly "oauthGrantCard": string;
   readonly "oauthGrantDetails": string;

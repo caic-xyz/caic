@@ -14,6 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+
 	"github.com/caic-xyz/md"
 )
 
@@ -189,6 +192,8 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string
+	// Harnesses holds the settings for each configured agent harness.
+	Harnesses HarnessSettings
 	// RuntimeSettings stores CPU architecture and limits by runtime name.
 	RuntimeSettings map[string]RuntimeSettings
 	// PurgeDelay is the recovery window before a stopped task is deleted.
@@ -210,6 +215,9 @@ func defaultSettings() Settings {
 
 // Validate checks that the settings are well-formed.
 func (s *Settings) Validate() error {
+	if err := s.Harnesses.Validate(); err != nil {
+		return err
+	}
 	for i, m := range s.CacheMappings {
 		if _, err := md.ResolveMountTarget(m.HostPath, m.ContainerPath); err != nil {
 			return fmt.Errorf("cacheMappings[%d]: %w", i, err)
@@ -391,4 +399,85 @@ func (f *usersFile) Validate() error {
 		}
 	}
 	return nil
+}
+
+// HarnessSettings holds the account's independently configurable harness sections.
+type HarnessSettings struct {
+	Antigravity AntigravitySettings
+	Claude      ClaudeSettings
+	Codex       CodexSettings
+	Dsh         DshSettings
+	Pi          PiSettings
+	OpenCode    OpenCodeSettings
+}
+
+// CompactionBudget selects only the native budgets used by h.
+func (s *HarnessSettings) CompactionBudget(h harness.Name) agent.CompactionBudget {
+	switch h {
+	case harness.Pi:
+		return agent.CompactionBudget{ReserveTokens: s.Pi.ReserveTokens, KeepRecentTokens: s.Pi.KeepRecentTokens}
+	case harness.OpenCode:
+		return agent.CompactionBudget{ReserveTokens: s.OpenCode.BufferTokens, KeepRecentTokens: s.OpenCode.KeepRecentTokens}
+	default:
+		return agent.CompactionBudget{}
+	}
+}
+
+// AutoCompactTokenLimit selects the requested task threshold for h. Zero uses
+// the native backend's default; unsupported harnesses have no override.
+func (s *HarnessSettings) AutoCompactTokenLimit(h harness.Name) int {
+	switch h {
+	case harness.Claude:
+		return s.Claude.AutoCompactTokenLimit
+	case harness.Codex:
+		return s.Codex.AutoCompactTokenLimit
+	default:
+		return 0
+	}
+}
+
+// Validate checks account-provided compaction thresholds and native budgets.
+func (s *HarnessSettings) Validate() error {
+	for _, n := range []*int{s.Pi.ReserveTokens, s.Pi.KeepRecentTokens, s.OpenCode.BufferTokens, s.OpenCode.KeepRecentTokens} {
+		if n != nil && (*n < 0 || *n > 2147483647) {
+			return errors.New("compaction budgets must be between 0 and 2147483647 tokens")
+		}
+	}
+	if s.Claude.AutoCompactTokenLimit < 0 {
+		return errors.New("claude auto-compaction threshold must be non-negative")
+	}
+	if s.Codex.AutoCompactTokenLimit < 0 {
+		return errors.New("codex auto-compaction threshold must be non-negative")
+	}
+	return nil
+}
+
+// AntigravitySettings holds account settings for Antigravity tasks.
+type AntigravitySettings struct{}
+
+// DshSettings holds account settings for DeepSeek Harness tasks.
+type DshSettings struct{}
+
+// PiSettings holds native Pi compaction budgets for new tasks.
+type PiSettings struct {
+	ReserveTokens    *int
+	KeepRecentTokens *int
+}
+
+// OpenCodeSettings holds native OpenCode compaction budgets for new tasks.
+type OpenCodeSettings struct {
+	BufferTokens     *int
+	KeepRecentTokens *int
+}
+
+// ClaudeSettings holds account overrides for Claude Code tasks.
+type ClaudeSettings struct {
+	// AutoCompactTokenLimit is the requested threshold in tokens; zero uses the native default.
+	AutoCompactTokenLimit int
+}
+
+// CodexSettings holds account overrides for Codex tasks.
+type CodexSettings struct {
+	// AutoCompactTokenLimit is the requested threshold in tokens; zero uses the native default.
+	AutoCompactTokenLimit int
 }

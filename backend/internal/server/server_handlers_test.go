@@ -261,10 +261,16 @@ func TestServerHandlers(t *testing.T) {
 
 		want := 91 * time.Second
 		got, err = s.serverHandlers.updatePreferences(t.Context(), &v1.UpdatePreferencesReq{
-			Settings: v1.UserSettings{PurgeDelay: want, RuntimeSettings: map[string]v1.RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}}},
+			Settings: v1.UserSettings{Harnesses: v1.HarnessSettings{Claude: v1.ClaudeSettings{AutoCompactTokenLimit: 120000}, Codex: v1.CodexSettings{AutoCompactTokenLimit: 90000}, Pi: v1.PiSettings{ReserveTokens: new(0), KeepRecentTokens: new(2000)}, OpenCode: v1.OpenCodeSettings{BufferTokens: new(3000)}}, PurgeDelay: want, RuntimeSettings: map[string]v1.RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}}},
 		})
 		if err != nil {
 			t.Fatalf("updatePreferences: %v", err)
+		}
+		if got.Settings.Harnesses.Claude.AutoCompactTokenLimit != 120000 || got.Settings.Harnesses.Codex.AutoCompactTokenLimit != 90000 {
+			t.Fatalf("compaction thresholds not preserved: %v", got.Settings.Harnesses)
+		}
+		if got.Settings.Harnesses.Pi.ReserveTokens == nil || *got.Settings.Harnesses.Pi.ReserveTokens != 0 || got.Settings.Harnesses.Pi.KeepRecentTokens == nil || *got.Settings.Harnesses.Pi.KeepRecentTokens != 2000 || got.Settings.Harnesses.OpenCode.BufferTokens == nil || *got.Settings.Harnesses.OpenCode.BufferTokens != 3000 || got.Settings.Harnesses.OpenCode.KeepRecentTokens != nil {
+			t.Fatalf("native budgets not preserved: %+v", got.Settings.Harnesses)
 		}
 		if got.Settings.PurgeDelay != want {
 			t.Errorf("updated purge delay = %s, want %s", got.Settings.PurgeDelay, want)
@@ -319,6 +325,26 @@ func TestValidatePreferenceSettings(t *testing.T) {
 		settings v1.UserSettings
 		want     string
 	}{
+		{
+			name:     "invalid Claude threshold",
+			settings: v1.UserSettings{Harnesses: v1.HarnessSettings{Claude: v1.ClaudeSettings{AutoCompactTokenLimit: -1}}},
+			want:     "harnesses.claude.autoCompactTokenLimit must be between 0 and 2147483647 tokens",
+		},
+		{
+			name:     "invalid Codex threshold",
+			settings: v1.UserSettings{Harnesses: v1.HarnessSettings{Codex: v1.CodexSettings{AutoCompactTokenLimit: 2147483648}}},
+			want:     "harnesses.codex.autoCompactTokenLimit must be between 0 and 2147483647 tokens",
+		},
+		{
+			name:     "negative Pi headroom",
+			settings: v1.UserSettings{Harnesses: v1.HarnessSettings{Pi: v1.PiSettings{ReserveTokens: new(-1)}}},
+			want:     "harnesses.pi.reserveTokens must be between 0 and 2147483647 tokens",
+		},
+		{
+			name:     "excessive OpenCode retained history",
+			settings: v1.UserSettings{Harnesses: v1.HarnessSettings{OpenCode: v1.OpenCodeSettings{KeepRecentTokens: new(2147483648)}}},
+			want:     "harnesses.opencode.keepRecentTokens must be between 0 and 2147483647 tokens",
+		},
 		{
 			name:     "unknown cache",
 			settings: v1.UserSettings{WellKnownCaches: map[string]bool{"bogus": true}},

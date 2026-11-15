@@ -31,8 +31,10 @@ func (m *SessionMetadata) Apply(msg Message) {
 		m.Restore(SessionMetadata{
 			SessionID: src.SessionID, ReportedModel: src.ReportedModel,
 			ReportedEffort: src.ReportedEffort, AgentVersion: src.AgentVersion,
-			AutoCompactTokenLimit: src.AutoCompactTokenLimit,
 		})
+		if src.AutoCompactTokenLimit != nil {
+			m.AutoCompactTokenLimit = *src.AutoCompactTokenLimit
+		}
 	case *SystemMessage:
 		switch src.Subtype {
 		case SystemSubtypeModelRerouted:

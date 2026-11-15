@@ -156,12 +156,25 @@ type ModelFetcher interface {
 	FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, env []string) (ModelInventory, error)
 }
 
+// CompactionBudget contains the selected harness's native token-budget overrides.
+// Nil fields leave native settings unchanged; a pointer to zero is an explicit override.
+// The value is captured when a task is created and treated as immutable thereafter.
+type CompactionBudget struct {
+	ReserveTokens    *int
+	KeepRecentTokens *int
+}
+
+// IsZero reports whether both budgets use native configuration.
+func (c *CompactionBudget) IsZero() bool { return c.ReserveTokens == nil && c.KeepRecentTokens == nil }
+
 // HarnessArgs holds the session-specific parameters that influence the CLI
 // arguments passed to an agent subprocess.
 type HarnessArgs struct {
-	Model           string // Model name or alias; empty means use backend default.
-	Effort          string // Thinking effort level (e.g. "low", "high"); empty means default.
-	ResumeSessionID string // Agent session ID to resume; empty starts a new session.
+	CompactionBudget      CompactionBudget
+	AutoCompactTokenLimit int    // Requested threshold in tokens; zero uses the backend default.
+	Model                 string // Model name or alias; empty means use backend default.
+	Effort                string // Thinking effort level (e.g. "low", "high"); empty means default.
+	ResumeSessionID       string // Agent session ID to resume; empty starts a new session.
 }
 
 // RecordHandshaker is implemented by backends that perform a bidirectional

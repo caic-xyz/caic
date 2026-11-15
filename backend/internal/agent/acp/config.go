@@ -1,4 +1,4 @@
-// ACP configuration separates protocol mechanics from harness-specific model routes, permissions, and tool events.
+// ACP protocol configuration selects harness-specific model routes, permissions, and tool events.
 
 package acp
 
@@ -7,15 +7,10 @@ import (
 	"github.com/maruel/genai/acp"
 )
 
-// Config selects native launch and protocol behavior for one harness.
+// Config selects protocol behavior for one harness.
 //
 // Immutable.
 type Config struct {
-	// Args is the native executable and argument vector passed to the relay.
-	Args []string
-	// Env holds KEY=VALUE pairs the relay sets in the native process
-	// environment, replacing inherited values.
-	Env []string
 	// ResumeMethod selects the native method for reopening persisted sessions.
 	ResumeMethod acp.Method
 	// EffortID is the native reasoning-effort configuration option ID.

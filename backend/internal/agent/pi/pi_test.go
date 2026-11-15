@@ -512,6 +512,13 @@ func TestBackend(t *testing.T) {
 	})
 
 	t.Run("AgentArgs", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+		t.Run("configured budgets", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
+			got := New("", nil).AgentArgs(agent.HarnessArgs{CompactionBudget: agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}, ResumeSessionID: "session"})
+			want := []string{"node", compactionLauncherPath, "--reserve-tokens", "0", "--keep-recent-tokens", "2000", "--session", "session"}
+			if !slices.Equal(got, want) {
+				t.Fatalf("configured args = %v, want %v", got, want)
+			}
+		})
 		t.Run("resume_exact_session", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.
 			args := New("", nil).AgentArgs(agent.HarnessArgs{ResumeSessionID: "saved-session"})
 			if !slices.Equal(args, []string{"pi", "--mode", "rpc", "--approve", "--session", "saved-session"}) {

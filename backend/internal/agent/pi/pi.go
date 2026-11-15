@@ -1,4 +1,4 @@
-// Package pi implements Pi RPC sessions with shared native metadata and token accounting.
+// Package pi implements Pi RPC sessions, native compaction budgets, and shared token accounting.
 //
 // Pi uses a custom type-dispatched JSONL protocol over stdin/stdout (not
 // JSON-RPC 2.0). There is no handshake — the subprocess is immediately ready
@@ -102,6 +102,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 // AgentArgs implements agent.Backend.
 func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 	args := []string{"pi", "--mode", "rpc", "--approve"}
+	if !a.CompactionBudget.IsZero() {
+		args = compactionArgs(a.CompactionBudget)
+	}
 	if a.ResumeSessionID != "" {
 		// Resume reads local JSONL history under ~/.pi/agent/sessions/ by default,
 		// grouped by working directory. The ID alone cannot recover missing history.
@@ -186,7 +189,12 @@ func (*Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.
 }
 
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (session *agent.Session, err error) {
-	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID})
+	if !opts.CompactionBudget.IsZero() {
+		if err := agent.DeployEmbeddedDir(ctx, opts.Target.SSHHost, compactionLauncher, agent.RelayDir); err != nil {
+			return nil, err
+		}
+	}
+	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID, CompactionBudget: opts.CompactionBudget})
 	relayArgs := []string{"--harness", "pi"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")

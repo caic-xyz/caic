@@ -73,6 +73,8 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// Harnesses holds the settings for each configured agent harness.
+	Harnesses HarnessSettings `json:"harnesses,omitzero"`
 	// RuntimeSettings stores CPU architecture and limits by runtime name.
 	RuntimeSettings map[string]RuntimeSettings `json:"runtimeSettings,omitempty"`
 	// PurgeDelay is the recovery window before a stopped task is deleted.
@@ -98,6 +100,52 @@ func (s *Settings) UnmarshalJSON(raw []byte) error {
 	*s = Settings(v)
 	s.Present = true
 	return nil
+}
+
+// HarnessSettings groups the independently configurable agent harnesses.
+type HarnessSettings struct {
+	Antigravity AntigravitySettings `json:"antigravity,omitzero"`
+	Claude      ClaudeSettings      `json:"claude,omitzero"`
+	Codex       CodexSettings       `json:"codex,omitzero"`
+	Dsh         DshSettings         `json:"dsh,omitzero"`
+	Pi          PiSettings          `json:"pi,omitzero"`
+	OpenCode    OpenCodeSettings    `json:"opencode,omitzero"`
+}
+
+// AntigravitySettings is the persisted Antigravity settings section.
+type AntigravitySettings struct{}
+
+// DshSettings is the persisted DeepSeek Harness settings section.
+type DshSettings struct{}
+
+// PiSettings configures native Pi compaction budgets for new tasks.
+type PiSettings struct {
+	// ReserveTokens leaves this many context tokens free before compaction. Null uses native configuration.
+	ReserveTokens *int `json:"reserveTokens"`
+	// KeepRecentTokens is the recent history retained verbatim. Null uses native configuration.
+	KeepRecentTokens *int `json:"keepRecentTokens"`
+}
+
+// OpenCodeSettings configures native OpenCode compaction budgets for new tasks.
+type OpenCodeSettings struct {
+	// BufferTokens reserves context headroom before compaction. Null uses native configuration.
+	BufferTokens *int `json:"bufferTokens"`
+	// KeepRecentTokens is the recent history retained alongside the summary. Null uses native configuration.
+	KeepRecentTokens *int `json:"keepRecentTokens"`
+}
+
+// ClaudeSettings configures Claude Code sessions.
+type ClaudeSettings struct {
+	// AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
+	// default; changes apply to new tasks.
+	AutoCompactTokenLimit int `json:"autoCompactTokenLimit"`
+}
+
+// CodexSettings configures Codex sessions.
+type CodexSettings struct {
+	// AutoCompactTokenLimit is the total active context threshold in tokens.
+	// Zero uses the harness default; changes apply to new tasks.
+	AutoCompactTokenLimit int `json:"autoCompactTokenLimit"`
 }
 
 // RuntimeSettings is the persisted RuntimeSettings representation.

@@ -195,12 +195,18 @@ exit 0
 				"-c", `approval_policy="never"`,
 				"-c", `approvals_reviewer="user"`,
 				"-c", "features.guardian_approval=false",
-				"-c", `model_auto_compact_token_limit=350000`,
-				"-c", `model_auto_compact_token_limit_scope="total"`,
 				"-c", `sandbox_mode="danger-full-access"`,
 			}
 			if !slices.Equal(args, want) {
 				t.Errorf("args = %v, want %v", args, want)
+			}
+			args = New("", nil).AgentArgs(agent.HarnessArgs{AutoCompactTokenLimit: 120000})
+			want = slices.Concat(want, []string{
+				"-c", "model_auto_compact_token_limit=120000",
+				"-c", `model_auto_compact_token_limit_scope="total"`,
+			})
+			if !slices.Equal(args, want) {
+				t.Errorf("custom args = %v, want %v", args, want)
 			}
 		})
 		t.Run("WidgetMCPConfig", func(t *testing.T) { //nolint:paralleltest // Backend cases share the process environment.

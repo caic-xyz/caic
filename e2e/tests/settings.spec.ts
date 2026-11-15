@@ -1,4 +1,4 @@
-// Browser coverage for settings layout, destination ordering, and mapping edits.
+// Browser coverage for native compaction budgets, saved thresholds, settings layout, destination ordering, and mapping edits.
 
 import { ok } from "node:assert/strict";
 import { expect, test } from "../helpers";
@@ -29,9 +29,10 @@ test("server model reload shows progress, success, and recoverable failure", asy
   const pi = models.getByRole("button", { name: "pi", exact: true });
   await expect(codex).toBeVisible();
   await expect(pi).toBeVisible();
+  await expect(models.getByRole("button", { name: "opencode", exact: true })).toBeVisible();
   await expect(models.getByRole("button", { name: "antigravity", exact: true })).toBeVisible();
   await expect(models.getByRole("button", { name: "DeepSeek Harness", exact: true })).toBeVisible();
-  await expect(models.getByRole("button")).toHaveCount(4);
+  await expect(models.getByRole("button")).toHaveCount(5);
 
   const gate = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
@@ -340,5 +341,193 @@ test("settings tabs navigate in the same document", async ({ page }) => {
     await expect(page).toHaveURL(url);
     await expect(page.getByRole("link", { name: /^(General|Storage|Server)$/ })).toHaveCount(3);
     expect(await page.evaluate(() => (window as unknown as { documentMarker?: boolean }).documentMarker)).toBe(true);
+  }
+});
+
+test("token thresholds save independently, validate, persist, and reset", async ({ page, api }) => {
+  await page.goto("/settings");
+  const claude = page.getByRole("spinbutton", { name: "claude threshold (tokens)" });
+  const codex = page.getByRole("spinbutton", { name: "codex threshold (tokens)" });
+  await expect(claude).toHaveAttribute("placeholder", "Harness default");
+  await expect(codex).toHaveAttribute("placeholder", "Harness default");
+  await claude.fill("120000");
+  await claude.press("Tab");
+  await expect
+    .poll(async () => (await api.getPreferences()).settings.harnesses?.claude?.autoCompactTokenLimit)
+    .toBe(120000);
+  await codex.fill("90000");
+  await codex.press("Tab");
+  await expect
+    .poll(async () => (await api.getPreferences()).settings.harnesses?.codex?.autoCompactTokenLimit)
+    .toBe(90000);
+  await page.reload();
+  await expect(claude).toHaveValue("120000");
+  await expect(codex).toHaveValue("90000");
+  await claude.fill("-1");
+  await claude.press("Tab");
+  expect(await claude.evaluate((input: HTMLInputElement) => input.validity.valid)).toBe(false);
+  expect((await api.getPreferences()).settings.harnesses?.claude?.autoCompactTokenLimit).toBe(120000);
+  await claude.fill("");
+  await claude.press("Tab");
+  await expect
+    .poll(async () => (await api.getPreferences()).settings.harnesses)
+    .toEqual({
+      codex: { autoCompactTokenLimit: 90000 },
+    });
+  await page.screenshot({ path: test.info().outputPath("compaction-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(claude).toHaveValue("");
+  await expect(codex).toHaveValue("90000");
+  const section = page.getByRole("region", { name: "Auto-compaction" });
+  await section.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("compaction-mobile.png") });
+  const bounds = await section.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await codex.fill("");
+  await codex.press("Tab");
+  await expect.poll(async () => (await api.getPreferences()).settings.harnesses).toBeUndefined();
+});
+
+test("native compaction budgets preserve zero, validate, persist, and reset independently", async ({ page, api }) => {
+  const original = await api.getPreferences();
+  try {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.setViewportSize({ width: 1600, height: 1200 });
+    await page.goto("/settings");
+    const section = page.getByRole("region", { name: "Auto-compaction", exact: true });
+    const claude = section.getByRole("spinbutton", { name: "claude threshold (tokens)" });
+    const codex = section.getByRole("spinbutton", { name: "codex threshold (tokens)" });
+    const pi = section.getByRole("group", { name: "pi", exact: true });
+    const opencode = section.getByRole("group", { name: "opencode", exact: true });
+    const piReserve = pi.getByRole("spinbutton", { name: "pi compaction headroom (tokens)" });
+    const piKeep = pi.getByRole("spinbutton", { name: "pi recent history (tokens)" });
+    const openBuffer = opencode.getByRole("spinbutton", { name: "opencode compaction headroom (tokens)" });
+    const openKeep = opencode.getByRole("spinbutton", { name: "opencode recent history (tokens)" });
+    const fields = [piReserve, piKeep, openBuffer, openKeep];
+    await test.step("visible names and shared guidance reach assistive technology", async () => {
+      for (const [field, name] of [
+        [claude, "claude threshold (tokens)"],
+        [codex, "codex threshold (tokens)"],
+        [piReserve, "pi compaction headroom (tokens)"],
+        [piKeep, "pi recent history (tokens)"],
+        [openBuffer, "opencode compaction headroom (tokens)"],
+        [openKeep, "opencode recent history (tokens)"],
+      ] as const) {
+        await expect(field).toHaveAccessibleName(name);
+        await expect(field).toHaveAccessibleDescription(
+          /Changes apply to new tasks\..*Clear a field to use the harness default\..*do not enable disabled auto-compaction\./,
+        );
+      }
+      for (const field of [claude, codex]) {
+        await expect(field).toHaveAccessibleDescription(/Thresholds count used context tokens\./);
+      }
+      await expect(piReserve).toHaveAccessibleDescription(/Larger values trigger earlier compaction\./);
+      await expect(openBuffer).toHaveAccessibleDescription(/native model, input, and output limits\./);
+      for (const field of [piKeep, openKeep]) {
+        await expect(field).toHaveAccessibleDescription(/Recent conversation kept after the summary/);
+      }
+    });
+    await test.step("edit every native budget and preserve thresholds", async () => {
+      for (const field of fields) {
+        await expect(field).toHaveValue("");
+        await expect(field).toHaveAttribute("placeholder", "Harness default");
+      }
+      for (const [field, value] of [
+        [claude, "120000"],
+        [codex, "90000"],
+        [piReserve, "8192"],
+        [piKeep, "12000"],
+        [openBuffer, "16000"],
+        [openKeep, "0"],
+      ] as const) {
+        await field.fill(value);
+        await field.press("Tab");
+        await expect(page.getByRole("status", { name: "Settings save status" })).toHaveText("Settings saved");
+      }
+      await expect
+        .poll(async () => (await api.getPreferences()).settings.harnesses)
+        .toEqual({
+          claude: { autoCompactTokenLimit: 120000 },
+          codex: { autoCompactTokenLimit: 90000 },
+          pi: { reserveTokens: 8192, keepRecentTokens: 12000 },
+          opencode: { bufferTokens: 16000, keepRecentTokens: 0 },
+        });
+      await page.reload();
+      for (const [field, value] of [
+        [piReserve, "8192"],
+        [piKeep, "12000"],
+        [openBuffer, "16000"],
+        [openKeep, "0"],
+      ] as const) {
+        await expect(field).toHaveValue(value);
+      }
+    });
+    await test.step("invalid drafts never save", async () => {
+      let saves = 0;
+      page.on("request", (request) => {
+        if (request.method() === "POST" && request.url().endsWith("/preferences")) saves++;
+      });
+      const saved = (await api.getPreferences()).settings.harnesses;
+      for (const field of fields) {
+        for (const invalid of ["-1", "1.5", "2147483648"]) {
+          await field.fill(invalid);
+          await expect(field).toHaveValue(invalid);
+          await field.press("Tab");
+          expect(await field.evaluate((input: HTMLInputElement) => input.validity.valid)).toBe(false);
+          expect((await api.getPreferences()).settings.harnesses).toEqual(saved);
+          // Native validation keeps focus on the invalid field. Reload discards
+          // that draft before trying another control, without saving a correction.
+          await page.reload();
+        }
+      }
+      expect(saves).toBe(0);
+      await page.reload();
+    });
+    await test.step("reset one budget without clearing its neighbors", async () => {
+      await piReserve.fill("");
+      await piReserve.press("Tab");
+      await expect
+        .poll(async () => (await api.getPreferences()).settings.harnesses)
+        .toEqual({
+          claude: { autoCompactTokenLimit: 120000 },
+          codex: { autoCompactTokenLimit: 90000 },
+          pi: { reserveTokens: null, keepRecentTokens: 12000 },
+          opencode: { bufferTokens: 16000, keepRecentTokens: 0 },
+        });
+      await page.reload();
+      await expect(piReserve).toHaveValue("");
+      await expect(openKeep).toHaveValue("0");
+      await section.screenshot({ path: test.info().outputPath("native-compaction-desktop.png") });
+      for (const width of [320, 390, 768]) {
+        await page.setViewportSize({ width, height: 844 });
+        for (const field of fields) {
+          await field.scrollIntoViewIfNeeded();
+          const box = await field.boundingBox();
+          ok(box);
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(width);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await section.screenshot({ path: test.info().outputPath("native-compaction-mobile.png") });
+      await openKeep.fill("");
+      await openKeep.press("Tab");
+      await expect
+        .poll(async () => (await api.getPreferences()).settings.harnesses?.opencode)
+        .toEqual({
+          bufferTokens: 16000,
+          keepRecentTokens: null,
+        });
+      await page.reload();
+      await expect(openKeep).toHaveValue("");
+      await expect(openBuffer).toHaveValue("16000");
+      expect(errors).toEqual([]);
+    });
+  } finally {
+    await api.updatePreferences({ settings: original.settings });
   }
 });

@@ -3515,32 +3515,34 @@ func TestManager(t *testing.T) {
 			id := ksid.NewID()
 			all := []*taskhistory.LoadedTask{
 				{
-					TaskID:            id.String(),
-					Prompt:            "test task",
-					Title:             "Test Title",
-					Harness:           "claude",
-					RuntimeName:       "docker",
-					Repos:             []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
-					State:             task.StateStopped,
-					LastTrailer:       &task.Result{State: task.StateStopped},
-					StartedAt:         now.Add(-1 * time.Hour),
-					LastActivityAt:    now,
-					Tailscale:         true,
-					USB:               true,
-					Display:           true,
-					Sudo:              true,
-					GitHubToken:       true,
-					BaseImage:         "ghcr.io/caic/base:v1",
-					ContainerPlatform: "linux/amd64",
-					MaxCPUs:           4,
-					CacheMounts:       []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
-					Mounts:            []runtime.Mount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
-					RequestedModel:    "model-1",
-					RequestedEffort:   "high",
-					AgentVersion:      "1.2.3",
-					ForgePR:           42,
-					ForgeOwner:        "acme",
-					ForgeRepo:         "magic",
+					TaskID:                         id.String(),
+					Prompt:                         "test task",
+					Title:                          "Test Title",
+					Harness:                        "claude",
+					RuntimeName:                    "docker",
+					Repos:                          []repo.Mount{{Name: "repo/a", Branch: "caic-1"}},
+					State:                          task.StateStopped,
+					LastTrailer:                    &task.Result{State: task.StateStopped},
+					StartedAt:                      now.Add(-1 * time.Hour),
+					LastActivityAt:                 now,
+					Tailscale:                      true,
+					USB:                            true,
+					Display:                        true,
+					Sudo:                           true,
+					GitHubToken:                    true,
+					BaseImage:                      "ghcr.io/caic/base:v1",
+					ContainerPlatform:              "linux/amd64",
+					MaxCPUs:                        4,
+					CacheMounts:                    []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
+					Mounts:                         []runtime.Mount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
+					RequestedModel:                 "model-1",
+					RequestedEffort:                "high",
+					RequestedAutoCompactTokenLimit: 120000,
+					RequestedCompactionBudget:      agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)},
+					AgentVersion:                   "1.2.3",
+					ForgePR:                        42,
+					ForgeOwner:                     "acme",
+					ForgeRepo:                      "magic",
 				},
 			}
 			err := m.LoadPurgedTasks(all)
@@ -3568,7 +3570,10 @@ func TestManager(t *testing.T) {
 			if tk.RuntimeName != "docker" {
 				t.Errorf("RuntimeName = %q, want docker", tk.RuntimeName)
 			}
-			if tk.RequestedModel != "model-1" || tk.RequestedEffort != "high" {
+			if got := tk.RequestedCompactionBudget; got.ReserveTokens == nil || *got.ReserveTokens != 0 || got.KeepRecentTokens == nil || *got.KeepRecentTokens != 2000 {
+				t.Fatalf("restored native budget = %+v", got)
+			}
+			if tk.RequestedModel != "model-1" || tk.RequestedEffort != "high" || tk.RequestedAutoCompactTokenLimit != 120000 {
 				t.Errorf("model/effort = %q/%q, want model-1/high", tk.RequestedModel, tk.RequestedEffort)
 			}
 			if tk.BaseImage != "ghcr.io/caic/base:v1" || tk.ContainerPlatform != "linux/amd64" || tk.MaxCPUs != 4 {
@@ -4581,6 +4586,8 @@ func TestManager(t *testing.T) {
 			}
 			e := forkSetup(t, "fake", agents)
 			e.Task().RequestedModel = "m1"
+			e.Task().RequestedAutoCompactTokenLimit = 120000
+			e.Task().RequestedCompactionBudget = agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -4588,6 +4595,25 @@ func TestManager(t *testing.T) {
 			}
 			if te.Code != CodeUnsupportedModel {
 				t.Errorf("Code = %q, want %q", te.Code, CodeUnsupportedModel)
+			}
+		})
+
+		t.Run("inherits_launch_threshold", func(t *testing.T) {
+			t.Parallel()
+			e := forkSetup(t, "fake", defaultBackends)
+			e.Task().RequestedAutoCompactTokenLimit = 120000
+			e.Task().RequestedCompactionBudget = agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
+			id, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			awaitTaskCleanup(t, e.Lifecycle.manager, id)
+			fork, ok := e.Lifecycle.manager.GetEntry(id)
+			if ok && !reflect.DeepEqual(fork.Task().RequestedCompactionBudget, e.Task().RequestedCompactionBudget) {
+				t.Fatal("same-harness fork lost native budgets")
+			}
+			if !ok || fork.Task().RequestedAutoCompactTokenLimit != 120000 {
+				t.Fatal("fork did not inherit the source task's launch threshold")
 			}
 		})
 		t.Run("new_harness_preserves_inherited_model", func(t *testing.T) {
@@ -4598,6 +4624,8 @@ func TestManager(t *testing.T) {
 			}
 			e := forkSetup(t, "fake", agents)
 			e.Task().RequestedModel = "m1"
+			e.Task().RequestedAutoCompactTokenLimit = 120000
+			e.Task().RequestedCompactionBudget = agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
 			id, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2"})
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
@@ -4606,6 +4634,12 @@ func TestManager(t *testing.T) {
 			fork, ok := e.Lifecycle.manager.GetEntry(id)
 			if !ok {
 				t.Fatalf("forked task %q not found", id)
+			}
+			if !fork.Task().RequestedCompactionBudget.IsZero() {
+				t.Fatal("different-harness fork inherited unrelated native budgets")
+			}
+			if fork.Task().RequestedAutoCompactTokenLimit != 0 {
+				t.Fatal("fork with a different harness inherited an unrelated threshold")
 			}
 			if got := fork.Task().RequestedModel; got != "m1" {
 				t.Errorf("forked model = %q, want inherited m1", got)
@@ -4941,7 +4975,7 @@ func TestManager(t *testing.T) {
 					if err := agenttest.AppendInputNativeRecord(log, request); err != nil {
 						t.Fatal(err)
 					}
-					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s", AutoCompactTokenLimit: 244800}); err != nil {
+					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s", AutoCompactTokenLimit: new(244800)}); err != nil {
 						t.Fatal(err)
 					}
 					if compressed {

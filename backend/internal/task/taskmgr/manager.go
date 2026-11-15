@@ -602,6 +602,8 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 	if err != nil {
 		return 0, badRequestf("%v", err)
 	}
+	t.RequestedAutoCompactTokenLimit = p.AutoCompactTokenLimit
+	t.RequestedCompactionBudget = p.CompactionBudget
 	t.SetSessionMetadata(agent.SessionMetadata{SessionID: p.ResumeSessionID})
 	t.Repos = mounts
 	t.RuntimeName = runtimeName
@@ -1221,6 +1223,8 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 		t.Pricer = m.pricer
 		t.Rollup = m.rollup
 		t.RuntimeName = rt
+		t.RequestedAutoCompactTokenLimit = lt.RequestedAutoCompactTokenLimit
+		t.RequestedCompactionBudget = lt.RequestedCompactionBudget
 		t.Repos = lt.Repos
 		t.MaxCPUs = lt.MaxCPUs
 		t.CacheMounts = slices.Clone(lt.CacheMounts)
@@ -2276,6 +2280,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	t.Rollup = m.rollup
 	t.Repos = mounts
 	t.RuntimeName = rt
+	t.RequestedAutoCompactTokenLimit = lt.RequestedAutoCompactTokenLimit
+	t.RequestedCompactionBudget = lt.RequestedCompactionBudget
 	t.MaxCPUs = lt.MaxCPUs
 	t.CacheMounts = lt.CacheMounts
 	t.Mounts = lt.Mounts

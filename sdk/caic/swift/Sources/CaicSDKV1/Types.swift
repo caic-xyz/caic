@@ -938,6 +938,121 @@ public struct RepoPrefsResp: Codable {
     }
 }
 
+/// AntigravitySettings holds account settings for Antigravity tasks.
+public struct AntigravitySettings: Codable {
+
+    public init() {
+    }
+}
+
+/// ClaudeSettings configures Claude Code sessions.
+public struct ClaudeSettings: Codable {
+    /// AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
+    /// default; changes apply to new tasks.
+    public let autoCompactTokenLimit: Int
+
+    public init(autoCompactTokenLimit: Int) {
+        self.autoCompactTokenLimit = autoCompactTokenLimit
+    }
+}
+
+/// CodexSettings configures Codex sessions.
+public struct CodexSettings: Codable {
+    /// AutoCompactTokenLimit is the total active context threshold in tokens.
+    /// Zero uses the harness default; changes apply to new tasks.
+    public let autoCompactTokenLimit: Int
+
+    public init(autoCompactTokenLimit: Int) {
+        self.autoCompactTokenLimit = autoCompactTokenLimit
+    }
+}
+
+/// DshSettings holds account settings for DeepSeek Harness tasks.
+public struct DshSettings: Codable {
+
+    public init() {
+    }
+}
+
+/// PiSettings configures native Pi compaction budgets for new tasks.
+public struct PiSettings: Codable {
+    /// ReserveTokens leaves this many context tokens free before compaction. Null uses native configuration.
+    public let reserveTokens: Int?
+    /// KeepRecentTokens is the recent history retained verbatim. Null uses native configuration.
+    public let keepRecentTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case reserveTokens
+        case keepRecentTokens
+    }
+
+    public init(reserveTokens: Int?, keepRecentTokens: Int?) {
+        self.reserveTokens = reserveTokens
+        self.keepRecentTokens = keepRecentTokens
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.reserveTokens = try c.decode(Int?.self, forKey: .reserveTokens)
+        self.keepRecentTokens = try c.decode(Int?.self, forKey: .keepRecentTokens)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.reserveTokens, forKey: .reserveTokens)
+        try c.encode(self.keepRecentTokens, forKey: .keepRecentTokens)
+    }
+}
+
+/// OpenCodeSettings configures native OpenCode compaction budgets for new tasks.
+public struct OpenCodeSettings: Codable {
+    /// BufferTokens reserves context headroom before compaction. Null uses native configuration.
+    public let bufferTokens: Int?
+    /// KeepRecentTokens is the recent history retained alongside the summary. Null uses native configuration.
+    public let keepRecentTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case bufferTokens
+        case keepRecentTokens
+    }
+
+    public init(bufferTokens: Int?, keepRecentTokens: Int?) {
+        self.bufferTokens = bufferTokens
+        self.keepRecentTokens = keepRecentTokens
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.bufferTokens = try c.decode(Int?.self, forKey: .bufferTokens)
+        self.keepRecentTokens = try c.decode(Int?.self, forKey: .keepRecentTokens)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.bufferTokens, forKey: .bufferTokens)
+        try c.encode(self.keepRecentTokens, forKey: .keepRecentTokens)
+    }
+}
+
+/// HarnessSettings groups the independently configurable agent harnesses.
+public struct HarnessSettings: Codable {
+    public let antigravity: AntigravitySettings?
+    public let claude: ClaudeSettings?
+    public let codex: CodexSettings?
+    public let dsh: DshSettings?
+    public let pi: PiSettings?
+    public let opencode: OpenCodeSettings?
+
+    public init(antigravity: AntigravitySettings? = nil, claude: ClaudeSettings? = nil, codex: CodexSettings? = nil, dsh: DshSettings? = nil, pi: PiSettings? = nil, opencode: OpenCodeSettings? = nil) {
+        self.antigravity = antigravity
+        self.claude = claude
+        self.codex = codex
+        self.dsh = dsh
+        self.pi = pi
+        self.opencode = opencode
+    }
+}
+
 /// RuntimeSettings holds CPU configuration for a single runtime.
 public struct RuntimeSettings: Codable {
     /// ContainerPlatform selects the runtime CPU architecture. Empty means use
@@ -1002,6 +1117,8 @@ public struct UserSettings: Codable {
     /// BaseImage overrides the default runtime base image. Empty means use
     /// the default.
     public let baseImage: String?
+    /// Harnesses holds the settings for each configured agent harness.
+    public let harnesses: HarnessSettings?
     /// RuntimeSettings stores CPU architecture and limits by runtime name.
     public let runtimeSettings: [String: RuntimeSettings]?
     /// PurgeDelay is the recovery window in nanoseconds before a stopped task is
@@ -1017,10 +1134,11 @@ public struct UserSettings: Codable {
     /// CustomMounts are custom non-cache host-to-runtime directory mappings.
     public let customMounts: [MountMappingResp]?
 
-    public init(autoFixOnCIFailure: Bool, autoFixOnPROpen: Bool, baseImage: String? = nil, runtimeSettings: [String: RuntimeSettings]? = nil, purgeDelay: Int, runtimeName: String? = nil, wellKnownCaches: [String: Bool]? = nil, cacheMappings: [CacheMappingResp]? = nil, customMounts: [MountMappingResp]? = nil) {
+    public init(autoFixOnCIFailure: Bool, autoFixOnPROpen: Bool, baseImage: String? = nil, harnesses: HarnessSettings? = nil, runtimeSettings: [String: RuntimeSettings]? = nil, purgeDelay: Int, runtimeName: String? = nil, wellKnownCaches: [String: Bool]? = nil, cacheMappings: [CacheMappingResp]? = nil, customMounts: [MountMappingResp]? = nil) {
         self.autoFixOnCIFailure = autoFixOnCIFailure
         self.autoFixOnPROpen = autoFixOnPROpen
         self.baseImage = baseImage
+        self.harnesses = harnesses
         self.runtimeSettings = runtimeSettings
         self.purgeDelay = purgeDelay
         self.runtimeName = runtimeName

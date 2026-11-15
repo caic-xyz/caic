@@ -1,10 +1,14 @@
 # Shared Agent Client Protocol
 
 Keep this package independent of individual harness packages. Native model
-routes, effort IDs, launch settings, permissions policy, and tool evidence are
+routes, effort IDs, permissions policy, and tool evidence are
 supplied by the owning adapter through `Config`. Do not branch on harness
 identity or import a harness provider here. Wire DTOs belong to
 `github.com/maruel/genai/acp`.
+
+Each harness builds its own `Launch{Args, Env}` in its `Start` method and passes
+that concrete value to shared ACP startup. Keep native launch configuration in
+the owning harness.
 
 Preserve directional request correlation, ordered journal recording, bounded
 replay, handshake cancellation, task-scoped MCP startup progress, and detached

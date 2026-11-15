@@ -50,6 +50,10 @@ func fakeAgentBackends() agent.Backends {
 	pi.QuotaProviderID = ""
 	backends[harness.Codex] = &fakeModelBackend{FakeBackend: codex}
 	backends[harness.Pi] = &fakeModelBackend{FakeBackend: pi}
+	opencode := smoketest.NewFakeBackend()
+	opencode.HarnessID = harness.OpenCode
+	opencode.QuotaProviderID = ""
+	backends[harness.OpenCode] = &fakeModelBackend{FakeBackend: opencode}
 	dsh := smoketest.NewFakeBackend()
 	dsh.HarnessID = harness.Dsh
 	dsh.QuotaProviderID = ""

@@ -2360,11 +2360,13 @@ else:
 				})
 			}
 		})
-		t.Run("PassesModelEffortAndResumeSession", func(t *testing.T) {
+		t.Run("PassesLaunchSettings", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
-			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "model-1", "high")
+			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{harness.Claude: backend}, t.TempDir())
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "model-1", "high")
+			tk.RequestedAutoCompactTokenLimit = 120000
+			tk.RequestedCompactionBudget = agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session:not-a-guid"})
 			tk.StartedAt = time.Now().UTC()
 			h, err := r.Start(t.Context(), tk, "")
@@ -2376,6 +2378,12 @@ else:
 			stopCancel()
 			_ = r.closeRun(tk, h.Run)
 
+			if got := backend.capturedOpts.AutoCompactTokenLimit; got != 120000 {
+				t.Fatalf("compaction threshold = %d, want captured task setting", got)
+			}
+			if got := backend.capturedOpts.CompactionBudget; got.ReserveTokens == nil || *got.ReserveTokens != 0 || got.KeepRecentTokens == nil || *got.KeepRecentTokens != 2000 {
+				t.Fatalf("captured native budget = %+v", got)
+			}
 			if backend.capturedOpts.Model != "model-1" {
 				t.Errorf("Model = %q, want model-1", backend.capturedOpts.Model)
 			}

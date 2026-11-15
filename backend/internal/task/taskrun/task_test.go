@@ -825,12 +825,12 @@ func TestTask(t *testing.T) {
 			native  string
 			want    agent.SessionMetadata
 		}{
-			{message: &agent.MetaSessionMessage{SessionID: "first", ReportedModel: "initial", ReportedEffort: "low", AgentVersion: "1", AutoCompactTokenLimit: 100},
+			{message: &agent.MetaSessionMessage{SessionID: "first", ReportedModel: "initial", ReportedEffort: "low", AgentVersion: "1", AutoCompactTokenLimit: new(100)},
 				want: agent.SessionMetadata{SessionID: "first", ReportedModel: "initial", ReportedEffort: "low", AgentVersion: "1", AutoCompactTokenLimit: 100}},
 			{message: &agent.InitMessage{SessionID: "native", ReportedModel: "active", ReportedEffort: "high", Version: "2"},
 				native: `{"type":"system","subtype":"init","session_id":"native","model":"active","effort":"high","claude_code_version":"2"}`,
 				want:   agent.SessionMetadata{SessionID: "native", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "2", AutoCompactTokenLimit: 100}},
-			{message: &agent.MetaSessionMessage{SessionID: "restored", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "3", AutoCompactTokenLimit: 300},
+			{message: &agent.MetaSessionMessage{SessionID: "restored", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "3", AutoCompactTokenLimit: new(300)},
 				want: agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "3", AutoCompactTokenLimit: 300}},
 			{message: &agent.InitMessage{Version: "4"},
 				native: `{"type":"system","subtype":"init","claude_code_version":"4"}`,
@@ -838,7 +838,7 @@ func TestTask(t *testing.T) {
 			{message: &agent.InitMessage{MessageProvenance: child, SessionID: "child", ReportedModel: "child-model", ReportedEffort: "max", Version: "child-version"},
 				native: `{"type":"system","subtype":"init","parent_tool_use_id":"child","session_id":"child","model":"child-model","effort":"max","claude_code_version":"child-version"}`,
 				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
-			{message: &agent.MetaSessionMessage{MessageProvenance: child, SessionID: "child", ReportedModel: "child-model", ReportedEffort: "max", AgentVersion: "child-version", AutoCompactTokenLimit: 999},
+			{message: &agent.MetaSessionMessage{MessageProvenance: child, SessionID: "child", ReportedModel: "child-model", ReportedEffort: "max", AgentVersion: "child-version", AutoCompactTokenLimit: new(999)},
 				want: agent.SessionMetadata{SessionID: "restored", ReportedModel: "active", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
 			{message: &agent.UsageMessage{ReportedModel: "routed", Usage: agent.Usage{InputTokens: 1, OutputTokens: 1}},
 				native: `{"type":"assistant","message":{"model":"routed","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -848,8 +848,10 @@ func TestTask(t *testing.T) {
 				want:   agent.SessionMetadata{SessionID: "restored", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
 			{message: agent.ContextCleared(),
 				want: agent.SessionMetadata{ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "4", AutoCompactTokenLimit: 300}},
-			{message: &agent.MetaSessionMessage{SessionID: "next", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "5", AutoCompactTokenLimit: 400},
+			{message: &agent.MetaSessionMessage{SessionID: "next", ReportedModel: "stale", ReportedEffort: "low", AgentVersion: "5", AutoCompactTokenLimit: new(400)},
 				want: agent.SessionMetadata{SessionID: "next", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "5", AutoCompactTokenLimit: 400}},
+			{message: &agent.MetaSessionMessage{AutoCompactTokenLimit: new(0)},
+				want: agent.SessionMetadata{SessionID: "next", ReportedModel: "routed", ReportedEffort: "high", AgentVersion: "5"}},
 		}
 		for _, compressed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {

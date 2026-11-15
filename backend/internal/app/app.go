@@ -328,7 +328,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
 	cacheSizes := server.NewCacheSizeStore(log.With("cmp", "cache-sizes"))
-	botClient := &botClient{log: log.With("cmp", "bot"), checkouts: checkoutRegistry, taskMgr: taskMgr, forgeMgr: forgeManager}
+	botClient := &botClient{log: log.With("cmp", "bot"), checkouts: checkoutRegistry, taskMgr: taskMgr, forgeMgr: forgeManager, prefs: prefsStore}
 	ciAdapter := &ciAdapter{
 		checkouts:   checkoutRegistry,
 		repoStatus:  repoStatus,

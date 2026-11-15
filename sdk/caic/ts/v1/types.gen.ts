@@ -549,6 +549,58 @@ export interface RepoPrefsResp {
   requestedModel?: string;
 }
 
+/** AntigravitySettings holds account settings for Antigravity tasks. */
+export interface AntigravitySettings {
+}
+
+/** ClaudeSettings configures Claude Code sessions. */
+export interface ClaudeSettings {
+  /**
+   * AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
+   * default; changes apply to new tasks.
+   */
+  autoCompactTokenLimit: number /* int */;
+}
+
+/** CodexSettings configures Codex sessions. */
+export interface CodexSettings {
+  /**
+   * AutoCompactTokenLimit is the total active context threshold in tokens.
+   * Zero uses the harness default; changes apply to new tasks.
+   */
+  autoCompactTokenLimit: number /* int */;
+}
+
+/** DshSettings holds account settings for DeepSeek Harness tasks. */
+export interface DshSettings {
+}
+
+/** PiSettings configures native Pi compaction budgets for new tasks. */
+export interface PiSettings {
+  /** ReserveTokens leaves this many context tokens free before compaction. Null uses native configuration. */
+  reserveTokens: number /* int */ | null;
+  /** KeepRecentTokens is the recent history retained verbatim. Null uses native configuration. */
+  keepRecentTokens: number /* int */ | null;
+}
+
+/** OpenCodeSettings configures native OpenCode compaction budgets for new tasks. */
+export interface OpenCodeSettings {
+  /** BufferTokens reserves context headroom before compaction. Null uses native configuration. */
+  bufferTokens: number /* int */ | null;
+  /** KeepRecentTokens is the recent history retained alongside the summary. Null uses native configuration. */
+  keepRecentTokens: number /* int */ | null;
+}
+
+/** HarnessSettings groups the independently configurable agent harnesses. */
+export interface HarnessSettings {
+  antigravity?: AntigravitySettings;
+  claude?: ClaudeSettings;
+  codex?: CodexSettings;
+  dsh?: DshSettings;
+  pi?: PiSettings;
+  opencode?: OpenCodeSettings;
+}
+
 /** RuntimeSettings holds CPU configuration for a single runtime. */
 export interface RuntimeSettings {
   /**
@@ -603,6 +655,8 @@ export interface UserSettings {
    * the default.
    */
   baseImage?: string;
+  /** Harnesses holds the settings for each configured agent harness. */
+  harnesses?: HarnessSettings;
   /** RuntimeSettings stores CPU architecture and limits by runtime name. */
   runtimeSettings?: { [key: string]: RuntimeSettings};
   /**

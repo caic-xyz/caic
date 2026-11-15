@@ -364,6 +364,10 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	t.Sudo = p.Sudo
 	t.OwnerID = p.OwnerID
 	t.ForkedFromTaskID = source.ID
+	if forkHarness == source.Harness {
+		t.RequestedAutoCompactTokenLimit = source.RequestedAutoCompactTokenLimit
+		t.RequestedCompactionBudget = source.RequestedCompactionBudget
+	}
 	t.ParentTaskID = p.parentTaskID
 	if p.parentTaskID != 0 {
 		// TODO(delegation): Enable CAIC MCP for delegated children after recursive

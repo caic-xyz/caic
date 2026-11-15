@@ -219,12 +219,18 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
-			RuntimeSettings:    runtimeSettings,
-			PurgeDelay:         prefs.Settings.PurgeDelay,
-			RuntimeName:        prefs.Settings.RuntimeName,
-			WellKnownCaches:    prefs.Settings.WellKnownCaches,
-			CacheMappings:      cacheMappings,
-			CustomMounts:       customMounts,
+			Harnesses: v1.HarnessSettings{
+				Claude:   v1.ClaudeSettings{AutoCompactTokenLimit: prefs.Settings.Harnesses.Claude.AutoCompactTokenLimit},
+				Codex:    v1.CodexSettings{AutoCompactTokenLimit: prefs.Settings.Harnesses.Codex.AutoCompactTokenLimit},
+				Pi:       v1.PiSettings{ReserveTokens: prefs.Settings.Harnesses.Pi.ReserveTokens, KeepRecentTokens: prefs.Settings.Harnesses.Pi.KeepRecentTokens},
+				OpenCode: v1.OpenCodeSettings{BufferTokens: prefs.Settings.Harnesses.OpenCode.BufferTokens, KeepRecentTokens: prefs.Settings.Harnesses.OpenCode.KeepRecentTokens},
+			},
+			RuntimeSettings: runtimeSettings,
+			PurgeDelay:      prefs.Settings.PurgeDelay,
+			RuntimeName:     prefs.Settings.RuntimeName,
+			WellKnownCaches: prefs.Settings.WellKnownCaches,
+			CacheMappings:   cacheMappings,
+			CustomMounts:    customMounts,
 		},
 	}, nil
 }
@@ -242,6 +248,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
+		p.Settings.Harnesses = harnessSettingsFromAPI(req.Settings.Harnesses)
 		p.Settings.RuntimeSettings = runtimeSettingsFromAPI(req.Settings.RuntimeSettings)
 		p.Settings.PurgeDelay = req.Settings.PurgeDelay
 		p.Settings.RuntimeName = req.Settings.RuntimeName
@@ -274,8 +281,30 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 	return h.getPreferences(ctx, nil)
 }
 
+// preferenceTokenBudget identifies an optional token budget in the API settings.
+type preferenceTokenBudget struct {
+	path  string
+	value *int
+}
+
 // validatePreferenceSettings verifies settings that require runtime-owned data.
 func validatePreferenceSettings(settings *v1.UserSettings) error {
+	for _, budget := range []preferenceTokenBudget{
+		{"harnesses.pi.reserveTokens", settings.Harnesses.Pi.ReserveTokens},
+		{"harnesses.pi.keepRecentTokens", settings.Harnesses.Pi.KeepRecentTokens},
+		{"harnesses.opencode.bufferTokens", settings.Harnesses.OpenCode.BufferTokens},
+		{"harnesses.opencode.keepRecentTokens", settings.Harnesses.OpenCode.KeepRecentTokens},
+	} {
+		if n := budget.value; n != nil && (*n < 0 || *n > 2147483647) {
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: budget.path + " must be between 0 and 2147483647 tokens"}
+		}
+	}
+	if n := settings.Harnesses.Claude.AutoCompactTokenLimit; n < 0 || n > 2147483647 {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "harnesses.claude.autoCompactTokenLimit must be between 0 and 2147483647 tokens"}
+	}
+	if n := settings.Harnesses.Codex.AutoCompactTokenLimit; n < 0 || n > 2147483647 {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "harnesses.codex.autoCompactTokenLimit must be between 0 and 2147483647 tokens"}
+	}
 	for name := range settings.WellKnownCaches {
 		if _, ok := md.WellKnownCaches[name]; !ok {
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownCache, Message: "unknown cache: " + name}
@@ -292,6 +321,15 @@ func validatePreferenceSettings(settings *v1.UserSettings) error {
 		}
 	}
 	return nil
+}
+
+func harnessSettingsFromAPI(settings v1.HarnessSettings) preferences.HarnessSettings {
+	return preferences.HarnessSettings{
+		Claude:   preferences.ClaudeSettings{AutoCompactTokenLimit: settings.Claude.AutoCompactTokenLimit},
+		Codex:    preferences.CodexSettings{AutoCompactTokenLimit: settings.Codex.AutoCompactTokenLimit},
+		Pi:       preferences.PiSettings{ReserveTokens: settings.Pi.ReserveTokens, KeepRecentTokens: settings.Pi.KeepRecentTokens},
+		OpenCode: preferences.OpenCodeSettings{BufferTokens: settings.OpenCode.BufferTokens, KeepRecentTokens: settings.OpenCode.KeepRecentTokens},
+	}
 }
 
 func runtimeSettingsFromAPI(settings map[string]v1.RuntimeSettings) map[string]preferences.RuntimeSettings {

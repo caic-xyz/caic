@@ -62,4 +62,17 @@ func TestSessionMetadata(t *testing.T) {
 			t.Fatalf("restoration did not update session settings: %+v", m)
 		}
 	})
+	t.Run("LaunchConfigurationReplacesPreviousThreshold", func(t *testing.T) {
+		t.Parallel()
+		var m SessionMetadata
+		m.Apply(&MetaSessionMessage{AutoCompactTokenLimit: new(400000)})
+		m.Apply(&MetaSessionMessage{SessionID: "restored"})
+		if m.AutoCompactTokenLimit != 400000 {
+			t.Fatalf("identity-only record changed threshold: %+v", m)
+		}
+		m.Apply(&MetaSessionMessage{AutoCompactTokenLimit: new(0)})
+		if m.AutoCompactTokenLimit != 0 || m.SessionID != "restored" {
+			t.Fatalf("native-default launch did not clear only the threshold: %+v", m)
+		}
+	})
 }

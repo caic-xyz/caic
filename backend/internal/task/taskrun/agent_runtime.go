@@ -248,14 +248,16 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
 	opts := &agent.Options{
-		Logger:          r.Log,
-		Target:          target,
-		Dir:             r.runtimeDir(t),
-		Model:           t.RequestedModel,
-		Effort:          t.RequestedEffort,
-		InitialPrompt:   t.InitialPrompt,
-		ResumeSessionID: t.GetSessionID(),
-		Records:         records,
+		Logger:                r.Log,
+		Target:                target,
+		Dir:                   r.runtimeDir(t),
+		Model:                 t.RequestedModel,
+		Effort:                t.RequestedEffort,
+		AutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit,
+		CompactionBudget:      t.RequestedCompactionBudget,
+		InitialPrompt:         t.InitialPrompt,
+		ResumeSessionID:       t.GetSessionID(),
+		Records:               records,
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		return nil, r.finishStartupFailure(ctx, t, run, &StartupError{Harness: t.Harness, Phase: "task-scoped MCP setup", Err: err})
@@ -804,7 +806,7 @@ func (r *AgentRuntime) reviveRun(t *Task, run *Run) (*SessionHandle, error) {
 	}
 	t.SetVNCPort(r.Runtimes.VNCPort(ctx, id))
 	t.SetState(task.StateStarting)
-	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, ResumeSessionID: t.GetSessionID(), Records: run.records}
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, AutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit, CompactionBudget: t.RequestedCompactionBudget, ResumeSessionID: t.GetSessionID(), Records: run.records}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		return nil, r.finishReviveFailure(ctx, t, err, run)
 	}
@@ -1068,7 +1070,7 @@ func (r *AgentRuntime) startSessionWithRun(t *Task, prompt agent.Prompt, run *Ru
 	if err := r.recordCommitBaseline(ctx, run.records, t.RuntimeInstanceID()); err != nil {
 		return nil, err
 	}
-	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, InitialPrompt: prompt, Records: run.records}
+	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, AutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit, CompactionBudget: t.RequestedCompactionBudget, InitialPrompt: prompt, Records: run.records}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		return nil, err
 	}

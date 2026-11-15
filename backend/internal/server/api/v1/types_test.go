@@ -303,3 +303,45 @@ func TestEventMessageSource(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdatePreferencesReq(t *testing.T) {
+	t.Parallel()
+	t.Run("UnmarshalJSON", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			var req UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"harnesses":{"antigravity":{},"claude":{"autoCompactTokenLimit":120000},"dsh":{}},"purgeDelay":15000000000}}`), &req); err != nil {
+				t.Fatal(err)
+			}
+			if err := req.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if req.Settings.Harnesses.Claude.AutoCompactTokenLimit != 120000 || req.Settings.Harnesses.Codex.AutoCompactTokenLimit != 0 {
+				t.Fatalf("settings = %+v", req.Settings.Harnesses)
+			}
+			encoded, err := json.Marshal(req.Settings.Harnesses)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(encoded) != `{"claude":{"autoCompactTokenLimit":120000}}` {
+				t.Fatalf("encoded harnesses = %s", encoded)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, raw := range []string{
+				`{"settings":{"harnesses":{"unknown":{}}}}`,
+				`{"settings":{"harnesses":{"antigravity":{"unknown":true}}}}`,
+				`{"settings":{"harnesses":{"dsh":{"unknown":true}}}}`,
+				`{"settings":{"harnesses":{"claude":{"unknown":true}}}}`,
+				`{"settings":{"harnesses":{"codex":{"autoCompactTokenLimit":"120000"}}}}`,
+			} {
+				var req UpdatePreferencesReq
+				if err := json.Unmarshal([]byte(raw), &req); err == nil {
+					t.Fatalf("accepted invalid settings: %s", raw)
+				}
+			}
+		})
+	})
+}

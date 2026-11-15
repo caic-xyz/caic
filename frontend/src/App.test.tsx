@@ -3761,7 +3761,13 @@ it("edits CPU settings independently for each runtime", async () => {
 
 function enableImageDrafts() {
   vi.mocked(api.listHarnesses).mockResolvedValue([
-    { name: "claude", models: [], supportsImages: true, supportsCompact: false, supportsModelRefresh: false },
+    {
+      name: "claude",
+      models: [],
+      supportsImages: true,
+      supportsCompact: false,
+      supportsModelRefresh: false,
+    },
   ]);
   vi.mocked(api.getConfig).mockResolvedValue({
     imageConstraints: {

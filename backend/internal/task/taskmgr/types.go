@@ -16,25 +16,27 @@ import (
 // The caller (Server) reads docker image, GitHub token access, and per-repo
 // prefs from the user's preferences store before calling Create.
 type CreateParams struct {
-	OwnerID           string // empty in no-auth mode
-	Prompt            agent.Prompt
-	Repos             []CreateRepo // first entry is primary; empty = no-repo
-	Harness           harness.Name
-	ResumeSessionID   string // opaque harness-native session ID; empty starts a fresh session
-	Model             string // "" = harness default
-	Effort            string // thinking effort; empty = default
-	Tailscale         bool
-	USB               bool
-	Display           bool
-	Sudo              bool
-	GitHubToken       bool                 // inject GitHub token into the runtime environment
-	RuntimeName       runtime.Name         // selected runtime backend; empty means backend default
-	BaseImage         string               // resolved base image
-	ContainerPlatform string               // resolved container platform; empty means use host default
-	MaxCPUs           int                  // max CPU cores; 0 means use the default
-	CacheMounts       []runtime.CacheMount // resolved build cache mounts
-	Mounts            []runtime.Mount      // resolved runtime bind mounts
-	CaicMCP           bool                 // grant this task its task-scoped CAIC MCP capability
+	OwnerID               string // empty in no-auth mode
+	Prompt                agent.Prompt
+	Repos                 []CreateRepo // first entry is primary; empty = no-repo
+	Harness               harness.Name
+	ResumeSessionID       string // opaque harness-native session ID; empty starts a fresh session
+	Model                 string // "" = harness default
+	CompactionBudget      agent.CompactionBudget
+	AutoCompactTokenLimit int    // Captured account threshold for this task.
+	Effort                string // thinking effort; empty = default
+	Tailscale             bool
+	USB                   bool
+	Display               bool
+	Sudo                  bool
+	GitHubToken           bool                 // inject GitHub token into the runtime environment
+	RuntimeName           runtime.Name         // selected runtime backend; empty means backend default
+	BaseImage             string               // resolved base image
+	ContainerPlatform     string               // resolved container platform; empty means use host default
+	MaxCPUs               int                  // max CPU cores; 0 means use the default
+	CacheMounts           []runtime.CacheMount // resolved build cache mounts
+	Mounts                []runtime.Mount      // resolved runtime bind mounts
+	CaicMCP               bool                 // grant this task its task-scoped CAIC MCP capability
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to checkout.Start. The caller resolves it (preferring

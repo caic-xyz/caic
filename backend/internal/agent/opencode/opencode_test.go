@@ -1,4 +1,4 @@
-// Tests OpenCode model discovery and initial inventory.
+// Tests OpenCode model discovery, inventory, and per-process native compaction configuration.
 
 package opencode
 
@@ -118,4 +118,25 @@ func TestBackend(t *testing.T) {
 			t.Fatal("OpenCode lost native image or compaction capability")
 		}
 	})
+}
+
+func TestLaunchEnv(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		budget agent.CompactionBudget
+		want   string
+	}{
+		{"native", agent.CompactionBudget{}, `OPENCODE_CONFIG_CONTENT={"agent":{"title":{"disable":true}}}`},
+		{"zero", agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(0)}, `OPENCODE_CONFIG_CONTENT={"agent":{"title":{"disable":true}},"compaction":{"buffer":0,"keep":{"tokens":0}}}`},
+		{"keep_only", agent.CompactionBudget{KeepRecentTokens: new(1234)}, `OPENCODE_CONFIG_CONTENT={"agent":{"title":{"disable":true}},"compaction":{"keep":{"tokens":1234}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := launchEnv(tc.budget)
+			if !slices.Equal(got, []string{tc.want}) {
+				t.Fatalf("launch environment = %v, want %q", got, tc.want)
+			}
+		})
+	}
 }

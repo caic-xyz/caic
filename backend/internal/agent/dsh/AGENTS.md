@@ -1,6 +1,6 @@
 # DeepSeek Harness ACP Backend
 
-`dsh.go` owns the DeepSeek variant and remote model discovery. `New` uses
+`dsh.go` owns the DeepSeek variant and remote model discovery. The backend uses
 `dsh --profile acp`, `session/resume`, JSON-encoded provider/model route values,
 and the `reasoning_effort` configuration option. Shared transport and metadata parsing live in `../acp/`. Native tool
 projection belongs to this package; evidence from another harness must never

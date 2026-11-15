@@ -611,6 +611,69 @@ RepoPrefsResp holds per-repository preferences.
 | `harness` | `string` |  |  |
 | `requestedModel` | `string` |  |  |
 
+### AntigravitySettings
+
+AntigravitySettings holds account settings for Antigravity tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+
+### ClaudeSettings
+
+ClaudeSettings configures Claude Code sessions.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
+default; changes apply to new tasks. | yes |
+
+### CodexSettings
+
+CodexSettings configures Codex sessions.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the total active context threshold in tokens.
+Zero uses the harness default; changes apply to new tasks. | yes |
+
+### DshSettings
+
+DshSettings holds account settings for DeepSeek Harness tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+
+### PiSettings
+
+PiSettings configures native Pi compaction budgets for new tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `reserveTokens` | `int \| null` | ReserveTokens leaves this many context tokens free before compaction. Null uses native configuration. | yes |
+| `keepRecentTokens` | `int \| null` | KeepRecentTokens is the recent history retained verbatim. Null uses native configuration. | yes |
+
+### OpenCodeSettings
+
+OpenCodeSettings configures native OpenCode compaction budgets for new tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `bufferTokens` | `int \| null` | BufferTokens reserves context headroom before compaction. Null uses native configuration. | yes |
+| `keepRecentTokens` | `int \| null` | KeepRecentTokens is the recent history retained alongside the summary. Null uses native configuration. | yes |
+
+### HarnessSettings
+
+HarnessSettings groups the independently configurable agent harnesses.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `antigravity` | `AntigravitySettings` |  |  |
+| `claude` | `ClaudeSettings` |  |  |
+| `codex` | `CodexSettings` |  |  |
+| `dsh` | `DshSettings` |  |  |
+| `pi` | `PiSettings` |  |  |
+| `opencode` | `OpenCodeSettings` |  |  |
+
 ### RuntimeSettings
 
 RuntimeSettings holds CPU configuration for a single runtime.
@@ -659,6 +722,7 @@ Only effective when the GitHub App is configured. | yes |
 request when it is opened or reopened via a forge webhook. | yes |
 | `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use
 the default. |  |
+| `harnesses` | `HarnessSettings` | Harnesses holds the settings for each configured agent harness. |  |
 | `runtimeSettings` | `Record<string, RuntimeSettings>` | RuntimeSettings stores CPU architecture and limits by runtime name. |  |
 | `purgeDelay` | `int64` | PurgeDelay is the recovery window in nanoseconds before a stopped task is
 permanently deleted. | yes |

@@ -526,7 +526,7 @@ func TestLoadLogHeader(t *testing.T) {
 					t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
 						t.Parallel()
 						path := writePhysicalTestLog(t, compressed,
-							`{"t":"caic_meta","version":3,"prompt":"task","title":"original","repos":[{"name":"org/repo","branch":"caic-0"}],"harness":"claude","model":"requested","effort":"medium","started_at":"2026-01-01T00:00:00Z","forge_issue":5,"owner_id":"owner","parent_task_id":"parent","forked_from_task_id":"fork","caic_mcp":true}`,
+							`{"t":"caic_meta","version":3,"prompt":"task","title":"original","repos":[{"name":"org/repo","branch":"caic-0"}],"harness":"claude","model":"requested","auto_compact_token_limit":120000,"compaction_budget":{"reserve_tokens":0,"keep_recent_tokens":2000},"effort":"medium","started_at":"2026-01-01T00:00:00Z","forge_issue":5,"owner_id":"owner","parent_task_id":"parent","forked_from_task_id":"fork","caic_mcp":true}`,
 							nativeLogLine(`{"type":"system","subtype":"init","session_id":"root","model":"claude-opus-x","effort":"high","claude_code_version":"2.1.0"}`),
 							nativeLogLine(`{"type":"system","subtype":"init","session_id":"child","parent_tool_use_id":"tool-child","model":"child-model","effort":"low","claude_code_version":"child-version"}`),
 							nativeLogLine(`{"type":"result","subtype":"success","duration_ms":1000,"num_turns":1,"total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":4}}`),
@@ -553,7 +553,10 @@ func TestLoadLogHeader(t *testing.T) {
 							if loaded.State != task.State(tc.state) || loaded.Title != "reviving" || loaded.ForgeOwner != "org" || loaded.ForgeRepo != "repo" || loaded.ForgePR != 7 || !loaded.DiffCreated || !loaded.LastActivityAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 500000000, time.UTC)) {
 								t.Fatalf("control metadata lost: %+v", loaded)
 							}
-							if loaded.Prompt != "task" || loaded.RequestedModel != "requested" || loaded.RequestedEffort != "medium" || loaded.OwnerID != "owner" || loaded.ParentTaskID != "parent" || loaded.ForkedFromTaskID != "fork" || !loaded.CaicMCP || loaded.ForgeIssue != 5 || len(loaded.Repos) != 1 || loaded.Repos[0].Name != "org/repo" {
+							if got := loaded.RequestedCompactionBudget; got.ReserveTokens == nil || *got.ReserveTokens != 0 || got.KeepRecentTokens == nil || *got.KeepRecentTokens != 2000 {
+								t.Fatalf("loaded native budget = %+v", got)
+							}
+							if loaded.Prompt != "task" || loaded.RequestedModel != "requested" || loaded.RequestedEffort != "medium" || loaded.RequestedAutoCompactTokenLimit != 120000 || loaded.OwnerID != "owner" || loaded.ParentTaskID != "parent" || loaded.ForkedFromTaskID != "fork" || !loaded.CaicMCP || loaded.ForgeIssue != 5 || len(loaded.Repos) != 1 || loaded.Repos[0].Name != "org/repo" {
 								t.Fatalf("header metadata lost: %+v", loaded)
 							}
 							r := loaded.LastTrailer
@@ -612,36 +615,45 @@ func TestLoadLogHeader(t *testing.T) {
 			t.Run(string(h), func(t *testing.T) {
 				t.Parallel()
 				for _, compressed := range []bool{false, true} {
-					t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
-						t.Parallel()
-						path := writePhysicalTestLog(t, compressed, mustJSON(t, agent.MetaMessage{Version: 3, Harness: string(h), Prompt: "test"}),
-							`{"t":"session","session_id":"session","agent_version":"1.0","auto_compact_token_limit":244800}`,
-							`{"t":"result","state":"purged"}`)
-						resolver := backends.Default("", nil)
-						semantic, err := loadSemanticTask(path, resolver)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if semantic.AutoCompactTokenLimit != 244800 {
-							t.Fatalf("semantic auto-compact threshold = %d, want 244800", semantic.AutoCompactTokenLimit)
-						}
-						for range 2 {
-							loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+					for _, limit := range []int{400000, 0} {
+						t.Run(fmt.Sprintf("compressed=%t/limit=%d", compressed, limit), func(t *testing.T) {
+							t.Parallel()
+							lines := []string{
+								mustJSON(t, agent.MetaMessage{Version: 3, Harness: string(h), Prompt: "test"}),
+								`{"t":"session","session_id":"session","agent_version":"1.0","auto_compact_token_limit":400000}`,
+								mustJSON(t, agent.MetaSessionMessage{SessionID: "session"}),
+							}
+							if limit == 0 {
+								lines = append(lines, mustJSON(t, agent.MetaSessionMessage{AutoCompactTokenLimit: new(0)}))
+							}
+							lines = append(lines, `{"t":"result","state":"purged"}`)
+							path := writePhysicalTestLog(t, compressed, lines...)
+							resolver := backends.Default("", nil)
+							semantic, err := loadSemanticTask(path, resolver)
 							if err != nil {
 								t.Fatal(err)
 							}
-							if loaded.AutoCompactTokenLimit != 244800 {
-								t.Fatalf("restored auto-compact threshold = %d, want 244800", loaded.AutoCompactTokenLimit)
+							if semantic.AutoCompactTokenLimit != limit {
+								t.Fatalf("semantic auto-compact threshold = %d, want %d", semantic.AutoCompactTokenLimit, limit)
 							}
-							before := inventoryJSON(t, loaded)
-							if err := loadMessagesForTest(loaded, resolver); err != nil {
-								t.Fatal(err)
+							for range 2 {
+								loaded, err := loadLogHeader(testLogger(), path, true, backends.Default("", nil))
+								if err != nil {
+									t.Fatal(err)
+								}
+								if loaded.AutoCompactTokenLimit != limit {
+									t.Fatalf("restored auto-compact threshold = %d, want %d", loaded.AutoCompactTokenLimit, limit)
+								}
+								before := inventoryJSON(t, loaded)
+								if err := loadMessagesForTest(loaded, resolver); err != nil {
+									t.Fatal(err)
+								}
+								if !bytes.Equal(inventoryJSON(t, loaded), before) {
+									t.Fatal("lazy load changed auto-compact metadata")
+								}
 							}
-							if !bytes.Equal(inventoryJSON(t, loaded), before) {
-								t.Fatal("lazy load changed auto-compact metadata")
-							}
-						}
-					})
+						})
+					}
 				}
 			})
 		}

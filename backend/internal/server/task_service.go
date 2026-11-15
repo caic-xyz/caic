@@ -650,7 +650,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq, ima
 		ownerID = u.ID
 	}
 
-	// Docker image and max CPUs come from the user's preferences; the rest of
+	// Container settings and the launch threshold come from the user's preferences; the rest of
 	// validation (unknown repo/harness/model/images) lives in Manager.Create.
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 
@@ -678,26 +678,28 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq, ima
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()}
 	}
 	id, err := s.taskMgr.Create(ctx, taskmgr.CreateParams{
-		OwnerID:             ownerID,
-		Prompt:              prompt,
-		Repos:               taskRepos,
-		Harness:             harnessName,
-		ResumeSessionID:     req.ResumeSessionID,
-		Model:               req.Model,
-		Effort:              req.Effort,
-		Tailscale:           req.Tailscale,
-		USB:                 req.USB,
-		Display:             req.Display,
-		Sudo:                req.Sudo,
-		GitHubToken:         req.GitHubToken,
-		CaicMCP:             req.CaicMCP,
-		RuntimeName:         runtimeName,
-		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
-		BaseImage:           prefs.Settings.BaseImage,
-		ContainerPlatform:   runtimeSettings.ContainerPlatform.String(),
-		MaxCPUs:             runtimeSettings.MaxCPUs,
-		CacheMounts:         cacheMounts,
-		Mounts:              mounts,
+		OwnerID:               ownerID,
+		Prompt:                prompt,
+		Repos:                 taskRepos,
+		Harness:               harnessName,
+		ResumeSessionID:       req.ResumeSessionID,
+		Model:                 req.Model,
+		Effort:                req.Effort,
+		AutoCompactTokenLimit: prefs.Settings.Harnesses.AutoCompactTokenLimit(harnessName),
+		CompactionBudget:      prefs.Settings.Harnesses.CompactionBudget(harnessName),
+		Tailscale:             req.Tailscale,
+		USB:                   req.USB,
+		Display:               req.Display,
+		Sudo:                  req.Sudo,
+		GitHubToken:           req.GitHubToken,
+		CaicMCP:               req.CaicMCP,
+		RuntimeName:           runtimeName,
+		ResolvedGitHubToken:   s.resolveGitHubContainerToken(ctx, req.GitHubToken),
+		BaseImage:             prefs.Settings.BaseImage,
+		ContainerPlatform:     runtimeSettings.ContainerPlatform.String(),
+		MaxCPUs:               runtimeSettings.MaxCPUs,
+		CacheMounts:           cacheMounts,
+		Mounts:                mounts,
 	})
 	if err != nil {
 		return nil, toDTO(err)

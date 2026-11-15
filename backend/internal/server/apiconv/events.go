@@ -101,7 +101,6 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			MessageProvenance: m.MessageProvenance,
 			SessionID:         m.SessionID, ReportedModel: m.ReportedModel,
 			ReportedEffort: m.ReportedEffort, Version: m.AgentVersion,
-			AutoCompactTokenLimit: m.AutoCompactTokenLimit,
 		}
 	}
 	switch m := msg.(type) {

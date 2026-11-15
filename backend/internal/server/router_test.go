@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -891,10 +892,18 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		for _, name := range []harness.Name{harness.Antigravity, harness.Claude} {
+		for _, name := range []harness.Name{harness.Antigravity, harness.Claude, harness.Codex, harness.Pi, harness.OpenCode} {
 			t.Run(string(name), func(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, map[harness.Name]agent.Backend{name: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
+				if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+					p.Settings.Harnesses.Claude.AutoCompactTokenLimit = 120000
+					p.Settings.Harnesses.Codex.AutoCompactTokenLimit = 90000
+					p.Settings.Harnesses.Pi = preferences.PiSettings{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
+					p.Settings.Harnesses.OpenCode = preferences.OpenCodeSettings{BufferTokens: new(3000)}
+				}); err != nil {
+					t.Fatal(err)
+				}
 				registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 				h := testTaskHandlers(s).routes()
 				const prompt = `<script>alert("xss")</script> & "quotes" & émojis 🎉`
@@ -912,6 +921,36 @@ func TestHandleCreateTask(t *testing.T) {
 				var created v1.Task
 				if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 					t.Fatal(err)
+				}
+				entry, exists := s.taskMgr.GetEntry(created.ID)
+				if !exists {
+					t.Fatal("created task missing")
+				}
+				expected := 0
+				if name == harness.Claude {
+					expected = 120000
+				}
+				if name == harness.Codex {
+					expected = 90000
+				}
+				wantBudget := agent.CompactionBudget{}
+				if name == harness.Pi {
+					wantBudget = agent.CompactionBudget{ReserveTokens: new(0), KeepRecentTokens: new(2000)}
+				}
+				if name == harness.OpenCode {
+					wantBudget = agent.CompactionBudget{ReserveTokens: new(3000)}
+				}
+				if !reflect.DeepEqual(entry.Task().RequestedCompactionBudget, wantBudget) {
+					t.Fatalf("selected native budget = %+v, want %+v", entry.Task().RequestedCompactionBudget, wantBudget)
+				}
+				if entry.Task().OwnerID != "" || entry.Task().RequestedAutoCompactTokenLimit != expected {
+					t.Fatalf("unauthenticated task threshold = %d, owner = %q", entry.Task().RequestedAutoCompactTokenLimit, entry.Task().OwnerID)
+				}
+				if err := s.prefs.Update("default", func(p *preferences.Preferences) { p.Settings.Harnesses.Claude.AutoCompactTokenLimit = 90000 }); err != nil {
+					t.Fatal(err)
+				}
+				if entry.Task().RequestedAutoCompactTokenLimit != expected {
+					t.Fatal("existing task's launch setting changed")
 				}
 				if created.ID == 0 {
 					t.Fatal("response has zero 'id' field")

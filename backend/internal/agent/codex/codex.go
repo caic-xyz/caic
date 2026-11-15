@@ -77,7 +77,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agen
 	// 	return nil, err
 	// }
 
-	codexArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
+	codexArgs := b.AgentArgs(agent.HarnessArgs{AutoCompactTokenLimit: opts.AutoCompactTokenLimit, Model: opts.Model})
 	relayArgs := []string{"--harness", "codex"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
@@ -111,7 +111,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agen
 		b.SetModelInventory(newModelInventory(models))
 	}
 	// The configured compaction threshold is independent of native reports.
-	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{AutoCompactTokenLimit: autoCompactTokenLimit}); err != nil {
+	if err := opts.Records.AppendMessage(ctx, &agent.MetaSessionMessage{AutoCompactTokenLimit: new(opts.AutoCompactTokenLimit)}); err != nil {
 		return nil, fmt.Errorf("write compaction configuration: %w", err)
 	}
 
@@ -128,7 +128,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agen
 }
 
 // AgentArgs implements agent.Backend.
-func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 	// TODO: re-enable widget MCP plugin once it's fixed for codex
 	// return []string{
 	// 	"codex", "--no-daemon", "app-server",
@@ -137,7 +137,7 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	// 	"-c", `mcp_servers.widget.command="python3"`,
 	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
 	// }
-	return codexAppServerArgs()
+	return codexAppServerArgs(a.AutoCompactTokenLimit)
 }
 
 // FetchModelInventory implements agent.ModelFetcher.
@@ -158,7 +158,7 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
-	args = append(args, codexAppServerArgs()...)
+	args = append(args, codexAppServerArgs(0)...)
 
 	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled.
 	stdin, err := cmd.StdinPipe()
@@ -223,40 +223,28 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-const autoCompactTokenLimit = 350000
-
-func codexAppServerArgs() []string {
-	// Compact at 350,000 total active tokens, 70% of the 500K context window
-	// that Codex gives GPT-6.1 Sol: https://developers.openai.com/api/docs/models/gpt-6.1-sol
-	// Usage drawn from a ChatGPT subscription has no long-context surcharge, so
-	// the trigger does not need to stay under the 272K API threshold, even
-	// though caic's API-equivalent cost estimate charges the surcharge above it:
-	// https://learn.chatgpt.com/docs/pricing
-	// The margin left below the window lets a turn finish, and the 90% default
-	// compaction/window ratio is a ceiling, not a target:
-	// https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/protocol/src/openai_models.rs#L529
-	// This is a compaction trigger, not a hard billing cap: context can grow
-	// between checks, and included subscription quotas have separate accounting.
-	// Count the full context, including the carried compaction prefix. Leave
-	// model_context_window unset to preserve model-default headroom; API pricing
-	// depends on actual input size, not the configured window capacity.
-	// https://learn.chatgpt.com/docs/config-file/config-reference
-	// https://learn.chatgpt.com/docs/pricing
-	//
+func codexAppServerArgs(limit int) []string {
 	// approval_policy="never" leaves the auto-review subagent nothing to review
 	// for commands, but guardian_approval defaults on and also reviews MCP
 	// elicitations, so pin both the reviewer and the feature off.
 	// https://github.com/openai/codex/blob/69231e1/codex-rs/features/src/lib.rs#L2140-L2143
 	// https://github.com/openai/codex/blob/69231e1/codex-rs/core/src/session/mcp.rs#L1173-L1197
-	return []string{
+	args := []string{
 		"codex", "--no-daemon", "app-server",
 		"-c", `approval_policy="never"`,
 		"-c", `approvals_reviewer="user"`,
 		"-c", "features.guardian_approval=false",
-		"-c", fmt.Sprintf("model_auto_compact_token_limit=%d", autoCompactTokenLimit),
-		"-c", `model_auto_compact_token_limit_scope="total"`,
 		"-c", `sandbox_mode="danger-full-access"`,
 	}
+	if limit > 0 {
+		// Explicit thresholds count the full active context, including the
+		// carried compaction prefix. Leave native model headroom unchanged.
+		args = append(args,
+			"-c", fmt.Sprintf("model_auto_compact_token_limit=%d", limit),
+			"-c", `model_auto_compact_token_limit_scope="total"`,
+		)
+	}
+	return args
 }
 
 func newModelInventory(modelInfo []codex.ModelInfo) agent.ModelInventory {

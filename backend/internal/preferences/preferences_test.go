@@ -5,6 +5,7 @@ package preferences
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -34,6 +35,7 @@ func TestPreferences(t *testing.T) {
 				Efforts: EffortPreferences{"claude": {"opus": "max"}, "codex": {"o3": "high"}},
 				Settings: Settings{
 					BaseImage:       "custom:latest",
+					Harnesses:       HarnessSettings{Claude: ClaudeSettings{AutoCompactTokenLimit: 120000}, Codex: CodexSettings{AutoCompactTokenLimit: 90000}, Pi: PiSettings{ReserveTokens: new(0), KeepRecentTokens: new(2000)}, OpenCode: OpenCodeSettings{BufferTokens: new(3000)}},
 					RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
 					PurgeDelay:      91 * time.Second,
 					CacheMappings: []CacheMapping{
@@ -501,6 +503,7 @@ func TestUsers(t *testing.T) {
 			Efforts: EffortPreferences{"claude": {"opus": "max"}},
 			Settings: Settings{
 				BaseImage:       "custom:latest",
+				Harnesses:       HarnessSettings{Claude: ClaudeSettings{AutoCompactTokenLimit: 120000}, Codex: CodexSettings{AutoCompactTokenLimit: 90000}, Pi: PiSettings{ReserveTokens: new(0), KeepRecentTokens: new(2000)}, OpenCode: OpenCodeSettings{BufferTokens: new(3000)}},
 				RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
 				PurgeDelay:      91 * time.Second,
 				WellKnownCaches: map[string]bool{"go-mod": true, "npm": false},
@@ -521,6 +524,12 @@ func TestUsers(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := s2.Get("alice")
+		if !reflect.DeepEqual(got.Settings.Harnesses, want.Settings.Harnesses) {
+			t.Fatalf("compaction thresholds = %v", got.Settings.Harnesses)
+		}
+		if s2.Get("bob").Settings.Harnesses != (HarnessSettings{}) {
+			t.Fatal("thresholds leaked to another account")
+		}
 		if got.Harness != want.Harness {
 			t.Errorf("harness = %q, want %q", got.Harness, want.Harness)
 		}

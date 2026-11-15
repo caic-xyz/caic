@@ -12,6 +12,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	agentacp "github.com/caic-xyz/caic/backend/internal/agent/acp"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode/data"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/maruel/genai/acp"
 	"github.com/maruel/genai/providers/opencode"
@@ -23,12 +24,6 @@ type Backend struct{ *agentacp.Backend }
 // New creates an OpenCode backend with independent native tool evidence.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.OpenCode, &agentacp.Config{
-		Args: []string{"opencode", "acp"},
-		// caic owns task titles. Removing OpenCode's hidden title agent skips
-		// the extra model call it makes on each session's first prompt. The
-		// inline configuration merges over the user's configuration files.
-		// https://github.com/anomalyco/opencode/blob/ba77ff9/packages/core/src/session/context.ts#L99-L101
-		Env: []string{`OPENCODE_CONFIG_CONTENT={"agent":{"title":{"disable":true}}}`},
 		// session/load needs OpenCode's persisted ~/.local/share/opencode state.
 		// Md mounts it across containers; custom storage must also stay accessible.
 		// https://opencode.ai/docs/troubleshooting/#storage
@@ -42,6 +37,19 @@ func New(cacheDir string, envVars []string) *Backend {
 	return b
 }
 
+// Start builds OpenCode's per-process configuration and starts its ACP session.
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return b.Backend.Start(ctx, opts, agentacp.Launch{
+		Args: b.AgentArgs(agent.HarnessArgs{}),
+		Env:  launchEnv(opts.CompactionBudget),
+	})
+}
+
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"opencode", "acp"}
+}
+
 // FetchModelInventory discovers OpenCode's native provider/model catalog.
 func (b *Backend) FetchModelInventory(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) (agent.ModelInventory, error) {
 	models, err := fetchModels(ctx, target, extraEnv)
@@ -50,6 +58,8 @@ func (b *Backend) FetchModelInventory(ctx context.Context, target runtime.Connec
 	}
 	return agent.ModelInventory{Models: models}, nil
 }
+
+var _ agent.Backend = (*Backend)(nil)
 
 func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]agent.Model, error) {
 	if target.SSHHost == "" {
@@ -97,21 +107,21 @@ func parseModels(out []byte) ([]agent.Model, error) {
 			continue // E.g. the colored "Models cache refreshed" status line.
 		}
 
-		var data []byte
+		var raw []byte
 		var info modelMetadata
 		for line++; line < len(lines); line++ {
-			data = append(data, lines[line]...)
-			data = append(data, '\n')
-			if err := json.Unmarshal(data, &info); err == nil {
+			raw = append(raw, lines[line]...)
+			raw = append(raw, '\n')
+			if err := json.Unmarshal(raw, &info); err == nil {
 				break
 			} else if line == len(lines)-1 {
 				return nil, fmt.Errorf("%s metadata: %w", model, err)
 			}
 		}
-		if len(data) == 0 {
+		if len(raw) == 0 {
 			return nil, fmt.Errorf("%s missing metadata", model)
 		}
-		if err := json.Unmarshal(data, &info); err != nil {
+		if err := json.Unmarshal(raw, &info); err != nil {
 			return nil, fmt.Errorf("%s metadata: %w", model, err)
 		}
 
@@ -125,4 +135,24 @@ func parseModels(out []byte) ([]agent.Model, error) {
 		return nil, errors.New("no model metadata")
 	}
 	return agentacp.NormalizeModels(models), nil
+}
+
+// launchEnv keeps native configuration per-process, never rewriting user files.
+// caic owns task titles. Disabling OpenCode's hidden title agent skips its extra
+// model call on the first prompt. The overlay merges over native configuration files.
+// https://github.com/anomalyco/opencode/blob/ba77ff9/packages/core/src/session/context.ts#L99-L101
+// Canonical buffer/keep.tokens settings are accepted by OpenCode v1.18.31 and newer:
+// https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/config/v2-compat.ts#L164-L184
+func launchEnv(c agent.CompactionBudget) []string {
+	cfg := data.Config{Agent: data.AgentConfig{Title: data.TitleConfig{Disable: true}}}
+	if !c.IsZero() {
+		cfg.Compaction = &data.CompactionConfig{Buffer: c.ReserveTokens}
+		if c.KeepRecentTokens != nil {
+			cfg.Compaction.Keep = &data.KeepConfig{Tokens: *c.KeepRecentTokens}
+		}
+	}
+	// This owned schema contains only structs, bools and integer pointers;
+	// json.Marshal cannot fail for these values.
+	v, _ := json.Marshal(cfg) //nolint:errchkjson // The owned schema contains only structs, bools, ints, and *int values.
+	return []string{"OPENCODE_CONFIG_CONTENT=" + string(v)}
 }

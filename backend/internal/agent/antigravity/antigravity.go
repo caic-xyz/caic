@@ -123,6 +123,12 @@ type Backend struct {
 }
 
 // New creates an Antigravity backend with its cached model inventory.
+// agy 1.5.3 accepts --settings, but its published schema has no general
+// compaction threshold: https://antigravity.google/schemas/v1/settings.json.
+// maxTokens in customModelsConfig.customModels entries describes context capacity
+// for Gemini API-authenticated custom models, not a built-in subscription model threshold.
+// Unknown settings are ignored, so no unsupported compaction override is exposed.
+// See https://antigravity.google/docs/settings?tab=cli.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{
 		HarnessID:       harness.Antigravity,

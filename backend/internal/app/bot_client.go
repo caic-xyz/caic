@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -27,6 +28,7 @@ type botClient struct {
 	log       *slog.Logger
 	checkouts *repo.Registry
 	taskMgr   *taskmgr.Manager
+	prefs     *preferences.Store
 	forgeMgr  *forgemgr.Manager
 }
 
@@ -98,16 +100,23 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (ksi
 	// caller's OAuth token rather than the server PAT.
 	ghToken := c.resolveGitHubContainerToken(ctx, true)
 
+	preferenceKey := req.OwnerID
+	if preferenceKey == "" {
+		preferenceKey = "default"
+	}
+	prefs := c.prefs.Get(preferenceKey)
 	id, err := c.taskMgr.Create(ctx, taskmgr.CreateParams{
-		OwnerID:             req.OwnerID,
-		Prompt:              agent.Prompt{Text: req.Prompt},
-		Repos:               []taskmgr.CreateRepo{{Name: req.Repo}},
-		Harness:             selectedHarness,
-		GitHubToken:         true,
-		ResolvedGitHubToken: ghToken,
-		ForgeIssue:          req.ForgeIssue,
-		ForgeOwner:          ownerResolved,
-		ForgeRepo:           repoResolved,
+		OwnerID:               req.OwnerID,
+		Prompt:                agent.Prompt{Text: req.Prompt},
+		Repos:                 []taskmgr.CreateRepo{{Name: req.Repo}},
+		Harness:               selectedHarness,
+		AutoCompactTokenLimit: prefs.Settings.Harnesses.AutoCompactTokenLimit(selectedHarness),
+		CompactionBudget:      prefs.Settings.Harnesses.CompactionBudget(selectedHarness),
+		GitHubToken:           true,
+		ResolvedGitHubToken:   ghToken,
+		ForgeIssue:            req.ForgeIssue,
+		ForgeOwner:            ownerResolved,
+		ForgeRepo:             repoResolved,
 	})
 	if err != nil {
 		return 0, err

@@ -527,9 +527,20 @@ func TestBackend(t *testing.T) {
 
 	t.Run("AgentArgsSetsAutoCompactWindow", func(t *testing.T) {
 		t.Parallel()
-		got := (&Backend{}).AgentArgs(agent.HarnessArgs{})
-		if !containsArgPair(got, "--autocompact", "400000") {
-			t.Fatalf("AgentArgs = %v, want --autocompact 400000", got)
+		for _, tc := range []struct {
+			limit int
+			want  []string
+		}{{0, nil}, {120000, []string{"--autocompact", "120000"}}} {
+			got := (&Backend{}).AgentArgs(agent.HarnessArgs{AutoCompactTokenLimit: tc.limit})
+			var flags []string
+			for i, arg := range got {
+				if arg == "--autocompact" {
+					flags = append(flags, got[i:i+2]...)
+				}
+			}
+			if !slices.Equal(flags, tc.want) {
+				t.Fatalf("compaction args = %v, want %v", flags, tc.want)
+			}
 		}
 	})
 

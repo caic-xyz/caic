@@ -1,13 +1,25 @@
-// SettingsForm presents autosaved container, storage, automation, and server settings.
+// SettingsForm presents autosaved harness compaction, container, storage, automation, and server settings.
 
 import { useSearchParams } from "@solidjs/router";
-import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, type Accessor, type Setter } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createUniqueId,
+  For,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  type Accessor,
+  type Setter,
+} from "solid-js";
 
 import type {
   CacheMappingResp,
   CacheSize,
   Harness,
   HarnessInfo,
+  HarnessSettings,
   ImageRefreshStatus,
   OAuthGrantResp,
   MountMappingResp,
@@ -39,6 +51,8 @@ type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
 interface SettingsFormProps {
   selectedImage: Accessor<string>;
   setSelectedImage: Setter<string>;
+  harnessSettings: Accessor<Required<HarnessSettings>>;
+  setHarnessSettings: Setter<Required<HarnessSettings>>;
   runtimeSettings: Accessor<Record<string, RuntimeSettings | undefined>>;
   updateRuntimeSettings: (name: string, settings: Partial<RuntimeSettings>) => void;
   purgeDelay: Accessor<number>;
@@ -104,6 +118,50 @@ export default function SettingsForm(props: SettingsFormProps) {
           : props.settingsSaveState() === "saved"
             ? "Settings saved"
             : "";
+  const compactionHarnesses = () =>
+    props
+      .harnesses()
+      .filter((h): h is HarnessInfo & { name: "claude" | "codex" } => h.name === "claude" || h.name === "codex");
+  const budgetHarnesses = () =>
+    props
+      .harnesses()
+      .filter((h): h is HarnessInfo & { name: "pi" | "opencode" } => h.name === "pi" || h.name === "opencode");
+  const saveHarnessSettings = (harnesses: Required<HarnessSettings>) => {
+    props.setHarnessSettings(harnesses);
+    void props.saveSettings({ harnesses });
+  };
+  const BudgetField = (field: {
+    label: string;
+    description: string;
+    value: number | null;
+    save: (value: number | null) => void;
+  }) => {
+    const descriptionId = createUniqueId();
+    return (
+      <label class={styles.settingsLabel}>
+        {field.label}
+        <input
+          type="number"
+          class={styles.settingsInput}
+          aria-label={field.label}
+          aria-describedby={`settings-compaction-description ${descriptionId}`}
+          min="0"
+          max="2147483647"
+          step="1"
+          placeholder="Harness default"
+          value={field.value ?? ""}
+          onBlur={(e) => {
+            const input = e.currentTarget;
+            if (!drafts.has(input) || !input.reportValidity()) return;
+            field.save(input.value === "" ? null : input.valueAsNumber);
+          }}
+        />
+        <span id={descriptionId} class={styles.settingsDescription}>
+          {field.description}
+        </span>
+      </label>
+    );
+  };
   const refreshableHarnesses = () => props.harnesses().filter((harness) => harness.supportsModelRefresh);
   const formatBytes = (bytes: number): string => {
     if (bytes <= 0) return "0 B";
@@ -195,6 +253,91 @@ export default function SettingsForm(props: SettingsFormProps) {
           </p>
         </Show>
         <Show when={section() === "general"}>
+          <section
+            class={`${styles.settingsSection} ${styles.compactionSettings}`}
+            aria-labelledby="settings-compaction"
+          >
+            <h3 id="settings-compaction" class={styles.settingsSectionTitle}>
+              Auto-compaction
+            </h3>
+            <p class={styles.settingsDescription} id="settings-compaction-description">
+              Changes apply to new tasks. Clear a field to use the harness default. Model limits and native compaction
+              settings still apply; these overrides do not enable disabled auto-compaction.
+            </p>
+            <For each={compactionHarnesses()}>
+              {(h) => (
+                <label class={styles.settingsLabel}>
+                  {harnessLabel(h.name)} threshold (tokens)
+                  <input
+                    type="number"
+                    class={styles.settingsInput}
+                    aria-describedby="settings-compaction-description settings-threshold-description"
+                    min="1"
+                    max="2147483647"
+                    step="1"
+                    placeholder="Harness default"
+                    value={props.harnessSettings()[h.name].autoCompactTokenLimit || ""}
+                    onBlur={(e) => {
+                      const input = e.currentTarget;
+                      if (!drafts.has(input) || !input.reportValidity()) return;
+                      const harnesses = {
+                        ...props.harnessSettings(),
+                        [h.name]: {
+                          ...props.harnessSettings()[h.name],
+                          autoCompactTokenLimit: input.value === "" ? 0 : input.valueAsNumber,
+                        },
+                      };
+                      saveHarnessSettings(harnesses);
+                    }}
+                  />
+                </label>
+              )}
+            </For>
+            <p class={styles.settingsDescription} id="settings-threshold-description">
+              Thresholds count used context tokens. Model limits may trigger compaction earlier.
+            </p>
+            <For each={budgetHarnesses()}>
+              {(h) => (
+                <fieldset class={styles.compactionBudget}>
+                  <legend>{harnessLabel(h.name)}</legend>
+                  <BudgetField
+                    label={`${harnessLabel(h.name)} compaction headroom (tokens)`}
+                    description={
+                      h.name === "pi"
+                        ? "Tokens reserved before the context fills. Larger values trigger earlier compaction."
+                        : "Token buffer for compaction. Its effect depends on native model, input, and output limits."
+                    }
+                    value={
+                      h.name === "pi"
+                        ? props.harnessSettings().pi.reserveTokens
+                        : props.harnessSettings().opencode.bufferTokens
+                    }
+                    save={(value) => {
+                      const settings = props.harnessSettings();
+                      saveHarnessSettings(
+                        h.name === "pi"
+                          ? { ...settings, pi: { ...settings.pi, reserveTokens: value } }
+                          : { ...settings, opencode: { ...settings.opencode, bufferTokens: value } },
+                      );
+                    }}
+                  />
+                  <BudgetField
+                    label={`${harnessLabel(h.name)} recent history (tokens)`}
+                    description="Recent conversation kept after the summary, subject to the harness's retention limits."
+                    value={props.harnessSettings()[h.name].keepRecentTokens}
+                    save={(value) => {
+                      const settings = props.harnessSettings();
+                      saveHarnessSettings(
+                        h.name === "pi"
+                          ? { ...settings, pi: { ...settings.pi, keepRecentTokens: value } }
+                          : { ...settings, opencode: { ...settings.opencode, keepRecentTokens: value } },
+                      );
+                    }}
+                  />
+                </fieldset>
+              )}
+            </For>
+          </section>
           <section class={styles.settingsSection} aria-labelledby="settings-container">
             <h3 id="settings-container" class={styles.settingsSectionTitle}>
               Container

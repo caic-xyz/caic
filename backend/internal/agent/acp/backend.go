@@ -1,4 +1,4 @@
-// Shared ACP transport, directional replay, metadata, and task-scoped MCP.
+// Shared ACP startup from harness launch values, transport, replay, metadata, and task-scoped MCP.
 
 // Package acp implements Agent Client Protocol over JSON-RPC 2.0 on stdin/stdout.
 package acp
@@ -25,7 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
-// Backend owns shared ACP transport and parsing for a configured harness.
+// Backend supplies shared ACP startup and parsing to harness-owned backends.
 type Backend struct {
 	agent.Base
 
@@ -59,16 +59,15 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // Start launches the selected ACP process via the relay daemon in the given
 // container. It performs the JSON-RPC handshake (initialize → session/new)
 // before returning a Session.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agent.Session, err error) {
-	agentArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
+func (b *Backend) Start(ctx context.Context, opts *agent.Options, launch Launch) (session *agent.Session, err error) {
 	relayArgs := []string{"--harness", string(b.Harness())}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 	}
-	for _, kv := range b.Config.Env {
+	for _, kv := range launch.Env {
 		relayArgs = append(relayArgs, "--env", kv)
 	}
-	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, agentArgs)
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, launch.Args)
 	if err != nil {
 		return nil, err
 	}
@@ -113,11 +112,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (session *agen
 		}
 	}
 	return s, nil
-}
-
-// AgentArgs implements agent.Backend.
-func (b *Backend) AgentArgs(_ agent.HarnessArgs) []string {
-	return b.Config.Args
 }
 
 // AttachRelay connects after the owning record processor has replayed history.
@@ -320,10 +314,17 @@ func (b *Backend) handshake(ctx context.Context, stdin io.Writer, stdout *bufio.
 	return res, records.Reader(), nil
 }
 
-var (
-	_ agent.Backend          = (*Backend)(nil)
-	_ agent.RecordHandshaker = (*Backend)(nil)
-)
+// Launch describes the harness-owned process to start for an ACP session.
+//
+// Immutable.
+type Launch struct {
+	// Args is the executable and argument vector passed to the relay.
+	Args []string
+	// Env contains per-process KEY=VALUE overrides; nil preserves the inherited environment.
+	Env []string
+}
+
+var _ agent.RecordHandshaker = (*Backend)(nil)
 
 // maxAccumulatedOutputBytes bounds synthetic final-message state. Streaming
 // deltas are already persisted independently, so an overflow disables the
