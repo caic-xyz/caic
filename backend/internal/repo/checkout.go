@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime/trace"
@@ -132,10 +131,10 @@ type Checkout struct {
 	BaseBranch       string
 	BaseBranchRemote string
 	GitTimeout       time.Duration
-	// PushTimeout bounds setup, hooks, network, and Git cleanup; verification
-	// can require a cold tool/dependency install, unlike ordinary Git queries.
+	// PushTimeout bounds the container's pre-push hook and the network push;
+	// verification can require a cold tool/dependency install, unlike ordinary
+	// Git queries.
 	PushTimeout time.Duration
-	PushDir     string
 
 	branchMu sync.Mutex // Serializes branch creation (nextID + git branch) to avoid duplicate names.
 	nextID   int        // Next branch sequence number (protected by branchMu).
@@ -147,21 +146,12 @@ type Checkout struct {
 // dir; pass the container-derived branches for this repo so a container
 // whose branch never made it into git (e.g. a launch that failed mid-setup)
 // still reserves its sequence number. See maxBranchSeqNum.
-// cacheDir is the configured application cache root. Persisted idle push
-// worktrees remain reusable across restarts; interrupted operations are reported.
-func NewCheckout(ctx context.Context, log *slog.Logger, dir, cacheDir, baseBranch string, liveBranches []string) (*Checkout, error) {
+func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string, liveBranches []string) (*Checkout, error) {
 	if dir == "" {
 		return nil, errors.New("checkout directory is required")
 	}
 	if log == nil {
 		return nil, errors.New("checkout logger is required")
-	}
-	if cacheDir == "" {
-		return nil, errors.New("checkout cache directory is required")
-	}
-	pushDir, err := pushCacheDir(cacheDir, true)
-	if err != nil {
-		return nil, err
 	}
 	checkout := &Checkout{
 		BaseBranch: baseBranch,
@@ -169,16 +159,12 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, cacheDir, baseBranc
 		GitTimeout: time.Minute,
 		// Cold verification may install dependencies and build its tools.
 		PushTimeout: 10 * time.Minute,
-		PushDir:     pushDir,
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkout.GitTimeout)
 	defer cancel()
 	highest, err := maxBranchSeqNum(ctx, log, checkout.Dir, liveBranches)
 	if err != nil {
 		return nil, err
-	}
-	if err := checkout.reportRetainedPushWorktrees(ctx, log, dir); err != nil {
-		return nil, fmt.Errorf("report retained push worktrees: %w", err)
 	}
 	checkout.nextID = highest + 1
 	return checkout, nil
@@ -242,6 +228,10 @@ func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger
 //
 // Public diff statistics remain runtime owned, including pending edits.
 // Safety issues in any repo block all pushes unless explicitly bypassed.
+// Before each push the instance runs the repository's pre-push hook on the
+// pinned commit, where the task's toolchain and dependencies live, and a
+// rejection aborts the push. The host then pushes the commit with --no-verify
+// straight from its repository, so no host hook or checkout is involved.
 // Successful pushes refresh the runtime's cached upstream refs. No host checkout
 // files or branches change. The returned statistics describe the pre-push diff.
 func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (v3.DiffStat, []SafetyIssue, error) {
@@ -316,7 +306,12 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	for i, d := range destinations {
 		rp := &repos[i]
 		pushCtx, cancel := context.WithTimeout(ctx, w.PushTimeout)
-		err := w.pushWorktree(pushCtx, log, rp.GitRoot, commits[i], d, opts.Force)
+		err := runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, BaseCommit: d.BaseRef})
+		if err != nil {
+			cancel()
+			return ds, allIssues, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
+		}
+		err = pushCommit(pushCtx, log, &git.Checkout{Root: rp.GitRoot, Logger: log}, commits[i], d, opts.Force)
 		cancel()
 		if err != nil {
 			return ds, allIssues, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
@@ -828,96 +823,17 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 	return result, failed, errors.Join(errs...)
 }
 
-// pushWorktree exclusively claims an idle checkout or creates a detached one.
-// Completed pushes return one slot to the persistent idle pool; interrupted
-// operations remain quarantined across server restarts.
-func (w *Checkout) pushWorktree(ctx context.Context, log *slog.Logger, root, commit string, d PushDestination, force bool) error {
-	g := &git.Checkout{Root: root, Logger: log}
-	common, err := pushCommonDir(ctx, g)
-	if err != nil {
-		return err
+// pushCommit pushes commit to d from the host repository without touching its
+// checkout. The container already ran the repository's pre-push hook on commit,
+// so the host skips hooks. Git keeps the user's transport and SSH configuration.
+func pushCommit(ctx context.Context, log *slog.Logger, g *git.Checkout, commit string, d PushDestination, force bool) error {
+	args := []string{"push", "--no-verify"}
+	if force {
+		args = append(args, "--force")
 	}
-	dir, reused, err := acquirePushWorktree(ctx, w.PushDir, common)
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "checkout")
-	reusable := false
-	err = awaitPushCommand(ctx, func() error {
-		checkout := &git.Checkout{Root: path, Logger: log}
-		// Git does not serialize worktree registration: listing worktrees fails
-		// while another add has written only part of its administrative files.
-		// Register and validate under the pool lock; checkout hooks run outside it.
-		if err := withPushPool(ctx, w.PushDir, common, func() error {
-			if reused {
-				return validateReusablePushWorktree(ctx, g, common, dir)
-			}
-			if _, err := g.RunGit(ctx, "worktree", "add", "--no-checkout", "--detach", path, commit); err != nil {
-				return fmt.Errorf("create push worktree: %w", err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		// Only this caic-owned checkout is reset. Keep ignored verification
-		// caches while removing leftovers, including nested untracked repos.
-		if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
-			return err
-		}
-		if _, err := checkout.RunGit(ctx, "checkout", "--detach", "--force", commit); err != nil {
-			return err
-		}
-		if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
-			return err
-		}
-		reusable = true
-		// Preserve native Git transport and lock configuration, including the
-		// user's SSH configuration. The outer deadline also bounds slow hooks.
-		return checkout.PushRef(ctx, d.Remote, "HEAD", d.Branch, force)
-	})
-	if ctx.Err() != nil {
-		return errors.Join(err, retainPushWorktree(ctx, log, root, dir))
-	}
-	cleanupCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
-	defer cancel()
-	cleanupErr := releasePushWorktree(cleanupCtx, g, w.PushDir, common, dir, reusable)
-	if cleanupErr != nil {
-		return errors.Join(err, cleanupErr, retainPushWorktree(ctx, log, root, dir))
-	}
+	log.InfoContext(ctx, "git push", "remote", d.Remote, "branch", d.Branch, "force", force)
+	_, err := g.RunGit(ctx, append(args, "--", d.Remote, commit+":refs/heads/"+d.Branch)...)
 	return err
-}
-
-func (w *Checkout) reportRetainedPushWorktrees(ctx context.Context, log *slog.Logger, root string) error {
-	common, err := pushCommonDir(ctx, &git.Checkout{Root: root, Logger: log})
-	if err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(w.PushDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "operation-") {
-			continue
-		}
-		// Never reclaim abandoned operations automatically: neither a dead
-		// host nor a released lock establishes hook-process completion.
-		dir := filepath.Join(w.PushDir, e.Name())
-		owner, err := readPushMarker(dir, "owner-v1")
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, errInvalidPushMarker) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if owner == common || owner == root {
-			if _, err := readPushIdleSince(dir); err == nil {
-				continue
-			}
-			_ = retainPushWorktree(ctx, log, root, dir)
-		}
-	}
-	return nil
 }
 
 // AllocatedBranch owns a newly created branch at its pinned starting commit.

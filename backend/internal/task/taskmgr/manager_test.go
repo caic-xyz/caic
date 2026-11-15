@@ -3799,7 +3799,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			initTaskRepo(t, dir, []string{"branch", "caic-0"})
-			checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, t.TempDir(), "", nil)
+			checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

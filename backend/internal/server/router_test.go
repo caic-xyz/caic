@@ -197,7 +197,6 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), testLogger(), Dependencies{
-		PushCacheDir: t.TempDir(),
 		Checkouts:    checkoutRegistry,
 		RepoStatus:   repoStatus,
 		Runtimes:     runtimeRouter,
@@ -232,7 +231,6 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
 	s, err := New(t.Context(), testLogger(), Dependencies{
-		PushCacheDir:               t.TempDir(),
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,
@@ -275,24 +273,22 @@ func TestNew(t *testing.T) {
 		checkoutRegistry := repo.NewRegistry()
 		taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry})
 		return Dependencies{
-			PushCacheDir: t.TempDir(),
-			Checkouts:    checkoutRegistry,
-			RepoStatus:   ci.NewRepoStatusStore(),
-			Runtimes:     runtimeRouter,
-			TaskMgr:      taskMgr,
-			Preferences:  newTestPrefs(t),
-			ForgeMgr:     forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
-			Warnings:     NewWarningStore(taskMgr),
-			CacheSizes:   NewCacheSizeStore(testLogger()),
-			Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
-			UsageRollup:  newTestUsageRollup(t),
+			Checkouts:   checkoutRegistry,
+			RepoStatus:  ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     taskMgr,
+			Preferences: newTestPrefs(t),
+			ForgeMgr:    forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
+			Warnings:    NewWarningStore(taskMgr),
+			CacheSizes:  NewCacheSizeStore(testLogger()),
+			Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+			UsageRollup: newTestUsageRollup(t),
 		}
 	}
 
 	t.Run("missing runtime", func(t *testing.T) {
 		t.Parallel()
-		if _, err := New(t.Context(), testLogger(), Dependencies{
-			PushCacheDir: t.TempDir()}); err == nil {
+		if _, err := New(t.Context(), testLogger(), Dependencies{}); err == nil {
 			t.Fatal("New() error = nil, want runtime required")
 		}
 	})
@@ -302,11 +298,10 @@ func TestNew(t *testing.T) {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
 		_, err := New(t.Context(), testLogger(), Dependencies{
-			PushCacheDir: t.TempDir(),
-			Runtimes:     runtimeRouter,
-			TaskMgr:      newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
-			Preferences:  newTestPrefs(t),
-			RepoStatus:   ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
+			Preferences: newTestPrefs(t),
+			RepoStatus:  ci.NewRepoStatusStore(),
 		})
 		if err == nil || err.Error() != "checkout registry is required" {
 			t.Fatalf("New() error = %v, want checkout registry required", err)
@@ -318,11 +313,10 @@ func TestNew(t *testing.T) {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
 		_, err := New(t.Context(), testLogger(), Dependencies{
-			PushCacheDir: t.TempDir(),
-			Checkouts:    checkoutRegistry,
-			Runtimes:     runtimeRouter,
-			TaskMgr:      newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
-			Preferences:  newTestPrefs(t),
+			Checkouts:   checkoutRegistry,
+			Runtimes:    runtimeRouter,
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
+			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "repo status store is required" {
 			t.Fatalf("New() error = %v, want repo status store required", err)
@@ -334,12 +328,11 @@ func TestNew(t *testing.T) {
 		runtimeRouter := newTestRuntime(t, &runtimetest.FakeBackend{})
 		checkoutRegistry := repo.NewRegistry()
 		_, err := New(t.Context(), testLogger(), Dependencies{
-			PushCacheDir: t.TempDir(),
-			Checkouts:    checkoutRegistry,
-			RepoStatus:   ci.NewRepoStatusStore(),
-			Runtimes:     runtimeRouter,
-			TaskMgr:      newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
-			Preferences:  newTestPrefs(t),
+			Checkouts:   checkoutRegistry,
+			RepoStatus:  ci.NewRepoStatusStore(),
+			Runtimes:    runtimeRouter,
+			TaskMgr:     newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Checkouts: checkoutRegistry}),
+			Preferences: newTestPrefs(t),
 		})
 		if err == nil || err.Error() != "forge manager is required" {
 			t.Fatalf("New() error = %v, want forge manager required", err)
@@ -569,7 +562,6 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	s, err := New(t.Context(), testLogger(), Dependencies{
-		PushCacheDir: t.TempDir(),
 		Checkouts:    checkoutRegistry,
 		CheckoutRoot: root,
 		RepoStatus:   repoStatus,
@@ -643,14 +635,6 @@ func TestCloneRepo(t *testing.T) {
 		}
 		if checkout.RelPath != "cloned" {
 			t.Fatalf("RelPath = %q, want cloned", checkout.RelPath)
-		}
-		// The push cache path is canonical; resolve aliases such as macOS /var.
-		wantPushDir, err := filepath.EvalSymlinks(filepath.Join(s.serverHandlers.pushCacheDir, "push"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if checkout.PushDir != wantPushDir {
-			t.Fatalf("PushDir = %q, want %q", checkout.PushDir, wantPushDir)
 		}
 		if checkout.Dir != filepath.Join(root, "cloned") {
 			t.Fatalf("Dir = %q, want cloned path", checkout.Dir)

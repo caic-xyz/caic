@@ -179,6 +179,11 @@ func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.Fet
 // RefreshRefs implements runtime.Repository.
 func (*FakeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
 
+// RunPrePush implements runtime.Repository. The fake has no hook installed.
+func (*FakeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs) error {
+	return nil
+}
+
 // Fetches returns the options of every Fetch call, in order.
 func (f *FakeBackend) Fetches() []runtime.FetchOpts {
 	f.mu.Lock()

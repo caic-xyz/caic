@@ -664,6 +664,32 @@ func (b *Backend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []ru
 	return out, errors.Join(errs...)
 }
 
+// RunPrePush implements runtime.Repository.
+func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, commit string, dest runtime.PushRefs) error {
+	defer trace.StartRegion(ctx, "instance.pre_push").End()
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return err
+	}
+	repos := ct.Repos()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	cmd, err := prePushCommand(repos[repoIdx].ContainerPath, commit, dest)
+	if err != nil {
+		return err
+	}
+	res, err := b.commandOutput(ctx, ct, cmd)
+	if err != nil {
+		return tailOutputError("pre-push hook", ct, err, res.Stdout, prePushOutputLimit)
+	}
+	return nil
+}
+
 // Fetch implements runtime.Repository.
 func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
@@ -1375,7 +1401,14 @@ func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command str
 // generated files, so only the tail -- where Git writes its fatal message -- is
 // kept in the error the API returns to the browser.
 func commandOutputError(action string, ct mdContainer, err error, out []byte) error {
-	const limit = 512
+	return tailOutputError(action, ct, err, out, 512)
+}
+
+// prePushOutputLimit keeps enough of a failed hook's output to show which
+// check rejected the push.
+const prePushOutputLimit = 16 << 10
+
+func tailOutputError(action string, ct mdContainer, err error, out []byte, limit int) error {
 	if len(out) > limit {
 		out = append([]byte("…"), out[len(out)-limit:]...)
 	}

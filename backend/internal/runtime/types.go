@@ -442,6 +442,18 @@ type FetchOpts struct {
 	Commit bool
 }
 
+// PushRefs names the ref update that a pre-push hook validates.
+type PushRefs struct {
+	// Remote is the remote name passed to the hook as both its name and URL
+	// arguments; the real URL can embed credentials and never enters an instance.
+	Remote string
+	// Branch is the destination branch name, without the refs/heads/ prefix.
+	Branch string
+	// BaseCommit is the destination's last known tip, reported to the hook as
+	// the remote object ID.
+	BaseCommit string
+}
+
 // FetchedBranch identifies an exact repository branch tip observed by Fetch.
 type FetchedBranch struct {
 	// RepositoryPath is the repository's absolute path inside the runtime.
@@ -471,6 +483,12 @@ type Repository interface {
 	// RefreshRefs copies cached upstream refs into the instance without moving
 	// working branches or committing pending edits.
 	RefreshRefs(ctx context.Context, id ID) error
+	// RunPrePush runs the repository's own pre-push hook inside the instance
+	// against a clean checkout of commit, with the refs that a push of commit to
+	// remote/branch on top of baseCommit would report. An instance without a hook,
+	// or a runtime that cannot run commands, has nothing to run. A rejection is an
+	// error carrying the hook's output.
+	RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs) error
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 	// CompactRepositoryStatus returns the branch, divergence, working-tree

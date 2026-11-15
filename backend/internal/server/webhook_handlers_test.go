@@ -500,19 +500,18 @@ func minimalRouter(t *testing.T) *testRouter {
 	prefs := newTestPrefs(t)
 	ciService := ci.NewService(testLogger(), cache, nil, &testCIBackend{checkouts: checkoutRegistry, repoStatus: repoStatus, taskMgr: taskMgr, forgeMgr: fm, prefs: prefs})
 	s, err := New(ctx, testLogger(), Dependencies{
-		PushCacheDir: t.TempDir(),
-		Checkouts:    checkoutRegistry,
-		RepoStatus:   repoStatus,
-		Runtimes:     runtimeRouter,
-		TaskMgr:      taskMgr,
-		Preferences:  prefs,
-		CICache:      cache,
-		ForgeMgr:     fm,
-		CIService:    ciService,
-		Warnings:     NewWarningStore(taskMgr),
-		CacheSizes:   NewCacheSizeStore(testLogger()),
-		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
-		UsageRollup:  newTestUsageRollup(t),
+		Checkouts:   checkoutRegistry,
+		RepoStatus:  repoStatus,
+		Runtimes:    runtimeRouter,
+		TaskMgr:     taskMgr,
+		Preferences: prefs,
+		CICache:     cache,
+		ForgeMgr:    fm,
+		CIService:   ciService,
+		Warnings:    NewWarningStore(taskMgr),
+		CacheSizes:  NewCacheSizeStore(testLogger()),
+		Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup: newTestUsageRollup(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -18,6 +18,7 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -1430,6 +1431,119 @@ type gitCommandContainer struct{ fakeMDContainer }
 
 func (*gitCommandContainer) SSHCommand(_ []string, cmd string) []string {
 	return []string{"bash", "-c", cmd}
+}
+
+// homeCommandContainer runs Bash probes with a private HOME, because the
+// pre-push checkout lives under it.
+type homeCommandContainer struct {
+	gitCommandContainer
+
+	home string
+}
+
+func (c *homeCommandContainer) SSHCommand(_ []string, cmd string) []string {
+	return []string{"bash", "-c", "export HOME=" + shellQuote(c.home) + "; " + cmd}
+}
+
+func TestRunPrePush(t *testing.T) {
+	t.Parallel()
+	newRepo := func(t *testing.T, hook string) (b *Backend, dir, commit string) {
+		dir = initStatusRepo(t)
+		commit = runTestGitOutput(t, dir, "rev-parse", "HEAD")
+		if hook != "" {
+			if err := os.WriteFile(filepath.Join(dir, ".git", "hooks", "pre-push"), []byte(hook), 0o700); err != nil { //nolint:gosec // fixture-owned executable hook.
+				t.Fatal(err)
+			}
+		}
+		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: t.TempDir()}
+		return newTestBackend(&fakeMDClient{getResult: ct}), dir, commit
+	}
+	dest := func(base string) runtime.PushRefs {
+		return runtime.PushRefs{Remote: "origin", Branch: "task", BaseCommit: base}
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		out := filepath.Join(t.TempDir(), "seen")
+		b, dir, commit := newRepo(t, "#!/bin/sh\n{ echo \"$@\"; cat; git rev-parse HEAD; git status --porcelain; } > "+shellQuote(out)+"\n")
+		// Pending edits in the task checkout never reach the hook's checkout.
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("dirty\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(out) //nolint:gosec // fixture-owned output.
+		if err != nil {
+			t.Fatal(err)
+		}
+		remote := dest(commit).Remote // The hook receives it as both name and URL.
+		want := remote + " " + remote + "\nrefs/heads/task " + commit + " refs/heads/task " + commit + "\n" + commit + "\n"
+		if string(got) != want {
+			t.Fatalf("hook saw %q, want %q", got, want)
+		}
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+			t.Fatalf("reused checkout: %v", err)
+		}
+	})
+
+	t.Run("Concurrent", func(t *testing.T) {
+		t.Parallel()
+		// Each hook run reports its start and end; overlapping runs interleave.
+		seen := filepath.Join(t.TempDir(), "seen")
+		b, _, commit := newRepo(t, "#!/bin/sh\necho start >> "+shellQuote(seen)+"\nsleep 0.2\necho end >> "+shellQuote(seen)+"\n")
+		var wg sync.WaitGroup
+		for range 3 {
+			wg.Go(func() {
+				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		wg.Wait()
+		got, err := os.ReadFile(seen) //nolint:gosec // fixture-owned output.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := strings.Repeat("start\nend\n", 3); string(got) != want {
+			t.Fatalf("hook runs overlapped: %q", got)
+		}
+	})
+
+	t.Run("MissingHook", func(t *testing.T) {
+		t.Parallel()
+		b, _, commit := newRepo(t, "")
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+			t.Fatalf("no hook is nothing to run: %v", err)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Rejection", func(t *testing.T) {
+			t.Parallel()
+			b, _, commit := newRepo(t, "#!/bin/sh\necho lint failed\nexit 77\n")
+			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
+			if err == nil || !strings.Contains(err.Error(), "lint failed") {
+				t.Fatalf("err=%v, want rejection with hook output", err)
+			}
+		})
+		t.Run("Arguments", func(t *testing.T) {
+			t.Parallel()
+			b, _, commit := newRepo(t, "#!/bin/sh\n")
+			for name, c := range map[string]string{"ShortCommit": commit[:8], "NoCommit": ""} {
+				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, c, dest(commit)); err == nil {
+					t.Errorf("%s accepted", name)
+				}
+			}
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, runtime.PushRefs{Remote: "origin", Branch: "task"}); err == nil {
+				t.Error("missing base accepted")
+			}
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 1, commit, dest(commit)); err == nil {
+				t.Error("repo index out of range accepted")
+			}
+		})
+	})
 }
 
 func TestTurnSnapshotBackend(t *testing.T) {

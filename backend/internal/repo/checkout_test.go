@@ -13,9 +13,7 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -96,7 +94,6 @@ func newTestCheckout(dir string) *Checkout {
 		RelPath:     filepath.Base(dir),
 		GitTimeout:  time.Minute,
 		PushTimeout: time.Minute,
-		PushDir:     filepath.Join(filepath.Dir(dir), "push"),
 	}
 }
 
@@ -113,831 +110,51 @@ func newInitializedTestCheckout(t *testing.T, dir string) *Checkout {
 }
 
 func newInitializedTestCheckoutWithLiveBranches(t *testing.T, dir string, liveBranches []string) *Checkout {
-	checkout, err := NewCheckout(t.Context(), logtest.Logger(t), dir, t.TempDir(), "main", liveBranches)
+	checkout, err := NewCheckout(t.Context(), logtest.Logger(t), dir, "main", liveBranches)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return checkout
 }
 
-//nolint:tparallel // Environment-changing push fixtures run before parallel cases.
 func TestCheckout(t *testing.T) {
+	t.Parallel()
 	t.Run("AllocateBranch", runAllocateBranchTests)
-	// These process-wide fixtures must run before parallel checkout cases.
-	t.Run("pushWorktree", func(t *testing.T) {
-		t.Run("OverallCancellationIncludesCleanup", func(t *testing.T) {
-			if goruntime.GOOS == "windows" {
-				t.Skip("shell fixture requires Unix")
-			}
-			// PATH is process-wide, so this fixture deliberately runs without Parallel.
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			realGit, err := exec.LookPath("git")
-			if err != nil {
-				t.Fatal(err)
-			}
-			bin := t.TempDir()
-			marker := filepath.Join(bin, "cleanup-started")
-			writePushFile(t, bin, "git", "#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then\n  printf started > '"+marker+"'\n  exec sleep 30\nfi\nexec '"+realGit+"' \"$@\"\n", 0o700)
-			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			ctx, cancel := context.WithCancel(t.Context())
-			done := make(chan error, 1)
-			var wg sync.WaitGroup
-			wg.Go(func() {
-				done <- w.pushWorktree(ctx, logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "cancel-cleanup"}, false)
-			})
-			t.Cleanup(func() {
-				cancel()
-				wg.Wait()
-			})
-			// Setup and pushing can be slow on a busy runner. Cancel
-			// only once Git cleanup is blocked, so this exercises its parent context.
-			ready := time.NewTimer(10 * time.Second)
-			t.Cleanup(func() { ready.Stop() })
-			for {
-				if _, err := os.Stat(marker); err == nil {
-					break
-				} else if !os.IsNotExist(err) {
-					t.Fatal(err)
-				}
-				select {
-				case err := <-done:
-					t.Fatalf("push returned before Git cleanup started: %v", err)
-				case <-ready.C:
-					t.Fatal("fixture never reached Git cleanup")
-				case <-time.After(time.Millisecond):
-				}
-			}
-			started := time.Now()
-			cancel()
-			select {
-			case err = <-done:
-			case <-time.After(1500 * time.Millisecond):
-				t.Fatal("cleanup ignored overall push cancellation")
-			}
-			if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "retained") {
-				t.Fatalf("overall cancellation or retention outcome lost: %v", err)
-			}
-			t.Logf("cleanup returned %v after cancellation", time.Since(started))
-			dirs := pushOperationDirs(t, w)
-			if len(dirs) != 1 {
-				t.Fatal("canceled cleanup lost operation directory")
-			}
-			owner, err := os.ReadFile(filepath.Join(dirs[0], "owner-v1"))
-			if err != nil || string(owner) != canonicalPath(t, filepath.Join(root, ".git")) {
-				t.Fatalf("canceled cleanup lost ownership: %q, %v", owner, err)
-			}
-			if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/cancel-cleanup"); got == "" {
-				t.Fatal("push did not finish before cleanup cancellation")
-			}
-		})
-		t.Run("CacheSystemd", func(t *testing.T) {
-			// Process-wide HOME/XDG settings intentionally model a service environment.
-			taskHome := t.TempDir()
-			t.Setenv("HOME", taskHome)
-			t.Setenv("XDG_CACHE_HOME", "")
-			root := initTestRepo(t, "main")
-			cache := t.TempDir()
-			w, err := DiscoverCheckout(t.Context(), logtest.Logger(t), root, cache, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if w.PushDir != canonicalPath(t, filepath.Join(cache, "push")) {
-				t.Fatalf("push directory=%q", w.PushDir)
-			}
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "service"}, false); err != nil {
-				t.Fatal(err)
-			}
-			assertPushIdle(t, w, root)
-			if _, err := os.Stat(filepath.Join(taskHome, ".cache")); !os.IsNotExist(err) {
-				t.Fatalf("used ambient home cache: %v", err)
-			}
-		})
-		t.Run("Core", func(t *testing.T) {
-			t.Parallel()
-			t.Run("OrdinaryHookDirtySource", func(t *testing.T) {
-				t.Parallel()
-				root := initTestRepo(t, "main")
-				// Exercise the real HEAD-only hook with a small fixture-owned static gate.
-				hook, err := os.ReadFile("../../../scripts/hooks/pre-push")
-				if err != nil {
-					t.Fatal(err)
-				}
-				writePushFile(t, root, "scripts/hooks/pre-push", string(hook), 0o700)
-				writePushFile(t, root, "Makefile", "verify:\n\t@test \"$$(cat README.md)\" = task\n", 0o600)
-				writePushFile(t, root, ".gitignore", "ignored/\n", 0o600)
-				runGit(t, root, "add", ".")
-				runGit(t, root, "commit", "-m", "Install checks")
-				runGit(t, root, "checkout", "-b", "task")
-				writePushFile(t, root, "README.md", "task\n", 0o600)
-				runGit(t, root, "commit", "-am", "Task change")
-				tip := strings.TrimSpace(runPushGit(t, root, "rev-parse", "HEAD"))
-				runGit(t, root, "checkout", "main")
-				runGit(t, root, "config", "core.hooksPath", "scripts/hooks")
-				writePushFile(t, root, "README.md", "staged\n", 0o600)
-				runGit(t, root, "add", "README.md")
-				writePushFile(t, root, "README.md", "unstaged\n", 0o600)
-				writePushFile(t, root, "untracked", "keep\n", 0o600)
-				writePushFile(t, root, "ignored/cache", "source cache\n", 0o600)
-				before := runPushGit(t, root, "status", "--porcelain=v2")
-				index := runPushGit(t, root, "diff", "--cached")
-				head := runPushGit(t, root, "rev-parse", "HEAD")
-				w := newInitializedTestCheckout(t, root)
-				if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, tip, PushDestination{Remote: "origin", Branch: "task"}, false); err != nil {
-					t.Fatal(err)
-				}
-				if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/task"); !strings.HasPrefix(got, tip+"\t") {
-					t.Fatal(got)
-				}
-				if runPushGit(t, root, "status", "--porcelain=v2") != before || runPushGit(t, root, "diff", "--cached") != index || runPushGit(t, root, "rev-parse", "HEAD") != head {
-					t.Fatal("source checkout changed")
-				}
-				for name, want := range map[string]string{"README.md": "unstaged\n", "untracked": "keep\n", "ignored/cache": "source cache\n"} {
-					got, err := os.ReadFile(filepath.Join(root, name)) //nolint:gosec // fixture-owned source file.
-					if err != nil || string(got) != want {
-						t.Fatalf("%s: %q, %v", name, got, err)
-					}
-				}
-				assertPushIdle(t, w, root)
-			})
-			t.Run("ConcurrentAndActiveRetention", func(t *testing.T) {
-				t.Parallel()
-				root := initTestRepo(t, "main")
-				w := newInitializedTestCheckout(t, root)
-				markers := t.TempDir()
-				// Rename publishes each marker with its content; readers never see it empty.
-				staging := t.TempDir()
-				hook := "#!/bin/sh\nset -eu\nname=$(basename \"$(dirname \"$PWD\")\")\npwd > '" + staging + "/'$name\nmv '" + staging + "/'$name '" + markers + "/'$name\nwhile [ ! -f '" + markers + "/release' ]; do sleep 0.01; done\n"
-				writePushFile(t, root, ".git/hooks/pre-push", hook, 0o700)
-				errs := make(chan error, 2)
-				var wg sync.WaitGroup
-				for _, branch := range []string{"one", "two"} {
-					wg.Go(func() {
-						errs <- w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: branch}, false)
-					})
-				}
-				deadline := time.Now().Add(10 * time.Second)
-				for {
-					entries, err := os.ReadDir(markers)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if len(entries) == 2 {
-						break
-					}
-					if time.Now().After(deadline) {
-						writePushFile(t, markers, "release", "", 0o600)
-						wg.Wait()
-						close(errs)
-						t.Fatal("concurrent hooks did not start", <-errs, <-errs)
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-				if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
-					t.Fatal(err)
-				}
-				entries, err := os.ReadDir(markers)
-				if err != nil {
-					t.Fatal(err)
-				}
-				paths := make(map[string]struct{})
-				for _, e := range entries {
-					data, err := os.ReadFile(filepath.Join(markers, e.Name())) //nolint:gosec // fixture-owned hook marker.
-					if err != nil {
-						t.Fatal(err)
-					}
-					path := strings.TrimSpace(string(data))
-					if _, err := os.Stat(filepath.Join(path, ".git")); err != nil { //nolint:gosec // path reported by fixture-owned hook.
-						t.Fatal("active checkout removed", err)
-					}
-					paths[path] = struct{}{}
-				}
-				if len(paths) != 2 {
-					t.Fatal("concurrent pushes shared a checkout")
-				}
-				writePushFile(t, markers, "release", "", 0o600)
-				wg.Wait()
-				close(errs)
-				for err := range errs {
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-				assertPushIdle(t, w, root)
-			})
-			t.Run("RetentionProtectsAbandonedUserAndForeignWorktrees", func(t *testing.T) {
-				t.Parallel()
-				root := initTestRepo(t, "main")
-				w := newInitializedTestCheckout(t, root)
-				common, err := pushCommonDir(t.Context(), &git.Checkout{Root: root, Logger: logtest.Logger(t)})
-				if err != nil {
-					t.Fatal(err)
-				}
-				abandoned := filepath.Join(w.PushDir, "operation-abandoned")
-				active := filepath.Join(w.PushDir, "operation-active")
-				user := filepath.Join(w.PushDir, "operation-user")
-				foreign := filepath.Join(w.PushDir, "operation-foreign")
-				for _, dir := range []string{abandoned, active, user, foreign} {
-					if err := os.MkdirAll(dir, 0o700); err != nil {
-						t.Fatal(err)
-					}
-					runGit(t, root, "worktree", "add", "--detach", filepath.Join(dir, "checkout"), "HEAD")
-				}
-				for _, dir := range []string{abandoned, active} {
-					writePushFile(t, dir, "owner-v1", common, 0o600)
-				}
-				writePushFile(t, foreign, "owner-v1", "other repository", 0o600)
-				if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
-					t.Fatal(err)
-				}
-				for _, dir := range []string{abandoned, active, user, foreign} {
-					if _, err := os.Stat(filepath.Join(dir, "checkout", ".git")); err != nil {
-						t.Fatal("retained worktree removed", err)
-					}
-				}
-			})
-			for _, tc := range []struct {
-				name, commit, hook string
-				// hang runs a hook that blocks until the push is canceled.
-				hang bool
-			}{
-				{name: "SetupFailure", commit: "nonexistent"},
-				{name: "SetupHookFailure", commit: "HEAD", hook: "#!/bin/sh\nexit 1\n"},
-				{name: "HookRejection", commit: "HEAD", hook: "#!/bin/sh\nexit 1\n"},
-				{name: "HookCancellation", commit: "HEAD", hang: true},
-				{name: "CleanupTimeout", commit: "HEAD"},
-				{name: "SetupHookCancellation", commit: "HEAD", hang: true},
-				{name: "CleanupFailure", commit: "HEAD", hook: "#!/bin/sh\ngit worktree lock \"$PWD\"\nexit 1\n"},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					root := initTestRepo(t, "main")
-					w := newInitializedTestCheckout(t, root)
-					if tc.name == "CleanupTimeout" {
-						w.GitTimeout = time.Nanosecond
-					}
-					hook := tc.hook
-					hookStarted := filepath.Join(t.TempDir(), "started")
-					if tc.hang {
-						hook = "#!/bin/sh\n: > '" + hookStarted + "'\nsleep 2\nexit 1\n"
-					}
-					if hook != "" {
-						hookName := "pre-push"
-						if strings.HasPrefix(tc.name, "SetupHook") {
-							hookName = "post-checkout"
-						}
-						writePushFile(t, root, ".git/hooks/"+hookName, hook, 0o700)
-					}
-					ctx, cancel := context.WithCancel(t.Context())
-					var workers sync.WaitGroup
-					t.Cleanup(func() { cancel(); workers.Wait() })
-					// Cancel only once the hook runs; a fixed timer can expire before
-					// the operation directory exists on a loaded machine.
-					canceled := make(chan time.Time, 1)
-					if tc.hang {
-						workers.Go(func() {
-							for ctx.Err() == nil {
-								if _, err := os.Stat(hookStarted); err == nil {
-									canceled <- time.Now()
-									cancel()
-									return
-								}
-								time.Sleep(10 * time.Millisecond)
-							}
-						})
-					}
-					err := w.pushWorktree(ctx, logtest.Logger(t), root, tc.commit, PushDestination{Remote: "origin", Branch: "task"}, false)
-					if err == nil {
-						t.Fatal("push unexpectedly succeeded")
-					}
-					switch {
-					case tc.name == "CleanupFailure":
-						if !strings.Contains(err.Error(), "locked push worktree") {
-							t.Fatal("cleanup error lost", err)
-						}
-					case tc.hang || tc.name == "CleanupTimeout":
-						if tc.hang {
-							select {
-							case at := <-canceled:
-								if time.Since(at) > time.Second {
-									t.Fatal("cancellation waited for the hook", err)
-								}
-							default:
-								t.Fatal("hook did not start", err)
-							}
-						}
-						if !strings.Contains(err.Error(), "retained") {
-							t.Fatal("retention guidance lost", err)
-						}
-						if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
-							t.Fatal(err)
-						}
-						if len(pushOperationDirs(t, w)) != 1 {
-							t.Fatal("uncertain operation removed")
-						}
-					default:
-						if tc.name == "HookRejection" {
-							assertPushIdle(t, w, root)
-						} else {
-							assertPushCleaned(t, w, root)
-						}
-					}
-				})
-			}
-		})
-		t.Run("Crash", func(t *testing.T) {
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			markers := t.TempDir()
-			// Rename publishes the marker with its content; readers never see it empty.
-			staging := t.TempDir()
-			writePushFile(t, root, ".git/hooks/pre-push", "#!/bin/sh\nset -eu\npwd > '"+staging+"/started'\nmv '"+staging+"/started' '"+markers+"/started'\nwhile [ ! -f '"+markers+"/release' ]; do sleep 0.01; done\nexit 1\n", 0o700)
-			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCheckout$/^pushWorktree$/^CrashHelper$") //nolint:gosec // fixture-owned test binary simulates a restarted server.
-			cmd.Env = append(os.Environ(), "CAIC_PUSH_CRASH_ROOT="+root, "CAIC_PUSH_CRASH_CACHE="+w.PushDir)
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			var checkout string
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				data, err := os.ReadFile(filepath.Join(markers, "started")) //nolint:gosec // fixture-owned hook marker.
-				if err == nil {
-					checkout = strings.TrimSpace(string(data))
-					break
-				}
-				if !os.IsNotExist(err) {
-					t.Fatal(err)
-				}
-				if time.Now().After(deadline) {
-					if err := cmd.Process.Kill(); err != nil {
-						t.Error(err)
-					}
-					if err := cmd.Wait(); err == nil {
-						t.Error("helper unexpectedly succeeded")
-					}
-					t.Fatal("hook did not start")
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if err := cmd.Process.Kill(); err != nil {
-				t.Fatal(err)
-			}
-			if err := cmd.Wait(); err == nil {
-				t.Fatal("helper survived kill")
-			}
-			t.Cleanup(func() { writePushFile(t, markers, "release", "", 0o600) })
-			marker := filepath.Join(filepath.Dir(checkout), "owner-v1")
-			owner, err := os.ReadFile(marker) //nolint:gosec // marker reported by fixture-owned hook.
-			if err != nil || string(owner) != canonicalPath(t, filepath.Join(root, ".git")) {
-				t.Fatalf("initial ownership marker was replaced during setup: %q, %v", owner, err)
-			}
-			if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := os.Stat(filepath.Join(checkout, ".git")); err != nil { //nolint:gosec // path reported by fixture-owned hook.
-				t.Fatal("orphan checkout removed", err)
-			}
-			// Restart while the old hook is still alive. The interrupted checkout must
-			// remain quarantined even though the original server process is dead.
-			if err := os.Remove(filepath.Join(root, ".git", "hooks", "pre-push")); err != nil {
-				t.Fatal(err)
-			}
-			restarted, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(w.PushDir), "main", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := restarted.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "restart"}, false); err != nil {
-				t.Fatal(err)
-			}
-			if len(pushOperationDirs(t, restarted)) != 2 {
-				t.Fatal("restart reused the interrupted checkout")
-			}
-			writePushFile(t, markers, "release", "", 0o600)
-			// Even after its hook exits, a restarted host never infers that an abandoned
-			// operation is safe to reclaim. Only explicit manual cleanup may remove it.
-			if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := os.Stat(filepath.Join(checkout, ".git")); err != nil { //nolint:gosec // path reported by fixture-owned hook.
-				t.Fatal("abandoned checkout removed", err)
-			}
-		})
-		t.Run("HookPolicies", func(t *testing.T) {
-			t.Parallel()
-			hook, err := os.ReadFile("../../../scripts/hooks/pre-push")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, policy := range []string{"WIP", "MultipleMainCommits", "NonHead", "VerificationChanges", "DeletionOnly"} {
-				t.Run(policy, func(t *testing.T) {
-					t.Parallel()
-					root := initTestRepo(t, "main")
-					writePushFile(t, root, "scripts/hooks/pre-push", string(hook), 0o700)
-					recipe := "verify:\n\t@true\n"
-					if policy == "VerificationChanges" {
-						recipe = "verify:\n\t@printf altered > README.md\n"
-					}
-					writePushFile(t, root, "Makefile", recipe, 0o600)
-					runGit(t, root, "add", ".")
-					runGit(t, root, "commit", "-m", "Install hook")
-					runGit(t, root, "checkout", "-b", "task")
-					writePushFile(t, root, "change", "task", 0o600)
-					runGit(t, root, "add", "change")
-					message := "Task change"
-					if policy == "WIP" {
-						message = "WIP task"
-					}
-					runGit(t, root, "commit", "-m", message)
-					if policy == "DeletionOnly" {
-						runGit(t, root, "push", "origin", "task")
-						writePushFile(t, root, "README.md", "dirty", 0o600)
-					}
-					runGit(t, root, "config", "core.hooksPath", "scripts/hooks")
-					args := []string{"push", "origin", "task"}
-					switch policy {
-					case "MultipleMainCommits":
-						args = []string{"push", "origin", "HEAD:main"}
-					case "NonHead":
-						args = []string{"push", "origin", "main"}
-					case "DeletionOnly":
-						args = []string{"push", "origin", ":task"}
-					}
-					_, err := (&git.Checkout{Root: root, Logger: logtest.Logger(t)}).RunGit(t.Context(), args...)
-					if policy == "DeletionOnly" {
-						if err != nil {
-							t.Fatal(err)
-						}
-					} else if err == nil {
-						t.Fatal("hook policy not enforced")
-					}
-				})
-			}
-		})
-		t.Run("Restart", func(t *testing.T) {
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			writePushFile(t, root, ".gitignore", "ignored/\n", 0o600)
-			runGit(t, root, "add", ".gitignore")
-			runGit(t, root, "commit", "-m", "Ignore verification caches")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-				t.Fatal(err)
-			}
-			dir := assertPushIdle(t, w, root)
-			checkout := filepath.Join(dir, "checkout")
-			writePushFile(t, checkout, "ignored/cache", "warm cache", 0o600)
-			writePushFile(t, checkout, "leftover", "remove me", 0o600)
-			writePushFile(t, checkout, "README.md", "discard verification edits", 0o600)
-			writePushFile(t, root, "README.md", "next task", 0o600)
-			runGit(t, root, "commit", "-am", "Next task")
-			tip := runPushGit(t, root, "rev-parse", "HEAD")
-			writePushFile(t, root, "README.md", "host dirty", 0o600)
-			restarted, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(w.PushDir), "main", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCheckout$/^pushWorktree$/^CrashHelper$") //nolint:gosec // fixture-owned test binary simulates a restarted server.
-			cmd.Env = append(os.Environ(), "CAIC_PUSH_CRASH_ROOT="+root, "CAIC_PUSH_CRASH_CACHE="+w.PushDir)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("restarted process: %v: %s", err, out)
-			}
-			if got := assertPushIdle(t, restarted, root); got != dir {
-				t.Fatalf("restart did not reuse checkout: %s, want %s", got, dir)
-			}
-			if got := runPushGit(t, checkout, "rev-parse", "HEAD"); got != tip {
-				t.Fatalf("reused checkout pushed wrong commit: %s, want %s", got, tip)
-			}
-			if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/crash"); !strings.HasPrefix(got, tip+"\t") {
-				t.Fatal("remote did not receive pinned commit", got)
-			}
-			for path, want := range map[string]string{filepath.Join(checkout, "ignored", "cache"): "warm cache", filepath.Join(root, "README.md"): "host dirty"} {
-				got, err := os.ReadFile(path) //nolint:gosec // fixture-owned files.
-				if err != nil || string(got) != want {
-					t.Fatalf("%s: %q, %v", path, got, err)
-				}
-			}
-			if _, err := os.Stat(filepath.Join(checkout, "leftover")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("untracked leftover survived reuse: %v", err)
-			}
-		})
-		t.Run("LockAcrossProcesses", func(t *testing.T) {
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			common, err := pushCommonDir(t.Context(), &git.Checkout{Root: root, Logger: logtest.Logger(t)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			markers := t.TempDir()
-			childCtx, childCancel := context.WithTimeout(context.WithoutCancel(t.Context()), 10*time.Second)
-			t.Cleanup(childCancel)
-			cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestCheckout$/^pushWorktree$/^LockHelper$") //nolint:gosec // fixture-owned binary and arguments.
-			cmd.Env = append(os.Environ(), "CAIC_PUSH_POOL_LOCK_CACHE="+w.PushDir, "CAIC_PUSH_POOL_LOCK_COMMON="+common, "CAIC_PUSH_POOL_LOCK_MARKERS="+markers)
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				writePushFile(t, markers, "release", "", 0o600)
-				if err := cmd.Wait(); err != nil {
-					t.Error("pool lock holder", err)
-				}
-			})
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				if _, err := os.Stat(filepath.Join(markers, "started")); err == nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("pool lock holder did not start")
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			start := time.Now()
-			if _, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(w.PushDir), "main", nil); err != nil {
-				t.Fatal("discovery failed while another server held the pool lock", err)
-			}
-			if time.Since(start) > 2*time.Second {
-				t.Fatal("discovery waited for cache maintenance")
-			}
-			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-			t.Cleanup(cancel)
-			// Claim directly: a short deadline could otherwise expire in Git before the lock.
-			if _, _, err := acquirePushWorktree(ctx, w.PushDir, common); !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("other server bypassed pool lock: %v", err)
-			}
-			if len(pushOperationDirs(t, w)) != 0 {
-				t.Fatal("contender created a checkout without the shared pool lock")
-			}
-		})
-		t.Run("ProtectsUncertainState", func(t *testing.T) {
-			t.Parallel()
-			for _, state := range []string{"claimed", "legacy", "partial", "foreign", "unowned"} {
-				t.Run(state, func(t *testing.T) {
-					t.Parallel()
-					root := initTestRepo(t, "main")
-					w := newInitializedTestCheckout(t, root)
-					if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-						t.Fatal(err)
-					}
-					dir := assertPushIdle(t, w, root)
-					expired := time.Now().Add(-48 * time.Hour)
-					writePushFile(t, dir, "idle-v1", expired.Format(time.RFC3339Nano)+"\n", 0o600)
-					switch state {
-					case "claimed", "legacy":
-						if err := os.Remove(filepath.Join(dir, "idle-v1")); err != nil {
-							t.Fatal(err)
-						}
-						if state == "legacy" {
-							writePushFile(t, dir, "owner-v1", root, 0o600)
-						}
-					case "partial":
-						writePushFile(t, dir, "idle-v1", expired.Format(time.RFC3339Nano), 0o600)
-					case "foreign":
-						writePushFile(t, dir, "owner-v1", "another repository", 0o600)
-					case "unowned":
-						if err := os.Remove(filepath.Join(dir, "owner-v1")); err != nil {
-							t.Fatal(err)
-						}
-					}
-					if err := os.Chtimes(dir, expired, expired); err != nil {
-						t.Fatal(err)
-					}
-					restarted, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(w.PushDir), "main", nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := SweepPushWorktrees(t.Context(), logtest.Logger(t), filepath.Dir(w.PushDir)); err != nil {
-						t.Fatal(err)
-					}
-					if err := restarted.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "second"}, false); err != nil {
-						t.Fatal(err)
-					}
-					if len(pushOperationDirs(t, restarted)) != 2 {
-						t.Fatal("uncertain worktree was reused or expired")
-					}
-					if _, err := os.Stat(filepath.Join(dir, "checkout", ".git")); err != nil {
-						t.Fatal("uncertain checkout was removed", err)
-					}
-				})
-			}
-		})
-		t.Run("MissingGitPointer", func(t *testing.T) {
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			writePushFile(t, root, ".gitignore", "cache/\n", 0o600)
-			runGit(t, root, "add", ".gitignore")
-			runGit(t, root, "commit", "-m", "Ignore private cache")
-			// Exercise an owned cache below the user's repository, where Git could
-			// discover the parent repository if a cached checkout loses its pointer.
-			w, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Join(root, "cache"), "main", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			commit := runPushGit(t, root, "rev-parse", "HEAD")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, commit, PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-				t.Fatal(err)
-			}
-			dir := assertPushIdle(t, w, root)
-			if err := os.Remove(filepath.Join(dir, "checkout", ".git")); err != nil {
-				t.Fatal(err)
-			}
-			writePushFile(t, root, "untracked", "keep", 0o600)
-			before := runPushGit(t, root, "status", "--porcelain")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, commit, PushDestination{Remote: "origin", Branch: "second"}, false); err == nil {
-				t.Fatal("reused checkout without its Git pointer")
-			}
-			if got := runPushGit(t, root, "status", "--porcelain"); got != before {
-				t.Fatal("reused checkout cleaned the parent repository", got)
-			}
-			data, err := os.ReadFile(filepath.Join(root, "untracked")) //nolint:gosec // fixture-owned parent repository sentinel.
-			if err != nil || string(data) != "keep" {
-				t.Fatalf("parent untracked file was removed: %q, %v", data, err)
-			}
-		})
-		t.Run("SharedRepository", func(t *testing.T) {
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			commit := runPushGit(t, root, "rev-parse", "HEAD")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, commit, PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-				t.Fatal(err)
-			}
-			dir := assertPushIdle(t, w, root)
-			source := filepath.Join(t.TempDir(), "linked-source")
-			runGit(t, root, "worktree", "add", "--detach", source, commit)
-			other, err := NewCheckout(t.Context(), logtest.Logger(t), source, filepath.Dir(w.PushDir), "main", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := other.pushWorktree(t.Context(), logtest.Logger(t), source, commit, PushDestination{Remote: "origin", Branch: "second"}, false); err != nil {
-				t.Fatal(err)
-			}
-			if dirs := pushOperationDirs(t, other); len(dirs) != 1 || dirs[0] != dir {
-				t.Fatal("source checkout aliases did not share the repository pool", dirs)
-			}
-			if got := runPushGit(t, source, "rev-parse", "HEAD"); got != commit {
-				t.Fatal("source alias was modified", got)
-			}
-		})
-		t.Run("Expiry", func(t *testing.T) {
-			t.Parallel()
-			for _, tc := range []struct {
-				name     string
-				restart  bool
-				relative bool
-			}{{name: "Periodic"}, {name: "PeriodicRelative", relative: true}, {name: "Startup", restart: true}} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					root := initTestRepo(t, "main")
-					w := newInitializedTestCheckout(t, root)
-					if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-						t.Fatal(err)
-					}
-					dir := assertPushIdle(t, w, root)
-					// Only a valid completion timestamp makes a slot eligible for expiry.
-					writePushFile(t, dir, "idle-v1", time.Now().Add(-25*time.Hour).Format(time.RFC3339Nano)+"\n", 0o600)
-					if tc.restart {
-						if _, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(w.PushDir), "main", nil); err != nil {
-							t.Fatal(err)
-						}
-						// The background startup sweep owns expiry; discovery does not
-						// wait on potentially large cached-directory deletion.
-						if err := SweepPushWorktrees(t.Context(), logtest.Logger(t), filepath.Dir(w.PushDir)); err != nil {
-							t.Fatal(err)
-						}
-					} else {
-						cache := filepath.Dir(w.PushDir)
-						if tc.relative {
-							cwd, err := os.Getwd()
-							if err != nil {
-								t.Fatal(err)
-							}
-							cache, err = filepath.Rel(cwd, cache)
-							if err != nil {
-								t.Fatal(err)
-							}
-						}
-						if err := SweepPushWorktrees(t.Context(), logtest.Logger(t), cache); err != nil {
-							t.Fatal(err)
-						}
-					}
-					assertPushCleaned(t, w, root)
-				})
-			}
-		})
-		t.Run("ReplacedCheckout", func(t *testing.T) {
-			if goruntime.GOOS == "windows" {
-				t.Skip("symlink fixture requires Unix")
-			}
-			t.Parallel()
-			root := initTestRepo(t, "main")
-			w := newInitializedTestCheckout(t, root)
-			commit := runPushGit(t, root, "rev-parse", "HEAD")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, commit, PushDestination{Remote: "origin", Branch: "first"}, false); err != nil {
-				t.Fatal(err)
-			}
-			dir := assertPushIdle(t, w, root)
-			user := filepath.Join(t.TempDir(), "user-checkout")
-			runGit(t, root, "worktree", "add", "--detach", user, commit)
-			writePushFile(t, user, "untracked", "keep", 0o600)
-			if err := os.Rename(filepath.Join(dir, "checkout"), filepath.Join(dir, "original")); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(user, filepath.Join(dir, "checkout")); err != nil {
-				t.Fatal(err)
-			}
-			writePushFile(t, dir, "idle-v1", time.Now().Add(-25*time.Hour).Format(time.RFC3339Nano)+"\n", 0o600)
-			if err := SweepPushWorktrees(t.Context(), logtest.Logger(t), filepath.Dir(w.PushDir)); err == nil {
-				t.Fatal("expiry accepted a replaced checkout")
-			}
-			data, err := os.ReadFile(filepath.Join(user, "untracked")) //nolint:gosec // fixture-owned user checkout sentinel.
-			if err != nil || string(data) != "keep" {
-				t.Fatalf("expiry removed user files: %q, %v", data, err)
-			}
-			if _, err := os.Stat(filepath.Join(dir, "owner-v1")); err != nil {
-				t.Fatal("unsafe cleanup lost ownership", err)
-			}
-		})
-		t.Run("CleanupLateCompletion", func(t *testing.T) {
-			t.Parallel()
-			synctest.Test(t, func(t *testing.T) {
-				dir := t.TempDir()
-				writePushFile(t, dir, "owner-v1", "repository", 0o600)
-				ctx, cancel := context.WithCancel(t.Context())
-				t.Cleanup(cancel)
-				started := make(chan struct{})
-				release := make(chan struct{})
-				finished := make(chan struct{})
-				done := make(chan error, 1)
-				var workers sync.WaitGroup
-				t.Cleanup(func() {
-					cancel()
-					select {
-					case <-release:
-					default:
-						close(release)
-					}
-					workers.Wait()
-				})
-				workers.Go(func() {
-					done <- finishPushCleanup(ctx, dir, func() error {
-						close(started)
-						<-release
-						close(finished)
-						return nil
-					})
-				})
-				<-started
-				cancel()
-				if err := <-done; !errors.Is(err, context.Canceled) {
-					t.Fatalf("cleanup did not report retained cancellation: %v", err)
-				}
-				close(release)
-				<-finished
-				synctest.Wait()
-				// The Git cleanup worker has now completed successfully after the caller
-				// returned cancellation. It must never erase retained ownership afterwards.
-				owner, err := os.ReadFile(filepath.Join(dir, "owner-v1")) //nolint:gosec // fixture-owned retained marker.
-				if err != nil || string(owner) != "repository" {
-					t.Fatalf("late cleanup erased retained ownership: %q, %v", owner, err)
-				}
-			})
-		})
-		t.Run("CrashHelper", func(t *testing.T) {
-			t.Parallel()
-			root := os.Getenv("CAIC_PUSH_CRASH_ROOT")
-			if root == "" {
-				t.Skip("subprocess fixture")
-			}
-			w, err := NewCheckout(t.Context(), logtest.Logger(t), root, filepath.Dir(os.Getenv("CAIC_PUSH_CRASH_CACHE")), "main", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			commit := runPushGit(t, root, "rev-parse", "HEAD")
-			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, commit, PushDestination{Remote: "origin", Branch: "crash"}, false); err != nil {
-				t.Fatal(err)
-			}
-		})
-		t.Run("LockHelper", func(t *testing.T) {
-			t.Parallel()
-			cache := os.Getenv("CAIC_PUSH_POOL_LOCK_CACHE")
-			if cache == "" {
-				t.Skip("subprocess fixture")
-			}
-			markers := os.Getenv("CAIC_PUSH_POOL_LOCK_MARKERS")
-			if err := withPushPool(t.Context(), cache, os.Getenv("CAIC_PUSH_POOL_LOCK_COMMON"), func() error {
-				writePushFile(t, markers, "started", "", 0o600)
-				for {
-					if _, err := os.Stat(filepath.Join(markers, "release")); err == nil { //nolint:gosec // fixture-owned subprocess marker.
-						return nil
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-			}); err != nil {
-				t.Fatal(err)
-			}
-		})
+	t.Run("pushCommit", func(t *testing.T) {
+		t.Parallel()
+		// The host repository's own hook rejects everything: the container already
+		// ran it, so the host must push without running any hook.
+		root := initTestRepo(t, "main")
+		writePushFile(t, root, ".git/hooks/pre-push", "#!/bin/sh\nexit 1\n", 0o700)
+		runGit(t, root, "checkout", "-b", "task")
+		writePushFile(t, root, "task.txt", "task\n", 0o600)
+		runGit(t, root, "add", "task.txt")
+		runGit(t, root, "commit", "-m", "task")
+		tip := runPushGit(t, root, "rev-parse", "HEAD")
+		runGit(t, root, "checkout", "main")
+		writePushFile(t, root, "README.md", "pending edit\n", 0o600)
+		before := runPushGit(t, root, "status", "--porcelain=v2")
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		d := PushDestination{Remote: "origin", Branch: "pushed"}
+		if err := pushCommit(t.Context(), logtest.Logger(t), g, tip, d, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/pushed"); !strings.HasPrefix(got, tip+"\t") {
+			t.Fatal(got)
+		}
+		if got := runPushGit(t, root, "status", "--porcelain=v2"); got != before || runPushGit(t, root, "branch", "--show-current") != "main" {
+			t.Fatal("host checkout changed")
+		}
+		// Rewriting the pushed branch needs force.
+		runGit(t, root, "checkout", "-q", "--detach", "main")
+		runGit(t, root, "commit", "-q", "--allow-empty", "-m", "other")
+		other := runPushGit(t, root, "rev-parse", "HEAD")
+		if err := pushCommit(t.Context(), logtest.Logger(t), g, other, d, false); err == nil {
+			t.Fatal("non-fast-forward push accepted")
+		}
+		if err := pushCommit(t.Context(), logtest.Logger(t), g, other, d, true); err != nil {
+			t.Fatal(err)
+		}
 	})
 	t.Run("Push", func(t *testing.T) {
 		t.Parallel()
@@ -1159,6 +376,43 @@ func TestCheckout(t *testing.T) {
 		_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 		if !errors.Is(err, sc.FetchErr) {
 			t.Fatalf("failed fetch: %v", err)
+		}
+	})
+	t.Run("PushPreHook", func(t *testing.T) {
+		t.Parallel()
+		root := initTestRepo(t, "main")
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		runGit(t, root, "branch", "caic-1")
+		tip, err := g.RevParse(t.Context(), "caic-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := newInitializedTestCheckout(t, root)
+		target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1", BaseBranch: "main"}}}
+		target, destinations, err := w.ResolvePushDestinations(t.Context(), logtest.Logger(t), target, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc := newRecordingContainer()
+		sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
+		sc.prePushErr = errors.New("verify failed")
+		_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		if !errors.Is(err, sc.prePushErr) {
+			t.Fatalf("hook rejection: %v", err)
+		}
+		if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/caic-1"); got != "" {
+			t.Fatalf("rejected commit was pushed: %q", got)
+		}
+		sc.prePushErr = nil
+		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		want := runtime.PushRefs{Remote: destinations[0].Remote, Branch: "caic-1", BaseCommit: destinations[0].BaseRef}
+		if last := sc.prePushes[len(sc.prePushes)-1]; last.commit != tip || last.dest != want {
+			t.Fatalf("hook ran for %+v, want %s %+v", last, tip, want)
+		}
+		if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/caic-1"); !strings.HasPrefix(got, tip+"\t") {
+			t.Fatalf("verified commit not pushed: %q", got)
 		}
 	})
 	t.Run("PushTaskDiffReport", func(t *testing.T) {
@@ -1420,10 +674,10 @@ func TestCheckout(t *testing.T) {
 		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			if _, err := NewCheckout(t.Context(), logtest.Logger(t), "", t.TempDir(), "main", nil); err == nil {
+			if _, err := NewCheckout(t.Context(), logtest.Logger(t), "", "main", nil); err == nil {
 				t.Fatal("want directory error")
 			}
-			if _, err := NewCheckout(t.Context(), nil, t.TempDir(), t.TempDir(), "main", nil); err == nil {
+			if _, err := NewCheckout(t.Context(), nil, t.TempDir(), "main", nil); err == nil {
 				t.Fatal("want logger error")
 			}
 		})
@@ -1778,6 +1032,8 @@ type recordingContainer struct {
 	fetchIDs   []runtime.ID
 	refreshIDs []runtime.ID
 	refreshErr error
+	prePushes  []prePushCall
+	prePushErr error
 	diffIDs    []runtime.ID
 	diffIdxs   []int
 }
@@ -1785,6 +1041,11 @@ type recordingContainer struct {
 // newRecordingContainer builds a recordingContainer with the fixed diff output.
 func newRecordingContainer() *recordingContainer {
 	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
+}
+
+func (c *recordingContainer) RunPrePush(_ context.Context, _ runtime.ID, _ int, commit string, dest runtime.PushRefs) error {
+	c.prePushes = append(c.prePushes, prePushCall{commit, dest})
+	return c.prePushErr
 }
 
 func (c *recordingContainer) RefreshRefs(_ context.Context, id runtime.ID) error {
@@ -1801,6 +1062,11 @@ func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx in
 	c.diffIDs = append(c.diffIDs, id)
 	c.diffIdxs = append(c.diffIdxs, repoIdx)
 	return c.FakeBackend.Diff(ctx, id, repoIdx, args...)
+}
+
+type prePushCall struct {
+	commit string
+	dest   runtime.PushRefs
 }
 
 // timeoutFetchBackend models a runtime fetch stalled until its operation timeout.
@@ -2133,19 +1399,11 @@ func writePushFile(t *testing.T, root, name, content string, mode os.FileMode) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- Directories belong to isolated fixture processes.
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), mode); err != nil { //nolint:gosec // fixture-owned path and contents.
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// canonicalPath resolves temporary directory aliases such as macOS /var.
-func canonicalPath(t *testing.T, path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resolved
-}
 func runPushGit(t *testing.T, root string, args ...string) string {
 	out, err := (&git.Checkout{Root: root, Logger: logtest.Logger(t)}).RunGit(t.Context(), args...)
 	if err != nil {
@@ -2153,43 +1411,6 @@ func runPushGit(t *testing.T, root string, args ...string) string {
 	}
 	return out
 }
-func assertPushCleaned(t *testing.T, w *Checkout, root string) {
-	if len(pushOperationDirs(t, w)) != 0 {
-		t.Fatal("push operation retained")
-	}
-	if out := runPushGit(t, root, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 1 {
-		t.Fatal("worktree registration retained", out)
-	}
-}
-
-func pushOperationDirs(t *testing.T, w *Checkout) []string {
-	entries, err := os.ReadDir(w.PushDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "operation-") {
-			dirs = append(dirs, filepath.Join(w.PushDir, e.Name()))
-		}
-	}
-	return dirs
-}
-
-func assertPushIdle(t *testing.T, w *Checkout, root string) string {
-	dirs := pushOperationDirs(t, w)
-	if len(dirs) != 1 {
-		t.Fatalf("expected one pooled worktree, got %v", dirs)
-	}
-	if _, err := os.Stat(filepath.Join(dirs[0], "idle-v1")); err != nil {
-		t.Fatal("completed push not reusable", err)
-	}
-	if out := runPushGit(t, root, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 2 {
-		t.Fatal("idle worktree registration missing", out)
-	}
-	return dirs[0]
-}
-
 func runAllocateBranchTests(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {

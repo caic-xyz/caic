@@ -3,6 +3,8 @@
 package mdruntime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -81,6 +83,50 @@ func gitStatusHeader(repo, configuredComparison string) string {
 		`elif git rev-parse --verify --quiet REVERT_HEAD >/dev/null; then operation=revert; ` +
 		`elif [ -f "$git_dir/BISECT_LOG" ]; then operation=bisect; fi && ` +
 		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi`
+}
+
+// workspaceSteps are shell steps that leave the shell in a clean checkout of
+// commit, a detached worktree of repo. Each repository has one workspace under
+// ~/.cache/caic/workspace, reused so ignored dependency caches survive between
+// operations. Any operation that needs a pristine tree of a commit shares it,
+// so the steps take an exclusive flock that the shell holds until it exits:
+// concurrent operations on one repository wait for each other, and the SSH
+// session's end releases the lock.
+func workspaceSteps(repo, commit string) []string {
+	sum := sha256.Sum256([]byte(repo))
+	return []string{
+		"cd " + shellQuote(repo),
+		`wt="$HOME/.cache/caic/workspace/` + hex.EncodeToString(sum[:8]) + `"`,
+		`mkdir -p "$(dirname "$wt")"`,
+		`exec 9>"$wt.lock"`,
+		"flock 9",
+		`if [ -e "$wt/.git" ] && git -C "$wt" clean -ffdq && git -C "$wt" checkout -q --detach --force ` + commit + `; then :; else ` +
+			`rm -rf "$wt" && git worktree prune && git worktree add -q --detach "$wt" ` + commit + `; fi`,
+		`cd "$wt"`,
+		"git clean -ffdq",
+	}
+}
+
+// prePushCommand runs the repository's pre-push hook in the workspace at
+// commit. The hook sees the same arguments and stdin as during git push, and
+// its output arrives on stdout.
+func prePushCommand(repo, commit string, dest runtime.PushRefs) (string, error) {
+	if !isGitObjectID(commit) {
+		return "", errors.New("pre-push commit must be a full object ID")
+	}
+	if !isGitObjectID(dest.BaseCommit) {
+		return "", errors.New("pre-push base commit must be a full object ID")
+	}
+	if dest.Remote == "" || dest.Branch == "" {
+		return "", errors.New("pre-push remote and branch are required")
+	}
+	update := "refs/heads/" + dest.Branch + " " + commit + " refs/heads/" + dest.Branch + " " + dest.BaseCommit
+	steps := append([]string{"exec 2>&1", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit)...)
+	return strings.Join(append(steps,
+		`hook=$(git rev-parse --git-path hooks/pre-push)`,
+		`if [ ! -x "$hook" ]; then exit 0; fi`,
+		`printf '%s\n' `+shellQuote(update)+` | "$hook" `+shellQuote(dest.Remote)+" "+shellQuote(dest.Remote)+" || exit 1",
+	), " && "), nil
 }
 
 func shellQuote(s string) string {

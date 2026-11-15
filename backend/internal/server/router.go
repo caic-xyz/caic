@@ -132,9 +132,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 	if d.UsageRollup == nil {
 		return nil, errors.New("usage rollup is required")
 	}
-	if d.PushCacheDir == "" {
-		return nil, errors.New("push cache directory is required")
-	}
 	log = log.With("cmp", "server")
 	if d.VoiceGateway.Mode == VoiceGatewayModeExternal {
 		switch {
@@ -234,7 +231,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (_ *Router, retE
 			prefs:              d.Preferences,
 			checkouts:          d.Checkouts,
 			checkoutRoot:       d.CheckoutRoot,
-			pushCacheDir:       d.PushCacheDir,
 			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
@@ -653,8 +649,6 @@ type Dependencies struct {
 	Updater         *autoupdate.Updater
 	UpdateInstalled func()
 
-	// PushCacheDir is the configured application cache root for cloned checkouts.
-	PushCacheDir               string
 	Checkouts                  *repo.Registry
 	CheckoutRoot               string
 	RepoStatus                 *ci.RepoStatusStore

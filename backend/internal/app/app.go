@@ -365,7 +365,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		Updater:                    cfg.Updater,
 		UpdateInstalled:            cfg.UpdateInstalled,
 		Checkouts:                  checkoutRegistry,
-		PushCacheDir:               cfg.Dirs.CacheDir,
 		CheckoutRoot:               absRoot,
 		RepoStatus:                 repoStatus,
 		Tailscale:                  cfg.Runtime.TailscaleAPIKey != "",
@@ -452,7 +451,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-checkout-init").End()
 			repoLog := appLog.With("phase", "repo-discovery", "path", abs)
-			result, err := repo.DiscoverCheckout(ctx, repoLog, abs, cfg.Dirs.CacheDir, liveBranches[abs])
+			result, err := repo.DiscoverCheckout(ctx, repoLog, abs, liveBranches[abs])
 			if err != nil {
 				repoLog.WarnContext(ctx, "skipping repo", "err", err)
 				return
@@ -596,7 +595,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			return nil
 		},
 		func(ctx context.Context) error {
-			newRepoWatcher(ctx, log.With("cmp", "repo-watcher"), absRoot, cfg.Dirs.CacheDir, checkoutRegistry, repoStatus, runtimes).watch()
+			newRepoWatcher(ctx, log.With("cmp", "repo-watcher"), absRoot, checkoutRegistry, repoStatus, runtimes).watch()
 			return nil
 		},
 	)

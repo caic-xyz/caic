@@ -35,6 +35,7 @@ const (
 	metricRepoFileDiff          = "repo.file_diff"
 	metricRepoFetch             = "repo.fetch"
 	metricRepoRefreshRefs       = "repo.refresh_refs"
+	metricRepoPrePush           = "repo.pre_push"
 	metricRepoStatus            = "repo.status"
 	metricRepoCompactStatus     = "repo.compact_status"
 	metricRepoDiffSize          = "repo.diff_size"
@@ -204,6 +205,17 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []F
 		return nil, err
 	}
 	return rt.Fetch(ctx, id, opts)
+}
+
+// RunPrePush runs the repository's pre-push hook in the owning runtime instance.
+func (r *Router) RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoPrePush, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return err
+	}
+	return rt.RunPrePush(ctx, id, repoIdx, commit, dest)
 }
 
 // RefreshRefs copies cached upstream refs into the owning runtime instance.
