@@ -87,7 +87,7 @@ func gitStatusHeader(repo, configuredComparison string) string {
 
 // workspaceSteps are shell steps that leave the shell in a clean checkout of
 // commit, a detached worktree of repo. Each repository has one workspace under
-// ~/.cache/caic/workspace, reused so ignored dependency caches survive between
+// <git dir>/caic-workspace, reused so ignored dependency caches survive between
 // operations. Any operation that needs a pristine tree of a commit shares it,
 // so the steps take an exclusive flock that the shell holds until it exits:
 // concurrent operations on one repository wait for each other, and the SSH
@@ -96,10 +96,11 @@ func workspaceSteps(repo, commit string) []string {
 	sum := sha256.Sum256([]byte(repo))
 	return []string{
 		"cd " + shellQuote(repo),
-		`wt="$HOME/.cache/caic/workspace/` + hex.EncodeToString(sum[:8]) + `"`,
+		`wt="$(git rev-parse --absolute-git-dir)/caic-workspace/` + hex.EncodeToString(sum[:8]) + `"`,
 		`mkdir -p "$(dirname "$wt")"`,
 		`exec 9>"$wt.lock"`,
-		"flock 9",
+		// flock(1) is absent on macOS; perl's flock locks the same open file.
+		`{ flock 9 2>/dev/null || perl -MFcntl=:flock -e 'open(F, ">&=9") && flock(F, LOCK_EX) or die "flock: $!\n"'; }`,
 		`if [ -e "$wt/.git" ] && git -C "$wt" clean -ffdq && git -C "$wt" checkout -q --detach --force ` + commit + `; then :; else ` +
 			`rm -rf "$wt" && git worktree prune && git worktree add -q --detach "$wt" ` + commit + `; fi`,
 		`cd "$wt"`,
