@@ -811,7 +811,9 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 	}
 	ctRepos := ct.Repos()
 	// Branch creation and upstream repair belong to the caller; md's Container
-	// requires mapped host branches with upstreams even when its checkout is preserved.
+	// requires mapped host branches with upstreams even when its checkout is
+	// preserved. Missing branches are recreated, including when their base
+	// branch was deleted too.
 	for i := range ctRepos {
 		r := &ctRepos[i]
 		g := &git.Checkout{Root: r.GitRoot, Logger: b.log}
@@ -836,21 +838,10 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 					continue
 				}
 			}
-			remote := r.DefaultRemote
-			if remote == "" {
-				remote, err = g.DefaultRemote(ctx)
-				if err != nil {
-					return fmt.Errorf("resolve upstream remote in %s: %w", r.GitRoot, err)
-				}
+			upstream, err := b.reviveUpstream(ctx, g, r)
+			if err != nil {
+				return err
 			}
-			base := r.DefaultBranch
-			if base == "" {
-				base, err = g.DefaultBranch(ctx, remote)
-				if err != nil {
-					return fmt.Errorf("resolve upstream branch in %s: %w", r.GitRoot, err)
-				}
-			}
-			upstream := "refs/remotes/" + remote + "/" + base
 			if exists {
 				if _, err := g.RunGit(ctx, "branch", "--set-upstream-to="+upstream, branch); err != nil {
 					return fmt.Errorf("configure upstream for host branch %q in %s: %w", branch, r.GitRoot, err)
@@ -1609,6 +1600,39 @@ func (b *Backend) cachedLabel(id runtime.ID, key string) (string, bool) {
 		return "", false
 	}
 	return labels[key], true
+}
+
+// reviveUpstream returns the remote-tracking ref that a recreated or
+// unconfigured mapped host branch tracks: the recorded base branch, or the
+// remote's default branch when the base branch was deleted, e.g. after a merge.
+// The container preserves the task's commits, so the host branch only needs to
+// exist with an upstream for md to revive it.
+func (b *Backend) reviveUpstream(ctx context.Context, g *git.Checkout, r *md.Repo) (string, error) {
+	remote := r.DefaultRemote
+	if remote == "" {
+		var err error
+		if remote, err = g.DefaultRemote(ctx); err != nil {
+			return "", fmt.Errorf("resolve upstream remote in %s: %w", r.GitRoot, err)
+		}
+	}
+	if r.DefaultBranch != "" {
+		ref := "refs/remotes/" + remote + "/" + r.DefaultBranch
+		exists, err := g.RefExists(ctx, ref)
+		if err != nil {
+			return "", fmt.Errorf("check upstream %q in %s: %w", ref, r.GitRoot, err)
+		}
+		if exists {
+			return ref, nil
+		}
+	}
+	base, err := g.DefaultBranch(ctx, remote)
+	if err != nil {
+		return "", fmt.Errorf("resolve upstream branch in %s: %w", r.GitRoot, err)
+	}
+	if r.DefaultBranch != "" {
+		b.log.WarnContext(ctx, "base branch deleted; tracking remote default", "dir", r.GitRoot, "base", r.DefaultBranch, "upstream", remote+"/"+base)
+	}
+	return "refs/remotes/" + remote + "/" + base, nil
 }
 
 func mdMounts(c mdContainer, h harness.Name, mounts []runtime.Mount) ([]md.Mount, error) {

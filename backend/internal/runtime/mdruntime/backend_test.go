@@ -1087,6 +1087,19 @@ func TestBackend(t *testing.T) {
 		if got := runGit("config", "--get", "branch.caic-0.merge"); got != "refs/heads/unfetched" {
 			t.Errorf("configured merge changed to %q", got)
 		}
+		// A task working directly on a base branch survives that branch's
+		// deletion both locally and on the remote, e.g. after a merge.
+		voice := &fakeMDContainer{name: "ctr-voice", repo: []md.Repo{{GitRoot: dir, Branches: []string{"voice"}, ContainerPath: "/repo", DefaultRemote: "upstream", DefaultBranch: "voice"}}}
+		bv := newTestBackend(&fakeMDClient{getResult: voice})
+		if err := bv.Revive(t.Context(), "docker:ctr-voice"); err != nil {
+			t.Fatalf("Revive with deleted base branch: %v", err)
+		}
+		if got := runGit("rev-parse", "voice"); got != want {
+			t.Errorf("recreated branch = %q, want %q", got, want)
+		}
+		if got := runGit("rev-parse", "--abbrev-ref", "voice@{upstream}"); got != "upstream/main" {
+			t.Errorf("upstream = %q, want upstream/main", got)
+		}
 		runGit("checkout", "-q", "main")
 		runGit("branch", "-D", "caic-0")
 		runGit("update-ref", "-d", "refs/remotes/upstream/main")
