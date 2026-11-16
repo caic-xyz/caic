@@ -84,6 +84,22 @@
   border-radius: 999px;
 }
 
+.asking {
+  animation: asking-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes asking-blink {
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asking {
+    animation: none;
+  }
+}
+
 .featureIconBadge {
   display: inline-flex;
   flex-shrink: 0;

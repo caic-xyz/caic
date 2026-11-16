@@ -497,6 +497,7 @@ export default function TaskCard(props: TaskCardProps) {
               <Tooltip text={cacheExpiryText()} disabled={!stale()}>
                 <span
                   class={styles.badge}
+                  classList={{ [styles.asking]: props.state === "asking" }}
                   data-testid="state-badge"
                   style={{ "--badge-bg": stale() ? staleStateColor(props.state) : stateColor(props.state) }}
                 >
