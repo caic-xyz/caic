@@ -32,32 +32,38 @@ var modelNameOrder = map[string][]string{
 	"claude": {"opus", "sonnet"},
 }
 
-// modelEffortOrder lists efforts from highest to lowest.
-var modelEffortOrder = []string{"high", "medium", "low"}
+// modelEffortSuffixes lists reasoning-effort suffixes that agy appends to
+// model IDs in `agy models`.
+var modelEffortSuffixes = []string{"xhigh", "high", "medium", "low"}
 
-// modelParts is an agy model ID split on "-". "gemini-3.8-flash-high" is
-// family "gemini", name "flash", version 3.8, effort "high".
+// modelParts is a base agy model ID split on "-". "gemini-3.8-flash" is
+// family "gemini", name "flash", version 3.8.
 type modelParts struct {
 	id      string
 	family  string
 	name    string
 	version float64
-	effort  string
 }
 
-// parseModelID splits id on "-". The first segment is the family, the last is
-// the effort, the first run of numeric segments is the version and the other
-// segments make the name, so "claude-opus-5-5-low" is family "claude", name
-// "opus", version 5.5, effort "low".
+// splitModelEffort strips a trailing reasoning-effort suffix from id.
+// Models without an effort suffix, such as gemini-pro-orchestrator-g1-pro,
+// are returned unchanged with an empty effort.
+func splitModelEffort(id string) (base, effort string) {
+	for _, e := range modelEffortSuffixes {
+		if b, ok := strings.CutSuffix(id, "-"+e); ok {
+			return b, e
+		}
+	}
+	return id, ""
+}
+
+// parseModelID splits a base model ID on "-". The first segment is the family,
+// the first run of numeric segments is the version and the other segments make
+// the name, so "claude-opus-5-5" is family "claude", name "opus", version 5.5.
 func parseModelID(id string) modelParts {
 	segs := strings.Split(id, "-")
 	p := modelParts{id: id, family: segs[0]}
-	if len(segs) < 3 {
-		p.name = strings.Join(segs[1:], "-")
-		return p
-	}
-	p.effort = segs[len(segs)-1]
-	segs = segs[1 : len(segs)-1]
+	segs = segs[1:]
 	start := slices.IndexFunc(segs, isNumeric)
 	if start < 0 {
 		p.name = strings.Join(segs, "-")
@@ -77,24 +83,33 @@ func isNumeric(s string) bool {
 	return err == nil
 }
 
-// sortModels hides gpt-oss, keeps only the latest version of each
-// family-name-effort combination, then orders the rest by family, name and
-// effort.
-func sortModels(ids []string) []string {
-	type key struct{ family, name, effort string }
+// sortModels hides gpt-oss, groups effort variants under their base model ID,
+// keeps only the latest version of each family-name combination, then orders
+// the rest by family and name.
+func sortModels(ids []string) []agent.Model {
+	type key struct{ family, name string }
 	var parts []modelParts
+	efforts := map[string][]string{}
 	latest := map[key]float64{}
 	for _, id := range ids {
 		if strings.HasPrefix(id, "gpt-oss") {
 			continue
 		}
-		p := parseModelID(id)
-		parts = append(parts, p)
-		k := key{p.family, p.name, p.effort}
-		latest[k] = max(latest[k], p.version)
+		base, effort := splitModelEffort(id)
+		if _, seen := efforts[base]; !seen {
+			p := parseModelID(base)
+			parts = append(parts, p)
+			k := key{p.family, p.name}
+			latest[k] = max(latest[k], p.version)
+		}
+		if effort != "" {
+			efforts[base] = append(efforts[base], effort)
+		} else if _, seen := efforts[base]; !seen {
+			efforts[base] = nil
+		}
 	}
 	parts = slices.DeleteFunc(parts, func(p modelParts) bool {
-		return p.version < latest[key{p.family, p.name, p.effort}]
+		return p.version < latest[key{p.family, p.name}]
 	})
 	rank := func(order []string, v string) int {
 		if i := slices.Index(order, v); i >= 0 {
@@ -106,12 +121,15 @@ func sortModels(ids []string) []string {
 		return cmp.Or(
 			cmp.Compare(rank(modelFamilyOrder, a.family), rank(modelFamilyOrder, b.family)),
 			cmp.Compare(rank(modelNameOrder[a.family], a.name), rank(modelNameOrder[b.family], b.name)),
-			cmp.Compare(rank(modelEffortOrder, a.effort), rank(modelEffortOrder, b.effort)),
 		)
 	})
-	out := make([]string, len(parts))
+	out := make([]agent.Model, len(parts))
 	for i, p := range parts {
-		out[i] = p.id
+		var opts []string
+		if len(efforts[p.id]) != 0 {
+			opts = agent.SortEfforts(efforts[p.id])
+		}
+		out[i] = agent.Model{ID: p.id, EffortOptions: opts}
 	}
 	return out
 }
@@ -482,11 +500,7 @@ func parseModels(out []byte) (agent.ModelInventory, error) {
 			if len(ids) == 0 {
 				return agent.ModelInventory{}, errors.New("agy returned no models")
 			}
-			inv := agent.ModelInventory{}
-			for _, id := range sortModels(ids) {
-				inv.Models = append(inv.Models, agent.Model{ID: id})
-			}
-			return inv, nil
+			return agent.ModelInventory{Models: sortModels(ids)}, nil
 		default:
 			return agent.ModelInventory{}, fmt.Errorf("agy: unexpected models event %q", ev.Event)
 		}

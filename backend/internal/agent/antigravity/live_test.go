@@ -60,7 +60,7 @@ func TestLiveRelay(t *testing.T) {
 	}
 	model := os.Getenv("CAIC_AGY_MODEL")
 	if model == "" {
-		model = "gemini-3.8-flash-low"
+		model = "gemini-3.8-flash"
 	}
 	if !slices.ContainsFunc(inv.Models, func(m agent.Model) bool { return m.ID == model }) {
 		t.Fatalf("model %q is unavailable", model)
@@ -242,7 +242,7 @@ func TestLiveTaskMCP(t *testing.T) {
 	b := New(t.TempDir(), nil)
 	model := os.Getenv("CAIC_AGY_MODEL")
 	if model == "" {
-		model = "gemini-3.8-flash-low"
+		model = "gemini-3.8-flash"
 	}
 	for _, task := range []string{"task-a", "task-b"} { //nolint:paralleltest // Both tasks share one relay on the target container.
 		t.Run(task, func(t *testing.T) {

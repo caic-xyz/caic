@@ -410,8 +410,9 @@ func TestParseModels(t *testing.T) {
 		t.Parallel()
 		out := `{"event":"command_result","command":{"name":"models","data":{"models":[{"id":"gemini-3.8-flash-low","label":"Flash"}]}}}` + result
 		inv, err := parseModels([]byte(out))
-		if err != nil || len(inv.Models) != 1 || inv.Models[0].ID != "gemini-3.8-flash-low" || len(inv.Models[0].EffortOptions) != 0 {
-			t.Fatalf("models = %+v, %v", inv, err)
+		want := []agent.Model{{ID: "gemini-3.8-flash", EffortOptions: []string{"low"}}}
+		if err != nil || !reflect.DeepEqual(inv.Models, want) {
+			t.Fatalf("models = %+v, %v; want %+v", inv, err, want)
 		}
 	})
 	t.Run("order", func(t *testing.T) {
@@ -419,7 +420,8 @@ func TestParseModels(t *testing.T) {
 		ids := []string{
 			"gemini-3.7-flash-high", "gemini-3.8-flash-low", "gemini-3.8-flash-high", "gemini-3.1-pro-low",
 			"gemini-3.1-pro-high", "claude-sonnet-5-5-high", "claude-opus-5-5-low", "claude-opus-5-5-high",
-			"gpt-oss-120b-medium", "gemini-3.7-flash-medium",
+			"gpt-oss-120b-medium", "gemini-3.7-flash-medium", "gemini-4-hydrogen-xhigh",
+			"gemini-4-hydrogen-medium", "gemini-pro-orchestrator-g1-pro",
 		}
 		models := make([]string, 0, len(ids))
 		for _, id := range ids {
@@ -430,16 +432,16 @@ func TestParseModels(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := make([]string, 0, len(inv.Models))
-		for _, m := range inv.Models {
-			got = append(got, m.ID)
+		want := []agent.Model{
+			{ID: "gemini-3.8-flash", EffortOptions: []string{"low", "high"}},
+			{ID: "gemini-3.1-pro", EffortOptions: []string{"low", "high"}},
+			{ID: "gemini-4-hydrogen", EffortOptions: []string{"medium", "xhigh"}},
+			{ID: "gemini-pro-orchestrator-g1-pro"},
+			{ID: "claude-opus-5-5", EffortOptions: []string{"low", "high"}},
+			{ID: "claude-sonnet-5-5", EffortOptions: []string{"high"}},
 		}
-		want := []string{
-			"gemini-3.8-flash-high", "gemini-3.7-flash-medium", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "gemini-3.1-pro-low",
-			"claude-opus-5-5-high", "claude-opus-5-5-low", "claude-sonnet-5-5-high",
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("models = %v, want %v", got, want)
+		if !reflect.DeepEqual(inv.Models, want) {
+			t.Fatalf("models = %+v, want %+v", inv.Models, want)
 		}
 	})
 	t.Run("error", func(t *testing.T) {
