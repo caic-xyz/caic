@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/maruel/ksid"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -76,13 +76,18 @@ func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (ksi
 	return a.taskCreator.CreateTask(ctx, req)
 }
 
-// GetCheckout returns the task checkout for relPath.
-func (a *ciAdapter) GetCheckout(relPath string) (*repo.Checkout, bool) {
-	return a.taskMgr.Checkouts.Checkout(relPath)
+// SyncTask pushes the task's commits to its own branch through its lifecycle.
+func (a *ciAdapter) SyncTask(ctx context.Context, entry ci.TaskEntry) (bool, error) {
+	e, ok := a.taskMgr.GetEntry(entry.Task().ID)
+	if !ok {
+		return false, errors.New("task is not registered")
+	}
+	res, err := e.Lifecycle.Sync(ctx, taskmgr.SyncTargetOrigin, false)
+	if err != nil {
+		return false, err
+	}
+	return res.Status == "blocked", nil
 }
-
-// RuntimeRouter returns the task runtime router.
-func (a *ciAdapter) RuntimeRouter() *runtime.Router { return a.taskMgr.Runtimes }
 
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
 func (a *ciAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {

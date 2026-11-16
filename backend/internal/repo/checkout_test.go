@@ -407,12 +407,46 @@ func TestCheckout(t *testing.T) {
 		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		want := runtime.PushRefs{Remote: destinations[0].Remote, Branch: "caic-1", BaseCommit: destinations[0].BaseRef}
+		// A branch that does not exist yet reports the all-zero object ID, as Git does.
+		want := runtime.PushRefs{Remote: destinations[0].Remote, Branch: "caic-1", RemoteCommit: strings.Repeat("0", len(tip))}
 		if last := sc.prePushes[len(sc.prePushes)-1]; last.commit != tip || last.dest != want {
 			t.Fatalf("hook ran for %+v, want %s %+v", last, tip, want)
 		}
 		if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/caic-1"); !strings.HasPrefix(got, tip+"\t") {
 			t.Fatalf("verified commit not pushed: %q", got)
+		}
+		// An existing branch reports its own tip, not the default branch's.
+		runGit(t, root, "checkout", "-q", "caic-1")
+		runGit(t, root, "commit", "-q", "--allow-empty", "-m", "next")
+		next, err := g.RevParse(t.Context(), "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "checkout", "-q", "main")
+		sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: next}}
+		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		want = runtime.PushRefs{Remote: destinations[0].Remote, Branch: "caic-1", RemoteCommit: tip}
+		if last := sc.prePushes[len(sc.prePushes)-1]; last.commit != next || last.dest != want {
+			t.Fatalf("second hook ran for %+v, want %s %+v", last, next, want)
+		}
+	})
+	t.Run("remoteBranchTip", func(t *testing.T) {
+		t.Parallel()
+		root := initTestRepo(t, "main")
+		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+		tip := runPushGit(t, root, "rev-parse", "HEAD")
+		got, err := remoteBranchTip(t.Context(), g, PushDestination{Remote: "origin", Branch: "main"}, len(tip))
+		if err != nil || got != tip {
+			t.Fatalf("existing branch: %q, %v", got, err)
+		}
+		got, err = remoteBranchTip(t.Context(), g, PushDestination{Remote: "origin", Branch: "absent"}, len(tip))
+		if err != nil || got != strings.Repeat("0", len(tip)) {
+			t.Fatalf("absent branch: %q, %v", got, err)
+		}
+		if _, err = remoteBranchTip(t.Context(), g, PushDestination{Remote: "nowhere", Branch: "main"}, len(tip)); err == nil {
+			t.Fatal("unreachable remote accepted")
 		}
 	})
 	t.Run("PushTaskDiffReport", func(t *testing.T) {

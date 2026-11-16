@@ -12,7 +12,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
@@ -64,8 +63,10 @@ type Backend interface {
 
 	// Tasks.
 	CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error)
-	GetCheckout(relPath string) (*repo.Checkout, bool)
-	RuntimeRouter() *runtime.Router
+	// SyncTask pushes the task's commits to its own branch as a user sync does,
+	// and reports whether the push was blocked by safety issues. It fails while
+	// another sync of the task runs.
+	SyncTask(ctx context.Context, entry TaskEntry) (blocked bool, err error)
 	SetTaskMonitorBranch(entry TaskEntry, branch string)
 
 	// Repos.

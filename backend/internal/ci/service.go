@@ -402,35 +402,19 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 		svc.log.WarnContext(ctx, "no primary repo", "task", t.ID)
 		return
 	}
-	checkout, ok := svc.backend.GetCheckout(p.Name)
-	if !ok {
-		svc.log.WarnContext(ctx, "no checkout", "task", t.ID)
-		return
-	}
 
 	svc.log.InfoContext(ctx, "syncing branch", "task", t.ID, "br", p.Branch)
-	target, destinations, err := checkout.ResolvePushDestinations(ctx, svc.log, t.GitTarget(), false)
+	blocked, err := svc.backend.SyncTask(ctx, entry)
 	if err != nil {
-		svc.log.WarnContext(ctx, "resolve push destination", "task", t.ID, "err", err)
-		return
-	}
-	_, issues, err := checkout.Push(ctx, svc.log, svc.backend.RuntimeRouter(), target, destinations, repo.PushOptions{CommitPending: true, Force: true})
-	if err != nil || len(issues) > 0 {
 		if _, refreshFailed := errors.AsType[*repo.PushRefreshError](err); !refreshFailed {
-			svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err, "safetyIssues", len(issues))
+			svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err)
 			return
 		}
 		svc.log.WarnContext(ctx, "push completed but refreshing container upstream refs failed", "task", t.ID, "err", err)
 	}
-	if err == nil {
-		snapshot, err := checkout.DiffStatAndRepoStates(ctx, svc.log, svc.backend.RuntimeRouter(), target)
-		changed, recordErr := entry.RecordRepositorySummary(ctx, &snapshot)
-		if changed {
-			svc.backend.NotifyTaskChange(t.ID)
-		}
-		if err := errors.Join(err, recordErr); err != nil {
-			svc.log.WarnContext(ctx, "push completed but refreshing task repository summary failed", "task", t.ID, "err", err)
-		}
+	if blocked {
+		svc.log.WarnContext(ctx, "sync blocked by safety issues", "task", t.ID)
+		return
 	}
 
 	// Fetch the new branch HEAD SHA from the forge after the push.

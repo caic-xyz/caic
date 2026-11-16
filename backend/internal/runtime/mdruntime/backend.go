@@ -685,7 +685,8 @@ func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, co
 	}
 	res, err := b.commandOutput(ctx, ct, cmd)
 	if err != nil {
-		return tailOutputError("pre-push hook", ct, err, res.Stdout, prePushOutputLimit)
+		// The hook's output is the message: keep its line breaks.
+		return fmt.Errorf("pre-push hook in container %s: %w\n%s", ct.Name(), err, tailOutput(res.Stdout, prePushOutputLimit))
 	}
 	return nil
 }
@@ -1401,18 +1402,20 @@ func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command str
 // generated files, so only the tail -- where Git writes its fatal message -- is
 // kept in the error the API returns to the browser.
 func commandOutputError(action string, ct mdContainer, err error, out []byte) error {
-	return tailOutputError(action, ct, err, out, 512)
+	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, tailOutput(out, 512))
 }
 
 // prePushOutputLimit keeps enough of a failed hook's output to show which
 // check rejected the push.
 const prePushOutputLimit = 16 << 10
 
-func tailOutputError(action string, ct mdContainer, err error, out []byte, limit int) error {
-	if len(out) > limit {
-		out = append([]byte("…"), out[len(out)-limit:]...)
+// tailOutput keeps the last limit bytes of out, where tools write their fatal
+// message, marking a cut with an ellipsis.
+func tailOutput(out []byte, limit int) []byte {
+	if len(out) <= limit {
+		return out
 	}
-	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, out)
+	return append([]byte("…"), out[len(out)-limit:]...)
 }
 
 // repositoryStatusFromProbe runs one git status command in the container and

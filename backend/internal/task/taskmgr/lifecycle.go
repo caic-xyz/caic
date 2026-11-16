@@ -36,6 +36,8 @@ type Lifecycle struct {
 
 	operationMu sync.Mutex // Keeps Stop/Revive/Purge completion in the same entry incarnation.
 
+	syncMu sync.Mutex // Held for a whole Sync: verification, push and summary refresh run one at a time.
+
 	purgeMu         sync.Mutex
 	purgeCancel     context.CancelFunc
 	purgeGeneration uint64
@@ -423,7 +425,13 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 
 // Sync pushes task commits to each repository's task or default branch and
 // publishes refreshed diff statistics and repository state after a successful push.
+// It rejects a call while another sync of the task is running: the caller can
+// retry, and the running sync already pushes the task's commits.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
+	if !r.syncMu.TryLock() {
+		return nil, conflict("a sync of this task is already running")
+	}
+	defer r.syncMu.Unlock()
 	t := r.entry.Task()
 	switch t.GetState() {
 	case task.StatePending:

@@ -313,6 +313,21 @@ func BenchmarkManagerCreate(b *testing.B) {
 	}
 }
 
+// blockingPrePushBackend holds the first container pre-push hook until released.
+type blockingPrePushBackend struct {
+	*runtimetest.FakeBackend
+
+	started chan struct{} // Closed when the first hook starts.
+	release chan struct{} // Closed to let hooks finish.
+	once    sync.Once
+}
+
+func (b *blockingPrePushBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs) error {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return nil
+}
+
 func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeInfo) *runtime.Router {
 	var sys runtime.System = &testRuntimeSystem{testRuntimeBackend: backend}
 	if info != nil {
@@ -3847,6 +3862,55 @@ func TestManager(t *testing.T) {
 			case <-changed:
 			default:
 				t.Fatal("sync did not notify task-list subscribers")
+			}
+		})
+		t.Run("error_already_running", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			initTaskRepo(t, dir, []string{"branch", "caic-0"})
+			checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "caic-0")
+			cmd.Dir = dir
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend := &blockingPrePushBackend{
+				FakeBackend: &runtimetest.FakeBackend{FetchedBranches: []runtime.FetchedBranch{{RepositoryPath: "/home/user/src/repo", BranchName: "caic-0", CommitHash: strings.TrimSpace(string(out))}}},
+				started:     make(chan struct{}),
+				release:     make(chan struct{}),
+			}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
+			registerCheckout(t, m.Checkouts, "repo", checkout)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetState(task.StateWaiting)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			recordTestTaskLog(t, m, e)
+			first := make(chan error, 1)
+			go func() {
+				_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
+				first <- err
+			}()
+			<-backend.started
+			// The first sync holds the container hook: a second one is turned away
+			// instead of verifying and pushing the same commits concurrently.
+			_, err = e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
+			if te, ok := errors.AsType[*Error](err); !ok || te.Kind != KindConflict {
+				t.Fatalf("second sync err = %v, want KindConflict", err)
+			}
+			close(backend.release)
+			if err := <-first; err != nil {
+				t.Fatal(err)
+			}
+			// Once the first sync is done, the task syncs again.
+			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false); err != nil {
+				t.Fatalf("sync after the first finished: %v", err)
 			}
 		})
 		t.Run("error_pending_no_container", func(t *testing.T) {

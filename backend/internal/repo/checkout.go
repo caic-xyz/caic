@@ -306,12 +306,18 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	for i, d := range destinations {
 		rp := &repos[i]
 		pushCtx, cancel := context.WithTimeout(ctx, w.PushTimeout)
-		err := runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, BaseCommit: d.BaseRef})
+		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		remoteCommit, err := remoteBranchTip(pushCtx, g, d, len(commits[i]))
+		if err != nil {
+			cancel()
+			return ds, allIssues, fmt.Errorf("remote tip of %s/%s: %w", d.Remote, d.Branch, err)
+		}
+		err = runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit})
 		if err != nil {
 			cancel()
 			return ds, allIssues, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
 		}
-		err = pushCommit(pushCtx, log, &git.Checkout{Root: rp.GitRoot, Logger: log}, commits[i], d, opts.Force)
+		err = pushCommit(pushCtx, log, g, commits[i], d, opts.Force)
 		cancel()
 		if err != nil {
 			return ds, allIssues, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
@@ -821,6 +827,20 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 		result = append(result, ds...)
 	}
 	return result, failed, errors.Join(errs...)
+}
+
+// remoteBranchTip returns the commit that d's branch points to on the remote,
+// or an all-zero object ID of idLen hex digits when the branch does not exist,
+// as Git reports it to a pre-push hook.
+func remoteBranchTip(ctx context.Context, g *git.Checkout, d PushDestination, idLen int) (string, error) {
+	out, err := g.RunGit(ctx, "ls-remote", "--", d.Remote, "refs/heads/"+d.Branch)
+	if err != nil {
+		return "", err
+	}
+	if tip, _, ok := strings.Cut(out, "\t"); ok {
+		return tip, nil
+	}
+	return strings.Repeat("0", idLen), nil
 }
 
 // pushCommit pushes commit to d from the host repository without touching its

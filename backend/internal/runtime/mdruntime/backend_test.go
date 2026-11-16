@@ -1459,7 +1459,7 @@ func TestRunPrePush(t *testing.T) {
 		return newTestBackend(&fakeMDClient{getResult: ct}), dir, commit, home
 	}
 	dest := func(base string) runtime.PushRefs {
-		return runtime.PushRefs{Remote: "origin", Branch: "task", BaseCommit: base}
+		return runtime.PushRefs{Remote: "origin", Branch: "task", RemoteCommit: base}
 	}
 
 	t.Run("valid", func(t *testing.T) {
@@ -1517,10 +1517,19 @@ func TestRunPrePush(t *testing.T) {
 		t.Parallel()
 		t.Run("Rejection", func(t *testing.T) {
 			t.Parallel()
-			b, _, commit, _ := newRepo(t, "#!/bin/sh\necho lint failed\nexit 77\n")
+			b, _, commit, _ := newRepo(t, "#!/bin/sh\necho check one\necho check two\nexit 77\n")
 			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
-			if err == nil || !strings.Contains(err.Error(), "lint failed") {
-				t.Fatalf("err=%v, want rejection with hook output", err)
+			// The output keeps its line breaks, after the cause.
+			if err == nil || !strings.HasSuffix(err.Error(), "\ncheck one\ncheck two\n") {
+				t.Fatalf("err=%q, want the hook's output on its own lines", err)
+			}
+		})
+		t.Run("LongOutput", func(t *testing.T) {
+			t.Parallel()
+			b, _, commit, _ := newRepo(t, "#!/bin/sh\nhead -c 40000 /dev/zero | tr '\\0' x\nprintf '\\nlast\\n'\nexit 1\n")
+			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
+			if err == nil || !strings.HasSuffix(err.Error(), "\nlast\n") || !strings.Contains(err.Error(), "\n…x") || len(err.Error()) > prePushOutputLimit+512 {
+				t.Fatalf("err has %d bytes, want the output tail only", len(err.Error()))
 			}
 		})
 		t.Run("Arguments", func(t *testing.T) {
@@ -1532,7 +1541,7 @@ func TestRunPrePush(t *testing.T) {
 				}
 			}
 			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, runtime.PushRefs{Remote: "origin", Branch: "task"}); err == nil {
-				t.Error("missing base accepted")
+				t.Error("missing remote commit accepted")
 			}
 			if err := b.RunPrePush(t.Context(), "docker:ctr", 1, commit, dest(commit)); err == nil {
 				t.Error("repo index out of range accepted")

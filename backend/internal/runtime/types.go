@@ -449,9 +449,9 @@ type PushRefs struct {
 	Remote string
 	// Branch is the destination branch name, without the refs/heads/ prefix.
 	Branch string
-	// BaseCommit is the destination's last known tip, reported to the hook as
-	// the remote object ID.
-	BaseCommit string
+	// RemoteCommit is the destination branch's current tip, or all zeros when it
+	// does not exist, reported to the hook as the remote object ID.
+	RemoteCommit string
 }
 
 // FetchedBranch identifies an exact repository branch tip observed by Fetch.
@@ -485,7 +485,7 @@ type Repository interface {
 	RefreshRefs(ctx context.Context, id ID) error
 	// RunPrePush runs the repository's own pre-push hook inside the instance
 	// against a clean checkout of commit, with the refs that a push of commit to
-	// remote/branch on top of baseCommit would report. An instance without a hook,
+	// remote/branch would report. An instance without a hook,
 	// or a runtime that cannot run commands, has nothing to run. A rejection is an
 	// error carrying the hook's output.
 	RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs) error

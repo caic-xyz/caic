@@ -106,13 +106,13 @@ func prePushCommand(repo, commit string, dest runtime.PushRefs) (string, error) 
 	if !isGitObjectID(commit) {
 		return "", errors.New("pre-push commit must be a full object ID")
 	}
-	if !isGitObjectID(dest.BaseCommit) {
-		return "", errors.New("pre-push base commit must be a full object ID")
+	if !isGitObjectID(dest.RemoteCommit) {
+		return "", errors.New("pre-push remote commit must be a full object ID")
 	}
 	if dest.Remote == "" || dest.Branch == "" {
 		return "", errors.New("pre-push remote and branch are required")
 	}
-	update := "refs/heads/" + dest.Branch + " " + commit + " refs/heads/" + dest.Branch + " " + dest.BaseCommit
+	update := "refs/heads/" + dest.Branch + " " + commit + " refs/heads/" + dest.Branch + " " + dest.RemoteCommit
 	steps := append([]string{"exec 2>&1", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit)...)
 	return strings.Join(append(steps,
 		`hook=$(git rev-parse --git-path hooks/pre-push)`,

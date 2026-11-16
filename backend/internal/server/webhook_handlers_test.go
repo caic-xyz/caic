@@ -26,7 +26,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
@@ -53,11 +52,7 @@ func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (ksid.ID
 	return 0, nil
 }
 
-func (b *testCIBackend) GetCheckout(relPath string) (*repo.Checkout, bool) {
-	return b.taskMgr.Checkouts.Checkout(relPath)
-}
-
-func (b *testCIBackend) RuntimeRouter() *runtime.Router { return b.taskMgr.Runtimes }
+func (b *testCIBackend) SyncTask(context.Context, ci.TaskEntry) (bool, error) { return false, nil }
 
 func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 	entry.SetMonitorBranch(branch)
