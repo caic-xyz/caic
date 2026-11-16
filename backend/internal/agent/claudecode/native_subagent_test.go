@@ -267,6 +267,13 @@ const (
 	foregroundStartedCommit  = `{"type":"system","subtype":"task_started","task_id":"bkmzvu4dn","tool_use_id":"toolu_01EiiP9xQhNNYsUgFZb9gxqK","description":"Commit caic","is_backgrounded":false,"task_type":"local_bash","uuid":"fc77a164-7574-456d-9fc6-4f2b0c2c870c","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 	foregroundNotifiedCommit = `{"type":"system","subtype":"task_notification","task_id":"bkmzvu4dn","tool_use_id":"toolu_01EiiP9xQhNNYsUgFZb9gxqK","status":"completed","output_file":"","summary":"Commit caic","uuid":"2a75abe0-9b81-4f49-8be8-e886fbb21dfc","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 
+	// Minimized from task 50R144VRE000: a Monitor watch that expired after its
+	// 30-minute timeout. The task records match a backgrounded Bash command.
+	monitorToolUse  = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01Tfpv2sbytgxvgA5J7UKtJW","name":"Monitor","input":{"command":"tail -f out | grep --line-buffered exit=","description":"make fix/verify/test results","timeout_ms":1800000}}]},"session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
+	monitorStarted  = `{"type":"system","subtype":"task_started","task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","tool_use_id":"toolu_01Tfpv2sbytgxvgA5J7UKtJW","description":"make fix/verify/test results","is_backgrounded":true,"task_type":"local_bash","session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
+	monitorKilled   = `{"type":"system","subtype":"task_updated","task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","patch":{"status":"killed","end_time":1794860421350},"session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
+	monitorNotified = `{"type":"system","subtype":"task_notification","task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","tool_use_id":"toolu_01Tfpv2sbytgxvgA5J7UKtJW","status":"stopped","output_file":"/tmp/claude-1000/tasks/bizvx8b6o.output","summary":"make fix/verify/test results","session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
+
 	backgroundNotifiedNoExit = `{"type":"system","subtype":"task_notification","task_id":"b3xwrrd6m","tool_use_id":"toolu_019JYuc8XsZmLd6qJNCkXMB6","status":"completed","output_file":"/tmp/claude-1000/tasks/b3xwrrd6m.output","summary":"Background command \"Install and run new lint in pitchpal\" completed","uuid":"73e900a7-7010-4c59-af96-1bf090ea9370","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 )
 
@@ -393,6 +400,23 @@ func TestBackgroundCommandLifecycle(t *testing.T) {
 		}
 		if final.ExitCode != nil {
 			t.Errorf("ExitCode = %v, want nil", final.ExitCode)
+		}
+	})
+
+	t.Run("MonitorBecomesWatch", func(t *testing.T) {
+		t.Parallel()
+		cards := feedBackgroundLines(t, monitorToolUse, monitorStarted, monitorKilled, monitorNotified)
+		if len(cards) != 3 {
+			t.Fatalf("emitted cards = %d, want 3 (start, update, notification)", len(cards))
+		}
+		if !cards[0].Watch || cards[0].Status != agent.BackgroundCommandStatusRunning {
+			t.Fatalf("started card = %#v, want a running watch", cards[0])
+		}
+		if final := cards[2]; !final.Watch || final.Status != agent.BackgroundCommandStatusInterrupted {
+			t.Fatalf("final card = %#v, want an interrupted watch", final)
+		}
+		if cards := feedBackgroundLines(t, backgroundStartedLint); len(cards) != 1 || cards[0].Watch {
+			t.Fatalf("Bash command cards = %#v, want one non-watch card", cards)
 		}
 	})
 

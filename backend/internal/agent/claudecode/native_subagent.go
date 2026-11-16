@@ -324,23 +324,33 @@ var exitCodePattern = regexp.MustCompile(`\(exit code (\d+)\)`)
 // through the subagent timeline would misidentify shell work as a model agent.
 // Its card set is allocated with the wire, created once per session, instead of
 // by the first record that stores a card.
+//
+// Claude Code reports a Monitor tool watch with the same task records as a
+// backgrounded Bash command; only the spawning tool use tells them apart.
 type backgroundCommands struct {
 	timeline agent.BackgroundCommandTimeline
-	known    map[string]bool // canonical task ID → the wire has proven this command
+	known    map[string]bool            // canonical task ID → the wire has proven this command
+	monitors map[delegationKey]struct{} // session/Monitor tool use → spawns a watch
 }
 
 // parse folds one decoded task record. Only a backgrounded task_started proves
 // a command: foreground shell tasks settle inside their own tool call and must
 // never become cards, and an update or notification for a task the wire has not
 // proven cannot invent one.
-func (b *backgroundCommands) parse(record *decodedLine) []agent.Message {
+func (b *backgroundCommands) parse(record *decodedLine, messages []agent.Message) []agent.Message {
+	sessionID := record.source.ThreadID
+	for _, message := range messages {
+		if use, ok := message.(*agent.ToolUseMessage); ok && use.Name == "Monitor" && use.ToolUseID != "" {
+			b.monitors[delegationKey{sessionID: sessionID, toolUseID: use.ToolUseID}] = struct{}{}
+		}
+	}
 	ev := record.system
 	if ev == nil {
 		return nil
 	}
 	switch ev.Subtype {
 	case claudecode.SystemTaskStarted:
-		return b.parseStarted(ev)
+		return b.parseStarted(ev, sessionID)
 	case claudecode.SystemTaskUpdated:
 		return b.parseUpdated(ev)
 	case claudecode.SystemTaskNotification:
@@ -353,13 +363,14 @@ func (b *backgroundCommands) parse(record *decodedLine) []agent.Message {
 // parseStarted proves a background command. A local_bash task started without
 // is_backgrounded runs synchronously inside its tool result; only a detached
 // one outlives that result and needs a card.
-func (b *backgroundCommands) parseStarted(ev *claudecode.OutputSystemMsg) []agent.Message {
+func (b *backgroundCommands) parseStarted(ev *claudecode.OutputSystemMsg, sessionID string) []agent.Message {
 	if ev.TaskType != "local_bash" || !ev.IsBackgrounded || ev.TaskID == "" {
 		return nil
 	}
 	id := claudeShellIdentity(ev.TaskID)
 	b.known[id] = true
-	s := agent.BackgroundCommand{ID: id, Label: ev.Description, Status: agent.BackgroundCommandStatusRunning, ToolUseID: ev.ToolUseID}
+	_, watch := b.monitors[delegationKey{sessionID: sessionID, toolUseID: ev.ToolUseID}]
+	s := agent.BackgroundCommand{ID: id, Label: ev.Description, Status: agent.BackgroundCommandStatusRunning, ToolUseID: ev.ToolUseID, Watch: watch}
 	return b.timeline.Observe(&s)
 }
 

@@ -243,6 +243,23 @@ func TestBackgroundCommandTimeline(t *testing.T) {
 			t.Fatalf("enriched card = %#v", got)
 		}
 	})
+	t.Run("WatchSurvivesUpdatesAndIsNotActive", func(t *testing.T) {
+		t.Parallel()
+		var timeline BackgroundCommandTimeline
+		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusRunning, Watch: true})
+		// Later task records do not repeat the spawning tool.
+		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusRunning})
+		if !timeline.Commands()[0].Watch {
+			t.Fatal("a later observation cleared Watch")
+		}
+		if got := timeline.Active(); got != 0 {
+			t.Fatalf("Active() = %d, want 0 for a running watch", got)
+		}
+		timeline.Apply(&BackgroundCommand{ID: "work", Status: BackgroundCommandStatusRunning})
+		if got := timeline.Active(); got != 1 {
+			t.Fatalf("Active() = %d, want 1 for the running command", got)
+		}
+	})
 	t.Run("TerminalIsFrozenAndResultUpgrades", func(t *testing.T) {
 		t.Parallel()
 		var timeline BackgroundCommandTimeline

@@ -828,11 +828,15 @@ type BackgroundCommand struct {
 	OutputRef string `json:"output_ref,omitempty"`
 	// ToolUseID correlates the command with the tool call that spawned it.
 	ToolUseID string `json:"tool_use_id,omitempty"`
+	// Watch reports that the command only observes other work and reports its
+	// events to the agent, such as Claude Code's Monitor tool. A watch can
+	// outlive the turn by design while the agent waits for the user.
+	Watch bool `json:"watch,omitempty"`
 }
 
 // BackgroundCommandMessage records an observed background-command lifecycle
-// update. It is informational harness activity: unlike a background subagent,
-// a detached shell command never justifies keeping its task running.
+// update. A running command keeps its task running after the turn ends; a
+// running watch does not.
 type BackgroundCommandMessage struct {
 	MessageProvenance
 

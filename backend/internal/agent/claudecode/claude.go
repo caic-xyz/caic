@@ -205,7 +205,7 @@ func newWireFormat() *wireFormat {
 			tools:   make(map[delegationKey]agent.NativeSubagent),
 			resumes: make(map[delegationKey]struct{}),
 		},
-		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
+		backgroundCommands: backgroundCommands{known: make(map[string]bool), monitors: make(map[delegationKey]struct{})},
 		widgetTracker:      newWidgetTracker(),
 		pendingSkillUses:   make(map[agent.ToolKey]string),
 		askSources:         make(map[agent.ToolKey]agent.MessageSource),
@@ -255,7 +255,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		return nil, err
 	}
 	msgs = append(msgs, native...)
-	msgs = append(msgs, w.backgroundCommands.parse(&record)...)
+	msgs = append(msgs, w.backgroundCommands.parse(&record, msgs)...)
 	for i, message := range msgs {
 		if message.Provenance().IsZero() || record.harnessRecord {
 			*message.Provenance() = record.source

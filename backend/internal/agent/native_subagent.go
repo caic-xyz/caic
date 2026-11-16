@@ -187,6 +187,7 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 	if old.OutputRef == "" {
 		old.OutputRef = observed.OutputRef
 	}
+	old.Watch = old.Watch || observed.Watch
 	if old.ExitCode == nil && observed.ExitCode != nil {
 		code := *observed.ExitCode
 		old.ExitCode = &code
@@ -202,11 +203,12 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 	t.byID[observed.ID] = old
 }
 
-// Active returns the number of detached commands reported as running.
+// Active returns the number of detached commands reported as running,
+// excluding watches: a watch waits on events and performs no work.
 func (t *BackgroundCommandTimeline) Active() int {
 	active := 0
 	for _, s := range t.byID {
-		if s.Status == BackgroundCommandStatusRunning {
+		if s.Status == BackgroundCommandStatusRunning && !s.Watch {
 			active++
 		}
 	}

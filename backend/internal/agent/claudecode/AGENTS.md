@@ -68,6 +68,14 @@ model subagent: only `task_type: "local_agent"` establishes one.
 `system/task_updated` can expose `patch.status`. These records do not expose
 a separately versioned child identity.
 
+Claude Code 2.1 reports a `Monitor` tool watch with the same records as
+`Bash` with `run_in_background`: `task_type: "local_bash"` and
+`is_backgrounded: true`. Only the `tool_use_id`, which names the `Monitor`
+call, tells them apart. A watch lasts until its source ends or its timeout
+expires (`task_updated` `killed`, then `task_notification` `stopped`), so it
+outlives the turn while the agent waits for the user. caic marks its card as
+a watch, which never keeps the task running.
+
 Claude Code plugins:
 - https://code.claude.com/docs/en/plugins: plugin creation, `--plugin-dir`, plugin structure overview
 - https://code.claude.com/docs/en/plugins-reference: full schema for plugin.json, MCP/LSP/hooks config, debugging

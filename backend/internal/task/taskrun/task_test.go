@@ -3695,6 +3695,25 @@ func TestTask(t *testing.T) {
 					t.Errorf("state = %v, want running while a detached command runs", got)
 				}
 			})
+			t.Run("RunningWatchAfterResultWaits", func(t *testing.T) {
+				t.Parallel()
+				watch := command("watch", agent.BackgroundCommandStatusRunning)
+				watch.Command.Watch = true
+				messages := []agent.Message{watch, result()}
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(task.StateRunning)
+				for _, m := range messages {
+					addTaskMessage(live, m)
+				}
+				replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				replay.SetState(task.StateRunning)
+				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				for _, tk := range []*Task{live, replay} {
+					if got := tk.GetState(); got != task.StateWaiting {
+						t.Fatalf("state = %v, want waiting while only a watch runs", got)
+					}
+				}
+			})
 			t.Run("LateRunningCommandAfterResultKeepsRunning", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

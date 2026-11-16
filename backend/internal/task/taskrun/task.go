@@ -1849,7 +1849,8 @@ func (t *Task) recordStateTransition(s task.State, at time.Time) {
 // settledTurnStateLocked returns the state a parent turn settles into once its
 // trailing ResultMessage has arrived: asking or presenting a plan when the user
 // still owes input, running while a detached subagent or shell command is
-// active, and waiting otherwise. A harness can end the parent turn while
+// active, and waiting otherwise. A watch never keeps the task running: it only
+// relays events to the agent, which can wait for the user meanwhile. A harness can end the parent turn while
 // background work continues, so a running background card keeps the task busy
 // after the parent stops producing output; a foreground card that
 // is still running then is stale evidence and falls back to waiting.
