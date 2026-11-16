@@ -1177,6 +1177,39 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("OpenSync", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "sync task", Repos: []v3.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		start := func(id string) string {
+			return mustJSON(t, &agent.SyncActivityMessage{MessageType: "sync_activity", SyncID: id, Phase: v3.SyncPhaseStart, Ts: 10})
+		}
+		end := func(id string) string {
+			return mustJSON(t, &agent.SyncActivityMessage{MessageType: "sync_activity", SyncID: id, Phase: v3.SyncPhaseEnd, Ts: 12, Status: v3.SyncStatusPushed})
+		}
+		for name, tc := range map[string]struct {
+			records []string
+			want    string
+		}{
+			"no_sync":        {nil, ""},
+			"ended":          {[]string{start("s1"), end("s1")}, ""},
+			"unended":        {[]string{start("s1")}, "s1"},
+			"second_unended": {[]string{start("s1"), end("s1"), start("s2")}, "s2"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				writeLogFile(t, dir, "t.jsonl", append([]string{meta}, tc.records...)...)
+				tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := tasks[0].OpenSync; got != tc.want {
+					t.Errorf("OpenSync = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("StreamMessagesIncludesReplayControls", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

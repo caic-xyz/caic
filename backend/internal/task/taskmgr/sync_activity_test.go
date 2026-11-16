@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
@@ -527,6 +528,95 @@ func TestLifecycleCancelSync(t *testing.T) {
 			}
 			if err := e.Lifecycle.CancelSync(); err == nil {
 				t.Fatal("CancelSync after the sync ended succeeded")
+			}
+		})
+	})
+}
+
+func TestEndInterruptedSync(t *testing.T) {
+	t.Parallel()
+	// seed writes the given sync records to the log of a task owned by a first
+	// manager, then returns that manager's log store and the task ID.
+	seed := func(t *testing.T, records ...*agent.SyncActivityMessage) (*taskhistory.Store, ksid.ID) {
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+		e := m.NewEntry(tk, nil)
+		recordTestTaskLog(t, m, e)
+		for _, r := range records {
+			if err := e.RecordHost(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return m.logStore, tk.ID
+	}
+	// restore starts a new manager over the store, as after a server restart.
+	restore := func(t *testing.T, store *taskhistory.Store, id ksid.ID) *Entry {
+		m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+		plain, err := store.LoadUnsettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.LoadUnsettledTasks(plain); err != nil {
+			t.Fatal(err)
+		}
+		e, ok := m.GetEntry(id)
+		if !ok {
+			t.Fatalf("task %s not restored", id)
+		}
+		return e
+	}
+	start := &agent.SyncActivityMessage{SyncID: "s1", Phase: v3.SyncPhaseStart, Target: "origin", Branch: "caic-0"}
+	out := &agent.SyncActivityMessage{SyncID: "s1", Phase: v3.SyncPhaseOutput, Output: "lint\n"}
+	end := &agent.SyncActivityMessage{SyncID: "s1", Phase: v3.SyncPhaseEnd, Status: v3.SyncStatusPushed}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		t.Run("unended_sync_fails_once", func(t *testing.T) {
+			t.Parallel()
+			store, id := seed(t, start, out)
+			e := restore(t, store, id)
+			got := loggedSyncRecords(t, e)
+			if len(got) != 3 {
+				t.Fatalf("records = %+v, want start, output, end", got)
+			}
+			last := got[2]
+			if last.Phase != v3.SyncPhaseEnd || last.SyncID != "s1" || last.Status != v3.SyncStatusFailed || last.Error != syncInterruptedError || last.Ts == 0 {
+				t.Errorf("end = %+v", last)
+			}
+			// A second restart finds the sync ended and writes nothing.
+			e = restore(t, store, id)
+			if got := loggedSyncRecords(t, e); len(got) != 3 {
+				t.Errorf("after second restore records = %+v, want 3", got)
+			}
+		})
+		t.Run("ended_sync_is_untouched", func(t *testing.T) {
+			t.Parallel()
+			store, id := seed(t, start, out, end)
+			e := restore(t, store, id)
+			if got := loggedSyncRecords(t, e); len(got) != 3 {
+				t.Errorf("records = %+v, want 3", got)
+			}
+		})
+		t.Run("live_task_is_not_closed", func(t *testing.T) {
+			t.Parallel()
+			// The task is already registered in this process: restore skips it.
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			recordTestTaskLog(t, m, e)
+			if err := e.RecordHost(t.Context(), start); err != nil {
+				t.Fatal(err)
+			}
+			plain, err := m.logStore.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.LoadUnsettledTasks(plain); err != nil {
+				t.Fatal(err)
+			}
+			if got := loggedSyncRecords(t, e); len(got) != 1 {
+				t.Errorf("records = %+v, want only the running start", got)
 			}
 		})
 	})

@@ -102,6 +102,7 @@ type LoadedTask struct {
 	LogSize                        int64        // Byte size of the log file on disk; populated by Store.Load.
 	DiffCreated                    bool         // True if any non-empty diff was recorded in the log; sticky across the run.
 	LastTrailer                    *task.Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
+	OpenSync                       string       // Sync ID of the last sync_activity start with no end record; empty when every sync ended. Not cached.
 	Timeline                       []agent.TimedMessage
 
 	path           string         // Absolute path for lazy message loading via LoadMessages.
@@ -203,8 +204,10 @@ func loadLogHeader(log *slog.Logger, path string, cacheHeader bool, resolver Par
 	}
 	// Cache the header so the next load skips the scan. Only terminal (immutable)
 	// logs are worth caching: they are the compressed, CPU-bound set, while live
-	// logs change on every append and would just invalidate the entry.
-	if cacheHeader && loaded.State.IsTerminal() {
+	// logs change on every append and would just invalidate the entry. A log
+	// with an unended sync is not cached: the cache does not store OpenSync, and
+	// the restore path must see it until the end record is written.
+	if cacheHeader && loaded.State.IsTerminal() && loaded.OpenSync == "" {
 		if err := writeHeaderCache(path, loaded); err != nil {
 			// Non-fatal: the load succeeded and the next load re-scans. Log it so a
 			// persistent failure (e.g. a read-only cache dir) is visible; it slows
@@ -413,6 +416,13 @@ func (p *taskMetadataProjection) apply(loaded *LoadedTask, messages []agent.Time
 			// harnesses preserve accounting in task completion trailers.
 			if loaded.Harness == harness.Claude && !msg.Source.IsChild() {
 				p.lastResult = msg
+			}
+		case *agent.SyncActivityMessage:
+			switch {
+			case msg.Phase == v3.SyncPhaseStart:
+				loaded.OpenSync = msg.SyncID
+			case msg.Phase == v3.SyncPhaseEnd && msg.SyncID == loaded.OpenSync:
+				loaded.OpenSync = ""
 			}
 		case *agent.MetaPRMessage:
 			if msg.ForgePR > 0 {

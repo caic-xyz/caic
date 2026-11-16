@@ -32,6 +32,26 @@ const (
 	maxSyncErrorBytes = 8 << 10
 )
 
+// syncInterruptedError is the end-record error of a sync whose server stopped.
+const syncInterruptedError = "interrupted: the server stopped during the push"
+
+// endInterruptedSync writes the failed end record of the sync syncID, whose
+// start record a previous server process wrote without an end. It runs once at
+// restore, before the task can start a sync in this process, and names the
+// sync so it never closes another one.
+func endInterruptedSync(ctx context.Context, log *slog.Logger, e *Entry, syncID string) {
+	end := &agent.SyncActivityMessage{
+		SyncID: syncID,
+		Phase:  v3.SyncPhaseEnd,
+		Ts:     float64(time.Now().UnixMilli()) / 1000,
+		Status: v3.SyncStatusFailed,
+		Error:  syncInterruptedError,
+	}
+	if err := e.RecordHost(ctx, end); err != nil {
+		log.WarnContext(ctx, "recording interrupted sync failed", "sync", syncID, "err", err)
+	}
+}
+
 // syncRecorder writes the log records of one sync attempt. Its Write method is
 // the hook output sink: it only buffers, so a slow log append never stalls the
 // hook, and a background flusher turns the buffer into output records.

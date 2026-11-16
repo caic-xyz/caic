@@ -949,10 +949,11 @@ func lastResultText(t *taskrun.Task) string {
 // logs not yet compressed, and abandoned logs. The caller scans with the
 // retention cutoff, so only recent logs arrive here.
 func (m *Manager) LoadUnsettledTasks(plain []*taskhistory.LoadedTask) error {
-	loaded, err := m.insertLoadedTasks(plain)
+	loaded, interrupted, err := m.insertLoadedTasks(plain)
 	if err != nil {
 		return err
 	}
+	m.endInterruptedSyncs(interrupted)
 	m.log.Info("loaded unsettled tasks from logs", "n", loaded, "candidates", len(plain))
 	return nil
 }
@@ -966,10 +967,11 @@ func (m *Manager) LoadPurgedTasks(purged []*taskhistory.LoadedTask) error {
 	}
 	// Do not scan full logs here. Some compressed histories are multi-GB, and
 	// historical session metadata must not block the task list becoming usable.
-	loaded, err := m.insertLoadedTasks(purged)
+	loaded, interrupted, err := m.insertLoadedTasks(purged)
 	if err != nil {
 		return err
 	}
+	m.endInterruptedSyncs(interrupted)
 	m.log.Info("loaded purged tasks from logs", "n", loaded, "candidates", len(purged))
 	return nil
 }
@@ -1155,8 +1157,9 @@ func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, ba
 // insertLoadedTasks inserts loaded task logs into the registry, skipping tasks
 // whose id or repo/branch already exists. It is shared by LoadUnsettledTasks
 // (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
-// scan).
-func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) {
+// scan). It also returns the entries whose log ends a sync without an end
+// record; the caller records those after the registry locks are released.
+func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (loaded int, interrupted []*Entry, err error) {
 	m.inputMu.Lock()
 	defer m.inputMu.Unlock()
 	m.mu.Lock()
@@ -1167,7 +1170,6 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 			existingBranches[p.Name+"\x00"+p.Branch] = struct{}{}
 		}
 	}
-	loaded := 0
 	for _, lt := range lts {
 		if lt.LastTrailer == nil {
 			lt.LastTrailer = &task.Result{State: task.StateFailed}
@@ -1261,8 +1263,19 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (int, error) 
 		// including its owner and delegation parent if it is removed before read.
 		m.publishTaskChangeLocked(TaskChange{TaskID: t.ID, OwnerID: t.OwnerID, ParentTaskID: t.ParentTaskID, Catalog: true, Summary: true, Notifications: true})
 		loaded++
+		if lt.OpenSync != "" {
+			interrupted = append(interrupted, entry)
+		}
 	}
-	return loaded, nil
+	return loaded, interrupted, nil
+}
+
+// endInterruptedSyncs closes the syncs that the previous server process left
+// running in the logs of freshly restored entries.
+func (m *Manager) endInterruptedSyncs(entries []*Entry) {
+	for _, e := range entries {
+		endInterruptedSync(m.serverCtx, m.log.With("task", e.task.ID), e, e.LoadedTask().OpenSync)
+	}
 }
 
 // resolveImportTaskIDs selects instances for configured checkouts, reads
@@ -2503,6 +2516,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	m.mu.Unlock()
 	m.inputMu.Unlock()
 	m.watchRateLimitEvents(t)
+	if lt.OpenSync != "" {
+		endInterruptedSync(ctx, m.log.With("task", t.ID), entry, lt.OpenSync)
+	}
 
 	m.log.InfoContext(ctx, "instance", "msg", "imported",
 		"repo", relPath, "instance", c.ID, "br", branch,
