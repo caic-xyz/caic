@@ -18,7 +18,6 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -1447,7 +1446,7 @@ func (c *homeCommandContainer) SSHCommand(_ []string, cmd string) []string {
 
 func TestRunPrePush(t *testing.T) {
 	t.Parallel()
-	newRepo := func(t *testing.T, hook string) (b *Backend, dir, commit string) {
+	newRepo := func(t *testing.T, hook string) (b *Backend, dir, commit, home string) {
 		dir = initStatusRepo(t)
 		commit = runTestGitOutput(t, dir, "rev-parse", "HEAD")
 		if hook != "" {
@@ -1455,8 +1454,9 @@ func TestRunPrePush(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: t.TempDir()}
-		return newTestBackend(&fakeMDClient{getResult: ct}), dir, commit
+		home = t.TempDir()
+		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: home}
+		return newTestBackend(&fakeMDClient{getResult: ct}), dir, commit, home
 	}
 	dest := func(base string) runtime.PushRefs {
 		return runtime.PushRefs{Remote: "origin", Branch: "task", BaseCommit: base}
@@ -1465,7 +1465,7 @@ func TestRunPrePush(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		out := filepath.Join(t.TempDir(), "seen")
-		b, dir, commit := newRepo(t, "#!/bin/sh\n{ echo \"$@\"; cat; git rev-parse HEAD; git status --porcelain; } > "+shellQuote(out)+"\n")
+		b, dir, commit, _ := newRepo(t, "#!/bin/sh\n{ echo \"$@\"; cat; git rev-parse HEAD; git status --porcelain; } > "+shellQuote(out)+"\n")
 		// Pending edits in the task checkout never reach the hook's checkout.
 		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("dirty\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -1487,32 +1487,27 @@ func TestRunPrePush(t *testing.T) {
 		}
 	})
 
-	t.Run("Concurrent", func(t *testing.T) {
+	t.Run("CleansUp", func(t *testing.T) {
 		t.Parallel()
-		// Each hook run reports its start and end; overlapping runs interleave.
-		seen := filepath.Join(t.TempDir(), "seen")
-		b, _, commit := newRepo(t, "#!/bin/sh\necho start >> "+shellQuote(seen)+"\nsleep 0.2\necho end >> "+shellQuote(seen)+"\n")
-		var wg sync.WaitGroup
-		for range 3 {
-			wg.Go(func() {
-				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
-					t.Error(err)
-				}
-			})
-		}
-		wg.Wait()
-		got, err := os.ReadFile(seen) //nolint:gosec // fixture-owned output.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := strings.Repeat("start\nend\n", 3); string(got) != want {
-			t.Fatalf("hook runs overlapped: %q", got)
+		b, dir, commit, home := newRepo(t, "#!/bin/sh\nexit 0\n")
+		// A directory left by a killed session is replaced.
+		for range 2 {
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+				t.Fatal(err)
+			}
+			if left, _ := filepath.Glob(filepath.Join(home, "src", "*")); len(left) != 0 {
+				t.Fatalf("worktrees left behind: %q", left)
+			}
+			stale := filepath.Join(home, "src", filepath.Base(dir)+"-"+commit[:7])
+			if err := os.MkdirAll(stale, 0o750); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 
 	t.Run("MissingHook", func(t *testing.T) {
 		t.Parallel()
-		b, _, commit := newRepo(t, "")
+		b, _, commit, _ := newRepo(t, "")
 		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
 			t.Fatalf("no hook is nothing to run: %v", err)
 		}
@@ -1522,7 +1517,7 @@ func TestRunPrePush(t *testing.T) {
 		t.Parallel()
 		t.Run("Rejection", func(t *testing.T) {
 			t.Parallel()
-			b, _, commit := newRepo(t, "#!/bin/sh\necho lint failed\nexit 77\n")
+			b, _, commit, _ := newRepo(t, "#!/bin/sh\necho lint failed\nexit 77\n")
 			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
 			if err == nil || !strings.Contains(err.Error(), "lint failed") {
 				t.Fatalf("err=%v, want rejection with hook output", err)
@@ -1530,7 +1525,7 @@ func TestRunPrePush(t *testing.T) {
 		})
 		t.Run("Arguments", func(t *testing.T) {
 			t.Parallel()
-			b, _, commit := newRepo(t, "#!/bin/sh\n")
+			b, _, commit, _ := newRepo(t, "#!/bin/sh\n")
 			for name, c := range map[string]string{"ShortCommit": commit[:8], "NoCommit": ""} {
 				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, c, dest(commit)); err == nil {
 					t.Errorf("%s accepted", name)
