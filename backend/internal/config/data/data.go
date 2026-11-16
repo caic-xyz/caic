@@ -100,6 +100,7 @@ type OAuth struct {
 // VoiceGateway is the persisted VoiceGateway section.
 type VoiceGateway struct {
 	WebRTCUDPPort        int              `toml:"webrtc_udp_port"`
+	STUNServers          []string         `toml:"stun_servers"`
 	Mode                 VoiceGatewayMode `toml:"mode"`
 	URL                  string           `toml:"url"`
 	InstanceID           string           `toml:"instance_id"`

@@ -111,6 +111,10 @@
 # authentication, and the WebRTC listener.
 # Provider credentials come from the host process environment.
 #webrtc_udp_port = 0
+# STUN servers that WebRTC clients use to learn their public address.
+# [] keeps clients from contacting any STUN server; that works when clients
+# can reach webrtc_udp_port directly or through its UPnP mapping.
+#stun_servers = ["stun:stun.l.google.com:19302"]
 #
 # Embedded mode reads its voice choices and stages from voice-choices.toml
 # beside this file. Without it, caic uses the defaults built into this release:

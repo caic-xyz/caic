@@ -140,24 +140,32 @@ test("browser voice selects a text choice on mobile and displays a failed choice
   await page.goto("/");
   const overlay = page.getByTestId("voice-overlay");
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
-  await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
+  await expect(
+    overlay.getByRole("radiogroup", { name: "Model", exact: true }).locator('input[value="gemini"]'),
+  ).toBeChecked();
   await overlay.getByRole("radio", { name: "Separate stages", exact: true }).check();
-  const choice = overlay.getByRole("combobox", { name: "Language model", exact: true });
-  await expect(choice).toBeEnabled();
-  await expect(choice).toHaveValue("text");
-  await overlay.getByRole("combobox", { name: "Recognition", exact: true }).selectOption("browser");
-  await overlay.getByRole("combobox", { name: "Speech", exact: true }).selectOption("browser");
-  await expect(overlay.getByRole("combobox", { name: "Recognition", exact: true })).toHaveValue("browser");
-  await expect(overlay.getByRole("combobox", { name: "Speech", exact: true })).toHaveValue("browser");
+  const choice = overlay.getByRole("radiogroup", { name: "Language model", exact: true });
+  await expect(choice.locator('input[value="text"]')).toBeEnabled();
+  await expect(choice.locator('input[value="text"]')).toBeChecked();
+  await overlay.getByRole("radiogroup", { name: "Recognition", exact: true }).locator('input[value="browser"]').check();
+  await overlay.getByRole("radiogroup", { name: "Speech", exact: true }).locator('input[value="browser"]').check();
+  await expect(
+    overlay.getByRole("radiogroup", { name: "Recognition", exact: true }).locator('input[value="browser"]'),
+  ).toBeChecked();
+  await expect(
+    overlay.getByRole("radiogroup", { name: "Speech", exact: true }).locator('input[value="browser"]'),
+  ).toBeChecked();
   await page.screenshot({ path: test.info().outputPath("voice-parts-mobile.png") });
   await page.reload();
   await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
   await expect(overlay.getByRole("radio", { name: "Separate stages", exact: true })).toBeChecked();
-  await expect(choice).toHaveValue("text");
+  await expect(choice.locator('input[value="text"]')).toBeChecked();
   await overlay.getByRole("radio", { name: "All-in-one", exact: true }).check();
-  await expect(overlay.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("gemini");
+  await expect(
+    overlay.getByRole("radiogroup", { name: "Model", exact: true }).locator('input[value="gemini"]'),
+  ).toBeChecked();
   await overlay.getByRole("radio", { name: "Separate stages", exact: true }).check();
-  await expect(choice).toHaveValue("text");
+  await expect(choice.locator('input[value="text"]')).toBeChecked();
   await expect(overlay.getByRole("alert")).toHaveCount(0);
   await overlay.getByRole("button", { name: "Close voice settings", exact: true }).click();
   includeTextChoice = false;

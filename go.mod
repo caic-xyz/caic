@@ -14,8 +14,8 @@ require (
 	github.com/klauspost/compress v1.20.3
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.3.0
-	github.com/maruel/genai v0.11.2-0.20261113175158-f13004eba830
-	github.com/maruel/gomode v0.3.1-0.20261114151249-0f348bfb6f78
+	github.com/maruel/genai v0.11.2-0.20261114223038-75d3f77b7198
+	github.com/maruel/gomode v0.3.1-0.20261116015838-ed05e4ef1e4f
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.16
@@ -158,7 +158,7 @@ require (
 	github.com/manuelarte/funcorder v0.6.0 // indirect
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
-	github.com/maruel/genaipy v0.1.2 // indirect
+	github.com/maruel/genaipy v0.1.3-0.20261116004219-cad62d34f47e // indirect
 	github.com/maruel/httpjson v0.5.3 // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
@@ -176,18 +176,18 @@ require (
 	github.com/pb33f/go-yaml v0.1.1 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect
 	github.com/pion/dtls/v3 v3.1.15 // indirect
-	github.com/pion/ice/v4 v4.4.8 // indirect
+	github.com/pion/ice/v4 v4.4.9 // indirect
 	github.com/pion/interceptor v0.1.51 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.2.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.20 // indirect
 	github.com/pion/rtp v1.10.6 // indirect
-	github.com/pion/sctp v1.12.0 // indirect
+	github.com/pion/sctp v1.12.1 // indirect
 	github.com/pion/sdp/v3 v3.0.20 // indirect
 	github.com/pion/srtp/v3 v3.1.3 // indirect
 	github.com/pion/stun/v4 v4.0.1 // indirect
-	github.com/pion/transport/v5 v5.1.4 // indirect
+	github.com/pion/transport/v5 v5.1.5 // indirect
 	github.com/pion/turn/v5 v5.1.3 // indirect
 	github.com/pion/webrtc/v4 v4.2.26 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect

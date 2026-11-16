@@ -26,6 +26,7 @@ import (
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/voicegateway"
 	"github.com/maruel/gomode/voicegateway/voicertc"
 	"golang.org/x/sync/errgroup"
 
@@ -246,7 +247,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		if err := voiceCfg.Validate(); err != nil {
 			return nil, fmt.Errorf("available voice pipelines: %w", err)
 		}
-		voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, cfg.Voice.Gateway.WebRTCUDPPort, filepath.Join(cfg.Dirs.CacheDir, "voice-gateway"))
+		voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, voicegateway.ServerConfig{WebRTCUDPPort: cfg.Voice.Gateway.WebRTCUDPPort, STUNServers: cfg.Voice.Gateway.STUNServers}, filepath.Join(cfg.Dirs.CacheDir, "voice-gateway"))
 		if err != nil {
 			return nil, fmt.Errorf("voice bridge: %w", err)
 		}

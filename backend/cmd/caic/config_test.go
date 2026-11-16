@@ -264,6 +264,7 @@ OPENROUTER_API_KEY = "sk-or-test"
 [voice-gateway]
 mode = "embedded"
 webrtc_udp_port = 3478
+stun_servers = ["stun:stun.example:3478"]
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
@@ -291,6 +292,9 @@ model = "gemini-live-test"
 		}
 		if cfg.Voice.Gateway.WebRTCUDPPort != 3478 {
 			t.Errorf("Voice.Gateway.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.WebRTCUDPPort)
+		}
+		if got := cfg.Voice.Gateway.STUNServers; !slices.Equal(got, []string{"stun:stun.example:3478"}) {
+			t.Errorf("Voice.Gateway.STUNServers = %q, want [stun:stun.example:3478]", got)
 		}
 	})
 

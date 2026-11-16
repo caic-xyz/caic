@@ -43,8 +43,9 @@ func defaultConfig() data.Config {
 			"pi":       {},
 		},
 		VoiceGateway: data.VoiceGateway{
-			TokenMode: string(server.VoiceTokenModeScoped),
-			Mode:      data.VoiceGatewayModeDisabled,
+			TokenMode:   string(server.VoiceTokenModeScoped),
+			Mode:        data.VoiceGatewayModeDisabled,
+			STUNServers: slices.Clone(voicegateway.DefaultSTUNServers),
 		},
 		Debug: data.Debug{LogLevel: "info"},
 	}
@@ -231,6 +232,7 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 				SigningKey:    voiceSigningKey,
 				Config:        voiceConfig,
 				WebRTCUDPPort: tc.VoiceGateway.WebRTCUDPPort,
+				STUNServers:   tc.VoiceGateway.STUNServers,
 			},
 		},
 		Debug: server.DebugConfig{

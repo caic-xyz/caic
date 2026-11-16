@@ -272,6 +272,9 @@ type VoiceGatewayConfig struct {
 	SigningKey    ed25519.PrivateKey
 	Config        voicegateway.ResolvedConfig
 	WebRTCUDPPort int
+	// STUNServers lists the stun: or stuns: URLs advertised to embedded-mode
+	// WebRTC clients; the voice bridge validates them.
+	STUNServers []string
 }
 
 // Validate returns an error if the voice gateway configuration is invalid.
