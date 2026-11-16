@@ -321,7 +321,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      nextID.Add(1),
-			Method:  "thread/resume",
+			Method:  codex.RequestThreadResume,
 			Params:  params,
 		}
 	} else {
@@ -332,7 +332,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      nextID.Add(1),
-			Method:  "thread/start",
+			Method:  codex.RequestThreadStart,
 			Params:  params,
 		}
 	}
@@ -418,7 +418,7 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
-		Method:  "turn/start",
+		Method:  codex.RequestTurnStart,
 		Params:  params,
 	}
 	return marshalInput(req)
@@ -444,7 +444,7 @@ func (w *wireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
-		Method:  "thread/compact/start",
+		Method:  codex.RequestThreadCompactStart,
 		Params:  params,
 	}
 	return marshalInput(req)
@@ -979,7 +979,7 @@ func fetchModelsFromAppServer(ctx context.Context, records recordReader, nextID 
 	initReq := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      nextID.Add(1),
-		Method:  "initialize",
+		Method:  codex.RequestInitialize,
 		Params:  initParams,
 	}
 	if err := write(initReq); err != nil {
@@ -1004,7 +1004,7 @@ func fetchModelsFromAppServer(ctx context.Context, records recordReader, nextID 
 		if err != nil {
 			return nil, fmt.Errorf("marshal model/list params: %w", err)
 		}
-		request := codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}
+		request := codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: codex.RequestModelList, Params: mlParams}
 		if err := write(request); err != nil {
 			return nil, fmt.Errorf("write model/list: %w", err)
 		}

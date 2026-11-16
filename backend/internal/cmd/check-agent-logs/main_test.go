@@ -492,12 +492,13 @@ func TestRun(t *testing.T) {
 			name   string
 			record string
 			want   string
+			update string
 		}{
-			{"valid", `{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-3.8-flash-low"}}}`, ""},
-			{"string input", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":"hello"}}}`, ""},
-			{"output drift", `{"t":"agent","ts":1.000,"msg":{"event":"step_update","step_update":{"state":"DONE","future":true}}}`, `unknown field "future"`},
-			{"input drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","future":true}]}}}`, `unknown field "future"`},
-			{"input message drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":"hello","future":true}}}`, `unknown field "future"`},
+			{"valid", `{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-3.8-flash-low"}}}`, "", ""},
+			{"valid input", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","caic_image":{"media_type":"image/png","data":"AA=="}}]}}}`, "", ""},
+			{"output drift", `{"t":"agent","ts":1.000,"msg":{"event":"step_update","step_update":{"state":"DONE","future":true}}}`, `unknown field "future"`, "providers/antigravity/dto.go"},
+			{"input drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","future":true}]}}}`, `unknown field "future"`, "antigravity/data/prompt.go"},
+			{"input message drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello"}],"future":true}}}`, `unknown field "future"`, "antigravity/data/prompt.go"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -508,7 +509,7 @@ func TestRun(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-				} else if err == nil || !strings.Contains(out.String(), tc.want) || !strings.Contains(out.String(), "providers/antigravity/dto.go") {
+				} else if err == nil || !strings.Contains(out.String(), tc.want) || !strings.Contains(out.String(), tc.update) {
 					t.Fatalf("schema drift: output=%s err=%v", out.String(), err)
 				}
 			})

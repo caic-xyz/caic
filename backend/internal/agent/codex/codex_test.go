@@ -69,7 +69,7 @@ func TestBackend(t *testing.T) {
 		if err := conn.SendPrompt(agent.Prompt{Text: "continue after rejection"}, nil); err != nil {
 			t.Fatalf("prompt after rejection: %v", err)
 		}
-		for i, method := range []string{"thread/compact/start", "turn/start"} {
+		for i, method := range []codex.RequestMethod{codex.RequestThreadCompactStart, codex.RequestTurnStart} {
 			var request codex.JSONRPCRequest
 			if err := json.Unmarshal([]byte(<-lines), &request); err != nil {
 				t.Fatal(err)

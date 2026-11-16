@@ -28,25 +28,6 @@ import (
 	pidto "github.com/maruel/genai/providers/pi"
 )
 
-var knownClaudeSystemSubtypes = map[claudedto.SystemSubtype]struct{}{
-	claudedto.SystemInit:        {},
-	claudedto.SystemTaskStarted: {}, claudedto.SystemTaskNotification: {},
-	claudedto.SystemTaskProgress: {}, claudedto.SystemTaskUpdated: {},
-	claudedto.SystemBackgroundTasksChanged: {}, claudedto.SystemThinkingTokens: {},
-	claudedto.SystemTurnDuration: {}, claudedto.SystemCompactBoundary: {},
-	claudedto.SystemStatus: {}, claudedto.SystemCommandsChanged: {},
-	claudedto.SystemSessionStateChanged: {}, claudedto.SystemAPIRetry: {},
-	claudedto.SystemLocalCommandOutput: {}, claudedto.SystemHookStarted: {},
-	claudedto.SystemHookProgress: {}, claudedto.SystemHookResponse: {},
-	claudedto.SystemFilesPersisted: {}, claudedto.SystemElicitationComplete: {},
-	claudedto.SystemPostTurnSummary: {}, claudedto.SystemModelRefusalFallback: {},
-	claudedto.SystemModelRefusalNoFallback: {}, claudedto.SystemVCSStateChanged: {},
-	claudedto.SystemControlRequestProgress: {}, claudedto.SystemInformational: {},
-	claudedto.SystemMemoryRecall: {}, claudedto.SystemMirrorError: {},
-	claudedto.SystemNotification: {}, claudedto.SystemPermissionDenied: {},
-	claudedto.SystemPluginInstall: {}, claudedto.SystemWorkerShuttingDown: {},
-}
-
 type config struct {
 	dir   string
 	since time.Duration
@@ -84,12 +65,14 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 		}
 	}
 	var err error
-	var dto string
+	var dto, hint string
 	switch harness {
 	case "antigravity":
 		if input {
-			dto = "StreamInputMessage"
-			err = checkAntigravityInput(message)
+			// caic's record, unlike the genai DTO, has no lenient custom unmarshaler.
+			dto = "InputMessage"
+			hint = "update: backend/internal/agent/antigravity/data/prompt.go"
+			err = strictDecode(message, &agydata.InputMessage{})
 		} else {
 			dto = "StreamEvent"
 			err = strictDecode(message, &antigravitydto.StreamEvent{})
@@ -126,7 +109,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 	if err == nil {
 		return nil
 	}
-	return &finding{path: path, line: line, harness: harness, dto: dto, err: err}
+	return &finding{path: path, line: line, harness: harness, dto: dto, err: err, hint: hint}
 }
 
 func (f finding) String() string {
@@ -475,37 +458,20 @@ func (z *zstdLog) Close() error {
 }
 
 func checkClaudeInput(data []byte) (string, error) {
-	var probe struct {
-		Type claudedto.InputType `json:"type"`
+	t, err := agent.JSONString(data, "type")
+	if err != nil {
+		return "InputType", err
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return "InputTypeProbe", err
-	}
-	var dst any
-	switch probe.Type {
-	case claudedto.InputUser:
-		dst = &claudedto.InputUserMsg{}
-	case claudedto.InputControlRequest:
-		dst = &claudedto.InputControlRequestMsg{}
-	case claudedto.InputControlResponse:
-		dst = &claudedto.InputControlResponseMsg{}
-	case claudedto.InputKeepAlive:
-		dst = &claudedto.InputKeepAliveMsg{}
-	case claudedto.InputUpdateEnvVars:
-		dst = &claudedto.InputUpdateEnvVarsMsg{}
-	default:
-		return "InputTypeProbe", fmt.Errorf("unrecognized Claude Code input type %q; add its DTO and checker dispatch", probe.Type)
+	dst := claudedto.NewInputMsg(claudedto.InputType(t))
+	if dst == nil {
+		return "InputType", fmt.Errorf("unrecognized Claude Code input type %q; add its DTO to claudecode.NewInputMsg", t)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
 
 func checkCodexInput(data []byte) (string, error) {
-	var request struct {
-		JSONRPC string           `json:"jsonrpc"`
-		ID      *json.RawMessage `json:"id"`
-		Method  string           `json:"method"`
-		Params  json.RawMessage  `json:"params"`
-	}
+	// JSONRPCRequest is a superset of JSONRPCNotification; request IDs start at 1.
+	var request codexdto.JSONRPCRequest
 	if err := strictDecode(data, &request); err != nil {
 		return "JSONRPCRequest", err
 	}
@@ -513,30 +479,17 @@ func checkCodexInput(data []byte) (string, error) {
 		return "JSONRPCRequest", errors.New("codex input is missing JSON-RPC 2.0 method")
 	}
 	if request.Method == "initialized" {
-		if request.ID != nil || len(request.Params) != 0 {
+		if request.ID != 0 || len(request.Params) != 0 {
 			return "JSONRPCNotification", errors.New("codex initialized input must be a parameterless notification")
 		}
 		return "JSONRPCNotification", nil
 	}
-	if request.ID == nil || isEmptyJSON(request.Params) {
+	if request.ID == 0 || isEmptyJSON(request.Params) {
 		return "JSONRPCRequest", fmt.Errorf("codex request %q is missing id or params", request.Method)
 	}
-	var dst any
-	switch request.Method {
-	case "initialize":
-		dst = &codexdto.InitializeParams{}
-	case "model/list":
-		dst = &codexdto.ModelListParams{}
-	case "thread/start":
-		dst = &codexdto.ThreadStartParams{}
-	case "thread/resume":
-		dst = &codexdto.ThreadResumeParams{}
-	case "turn/start":
-		dst = &codexdto.TurnStartParams{}
-	case "thread/compact/start":
-		dst = &codexdto.ThreadCompactStartParams{}
-	default:
-		return "JSONRPCRequest", fmt.Errorf("unrecognized Codex request method %q; add its DTO and checker dispatch", request.Method)
+	dst := codexdto.NewRequestParams(request.Method)
+	if dst == nil {
+		return "JSONRPCRequest", fmt.Errorf("unrecognized Codex request method %q; add its DTO to codex.NewRequestParams", request.Method)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(request.Params, dst)
 }
@@ -556,90 +509,17 @@ func strictDecode(data []byte, dst any) error {
 	return nil
 }
 
-func checkAntigravityInput(data []byte) error {
-	// Override the message field to validate string and block-array content
-	// strictly, independent of the DTO's custom unmarshaler.
-	var envelope struct {
-		antigravitydto.StreamInputMessage
-
-		Message json.RawMessage `json:"message"`
-	}
-	if err := strictDecode(data, &envelope); err != nil {
-		return err
-	}
-	if isEmptyJSON(envelope.Message) {
-		return nil
-	}
-	var message struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := strictDecode(envelope.Message, &message); err != nil {
-		return err
-	}
-	content := bytes.TrimSpace(message.Content)
-	if isEmptyJSON(content) || content[0] == '"' {
-		return nil
-	}
-	// caic's block adds only caic_image, which agy ignores.
-	return strictDecode(content, &[]agydata.ContentBlock{})
-}
-
 func checkClaude(data []byte) (string, error) {
 	var probe claudedto.OutputTypeProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "OutputTypeProbe", err
 	}
-	var dst any
-	switch probe.Type {
-	case claudedto.OutputAssistant:
-		dst = &claudedto.OutputAssistantMsg{}
-	case claudedto.OutputUser:
-		dst = &claudedto.OutputUserMsg{}
-	case claudedto.OutputResult:
-		dst = &claudedto.OutputResultMsg{}
-	case claudedto.OutputSystem:
-		subtype := claudedto.SystemSubtype(probe.Subtype)
-		switch subtype {
-		case claudedto.SystemInit:
-			dst = &claudedto.OutputInitMsg{}
-		case claudedto.SystemDevIntent:
-			dst = &claudedto.OutputDevIntentMsg{}
-		case claudedto.SystemSessionWritesLost:
-			dst = &claudedto.OutputSessionWritesLostMsg{}
-		case claudedto.SystemCodeChangePublished:
-			dst = &claudedto.OutputCodeChangePublishedMsg{}
-		default:
-			if _, ok := knownClaudeSystemSubtypes[subtype]; !ok {
-				return "OutputSystemMsg", fmt.Errorf("unrecognized Claude Code system subtype %q; add its DTO and checker dispatch", probe.Subtype)
-			}
-			dst = &claudedto.OutputSystemMsg{}
+	dst := claudedto.NewOutputMsg(&probe)
+	if dst == nil {
+		if probe.Type == claudedto.OutputSystem {
+			return "OutputSystemMsg", fmt.Errorf("unrecognized Claude Code system subtype %q; add its DTO to claudecode.NewOutputMsg", probe.Subtype)
 		}
-	case claudedto.OutputStreamEvent:
-		dst = &claudedto.OutputStreamEventMsg{}
-	case claudedto.OutputRateLimitEvent:
-		dst = &claudedto.OutputRateLimitEventMsg{}
-	case claudedto.OutputToolProgress:
-		dst = &claudedto.OutputToolProgressMsg{}
-	case claudedto.OutputAuthStatus:
-		dst = &claudedto.OutputAuthStatusMsg{}
-	case claudedto.OutputToolUseSummary:
-		dst = &claudedto.OutputToolUseSummaryMsg{}
-	case claudedto.OutputPromptSuggestion:
-		dst = &claudedto.OutputPromptSuggestionMsg{}
-	case claudedto.OutputControlRequest:
-		dst = &claudedto.OutputControlRequestMsg{}
-	case claudedto.OutputControlResponse:
-		// Task logs include both relay directions. Claude's control response is
-		// an input DTO, even when it is preserved in an agent record.
-		dst = &claudedto.InputControlResponseMsg{}
-	case claudedto.OutputControlCancelRequest:
-		dst = &claudedto.OutputControlCancelRequestMsg{}
-	case claudedto.OutputConversationReset:
-		dst = &claudedto.OutputConversationResetMsg{}
-	case claudedto.OutputCommandLifecycle:
-		dst = &claudedto.OutputCommandLifecycleMsg{}
-	default:
-		return "OutputTypeProbe", fmt.Errorf("unrecognized Claude Code output type %q; add its DTO and checker dispatch", probe.Type)
+		return "OutputTypeProbe", fmt.Errorf("unrecognized Claude Code output type %q; add its DTO to claudecode.NewOutputMsg", probe.Type)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
@@ -658,56 +538,9 @@ func checkCodex(data []byte) (string, error) {
 	if isEmptyJSON(msg.Params) {
 		return "JSONRPCMessage", fmt.Errorf("codex notification %q is missing params", msg.Method)
 	}
-	var dst any
-	switch msg.Method {
-	case codexdto.MethodThreadStarted:
-		dst = &codexdto.ThreadStartedNotification{}
-	case codexdto.MethodTurnStarted:
-		dst = &codexdto.TurnStartedNotification{}
-	case codexdto.MethodTurnCompleted:
-		dst = &codexdto.TurnCompletedNotification{}
-	case codexdto.MethodItemStarted:
-		dst = &codexdto.ItemStartedNotification{}
-	case codexdto.MethodItemCompleted:
-		dst = &codexdto.ItemCompletedNotification{}
-	case codexdto.MethodItemDelta:
-		dst = &codexdto.AgentMessageDeltaNotification{}
-	case codexdto.MethodTokenUsageUpdated:
-		dst = &codexdto.ThreadTokenUsageUpdatedNotification{}
-	case codexdto.MethodReasoningSummaryTextDelta:
-		dst = &codexdto.ReasoningSummaryTextDeltaNotification{}
-	case codexdto.MethodCommandOutputDelta:
-		dst = &codexdto.CommandExecutionOutputDeltaNotification{}
-	case codexdto.MethodMcpToolCallProgress:
-		dst = &codexdto.McpToolCallProgressNotification{}
-	case codexdto.MethodThreadStatusChanged:
-		dst = &codexdto.ThreadStatusChangedNotification{}
-	case codexdto.MethodThreadGoalUpdated:
-		dst = &codexdto.ThreadGoalUpdatedNotification{}
-	case codexdto.MethodThreadGoalCleared:
-		dst = &codexdto.ThreadGoalClearedNotification{}
-	case codexdto.MethodModelRerouted:
-		dst = &codexdto.ModelReroutedNotification{}
-	case codexdto.MethodModelSafetyBufferingUpdated:
-		dst = &codexdto.ModelSafetyBufferingUpdatedNotification{}
-	case codexdto.MethodMcpServerStatusUpdated:
-		dst = &codexdto.McpServerStatusUpdatedNotification{}
-	case codexdto.MethodAccountRateLimitsUpdated:
-		dst = &codexdto.AccountRateLimitsUpdatedNotification{}
-	case codexdto.MethodAccountUpdated:
-		dst = &codexdto.AccountUpdatedNotification{}
-	case codexdto.MethodDeprecationNotice:
-		dst = &codexdto.DeprecationNoticeNotification{}
-	case codexdto.MethodRemoteControlStatusChanged:
-		dst = &codexdto.RemoteControlStatusChangedNotification{}
-	case codexdto.MethodSkillsChanged:
-		dst = &codexdto.SkillsChangedNotification{}
-	case codexdto.MethodErrorNotification:
-		dst = &codexdto.ErrorNotification{}
-	case codexdto.MethodWarning:
-		dst = &codexdto.WarningNotification{}
-	default:
-		return "JSONRPCMessage", fmt.Errorf("unrecognized Codex notification method %q; add its DTO and checker dispatch", msg.Method)
+	dst := codexdto.NewNotificationParams(msg.Method)
+	if dst == nil {
+		return "JSONRPCMessage", fmt.Errorf("unrecognized Codex notification method %q; add its DTO to codex.NewNotificationParams", msg.Method)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(msg.Params, dst)
 }
@@ -717,58 +550,9 @@ func checkPi(data []byte) (string, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "LineProbe", err
 	}
-	var dst any
-	switch probe.Type {
-	case pidto.EventAgentStart:
-		dst = &pidto.AgentStartEvent{}
-	case pidto.EventAgentEnd:
-		dst = &pidto.AgentEndEvent{}
-	case pidto.EventAgentSettled:
-		dst = &pidto.AgentSettledEvent{}
-	case pidto.EventAutoRetryStart:
-		dst = &pidto.AutoRetryStartEvent{}
-	case pidto.EventAutoRetryEnd:
-		dst = &pidto.AutoRetryEndEvent{}
-	case pidto.EventCompactionStart:
-		dst = &pidto.CompactionStartEvent{}
-	case pidto.EventCompactionEnd:
-		dst = &pidto.CompactionEndEvent{}
-	case pidto.EventEntryAppended:
-		dst = &pidto.EntryAppendedEvent{}
-	case pidto.EventQueueUpdate:
-		dst = &pidto.QueueUpdateEvent{}
-	case pidto.EventSummarizationRetryScheduled:
-		dst = &pidto.SummarizationRetryScheduledEvent{}
-	case pidto.EventSummarizationRetryAttemptStart:
-		dst = &pidto.SummarizationRetryAttemptStartEvent{}
-	case pidto.EventSummarizationRetryFinished:
-		dst = &pidto.SummarizationRetryFinishedEvent{}
-	case pidto.EventThinkingLevelChanged:
-		dst = &pidto.ThinkingLevelChangedEvent{}
-	case pidto.EventTurnStart:
-		dst = &pidto.TurnStartEvent{}
-	case pidto.EventTurnEnd:
-		dst = &pidto.TurnEndEvent{}
-	case pidto.EventMessageStart:
-		dst = &pidto.MessageStartEvent{}
-	case pidto.EventMessageUpdate:
-		dst = &pidto.MessageUpdateEvent{}
-	case pidto.EventMessageEnd:
-		dst = &pidto.MessageEndEvent{}
-	case pidto.EventToolExecStart:
-		dst = &pidto.ToolExecStartEvent{}
-	case pidto.EventToolExecUpdate:
-		dst = &pidto.ToolExecUpdateEvent{}
-	case pidto.EventToolExecEnd:
-		dst = &pidto.ToolExecEndEvent{}
-	case pidto.EventExtensionUI:
-		dst = &pidto.ExtensionUIRequest{}
-	case pidto.EventExtensionError:
-		dst = &pidto.ExtensionErrorEvent{}
-	case pidto.EventResponse:
-		dst = &pidto.Response{}
-	default:
-		return "LineProbe", fmt.Errorf("unrecognized Pi output event type %q; add its DTO and checker dispatch", probe.Type)
+	dst := pidto.NewEvent(probe.Type)
+	if dst == nil {
+		return "LineProbe", fmt.Errorf("unrecognized Pi output event type %q; add its DTO to pi.NewEvent", probe.Type)
 	}
 	dto := fmt.Sprintf("%T", dst)
 	if err := strictDecode(data, dst); err != nil {
@@ -782,20 +566,9 @@ func checkPiInput(data []byte) (string, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "LineProbe", err
 	}
-	var dst any
-	switch probe.Type {
-	case pidto.CmdPrompt:
-		dst = &pidto.PromptCmd{}
-	case pidto.CmdSetModel:
-		dst = &pidto.SetModelCmd{}
-	case pidto.CmdSetThinking:
-		dst = &pidto.SetThinkingCmd{}
-	case pidto.CmdGetState:
-		dst = &pidto.GetStateCmd{}
-	case pidto.CmdCompact:
-		dst = &pidto.CompactCmd{}
-	default:
-		return "LineProbe", fmt.Errorf("unrecognized Pi input command type %q; add its DTO and checker dispatch", probe.Type)
+	dst := pidto.NewCommand(probe.Type)
+	if dst == nil {
+		return "LineProbe", fmt.Errorf("unrecognized Pi input command type %q; add its DTO to pi.NewCommand", probe.Type)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
@@ -817,14 +590,11 @@ func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]acp.M
 		if isEmptyJSON(msg.Params) {
 			return "JSONRPCMessage", fmt.Errorf("OpenCode request or notification %q is missing params", msg.Method)
 		}
-		if msg.ID == nil {
-			if input {
-				return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode input notification method %q", msg.Method)
-			}
-			return checkOpenCodeNotification(msg.Method, msg.Params)
+		if msg.Method.FromAgent() == input {
+			return "JSONRPCMessage", fmt.Errorf("OpenCode method %q in the wrong direction", msg.Method)
 		}
-		dto, err := checkOpenCodeRequest(msg.Method, msg.Params, input)
-		if err != nil {
+		dto, err := checkOpenCodeParams(msg.Method, msg.Params)
+		if err != nil || msg.ID == nil {
 			return dto, err
 		}
 		if methods != nil {
@@ -853,49 +623,20 @@ func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]acp.M
 	return checkOpenCodeResponse(method, msg.Result)
 }
 
-func checkOpenCodeRequest(method acp.Method, params json.RawMessage, input bool) (string, error) {
-	if !input {
-		if method != acp.MethodSessionRequestPermission {
-			return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode output request method %q; add its DTO and checker dispatch", method)
-		}
-		return "*acp.PermissionRequestParams", strictDecode(params, &acp.PermissionRequestParams{})
-	}
-	var dst any
-	switch method {
-	case acp.MethodInitialize:
-		dst = &acp.InitializeParams{}
-	case acp.MethodSessionNew:
-		dst = &acp.SessionNewParams{}
-	case acp.MethodSessionLoad:
-		dst = &acp.SessionLoadParams{}
-	case acp.MethodSessionResume:
-		dst = &acp.SessionResumeParams{}
-	case acp.MethodSessionPrompt:
-		dst = &acp.SessionPromptParams{}
-	case acp.MethodSessionSetModel:
-		dst = &acp.SetSessionModelParams{}
-	case acp.MethodSessionSetConfigOption:
-		dst = &acp.SetSessionConfigOptionParams{}
-	case acp.MethodSessionCancel, acp.MethodSessionSetMode:
-		return "JSONRPCMessage", fmt.Errorf("OpenCode request %q has no genai DTO; add its DTO and checker strict decode", method)
-	default:
-		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode request method %q; add its DTO and checker dispatch", method)
-	}
-	return fmt.Sprintf("%T", dst), strictDecode(params, dst)
-}
-
 func isEmptyJSON(raw json.RawMessage) bool {
 	return len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
-func checkOpenCodeNotification(method acp.Method, params json.RawMessage) (string, error) {
-	if method == acp.MethodSessionRequestPermission {
-		return "*acp.PermissionRequestParams", strictDecode(params, &acp.PermissionRequestParams{})
-	}
+// checkOpenCodeParams validates the params of a request or notification in
+// either direction, and the variant inside a session/update.
+func checkOpenCodeParams(method acp.Method, params json.RawMessage) (string, error) {
 	if method != acp.MethodSessionUpdate {
-		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode notification method %q; add its DTO and checker dispatch", method)
+		dst := acp.NewParams(method)
+		if dst == nil {
+			return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode request method %q; add its DTO to acp.NewParams", method)
+		}
+		return fmt.Sprintf("%T", dst), strictDecode(params, dst)
 	}
-
 	var updateParams acp.SessionUpdateParams
 	if err := strictDecode(params, &updateParams); err != nil {
 		return "*acp.SessionUpdateParams", err
@@ -907,57 +648,17 @@ func checkOpenCodeNotification(method acp.Method, params json.RawMessage) (strin
 	if err := json.Unmarshal(updateParams.Update, &probe); err != nil {
 		return "UpdateProbe", err
 	}
-	var dst any
-	switch probe.SessionUpdate {
-	case acp.UpdateAgentMessageChunk:
-		dst = &acp.AgentMessageChunkUpdate{}
-	case acp.UpdateAgentThoughtChunk:
-		dst = &acp.AgentThoughtChunkUpdate{}
-	case acp.UpdateUserMessageChunk:
-		dst = &acp.UserMessageChunkUpdate{}
-	case acp.UpdateToolCall:
-		dst = &acp.ToolCallUpdate{}
-	case acp.UpdateToolCallUpdate:
-		dst = &acp.ToolCallUpdateUpdate{}
-	case acp.UpdatePlan:
-		dst = &acp.PlanUpdate{}
-	case acp.UpdateUsageUpdate:
-		dst = &acp.UsageUpdateUpdate{}
-	case acp.UpdateCurrentModeUpdate:
-		dst = &acp.CurrentModeUpdate{}
-	case acp.UpdateAvailableCommandsUpdate:
-		dst = &acp.AvailableCommandsUpdate{}
-	case acp.UpdateSessionInfoUpdate:
-		dst = &acp.SessionInfoUpdate{}
-	case acp.UpdateConfigOptionUpdate:
-		dst = &acp.ConfigOptionUpdate{}
-	default:
-		return "UpdateProbe", fmt.Errorf("unrecognized OpenCode session update %q; add its DTO and checker dispatch", probe.SessionUpdate)
+	dst := acp.NewSessionUpdate(probe.SessionUpdate)
+	if dst == nil {
+		return "UpdateProbe", fmt.Errorf("unrecognized OpenCode session update %q; add its DTO to acp.NewSessionUpdate", probe.SessionUpdate)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(updateParams.Update, dst)
 }
 
 func checkOpenCodeResponse(method acp.Method, result json.RawMessage) (string, error) {
-	var dst any
-	switch method {
-	case acp.MethodInitialize:
-		dst = &acp.InitializeResult{}
-	case acp.MethodSessionNew:
-		dst = &acp.SessionNewResult{}
-	case acp.MethodSessionLoad:
-		dst = &acp.SessionLoadResult{}
-	case acp.MethodSessionResume:
-		dst = &acp.SessionResumeResult{}
-	case acp.MethodSessionPrompt:
-		dst = &acp.PromptResult{}
-	case acp.MethodSessionRequestPermission:
-		dst = &acp.PermissionResponseResult{}
-	case acp.MethodSessionSetConfigOption:
-		dst = &acp.SetSessionConfigOptionResult{}
-	case acp.MethodSessionSetModel, acp.MethodSessionCancel, acp.MethodSessionSetMode:
-		return "JSONRPCMessage", fmt.Errorf("OpenCode response for %q has no genai DTO; add its DTO and checker strict decode", method)
-	default:
-		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode response method %q; add its DTO and checker dispatch", method)
+	dst := acp.NewResult(method)
+	if dst == nil {
+		return "JSONRPCMessage", fmt.Errorf("unrecognized OpenCode response method %q; add its DTO to acp.NewResult", method)
 	}
 	return fmt.Sprintf("%T", dst), strictDecode(result, dst)
 }
