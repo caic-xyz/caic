@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"slices"
@@ -374,9 +375,10 @@ type wireFormat struct {
 	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
 	lastThreadTotals  map[string]codex.TokenUsageBreakdown
-	threadModels      map[string]string   // Only models explicitly reported for each native thread.
-	childThreads      map[string]struct{} // Explicit child ownership, independent of lifecycle/card evidence.
-	threadTurnStarted map[string]bool     // usage before a thread's first turn is its saved baseline
+	threadModels      map[string]string       // Only models explicitly reported for each native thread.
+	childThreads      map[string]struct{}     // Explicit child ownership, independent of lifecycle/card evidence.
+	threadTurnStarted map[string]bool         // usage before a thread's first turn is its saved baseline
+	streamedOutput    map[streamItem]struct{} // Commands whose output arrived as outputDelta.
 }
 
 // SetRequestedEffort implements agent.RequestedEffort.
@@ -505,7 +507,54 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 
 // NewStreamTrim implements agent.StreamTrimmer; see stream_trim.go.
 func (*wireFormat) NewStreamTrim() agent.StreamTrim {
-	return &streamTrim{completed: make(map[streamItem]struct{})}
+	return &streamTrim{completed: make(map[streamItem]struct{}), output: make(map[streamItem]hash.Hash)}
+}
+
+// commandOutput projects a completed command's aggregatedOutput when none of
+// it streamed. Codex streams outputDelta for some commands only, and the
+// completed commandExecution result carries no output of its own; a settled
+// log also elides deltas that aggregatedOutput repeats (see stream_trim.go).
+// The output precedes the result, as streamed output does.
+func (w *wireFormat) commandOutput(method codex.Method, record *decodedItem, msgs []agent.Message) ([]agent.Message, error) {
+	switch method {
+	case codex.MethodCommandOutputDelta:
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		for _, m := range msgs {
+			if delta, ok := m.(*agent.ToolOutputDeltaMessage); ok {
+				if w.streamedOutput == nil {
+					w.streamedOutput = make(map[streamItem]struct{})
+				}
+				w.streamedOutput[streamItem{threadID: delta.Source.ThreadID, itemID: delta.Source.ItemID}] = struct{}{}
+			}
+		}
+	case codex.MethodItemCompleted:
+		if record.typ != codex.ItemTypeCommandExecution {
+			return msgs, nil
+		}
+		item := streamItem{threadID: record.source.ThreadID, itemID: record.source.ItemID}
+		w.mu.Lock()
+		_, streamed := w.streamedOutput[item]
+		delete(w.streamedOutput, item)
+		w.mu.Unlock()
+		if streamed {
+			return msgs, nil
+		}
+		output, err := agent.JSONString(record.raw, "aggregatedOutput")
+		if err != nil || output == "" {
+			return msgs, err
+		}
+		i := slices.IndexFunc(msgs, func(m agent.Message) bool {
+			_, ok := m.(*agent.ToolResultMessage)
+			return ok
+		})
+		if i < 0 {
+			return msgs, nil
+		}
+		return slices.Insert(msgs, i, agent.Message(&agent.ToolOutputDeltaMessage{Source: record.source, ToolUseID: item.itemID, Delta: output})), nil
+	default:
+	}
+	return msgs, nil
 }
 
 // parseOutput owns ordered protocol state independently of transcript projection.
@@ -617,6 +666,9 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 
 	msgs, record, err := decode(line, &probe)
 	if err != nil {
+		return nil, err
+	}
+	if msgs, err = w.commandOutput(codex.Method(probe.Method), &record, msgs); err != nil {
 		return nil, err
 	}
 	if started := record.threadStarted; started != nil {

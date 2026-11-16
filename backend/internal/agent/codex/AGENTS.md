@@ -32,15 +32,23 @@ with totals on `turn/completed`.
 
 ## Settled stream trimming
 
-`item/completed` repeats an `agentMessage`'s full `text` and a `reasoning`
-item's full `summary`. `stream_trim.go` selects `item/agentMessage/delta` and
-`item/reasoning/summaryTextDelta` records whose `threadId` and `itemId`
-completed; terminal compression replaces each with an `elided` record. Item IDs
-are unique within a thread across turns. `item/commandExecution/outputDelta`
-stays: the completed `commandExecution` result carries no output. Across 395
-local Codex v3 logs, that elides 64% of the records and 9.6% of the compressed
-bytes; the full and metadata projections keep every other message at its
-record position.
+`item/completed` repeats an `agentMessage`'s full `text`, a `reasoning`
+item's full `summary`, and a `commandExecution`'s `aggregatedOutput`.
+`stream_trim.go` selects `item/agentMessage/delta`,
+`item/reasoning/summaryTextDelta`, and `item/commandExecution/outputDelta`
+records whose `threadId` and `itemId` completed; terminal compression replaces
+each with an `elided` record. Item IDs are unique within a thread across turns.
+
+Codex streams `outputDelta` for some commands only. When a command completed
+without any, the wire projects its `aggregatedOutput` as one output delta before
+the result; across the local logs, 71,633 commands had output but no deltas,
+against 17,066 whose deltas equal `aggregatedOutput`. Output deltas go only in
+that equal case. In another 4,357 commands, `aggregatedOutput` adds a prefix the
+deltas lack, so the projected output misses its beginning; those deltas stay.
+
+Across 396 local Codex v3 logs, trimming elides 69% of the records and 10.3%
+of the compressed bytes; the folded turn metrics, exit status, result text,
+tool output, and every other message keep their values and record positions.
 
 ## Upstream Source
 

@@ -1322,6 +1322,43 @@ func TestWireFormat(t *testing.T) {
 		}
 	})
 
+	t.Run("CommandOutputWithoutDeltas", func(t *testing.T) {
+		t.Parallel()
+		w := New("", nil).NewWire()
+		completed := func(id string) string {
+			return `{"method":"item/completed","params":{"threadId":"t","turnId":"u","item":{"type":"commandExecution","id":"` + id + `","command":"ls","cwd":"/","status":"completed","exitCode":0,"aggregatedOutput":"ab"}}}`
+		}
+		for _, record := range []struct {
+			line string
+			want []string // Projected output deltas, then "result".
+		}{
+			// Codex streamed none of this command's output.
+			{completed("quiet"), []string{"ab", "result"}},
+			// A streamed command projects only what it streamed.
+			{`{"method":"item/commandExecution/outputDelta","params":{"threadId":"t","turnId":"u","itemId":"loud","delta":"b"}}`, []string{"b"}},
+			{completed("loud"), []string{"result"}},
+		} {
+			msgs, err := w.ParseOutput([]byte(record.line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, m := range msgs {
+				switch m := m.(type) {
+				case *agent.ToolOutputDeltaMessage:
+					if m.ToolUseID == "" || m.Source.ItemID != m.ToolUseID {
+						t.Fatalf("delta identity = %q/%+v", m.ToolUseID, m.Source)
+					}
+					got = append(got, m.Delta)
+				case *agent.ToolResultMessage:
+					got = append(got, "result")
+				}
+			}
+			if !slices.Equal(got, record.want) {
+				t.Fatalf("%s:\ngot  %q\nwant %q", record.line, got, record.want)
+			}
+		}
+	})
 	t.Run("ChildThreadSkillReadLoadsNothing", func(t *testing.T) {
 		t.Parallel()
 		// Observed shape (4DLLPGQ6C000): spawned child threads run the same

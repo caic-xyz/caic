@@ -2703,11 +2703,26 @@ func relaySnapshotAppend(records []agent.RelayRecordBoundary, generation string,
 		return snapshot.Encoded, nil
 	}
 	if first.Generation != "" && first.Generation != generation {
-		if first.RelayEnd == int64(first.ByteEnd) {
+		complete := first.RelayEnd == int64(first.ByteEnd)
+		if generation != "" {
+			if !complete {
+				return nil, errors.New("new relay generation has a truncated snapshot")
+			}
 			return snapshot.Encoded, nil
 		}
-		if generation != "" {
-			return nil, errors.New("new relay generation has a truncated snapshot")
+		// A log without a generation marker predates persisted handshake
+		// records, so a marked snapshot can still be the same relay output.
+		// Appending it whole would duplicate every record the log already
+		// holds; only a complete snapshot without overlap is a new relay.
+		if complete {
+			end, err := relayFingerprintOverlap(records, snapshot.RelayRecords)
+			if err != nil {
+				return nil, err
+			}
+			if end == 0 {
+				return snapshot.Encoded, nil
+			}
+			return relaySnapshotAfter(snapshot, end)
 		}
 	}
 	end, err := relayPositionOverlap(records, snapshot.RelayRecords)
@@ -2726,6 +2741,11 @@ func relaySnapshotAppend(records []agent.RelayRecordBoundary, generation string,
 	if end == 0 {
 		return nil, errors.New("relay snapshot has no physical overlap with durable task log")
 	}
+	return relaySnapshotAfter(snapshot, end)
+}
+
+// relaySnapshotAfter returns the snapshot bytes after its first end records.
+func relaySnapshotAfter(snapshot agent.RelaySnapshot, end int) ([]byte, error) {
 	byteEnd := snapshot.RelayRecords[end-1].ByteEnd
 	if byteEnd < 0 || byteEnd > len(snapshot.Encoded) {
 		return nil, errors.New("relay overlap byte boundary is outside the snapshot")
@@ -2774,6 +2794,7 @@ func relayPositionOverlap(records, snapshot []agent.RelayRecordBoundary) (int, e
 // records. A unique endpoint needs two adjacent records, unless the match
 // reaches the beginning of either source. This also tolerates a discontinuity
 // earlier than that endpoint without trusting an ambiguous repeated record.
+// It returns zero when no record matches.
 func relayFingerprintOverlap(records, snapshot []agent.RelayRecordBoundary) (int, error) {
 	for _, record := range records {
 		if record.Fingerprint == ([32]byte{}) {
@@ -2801,9 +2822,6 @@ func relayFingerprintOverlap(records, snapshot []agent.RelayRecordBoundary) (int
 		}
 		matchEnd = relayEnd + 1
 		matches++
-	}
-	if matches == 0 {
-		return 0, errors.New("unmarked relay history has no exact physical overlap")
 	}
 	if matches > 1 {
 		return 0, errors.New("unmarked relay history has ambiguous repeated physical overlap")
