@@ -3137,13 +3137,14 @@ for (const { harness, start, finish } of unfinishedToolGroups) {
         return within(item).getByTestId("timing-duration");
       };
       await vi.waitFor(() => expect(groupTiming(/^1\/2 tools: /)).toHaveTextContent("0:09"));
-      const pending = () => screen.queryByTestId("tool-group-pending");
-      expect(pending()).toBeInTheDocument();
+      // The summary reports the group's state; its rows carry their own icons.
+      const pending = (summary: RegExp) => within(screen.getByText(summary)).queryByRole("img", { name: "Running" });
+      expect(pending(/^1\/2 tools: /)).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(2_000);
       expect(groupTiming(/^1\/2 tools: /)).toHaveTextContent("0:11");
       send?.(finish(12_000));
       await vi.waitFor(() => expect(screen.getByText(/^2\/2 tools: /)).toBeInTheDocument());
-      expect(pending()).not.toBeInTheDocument();
+      expect(pending(/^2\/2 tools: /)).not.toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(3_000);
       expect(groupTiming(/^2\/2 tools: /)).toHaveTextContent("0:11");
     } finally {

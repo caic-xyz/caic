@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/klauspost/compress/zstd"
@@ -227,6 +228,35 @@ func TestSource(t *testing.T) {
 					t.Fatalf("stored exit = %q, want %q", got, want)
 				}
 			})
+		}
+	})
+	t.Run("settlement interrupts an unreturned tool call", func(t *testing.T) {
+		t.Parallel()
+		// The host writes the settlement trailer, even after the container died.
+		trailer, err := agent.MarshalLogMessage(taskhistory.ResultMessage("", &task.Result{State: task.StateStopped}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := writeFixture(t, claudeHeader,
+			`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}]}}}`,
+			string(trailer))
+		source, _ := newFixtureSource(t, path)
+		snapshot, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var results []v1.EventToolResult
+		for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := event.Message.ToolResult; r != nil {
+				results = append(results, *r)
+			}
+		}
+		want := []v1.EventToolResult{{ToolUseID: "toolu_1", Error: apiconv.InterruptedToolError}}
+		if !reflect.DeepEqual(results, want) {
+			t.Fatalf("tool results = %#v, want %#v", results, want)
 		}
 	})
 	t.Run("TurnCosts", testSourceTurnCosts)

@@ -137,10 +137,17 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 					return Snapshot{}, err
 				}
 			}
-			if !s.exitStatus.Observe(m) {
-				continue
+			var projected []v1.EventMessage
+			if _, settled := m.(*agent.MetaResultMessage); settled {
+				// The host settled the task, possibly after its container died
+				// without recording an exit: no open tool call can return.
+				projected = s.tracker.InterruptOpenTools(parsed.ProducerTime)
+			} else {
+				if !s.exitStatus.Observe(m) {
+					continue
+				}
+				projected = s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			}
-			projected := s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			for i := range projected {
 				events = append(events, Event{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			}

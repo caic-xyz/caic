@@ -1397,7 +1397,8 @@ a.ciStatus:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .historyLoading svg,
-  .headerLoading svg {
+  .headerLoading svg,
+  .toolPending {
     animation: none;
   }
 }

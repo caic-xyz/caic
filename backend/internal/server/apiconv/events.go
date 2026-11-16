@@ -1,10 +1,12 @@
-// Agent event conversions to API v1 SSE DTOs, excluding private delivery controls and reported skill machinery.
+// Agent event conversions to API v1 SSE DTOs, closing interrupted tool calls and excluding private delivery controls and skill machinery.
 
 package apiconv
 
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -21,14 +23,19 @@ import (
 // GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 const InputTruncateThreshold = 4096
 
-// maxPendingToolTimings bounds timing state while converting unbounded task
+// maxPendingToolTimings bounds open-tool state while converting unbounded task
 // history. When full, the next unseen tool start deterministically resets the
-// map, so older results report zero duration rather than retaining timestamps.
+// map, so older results report zero duration and an interruption no longer
+// closes the forgotten calls.
 const maxPendingToolTimings = 1024
 
+// InterruptedToolError is the result error of a tool call that was still open
+// when its agent process exited or its task settled: no result can follow.
+const InterruptedToolError = "interrupted before the tool returned"
+
 // ToolTimingTracker computes per-tool-call duration while converting agent
-// messages to API events and supplies fallback result text from a turn text
-// window.
+// messages to API events, closes tool calls left open by an agent exit or task
+// settlement, and supplies fallback result text from a turn text window.
 //
 // The harness is fixed at construction; the per-stream state
 // (pending, window) accumulates across ConvertMessage calls.
@@ -37,7 +44,7 @@ type ToolTimingTracker struct {
 	harness          harness.Name
 	cost             task.CostTracker
 	pricer           usage.ModelPricer
-	pending          map[agent.ToolKey]time.Time
+	pending          map[agent.ToolKey]pendingTool
 	window           task.ResultTextWindow
 	skillReads       agent.SkillReadTracker // Confirms inferred skill loads.
 	skillTools       agent.SkillToolTracker // Hides reported skill machinery after accounting.
@@ -52,7 +59,7 @@ func NewToolTimingTracker(taskID string, h harness.Name, model string, pricer us
 		harness: h,
 		cost:    task.CostTracker{Harness: h, Model: model},
 		pricer:  pricer,
-		pending: make(map[agent.ToolKey]time.Time),
+		pending: make(map[agent.ToolKey]pendingTool),
 	}
 }
 
@@ -60,11 +67,22 @@ func NewToolTimingTracker(taskID string, h harness.Name, model string, pricer us
 // The physical record ID and zero-based parsed message index address its images.
 func (tt *ToolTimingTracker) ConvertMessage(recordID uint64, messageIndex int, msg agent.Message, now time.Time) []v1.EventMessage {
 	hidden := tt.skillTools.Observe(msg)
+	// A root exit ends every open call: the agent process that would report
+	// their results is gone. Close them before the exit's own events.
+	var events []v1.EventMessage
+	if exit, ok := msg.(*agent.ExitMessage); ok && !exit.Source.IsChild() {
+		events = tt.InterruptOpenTools(now)
+	}
+	closed := len(events)
 	// Fold timing and skill confirmation even when the generic tool is hidden.
-	events := tt.convertMessage(recordID, messageIndex, msg, now)
+	events = append(events, tt.convertMessage(recordID, messageIndex, msg, now)...)
 	if hidden {
-		filtered := events[:0]
-		for i := range events {
+		// A hidden call's result is filtered too, so it is never closed.
+		if m, ok := msg.(*agent.ToolUseMessage); ok {
+			delete(tt.pending, agent.ToolKeyForSource(m.Provenance(), m.ToolUseID))
+		}
+		filtered := events[:closed]
+		for i := closed; i < len(events); i++ {
 			switch events[i].Kind {
 			case v1.EventKindToolUse, v1.EventKindToolResult, v1.EventKindToolOutputDelta:
 				continue
@@ -74,8 +92,47 @@ func (tt *ToolTimingTracker) ConvertMessage(recordID uint64, messageIndex int, m
 		}
 		events = filtered
 	}
-	for i := range events {
+	for i := closed; i < len(events); i++ {
 		events[i].Source = v1.EventMessageSource(*msg.Provenance())
+	}
+	return events
+}
+
+// InterruptOpenTools closes every open generic tool call with an interrupted
+// result under the source of its tool use. Call it when no result can follow,
+// such as when the host settles the task. Results are ordered by start time
+// then key so the projection stays deterministic.
+func (tt *ToolTimingTracker) InterruptOpenTools(now time.Time) []v1.EventMessage {
+	var keys []agent.ToolKey
+	for key := range tt.pending {
+		if tt.pending[key].interruptible {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, func(a, b agent.ToolKey) int {
+		if c := tt.pending[a].started.Compare(tt.pending[b].started); c != 0 {
+			return c
+		}
+		return strings.Compare(a.String(), b.String())
+	})
+	var ts int64
+	if !now.IsZero() {
+		ts = now.UnixMilli()
+	}
+	events := make([]v1.EventMessage, 0, len(keys))
+	for _, key := range keys {
+		open := tt.pending[key]
+		delete(tt.pending, key)
+		events = append(events, v1.EventMessage{
+			Kind:   v1.EventKindToolResult,
+			Ts:     ts,
+			Source: v1.EventMessageSource(open.source),
+			ToolResult: &v1.EventToolResult{
+				ToolUseID: key.ToolUseID,
+				Duration:  open.elapsed(now),
+				Error:     InterruptedToolError,
+			},
+		})
 	}
 	return events
 }
@@ -151,7 +208,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		}
 		return nil
 	case *agent.ToolUseMessage:
-		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now, true)
 		detail, inputView := ToolUseDisplay(m.Name, m.Input, &m.InputView)
 		if m.Detail != "" {
 			detail = m.Detail
@@ -183,7 +240,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			},
 		}}
 	case *agent.AskMessage:
-		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now, false)
 		return []v1.EventMessage{{
 			Kind: v1.EventKindAsk,
 			Ts:   ts,
@@ -193,7 +250,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			},
 		}}
 	case *agent.TodoMessage:
-		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now, false)
 		if todos := TodoItems(m.Todos); len(todos) > 0 {
 			return []v1.EventMessage{{
 				Kind: v1.EventKindTodo,
@@ -220,9 +277,9 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		nativeDuration, _ := agent.NativeDuration(m)
 		duration := nativeDuration.Seconds()
 		key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
-		if started, ok := tt.pending[key]; ok {
-			if duration <= 0 && !now.IsZero() {
-				duration = now.Sub(started).Seconds()
+		if open, ok := tt.pending[key]; ok {
+			if duration <= 0 {
+				duration = open.elapsed(now)
 			}
 			delete(tt.pending, key)
 		}
@@ -425,7 +482,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 		}
 		return nil
 	case *agent.WidgetMessage:
-		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now, true)
 		return []v1.EventMessage{{
 			Kind: v1.EventKindWidget,
 			Ts:   ts,
@@ -465,6 +522,17 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 	}
 }
 
+func (tt *ToolTimingTracker) rememberToolStart(source *agent.MessageSource, toolUseID string, now time.Time, interruptible bool) {
+	key := agent.ToolKeyForSource(source, toolUseID)
+	if key.ToolUseID == "" {
+		return
+	}
+	if _, exists := tt.pending[key]; !exists && len(tt.pending) == maxPendingToolTimings {
+		tt.pending = make(map[agent.ToolKey]pendingTool)
+	}
+	tt.pending[key] = pendingTool{source: *source, started: now, interruptible: interruptible}
+}
+
 func skillLoadEvent(m *agent.SkillLoadMessage, ts int64) v1.EventMessage {
 	return v1.EventMessage{
 		Kind:      v1.EventKindSkillLoad,
@@ -500,15 +568,22 @@ func changeStat(stat *logv3.ChangeStat) *v1.EventChangeStat {
 	}
 }
 
-func (tt *ToolTimingTracker) rememberToolStart(source *agent.MessageSource, toolUseID string, now time.Time) {
-	key := agent.ToolKeyForSource(source, toolUseID)
-	if key.ToolUseID == "" || now.IsZero() {
-		return
+// pendingTool is a tool call whose result has not been converted yet.
+type pendingTool struct {
+	source  agent.MessageSource
+	started time.Time // Zero when the producer time is unknown.
+	// interruptible marks a generic tool call. Questions stay answerable by a
+	// later prompt and plan updates complete on their own, so neither is
+	// closed by an interruption.
+	interruptible bool
+}
+
+// elapsed returns the call's duration in seconds at now, or 0 when unknown.
+func (p *pendingTool) elapsed(now time.Time) float64 {
+	if p.started.IsZero() || now.IsZero() {
+		return 0
 	}
-	if _, exists := tt.pending[key]; !exists && len(tt.pending) == maxPendingToolTimings {
-		tt.pending = make(map[agent.ToolKey]time.Time)
-	}
-	tt.pending[key] = now
+	return now.Sub(p.started).Seconds()
 }
 
 // AskQuestions converts agent ask questions to API DTOs.

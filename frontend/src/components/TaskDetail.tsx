@@ -2597,6 +2597,11 @@ function GroupTiming(props: {
   );
 }
 
+// ToolPendingIcon marks a tool call or group whose work has not finished.
+function ToolPendingIcon() {
+  return <span class={styles.toolPending} role="img" aria-label="Running" />;
+}
+
 function ToolMessageGroup(props: {
   toolCalls: ToolCall[];
   taskId: string;
@@ -2625,79 +2630,60 @@ function ToolMessageGroup(props: {
     return `${props.taskId}:group:${first?.source ? toolIdentity(first.source, "") : first?.use.toolUseID}`;
   };
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
+  const backgroundCommand = (call: ToolCall) =>
+    props.backgroundByToolUseID().get(toolIdentity(call.source, call.use.toolUseID));
   // A call whose detached command still runs is not done, even though its
   // launch already returned, like a command that has not returned yet.
-  const finished = (call: ToolCall) => {
-    if (!call.done) return false;
-    const command = props.backgroundByToolUseID().get(toolIdentity(call.source, call.use.toolUseID));
-    return command?.status !== "running" || props.backgroundSettled();
-  };
+  const finishedCount = createMemo(
+    () =>
+      calls().filter(
+        (call) => call.done && (backgroundCommand(call)?.status !== "running" || props.backgroundSettled()),
+      ).length,
+  );
   const thinkingEvents = () => (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
   const outputDeltaEvents = (toolUseID: string) =>
     (props.events ?? []).filter((e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID);
+  const Row = (row: { call: ToolCall; thinkingEvents?: EventMessage[] }) => (
+    <ToolCallCard
+      call={row.call}
+      taskId={props.taskId}
+      durationMs={row.call.durationMs ?? toolCallDurationMs(row.call, durations())}
+      thinkingEvents={row.thinkingEvents}
+      outputDeltaEvents={outputDeltaEvents(row.call.use.toolUseID)}
+      open={detailsOpenState.get(callKey(row.call)) ?? false}
+      onToggle={(v) => detailsOpenState.set(callKey(row.call), v)}
+      nativeActivity={props.nativeByToolUseID().get(toolIdentity(row.call.source, row.call.use.toolUseID))}
+      nativeSettled={props.nativeSettled}
+      backgroundCommand={backgroundCommand(row.call)}
+      backgroundSettled={props.backgroundSettled}
+    />
+  );
   return (
     <Show when={calls().length > 0}>
       <Show
         when={calls().length > 1 || calls()[0]?.source !== undefined}
-        fallback={
-          <Show when={calls()[0]}>
-            {(call) => (
-              <ToolCallCard
-                call={call()}
-                taskId={props.taskId}
-                durationMs={call().durationMs ?? toolCallDurationMs(call(), durations())}
-                thinkingEvents={thinkingEvents()}
-                outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
-                open={detailsOpenState.get(callKey(call())) ?? false}
-                onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
-                nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
-                nativeSettled={props.nativeSettled}
-                backgroundCommand={props.backgroundByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
-                backgroundSettled={props.backgroundSettled}
-              />
-            )}
-          </Show>
-        }
+        fallback={<Show when={calls()[0]}>{(call) => <Row call={call()} thinkingEvents={thinkingEvents()} />}</Show>}
       >
-        <>
-          <details
-            class={styles.toolGroup}
-            open={isOpen()}
-            onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
-          >
-            <summary>
-              <Show when={!calls().every(finished)}>
-                <span class={styles.toolPending} data-testid="tool-group-pending" />
-              </Show>
-              {calls().filter(finished).length}/{calls().length} tools: {toolCountSummary(calls())}
-            </summary>
-            <div class={styles.toolGroupInner}>
-              <Show when={thinkingEvents().length > 0}>
-                <ThinkingCard events={thinkingEvents()} />
-              </Show>
-              <Index each={calls()}>
-                {(call) => (
-                  <ToolCallCard
-                    call={call()}
-                    taskId={props.taskId}
-                    durationMs={call().durationMs ?? toolCallDurationMs(call(), durations())}
-                    outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
-                    open={detailsOpenState.get(callKey(call())) ?? false}
-                    onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
-                    nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
-                    nativeSettled={props.nativeSettled}
-                    backgroundCommand={props
-                      .backgroundByToolUseID()
-                      .get(toolIdentity(call().source, call().use.toolUseID))}
-                    backgroundSettled={props.backgroundSettled}
-                  />
-                )}
-              </Index>
-            </div>
-          </details>
-        </>
+        <details
+          class={styles.toolGroup}
+          open={isOpen()}
+          onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
+        >
+          <summary>
+            <Show when={finishedCount() < calls().length}>
+              <ToolPendingIcon />
+            </Show>
+            {finishedCount()}/{calls().length} tools: {toolCountSummary(calls())}
+          </summary>
+          <div class={styles.toolGroupInner}>
+            <Show when={thinkingEvents().length > 0}>
+              <ThinkingCard events={thinkingEvents()} />
+            </Show>
+            <Index each={calls()}>{(call) => <Row call={call()} />}</Index>
+          </div>
+        </details>
       </Show>
       <Show when={currentPlan()}>
         {(plan) => (
@@ -3031,7 +3017,7 @@ function ToolCallCard(props: {
                   </Show>
                 }
               >
-                <span class={styles.toolPending} />
+                <ToolPendingIcon />
               </Show>
               {props.call.use.name}
               <For each={props.nativeActivity ?? []}>
