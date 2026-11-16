@@ -2606,7 +2606,8 @@ function GroupTiming(props: {
   );
 }
 
-// ToolPendingIcon marks a tool call or group whose work has not finished.
+// ToolPendingIcon marks a tool call or group whose work has not finished. It
+// trails the summary text.
 function ToolPendingIcon() {
   return <span class={styles.toolPending} role="img" aria-label="Running" />;
 }
@@ -2686,10 +2687,10 @@ function ToolMessageGroup(props: {
           onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
         >
           <summary>
+            {finishedCount()}/{calls().length} tools: {toolCountSummary(calls())}
             <Show when={finishedCount() < calls().length}>
               <ToolPendingIcon />
             </Show>
-            {finishedCount()}/{calls().length} tools: {toolCountSummary(calls())}
           </summary>
           <div class={styles.toolGroupInner}>
             <Show when={thinkingEvents().length > 0}>
@@ -2968,6 +2969,9 @@ function ToolCallCard(props: {
     },
     () => toolCallRunning(props.call, timedCommand(), props.backgroundSettled?.() ?? false),
   );
+  // A running call without a folded background command shows only the trailing
+  // spinner; every other state shows a leading status mark.
+  const toolPending = () => !props.backgroundCommand && !props.call.done;
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
@@ -3008,27 +3012,26 @@ function ToolCallCard(props: {
         <summary>
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
-              <Switch fallback={<span class={styles.toolDone}>&#10003;</span>}>
-                {/* A folded background command outranks every other mark: the
-                    chip resolves to the command's outcome instead of leaving a
-                    perpetual "running in background" mark on a finished call. */}
-                <Match when={props.backgroundCommand} keyed>
-                  {(command) => (
-                    <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
-                  )}
-                </Match>
-                <Match when={!props.call.done}>
-                  <ToolPendingIcon />
-                </Match>
-                <Match when={props.call.result?.interrupted}>
-                  <ToolInterruptedIcon />
-                </Match>
-                <Match when={props.call.use.background}>
-                  <span class={styles.toolBackground} title="Running in background">
-                    &#8943;
-                  </span>
-                </Match>
-              </Switch>
+              <Show when={!toolPending()}>
+                <Switch fallback={<span class={styles.toolDone}>&#10003;</span>}>
+                  {/* A folded background command outranks every other mark: the
+                      chip resolves to the command's outcome instead of leaving a
+                      perpetual "running in background" mark on a finished call. */}
+                  <Match when={props.backgroundCommand} keyed>
+                    {(command) => (
+                      <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
+                    )}
+                  </Match>
+                  <Match when={props.call.result?.interrupted}>
+                    <ToolInterruptedIcon />
+                  </Match>
+                  <Match when={props.call.use.background}>
+                    <span class={styles.toolBackground} title="Running in background">
+                      &#8943;
+                    </span>
+                  </Match>
+                </Switch>
+              </Show>
               {props.call.use.name}
               <For each={props.nativeActivity ?? []}>
                 {(activity) => <NativeActivityStatus activity={activity} settled={props.nativeSettled?.() ?? false} />}
@@ -3040,6 +3043,10 @@ function ToolCallCard(props: {
                 <span class={styles.toolError}> error</span>
               </Show>
             </span>
+            {/* Outside toolSummaryMain so a truncated detail cannot clip it. */}
+            <Show when={toolPending()}>
+              <ToolPendingIcon />
+            </Show>
             <Show when={durationMs() !== null}>
               <span class={styles.toolDuration} data-testid="tool-duration">
                 {formatTimingDuration(durationMs() ?? 0)}
