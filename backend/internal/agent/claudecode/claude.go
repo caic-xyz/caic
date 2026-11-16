@@ -443,9 +443,9 @@ func resultContextWindow(line []byte, model string) int {
 		return int(e.ContextWindow)
 	}
 	if len(w.ModelUsage) == 1 {
-		for _, e := range w.ModelUsage {
-			if e.ContextWindow > 0 {
-				return int(e.ContextWindow)
+		for k := range w.ModelUsage {
+			if cw := w.ModelUsage[k].ContextWindow; cw > 0 {
+				return int(cw)
 			}
 		}
 	}

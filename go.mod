@@ -14,7 +14,7 @@ require (
 	github.com/klauspost/compress v1.20.3
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.3.1
-	github.com/maruel/genai v0.11.2-0.20261116020409-76209c25f72b
+	github.com/maruel/genai v0.11.2-0.20261116152106-49e41e3abcaa
 	github.com/maruel/gomode v0.3.1-0.20261116023917-0afe0cac3a18
 	github.com/maruel/ksid v0.1.2
 	github.com/maruel/roundtrippers v0.5.1

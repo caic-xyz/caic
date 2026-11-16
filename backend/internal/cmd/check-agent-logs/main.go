@@ -28,11 +28,6 @@ import (
 	pidto "github.com/maruel/genai/providers/pi"
 )
 
-// TODO: Add Claude Code's dev_intent subtype (fields kind, trigger) to genai's
-// claudecode.SystemSubtype, then register it here together with the genai
-// subtypes this map omits: control_request_progress, informational,
-// memory_recall, mirror_error, notification, permission_denied,
-// plugin_install, and worker_shutting_down.
 var knownClaudeSystemSubtypes = map[claudedto.SystemSubtype]struct{}{
 	claudedto.SystemInit:        {},
 	claudedto.SystemTaskStarted: {}, claudedto.SystemTaskNotification: {},
@@ -46,6 +41,10 @@ var knownClaudeSystemSubtypes = map[claudedto.SystemSubtype]struct{}{
 	claudedto.SystemFilesPersisted: {}, claudedto.SystemElicitationComplete: {},
 	claudedto.SystemPostTurnSummary: {}, claudedto.SystemModelRefusalFallback: {},
 	claudedto.SystemModelRefusalNoFallback: {}, claudedto.SystemVCSStateChanged: {},
+	claudedto.SystemControlRequestProgress: {}, claudedto.SystemInformational: {},
+	claudedto.SystemMemoryRecall: {}, claudedto.SystemMirrorError: {},
+	claudedto.SystemNotification: {}, claudedto.SystemPermissionDenied: {},
+	claudedto.SystemPluginInstall: {}, claudedto.SystemWorkerShuttingDown: {},
 }
 
 type config struct {
@@ -600,9 +599,16 @@ func checkClaude(data []byte) (string, error) {
 		dst = &claudedto.OutputResultMsg{}
 	case claudedto.OutputSystem:
 		subtype := claudedto.SystemSubtype(probe.Subtype)
-		if subtype == claudedto.SystemInit {
+		switch subtype {
+		case claudedto.SystemInit:
 			dst = &claudedto.OutputInitMsg{}
-		} else {
+		case claudedto.SystemDevIntent:
+			dst = &claudedto.OutputDevIntentMsg{}
+		case claudedto.SystemSessionWritesLost:
+			dst = &claudedto.OutputSessionWritesLostMsg{}
+		case claudedto.SystemCodeChangePublished:
+			dst = &claudedto.OutputCodeChangePublishedMsg{}
+		default:
 			if _, ok := knownClaudeSystemSubtypes[subtype]; !ok {
 				return "OutputSystemMsg", fmt.Errorf("unrecognized Claude Code system subtype %q; add its DTO and checker dispatch", probe.Subtype)
 			}
@@ -628,6 +634,10 @@ func checkClaude(data []byte) (string, error) {
 		dst = &claudedto.InputControlResponseMsg{}
 	case claudedto.OutputControlCancelRequest:
 		dst = &claudedto.OutputControlCancelRequestMsg{}
+	case claudedto.OutputConversationReset:
+		dst = &claudedto.OutputConversationResetMsg{}
+	case claudedto.OutputCommandLifecycle:
+		dst = &claudedto.OutputCommandLifecycleMsg{}
 	default:
 		return "OutputTypeProbe", fmt.Errorf("unrecognized Claude Code output type %q; add its DTO and checker dispatch", probe.Type)
 	}
@@ -672,10 +682,14 @@ func checkCodex(data []byte) (string, error) {
 		dst = &codexdto.McpToolCallProgressNotification{}
 	case codexdto.MethodThreadStatusChanged:
 		dst = &codexdto.ThreadStatusChangedNotification{}
+	case codexdto.MethodThreadGoalUpdated:
+		dst = &codexdto.ThreadGoalUpdatedNotification{}
 	case codexdto.MethodThreadGoalCleared:
 		dst = &codexdto.ThreadGoalClearedNotification{}
 	case codexdto.MethodModelRerouted:
 		dst = &codexdto.ModelReroutedNotification{}
+	case codexdto.MethodModelSafetyBufferingUpdated:
+		dst = &codexdto.ModelSafetyBufferingUpdatedNotification{}
 	case codexdto.MethodMcpServerStatusUpdated:
 		dst = &codexdto.McpServerStatusUpdatedNotification{}
 	case codexdto.MethodAccountRateLimitsUpdated:
