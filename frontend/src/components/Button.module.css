@@ -67,6 +67,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
 /* Mobile */
 @media (width <= 768px) {
   .btn {

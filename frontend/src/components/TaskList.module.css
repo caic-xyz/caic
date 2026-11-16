@@ -64,6 +64,12 @@
   transition: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .list {
+    transition-property: opacity;
+  }
+}
+
 .header {
   display: flex;
   align-items: center;

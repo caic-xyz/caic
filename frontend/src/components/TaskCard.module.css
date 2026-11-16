@@ -94,12 +94,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .asking {
-    animation: none;
-  }
-}
-
 .featureIconBadge {
   display: inline-flex;
   flex-shrink: 0;
@@ -404,6 +398,14 @@ a.featureIconBadge:focus-visible {
 @keyframes purge-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asking,
+  .purgeSpinner,
+  .reviveSpinner {
+    animation: none;
   }
 }
 
