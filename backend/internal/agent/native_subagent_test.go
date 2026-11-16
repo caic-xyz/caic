@@ -12,11 +12,11 @@ func TestNativeSubagentTimeline(t *testing.T) {
 	t.Run("newer run reopens a card and rejects older runs", func(t *testing.T) {
 		t.Parallel()
 		var timeline NativeSubagentTimeline
-		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Status: NativeSubagentStatusCompleted, Result: "waiting"})
-		timeline.Apply(&NativeSubagent{ID: "child", RunID: "002", Status: NativeSubagentStatusRunning, Background: true})
-		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Status: NativeSubagentStatusCompleted, Result: "stale"})
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Label: "Implement", Prompt: "first", Status: NativeSubagentStatusCompleted, Result: "waiting"})
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "002", Prompt: "second", Status: NativeSubagentStatusRunning, Background: true})
+		timeline.Apply(&NativeSubagent{ID: "child", RunID: "001", Prompt: "stale", Status: NativeSubagentStatusCompleted, Result: "stale"})
 		cards := timeline.Subagents()
-		if len(cards) != 1 || cards[0].Status != NativeSubagentStatusRunning || cards[0].Result != "" || timeline.ActiveBackground() != 1 {
+		if len(cards) != 1 || cards[0].Status != NativeSubagentStatusRunning || cards[0].Result != "" || cards[0].Prompt != "second" || cards[0].Label != "Implement" || timeline.ActiveBackground() != 1 {
 			t.Fatalf("cards = %#v, want one active new run", cards)
 		}
 		timeline.Apply(&NativeSubagent{ID: "child", RunID: "002", Status: NativeSubagentStatusCompleted, Result: "checked"})

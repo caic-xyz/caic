@@ -139,7 +139,8 @@ export class NativeActivityTracker {
         scope: old?.scope || s.scope,
         groupID: old?.groupID || s.groupID,
         label: old?.label || s.label,
-        prompt: old?.prompt || s.prompt,
+        // A resumed run carries its own prompt.
+        prompt: resumed ? s.prompt : old?.prompt || s.prompt,
         // A terminal observation upgrades an interim result, but terminal
         // results do not overwrite each other.
         result: resumed

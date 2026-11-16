@@ -13,7 +13,8 @@ type NativeSubagentTimeline struct {
 // and are ignored. Repeated observations enrich missing optional information,
 // except that a terminal observation's result upgrades an earlier interim one;
 // terminal outcomes are retained within a run. A newer ordered RunID reopens
-// the same card; observations from older runs cannot change it.
+// the same card with that run's prompt; observations from older runs cannot
+// change it.
 func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 	observed := *s
 	if observed.ID == "" {
@@ -36,6 +37,7 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 		if observed.RunID != old.RunID {
 			old.RunID = observed.RunID
 			old.Status = NativeSubagentStatusUnknown
+			old.Prompt = ""
 			old.Result = ""
 		}
 	}

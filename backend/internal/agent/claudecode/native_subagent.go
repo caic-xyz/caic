@@ -132,6 +132,10 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 		if ev.RunID < s.RunID {
 			return nil, nil
 		}
+		if ev.RunID != s.RunID {
+			// A resumed run carries its own prompt in its task_started record.
+			s.Prompt = ""
+		}
 		s.RunID = ev.RunID
 	}
 	if ev.ToolUseID != "" {

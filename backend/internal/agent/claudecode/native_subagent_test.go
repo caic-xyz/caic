@@ -16,12 +16,12 @@ func TestNativeSubagentResumedRun(t *testing.T) {
 	t.Parallel()
 	// Claude 2.1.319 task 4V6FPSTTU000 completed a child while its shell
 	// checks ran, then woke the same child with a newer run_id.
-	observations := historyObservations(t, [][]byte{
-		[]byte(`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"001","is_backgrounded":true}`),
-		[]byte(`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Waiting for checks"}`),
-		[]byte(`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"002","is_backgrounded":true}`),
-		[]byte(`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Stale completion"}`),
-	})
+	observations := wireSubagents(t,
+		`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"001","is_backgrounded":true}`,
+		`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Waiting for checks"}`,
+		`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"002","is_backgrounded":true}`,
+		`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","status":"completed","summary":"Stale completion"}`,
+	)
 	cards, active := agenttest.FoldNativeSubagents(observations)
 	if len(cards) != 1 || cards[0].Status != agent.NativeSubagentStatusRunning || cards[0].Result != "" || active != 1 {
 		t.Fatalf("cards = %#v, active = %d, want one reopened child without its previous result", cards, active)
@@ -33,30 +33,21 @@ func TestNativeSubagentSendMessageResume(t *testing.T) {
 	// Claude task 4VN78Q1IU000 resumed a completed background agent with
 	// SendMessage. The new run's task_started names the SendMessage tool use, and
 	// its tool result only acknowledges the resumption while the run continues.
-	wire := New().NewWire()
-	var got []agent.NativeSubagent
-	for _, line := range []string{
+	got := wireSubagents(t,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Implement","prompt":"Implement","subagent_type":"general-purpose","run_in_background":true}}]}}`,
 		`{"type":"system","subtype":"task_started","task_id":"child","run_id":"001","tool_use_id":"spawn","is_backgrounded":true,"task_type":"local_agent"}`,
 		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"spawn","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully."}]}]},"tool_use_result":{"status":"async_launched"}}`,
 		`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","tool_use_id":"spawn","status":"completed","summary":"Done"}`,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"resume","name":"SendMessage","input":{"to":"child","message":"Redesign"}}]}}`,
-		`{"type":"system","subtype":"task_started","task_id":"child","run_id":"002","tool_use_id":"resume","is_backgrounded":true,"task_type":"local_agent"}`,
+		`{"type":"system","subtype":"task_started","task_id":"child","run_id":"002","tool_use_id":"resume","is_backgrounded":true,"task_type":"local_agent","prompt":"Redesign"}`,
 		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"resume","type":"tool_result","content":[{"type":"text","text":"{\"success\":true,\"message\":\"Resuming agent child\"}"}]}]},"tool_use_result":{"success":true,"resumedAgentId":"child"}}`,
-	} {
-		msgs, err := wire.ParseOutput([]byte(line))
-		if err != nil {
-			t.Fatalf("ParseOutput(%s): %v", line, err)
-		}
-		for _, m := range msgs {
-			if native, ok := m.(*agent.NativeSubagentMessage); ok {
-				got = append(got, native.Subagent)
-			}
-		}
-	}
+	)
 	cards, active := agenttest.FoldNativeSubagents(got)
 	if len(cards) != 1 || cards[0].Status != agent.NativeSubagentStatusRunning || !cards[0].Background || active != 1 {
 		t.Fatalf("cards = %#v, active = %d, want one running background child", cards, active)
+	}
+	if cards[0].Prompt != "Redesign" || cards[0].Label != "Implement" {
+		t.Fatalf("card = %#v, want the resumed run's prompt under the original label", cards[0])
 	}
 }
 
@@ -133,13 +124,13 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 	// History through task_started; the tail continues with the child stream
 	// message, task_updated, task_notification, and the parent tool result.
 	history, tail := evidence.Payloads[:2], evidence.Payloads[2:]
-	restored, restoredActive := agenttest.FoldNativeSubagents(historyObservations(t, history))
+	restored, restoredActive := agenttest.FoldNativeSubagents(wireSubagents(t, history...))
 	if len(restored) != 1 || restored[0].Status != agent.NativeSubagentStatusRunning || restoredActive != 1 {
 		t.Fatalf("restored = %#v active = %d, want one running card", restored, restoredActive)
 	}
 	live := agenttest.RestartNativeSubagents(t, history, tail, New().NewWire())
 
-	observations := append(historyObservations(t, history), live...)
+	observations := append(wireSubagents(t, history...), live...)
 	cards, active := agenttest.FoldNativeSubagents(observations)
 	if len(cards) != 1 || cardStatus(cards) != agent.NativeSubagentStatusCompleted || active != 0 {
 		t.Fatalf("cards = %#v active = %d, want one completed card after restart", cards, active)
@@ -150,14 +141,15 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 }
 
 // historyObservations returns the canonical observations of a record prefix.
-func historyObservations(t *testing.T, payloads [][]byte) []agent.NativeSubagent {
-	t.Helper()
+// wireSubagents parses records through one fresh live wire and returns every
+// native-subagent observation it emits, in order.
+func wireSubagents[T string | []byte](t *testing.T, records ...T) []agent.NativeSubagent {
 	wire := New().NewWire()
 	var out []agent.NativeSubagent
-	for index, payload := range payloads {
-		messages, err := wire.ParseOutput(payload)
+	for index, record := range records {
+		messages, err := wire.ParseOutput([]byte(record))
 		if err != nil {
-			t.Fatalf("history record %d: %v", index, err)
+			t.Fatalf("record %d: %v", index, err)
 		}
 		for _, message := range messages {
 			if native, ok := message.(*agent.NativeSubagentMessage); ok {
@@ -206,37 +198,20 @@ func TestClaudeSubagentStatus(t *testing.T) {
 // is_backgrounded is authoritative when it is not.
 func TestNativeSubagentBackground(t *testing.T) {
 	t.Parallel()
-	observations := func(t *testing.T, lines ...string) []agent.NativeSubagent {
-		t.Helper()
-		wire := New().NewWire()
-		var out []agent.NativeSubagent
-		for _, line := range lines {
-			msgs, err := wire.ParseOutput([]byte(line))
-			if err != nil {
-				t.Fatalf("ParseMessage(%s): %v", line, err)
-			}
-			for _, message := range msgs {
-				if native, ok := message.(*agent.NativeSubagentMessage); ok {
-					out = append(out, native.Subagent)
-				}
-			}
-		}
-		return out
-	}
 	toolUse := func(id, background string) []string {
 		return []string{
 			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose","run_in_background":` + background + `}}]}}`,
 			`{"type":"system","subtype":"task_started","task_id":"` + id + `","tool_use_id":"spawn","subagent_type":"general-purpose","task_type":"local_agent"}`,
 		}
 	}
-	if got := observations(t, toolUse("bg-input", "true")...); len(got) != 1 || !got[0].Background {
+	if got := wireSubagents(t, toolUse("bg-input", "true")...); len(got) != 1 || !got[0].Background {
 		t.Fatalf("tool input = %#v, want one detached card", got)
 	}
-	if got := observations(t, toolUse("fg", "false")...); len(got) != 1 || got[0].Background {
+	if got := wireSubagents(t, toolUse("fg", "false")...); len(got) != 1 || got[0].Background {
 		t.Fatalf("foreground = %#v, want one attached card", got)
 	}
 	taskRecord := `{"type":"system","subtype":"task_started","task_id":"bg-record","tool_use_id":"spawn","subagent_type":"general-purpose","is_backgrounded":true,"task_type":"local_agent"}`
-	if got := observations(t,
+	if got := wireSubagents(t,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
 		taskRecord,
 	); len(got) != 1 || !got[0].Background {
@@ -249,26 +224,13 @@ func TestNativeSubagentBackground(t *testing.T) {
 // carries a tool result for the same tool use ID.
 func TestNativeSubagentChildStreamCannotSettle(t *testing.T) {
 	t.Parallel()
-	wire := New().NewWire()
-	feed := func(line string) []agent.Message {
-		msgs, err := wire.ParseOutput([]byte(line))
-		if err != nil {
-			t.Fatalf("ParseMessage(%s): %v", line, err)
-		}
-		return msgs
-	}
-	feed(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"test-spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`)
-	feed(`{"type":"system","subtype":"task_started","task_id":"test-agent","tool_use_id":"test-spawn","task_type":"local_agent"}`)
-
-	child := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"test-spawn","type":"tool_result","content":[{"type":"text","text":"child noise"}]}]},"parent_tool_use_id":"test-spawn"}`
-	var native []*agent.NativeSubagentMessage
-	for _, message := range feed(child) {
-		if m, ok := message.(*agent.NativeSubagentMessage); ok {
-			native = append(native, m)
-		}
-	}
-	if len(native) != 0 {
-		t.Fatalf("child stream produced %d lifecycle updates, want 0", len(native))
+	got := wireSubagents(t,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"test-spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
+		`{"type":"system","subtype":"task_started","task_id":"test-agent","tool_use_id":"test-spawn","task_type":"local_agent"}`,
+		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"test-spawn","type":"tool_result","content":[{"type":"text","text":"child noise"}]}]},"parent_tool_use_id":"test-spawn"}`,
+	)
+	if len(got) != 1 || got[0].Status != agent.NativeSubagentStatusRunning {
+		t.Fatalf("observations = %#v, want only the running task_started card", got)
 	}
 }
 
