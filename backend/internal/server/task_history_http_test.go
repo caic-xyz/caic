@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
@@ -36,6 +37,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 )
 
@@ -1121,6 +1123,66 @@ func TestHistoryCompressionAndRevival(t *testing.T) {
 	retained := historyRequest(t, s, recentHistoryURL(&initial), "")
 	if retained.Code != 200 || retained.Body.String() != original.Body.String() {
 		t.Fatal("revival changed an earlier immutable chunk")
+	}
+}
+
+// TestHistorySettlementKeepsPositions pins the cache contract of terminal
+// stream trimming: elision keeps every record's position, so the immutable
+// slice a browser cached before settlement and the one served after it agree
+// on every event except the repeated stream deltas.
+func TestHistorySettlementKeepsPositions(t *testing.T) {
+	t.Parallel()
+	s, tk, path := historyHTTPFixture(t)
+	stream := func(event string) string {
+		return `{"t":"agent","ts":3.000,"msg":{"type":"stream_event","event":` + event + `,"session_id":"s","parent_tool_use_id":null,"api_message_id":"m"}}`
+	}
+	appendHistory(t, path, stream(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}`))
+	appendHistory(t, path, stream(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}`))
+	appendHistory(t, path, stream(`{"type":"content_block_stop","index":0}`))
+	appendHistory(t, path, `{"t":"agent","ts":3.000,"msg":{"type":"assistant","message":{"id":"m","role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"s","parent_tool_use_id":null}}`)
+	initial := historyBootstrap(t, s, tk, "")
+	events := func(w *httptest.ResponseRecorder) []v1.HistoryEvent {
+		if w.Code != http.StatusOK {
+			t.Fatalf("slice = %d %s", w.Code, w.Body)
+		}
+		var out []v1.HistoryEvent
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	cached := events(historyRequest(t, s, recentHistoryURL(&initial), ""))
+
+	store := taskhistory.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(filepath.Dir(path)), agent.Backends{harness.Claude: claudecode.New()})
+	compressed, err := store.Compress(path, nil, task.StatePurged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := s.taskMgr.GetEntry(tk.ID)
+	tk.SetState(task.StatePurged)
+	entry.LogPath.Set(compressed)
+	s.taskHandlers.taskSvc.history.prune(false)
+
+	settled := historyBootstrap(t, s, tk, "")
+	if settled.ResourceBase != initial.ResourceBase || settled.Through != initial.Through {
+		t.Fatalf("settled bootstrap = %+v, want the cached identity and prefix", settled)
+	}
+	served := events(historyRequest(t, s, recentHistoryURL(&initial), ""))
+	var repeated []v1.HistoryEvent
+	for _, e := range cached {
+		if e.Message.Kind != v1.EventKindTextDelta {
+			repeated = append(repeated, e)
+		}
+	}
+	if len(repeated) == len(cached) {
+		t.Fatal("fixture streamed no text deltas")
+	}
+	if !slices.EqualFunc(served, repeated, func(a, b v1.HistoryEvent) bool {
+		x, _ := json.Marshal(a)
+		y, _ := json.Marshal(b)
+		return bytes.Equal(x, y)
+	}) {
+		t.Fatalf("served:\n%+v\nwant the cached events without stream deltas:\n%+v", served, repeated)
 	}
 }
 

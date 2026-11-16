@@ -543,6 +543,11 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	}
 }
 
+// NewStreamTrim implements agent.StreamTrimmer; see stream_trim.go.
+func (*wireFormat) NewStreamTrim() agent.StreamTrim {
+	return &streamTrim{stopped: make(map[streamBlock]struct{})}
+}
+
 // rememberQuestion runs after control ownership has been resolved. Recording
 // non-question IDs too prevents a later colliding request from turning a
 // permission response into a user answer.

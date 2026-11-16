@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"iter"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -178,7 +180,11 @@ func (s *Store) Compress(path string, log agent.LogSink, state task.State) (stri
 	if !state.IsTerminal() {
 		return path, nil
 	}
-	return s.Journal.Compress(path)
+	elide, err := s.streamTrimElide(path)
+	if err != nil {
+		return path, err
+	}
+	return s.Journal.Compress(path, elide)
 }
 
 // CompressTerminal closes and compresses a terminal log, then publishes the
@@ -311,6 +317,58 @@ func (*Store) LoadRelayBoundaries(path string) (records []agent.RelayRecordBound
 		return nil, "", retErr
 	}
 	return relay.records, relay.generation, nil
+}
+
+// streamTrimElide selects the records a terminal log elides: no relay
+// reconciles it and no session resumes it, so streamed increments its harness
+// repeats in final records go. Elision keeps every record's history position,
+// so immutable history resources cached before settlement stay valid; they only
+// still carry the repeated increments. It returns nil, an exact copy, when the
+// source is
+// already settled, its harness has no trim rule or is no longer configured, or
+// the rule rejects a record: a trim failure must not block settlement. Both
+// passes decode records identically, so a log the first pass accepts cannot
+// fail the second.
+func (s *Store) streamTrimElide(path string) (func(*taskslog.Frame) (bool, error), error) {
+	if taskslog.IsCompressed(path) {
+		return nil, nil //nolint:nilnil // A nil elide requests an exact copy.
+	}
+	var trim agent.StreamTrim
+	// The copy pass validates EOF; this pass may stop early.
+	err := taskslog.ScanFile(path, false, func(_ os.FileInfo, scanner *taskslog.Scanner, _ v3.MetaMessage) error {
+		parser, err := s.resolver.ResolveParser(harness.Name(scanner.Harness))
+		if err != nil {
+			return nil //nolint:nilerr // An unconfigured harness settles untrimmed.
+		}
+		trimmer, ok := parser.(agent.StreamTrimmer)
+		if !ok {
+			return nil
+		}
+		trim = trimmer.NewStreamTrim()
+		for scanner.Scan() {
+			if f := scanner.Frame(); f.Kind == taskslog.KindAgent {
+				if err := trim.Observe(f.Native); err != nil {
+					s.log.Warn("settle task log untrimmed", "path", path, "err", err)
+					trim = nil
+					return nil
+				}
+			}
+		}
+		return scanner.Err()
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		// A concurrent settlement compressed the log; Journal.Compress adopts it.
+		return nil, nil //nolint:nilnil // A nil elide requests an exact copy.
+	}
+	if err != nil || trim == nil {
+		return nil, err
+	}
+	return func(f *taskslog.Frame) (bool, error) {
+		if f.Kind != taskslog.KindAgent {
+			return false, nil
+		}
+		return trim.Superseded(f.Native)
+	}, nil
 }
 
 func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]struct{}) error {

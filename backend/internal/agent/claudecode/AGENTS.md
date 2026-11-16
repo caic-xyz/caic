@@ -45,6 +45,20 @@ command.
 result (`tool_use_result.resumedAgentId`) only acknowledges the resumption and
 never settles the card.
 
+## Settled stream trimming
+
+Claude Code emits each content block in full as an `assistant` record when the
+block's `stream_event` `content_block_stop` arrives: text, tool input, and the
+thinking signature. Thinking text is the exception: the final `thinking` block
+carries only `signature`, so `thinking_delta` holds the only copy. Stream
+events name their block by `session_id`, `parent_tool_use_id`,
+`api_message_id`, and `event.index`; message-level events carry no index.
+`stream_trim.go` selects `text_delta`, `input_json_delta`, and
+`signature_delta` records of stopped blocks; terminal compression replaces each
+with an `elided` record, so history positions and cached immutable slices stay
+valid. Across every locally readable Claude v3 log, that elides 57% of the
+records, and every other message keeps its record and position.
+
 A sanitized v3 task record proves the observable lifecycle:
 `system/task_started` carries `task_id`, `tool_use_id`, `description`,
 `is_backgrounded`, and `task_type`; the matching `system/task_notification`

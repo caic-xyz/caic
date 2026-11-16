@@ -360,6 +360,14 @@ type RelayGenerationMessage struct {
 	Generation  string `json:"generation"`
 }
 
+// ElidedMessage occupies the position of a record that terminal settlement
+// removed because a later record repeats its content. It projects nothing.
+type ElidedMessage struct {
+	MessageProvenance
+
+	MessageType string `json:"t"`
+}
+
 // ModelInfoMessage is the persisted ModelInfoMessage representation.
 type ModelInfoMessage struct {
 	MessageProvenance

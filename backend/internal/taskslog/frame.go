@@ -60,6 +60,8 @@ func (t Kind) controlKind() (logControlKind, bool) {
 		return logControlMCPRequest, true
 	case KindRelayGeneration:
 		return logControlRelayGeneration, true
+	case KindElided:
+		return logControlElided, true
 	default:
 		return 0, false
 	}
@@ -152,6 +154,9 @@ const (
 	KindUserInput           Kind = "user_input"
 	KindMCPRequest          Kind = "mcp_request"
 	KindRelayGeneration     Kind = "relay_generation"
+	// KindElided stands in for a record a settled log no longer stores, so
+	// every later record keeps its one-based history position.
+	KindElided Kind = "elided"
 )
 
 const (
@@ -287,6 +292,7 @@ var v3ControlFields = map[logControlKind][]string{
 	logControlUserInput:           {"images", "text", "ts"},
 	logControlMCPRequest:          {"arguments", "id", "method", "name"},
 	logControlRelayGeneration:     {"generation"},
+	logControlElided:              nil,
 }
 
 func v3ControlFieldAllowed(kind logControlKind, field string) bool {
@@ -412,6 +418,7 @@ const (
 	logControlUserInput
 	logControlMCPRequest
 	logControlRelayGeneration
+	logControlElided
 )
 
 // newControl returns an empty v3 control of the kind's owned schema.
@@ -456,6 +463,8 @@ func newControl(kind logControlKind) any {
 		out = new(v3.MCPRequestMessage)
 	case logControlRelayGeneration:
 		out = new(v3.RelayGenerationMessage)
+	case logControlElided:
+		out = new(v3.ElidedMessage)
 	}
 	return out
 }

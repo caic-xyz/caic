@@ -862,7 +862,7 @@ func TestLoadLogHeader(t *testing.T) {
 			t.Fatalf("expected header cache after scan: %v", err)
 		}
 		store := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))
-		compressed, err := store.Journal.Compress(path)
+		compressed, err := store.Journal.Compress(path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

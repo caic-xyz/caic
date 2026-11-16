@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -497,6 +498,55 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("CompressElidesSupersededClaudeDeltas", func(t *testing.T) {
+		t.Parallel()
+		store := NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
+		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
+		log, err := openTaskLog(store, tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream := func(event string) string {
+			return `{"t":"agent","ts":1.000,"msg":{"type":"stream_event","event":` + event + `,"session_id":"s","parent_tool_use_id":null,"api_message_id":"m"}}` + "\n"
+		}
+		// Block 0 streams thinking, whose final record carries only a signature.
+		// Block 1 streams text and stops, so its final record repeats it. Block
+		// 2 is interrupted before it stops.
+		records := []string{
+			stream(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}`),
+			stream(`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`),
+			stream(`{"type":"content_block_stop","index":0}`),
+			stream(`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}`),
+			stream(`{"type":"content_block_stop","index":1}`),
+			`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"id":"m","role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"s","parent_tool_use_id":null}}` + "\n",
+			stream(`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Interr"}}`),
+		}
+		for _, r := range records {
+			if err := log.AppendRecord(agent.PhysicalRecord{Encoded: []byte(r)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		compressed, err := store.Compress(log.path, log, task.StatePurged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var kept []string
+		if err := taskslog.ScanFile(compressed, true, func(_ os.FileInfo, scanner *taskslog.Scanner, _ v3.MetaMessage) error {
+			for scanner.Scan() {
+				kept = append(kept, string(scanner.Bytes())+"\n")
+			}
+			return scanner.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// Elision keeps every record's position.
+		const elided = `{"t":"elided"}` + "\n"
+		want := []string{records[0], elided, records[2], elided, records[4], records[5], records[6]}
+		if !slices.Equal(kept, want) {
+			t.Fatalf("kept records:\n%s\nwant:\n%s", strings.Join(kept, ""), strings.Join(want, ""))
+		}
+	})
+
 	t.Run("CompressPath", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Success", func(t *testing.T) {
@@ -507,7 +557,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			compressed, err := taskslog.NewStore(filepath.Dir(path)).Compress(path)
+			compressed, err := taskslog.NewStore(filepath.Dir(path)).Compress(path, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -545,7 +595,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := taskslog.NewStore(filepath.Dir(path)).Compress(path); err == nil {
+			if _, err := taskslog.NewStore(filepath.Dir(path)).Compress(path, nil); err == nil {
 				t.Fatal("compressPath returned nil error")
 			}
 			data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
@@ -619,7 +669,7 @@ func TestStore(t *testing.T) {
 			staleMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV3), Harness: string(harness.Claude), Prompt: "stale source"})
 			writeLogFile(t, dir, filepath.Base(path), staleMeta, trailer)
 			// An interrupted compression left a stale compressed copy behind.
-			if _, err := taskslog.NewStore(filepath.Dir(path)).Compress(path); err != nil {
+			if _, err := taskslog.NewStore(filepath.Dir(path)).Compress(path, nil); err != nil {
 				t.Fatal(err)
 			}
 			authMeta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV3), Harness: string(harness.Claude), Prompt: "authoritative source"})

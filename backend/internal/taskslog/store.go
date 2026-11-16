@@ -295,11 +295,14 @@ func (s *Store) SaveInputQueue(entries []inputqueue.Entry) error {
 }
 
 // Compress atomically replaces a plain terminal task log with its zstd
-// representation. A failed compression leaves the source log intact. Calls
-// for the same path are serialized by compressMu, so a concurrent compressor
-// either observes the compressed result and returns it, or sees the plain
-// source gone with the compressed sibling present and adopts it.
-func (s *Store) Compress(path string) (string, error) {
+// representation. A nil elide copies the exact bytes; otherwise frames are
+// validated and each record elide selects is replaced by an elided record, so
+// every record keeps its position. A failed compression leaves the source log
+// intact. Calls for the same path are
+// serialized by compressMu, so a concurrent compressor either observes the
+// compressed result and returns it, or sees the plain source gone with the
+// compressed sibling present and adopts it.
+func (s *Store) Compress(path string, elide func(*Frame) (bool, error)) (string, error) {
 	s.compressMu.Lock()
 	defer s.compressMu.Unlock()
 	if path == "" || IsCompressed(path) {
@@ -337,7 +340,12 @@ func (s *Store) Compress(path string) (string, error) {
 	if err != nil {
 		return "", errors.Join(err, in.Close(), out.Close())
 	}
-	_, copyErr := io.Copy(enc, in)
+	var copyErr error
+	if elide == nil {
+		_, copyErr = io.Copy(enc, in)
+	} else {
+		copyErr = copyEliding(enc, in, path, elide)
+	}
 	closeErr := errors.Join(enc.Close(), out.Close(), in.Close())
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		_ = os.Remove(tmp)
@@ -367,6 +375,49 @@ func (s *Store) Compress(path string) (string, error) {
 		)
 	}
 	return dst, nil
+}
+
+// elidedRecord is the encoded placeholder of an elided record.
+var elidedRecord = []byte(`{"t":"` + string(KindElided) + `"}`)
+
+// copyEliding writes every record LF-terminated, replacing the ones elide
+// selects with elidedRecord.
+func copyEliding(w io.Writer, r io.Reader, src string, elide func(*Frame) (bool, error)) error {
+	scanner := NewScanner(r, src)
+	if _, err := scanner.ReadHeader(); err != nil {
+		return err
+	}
+	if err := writeRecord(w, scanner.HeaderFrame.Encoded); err != nil {
+		return err
+	}
+	for scanner.Scan() {
+		elided, err := elide(scanner.Frame())
+		if err != nil {
+			return err
+		}
+		record := scanner.Bytes()
+		if elided {
+			record = elidedRecord
+		}
+		if err := writeRecord(w, record); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !scanner.EOFValidated() {
+		return fmt.Errorf("%s: task log ended before EOF validation", src)
+	}
+	return nil
+}
+
+func writeRecord(w io.Writer, encoded []byte) error {
+	if _, err := w.Write(encoded); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte{'\n'})
+	return err
 }
 
 // resolveName validates name is a plain task-log filename and joins it under

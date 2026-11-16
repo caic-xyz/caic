@@ -2345,7 +2345,7 @@ func TestMCPTools(t *testing.T) {
 				path := filepath.Join(dir, id.String()+".jsonl")
 				if compressed {
 					var err error
-					path, err = taskslog.NewStore(dir).Compress(path)
+					path, err = taskslog.NewStore(dir).Compress(path, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -2398,7 +2398,7 @@ func TestMCPTools(t *testing.T) {
 				path := filepath.Join(dir, id.String()+".jsonl")
 				if compressed {
 					var err error
-					path, err = taskslog.NewStore(dir).Compress(path)
+					path, err = taskslog.NewStore(dir).Compress(path, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -2437,7 +2437,7 @@ func TestMCPTools(t *testing.T) {
 				path := filepath.Join(dir, id.String()+".jsonl")
 				if compressed {
 					var err error
-					path, err = taskslog.NewStore(dir).Compress(path)
+					path, err = taskslog.NewStore(dir).Compress(path, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

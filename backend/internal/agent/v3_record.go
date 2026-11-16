@@ -128,7 +128,7 @@ func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, erro
 		if m.ContextWindow > 0 {
 			p.contextWindow = int(m.ContextWindow)
 		}
-	case *v3.RelayGenerationMessage:
+	case *v3.RelayGenerationMessage, *v3.ElidedMessage:
 	case *v3.SystemMessage:
 		msg := SystemMessage(*m)
 		if frame.Kind == taskslog.KindContextCleared {

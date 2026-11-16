@@ -186,6 +186,23 @@ type CompactCommand interface {
 	EncodeCompact(instructions string) ([]byte, error)
 }
 
+// StreamTrimmer is an optional MessageParser extension for providers whose
+// native output repeats streamed increments in a later final record. A settled
+// log, which no relay reconciles and no session resumes, elides the increments.
+type StreamTrimmer interface {
+	NewStreamTrim() StreamTrim
+}
+
+// StreamTrim selects one log's superseded native output records in two ordered
+// passes: Observe sees every output record, then Superseded decides each one.
+// Eliding the selected records must leave the history projection unchanged
+// except for increments a final record repeats. Input lines may alias scanner
+// memory and must not be retained.
+type StreamTrim interface {
+	Observe(line []byte) error
+	Superseded(line []byte) (bool, error)
+}
+
 // ErrCompactInstructionsUnsupported reports that native compaction cannot honor
 // custom instructions. The request is rejected without sending a native command.
 var ErrCompactInstructionsUnsupported = errors.New("custom compaction instructions are not supported")

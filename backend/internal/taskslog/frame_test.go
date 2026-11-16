@@ -121,6 +121,25 @@ func TestDecodeFrame(t *testing.T) {
 			}
 		})
 	})
+	t.Run("elided placeholder", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			frame, err := DecodeFrame(elidedRecord)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := frame.Control.(*v3.ElidedMessage); !ok || frame.Kind != KindElided {
+				t.Fatalf("frame = %+v, want an elided control", frame)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			if _, err := DecodeFrame([]byte(`{"t":"elided","msg":{}}`)); err == nil {
+				t.Fatal("DecodeFrame accepted an elided record carrying a payload")
+			}
+		})
+	})
 }
 
 // TestV3ControlFieldAllowed pins the strict frame field allowlist to the v3
