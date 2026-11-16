@@ -1,4 +1,4 @@
-// Tests Checkout branch preparation and rollback, pooled pushes, restart safety, diffs, and summaries.
+// Tests Checkout branch preparation and rollback, pushes, diffs, and summaries.
 
 package repo
 

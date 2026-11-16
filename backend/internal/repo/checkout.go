@@ -1,4 +1,4 @@
-// Checkout owns prepared task branches, pooled pushes, upstream ref refreshes, and Git snapshots.
+// Checkout owns prepared task branches, pushes, upstream ref refreshes, and Git snapshots.
 
 package repo
 

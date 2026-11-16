@@ -1,4 +1,4 @@
-// Discovers app-managed repositories and periodically expires idle push worktrees.
+// Discovers and reconciles app-managed repositories below the checkout root.
 
 package app
 

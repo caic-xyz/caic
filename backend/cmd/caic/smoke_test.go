@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -468,12 +469,12 @@ func TestSmoke(t *testing.T) {
 		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
 		root := filepath.Join(smoke.rootDir, repos[0].Path)
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
-		audit := filepath.Join(t.TempDir(), "verified")
+		const audit = "/tmp/smoke-verified"
 		hook, err := os.ReadFile("../../../scripts/hooks/pre-push")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "Makefile"), []byte("verify:\n\t@test \"$$(cat smoke-push.txt)\" = runtime-task\n\t@git rev-parse HEAD > '"+audit+"'\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "Makefile"), []byte("verify:\n\t@test \"$$(cat smoke-push.txt)\" = runtime-task\n\t@printf '%s %s\\n' \"$$PWD\" \"$$(git rev-parse HEAD)\" >> '"+audit+"'\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		for _, args := range [][]string{{"add", "."}, {"-c", "user.name=Smoke", "-c", "user.email=smoke@example.com", "commit", "-m", "Install push verification"}, {"push", "origin", "main"}} {
@@ -481,7 +482,8 @@ func TestSmoke(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-push"), hook, 0o700); err != nil { //nolint:gosec // Git requires an executable hook in the test-owned repository.
+		// The container runs the repository's hook; the host push must ignore any host hook.
+		if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-push"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil { //nolint:gosec // Git requires an executable hook in the test-owned repository.
 			t.Fatal(err)
 		}
 		before, err := g.RevParse(t.Context(), "HEAD")
@@ -498,13 +500,18 @@ func TestSmoke(t *testing.T) {
 		containerRoot := "/home/user/src/" + filepath.Base(repos[0].Path)
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		t.Cleanup(cancel)
-		cmd := exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
+		cmd := exec.CommandContext(ctx, smoke.runtimeName, "exec", "-i", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; cat > .git/hooks/pre-push; chmod 0700 .git/hooks/pre-push; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD --short HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
+		cmd.Stdin = bytes.NewReader(hook)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("container commit: %v: %s", err, out)
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		tip := lines[len(lines)-1]
+		if len(lines) < 2 {
+			t.Fatalf("container commit revisions: %q", out)
+		}
+		tip := lines[len(lines)-2]
+		worktree := containerRoot + "-" + lines[len(lines)-1]
 		if err := os.WriteFile(filepath.Join(root, "host-dirty"), []byte("keep"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -529,9 +536,14 @@ func TestSmoke(t *testing.T) {
 		if len(task.DiffStat) != 0 || len(task.RepoStates) != 1 || task.RepoStates[0].Ahead != 0 {
 			t.Fatalf("post-push task statistics: diff=%+v repos=%+v", task.DiffStat, task.RepoStates)
 		}
-		verified, err := os.ReadFile(audit) //nolint:gosec // The path is in a test-owned directory.
-		if err != nil || strings.TrimSpace(string(verified)) != tip {
-			t.Fatalf("hook verified %q, want %s: %v", verified, tip, err)
+		verified, err := smoketest.ContainerFile(ctx, smoke.runtimeName, container, audit)
+		wantVerified := worktree + " " + tip + "\n" + worktree + " " + tip + "\n"
+		if err != nil || verified != wantVerified {
+			t.Fatalf("hook verified %q, want %q: %v", verified, wantVerified, err)
+		}
+		cmd = exec.CommandContext(ctx, smoke.runtimeName, "exec", "--user", "user", container, "sh", "-c", "test ! -e \"$1\" && git -C \"$2\" worktree list --porcelain", "sh", worktree, containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
+		if out, err := cmd.CombinedOutput(); err != nil || strings.Count(string(out), "worktree ") != 1 {
+			t.Fatalf("throwaway push worktree cleanup: %q, %v", out, err)
 		}
 		remote, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/"+task.Repos[0].Branch)
 		if err != nil || !strings.HasPrefix(remote, tip+"\t") {
@@ -543,22 +555,6 @@ func TestSmoke(t *testing.T) {
 		}
 		if dirty, err := os.ReadFile(filepath.Join(root, "host-dirty")); err != nil || string(dirty) != "keep" { //nolint:gosec // The path is inside the test-owned repository.
 			t.Fatalf("host untracked file changed: %q, %v", dirty, err)
-		}
-		entries, err := os.ReadDir(filepath.Join(smoke.cfg.Dirs.CacheDir, "push"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		idle := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), "operation-") {
-				if _, err := os.Stat(filepath.Join(smoke.cfg.Dirs.CacheDir, "push", e.Name(), "idle-v1")); err != nil {
-					t.Fatal("completed push checkout not reusable", err)
-				}
-				idle++
-			}
-		}
-		if idle != 1 {
-			t.Fatalf("expected one idle push checkout, got %d", idle)
 		}
 	})
 }
