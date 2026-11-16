@@ -317,6 +317,7 @@ export default function TaskList(props: TaskListProps) {
         diffStat={t().diffStat}
         repoStates={t().repoStates}
         error={t().error}
+        turnError={t().turnError}
         inPlanMode={t().inPlanMode}
         runtime={t().runtime}
         resourceUsage={t().resourceUsage}

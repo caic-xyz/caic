@@ -590,6 +590,19 @@ describe("TaskCard", () => {
     expect(getByText(error).className).toContain("errorSummary");
   });
 
+  it("shows a failed turn while waiting and prefers the task error", () => {
+    const turnError = "INVALID_ARGUMENT (code 400): Request contains an invalid argument.";
+    const [error, setError] = createSignal<string>();
+    const { getByText, queryByText } = renderCard(() => (
+      <TaskCard {...props({ state: "waiting", turnError })} error={error()} />
+    ));
+
+    expect(getByText(turnError).className).toContain("errorSummary");
+    setError("agent exited: exit status 3");
+    expect(getByText("agent exited: exit status 3")).toBeInTheDocument();
+    expect(queryByText(turnError)).not.toBeInTheDocument();
+  });
+
   it("renders a clickable origin task without selecting the child", () => {
     const onClick = vi.fn();
     const { getByRole } = renderCard(() => <TaskCard {...props({ forkedFromTaskID: "3BL0EKDTO000", onClick })} />);

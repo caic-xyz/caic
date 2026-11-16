@@ -70,6 +70,8 @@ export interface TaskCardProps {
   diffStat?: DiffStat;
   repoStates?: GitRepositoryState[];
   error?: string;
+  /** Latest turn failure while the task waits for input; error takes precedence. */
+  turnError?: string;
   inPlanMode?: boolean;
   runtime?: RuntimeInstance;
   resourceUsage?: EventStats;
@@ -655,9 +657,7 @@ export default function TaskCard(props: TaskCardProps) {
           </div>
         </Show>
 
-        <Show when={props.error}>
-          <div class={styles.errorSummary}>{props.error}</div>
-        </Show>
+        <Show when={props.error || props.turnError}>{(error) => <div class={styles.errorSummary}>{error()}</div>}</Show>
       </div>
       <Portal>
         <Show when={contextMenuPosition()} keyed>
