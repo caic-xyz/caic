@@ -38,6 +38,9 @@ const (
 // cards whenever a session resumes from history the wire has not seen: the
 // restored card would be keyed by the tool use seen at spawn time, and a later
 // task record keyed by the task ID would look like a different agent.
+// A SendMessage call that resumes a settled agent starts a new run whose task
+// records name the SendMessage tool use, so its correlation also enters byTool.
+// Its tool result only acknowledges the resumption and must not settle the run.
 // Its correlation maps are allocated with the wire, created once per session,
 // instead of by the first record that uses them.
 type nativeSubagents struct {
@@ -45,6 +48,7 @@ type nativeSubagents struct {
 	tasks    map[string]agent.NativeSubagent        // canonical task ID → card
 	byTool   map[delegationKey]string               // session/delegation → canonical task ID; empty means ambiguous
 	tools    map[delegationKey]agent.NativeSubagent // session/delegation → invocation metadata
+	resumes  map[delegationKey]struct{}             // session/SendMessage tool use → acknowledges a resumption
 }
 
 // parse folds one decoded line: a delegation tool use records the metadata that
@@ -63,14 +67,22 @@ func (n *nativeSubagents) parse(record *decodedLine, messages []agent.Message) (
 	}
 }
 
-// parseToolUses remembers the delegation metadata of an Agent invocation. The
-// tool use alone is not lifecycle evidence: the task records carry the native
-// identity and the reported state, so remember what they do not repeat instead
-// of emitting a card here.
+// parseToolUses remembers the delegation metadata of an Agent invocation and
+// the SendMessage calls whose results cannot settle a lifecycle. The tool use
+// alone is not lifecycle evidence: the task records carry the native identity
+// and the reported state, so remember what they do not repeat instead of
+// emitting a card here.
 func (n *nativeSubagents) parseToolUses(messages []agent.Message, sessionID string) error {
 	for _, message := range messages {
 		use, ok := message.(*agent.ToolUseMessage)
-		if !ok || (use.Name != "Agent" && use.Name != "Task") || use.ToolUseID == "" {
+		if !ok || use.ToolUseID == "" {
+			continue
+		}
+		if use.Name == "SendMessage" {
+			n.resumes[delegationKey{sessionID: sessionID, toolUseID: use.ToolUseID}] = struct{}{}
+			continue
+		}
+		if use.Name != "Agent" && use.Name != "Task" {
 			continue
 		}
 		var input struct {
@@ -233,6 +245,9 @@ func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg, sessionI
 		key := delegationKey{sessionID: sessionID, toolUseID: b.ToolUseID}
 		canonicalID, known := n.byTool[key]
 		if !known || canonicalID == "" {
+			continue
+		}
+		if _, resume := n.resumes[key]; resume {
 			continue
 		}
 		s := n.tasks[canonicalID]

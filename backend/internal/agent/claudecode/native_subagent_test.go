@@ -28,6 +28,38 @@ func TestNativeSubagentResumedRun(t *testing.T) {
 	}
 }
 
+func TestNativeSubagentSendMessageResume(t *testing.T) {
+	t.Parallel()
+	// Claude task 4VN78Q1IU000 resumed a completed background agent with
+	// SendMessage. The new run's task_started names the SendMessage tool use, and
+	// its tool result only acknowledges the resumption while the run continues.
+	wire := New().NewWire()
+	var got []agent.NativeSubagent
+	for _, line := range []string{
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Implement","prompt":"Implement","subagent_type":"general-purpose","run_in_background":true}}]}}`,
+		`{"type":"system","subtype":"task_started","task_id":"child","run_id":"001","tool_use_id":"spawn","is_backgrounded":true,"task_type":"local_agent"}`,
+		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"spawn","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully."}]}]},"tool_use_result":{"status":"async_launched"}}`,
+		`{"type":"system","subtype":"task_notification","task_id":"child","run_id":"001","tool_use_id":"spawn","status":"completed","summary":"Done"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"resume","name":"SendMessage","input":{"to":"child","message":"Redesign"}}]}}`,
+		`{"type":"system","subtype":"task_started","task_id":"child","run_id":"002","tool_use_id":"resume","is_backgrounded":true,"task_type":"local_agent"}`,
+		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"resume","type":"tool_result","content":[{"type":"text","text":"{\"success\":true,\"message\":\"Resuming agent child\"}"}]}]},"tool_use_result":{"success":true,"resumedAgentId":"child"}}`,
+	} {
+		msgs, err := wire.ParseOutput([]byte(line))
+		if err != nil {
+			t.Fatalf("ParseOutput(%s): %v", line, err)
+		}
+		for _, m := range msgs {
+			if native, ok := m.(*agent.NativeSubagentMessage); ok {
+				got = append(got, native.Subagent)
+			}
+		}
+	}
+	cards, active := agenttest.FoldNativeSubagents(got)
+	if len(cards) != 1 || cards[0].Status != agent.NativeSubagentStatusRunning || !cards[0].Background || active != 1 {
+		t.Fatalf("cards = %#v, active = %d, want one running background child", cards, active)
+	}
+}
+
 // TestNativeSubagentJokeEvidence replays the minimized Claude 2.1.270
 // recording of the standardized delegation request ("Use a native subagent to
 // tell a joke about README.md...") through the live wire parser and both task

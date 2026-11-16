@@ -40,6 +40,11 @@ tool's `run_in_background` and a task record's `is_backgrounded`
 card can keep a task running after the parent result, as can a detached shell
 command.
 
+`SendMessage` to a settled agent resumes it: a new `task_started` with the same
+`task_id`, a newer `run_id`, and the SendMessage `tool_use_id`. Its tool
+result (`tool_use_result.resumedAgentId`) only acknowledges the resumption and
+never settles the card.
+
 A sanitized v3 task record proves the observable lifecycle:
 `system/task_started` carries `task_id`, `tool_use_id`, `description`,
 `is_backgrounded`, and `task_type`; the matching `system/task_notification`

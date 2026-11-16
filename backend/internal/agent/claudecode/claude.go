@@ -200,9 +200,10 @@ type wireFormat struct {
 func newWireFormat() *wireFormat {
 	return &wireFormat{
 		nativeSubagents: nativeSubagents{
-			tasks:  make(map[string]agent.NativeSubagent),
-			byTool: make(map[delegationKey]string),
-			tools:  make(map[delegationKey]agent.NativeSubagent),
+			tasks:   make(map[string]agent.NativeSubagent),
+			byTool:  make(map[delegationKey]string),
+			tools:   make(map[delegationKey]agent.NativeSubagent),
+			resumes: make(map[delegationKey]struct{}),
 		},
 		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
 		widgetTracker:      newWidgetTracker(),
