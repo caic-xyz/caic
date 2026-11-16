@@ -21,12 +21,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"sync"
-
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
-
-	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
-
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,9 +33,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
-
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	claudedto "github.com/maruel/genai/providers/claudecode"
 
@@ -53,6 +46,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 const image = "ghcr.io/caic-xyz/md-user:latest"

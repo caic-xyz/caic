@@ -471,7 +471,7 @@ func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	}
 	msg := claudecode.InputUserMsg{
 		Type:    claudecode.InputUser,
-		Message: claudecode.InputUserContent{Role: "user", Content: blocks},
+		Message: claudecode.InputUserContent{Role: claudecode.RoleUser, Content: blocks},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -507,17 +507,14 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 			source.ThreadID = w.sessionID
 		}
 		input := &agent.UserInputMessage{Source: source}
-		var text claudecode.OutputUserText
-		if err := json.Unmarshal(raw, &text); err == nil && text.Role == "user" {
-			input.Text = text.Content
-			return []agent.Message{input}, nil
-		}
-		var prompt claudecode.InputUserMsg
-		if err := json.Unmarshal(line, &prompt); err != nil {
+		// An input body has the output body's shape: text or block content.
+		var body claudecode.OutputUserMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
 			return nil, err
 		}
-		for i := range prompt.Message.Content {
-			content := &prompt.Message.Content[i]
+		input.Text = body.Content.Text
+		for i := range body.Content.Blocks {
+			content := &body.Content.Blocks[i]
 			switch content.Type {
 			case "text":
 				input.Text = content.Text

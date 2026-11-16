@@ -4,12 +4,11 @@ package claudecode
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/maruel/genai/providers/claudecode"
-
-	"regexp"
-	"strconv"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -233,22 +232,11 @@ func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg, sessionI
 	if ev.ParentToolUseID != "" {
 		return nil, nil
 	}
-	if len(ev.Message) == 0 || ev.Message[0] != '{' {
-		return nil, nil
-	}
-	// A plain-text body, such as the summary that resumes a compacted session,
-	// carries no tool result.
-	var text claudecode.OutputUserText
-	if json.Unmarshal(ev.Message, &text) == nil {
-		return nil, nil
-	}
-	var body claudecode.OutputUserBlock
-	if err := json.Unmarshal(ev.Message, &body); err != nil {
-		return nil, err
-	}
+	// Only content blocks carry tool results; a text body such as the summary
+	// that resumes a compacted session has none.
 	var out []agent.Message
-	for i := range body.Content {
-		b := &body.Content[i]
+	for i := range ev.Message.Content.Blocks {
+		b := &ev.Message.Content.Blocks[i]
 		if b.Type != "tool_result" {
 			continue
 		}

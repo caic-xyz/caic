@@ -657,11 +657,11 @@ func skillPath(u *claudecode.OutputUserMsg) string {
 	if u == nil || !u.IsSynthetic {
 		return ""
 	}
-	var body claudecode.OutputUserBlock
-	if json.Unmarshal(u.Message, &body) != nil || len(body.Content) == 0 || body.Content[0].Type != "text" {
+	blocks := u.Message.Content.Blocks
+	if len(blocks) == 0 || blocks[0].Type != "text" {
 		return ""
 	}
-	rest, ok := strings.CutPrefix(body.Content[0].Text, skillBaseDirPrefix)
+	rest, ok := strings.CutPrefix(blocks[0].Text, skillBaseDirPrefix)
 	if !ok {
 		return ""
 	}
@@ -773,40 +773,27 @@ func parseUser(line []byte, record *decodedLine) ([]agent.Message, error) {
 	// A child user record carries the delegating Agent ID, not its own tool
 	// result ID. The role:user body owns prompts and inline tool_result IDs.
 	// Role-less result bodies directly reference their tool at the top level.
-	role, err := agent.JSONString(w.Message, "role")
-	if err != nil {
-		return nil, err
-	}
-	if w.ParentToolUseID != "" && role != "user" {
+	if w.ParentToolUseID != "" && w.Message.Role != claudecode.RoleUser {
 		record.source.DelegationToolUseID = ""
-		return []agent.Message{extractToolResult(w.ParentToolUseID, w.Message)}, nil
+		return []agent.Message{extractToolResult(w.ParentToolUseID, &w.Message.ToolResult)}, nil
 	}
-
-	// Parse the message body once to handle all remaining cases.
-	return parseUserMessage(w.Message), nil
+	return parseUserMessage(&w.Message), nil
 }
 
-// parseUserMessage dispatches on the message body shape. It handles plain text
-// user input, block-style user input (text + images), and inline tool_result
-// content blocks (MCP tools that arrive without parent_tool_use_id).
-func parseUserMessage(raw json.RawMessage) []agent.Message {
-	if len(raw) == 0 {
+// parseUserMessage converts a user body: plain text or text and image blocks
+// become user input, and inline tool_result blocks (MCP tools that arrive
+// without parent_tool_use_id) become tool results.
+func parseUserMessage(msg *claudecode.OutputUserMessage) []agent.Message {
+	if msg.Role != claudecode.RoleUser {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
-	var text claudecode.OutputUserText
-	if err := json.Unmarshal(raw, &text); err == nil && text.Role == "user" && text.Content != "" {
-		return []agent.Message{&agent.UserInputMessage{Text: text.Content}}
+	blocks := msg.Content.Blocks
+	if blocks == nil {
+		return []agent.Message{&agent.UserInputMessage{Text: msg.Content.Text}}
 	}
-
-	// Block-style content ("content": [...]).
-	var blockMsg claudecode.OutputUserBlock
-	if err := json.Unmarshal(raw, &blockMsg); err != nil || blockMsg.Role != "user" {
-		return []agent.Message{&agent.UserInputMessage{}}
-	}
-	// Check for inline tool_result blocks (MCP tools).
 	var results []agent.Message
-	for i := range blockMsg.Content {
-		b := &blockMsg.Content[i]
+	for i := range blocks {
+		b := &blocks[i]
 		if b.Type == "tool_result" && b.ToolUseID != "" {
 			results = append(results, toolResultFromBlock(b))
 		}
@@ -814,10 +801,9 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 	if len(results) > 0 {
 		return results
 	}
-	// Regular user input with text/image blocks.
 	ui := &agent.UserInputMessage{}
-	for i := range blockMsg.Content {
-		b := &blockMsg.Content[i]
+	for i := range blocks {
+		b := &blocks[i]
 		switch b.Type {
 		case "text":
 			ui.Text = b.Text
@@ -852,14 +838,10 @@ func toolResultFromBlock(b *claudecode.OutputUserContentBlock) *agent.ToolResult
 
 // extractToolResult builds a ToolResultMessage from the top-level
 // parent_tool_use_id path (standard Claude Code tools).
-func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultMessage {
+func extractToolResult(toolUseID string, res *claudecode.OutputToolResult) *agent.ToolResultMessage {
 	m := &agent.ToolResultMessage{ToolUseID: toolUseID}
-	if len(raw) == 0 {
-		return m
-	}
-	var msg claudecode.OutputToolResult
-	if json.Unmarshal(raw, &msg) == nil && msg.IsError {
-		blocks := msg.Content.TextBlocks()
+	if res.IsError {
+		blocks := res.Content.TextBlocks()
 		for i := range blocks {
 			c := &blocks[i]
 			if c.Type == "text" && c.Text != "" {

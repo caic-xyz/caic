@@ -1,4 +1,4 @@
-// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs, and lists the newest harness version each harness ran.
+// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs and caic's parsers, and lists the newest harness version each harness ran.
 package main
 
 import (
@@ -212,11 +212,11 @@ func run(args []string, out io.Writer) error {
 			runErr = errors.Join(runErr, err)
 		}
 	}
-	if _, err := fmt.Fprintf(out, "checked %d v3 task logs; found %d schema issues\n", checked, len(findings)); err != nil {
+	if _, err := fmt.Fprintf(out, "checked %d v3 task logs; found %d issues\n", checked, len(findings)); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
 	if len(findings) != 0 {
-		runErr = errors.Join(runErr, errors.New("agent log schema validation failed"))
+		runErr = errors.Join(runErr, errors.New("agent log validation failed"))
 	}
 	return runErr
 }
@@ -345,19 +345,32 @@ func checkFile(path string, cutoff time.Time, resolver agent.Backends) (result f
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
 	}
-	// caic's metadata projection, as used by task loading, reports versions.
-	// An unknown harness has none; the checker reports it.
-	versions := &versionCollector{}
-	if native, err := resolver.ResolveMetadataParser(agentharness.Name(harnessID)); err == nil {
-		if versions.parser, err = agent.NewLogRecordParser(native); err != nil {
-			return fileCheck{}, fmt.Errorf("create task-log metadata parser: %w", err)
-		}
+	// Replay caic's own parsers as task loading does: the full wire parser
+	// interprets every record, and the metadata projection reports versions.
+	h := agentharness.Name(harnessID)
+	wireParser, err := resolver.ResolveParser(h)
+	if err != nil {
+		return fileCheck{findings: []finding{{path: path, line: 1, harness: harnessID, dto: "harness dispatch", err: err, hint: "add: its backend to backends.Default and its DTO checker dispatch"}}, version: version, checked: true, harness: harnessID}, nil
 	}
+	wire, err := newReplay(wireParser, "caic wire parser")
+	if err != nil {
+		return fileCheck{}, err
+	}
+	metadataParser, err := resolver.ResolveMetadataParser(h)
+	if err != nil {
+		return fileCheck{}, err
+	}
+	metadata, err := newReplay(metadataParser, "caic metadata parser")
+	if err != nil {
+		return fileCheck{}, err
+	}
+	versions := &versionCollector{replay: metadata}
 	for ; ; checker.line++ {
 		if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
 			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, checker.line, err)
 		}
-		versions.parse(sc.Bytes())
+		wire.parse(sc.Bytes(), checker.line)
+		versions.parse(sc.Bytes(), checker.line)
 		if !sc.Scan() {
 			break
 		}
@@ -365,29 +378,63 @@ func checkFile(path string, cutoff time.Time, resolver agent.Backends) (result f
 	if err := sc.Err(); err != nil {
 		return fileCheck{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	return fileCheck{findings: checker.findings, version: version, checked: true, harness: harnessID, agentVersions: versions.seen}, nil
+	findings := checker.findings
+	for _, r := range []*replay{wire, versions.replay} {
+		// A record the checker rejected already explains the parser failure.
+		if r.err != nil && !slices.ContainsFunc(checker.findings, func(f finding) bool { return f.line == r.line }) {
+			findings = append(findings, finding{path: path, line: r.line, harness: harnessID, dto: r.dto, err: r.err, hint: "fix: caic's " + harnessID + " parser under backend/internal/agent"})
+		}
+	}
+	return fileCheck{findings: findings, version: version, checked: true, harness: harnessID, agentVersions: versions.seen}, nil
+}
+
+// replay runs one caic parser over a log. A rejected record would fail the
+// task, and leaves the parser state undefined, so replay stops there and
+// retains the record's line and error.
+type replay struct {
+	parser *agent.LogRecordParser
+	dto    string
+	line   int
+	err    error // Set once the parser rejects a record; replay then stops.
+}
+
+func newReplay(native agent.MessageParser, dto string) (*replay, error) {
+	parser, err := agent.NewLogRecordParser(native)
+	if err != nil {
+		return nil, fmt.Errorf("create task-log %s: %w", dto, err)
+	}
+	return &replay{parser: parser, dto: dto}, nil
+}
+
+// parse returns the record's messages and whether the parser accepted it.
+func (r *replay) parse(record []byte, line int) (agent.ParsedRecord, bool) {
+	if r.err != nil {
+		return agent.ParsedRecord{}, false
+	}
+	parsed, err := r.parser.ParseRecord(record)
+	if err != nil {
+		r.line, r.err = line, err
+		return agent.ParsedRecord{}, false
+	}
+	return parsed, true
 }
 
 // versionCollector folds session metadata to list each distinct reported
-// version. It stops at the first record its parser rejects, such as a relay
-// diagnostic; the checker reports that record.
+// version.
 type versionCollector struct {
-	parser  *agent.LogRecordParser
+	*replay
+
 	session agent.SessionMetadata
 	seen    []string
 }
 
-func (v *versionCollector) parse(line []byte) {
-	if v.parser == nil {
+func (v *versionCollector) parse(record []byte, line int) {
+	parsed, ok := v.replay.parse(record, line)
+	if !ok {
 		return
 	}
-	record, err := v.parser.ParseRecord(line)
-	if err != nil {
-		v.parser = nil
-		return
-	}
-	for i := range record.Messages {
-		v.session.Apply(record.Messages[i].Message)
+	for i := range parsed.Messages {
+		v.session.Apply(parsed.Messages[i].Message)
 	}
 	if v.session.AgentVersion != "" && !slices.Contains(v.seen, v.session.AgentVersion) {
 		v.seen = append(v.seen, v.session.AgentVersion)

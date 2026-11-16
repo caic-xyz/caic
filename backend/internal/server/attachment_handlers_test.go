@@ -36,7 +36,6 @@ func newAttachmentTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ks
 // attachmentImageLog writes a task log whose input record carries one image and
 // returns its path and attachment location.
 func attachmentImageLog(t *testing.T, mediaType string, data []byte) (path, location string) {
-	t.Helper()
 	dir := t.TempDir()
 	path = filepath.Join(dir, "task.jsonl")
 	record := fmt.Sprintf(`{"t":"user_input","ts":1.000,"images":[{"media_type":%q,"data":%q}]}`, mediaType, base64.StdEncoding.EncodeToString(data))
@@ -61,7 +60,6 @@ func testImage(width, height int) *image.RGBA {
 
 // testJPEG encodes a synthetic image so scaling produces a different byte count.
 func testJPEG(t *testing.T, width, height int) []byte {
-	t.Helper()
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, testImage(width, height), &jpeg.Options{Quality: 90}); err != nil {
 		t.Fatal(err)
@@ -70,7 +68,6 @@ func testJPEG(t *testing.T, width, height int) []byte {
 }
 
 func attachmentRequest(t *testing.T, s *testRouter, id, location, query string) *httptest.ResponseRecorder {
-	t.Helper()
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet,
 		"/tasks/"+id+"/attachments/"+location+query, nil)
@@ -225,7 +222,7 @@ func TestTaskAttachment(t *testing.T) {
 		t.Parallel()
 		s, _, id := newAttachmentTestRouter(t)
 		entry, _ := s.taskMgr.GetEntry(id)
-		jpegData := orientedJPEG(t, testJPEG(t, 1600, 900), 6)
+		jpegData := orientedJPEG(testJPEG(t, 1600, 900), 6)
 		logPath, location := attachmentImageLog(t, "image/jpeg", jpegData)
 		entry.LogPath.Set(logPath)
 		w := attachmentRequest(t, s, id.String(), location, "?max=480")
@@ -309,8 +306,7 @@ func pngHeader(width, height uint32) []byte {
 
 // orientedJPEG inserts an Exif APP1 segment carrying orientation before the
 // start of scan of an encoded JPEG.
-func orientedJPEG(t *testing.T, jpegData []byte, orientation uint16) []byte {
-	t.Helper()
+func orientedJPEG(jpegData []byte, orientation uint16) []byte {
 	tiff := make([]byte, 0, 26)
 	tiff = append(tiff,
 		'I', 'I', 42, 0, 8, 0, 0, 0, 1, 0,
@@ -379,7 +375,7 @@ func TestDownscaleImage(t *testing.T) {
 			{"animated format", jpegData, "image/gif", apiconv.ConversationImageMaxDimension},
 			{"already small", small, "image/jpeg", apiconv.ConversationImageMaxDimension},
 			{"not an image", []byte("not an image"), "image/jpeg", apiconv.ConversationImageMaxDimension},
-			{"oriented", orientedJPEG(t, jpegData, 6), "image/jpeg", apiconv.ConversationImageMaxDimension},
+			{"oriented", orientedJPEG(jpegData, 6), "image/jpeg", apiconv.ConversationImageMaxDimension},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -397,7 +393,7 @@ func TestJPEGOrientation(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 		for _, orientation := range []uint16{1, 3, 6, 8} {
-			if got := jpegOrientation(orientedJPEG(t, jpegData, orientation)); got != int(orientation) {
+			if got := jpegOrientation(orientedJPEG(jpegData, orientation)); got != int(orientation) {
 				t.Errorf("jpegOrientation = %d, want %d", got, orientation)
 			}
 		}

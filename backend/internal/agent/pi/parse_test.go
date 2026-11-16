@@ -539,7 +539,6 @@ func TestHandleAgentEnd(t *testing.T) {
 func TestWireFormatDurationTracking(t *testing.T) {
 	t.Parallel()
 	newParser := func(t *testing.T) *agent.LogRecordParser {
-		t.Helper()
 		parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
 		if err != nil {
 			t.Fatal(err)
@@ -547,7 +546,6 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		return parser
 	}
 	parse := func(t *testing.T, parser *agent.LogRecordParser, line string) []agent.TimedMessage {
-		t.Helper()
 		record, err := parser.ParseRecord([]byte(line))
 		if err != nil {
 			t.Fatalf("ParseRecord(%s): %v", line, err)
@@ -555,7 +553,6 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		return record.Messages
 	}
 	result := func(t *testing.T, messages []agent.TimedMessage) *agent.ResultMessage {
-		t.Helper()
 		var found *agent.ResultMessage
 		for _, message := range messages {
 			if rm, ok := message.Message.(*agent.ResultMessage); ok {

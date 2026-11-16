@@ -9,12 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/maruel/genai/acp"
-
-	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	agentacp "github.com/caic-xyz/caic/backend/internal/agent/acp"

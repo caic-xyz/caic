@@ -3,10 +3,9 @@
 package claudecode
 
 import (
+	"slices"
 	"strings"
 	"testing"
-
-	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -294,7 +293,6 @@ const (
 // feedBackgroundLines runs lines through one live wire and returns every
 // background-command message it emitted.
 func feedBackgroundLines(t *testing.T, lines ...string) []agent.BackgroundCommand {
-	t.Helper()
 	wire := newWireFormat()
 	var cards []agent.BackgroundCommand
 	for _, line := range lines {

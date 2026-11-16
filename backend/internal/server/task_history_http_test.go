@@ -494,7 +494,6 @@ func historyStream(t testing.TB, s *testRouter, tk *taskrun.Task, cursor, header
 }
 
 func assertStatsSnapshot(t testing.TB, r *bufio.Reader) {
-	t.Helper()
 	f := readHistoryFrame(t, r)
 	if f.name != "statsSnapshot" || f.id != "" {
 		t.Fatalf("resource snapshot: %+v", f)
@@ -1237,7 +1236,7 @@ func BenchmarkHistoryTaskOpen(b *testing.B) {
 			for i := range 1000 {
 				fmt.Fprintf(&raw, `{"t":"user_input","text":"turn %d"}`+"\n", i)
 				fmt.Fprintf(&raw, `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-%d","name":"Bash","input":{"command":"git status"}}]}}}`+"\n", i)
-				fmt.Fprintf(&raw, `{"t":"agent","ts":2.000,"msg":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-%d","content":%q}]}}}`+"\n", i, strings.Repeat("tool output ", 16))
+				fmt.Fprintf(&raw, `{"t":"agent","ts":2.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-%d","content":%q}]}}}`+"\n", i, strings.Repeat("tool output ", 16))
 				fmt.Fprintf(&raw, `{"t":"agent","ts":3.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":%q}],"usage":{"input_tokens":10000,"output_tokens":1000}}}}`+"\n", strings.Repeat("Completed validation. ", 8))
 				fmt.Fprintf(&raw, `{"t":"agent","ts":4.000,"msg":{"type":"result","subtype":"success","total_cost_usd":%.3f,"usage":{"input_tokens":10000,"output_tokens":1000}}}`+"\n", float64(i+1)*0.01)
 			}

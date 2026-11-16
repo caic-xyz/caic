@@ -2086,7 +2086,6 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 func TestVoiceRoutesByMode(t *testing.T) {
 	t.Parallel()
 	newRouter := func(t *testing.T) (*testRouter, *auth.User) {
-		t.Helper()
 		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
 		if err != nil {
 			t.Fatal(err)
@@ -2098,7 +2097,6 @@ func TestVoiceRoutesByMode(t *testing.T) {
 		return newTestOAuthRouter(t, store), &user
 	}
 	sessionCookie := func(t *testing.T, s *testRouter, user *auth.User) *http.Cookie {
-		t.Helper()
 		jwt, _, err := s.authStore.IssueToken(user, s.sessionSecret, time.Hour, auth.SessionInfo{})
 		if err != nil {
 			t.Fatal(err)
@@ -2106,7 +2104,6 @@ func TestVoiceRoutesByMode(t *testing.T) {
 		return &http.Cookie{Name: "caic_session", Value: jwt, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode}
 	}
 	status := func(t *testing.T, h http.Handler, cookie *http.Cookie, path string) int {
-		t.Helper()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com"+path, http.NoBody)
 		req.AddCookie(cookie)
 		w := httptest.NewRecorder()
@@ -3318,7 +3315,6 @@ func TestBackgroundWorkers(t *testing.T) {
 
 // recordRouterTaskLog gives retained-task fixtures the durable history required by lifecycle operations.
 func recordRouterTaskLog(t testing.TB, s *testRouter, tk *taskrun.Task) {
-	t.Helper()
 	log, path, err := s.logStore.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {
 		t.Fatal(err)

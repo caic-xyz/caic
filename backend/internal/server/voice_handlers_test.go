@@ -44,7 +44,6 @@ func externalVoiceGateway(tokenMode VoiceTokenMode) *VoiceGatewayConfig {
 }
 
 func fetchVoiceToken(t *testing.T, gateway *VoiceGatewayConfig, issuer voiceTokenIssuer) (*httptest.ResponseRecorder, voicev1.ServiceAuthorization) {
-	t.Helper()
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/voice/token", http.NoBody)
 	voiceTokenHandler(gateway, issuer)(w, req)

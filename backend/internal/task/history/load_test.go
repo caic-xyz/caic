@@ -13,30 +13,26 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/taskslog"
-
-	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-
 	"github.com/klauspost/compress/zstd"
-
-	goruntime "runtime"
-	"strconv"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/tokens"
-	"github.com/maruel/ksid"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -1841,7 +1837,7 @@ func BenchmarkDecodeDiscriminatorProbe(b *testing.B) {
 	large := strings.Repeat("tool output line\\n", 16<<10)
 	for _, tc := range []struct{ name, line string }{
 		{"assistant", nativeLogLine(`{"type":"assistant","message":{"content":[{"type":"text","text":"work"}]}}`)},
-		{"large tool result", nativeLogLine(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + large + `"}]}}`)},
+		{"large tool result", nativeLogLine(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"` + large + `"}]}}`)},
 		{"header", `{"t":"caic_meta","version":3,"prompt":"benchmark","harness":"claude"}`},
 		{"input", `{"t":"input","ts":1767225600.500,"msg":{"type":"user","message":{"role":"user","content":"prompt"}}}`},
 	} {

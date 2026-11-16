@@ -842,7 +842,6 @@ func readFileTail(path string, maxBytes int64) (string, error) {
 // reaches a terminal state can never reach want, so the wait reports the real
 // outcome instead of burning the timeout.
 func waitForTaskState(t *testing.T, s *smokeServer, taskID, want string) v1.Task {
-	t.Helper()
 	deadline := time.Now().Add(smokeTaskTimeout)
 	for {
 		task := findTask(t, s, taskID)
@@ -874,7 +873,6 @@ func isTerminalTaskState(state v1.TaskState) bool {
 
 // waitForTaskRuntime polls until the task's container is assigned or launch fails.
 func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID {
-	t.Helper()
 	deadline := time.Now().Add(smokeTaskTimeout)
 	for {
 		task := findTask(t, s, taskID)
@@ -893,7 +891,6 @@ func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID 
 
 // findTask returns the task list entry for taskID, or the zero task.
 func findTask(t *testing.T, s *smokeServer, taskID string) v1.Task {
-	t.Helper()
 	var tasks []v1.Task
 	getJSON(t, s.baseURL, "/api/caic/v1/tasks", &tasks)
 	for i := range tasks {

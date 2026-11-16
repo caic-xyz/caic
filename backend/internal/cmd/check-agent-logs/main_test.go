@@ -44,7 +44,7 @@ func TestRun(t *testing.T) {
 				t.Errorf("obsolete log still exists: %s (stat error: %v)", path, err)
 			}
 		}
-		want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 0 v3 task logs; found 0 schema issues\n", paths[0], paths[1])
+		want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 0 v3 task logs; found 0 issues\n", paths[0], paths[1])
 		if out.String() != want {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}
@@ -90,7 +90,7 @@ func TestRun(t *testing.T) {
 				default:
 					args = append(args, "-dir", dir)
 				}
-				fmt.Fprintf(&want, "checked %d v3 task logs; found 0 schema issues\n", tc.checked)
+				fmt.Fprintf(&want, "checked %d v3 task logs; found 0 issues\n", tc.checked)
 				var out bytes.Buffer
 				if err := run(args, &out); err != nil {
 					t.Fatal(err)
@@ -135,7 +135,7 @@ func TestRun(t *testing.T) {
 					if err := run(append(tc.args, "-dir", dir), &out); err != nil {
 						t.Fatal(err)
 					}
-					if out.String() != "checked 0 v3 task logs; found 0 schema issues\n" {
+					if out.String() != "checked 0 v3 task logs; found 0 issues\n" {
 						t.Errorf("output = %q", out.String())
 					}
 					if _, err := os.Stat(path); err != nil {
@@ -193,7 +193,7 @@ func TestRun(t *testing.T) {
 		if err := run([]string{path, dir, path, rel, current}, &out); err != nil {
 			t.Fatal(err)
 		}
-		want := fmt.Sprintf("deleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 schema issues\n", path)
+		want := fmt.Sprintf("deleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 issues\n", path)
 		if out.String() != want {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}
@@ -281,7 +281,7 @@ func TestRun(t *testing.T) {
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Errorf("run error = %v, want closed pipe", err)
 		}
-		if err == nil || !strings.Contains(err.Error(), "agent log schema validation failed") {
+		if err == nil || !strings.Contains(err.Error(), "agent log validation failed") {
 			t.Errorf("run error = %v, want later v3 schema failure", err)
 		}
 		for _, path := range obsolete {
@@ -365,7 +365,7 @@ func TestRun(t *testing.T) {
 						}
 					}
 				}
-				want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 schema issues\n", obsolete[0], obsolete[1])
+				want := fmt.Sprintf("deleted obsolete v1 task log %s\ndeleted obsolete v2 task log %s\nchecked 1 v3 task logs; found 0 issues\n", obsolete[0], obsolete[1])
 				if out.String() != want {
 					t.Errorf("output = %q, want %q", out.String(), want)
 				}
@@ -420,7 +420,7 @@ func TestRun(t *testing.T) {
 			if err := run([]string{path}, &out); err != nil {
 				t.Fatal(err)
 			}
-			if got := out.String(); got != "checked 1 v3 task logs; found 0 schema issues\n" {
+			if got := out.String(); got != "checked 1 v3 task logs; found 0 issues\n" {
 				t.Errorf("output = %q", got)
 			}
 		}
@@ -559,7 +559,7 @@ func TestRun(t *testing.T) {
 		}, false)
 		var out bytes.Buffer
 		err := run([]string{path}, &out)
-		if err == nil || err.Error() != "agent log schema validation failed" {
+		if err == nil || err.Error() != "agent log validation failed" {
 			t.Fatalf("run error = %v", err)
 		}
 		got := out.String()
@@ -922,6 +922,38 @@ func TestCheckFile(t *testing.T) {
 		}
 	})
 
+	t.Run("error unknown harness", func(t *testing.T) {
+		t.Parallel()
+		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
+			taskMeta("future"),
+			`{"t":"agent","ts":1.000,"msg":{"type":"start"}}`,
+		}, false)
+		result, err := checkFile(path, time.Time{}, backends.Default("", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.findings) != 1 || result.findings[0].line != 1 || result.findings[0].dto != "harness dispatch" {
+			t.Fatalf("findings = %#v, want one harness dispatch finding", result.findings)
+		}
+	})
+	t.Run("error caic wire parser", func(t *testing.T) {
+		t.Parallel()
+		// The DTO keeps tool_use_result opaque; caic's subagent correlation
+		// decodes its status and rejects a number.
+		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
+			taskMeta("claude"),
+			`{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}}`,
+			`{"t":"agent","ts":2.000,"msg":{"type":"system","subtype":"task_started","task_id":"child","tool_use_id":"spawn","task_type":"local_agent"}}`,
+			`{"t":"agent","ts":3.000,"msg":{"type":"user","message":{"role":"user","content":[{"tool_use_id":"spawn","type":"tool_result","content":"done"}]},"tool_use_result":{"status":1}}}`,
+		}, false)
+		result, err := checkFile(path, time.Time{}, backends.Default("", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.findings) != 1 || result.findings[0].line != 4 || result.findings[0].dto != "caic wire parser" {
+			t.Fatalf("findings = %#v, want the wire parser rejecting line 4", result.findings)
+		}
+	})
 	t.Run("reports relay diagnostic", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{

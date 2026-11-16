@@ -4,10 +4,6 @@ package main
 import (
 	"bytes"
 	"context"
-
-	"github.com/caic-xyz/caic/backend/internal/agent/backends"
-	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
-
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,10 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maruel/gomode/httpserver/geoip"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/maruel/gomode/httpserver/geoip"
-
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
@@ -36,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"

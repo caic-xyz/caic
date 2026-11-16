@@ -6941,7 +6941,6 @@ func runAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 // initTaskRepo creates a minimal git repo with a main commit and a self-referencing
 // origin remote with origin/main populated, ready for AllocateBranch to fetch from.
 func initTaskRepo(t *testing.T, dir string, args ...[]string) {
-	t.Helper()
 	run := func(args ...string) {
 		cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // Test helper receives only controlled arguments.
 		cmd.Dir = dir

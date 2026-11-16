@@ -37,7 +37,6 @@ type NativeSubagentEvidence struct {
 // The fixture's control records (the metadata header and result trailer)
 // never reach the native parser, so one fixture serves live and replay.
 func LoadNativeSubagentEvidence(t testing.TB, path string, newWire func() agent.WireFormat) NativeSubagentEvidence {
-	t.Helper()
 	native := nativeSubagentPayloads(t, path)
 	evidence := NativeSubagentEvidence{Payloads: native}
 	evidence.PerPayload, evidence.Live = liveSubagents(t, native, newWire())
@@ -50,7 +49,6 @@ func LoadNativeSubagentEvidence(t testing.TB, path string, newWire func() agent.
 // prefix inside the container, holds, and lets the remaining recorded payloads
 // settle the restored card from live records.
 func (e *NativeSubagentEvidence) RunningSplit(t testing.TB) int {
-	t.Helper()
 	var observations []agent.NativeSubagent
 	for index, group := range e.PerPayload {
 		observations = append(observations, group...)
@@ -65,7 +63,6 @@ func (e *NativeSubagentEvidence) RunningSplit(t testing.TB) int {
 // Contract returns the contract this evidence fixture pins. Live parsing and
 // task-log replay must agree before the contract is trusted.
 func (e *NativeSubagentEvidence) Contract(t testing.TB) NativeSubagentContract {
-	t.Helper()
 	live := Contract(e.Live)
 	if got := Contract(e.Replay); !got.Equal(live) {
 		t.Fatalf("replay contract = %s, want the live contract %s", got, live)
@@ -76,7 +73,6 @@ func (e *NativeSubagentEvidence) Contract(t testing.TB) NativeSubagentContract {
 // nativeSubagentPayloads returns the native harness payloads of a fixture in
 // file order.
 func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
-	t.Helper()
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +118,6 @@ func nativeSubagentPayloads(t testing.TB, path string) [][]byte {
 // liveSubagents parses raw harness payloads exactly as a live session does and
 // groups the observations by the payload that produced them.
 func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perPayload [][]agent.NativeSubagent, all []agent.NativeSubagent) {
-	t.Helper()
 	perPayload = make([][]agent.NativeSubagent, 0, len(payloads))
 	for index, payload := range payloads {
 		messages, err := wire.ParseOutput(payload)
@@ -139,7 +134,6 @@ func liveSubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) (perP
 // replaySubagents replays the same native payloads as physical task-log records
 // which is the restart and settled-history path.
 func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
-	t.Helper()
 	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +159,6 @@ func replaySubagents(t testing.TB, payloads [][]byte, wire agent.WireFormat) []a
 // The returned observations are the tail's, and they must settle the same
 // canonical identities the history produced.
 func RestartNativeSubagents(t testing.TB, history, tail [][]byte, wire agent.WireFormat) []agent.NativeSubagent {
-	t.Helper()
 	parser, err := agent.NewLogRecordParser(wire)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +303,6 @@ func (c NativeSubagentContract) String() string {
 // NativeSubagentEvidencePrompt returns the delegation prompt one evidence
 // fixture was recorded with, so a live acceptance drives the identical request.
 func NativeSubagentEvidencePrompt(t testing.TB, path string) string {
-	t.Helper()
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)

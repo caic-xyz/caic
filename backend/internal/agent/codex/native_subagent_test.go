@@ -91,7 +91,6 @@ type codexAgentState struct {
 }
 
 func collectNative(t *testing.T, wire agent.WireFormat, lines ...[]byte) []agent.NativeSubagent {
-	t.Helper()
 	var got []agent.NativeSubagent
 	for _, line := range lines {
 		msgs, err := wire.ParseOutput(line)

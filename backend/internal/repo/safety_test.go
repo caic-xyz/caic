@@ -9,18 +9,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-
-	"os/exec"
-	"runtime"
-	"sync"
-
 	"github.com/caic-xyz/caic/backend/internal/logtest"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 func TestCheckSafety(t *testing.T) {

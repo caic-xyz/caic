@@ -88,7 +88,6 @@ type recordedObservation struct {
 
 // newSmokeReplayCase loads one retained recording into a replay recording.
 func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCase {
-	t.Helper()
 	newWire := func() agent.WireFormat { return smokeReplayWire(h) }
 	path := filepath.Join("..", "..", "internal", "agent", smokeReplayEvidenceDir[h], "testdata", "evidence", file)
 	evidence := agenttest.LoadNativeSubagentEvidence(t, path, newWire)
@@ -112,7 +111,6 @@ func newSmokeReplayCase(t *testing.T, h harness.Name, file string) smokeReplayCa
 // runSmokeReplay creates one task, restarts caic mid-turn, and verifies that the
 // replay delivered exactly the recorded lifecycle.
 func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smokeReplayCase) {
-	t.Helper()
 	var repos []v1.Repo
 	getJSON(t, fixture.baseURL, "/api/caic/v1/server/repos", &repos)
 	if len(repos) == 0 {
@@ -200,7 +198,6 @@ func runSmokeReplay(t *testing.T, fixture *smokeServer, h harness.Name, tc *smok
 // both are records the container produced without caic watching, so the count of
 // each is reported rather than asserted.
 func verifySmokeSettlement(t *testing.T, taskID string, records []recordedObservation, downtimeStart, downtimeEnd time.Time) {
-	t.Helper()
 	var runningBefore, settledAfter, duringDowntime int
 	for i := range records {
 		switch {
@@ -226,7 +223,6 @@ func verifySmokeSettlement(t *testing.T, taskID string, records []recordedObserv
 // stopAndPurgeTask stops and purges one replayed task so the next harness starts
 // from a clean task list.
 func stopAndPurgeTask(t *testing.T, fixture *smokeServer, taskID string) {
-	t.Helper()
 	postJSON(t, fixture.baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
 	waitForTaskState(t, fixture, taskID, "stopped")
 	postJSON(t, fixture.baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
@@ -237,7 +233,6 @@ func stopAndPurgeTask(t *testing.T, fixture *smokeServer, taskID string) {
 // watchForRunningNativeAgent waits until the canonical task event stream shows a
 // running native card and returns the observations behind that view.
 func watchForRunningNativeAgent(t *testing.T, baseURL, taskID string) []agent.NativeSubagent {
-	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), smokeTaskTimeout)
 	defer cancel()
 	observations, err := readTaskEvents(ctx, baseURL, taskID, func(ready bool, observations []agent.NativeSubagent) bool {
@@ -257,7 +252,6 @@ func watchForRunningNativeAgent(t *testing.T, baseURL, taskID string) []agent.Na
 // readTaskHistory returns the observations a task's event stream replays before
 // it announces ready, which is the history the task UI paints.
 func readTaskHistory(t *testing.T, baseURL, taskID string) []agent.NativeSubagent {
-	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	observations, err := readTaskEvents(ctx, baseURL, taskID, func(ready bool, _ []agent.NativeSubagent) bool {
@@ -338,7 +332,6 @@ func readTaskEvents(ctx context.Context, baseURL, taskID string, stop func(ready
 // restart and settled-history replay do, and returns the native-subagent
 // observations with the producer times the log recorded.
 func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat) []recordedObservation {
-	t.Helper()
 	path := findTaskLog(t, cacheDir, taskID)
 	reader := openTaskLog(t, path)
 	defer func() {
@@ -379,7 +372,6 @@ func replayTaskLog(t *testing.T, cacheDir, taskID string, wire agent.WireFormat)
 // findTaskLog returns the task log path for taskID, preferring the plain log an
 // active task keeps.
 func findTaskLog(t *testing.T, cacheDir, taskID string) string {
-	t.Helper()
 	dir := filepath.Join(cacheDir, "tasks")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -410,7 +402,6 @@ func findTaskLog(t *testing.T, cacheDir, taskID string) string {
 
 // openTaskLog opens a plain or zstd-compressed task log for reading.
 func openTaskLog(t *testing.T, path string) io.ReadCloser {
-	t.Helper()
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)

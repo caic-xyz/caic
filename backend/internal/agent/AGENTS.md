@@ -7,7 +7,9 @@ unknown-field warnings or `UnmarshalJSON` overflow tracking.
 
 Use `go run ./backend/internal/cmd/check-agent-logs` to delete unsupported v1/v2 task logs and detect
 schema drift. It strictly validates recent v3 task-log records against the corresponding genai DTOs and reports the
-DTO and provider file to update. When a wire protocol changes, update the genai
+DTO and provider file to update. It also replays each log through caic's wire
+and metadata parsers, as task loading does, and reports the first record each
+rejects; such a record fails the task. When a wire protocol changes, update the genai
 DTO and its method-to-DTO map, such as `codex.NewNotificationParams`.
 It also prints the newest version each harness ran; when it is newer than the
 release pinned in the genai DTO file, check that release upstream for wire

@@ -515,7 +515,7 @@ func TestSource(t *testing.T) {
 		lines = append(lines,
 			`{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"crossing","name":"Bash","input":{"command":"echo done"}}]}}}`,
 			delta,
-			`{"t":"agent","ts":4.000,"msg":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"crossing","content":"done"}]}}}`,
+			`{"t":"agent","ts":4.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"crossing","content":"done"}]}}}`,
 			twoTexts,
 			`{"t":"agent","ts":5.000,"msg":{"type":"result","subtype":"success","total_cost_usd":1.5,"usage":{"input_tokens":100,"output_tokens":20}}}`)
 		path := writeFixture(t, lines...)
@@ -870,7 +870,7 @@ func BenchmarkSource(b *testing.B) {
 			fmt.Sprintf(`{"t":"agent","ts":2.000,"msg":{"type":"assistant","message":{"content":[{"type":"thinking","thinking":%q}]}}}`, "Inspect the affected files and validate their behavior."),
 			fmt.Sprintf(`{"t":"agent","ts":3.000,"msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":"Bash","input":{"command":"git diff --stat"}}]}}}`, id),
 			delta,
-			fmt.Sprintf(`{"t":"agent","ts":4.000,"msg":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":%q,"content":%q}]}}}`, id, result),
+			fmt.Sprintf(`{"t":"agent","ts":4.000,"msg":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":%q}]}}}`, id, result),
 			delta,
 			fmt.Sprintf(`{"t":"agent","ts":5.000,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":%q}],"usage":{"input_tokens":10000,"output_tokens":800,"cache_read_input_tokens":3000}}}}`, "The requested changes are implemented. "+strings.Repeat("Validation passed. ", 24)),
 			fmt.Sprintf(`{"t":"agent","ts":6.000,"msg":{"type":"result","subtype":"success","total_cost_usd":%.3f,"num_turns":1,"usage":{"input_tokens":10000,"output_tokens":800}}}`, float64(turn+1)*0.002),

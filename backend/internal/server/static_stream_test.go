@@ -9,19 +9,18 @@ import (
 	"io"
 	"io/fs"
 	"math/rand/v2"
-	"sync"
-	"testing"
-	"testing/fstest"
-
-	// transcodeFS wraps the natural source boundary to observe opens and inject I/O errors.
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/andybalholm/brotli"
 )
 
+// transcodeFS wraps the natural source boundary to observe opens and inject I/O errors.
 type transcodeFS struct {
 	fs.FS
 

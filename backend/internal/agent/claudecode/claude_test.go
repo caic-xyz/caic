@@ -443,7 +443,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 				t.Errorf("skill-less Skill call should be dropped, got %T", m)
 			}
 		}
-		result := []byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"sk_9"}]}}`)
+		result := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_9"}]}}`)
 		msgs, err = b.ParseOutput(result)
 		if err != nil {
 			t.Fatal(err)

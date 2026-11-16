@@ -3,12 +3,14 @@
 package taskrun
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
@@ -21,22 +23,16 @@ import (
 	"testing"
 	"time"
 
-	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
-
-	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
-
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/genai"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/mcp/mcptest"
 	"github.com/maruel/ksid"
 
-	"bufio"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
@@ -44,14 +40,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/metrics"
-
-	// statusFailingRuntime fails the compact status probe, simulating the
-	// transient container probe failures the task card must survive.
-	"log/slog"
 )
 
+// statusFailingRuntime fails the compact status probe, simulating the
+// transient container probe failures the task card must survive.
 type statusFailingRuntime struct {
 	*runtimetest.FakeBackend
 }

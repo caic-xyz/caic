@@ -248,7 +248,6 @@ func TestFakeAgentTimingMessagesParse(t *testing.T) {
 			name:  "thinking",
 			input: `{"type":"thinking","text":"checking timing"}`,
 			check: func(t *testing.T, msg agent.Message) {
-				t.Helper()
 				thinking, ok := msg.(*agent.ThinkingMessage)
 				if !ok || thinking.Text != "checking timing" {
 					t.Fatalf("message = %#v, want thinking message", msg)
@@ -259,7 +258,6 @@ func TestFakeAgentTimingMessagesParse(t *testing.T) {
 			name:  "tool result duration",
 			input: `{"type":"tool_result","tool_use_id":"tool-1","duration_ms":620}`,
 			check: func(t *testing.T, msg agent.Message) {
-				t.Helper()
 				result, ok := msg.(*agent.ToolResultMessage)
 				if !ok || result.DurationMs != 620 {
 					t.Fatalf("message = %#v, want 620ms tool result", msg)
@@ -427,7 +425,6 @@ func TestRunPrePushScript(t *testing.T) {
 	t.Parallel()
 	dest := runtime.PushRefs{Remote: "origin", Branch: "caic-7"}
 	write := func(t *testing.T, dir, mode string) {
-		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, "caic-7"), []byte(mode), 0o600); err != nil {
 			t.Fatal(err)
 		}

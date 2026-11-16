@@ -3,28 +3,26 @@
 package server
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/maruel/ksid"
 
-	"context"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-
-	// TestTaskListEventsReplayTransitions verifies that a task whose state advances
-	// twice between two snapshots still delivers the interrupted state. The
-	// handler reads a snapshot in which the state has already advanced to stopped,
-	// so only the per-task transition journal can recover stopping.
-	"fmt"
-	"log/slog"
 )
 
+// TestTaskListEventsReplayTransitions verifies that a task whose state advances
+// twice between two snapshots still delivers the interrupted state. The
+// handler reads a snapshot in which the state has already advanced to stopped,
+// so only the per-task transition journal can recover stopping.
 func TestTaskListEventsReplayTransitions(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)

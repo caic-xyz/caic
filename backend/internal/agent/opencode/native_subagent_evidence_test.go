@@ -123,7 +123,6 @@ func TestNativeSubagentRestartSettlesSameCard(t *testing.T) {
 
 // liveSubagents parses native payloads on one wire and returns the observations.
 func liveSubagents(t *testing.T, payloads [][]byte) (observations, cards []agent.NativeSubagent) {
-	t.Helper()
 	wire := New("", nil).NewWire()
 	for index, payload := range payloads {
 		messages, err := wire.ParseOutput(payload)

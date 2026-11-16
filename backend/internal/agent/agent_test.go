@@ -2452,7 +2452,7 @@ func newTestRecordsWithHandler(t testing.TB, ctx context.Context, sink LogSink, 
 func BenchmarkWarmHistoryReplay(b *testing.B) {
 	for _, size := range []int64{1 << 20, 10 << 20, 128 << 20} {
 		b.Run(fmt.Sprintf("%dMiB", size>>20), func(b *testing.B) {
-			stream := warmHistoryStream(b, size)
+			stream := warmHistoryStream(size)
 			path := filepath.Join(b.TempDir(), "history.jsonl")
 			header := []byte(`{"t":"caic_meta","version":3,"prompt":"benchmark","harness":"claude"}` + "\n")
 			if err := os.WriteFile(path, append(header, stream...), 0o600); err != nil {
@@ -2542,8 +2542,7 @@ func BenchmarkLiveRelayRecord(b *testing.B) {
 
 // warmHistoryStream builds a canonical v3 agent-record stream of at most size
 // bytes, ending on a whole record.
-func warmHistoryStream(b *testing.B, size int64) []byte {
-	b.Helper()
+func warmHistoryStream(size int64) []byte {
 	var buf bytes.Buffer
 	line := []byte(`{"t":"agent","ts":1.000,"msg":{"type":"native_subagent","subagent":{"id":"codex:thread:test","status":"running"}}}` + "\n")
 	for int64(buf.Len()+len(line)) <= size {
