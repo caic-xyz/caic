@@ -30,7 +30,7 @@ func (p *metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
 	if err := p.wire.rememberRequest(&probe); err != nil {
 		return nil, err
 	}
-	if probe.Method != "turn/start" {
+	if codex.RequestMethod(probe.Method) != codex.RequestTurnStart {
 		return nil, nil
 	}
 	threadID, err := agent.JSONString(probe.Params, "threadId")
@@ -48,7 +48,7 @@ func (p *metadataParser) ParseOutput(line []byte) ([]agent.Message, error) {
 
 type recordedRequest struct {
 	id       string
-	method   string
+	method   codex.RequestMethod
 	threadID string
 }
 

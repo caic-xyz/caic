@@ -9,12 +9,16 @@ Use `go run ./backend/internal/cmd/check-agent-logs` to delete unsupported v1/v2
 schema drift. It strictly validates recent v3 task-log records against the corresponding genai DTOs and reports the
 DTO and provider file to update. When a wire protocol changes, update the genai
 DTO and its method-to-DTO map, such as `codex.NewNotificationParams`.
+It also prints the newest version each harness ran; when it is newer than the
+release pinned in the genai DTO file, check that release upstream for wire
+changes.
 
 ## Harness Version
 
 Each process start records the running harness version. Claude Code
-(`system/init`), Codex (the `initialize` response's `userAgent`), and ACP
-(`agentInfo.version`) report it natively. Harnesses that do not, Pi and agy, call
+(`system/init`), Codex (the `initialize` response's `userAgent`), and OpenCode
+(ACP `agentInfo.version`) report it natively. Pi and agy report none, and dsh's
+`agentInfo.version` is a fixed `0.0.1`; their backends call
 `agent.RecordVersion` before launch.
 
 ## Harness-Specific Evidence

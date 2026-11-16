@@ -14,7 +14,7 @@ require (
 	github.com/klauspost/compress v1.20.3
 	github.com/lmittmann/tint v1.2.1
 	github.com/maruel/apisdkgen v0.3.1
-	github.com/maruel/genai v0.11.2-0.20261116182058-9c2dc54d0f98
+	github.com/maruel/genai v0.11.3-0.20261116211451-240e16dbfa8a
 	github.com/maruel/gomode v0.3.1-0.20261116023917-0afe0cac3a18
 	github.com/maruel/ksid v0.1.2
 	github.com/maruel/roundtrippers v0.5.1
@@ -25,6 +25,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.9
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/image v0.43.0
+	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
@@ -256,7 +257,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20261014143641-f0251eb4aa3e // indirect
-	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

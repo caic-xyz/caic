@@ -29,6 +29,10 @@ type Config struct {
 	NewTools func() ToolParser
 	// Permissions answers native permission requests; nil leaves requests raw.
 	Permissions agent.MessageInterceptor
+	// VersionExecutable names the CLI whose --version Start records, for an
+	// agent whose initialize agentInfo.version is not its release; that value
+	// is then ignored. Empty trusts agentInfo.version.
+	VersionExecutable string
 }
 
 // ModelCodec preserves harness-native model routes at the protocol boundary.

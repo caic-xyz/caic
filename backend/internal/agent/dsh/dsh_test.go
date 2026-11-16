@@ -90,7 +90,7 @@ func TestNew(t *testing.T) {
 				for _, event := range handler.Events() {
 					if init, ok := event.Message.(*agent.InitMessage); ok {
 						found = true
-						if init.ReportedModel != "deepseek-official/deepseek-v4-flash" || init.ReportedEffort != "high" || init.Version != "0.0.1" {
+						if init.ReportedModel != "deepseek-official/deepseek-v4-flash" || init.ReportedEffort != "high" {
 							t.Fatalf("init = %+v", init)
 						}
 					}

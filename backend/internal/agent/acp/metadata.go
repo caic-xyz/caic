@@ -134,7 +134,7 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 		if err != nil {
 			return nil, true, err
 		}
-		metadata, err := sessionResultMetadata(request.method, request.sessionID, result, w.config.EffortID)
+		metadata, err := sessionResultMetadata(request.method, request.sessionID, result, w.config)
 		if err == nil {
 			err = w.normalizeMetadata(&metadata)
 		}
@@ -195,13 +195,16 @@ func (w *metadataState) parseOutput(line []byte, probe *agent.JSONRPCEnvelope) (
 	return nil, false, nil
 }
 
-func sessionResultMetadata(method acp.Method, requestedSession string, result []byte, effortID acp.ConfigOptionID) (agent.SessionMetadata, error) {
+func sessionResultMetadata(method acp.Method, requestedSession string, result []byte, config *Config) (agent.SessionMetadata, error) {
 	if err := requireMetadataObject(result); err != nil {
 		return agent.SessionMetadata{}, err
 	}
 	metadata := agent.SessionMetadata{}
 	switch method {
 	case acp.MethodInitialize:
+		if config.VersionExecutable != "" {
+			return metadata, nil
+		}
 		info, err := agent.JSONField(result, "agentInfo")
 		if err != nil {
 			return agent.SessionMetadata{}, err
@@ -234,11 +237,11 @@ func sessionResultMetadata(method acp.Method, requestedSession string, result []
 		if err != nil {
 			return agent.SessionMetadata{}, err
 		}
-		err = parseConfigOptions(result, &metadata, effortID)
+		err = parseConfigOptions(result, &metadata, config.EffortID)
 		return metadata, err
 	case acp.MethodSessionSetConfigOption:
 		metadata.SessionID = requestedSession
-		err := parseConfigOptions(result, &metadata, effortID)
+		err := parseConfigOptions(result, &metadata, config.EffortID)
 		return metadata, err
 	default:
 		// The request owner calls this only for initialization and configuration.

@@ -1,4 +1,4 @@
-// Command check-agent-logs deletes obsolete task logs and validates recent v3 harness records against direction-specific genai wire DTOs.
+// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs, and lists the newest harness version each harness ran.
 package main
 
 import (
@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,12 +21,15 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	agydata "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data"
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
+	agentharness "github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 	codexdto "github.com/maruel/genai/providers/codex"
 	pidto "github.com/maruel/genai/providers/pi"
+	"golang.org/x/mod/semver"
 )
 
 type config struct {
@@ -39,6 +43,16 @@ type fileCheck struct {
 	findings []finding
 	version  int
 	checked  bool
+	harness  string
+	// agentVersions lists each harness version the log's processes reported.
+	agentVersions []string
+}
+
+// newestVersion tracks the newest version a harness reported across logs.
+type newestVersion struct {
+	version string
+	logs    int    // Logs that ran version.
+	latest  string // Last such log path in sorted order.
 }
 
 type finding struct {
@@ -146,12 +160,14 @@ func run(args []string, out io.Writer) error {
 	paths, runErr := logPaths(cfg)
 	var findings []finding
 	var checked int
+	newest := map[string]*newestVersion{}
+	resolver := backends.Default("", nil)
 	var cutoff time.Time
 	if len(cfg.paths) == 0 && !cfg.all {
 		cutoff = time.Now().Add(-cfg.since)
 	}
 	for _, path := range paths {
-		result, err := checkFile(path, cutoff)
+		result, err := checkFile(path, cutoff, resolver)
 		if err != nil {
 			runErr = errors.Join(runErr, err)
 			continue
@@ -169,12 +185,30 @@ func run(args []string, out io.Writer) error {
 			if result.checked {
 				checked++
 			}
+			for _, v := range result.agentVersions {
+				n := newest[result.harness]
+				if n == nil || semver.Compare("v"+v, "v"+n.version) > 0 {
+					n = &newestVersion{version: v}
+					newest[result.harness] = n
+				}
+				if v == n.version {
+					n.logs++
+					n.latest = path
+				}
+			}
 		}
 		findings = append(findings, result.findings...)
 	}
 	findings = dedupe(findings)
 	for _, f := range findings {
 		if _, err := fmt.Fprintln(out, f.String()); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}
+	// Compare with the release pinned in each genai DTO file header.
+	for _, h := range slices.Sorted(maps.Keys(newest)) {
+		n := newest[h]
+		if _, err := fmt.Fprintf(out, "harness=%s newest version %s in %d logs; latest: %s\n", h, n.version, n.logs, n.latest); err != nil {
 			runErr = errors.Join(runErr, err)
 		}
 	}
@@ -269,7 +303,7 @@ func isLogPath(path string) bool {
 }
 
 // checkFile closes the reader before returning a version eligible for deletion.
-func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
+func checkFile(path string, cutoff time.Time, resolver agent.Backends) (result fileCheck, err error) {
 	r, err := openLog(path)
 	if err != nil {
 		return fileCheck{}, err
@@ -289,7 +323,7 @@ func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 		return fileCheck{}, fmt.Errorf("validate %s:1: missing metadata header", path)
 	}
 
-	version, harness, err := inspectHeader(sc.Bytes())
+	version, harnessID, err := inspectHeader(sc.Bytes())
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("validate %s:1: %w", path, err)
 	}
@@ -306,23 +340,58 @@ func checkFile(path string, cutoff time.Time) (result fileCheck, err error) {
 		}
 	}
 
-	checker := &messageChecker{path: path, harness: harness, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method)}
+	checker := &messageChecker{path: path, harness: harnessID, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method)}
 	parser, err := agent.NewLogRecordParser(checker)
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
 	}
-	if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
-		return fileCheck{}, fmt.Errorf("validate %s:1: %w", path, err)
+	// caic's metadata projection, as used by task loading, reports versions.
+	// An unknown harness has none; the checker reports it.
+	versions := &versionCollector{}
+	if native, err := resolver.ResolveMetadataParser(agentharness.Name(harnessID)); err == nil {
+		if versions.parser, err = agent.NewLogRecordParser(native); err != nil {
+			return fileCheck{}, fmt.Errorf("create task-log metadata parser: %w", err)
+		}
 	}
-	for checker.line++; sc.Scan(); checker.line++ {
+	for ; ; checker.line++ {
 		if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
 			return fileCheck{}, fmt.Errorf("validate %s:%d: %w", path, checker.line, err)
+		}
+		versions.parse(sc.Bytes())
+		if !sc.Scan() {
+			break
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return fileCheck{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	return fileCheck{findings: checker.findings, version: version, checked: true}, nil
+	return fileCheck{findings: checker.findings, version: version, checked: true, harness: harnessID, agentVersions: versions.seen}, nil
+}
+
+// versionCollector folds session metadata to list each distinct reported
+// version. It stops at the first record its parser rejects, such as a relay
+// diagnostic; the checker reports that record.
+type versionCollector struct {
+	parser  *agent.LogRecordParser
+	session agent.SessionMetadata
+	seen    []string
+}
+
+func (v *versionCollector) parse(line []byte) {
+	if v.parser == nil {
+		return
+	}
+	record, err := v.parser.ParseRecord(line)
+	if err != nil {
+		v.parser = nil
+		return
+	}
+	for i := range record.Messages {
+		v.session.Apply(record.Messages[i].Message)
+	}
+	if v.session.AgentVersion != "" && !slices.Contains(v.seen, v.session.AgentVersion) {
+		v.seen = append(v.seen, v.session.AgentVersion)
+	}
 }
 
 // messageChecker validates native DTOs in the direction selected by the log parser.

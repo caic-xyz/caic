@@ -70,6 +70,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, launch Launch)
 	for _, kv := range launch.Env {
 		relayArgs = append(relayArgs, "--env", kv)
 	}
+	if b.Config.VersionExecutable != "" {
+		if err := agent.RecordVersion(ctx, opts, b.Config.VersionExecutable); err != nil {
+			return nil, err
+		}
+	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, launch.Args)
 	if err != nil {
 		return nil, err
@@ -223,11 +228,6 @@ func (b *Backend) handshake(ctx context.Context, stdin io.Writer, stdout *bufio.
 		if err := json.Unmarshal(initResp.Result, &initResult); err != nil {
 			return nil, nil, fmt.Errorf("parse initialize result: %w", err)
 		}
-		metadata, err := sessionResultMetadata(acp.MethodInitialize, "", initResp.Result, b.Config.EffortID)
-		if err != nil {
-			return nil, nil, err
-		}
-		res.agentVersion = metadata.AgentVersion
 	}
 
 	// 2. Create or resume session. Use ACP's native MCP registration so user
@@ -283,7 +283,7 @@ func (b *Backend) handshake(ctx context.Context, stdin io.Writer, stdout *bufio.
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
 		return nil, nil, fmt.Errorf("parse session result: %w", err)
 	}
-	metadata, err := sessionResultMetadata(sessionReq.Method, opts.ResumeSessionID, resp.Result, b.Config.EffortID)
+	metadata, err := sessionResultMetadata(sessionReq.Method, opts.ResumeSessionID, resp.Result, b.Config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("session metadata: %w", err)
 	}
@@ -643,7 +643,6 @@ type handshakeResult struct {
 	nextID        int64
 	currentModel  string // Model ID the session is using.
 	currentEffort string // Reasoning effort the session is using.
-	agentVersion  string // Agent version string from initialize.
 	configOptions []acp.SessionConfigOption
 }
 

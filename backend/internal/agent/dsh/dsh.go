@@ -47,6 +47,8 @@ func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.Dsh, &agentacp.Config{
 		ResumeMethod: acp.MethodSessionResume, ImagesByPath: true,
 		EffortID: dshEffortID, Models: modelCodec{}, NewTools: newTools, Permissions: agentacp.PermissionApprover{},
+		// dsh's ACP agentInfo.version is a fixed "0.0.1", not its release.
+		VersionExecutable: "dsh",
 	})}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Dsh, envVars))
 	return b

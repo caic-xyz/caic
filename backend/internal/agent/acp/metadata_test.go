@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 func TestMetadataParser(t *testing.T) {
@@ -176,6 +177,32 @@ func TestMetadataParser(t *testing.T) {
 					if got != record.want {
 						t.Fatalf("record %d metadata = %+v, want %+v", i, got, record.want)
 					}
+				}
+			})
+		}
+	})
+	t.Run("version from executable", func(t *testing.T) {
+		t.Parallel()
+		config := testConfig()
+		config.VersionExecutable = "agent"
+		b := New(harness.Dsh, config)
+		for name, parser := range map[string]agent.MessageParser{"full": b.NewWire(), "metadata": b.NewMetadataParser()} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				// A placeholder agentInfo.version must not replace the probed release.
+				got := agent.SessionMetadata{AgentVersion: "0.2.2-rc.1"}
+				if _, err := parser.ParseInput([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)); err != nil {
+					t.Fatal(err)
+				}
+				msgs, err := parser.ParseOutput([]byte(`{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"0.0.1"}}}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, msg := range msgs {
+					got.Apply(msg)
+				}
+				if got.AgentVersion != "0.2.2-rc.1" {
+					t.Fatalf("version = %q, want the probed 0.2.2-rc.1", got.AgentVersion)
 				}
 			})
 		}

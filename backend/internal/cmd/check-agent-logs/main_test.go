@@ -16,6 +16,7 @@ import (
 
 	"github.com/maruel/genai/acp"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -516,6 +517,28 @@ func TestRun(t *testing.T) {
 		}
 	})
 
+	t.Run("newest harness version", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		// A revival on an upgraded harness records a second version.
+		writeLog(t, filepath.Join(dir, "a.jsonl"), []string{
+			taskMeta("pi"),
+			`{"t":"session","session_id":"","agent_version":"1.4.0"}`,
+			`{"t":"session","session_id":"","agent_version":"1.10.0"}`,
+		}, false)
+		b := writeLog(t, filepath.Join(dir, "b.jsonl"), []string{taskMeta("pi"), `{"t":"session","session_id":"","agent_version":"1.10.0"}`}, false)
+		writeLog(t, filepath.Join(dir, "c.jsonl"), []string{taskMeta("pi"), `{"t":"session","session_id":"","agent_version":"1.9.0"}`}, false)
+		var out bytes.Buffer
+		if err := run([]string{dir}, &out); err != nil {
+			t.Fatalf("run: %v\n%s", err, out.String())
+		}
+		// Versions compare numerically: 1.10.0 is newer than 1.9.0.
+		want := "harness=pi newest version 1.10.0 in 2 logs; latest: " + b + "\n"
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output = %s, want %q", out.String(), want)
+		}
+	})
+
 	t.Run("Claude Code init", func(t *testing.T) {
 		t.Parallel()
 		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
@@ -821,7 +844,7 @@ func TestCheckFile(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), append([]string{taskMeta(tc.harness)}, tc.records...), false)
-				result, err := checkFile(path, time.Time{})
+				result, err := checkFile(path, time.Time{}, backends.Default("", nil))
 				if err != nil || !result.checked || len(result.findings) != 0 {
 					t.Fatalf("directional records = %#v, %v", result, err)
 				}
@@ -845,7 +868,7 @@ func TestCheckFile(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{taskMeta(tc.harness), tc.record}, false)
-				result, err := checkFile(path, time.Time{})
+				result, err := checkFile(path, time.Time{}, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -878,7 +901,7 @@ func TestCheckFile(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), append([]string{taskMeta(tc.harness)}, tc.records...), false)
-				result, err := checkFile(path, time.Time{})
+				result, err := checkFile(path, time.Time{}, backends.Default("", nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -894,7 +917,7 @@ func TestCheckFile(t *testing.T) {
 			taskMeta("pi"),
 			`{"t":"agent","ts":1,"msg":{"type":"agent_start"}}`,
 		}, false)
-		if _, err := checkFile(path, time.Time{}); err == nil || !strings.Contains(err.Error(), "timestamp must have exactly three fractional digits") {
+		if _, err := checkFile(path, time.Time{}, backends.Default("", nil)); err == nil || !strings.Contains(err.Error(), "timestamp must have exactly three fractional digits") {
 			t.Errorf("checkFile error = %v, want noncanonical timestamp", err)
 		}
 	})

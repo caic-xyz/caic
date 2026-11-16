@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -461,7 +460,7 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 		return nil, err
 	}
 	var messages []agent.Message
-	if probe.Method == "turn/start" {
+	if codex.RequestMethod(probe.Method) == codex.RequestTurnStart {
 		content, err := agent.JSONField(probe.Params, "input")
 		if err != nil {
 			return nil, err
@@ -792,7 +791,7 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 }
 
 func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
-	if probe.Method == "initialize" {
+	if codex.RequestMethod(probe.Method) == codex.RequestInitialize {
 		w.requests = nil
 		w.inputTurns = nil
 	}
@@ -809,8 +808,8 @@ func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
 	}
 	id := string(probe.ID)
 	i := slices.IndexFunc(w.requests, func(r recordedRequest) bool { return r.id == id })
-	r := recordedRequest{id: id, method: probe.Method}
-	if probe.Method == "turn/start" {
+	r := recordedRequest{id: id, method: codex.RequestMethod(probe.Method)}
+	if codex.RequestMethod(probe.Method) == codex.RequestTurnStart {
 		var err error
 		r.threadID, err = agent.JSONString(probe.Params, "threadId")
 		if err != nil {
@@ -851,7 +850,9 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	request := w.requests[i]
 	method := request.method
 	w.requests = slices.Delete(w.requests, i, i+1)
-	if method != "initialize" && method != "thread/start" && method != "thread/resume" && method != "turn/start" {
+	switch method {
+	case codex.RequestInitialize, codex.RequestThreadStart, codex.RequestThreadResume, codex.RequestTurnStart:
+	default:
 		return nil, false, nil
 	}
 	failure, err := agent.JSONField(line, "error")
@@ -868,17 +869,17 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, true, nil
 	}
-	if method == "initialize" {
+	if method == codex.RequestInitialize {
 		userAgent, err := agent.JSONString(raw, "userAgent")
 		if err != nil {
 			return nil, true, err
 		}
 		w.mu.Lock()
-		w.agentVersion = userAgentVersion(userAgent)
+		w.agentVersion = (&codex.InitializeResponse{UserAgent: userAgent}).Version()
 		w.mu.Unlock()
 		return nil, true, nil
 	}
-	if method == "turn/start" {
+	if method == codex.RequestTurnStart {
 		turnID, err := agent.JSONString(raw, "turn", "id")
 		if err != nil {
 			return nil, true, err
@@ -897,14 +898,6 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	}
 	m := w.applyThreadResponse(&r)
 	return []agent.Message{m}, true, nil
-}
-
-// userAgentVersion returns the build version in an initialize response's
-// userAgent, "<originator>/<version> (<os>; <arch>) ...", or "" when absent.
-func userAgentVersion(userAgent string) string {
-	product, _, _ := strings.Cut(userAgent, " ")
-	_, version, _ := strings.Cut(product, "/")
-	return version
 }
 
 func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.InitMessage {
