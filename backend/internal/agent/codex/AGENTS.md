@@ -22,12 +22,25 @@ Codex CLI runs in **app-server mode** — a JSON-RPC 2.0 NDJSON protocol over st
 
 - `codex.go` — Backend lifecycle, handshake, `wireFormat` state machine
 - `parse.go` — Stateless parser: JSON-RPC notifications → `agent.Message`
+- `stream_trim.go` — Selects deltas a settled log elides
 
 Wire types are provided by `github.com/maruel/genai/providers/codex` (imported as `cx`).
 
 `wireFormat` wraps the stateless parser to accumulate per-turn token usage
 from `thread/tokenUsage/updated` notifications, emitting a final `ResultMessage`
 with totals on `turn/completed`.
+
+## Settled stream trimming
+
+`item/completed` repeats an `agentMessage`'s full `text` and a `reasoning`
+item's full `summary`. `stream_trim.go` selects `item/agentMessage/delta` and
+`item/reasoning/summaryTextDelta` records whose `threadId` and `itemId`
+completed; terminal compression replaces each with an `elided` record. Item IDs
+are unique within a thread across turns. `item/commandExecution/outputDelta`
+stays: the completed `commandExecution` result carries no output. Across 395
+local Codex v3 logs, that elides 64% of the records and 9.6% of the compressed
+bytes; the full and metadata projections keep every other message at its
+record position.
 
 ## Upstream Source
 

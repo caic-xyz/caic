@@ -503,6 +503,11 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	return w.parseOutput(line, parseMessage)
 }
 
+// NewStreamTrim implements agent.StreamTrimmer; see stream_trim.go.
+func (*wireFormat) NewStreamTrim() agent.StreamTrim {
+	return &streamTrim{completed: make(map[streamItem]struct{})}
+}
+
 // parseOutput owns ordered protocol state independently of transcript projection.
 func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPCEnvelope) ([]agent.Message, decodedItem, error)) ([]agent.Message, error) {
 	probe, err := agent.ParseJSONRPCEnvelope(line)

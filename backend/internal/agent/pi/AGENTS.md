@@ -37,6 +37,23 @@ the message's streaming deltas from its consolidated content in the frontend
 | `turn_end` | UsageMessage (also increments turn counter) |
 | `extension_ui_request` | (auto-respond on stdin) |
 
+## Settled stream trimming
+
+Pi streams each content block as `*_start`, `*_delta`, and `*_end`
+`message_update` records, then repeats the assistant message in `message_end`,
+the projection's only source of final text and thinking. Updates carry no
+message ID; `stream_trim.go` keys blocks by message boundary count and
+`contentIndex`. It elides `text_delta`, `thinking_delta`, and `toolcall_delta`
+records of blocks that reached `*_end` in a message that then reached a
+non-`error` assistant `message_end`. The first text or thinking delta after any
+other native record stays: it proves input acceptance and starts the fallback
+turn clock of results without a native duration. Update `usage` fields are
+unread. Across 227 local Pi v3 logs, 27.7M of 28.9M records go, zstd size
+drops from 638 MB to 427 MB, and parsed messages, positions, exit and turn
+folds, and the metadata projection stay identical. 2,176 thinking blocks differ
+from their deltas only in whitespace; the projection already uses
+`message_end`.
+
 ## Tool Name Normalization
 
 Pi tool names need normalization to caic canonical names (similar to OpenCode).

@@ -394,6 +394,11 @@ func (*piWireFormat) EncodeCompact(instructions string) ([]byte, error) {
 	return marshalInput(cmd)
 }
 
+// NewStreamTrim implements agent.StreamTrimmer; see stream_trim.go.
+func (*piWireFormat) NewStreamTrim() agent.StreamTrim {
+	return &streamTrim{settled: make(map[streamBlock]struct{})}
+}
+
 // ParseOutput adapts native Pi records and marks unique token contributions.
 // turn_end and compaction summaries are additive; a result repeats the last
 // call when those reports already account for it. This state is reconstructed
