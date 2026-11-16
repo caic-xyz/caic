@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -22,7 +23,9 @@ import (
 	"github.com/maruel/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	acpdata "github.com/caic-xyz/caic/backend/internal/agent/acp/data"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Backend supplies shared ACP startup and parsing to harness-owned backends.
@@ -39,7 +42,7 @@ func New(h harness.Name, config *Config) *Backend {
 }
 
 // SupportsImages implements agent.Backend.
-func (b *Backend) SupportsImages() bool { return b.Config.Images }
+func (b *Backend) SupportsImages() bool { return b.Config.Images || b.Config.ImagesByPath }
 
 // SupportsCompact implements agent.Backend.
 func (b *Backend) SupportsCompact() bool { return b.Config.CompactPrompt != "" }
@@ -99,10 +102,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, launch Launch)
 	}
 
 	log := opts.Logger.With("target", opts.Target.SSHHost)
-	c := agent.NewConn(ctx, log, rp.Stdin, opts.Records, opts.MCP)
-	if b.Config.Permissions != nil {
-		c = &permissionConn{Conn: c, MessageInterceptor: b.Config.Permissions}
-	}
+	c := wrapConn(ctx, agent.NewConn(ctx, log, rp.Stdin, opts.Records, opts.MCP), b.Config, opts.Target)
 	bootstrap = false
 	s := agent.NewSession(ctx, rp.Cmd, c, agent.ContinuedReader{Reader: continuation, Closer: rp.Stdout}, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
@@ -116,12 +116,21 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, launch Launch)
 
 // AttachRelay connects after the owning record processor has replayed history.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if b.Config.Permissions != nil {
-		return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
-			return &permissionConn{Conn: c, MessageInterceptor: b.Config.Permissions}, nil
-		})
+	return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
+		return wrapConn(ctx, c, b.Config, opts.Target), nil
+	})
+}
+
+// wrapConn adds image uploads and permission replies. The permission
+// interceptor stays outermost so the session finds it.
+func wrapConn(ctx context.Context, c agent.Conn, config *Config, target runtime.ConnectionTarget) agent.Conn {
+	if config.ImagesByPath {
+		c = agent.NewAttachmentConn(ctx, c, target)
 	}
-	return agent.AttachRelaySession(ctx, opts, nil)
+	if config.Permissions != nil {
+		c = &permissionConn{Conn: c, MessageInterceptor: config.Permissions}
+	}
+	return c
 }
 
 // NewWire implements agent.Backend.
@@ -355,7 +364,8 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 		w.mu.Unlock()
 		return nil, errors.New("ACP: no session ID (handshake not completed)")
 	}
-	if len(p.Images) > 0 && (!w.config.Images || !w.supportsImage) {
+	native := w.config.Images && w.supportsImage
+	if len(p.Images) > 0 && !native && !w.config.ImagesByPath {
 		w.mu.Unlock()
 		return nil, errors.New("ACP harness does not support image prompts")
 	}
@@ -365,11 +375,15 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	content := make([]acp.PromptContent, 0, 1+len(p.Images))
 	content = append(content, acp.PromptContent{Type: acp.ContentText, Text: p.Text})
 	for _, img := range p.Images {
-		content = append(content, acp.PromptContent{
-			Type:     acp.ContentImage,
-			Data:     img.Data,
-			MimeType: img.MediaType,
-		})
+		if native {
+			content = append(content, acp.PromptContent{Type: acp.ContentImage, Data: img.Data, MimeType: img.MediaType})
+			continue
+		}
+		link, err := imageLink(img)
+		if err != nil {
+			return nil, err
+		}
+		content = append(content, link)
 	}
 	params, err := marshalParams(acp.SessionPromptParams{SessionID: sessionID, Prompt: content})
 	if err != nil {
@@ -382,6 +396,33 @@ func (w *wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 		Params:  params,
 	}
 	return MarshalInput(req)
+}
+
+// imageLink references img by its agent.AttachmentPath. Its _meta keeps the
+// image so the recorded prompt restores it.
+func imageLink(img v3.ImageData) (acp.PromptContent, error) {
+	p, err := agent.AttachmentPath(img)
+	if err != nil {
+		return acp.PromptContent{}, err
+	}
+	meta, err := json.Marshal(acpdata.PromptImageMeta{Caic: acpdata.PromptImage{ImageData: img.Data}})
+	if err != nil {
+		return acp.PromptContent{}, err
+	}
+	return acp.PromptContent{Type: acp.ContentResourceLink, URI: "file://" + p, Name: path.Base(p), MimeType: img.MediaType, Meta: meta}, nil
+}
+
+// linkedImage restores the image recorded by imageLink. Other resource links
+// carry no caic image.
+func linkedImage(content *acp.PromptContent) (v3.ImageData, bool) {
+	if len(content.Meta) == 0 {
+		return v3.ImageData{}, false
+	}
+	var meta acpdata.PromptImageMeta
+	if err := json.Unmarshal(content.Meta, &meta); err != nil || meta.Caic.ImageData == "" {
+		return v3.ImageData{}, false
+	}
+	return v3.ImageData{MediaType: content.MimeType, Data: meta.Caic.ImageData}, true
 }
 
 // EncodeCompact sends the harness-configured native command through session/prompt.
@@ -428,7 +469,11 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 					input.Text += content.Text
 				case acp.ContentImage:
 					input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
-				case acp.ContentAudio, acp.ContentResource, acp.ContentResourceLink:
+				case acp.ContentResourceLink:
+					if img, ok := linkedImage(content); ok {
+						input.Images = append(input.Images, img)
+					}
+				case acp.ContentAudio, acp.ContentResource:
 					// UserInputMessage currently has no representation for these ACP content types.
 				}
 			}

@@ -17,6 +17,9 @@ type Config struct {
 	EffortID acp.ConfigOptionID
 	// Images permits image encoding when ACP also advertises image support.
 	Images bool
+	// ImagesByPath sends images that are not encoded natively as resource_link
+	// blocks to their agent.AttachmentPath, which the session writes first.
+	ImagesByPath bool
 	// CompactPrompt is the verified native compaction command; empty disables it.
 	// Custom compaction instructions are not supported.
 	CompactPrompt string

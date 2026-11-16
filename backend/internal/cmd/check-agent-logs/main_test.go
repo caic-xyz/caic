@@ -451,6 +451,11 @@ func TestRun(t *testing.T) {
 				input:   `{"event":"user","message":{"content":[{"type":"text","text":"hello"}]}}`,
 			},
 			{
+				name:    "antigravity image path",
+				harness: "antigravity",
+				input:   `{"event":"user","message":{"content":[{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/a.png","caic_image":{"media_type":"image/png","data":"aW1hZ2U="}}]}}`,
+			},
+			{
 				name:    "claude",
 				harness: "claude",
 				input:   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,

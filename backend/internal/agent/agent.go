@@ -857,30 +857,39 @@ const WidgetPluginDir = RelayDir + "/widget-plugin"
 // DeployEmbeddedDir writes all files from an embed.FS to a target directory
 // in the container via a single SSH + tar invocation. Idempotent.
 func DeployEmbeddedDir(ctx context.Context, container string, fsys fs.FS, targetDir string) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
+	var files []deployFile
 	if err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil || d.IsDir() {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
-		data, readErr := fs.ReadFile(fsys, path)
-		if readErr != nil {
-			return readErr
-		}
-		if writeErr := tw.WriteHeader(&tar.Header{
-			Name: path,
-			Mode: 0o644,
-			Size: int64(len(data)),
-		}); writeErr != nil {
-			return writeErr
-		}
-		_, writeErr := tw.Write(data)
-		return writeErr
+		data, err := fs.ReadFile(fsys, path)
+		files = append(files, deployFile{name: path, mode: 0o644, data: data})
+		return err
 	}); err != nil {
-		return fmt.Errorf("build tar: %w", err)
+		return fmt.Errorf("read %s: %w", targetDir, err)
+	}
+	return deployFiles(ctx, container, targetDir, files)
+}
+
+// deployFile is one regular file written by deployFiles.
+type deployFile struct {
+	name string // Slash-separated path relative to the target directory.
+	mode int64
+	data []byte
+}
+
+// deployFiles writes files beneath targetDir in the container via a single
+// SSH + tar invocation, replacing existing files with the same names.
+func deployFiles(ctx context.Context, container, targetDir string, files []deployFile) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, f := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: f.mode, Size: int64(len(f.data))}); err != nil {
+			return fmt.Errorf("build tar: %w", err)
+		}
+		if _, err := tw.Write(f.data); err != nil {
+			return fmt.Errorf("build tar: %w", err)
+		}
 	}
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("close tar: %w", err)

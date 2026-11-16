@@ -100,7 +100,7 @@ func TestWireFormat(t *testing.T) {
 				t.Fatal(err)
 			}
 			out.Write(data)
-			want := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}` + "\n"
+			want := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/6fd6529e1a080d633cc56dd862cc9fc4.png","caic_image":{"media_type":"image/png","data":"aW1hZ2U="}}]}}` + "\n"
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
 			}
@@ -125,7 +125,7 @@ func TestWireFormat(t *testing.T) {
 				t.Fatal(err)
 			}
 			out.Write(data)
-			want := `{"event":"user","message":{"content":[{"type":"text","text":"data:image/jpeg;base64,anBn"}]}}` + "\n"
+			want := `{"event":"user","message":{"content":[{"type":"text","text":"\nAttached image: /tmp/caic-relay/attachments/7fb574c59d4bc36b817c23a03bf8f62c.jpg","caic_image":{"media_type":"image/jpeg","data":"anBn"}}]}}` + "\n"
 			if out.String() != want {
 				t.Fatalf("input = %q, want %q", out.String(), want)
 			}
@@ -135,6 +135,26 @@ func TestWireFormat(t *testing.T) {
 			}
 			m, ok := msgs[0].(*agent.UserInputMessage)
 			if !ok || m.Text != "" || len(m.Images) != 1 || m.Images[0].MediaType != "image/jpeg" || m.Images[0].Data != "anBn" {
+				t.Fatalf("parsed input = %+v", msgs[0])
+			}
+		})
+		t.Run("non-image media type", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			if _, err := w.EncodePrompt(agent.Prompt{Images: []v3.ImageData{{MediaType: "text/plain", Data: "dGlm"}}}); err == nil || !strings.Contains(err.Error(), "text/plain") {
+				t.Fatalf("EncodePrompt error = %v", err)
+			}
+		})
+		t.Run("historical data URL", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			line := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}`
+			msgs, err := w.ParseInput([]byte(line))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			m, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
 				t.Fatalf("parsed input = %+v", msgs[0])
 			}
 		})

@@ -35,5 +35,10 @@ DONE-step usage `PerCall`: agy sets usage once per model call, so caic prices
 it at the vendor's API rates while the result's conversation-wide usage stays
 out of the estimate.
 
+agy 1.5.9 stream-json input rejects every block type but `text` and ignores
+unknown fields. Prompt images are written to `agent.AttachmentDir` and sent as
+a text block naming the path; its `caic_image` field (`data/prompt.go`) keeps
+the image for history. Older records carry images as text data URLs.
+
 Run `go run ./backend/internal/cmd/check-agent-logs` for offline DTO drift checks. Live parsers accept
 unknown fields.

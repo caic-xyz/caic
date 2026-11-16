@@ -27,9 +27,11 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 
 // New creates a DeepSeek Harness backend sharing the standard ACP transport.
 // Native dsh sessions use session/resume and opaque JSON model-route values.
-// Image input depends on the selected route and durable store support; those
-// capabilities and manual ACP compaction are not yet verified for caic task
-// sessions, so neither capability is advertised by this backend.
+// dsh 0.2.2-rc.1 advertises no ACP image prompts, so prompt images go by path
+// as resource_link blocks. Its read_image tool opens them only on routes that
+// declare image input; the default deepseek-v4-flash route reports
+// "does not declare image input". Manual ACP compaction is not yet verified for
+// caic task sessions, so this backend does not advertise it.
 // Native automatic compaction already runs through the ACP profile's
 // compaction-basic plugin (verified with dsh 0.2.2-rc.1 --dump-config).
 // Its threshold is floor(min(context*thresholdRatio, context-output-headroomTokens));
@@ -37,8 +39,6 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // threshold, so a caic override needs its own native settings design.
 // See https://github.com/deepseek-ai/deepseek-harness/blob/39163dd30f703a79079e2d2446545cff3c453738/packages/compaction/compaction-basic/README.md.
 //
-// TODO: Enable images after selecting the exact route before initialize,
-// verifying its durable image store, and accepting native prompt/history behavior.
 // TODO: Enable compaction after proving a native ACP command and its context
 // boundary and accounting semantics.
 // TODO: Native usage_update reports only context occupancy and size. Billed
@@ -46,8 +46,8 @@ const dshEffortID acp.ConfigOptionID = "reasoning_effort"
 // upstream reports prompt usage or usage_update.cost.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{Backend: agentacp.New(harness.Dsh, &agentacp.Config{
-		ResumeMethod: acp.MethodSessionResume,
-		EffortID:     dshEffortID, Models: modelCodec{}, NewTools: newTools, Permissions: agentacp.PermissionApprover{},
+		ResumeMethod: acp.MethodSessionResume, ImagesByPath: true,
+		EffortID: dshEffortID, Models: modelCodec{}, NewTools: newTools, Permissions: agentacp.PermissionApprover{},
 	})}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Dsh, envVars))
 	return b

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	agydata "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -116,8 +117,8 @@ func sortModels(ids []string) []string {
 }
 
 // Backend implements agent.Backend for agy. Task MCP uses a relay-owned plugin
-// workspace without changing shared ~/.gemini settings. Images are formatted as
-// text data URLs for agy stream-json input.
+// workspace without changing shared ~/.gemini settings. Prompt images are
+// written to agent.AttachmentDir and referenced by path.
 type Backend struct {
 	agent.Base
 }
@@ -151,13 +152,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, err
 	}
-	c := agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP)
+	c := agent.NewAttachmentConn(ctx, agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Records, opts.MCP), opts.Target)
 	return agent.StartSession(ctx, rp, c, opts)
 }
 
 // AttachRelay reconnects to a running agy process through the shared relay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, nil)
+	return agent.AttachRelaySession(ctx, opts, func(c agent.Conn) (agent.Conn, error) {
+		return agent.NewAttachmentConn(ctx, c, opts.Target), nil
+	})
 }
 
 // AgentArgs returns agy's persistent NDJSON print-mode command. A bare -p
@@ -235,47 +238,58 @@ type wireFormat struct {
 }
 
 // EncodePrompt encodes text and image input as one complete native record.
+// agy stream-json input accepts only text, so each image becomes a text block
+// naming its AttachmentPath; the agent opens that file with its read tool.
+// The block also carries the image so history keeps it.
 func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
-	var blocks []antigravity.StreamInputContentBlock
+	var blocks []agydata.ContentBlock
 	if p.Text != "" {
-		blocks = append(blocks, antigravity.StreamInputContentBlock{Type: "text", Text: p.Text})
+		blocks = append(blocks, textBlock(p.Text))
 	}
 	for _, img := range p.Images {
-		blocks = append(blocks, antigravity.StreamInputContentBlock{
-			Type: "text",
-			// TODO: Gross hack but the agent figure it out and saves it as a temporary file. Let's use a proper image once
-			// agy supports it with --input-format=stream-json.
-			Text: "data:" + img.MediaType + ";base64," + img.Data,
-		})
+		path, err := agent.AttachmentPath(img)
+		if err != nil {
+			return nil, err
+		}
+		b := textBlock("\nAttached image: " + path)
+		b.CaicImage = &agydata.Image{MediaType: img.MediaType, Data: img.Data}
+		blocks = append(blocks, b)
 	}
 	if len(blocks) == 0 {
-		blocks = append(blocks, antigravity.StreamInputContentBlock{Type: "text", Text: ""})
+		blocks = append(blocks, textBlock(""))
 	}
-	data, err := json.Marshal(antigravity.StreamInputMessage{
-		Event:   antigravity.EventUser,
-		Message: antigravity.StreamInputUserMessage{Content: blocks},
+	line, err := json.Marshal(agydata.InputMessage{
+		Event:   string(antigravity.EventUser),
+		Message: agydata.InputUserMessage{Content: blocks},
 	})
 	if err != nil {
 		return nil, err
 	}
-	return append(data, '\n'), nil
+	return append(line, '\n'), nil
+}
+
+func textBlock(text string) agydata.ContentBlock {
+	return agydata.ContentBlock{Type: "text", Text: text}
 }
 
 // ParseInput decodes client prompts without updating output conversation state.
+// Records written before path attachments carry each image as a text data URL.
 func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
-	var ev antigravity.StreamInputMessage
+	var ev agydata.InputMessage
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("antigravity input: %w", err)
 	}
-	switch ev.Event {
+	switch antigravity.EventType(ev.Event) {
 	case antigravity.EventUser:
 		m := &agent.UserInputMessage{}
 		for _, c := range ev.Message.Content {
 			if c.Type != "text" {
 				return nil, fmt.Errorf("antigravity: unsupported input content %q", c.Type)
 			}
-			if mediaType, data, ok := agent.ParseImageDataURL(c.Text); ok {
-				m.Images = append(m.Images, v3.ImageData{MediaType: mediaType, Data: data})
+			if c.CaicImage != nil {
+				m.Images = append(m.Images, v3.ImageData{MediaType: c.CaicImage.MediaType, Data: c.CaicImage.Data})
+			} else if mediaType, payload, ok := agent.ParseImageDataURL(c.Text); ok {
+				m.Images = append(m.Images, v3.ImageData{MediaType: mediaType, Data: payload})
 			} else {
 				m.Text += c.Text
 			}
@@ -283,7 +297,7 @@ func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 		return []agent.Message{m}, nil
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: ev.Event, Raw: bytes.Clone(line)}}, nil
 	}
 }
 

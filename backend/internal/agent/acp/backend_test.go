@@ -162,6 +162,42 @@ func TestWireFormat(t *testing.T) {
 			t.Fatalf("unsupported image: data=%s err=%v", data, err)
 		}
 	})
+	t.Run("EncodePrompt images by path", func(t *testing.T) {
+		t.Parallel()
+		config := testConfig()
+		config.ImagesByPath = true
+		b := New("test", config)
+		if !b.SupportsImages() {
+			t.Fatal("SupportsImages() = false")
+		}
+		wire, ok := b.NewWire().(*wireFormat)
+		if !ok {
+			t.Fatal("unexpected protocol wire")
+		}
+		wire.session.SessionID = "s"
+		prompt := agent.Prompt{Text: "describe", Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
+		data, err := wire.EncodePrompt(prompt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `{"type":"resource_link","mimeType":"image/png","uri":"file:///tmp/caic-relay/attachments/6fd6529e1a080d633cc56dd862cc9fc4.png","name":"6fd6529e1a080d633cc56dd862cc9fc4.png","_meta":{"caic":{"imageData":"aW1hZ2U="}}}`
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("prompt = %s, want block %s", data, want)
+		}
+		msgs, err := wire.ParseInput(data)
+		if err != nil || len(msgs) == 0 {
+			t.Fatalf("ParseInput = %v, %v", msgs, err)
+		}
+		input, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok || input.Text != "describe" || !slices.Equal(input.Images, prompt.Images) {
+			t.Fatalf("input = %+v", msgs[0])
+		}
+		wire.supportsImage = true
+		data, err = wire.EncodePrompt(prompt)
+		if err != nil || !strings.Contains(string(data), `{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}`) {
+			t.Fatalf("native prompt = %s, %v", data, err)
+		}
+	})
 	t.Run("EncodeCompact", func(t *testing.T) {
 		t.Parallel()
 		t.Run("error", func(t *testing.T) {

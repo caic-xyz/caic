@@ -60,6 +60,7 @@ Deployment and management from Go is in the parent `agent.go` (`DeployRelay`, `S
   output.jsonl      # Append-only conversation log (survives restarts)
   relay.log         # Daemon diagnostics
   pid               # PID file
+  attachments/      # Prompt images read by path (agent.AttachmentDir)
   widget-plugin/    # MCP server + skills (deployed separately)
 ```
 

@@ -4,7 +4,9 @@
 `dsh --profile acp`, `session/resume`, JSON-encoded provider/model route values,
 and the `reasoning_effort` configuration option. Shared transport and metadata parsing live in `../acp/`. Native tool
 projection belongs to this package; evidence from another harness must never
-establish DeepSeek delegation. Image prompts and compaction remain disabled until verified.
+establish DeepSeek delegation. Compaction remains disabled until verified.
+Prompt images go by path through shared ACP `ImagesByPath`; dsh `read_image`
+rejects them on routes without image input, including `deepseek-v4-flash`.
 
 `testdata/dsh-handshake.ndjson` retains the initialization and configuration
 responses from genai's `providers/dsh/testdata/GenSync_session_turn1.ndjson`.

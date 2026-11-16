@@ -19,6 +19,7 @@ import (
 	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	agydata "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
@@ -580,7 +581,8 @@ func checkAntigravityInput(data []byte) error {
 	if isEmptyJSON(content) || content[0] == '"' {
 		return nil
 	}
-	return strictDecode(content, &[]antigravitydto.StreamInputContentBlock{})
+	// caic's block adds only caic_image, which agy ignores.
+	return strictDecode(content, &[]agydata.ContentBlock{})
 }
 
 func checkClaude(data []byte) (string, error) {
