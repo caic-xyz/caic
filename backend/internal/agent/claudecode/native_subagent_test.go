@@ -234,6 +234,20 @@ func TestNativeSubagentChildStreamCannotSettle(t *testing.T) {
 	}
 }
 
+func TestNativeSubagentStringContentUserMessage(t *testing.T) {
+	t.Parallel()
+	// Claude task 4VN78Q1IU000 resumed after compaction with a user record whose
+	// content is a string, not a block list.
+	got := wireSubagents(t,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
+		`{"type":"system","subtype":"task_started","task_id":"child","tool_use_id":"spawn","task_type":"local_agent"}`,
+		`{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation."}}`,
+	)
+	if len(got) != 1 || got[0].Status != agent.NativeSubagentStatusRunning {
+		t.Fatalf("observations = %#v, want only the running task_started card", got)
+	}
+}
+
 // sameCard compares two folded cards by value: the exit code is a pointer in
 // the canonical type, so replay equality must dereference it.
 func sameCard(a, b *agent.BackgroundCommand) bool {

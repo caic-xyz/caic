@@ -233,10 +233,16 @@ func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg, sessionI
 	if ev.ParentToolUseID != "" {
 		return nil, nil
 	}
-	var body claudecode.OutputUserBlock
 	if len(ev.Message) == 0 || ev.Message[0] != '{' {
 		return nil, nil
 	}
+	// A plain-text body, such as the summary that resumes a compacted session,
+	// carries no tool result.
+	var text claudecode.OutputUserText
+	if json.Unmarshal(ev.Message, &text) == nil {
+		return nil, nil
+	}
+	var body claudecode.OutputUserBlock
 	if err := json.Unmarshal(ev.Message, &body); err != nil {
 		return nil, err
 	}
