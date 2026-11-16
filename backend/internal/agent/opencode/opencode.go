@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -65,13 +64,13 @@ func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	args := []string{target.SSHHost}
+	var args []string
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, "opencode", "models", "--refresh", "--verbose")
-	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // target is not user-controlled
+	out, err := agent.SSHCommand(ctx, target.SSHHost, args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("opencode models: %w", err)
 	}

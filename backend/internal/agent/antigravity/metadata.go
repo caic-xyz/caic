@@ -48,7 +48,7 @@ func (s *accounting) observeStep(step *antigravity.StepUpdatePayload) ([]agent.M
 	if _, found := s.done[key]; found {
 		return nil, false
 	}
-	if step.State != antigravity.StepDone {
+	if !terminalStep(step.State) {
 		return nil, true
 	}
 	s.done[key] = struct{}{}

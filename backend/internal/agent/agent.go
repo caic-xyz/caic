@@ -678,11 +678,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wrap func(Conn) (Con
 	if opts.Logger == nil {
 		return nil, errors.New("opts.Logger is required")
 	}
-	sshArgs := []string{
-		sshHost, "python3", RelayScriptPath, "attach",
-		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
-	}
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
+	cmd := sshSessionCommand(ctx, sshHost, ShellJoin([]string{"python3", RelayScriptPath, "attach", "--offset", strconv.FormatInt(opts.RelayOffset, 10)}))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -857,13 +853,8 @@ func DeployRelay(ctx context.Context, target runtime.ConnectionTarget) error {
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
-	// SSH concatenates remote args with spaces and passes them to the login
-	// shell, so a single string works correctly as a shell command.
-	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
-		"mkdir -p "+RelayDir+" && cat > "+RelayScriptPath)
-	cmd.Stdin = bytes.NewReader(relay.ScriptV2)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("deploy relay: %w: %s", err, out)
+	if err := WriteFile(ctx, target.SSHHost, RelayScriptPath, relay.ScriptV2, 0o644); err != nil {
+		return fmt.Errorf("deploy relay: %w", err)
 	}
 	return nil
 }
@@ -911,8 +902,7 @@ func deployFiles(ctx context.Context, container, targetDir string, files []deplo
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("close tar: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "ssh", container, //nolint:gosec // container is not user-controlled
-		"mkdir -p "+targetDir+" && tar xf - -C "+targetDir)
+	cmd := SSHScript(ctx, container, "mkdir -p "+ShellQuote(targetDir)+" && tar xf - -C "+ShellQuote(targetDir))
 	cmd.Stdin = &buf
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("deploy %s: %w: %s", targetDir, err, out)
@@ -927,7 +917,7 @@ func StopRelay(ctx context.Context, target runtime.ConnectionTarget) error {
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
-	cmd := sshCmd(ctx, target.SSHHost, "python3", RelayScriptPath, "attach")
+	cmd := SSHCommand(ctx, target.SSHHost, "python3", RelayScriptPath, "attach")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("relay shutdown stdin pipe: %w", err)
@@ -945,8 +935,7 @@ func StopRelay(ctx context.Context, target runtime.ConnectionTarget) error {
 // a subsequent StartRelay begins with a clean output.jsonl. Used by fork to
 // prevent the source task's message history from leaking into the forked task.
 func CleanRelayState(ctx context.Context, container string) error {
-	cmd := exec.CommandContext(ctx, "ssh", container, "rm", "-rf", RelayDir) //nolint:gosec // container is not user-controlled
-	return cmd.Run()
+	return SSHCommand(ctx, container, "rm", "-rf", RelayDir).Run()
 }
 
 // RelayStatus checks relay socket + PID liveness and returns diagnostic detail.
@@ -959,7 +948,7 @@ func RelayStatus(ctx context.Context, container string) (alive bool, detail stri
 			`echo "sock=$sock pid=$pid kill=$killok"; `+
 			`[ "$sock" -eq 1 ] && [ "$killok" -eq 1 ]`,
 		RelaySockPath, pidPath)
-	cmd := sshCmd(ctx, container, "sh", "-c", check)
+	cmd := SSHCommand(ctx, container, "sh", "-c", check)
 	out, err := cmd.CombinedOutput()
 	detail = strings.TrimSpace(string(out))
 	if err != nil {
@@ -981,7 +970,7 @@ func IsRelayRunning(ctx context.Context, container string) (bool, error) {
 // container. Returns empty string on any error (missing file, SSH failure).
 func ReadRelayLog(ctx context.Context, container string, maxBytes int) string {
 	// Use tail -c to cap the output; the log can be large after long sessions.
-	cmd := sshCmd(ctx, container, "tail", "-c", strconv.Itoa(maxBytes), RelayLogPath)
+	cmd := SSHCommand(ctx, container, "tail", "-c", strconv.Itoa(maxBytes), RelayLogPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -996,11 +985,11 @@ func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
 	if container == "" {
 		return "", errors.New("read plan: container is required")
 	}
-	args := []string{container, "python3", RelayScriptPath, "read-plan"}
+	args := []string{"python3", RelayScriptPath, "read-plan"}
 	if planFile != "" {
 		args = append(args, planFile)
 	}
-	cmd := sshCmd(ctx, args...)
+	cmd := SSHCommand(ctx, container, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("read plan: %w", err)
@@ -1043,11 +1032,6 @@ type RelayProcess struct {
 	Stdout io.ReadCloser
 }
 
-// ShellQuote preserves one argument through a POSIX shell without expansion.
-func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
 // PrepareRelay deploys the relay script and starts the SSH serve-attach
 // process. relayArgs configure the relay; agentArgs start the harness after
 // the relay's command separator. The caller creates a Conn and Session from
@@ -1069,26 +1053,20 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	}
 	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 10+2*len(relayEnv)+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
-	sshArgs = append(sshArgs, sshHost, "PYTHONDONTWRITEBYTECODE=1", "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
+	argv := make([]string, 0, 8+2*len(relayEnv)+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
+	argv = append(argv, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
 	for _, kv := range relayEnv {
-		sshArgs = append(sshArgs, "--env", kv)
+		argv = append(argv, "--env", kv)
 	}
-	sshArgs = append(sshArgs, relayArgs...)
+	argv = append(argv, relayArgs...)
 	for _, key := range opts.StripEnv {
-		sshArgs = append(sshArgs, "--strip-env", key)
+		argv = append(argv, "--strip-env", key)
 	}
-	sshArgs = append(sshArgs, "--")
-	sshArgs = append(sshArgs, agentArgs...)
-
-	// OpenSSH joins remote arguments and passes them through the login shell.
-	// Keep the fixed environment assignment as shell syntax; quote the command
-	// and its arguments so opaque session IDs remain one argv value.
-	for i := 2; i < len(sshArgs); i++ {
-		sshArgs[i] = ShellQuote(sshArgs[i])
-	}
+	argv = append(argv, "--")
+	argv = append(argv, agentArgs...)
 	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", agentArgs)
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // remote arguments are shell-quoted; target is server-owned.
+	// The fixed environment assignment stays shell syntax.
+	cmd := sshSessionCommand(ctx, sshHost, "PYTHONDONTWRITEBYTECODE=1 "+ShellJoin(argv))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -1110,21 +1088,10 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 // wait on an interactive editor.
 var relayEnv = []string{"EDITOR=true", "GIT_EDITOR=true"}
 
-// sshTimeoutArgs are the default SSH options for relay operations.
-var sshTimeoutArgs = []string{"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2"}
-
-// sshCmd creates an exec.Cmd with standard timeout args prepended.
-func sshCmd(ctx context.Context, extraArgs ...string) *exec.Cmd {
-	args := make([]string, 0, len(sshTimeoutArgs)+len(extraArgs))
-	args = append(args, sshTimeoutArgs...)
-	args = append(args, extraArgs...)
-	return exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // args are not user-controlled.
-}
-
 // RelayOutputSize returns the byte size of the relay output.jsonl in the
 // container. This is fast (single stat call) and avoids transferring the file.
 func RelayOutputSize(ctx context.Context, container string) (int64, error) {
-	cmd := sshCmd(ctx, container, "stat", "-c", "%s", RelayOutputPath)
+	cmd := SSHCommand(ctx, container, "stat", "-c", "%s", RelayOutputPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("stat relay output: %w", err)
@@ -1223,7 +1190,7 @@ func relayOutputGeneration(ctx context.Context, container string) (string, error
 }
 
 func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
-	return exec.CommandContext(ctx, "ssh", container, "head", "-c", "4096", RelayOutputPath) //nolint:gosec // container is not user-controlled.
+	return SSHCommand(ctx, container, "head", "-c", "4096", RelayOutputPath)
 }
 
 // readRelayTailRecords parses one stat-bounded relay snapshot and returns the
@@ -1282,7 +1249,7 @@ func relayTailNeedsLeadingSkip(ctx context.Context, container string, start int6
 		return false, nil
 	}
 	command := fmt.Sprintf("dd if=%s bs=1 skip=%d count=1 status=none", RelayOutputPath, start-1)
-	out, err := sshCmd(ctx, container, command).Output()
+	out, err := SSHScript(ctx, container, command).Output()
 	if err != nil {
 		return false, fmt.Errorf("read relay tail boundary: %w", err)
 	}
@@ -1298,10 +1265,10 @@ func relaySnapshotCommand(ctx context.Context, container string, tailBytes, size
 	if tailBytes > 0 && size > tailBytes {
 		start := size - tailBytes
 		command := fmt.Sprintf("head -c %d %s | tail -c %d", size, RelayOutputPath, tailBytes)
-		return sshCmd(ctx, container, command), start
+		return SSHScript(ctx, container, command), start
 	}
 	command := fmt.Sprintf("head -c %d %s", size, RelayOutputPath)
-	return sshCmd(ctx, container, command), 0
+	return SSHScript(ctx, container, command), 0
 }
 
 // readNDJSONRecord reads one LF-terminated physical record without inventing a

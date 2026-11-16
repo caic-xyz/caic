@@ -1147,6 +1147,8 @@ export interface Task {
   /** Auto-compaction threshold (tokens), or zero if unknown. */
   autoCompactTokenLimit: number /* int */;
   error?: string;
+  /** Latest turn failure, cleared by a successful or new turn. */
+  turnError?: string;
   startupFailure?: TaskStartupFailure;
   result?: string;
   forgeOwner?: string;

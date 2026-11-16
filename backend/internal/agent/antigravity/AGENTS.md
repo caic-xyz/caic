@@ -1,7 +1,8 @@
 # Antigravity CLI Backend
 
 Use `github.com/maruel/genai/providers/antigravity` for wire DTOs. The DTOs and
-`~/src/genai/providers/antigravity/AGENTS.md` describe agy 1.2.14.
+`~/src/genai/providers/antigravity/AGENTS.md` describe agy 1.5.9. A failed tool
+step ends in state `ERROR` with `tool_info.error` set and never reaches `DONE`.
 
 ## Evidence
 

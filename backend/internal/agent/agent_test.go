@@ -39,7 +39,7 @@ func TestPrepareRelay(t *testing.T) {
 	// Emulate OpenSSH's remote-shell parsing, then capture the harness argv.
 	dir := t.TempDir()
 	for name, script := range map[string]string{
-		"ssh":     "#!/bin/sh\nset -eu\ncase \"$*\" in\n*serve-attach*) shift; exec /bin/sh -c \"$*\" ;;\n*) /bin/cat >/dev/null ;;\nesac\n",
+		"ssh":     "#!/bin/sh\nset -eu\nwhile [ \"$1\" = -o ]; do shift 2; done\ncase \"$*\" in\n*serve-attach*) shift; exec /bin/sh -c \"$*\" ;;\n*) /bin/cat >/dev/null ;;\nesac\n",
 		"python3": "#!/bin/sh\nset -eu\ntest \"${PYTHONDONTWRITEBYTECODE-}\" = 1\nprintf '%s\\0' \"$@\"\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil { //nolint:gosec // Private SSH test fixtures must be executable.
@@ -1793,9 +1793,9 @@ func TestReadRelayTailRecords(t *testing.T) {
 func TestRelayGenerationCommand(t *testing.T) {
 	t.Parallel()
 	cmd := relayGenerationCommand(t.Context(), "container")
-	want := []string{"ssh", "container", "head", "-c", "4096", RelayOutputPath}
-	if !reflect.DeepEqual(cmd.Args, want) {
-		t.Fatalf("relay generation command args = %#v, want %#v", cmd.Args, want)
+	want := []string{"container", "head -c 4096 " + RelayOutputPath}
+	if got := cmd.Args[len(cmd.Args)-2:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("relay generation command args = %#v, want suffix %#v", cmd.Args, want)
 	}
 }
 

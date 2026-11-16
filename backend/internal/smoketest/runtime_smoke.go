@@ -197,7 +197,7 @@ func deploySmokeAgent(ctx context.Context, target runtime.ConnectionTarget) erro
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
-	return writeContainerFile(ctx, target.SSHHost, smokeAgentPath, []byte(smokeAgentScript))
+	return agent.WriteFile(ctx, target.SSHHost, smokeAgentPath, []byte(smokeAgentScript), 0o644)
 }
 
 // InitSmokeRepos creates two local repositories for the runtime smoke test.

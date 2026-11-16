@@ -2207,6 +2207,8 @@ public struct Task: Codable {
     /// Auto-compaction threshold (tokens), or zero if unknown.
     public let autoCompactTokenLimit: Int
     public let error: String?
+    /// Latest turn failure, cleared by a successful or new turn.
+    public let turnError: String?
     public let startupFailure: TaskStartupFailure?
     public let result: String?
     public let forgeOwner: String?
@@ -2271,6 +2273,7 @@ public struct Task: Codable {
         case contextWindowLimit
         case autoCompactTokenLimit
         case error
+        case turnError
         case startupFailure
         case result
         case forgeOwner
@@ -2301,7 +2304,7 @@ public struct Task: Codable {
         case gitHubToken
     }
 
-    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, gitHubToken: Bool? = nil) {
+    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, turnError: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, gitHubToken: Bool? = nil) {
         self.pendingInput = pendingInput
         self.id = id
         self.initialPrompt = initialPrompt
@@ -2329,6 +2332,7 @@ public struct Task: Codable {
         self.contextWindowLimit = contextWindowLimit
         self.autoCompactTokenLimit = autoCompactTokenLimit
         self.error = error
+        self.turnError = turnError
         self.startupFailure = startupFailure
         self.result = result
         self.forgeOwner = forgeOwner
@@ -2388,6 +2392,7 @@ public struct Task: Codable {
         self.contextWindowLimit = try c.decode(Int.self, forKey: .contextWindowLimit)
         self.autoCompactTokenLimit = try c.decode(Int.self, forKey: .autoCompactTokenLimit)
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.turnError = try c.decodeIfPresent(String.self, forKey: .turnError)
         self.startupFailure = try c.decodeIfPresent(TaskStartupFailure.self, forKey: .startupFailure)
         self.result = try c.decodeIfPresent(String.self, forKey: .result)
         self.forgeOwner = try c.decodeIfPresent(String.self, forKey: .forgeOwner)
@@ -2447,6 +2452,7 @@ public struct Task: Codable {
         try c.encode(self.contextWindowLimit, forKey: .contextWindowLimit)
         try c.encode(self.autoCompactTokenLimit, forKey: .autoCompactTokenLimit)
         try c.encodeIfPresent(self.error, forKey: .error)
+        try c.encodeIfPresent(self.turnError, forKey: .turnError)
         try c.encodeIfPresent(self.startupFailure, forKey: .startupFailure)
         try c.encodeIfPresent(self.result, forKey: .result)
         try c.encodeIfPresent(self.forgeOwner, forKey: .forgeOwner)

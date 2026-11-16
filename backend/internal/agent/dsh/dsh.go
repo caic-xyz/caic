@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -237,13 +236,10 @@ func fetchDSHModels(ctx context.Context, target runtime.ConnectionTarget, extraE
 	defer cancel()
 	args := append([]string{"env"}, extraEnv...)
 	args = append(args, "dsh", "--profile", "acp")
-	for i := range args {
-		args[i] = agent.ShellQuote(args[i])
-	}
 	// Dsh reads cwd/.env before ACP starts. The login directory contains md's
 	// environment file, whose launch controls (including DSH_HOME) dsh rejects
 	// in project files. Match the inventory session's stable root workspace.
-	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, "cd / && "+strings.Join(args, " ")) //nolint:gosec // SSH target is owned by the runtime; remote arguments are shell quoted.
+	cmd := agent.SSHScript(ctx, target.SSHHost, "cd / && "+agent.ShellJoin(args))
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

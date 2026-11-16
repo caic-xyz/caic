@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
-	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
@@ -338,6 +337,20 @@ func TestWireFormat(t *testing.T) {
 				t.Fatalf("duplicate completion = %v, %v", msgs, err)
 			}
 		})
+		t.Run("failed tool ends in ERROR", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			if _, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ACTIVE","step_type":"tool","tool_name":"edit_file"}}`)); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := w.ParseOutput([]byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":69,"state":"ERROR","step_type":"tool","tool_name":"edit_file","tool_info":{"name":"edit_file","error":{"type":"TOOL_ERROR","message":"target content not found"}}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("failure = %v, %v", msgs, err)
+			}
+			if result, ok := msgs[0].(*agent.ToolResultMessage); !ok || result.Error != "target content not found" {
+				t.Fatalf("result = %+v", msgs[0])
+			}
+		})
 		t.Run("response finalization preserves tool order", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
@@ -460,18 +473,4 @@ func TestParseModels(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestShellCommand(t *testing.T) {
-	t.Parallel()
-	for _, value := range []string{"", "spaces and 'quotes'", "$(printf injected); $HOME `printf injected`\n*"} {
-		t.Run(value, func(t *testing.T) {
-			t.Parallel()
-			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", shellCommand([]string{"env", "AGY_TEST=" + value, "/bin/sh", "-c", `printf '%s' "$AGY_TEST"`})) //nolint:gosec // Exercises shell quoting with fixed hostile test values.
-			out, err := cmd.Output()
-			if err != nil || string(out) != value {
-				t.Fatalf("shell argv preservation = %q, %v; want %q", out, err, value)
-			}
-		})
-	}
 }

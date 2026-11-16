@@ -39,7 +39,7 @@ func TestAttachmentConn(t *testing.T) {
 	// The fake ssh runs the remote shell command beneath a temporary root.
 	root := t.TempDir()
 	bin := t.TempDir()
-	script := "#!/bin/sh\nset -eu\nshift\ncmd=$(printf '%s' \"$*\" | sed \"s|" + RelayDir + "|$FAKE_ROOT" + RelayDir + "|g\")\nexec /bin/sh -c \"$cmd\"\n"
+	script := "#!/bin/sh\nset -eu\nwhile [ \"$1\" = -o ]; do shift 2; done\nshift\ncmd=$(printf '%s' \"$*\" | sed \"s|" + RelayDir + "|$FAKE_ROOT" + RelayDir + "|g\")\nexec /bin/sh -c \"$cmd\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil { //nolint:gosec // Private SSH test fixtures must be executable.
 		t.Fatal(err)
 	}

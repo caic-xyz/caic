@@ -2093,6 +2093,8 @@ data class Task(
     /** Auto-compaction threshold (tokens), or zero if unknown. */
     val autoCompactTokenLimit: Int,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val error: String? = null,
+    /** Latest turn failure, cleared by a successful or new turn. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val turnError: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val startupFailure: TaskStartupFailure? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val result: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val forgeOwner: String? = null,

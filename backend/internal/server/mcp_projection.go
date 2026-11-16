@@ -174,6 +174,7 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 		{"runtimeName", task.Runtime.RuntimeName, &out.RuntimeName, maxTaskSummaryRuntime},
 		{"taskResult", task.Result, &out.TaskResult, mcpTextOutputMaxBytes},
 		{"error", task.Error, &out.Error, mcpTextOutputMaxBytes},
+		{"turnError", task.TurnError, &out.TurnError, mcpTextOutputMaxBytes},
 	} {
 		value, cut, err := boundedMCPDetailText(field.src, field.limit)
 		if err != nil {
@@ -225,6 +226,9 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 	out.Result = fmt.Sprintf("Task %s: %s\nState: %s", out.TaskID, out.Title, out.State)
 	if number > 0 {
 		out.Result = fmt.Sprintf("Task #%d: %s\nState: %s", number, out.Title, out.State)
+	}
+	if out.TurnError != "" {
+		out.Result += "\nLast turn failed; see turnError"
 	}
 	if out.PendingInput != nil {
 		out.Result += "\nPending input: " + string(out.PendingInput.State)

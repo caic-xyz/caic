@@ -132,7 +132,7 @@ func TestBackend(t *testing.T) {
 	t.Run("Start", func(t *testing.T) {
 		dir := t.TempDir()
 		for name, script := range map[string]string{
-			"ssh": "#!/bin/sh\nset -eu\ncase \"$*\" in\n*serve-attach*) shift; exec /bin/sh -c \"$*\" ;;\n*) /bin/cat >/dev/null ;;\nesac\n",
+			"ssh": "#!/bin/sh\nset -eu\nwhile [ \"$1\" = -o ]; do shift 2; done\ncase \"$*\" in\n*serve-attach*) shift; exec /bin/sh -c \"$*\" ;;\n*) /bin/cat >/dev/null ;;\nesac\n",
 			"python3": `#!/bin/sh
 set -eu
 printf '%s\0' "$@" > "$CAIC_CODEX_ARGV"

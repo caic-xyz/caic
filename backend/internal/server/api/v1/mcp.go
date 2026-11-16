@@ -20,6 +20,7 @@ type MCPTaskDetail struct {
 	CostComplete          bool             `json:"costComplete" jsonschema_description:"Whether costUSD covers all observed billed usage"`
 	TaskResult            string           `json:"taskResult,omitempty"`
 	Error                 string           `json:"error,omitempty"`
+	TurnError             string           `json:"turnError,omitempty" jsonschema_description:"Latest turn failure, such as a rejected provider request, while the task waits for input"`
 	ChangedFiles          int              `json:"changedFiles"`
 	ChangedPaths          []string         `json:"changedPaths"`
 	ChangedPathsTruncated bool             `json:"changedPathsTruncated"`

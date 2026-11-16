@@ -701,6 +701,7 @@ type Snapshot struct {
 	CIStatus           forge.CIStatus
 	CIChecks           []forge.Check
 	RateLimit          RateLimit
+	TurnError          string // Latest root turn failure; empty after a successful or new turn.
 }
 
 // RateLimit records the active quota block resolved for a task. It is retained
@@ -1693,6 +1694,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		CIStatus:           t.ciStatus,
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
 		RateLimit:          t.rateLimit,
+		TurnError:          t.exitStatus.TurnError,
 	}
 }
 

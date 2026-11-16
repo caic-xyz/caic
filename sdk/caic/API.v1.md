@@ -1230,6 +1230,7 @@ Task is the JSON representation sent to the frontend.
 | `contextWindowLimit` | `int` | Model context window limit (tokens). | yes |
 | `autoCompactTokenLimit` | `int` | Auto-compaction threshold (tokens), or zero if unknown. | yes |
 | `error` | `string` |  |  |
+| `turnError` | `string` | Latest turn failure, cleared by a successful or new turn. |  |
 | `startupFailure` | `TaskStartupFailure` |  |  |
 | `result` | `string` |  |  |
 | `forgeOwner` | `string` |  |  |

@@ -302,6 +302,7 @@ export function validateTask(raw: ValidatorInput): Task {
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
     autoCompactTokenLimit: asNumber(obj["autoCompactTokenLimit"], "Task.autoCompactTokenLimit"),
     ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "Task.error") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "turnError") ? { turnError: asString(obj["turnError"], "Task.turnError") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "startupFailure") ? { startupFailure: validateTaskStartupFailure(obj["startupFailure"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "result") ? { result: asString(obj["result"], "Task.result") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "forgeOwner") ? { forgeOwner: asString(obj["forgeOwner"], "Task.forgeOwner") } : {}),

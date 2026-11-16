@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -237,20 +236,10 @@ func deployReplayRecording(ctx context.Context, target runtime.ConnectionTarget,
 		recording.Write(bytes.TrimSpace(payload))
 		recording.WriteByte('\n')
 	}
-	if err := writeContainerFile(ctx, target.SSHHost, replayAgentPath, []byte(replayAgentScript)); err != nil {
+	if err := agent.WriteFile(ctx, target.SSHHost, replayAgentPath, []byte(replayAgentScript), 0o644); err != nil {
 		return err
 	}
-	return writeContainerFile(ctx, target.SSHHost, replayPayloadPath, recording.Bytes())
-}
-
-// writeContainerFile writes content to path inside the container over SSH.
-func writeContainerFile(ctx context.Context, host, path string, content []byte) error {
-	cmd := exec.CommandContext(ctx, "ssh", host, "mkdir -p "+agent.RelayDir+" && cat > "+path) //nolint:gosec // host and path are internally controlled.
-	cmd.Stdin = bytes.NewReader(content)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("write %s: %w: %s", path, err, out)
-	}
-	return nil
+	return agent.WriteFile(ctx, target.SSHHost, replayPayloadPath, recording.Bytes(), 0o644)
 }
 
 // replaySessionID returns a unique session identity for one replay task.

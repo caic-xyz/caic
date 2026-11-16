@@ -849,11 +849,11 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 		// Remote snapshot commands are supported to reproduce the output-only warm
 		// source as well as attach. No client command is present in the relay file.
 		script := `#!/usr/bin/python3
-import os, subprocess, sys
+import os, shlex, subprocess, sys
 args = sys.argv[1:]
 while args[0] == "-o":
     args = args[2:]
-args = args[1:]
+args = shlex.split(" ".join(args[1:]))
 path = os.environ["CAIC_TEST_RELAY_OUTPUT"]
 if args[:3] == ["python3", "/tmp/caic-relay/relay.py", "attach"]:
     offset = int(args[args.index("--offset") + 1])

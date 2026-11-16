@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -226,7 +225,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 		args = append(args, env...)
 	}
 	args = append(args, "agy", "--output-format", "stream-json", "models")
-	out, err := exec.CommandContext(ctx, "ssh", target.SSHHost, shellCommand(args)).Output() //nolint:gosec // target is configured; remote arguments are shell-quoted
+	out, err := agent.SSHCommand(ctx, target.SSHHost, args...).Output()
 	if err != nil {
 		return agent.ModelInventory{}, fmt.Errorf("agy models: %w", err)
 	}
@@ -418,7 +417,7 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 				st.text.WriteString(s.TextDelta)
 			}
 		}
-		if s.State == antigravity.StepDone && !st.overflow && st.text.Len() != 0 {
+		if terminalStep(s.State) && !st.overflow && st.text.Len() != 0 {
 			msgs = append(msgs, &agent.TextMessage{Text: st.text.String()})
 			st.text.Reset()
 		}
@@ -431,7 +430,7 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 			msgs = append(msgs, &agent.ToolUseMessage{ToolUseID: id, Name: name, Input: s.ToolInfo.Parameters})
 			st.started = true
 		}
-		if s.State == antigravity.StepDone {
+		if terminalStep(s.State) {
 			if s.ToolInfo.Output != "" {
 				msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: id, Delta: s.ToolInfo.Output})
 			}
@@ -441,10 +440,17 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 		if s.TextDelta != "" {
 			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeNotice, Detail: s.TextDelta})
 		}
-	case antigravity.StepUserInput, antigravity.StepFinish:
-		// User text is retained by the recorded stdin; finish is followed by result.
+	case antigravity.StepUserInput, antigravity.StepFinish, antigravity.StepErrorMessage:
+		// User text is retained by the recorded stdin; finish and error_message
+		// precede the result, which carries the outcome.
 	}
 	return msgs
+}
+
+// terminalStep reports whether a step ended. agy 1.5.9 moves a failed tool step
+// from ACTIVE to ERROR and never reports it DONE.
+func terminalStep(state antigravity.StepState) bool {
+	return state == antigravity.StepDone || state == antigravity.StepError
 }
 
 func convertUsage(u *antigravity.JSONUsage) agent.Usage {
@@ -457,16 +463,6 @@ func convertUsage(u *antigravity.JSONUsage) agent.Usage {
 		OutputTokens:          int(u.OutputTokens),
 		ReasoningOutputTokens: int(u.ThinkingTokens),
 	}
-}
-
-// shellCommand preserves argv through SSH's remote shell, including spaces,
-// quotes, and expansion syntax in environment values.
-func shellCommand(args []string) string {
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = agent.ShellQuote(a)
-	}
-	return strings.Join(quoted, " ")
 }
 
 func parseModels(out []byte) (agent.ModelInventory, error) {

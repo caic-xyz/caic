@@ -69,6 +69,13 @@ func TestTaskMCPDetail(t *testing.T) {
 			t.Fatalf("fields unexpectedly share a budget: bytes=%d, err=%v", len(encoded), err)
 		}
 	})
+	t.Run("turn error", func(t *testing.T) {
+		t.Parallel()
+		out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), State: v1.TaskStateWaiting, TurnError: "INVALID_ARGUMENT (code 400)"})
+		if err != nil || out.TurnError != "INVALID_ARGUMENT (code 400)" || !strings.Contains(out.Result, "turnError") {
+			t.Fatalf("detail = %+v, %v", out, err)
+		}
+	})
 	for _, state := range []v1.MCPPendingInputState{v1.MCPPendingInputDelivered, v1.MCPPendingInputDelivering, v1.MCPPendingInputQueued} {
 		t.Run("pending/"+string(state), func(t *testing.T) {
 			t.Parallel()

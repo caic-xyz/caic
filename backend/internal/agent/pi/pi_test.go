@@ -48,6 +48,8 @@ func runPiSSHHelper() {
 		}
 	}
 
+	// SSH sends the remote command as one shell string after the host.
+	args = append(args[:1], strings.Fields(strings.Join(args[1:], " "))...)
 	switch {
 	case slices.Equal(args, []string{"task", "pi", "--version"}):
 		//nolint:gosec // The test-only helper receives its state directory through the environment.
@@ -62,7 +64,7 @@ func runPiSSHHelper() {
 			os.Exit(1)
 		}
 		fmt.Println("Pi and extensions updated")
-	case slices.Contains(args, "'serve-attach'"):
+	case slices.Contains(args, "serve-attach"):
 		runPiRelayHelper()
 	}
 }
@@ -336,7 +338,7 @@ func TestBackend(t *testing.T) {
 			t.Fatalf("Start: %v", err)
 		}
 		args, err := os.ReadFile(filepath.Join(dir, "relay-args")) //nolint:gosec // test-owned temporary directory
-		if err != nil || !strings.Contains(string(args), "'--session' 'ses-1'") {
+		if err != nil || !strings.Contains(string(args), "--session ses-1") {
 			t.Fatalf("Pi resume command=%s err=%v", args, err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -251,7 +250,7 @@ func updatePi(ctx context.Context, target runtime.ConnectionTarget) (string, err
 	}
 	updateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(updateCtx, "ssh", target.SSHHost, "pi", "update", "--all") //nolint:gosec // target is not user-controlled.
+	cmd := agent.SSHCommand(updateCtx, target.SSHHost, "pi", "update", "--all")
 	out, err := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
 	if err == nil {
@@ -755,13 +754,13 @@ func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	args := []string{target.SSHHost}
+	var args []string
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, "pi", "--mode", "rpc", "--approve", "--no-session")
-	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled
+	cmd := agent.SSHCommand(ctx, target.SSHHost, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

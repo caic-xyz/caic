@@ -409,6 +409,7 @@ type Task struct {
 	ContextWindowLimit                 int                  `json:"contextWindowLimit"`        // Model context window limit (tokens).
 	AutoCompactTokenLimit              int                  `json:"autoCompactTokenLimit"`     // Auto-compaction threshold (tokens), or zero if unknown.
 	Error                              string               `json:"error,omitempty"`
+	TurnError                          string               `json:"turnError,omitempty"` // Latest turn failure, cleared by a successful or new turn.
 	StartupFailure                     *TaskStartupFailure  `json:"startupFailure,omitempty"`
 	Result                             string               `json:"result,omitempty"`
 	ForgeOwner                         string               `json:"forgeOwner,omitempty"`

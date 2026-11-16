@@ -3,6 +3,7 @@
 package task
 
 import (
+	"cmp"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -64,6 +65,10 @@ type ExitStatus struct {
 	// Error is the latest exit diagnostic after reconciliation. Callers must
 	// treat it as read-only and update the status through Observe.
 	Error string
+	// TurnError is the latest root turn's failure, such as a provider request
+	// rejection that leaves the agent waiting for input. A successful result or
+	// the start of the next turn clears it. Callers must treat it as read-only.
+	TurnError string
 
 	clean        bool
 	inputPending bool
@@ -98,6 +103,7 @@ func (s *ExitStatus) Observe(msg agent.Message) bool {
 				s.inputPending = false
 				s.clean = false
 				s.Error = ""
+				s.TurnError = ""
 			}
 			return true
 		}
@@ -113,15 +119,20 @@ func (s *ExitStatus) Observe(msg agent.Message) bool {
 		s.inputPending = false
 		s.clean = false
 		s.Error = ""
+		s.TurnError = ""
 	}
 	if ClearsExitError(msg) {
 		s.Error = ""
+		s.TurnError = ""
 		s.clean = false
 		s.inputPending = false
 	}
 	if result, ok := msg.(*agent.ResultMessage); ok {
 		s.clean = !result.IsError
 		s.inputPending = false
+		if result.IsError {
+			s.TurnError = cmp.Or(result.Result, "turn failed without a diagnostic")
+		}
 	}
 	return true
 }

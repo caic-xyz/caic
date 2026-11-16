@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os/exec"
 	"slices"
 	"strconv"
 	"sync"
@@ -153,14 +152,14 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	if target.SSHHost == "" {
 		return nil, errors.New("agent connection target missing SSH host")
 	}
-	args := []string{target.SSHHost}
+	var args []string
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, codexAppServerArgs(0)...)
 
-	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled.
+	cmd := agent.SSHCommand(ctx, target.SSHHost, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -1064,11 +1063,8 @@ func readJSONRPCResponse(ctx context.Context, r recordReader, expectedID int64) 
 // 	if target.SSHHost == "" {
 // 		return errors.New("agent connection target missing SSH host")
 // 	}
-// 	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
-// 		"mkdir -p "+agent.WidgetPluginDir+" && cat > "+widgetMCPServerPath)
-// 	cmd.Stdin = bytes.NewReader(agent.WidgetMCPServerScript)
-// 	if out, err := cmd.CombinedOutput(); err != nil {
-// 		return fmt.Errorf("deploy widget MCP: %w: %s", err, out)
+// 	if err := agent.WriteFile(ctx, target.SSHHost, widgetMCPServerPath, agent.WidgetMCPServerScript, 0o644); err != nil {
+// 		return fmt.Errorf("deploy widget MCP: %w", err)
 // 	}
 // 	return nil
 // }
