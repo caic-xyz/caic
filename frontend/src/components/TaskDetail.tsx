@@ -2606,6 +2606,9 @@ function ToolMessageGroup(props: {
             onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
           >
             <summary>
+              <Show when={!calls().every(finished)}>
+                <span class={styles.toolPending} data-testid="tool-group-pending" />
+              </Show>
               {calls().filter(finished).length}/{calls().length} tools: {toolCountSummary(calls())}
             </summary>
             <div class={styles.toolGroupInner}>
