@@ -159,6 +159,10 @@ func New(cacheDir string, envVars []string) *Backend {
 
 // Start launches agy through the shared relay and its task-local MCP plugin.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	// agy's stream-json protocol reports no version.
+	if err := agent.RecordVersion(ctx, opts, "agy"); err != nil {
+		return nil, err
+	}
 	relayArgs := []string{"--harness", "antigravity"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")

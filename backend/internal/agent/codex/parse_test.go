@@ -39,9 +39,6 @@ func TestParseMessage(t *testing.T) {
 		if init.Cwd != "/repo" {
 			t.Errorf("Cwd = %q", init.Cwd)
 		}
-		if init.Version != "1.0" {
-			t.Errorf("Version = %q, want 1.0", init.Version)
-		}
 		if init.ReportedModel != "gpt-5.6-terra" || init.ReportedEffort != "high" {
 			t.Errorf("model/effort = %q/%q, want gpt-5.6-terra/high", init.ReportedModel, init.ReportedEffort)
 		}

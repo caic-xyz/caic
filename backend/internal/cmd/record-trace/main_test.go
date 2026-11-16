@@ -251,7 +251,7 @@ func TestRecordingRetainsNativeCorrelation(t *testing.T) {
 	})
 	var encoded strings.Builder
 	for _, line := range []string{
-		`{"id":1,"result":{"userAgent":"caic/0.1"}}`,
+		`{"id":1,"result":{"userAgent":"caic/0.169.0 (Debian 13.0.0; x86_64) unknown (caic; 1.0.0)"}}`,
 		`{"id":2,"result":{"data":[]}}`,
 		`{"id":3,"result":{"thread":{"id":"recorded-thread","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}`,
 		`{"id":4,"result":{"turn":{"id":"turn-1"}}}`,
@@ -313,7 +313,7 @@ func TestRecordingRetainsNativeCorrelation(t *testing.T) {
 			}
 		}
 	}
-	want := agent.SessionMetadata{SessionID: "recorded-thread", ReportedModel: "gpt-5.6", ReportedEffort: "medium", AgentVersion: "0.133.0"}
+	want := agent.SessionMetadata{SessionID: "recorded-thread", ReportedModel: "gpt-5.6", ReportedEffort: "medium", AgentVersion: "0.169.0"}
 	if metadata != want || inputs != 1 || strings.Count(string(raw), `"t":"input"`) != 5 {
 		t.Fatalf("recording metadata = %+v, canonical inputs = %d; want %+v, 1 and 5 native inputs\n%s", metadata, inputs, want, raw)
 	}

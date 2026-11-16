@@ -212,7 +212,7 @@ func TestHandshake(t *testing.T) {
 	})
 	t.Run("model_list_params", func(t *testing.T) {
 		t.Parallel()
-		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.169.0 (Debian 13.0.0; x86_64) unknown (caic; 1.0.0)"}}
 {"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}
 `
@@ -225,8 +225,9 @@ func TestHandshake(t *testing.T) {
 		if w.threadID != "thread_1" {
 			t.Errorf("threadID = %q, want thread_1", w.threadID)
 		}
-		if w.agentVersion != "0.133.0" {
-			t.Errorf("agentVersion = %q, want 0.133.0", w.agentVersion)
+		// The initialize response names the running version, not the thread's creating one.
+		if w.agentVersion != "0.169.0" {
+			t.Errorf("agentVersion = %q, want 0.169.0", w.agentVersion)
 		}
 		if w.reportedModel != "gpt-5.6" {
 			t.Errorf("model = %q, want gpt-5.6", w.reportedModel)

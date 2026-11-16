@@ -57,7 +57,6 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			SessionID:      p.Thread.ID,
 			Cwd:            p.Thread.CWD,
 			ReportedModel:  p.Thread.Model,
-			Version:        p.Thread.CLIVersion,
 			ReportedEffort: string(p.Thread.ReasoningEffort),
 		}}, decodedItem{threadStarted: &p}, nil
 

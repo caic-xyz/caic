@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -850,7 +851,7 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	request := w.requests[i]
 	method := request.method
 	w.requests = slices.Delete(w.requests, i, i+1)
-	if method != "thread/start" && method != "thread/resume" && method != "turn/start" {
+	if method != "initialize" && method != "thread/start" && method != "thread/resume" && method != "turn/start" {
 		return nil, false, nil
 	}
 	failure, err := agent.JSONField(line, "error")
@@ -865,6 +866,16 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 		return nil, true, err
 	}
 	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true, nil
+	}
+	if method == "initialize" {
+		userAgent, err := agent.JSONString(raw, "userAgent")
+		if err != nil {
+			return nil, true, err
+		}
+		w.mu.Lock()
+		w.agentVersion = userAgentVersion(userAgent)
+		w.mu.Unlock()
 		return nil, true, nil
 	}
 	if method == "turn/start" {
@@ -888,6 +899,14 @@ func (w *wireFormat) threadResponse(line []byte, probe *agent.JSONRPCEnvelope) (
 	return []agent.Message{m}, true, nil
 }
 
+// userAgentVersion returns the build version in an initialize response's
+// userAgent, "<originator>/<version> (<os>; <arch>) ...", or "" when absent.
+func userAgentVersion(userAgent string) string {
+	product, _, _ := strings.Cut(userAgent, " ")
+	_, version, _ := strings.Cut(product, "/")
+	return version
+}
+
 func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.InitMessage {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -896,7 +915,10 @@ func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.In
 		w.threadTurnStarted = make(map[string]bool)
 	}
 	w.threadTurnStarted[r.Thread.ID] = false
-	if r.Thread.CLIVersion != "" {
+	// cliVersion names the version that created the thread. It stands in for
+	// the running version only in logs that predate recording the initialize
+	// response.
+	if w.agentVersion == "" {
 		w.agentVersion = r.Thread.CLIVersion
 	}
 	model := r.Model
@@ -913,7 +935,7 @@ func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.In
 	if effort != "" {
 		w.reportedEffort = effort
 	}
-	return &agent.InitMessage{Source: agent.MessageSource{ThreadID: r.Thread.ID, RootThreadID: r.Thread.ID}, SessionID: r.Thread.ID, Cwd: r.Thread.CWD, ReportedModel: model, ReportedEffort: effort, Version: r.Thread.CLIVersion}
+	return &agent.InitMessage{Source: agent.MessageSource{ThreadID: r.Thread.ID, RootThreadID: r.Thread.ID}, SessionID: r.Thread.ID, Cwd: r.Thread.CWD, ReportedModel: model, ReportedEffort: effort, Version: w.agentVersion}
 }
 
 // scopeSource adds session ownership without inferring it from arrival order.

@@ -193,6 +193,10 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (session *agen
 			return nil, err
 		}
 	}
+	// Pi's RPC protocol reports no version, and a retry follows pi update.
+	if err := agent.RecordVersion(ctx, opts, "pi"); err != nil {
+		return nil, err
+	}
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID, CompactionBudget: opts.CompactionBudget})
 	relayArgs := []string{"--harness", "pi"}
 	if opts.MCP != nil {

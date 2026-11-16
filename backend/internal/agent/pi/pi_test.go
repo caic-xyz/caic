@@ -53,10 +53,16 @@ func runPiSSHHelper() {
 	switch {
 	case slices.Equal(args, []string{"task", "pi", "--version"}):
 		//nolint:gosec // The test-only helper receives its state directory through the environment.
-		if err := os.WriteFile(filepath.Join(os.Getenv("PI_SSH_HELPER_DIR"), "version-called"), nil, 0o600); err != nil {
+		f, err := os.OpenFile(filepath.Join(os.Getenv("PI_SSH_HELPER_DIR"), "version-calls"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, err = f.WriteString("1")
+			err = errors.Join(err, f.Close())
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		fmt.Println("1.5.2")
 	case slices.Equal(args, []string{"task", "pi", "update", "--all"}):
 		//nolint:gosec // The test-only helper receives its state directory through the environment.
 		if err := os.WriteFile(filepath.Join(os.Getenv("PI_SSH_HELPER_DIR"), "updated"), nil, 0o600); err != nil {
@@ -361,10 +367,12 @@ func TestBackend(t *testing.T) {
 				t.Fatalf("startup log = %q, want %q", log.String(), want)
 			}
 		}
-		if _, err := os.Stat(filepath.Join(dir, "version-called")); err == nil {
-			t.Fatal("pi --version was called")
-		} else if !os.IsNotExist(err) {
-			t.Fatal(err)
+		// Each launch attempt records the version, since the retry follows pi update.
+		if calls, err := os.ReadFile(filepath.Join(dir, "version-calls")); err != nil || string(calls) != "11" { //nolint:gosec // test-owned temporary directory
+			t.Fatalf("pi --version calls = %q, err=%v; want one per launch attempt", calls, err)
+		}
+		if n := strings.Count(log.String(), `"agent_version":"1.5.2"`); n != 2 {
+			t.Fatalf("startup log = %q, want the version recorded for both launches", log.String())
 		}
 		count, err := os.ReadFile(filepath.Join(dir, "relay-count")) //nolint:gosec // dir is a test-owned temporary directory.
 		if err != nil {
@@ -400,9 +408,9 @@ func TestBackend(t *testing.T) {
 			state string
 			want  agent.SessionMetadata
 		}{
-			{"state without session ID", `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.6"},"thinkingLevel":"high"}}`, agent.SessionMetadata{ReportedModel: "openai/gpt-5.6", ReportedEffort: "high"}},
-			{"failed state retains selected model", `{"type":"response","command":"get_state","success":false,"error":"interrupted state"}`, agent.SessionMetadata{ReportedModel: "anthropic/claude-opus-4-7"}},
-			{"requested model resume", `{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","thinkingLevel":"high"}}`, agent.SessionMetadata{SessionID: "ses-1", ReportedModel: "anthropic/claude-opus-4-7", ReportedEffort: "high"}},
+			{"state without session ID", `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.6"},"thinkingLevel":"high"}}`, agent.SessionMetadata{ReportedModel: "openai/gpt-5.6", ReportedEffort: "high", AgentVersion: "1.5.2"}},
+			{"failed state retains selected model", `{"type":"response","command":"get_state","success":false,"error":"interrupted state"}`, agent.SessionMetadata{ReportedModel: "anthropic/claude-opus-4-7", AgentVersion: "1.5.2"}},
+			{"requested model resume", `{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","thinkingLevel":"high"}}`, agent.SessionMetadata{SessionID: "ses-1", ReportedModel: "anthropic/claude-opus-4-7", ReportedEffort: "high", AgentVersion: "1.5.2"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				exe, err := os.Executable()

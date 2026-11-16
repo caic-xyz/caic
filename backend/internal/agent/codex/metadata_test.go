@@ -69,6 +69,39 @@ func TestMetadataParser(t *testing.T) {
 					t.Fatalf("prior process request = %+v", metadata)
 				}
 			})
+			t.Run("running version", func(t *testing.T) {
+				t.Parallel()
+				p := newParser()
+				var metadata agent.SessionMetadata
+				feed := func(input bool, line string) {
+					parse := p.ParseOutput
+					if input {
+						parse = p.ParseInput
+					}
+					messages, err := parse([]byte(line))
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, m := range messages {
+						metadata.Apply(m)
+					}
+				}
+				// Logs that predate the recorded initialize response fall back to the creating version.
+				feed(true, `{"id":1,"method":"thread/start","params":{}}`)
+				feed(false, `{"id":1,"result":{"thread":{"id":"root","cliVersion":"0.154.0"}}}`)
+				if metadata.AgentVersion != "0.154.0" {
+					t.Fatalf("version without initialize = %q, want 0.154.0", metadata.AgentVersion)
+				}
+				// A revival on an upgraded CLI resumes a thread created by the old one.
+				feed(true, `{"id":1,"method":"initialize","params":{}}`)
+				feed(false, `{"id":1,"result":{"userAgent":"caic/0.169.0 (Debian 13.0.0; x86_64) unknown (caic; 1.0.0)"}}`)
+				feed(true, `{"id":2,"method":"thread/resume","params":{"threadId":"root"}}`)
+				feed(false, `{"id":2,"result":{"thread":{"id":"root","cliVersion":"0.154.0"}}}`)
+				feed(false, `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"root","cliVersion":"0.154.0"}}}`)
+				if metadata.AgentVersion != "0.169.0" {
+					t.Fatalf("revived version = %q, want running 0.169.0", metadata.AgentVersion)
+				}
+			})
 			t.Run("ordered models and inclusive usage", func(t *testing.T) {
 				t.Parallel()
 				p := newParser()
