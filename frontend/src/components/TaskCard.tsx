@@ -207,7 +207,8 @@ export default function TaskCard(props: TaskCardProps) {
       await action();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      props.onError(`${name} failed: ${message}`);
+      // A push is recorded in the task log, which outlives this warning.
+      props.onError(`${name} failed: ${message}${name === "sync" ? ". Open the task to see its push log." : ""}`);
     } finally {
       setMenuActionPending(false);
     }

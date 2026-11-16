@@ -175,6 +175,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	// Resource statistics stream only for behaviour tests: the documentation
 	// screenshots compare two renders and need a stable glyph.
 	fc.StreamStats = !visualFixtures
+	fc.HookDir = os.Getenv("CAIC_E2E_HOOK_DIR")
 	cfg.Agent.Backends = fakeAgentBackends()
 
 	// If a trace file is specified, copy it to the tasks log directory so it

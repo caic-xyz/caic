@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -420,4 +421,88 @@ func TestVNCServer(t *testing.T) {
 			t.Fatalf("connection after close: %v, want EOF", err)
 		}
 	})
+}
+
+func TestRunPrePushScript(t *testing.T) {
+	t.Parallel()
+	dest := runtime.PushRefs{Remote: "origin", Branch: "caic-7"}
+	write := func(t *testing.T, dir, mode string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "caic-7"), []byte(mode), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("without a hook directory it is silent", func(t *testing.T) {
+		t.Parallel()
+		var out bytes.Buffer
+		if err := NewRuntimeBackend(0).RunPrePush(t.Context(), "", 0, "", dest, &out); err != nil || out.Len() != 0 {
+			t.Fatalf("err = %v, output = %q", err, out.String())
+		}
+	})
+	t.Run("without a script it passes", func(t *testing.T) {
+		t.Parallel()
+		b := NewRuntimeBackend(0)
+		b.HookDir = t.TempDir()
+		var out bytes.Buffer
+		if err := b.RunPrePush(t.Context(), "", 0, "", dest, &out); err != nil || !strings.Contains(out.String(), "caic-7") {
+			t.Fatalf("err = %v, output = %q", err, out.String())
+		}
+	})
+	t.Run("fail reports the lint failure", func(t *testing.T) {
+		t.Parallel()
+		b := NewRuntimeBackend(0)
+		b.HookDir = t.TempDir()
+		write(t, b.HookDir, "fail")
+		var out bytes.Buffer
+		if err := b.RunPrePush(t.Context(), "", 0, "", dest, &out); err == nil || !strings.Contains(out.String(), "lint failed") {
+			t.Fatalf("err = %v, output = %q", err, out.String())
+		}
+	})
+	t.Run("hold streams until released", func(t *testing.T) {
+		t.Parallel()
+		b := NewRuntimeBackend(0)
+		b.HookDir = t.TempDir()
+		write(t, b.HookDir, "hold")
+		var out syncBuffer
+		done := make(chan error, 1)
+		go func() { done <- b.RunPrePush(t.Context(), "", 0, "", dest, &out) }()
+		for !strings.Contains(out.String(), "step 2") {
+			time.Sleep(10 * time.Millisecond)
+		}
+		write(t, b.HookDir, "ok")
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("hold stops when the push is cancelled", func(t *testing.T) {
+		t.Parallel()
+		b := NewRuntimeBackend(0)
+		b.HookDir = t.TempDir()
+		write(t, b.HookDir, "hold")
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- b.RunPrePush(ctx, "", 0, "", dest, io.Discard) }()
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	})
+}
+
+// syncBuffer is a bytes.Buffer safe for a writer and a polling reader.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }

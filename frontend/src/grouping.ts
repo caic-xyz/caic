@@ -693,9 +693,8 @@ function groupMessagesAfter(
         // rather than inside a turn that can be elided.
         break;
       case "syncActivity":
-        // Push activity records are not rendered yet; the inline timeline entry
-        // is planned in docs/PLAN_PUSH_TIMELINE.md (phase push-timeline-ui).
-        // Listed to avoid an OTHER group acting as a hard barrier.
+        // Push records fold into one anchored entry in syncActivity.ts, outside
+        // every turn. Listed to avoid an OTHER group acting as a hard barrier.
         break;
       case "init":
       case "result":

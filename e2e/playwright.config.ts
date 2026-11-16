@@ -25,6 +25,8 @@
 // The webServer dynamically allocates a port for the fake backend and verifies
 // it before running instrumented tests.
 
+import { mkdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { chromeExecutable } from "./browser";
@@ -58,6 +60,16 @@ if (
 }
 const authServerURL = `http://${serverHost}:${authServerPort}`;
 process.env.CAIC_E2E_AUTH_URL = authServerURL;
+// The fake runtime scripts each push's pre-push hook from a file in this
+// directory; the server and the tests read the same path (see push-timeline.spec.ts).
+// The first evaluation creates it empty; later ones and workers inherit it.
+if (process.env.CAIC_E2E_HOOK_DIR === undefined) {
+  // Outside test-results, which Playwright empties after loading this config.
+  const hookDir = path.join(os.tmpdir(), `caic-e2e-push-hooks-${serverPort}`);
+  rmSync(hookDir, { recursive: true, force: true });
+  mkdirSync(hookDir, { recursive: true });
+  process.env.CAIC_E2E_HOOK_DIR = hookDir;
+}
 const prebuiltBinary = process.env.CAIC_E2E_BINARY;
 if (prebuiltBinary && !/^\/[a-zA-Z0-9_./-]+$/.test(prebuiltBinary)) {
   throw new Error("CAIC_E2E_BINARY must be an absolute path without shell metacharacters");

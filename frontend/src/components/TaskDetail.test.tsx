@@ -3225,3 +3225,105 @@ for (const boundary of ["compaction", "changed init"]) {
     expect(summary).toHaveFocus();
   });
 }
+
+describe("push timeline", () => {
+  const syncStart: EventMessage = {
+    kind: "syncActivity",
+    ts: 2500,
+    syncActivity: { syncID: "s1", phase: "start", target: "origin", branch: "feature-branch" },
+  };
+
+  function seedTurns(extra: EventMessage[]) {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      for (const event of [
+        { kind: "text", ts: 1000, text: { text: "First response" } },
+        resultEvent(2000),
+        ...extra,
+        { kind: "userInput", ts: 3000, userInput: { text: "Continue" } },
+        { kind: "text", ts: 4000, text: { text: "Second response" } },
+        resultEvent(5000),
+        { kind: "userInput", ts: 6000, userInput: { text: "Again" } },
+        { kind: "text", ts: 7000, text: { text: "Third response" } },
+        resultEvent(8000),
+      ] satisfies EventMessage[])
+        emit(handlers, event);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+  }
+
+  it("keeps a push beside the turn it followed while earlier turns stay collapsed", async () => {
+    seedTurns([
+      syncStart,
+      { kind: "syncActivity", ts: 2600, syncActivity: { syncID: "s1", phase: "output", output: "lint ok\n" } },
+      {
+        kind: "syncActivity",
+        ts: 2700,
+        syncActivity: { syncID: "s1", phase: "end", status: "pushed", durationMS: 200 },
+      },
+    ]);
+    await renderTaskDetail({ taskId: "push-anchor" });
+    const entry = screen.getByTestId("sync-activity");
+    expect(entry).toHaveAttribute("data-state", "pushed");
+    expect(within(entry).getByTestId("sync-output")).toHaveTextContent("lint ok");
+    const toggles = screen.getAllByRole("button", { name: /1 message/ });
+    expect(toggles).toHaveLength(2);
+    expect(toggles[0]?.compareDocumentPosition(entry) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(entry.compareDocumentPosition(toggles[1] as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("cancels a running push from its entry", async () => {
+    seedTurns([syncStart]);
+    const cancel = vi.spyOn(api, "cancelTaskSync").mockResolvedValue({ status: "cancelling" });
+    await renderTaskDetail({ taskId: "push-cancel" });
+    expect(screen.getByTestId("sync-activity")).toHaveAttribute("data-state", "running");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Cancel push" }));
+    expect(cancel).toHaveBeenCalledWith("push-cancel");
+  });
+
+  it("reports a failed cancel request", async () => {
+    seedTurns([syncStart]);
+    vi.spyOn(api, "cancelTaskSync").mockRejectedValue(new Error("no sync of this task is running"));
+    await renderTaskDetail({ taskId: "push-cancel-failed" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Cancel push" }));
+    expect(await screen.findByText("cancel failed: no sync of this task is running")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel push" })).toBeEnabled();
+  });
+
+  it("keeps an unrecorded sync failure until the next action", async () => {
+    seedTurns([]);
+    vi.spyOn(api, "syncTask").mockRejectedValue(new Error("a sync of this task is already running"));
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    await renderTaskDetail({ taskId: "push-unrecorded" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Push" }));
+    expect(await screen.findByText("sync failed: a sync of this task is already running")).toBeInTheDocument();
+    expect(timers.mock.calls.filter(([, delay]) => delay === 5000)).toHaveLength(0);
+  });
+
+  it("leaves a recorded failure to its timeline entry", async () => {
+    let handlers: HistoryEventsHandlers | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, h) => {
+      handlers = h;
+      emit(h, { kind: "text", ts: 1000, text: { text: "Response" } });
+      emit(h, resultEvent(2000));
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    vi.spyOn(api, "syncTask").mockImplementation(async () => {
+      assert.ok(handlers);
+      emit(handlers, syncStart);
+      emit(handlers, {
+        kind: "syncActivity",
+        ts: 2600,
+        syncActivity: { syncID: "s1", phase: "end", status: "failed", error: "hook rejected", durationMS: 100 },
+      });
+      throw new Error("sync to origin: hook rejected");
+    });
+    await renderTaskDetail({ taskId: "push-recorded" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Push" }));
+    expect(await screen.findByTestId("sync-error")).toHaveTextContent("hook rejected");
+    await waitFor(() => expect(screen.queryByText(/^sync failed:/)).not.toBeInTheDocument());
+  });
+});

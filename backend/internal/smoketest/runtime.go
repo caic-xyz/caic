@@ -62,6 +62,11 @@ type RuntimeBackend struct {
 	// documentation screenshots render the same server twice and compare the
 	// results, so they leave it off to keep the statistics glyph stable.
 	StreamStats bool
+	// HookDir, when non-empty, scripts RunPrePush from a file named after the
+	// destination branch: "fail" fails the hook and "hold" streams output until
+	// the file changes or the push is cancelled. Any other content, or no file,
+	// passes. The e2e tests write the file to drive a push through its states.
+	HookDir string
 
 	vncPort int // non-zero when a fake VNC server is running.
 
@@ -247,8 +252,35 @@ func (b *RuntimeBackend) Fetch(ctx context.Context, id runtime.ID, _ runtime.Fet
 // RefreshRefs implements runtime.Repository. Fake repositories already use host refs.
 func (*RuntimeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
 
-// RunPrePush implements runtime.Repository. Fake repositories have no hooks.
-func (*RuntimeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs, io.Writer) error {
+// RunPrePush implements runtime.Repository. Fake repositories have no hooks
+// unless HookDir scripts one.
+func (b *RuntimeBackend) RunPrePush(ctx context.Context, _ runtime.ID, _ int, _ string, dest runtime.PushRefs, out io.Writer) error {
+	if b.HookDir == "" {
+		return nil
+	}
+	path := filepath.Join(b.HookDir, strings.ReplaceAll(dest.Branch, "/", "-"))
+	mode := func() string {
+		raw, _ := os.ReadFile(path) //nolint:gosec // The path is the e2e hook directory joined with a branch name.
+		return strings.TrimSpace(string(raw))
+	}
+	if _, err := fmt.Fprintf(out, "pre-push: checking %s\n", dest.Branch); err != nil {
+		return err
+	}
+	initial := mode()
+	for step := 1; initial == "hold" && mode() == initial; step++ {
+		if _, err := fmt.Fprintf(out, "pre-push: step %d\n", step); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	if m := mode(); m == "fail" {
+		_, _ = fmt.Fprintln(out, "pre-push: lint failed")
+		return errors.New("pre-push lint failed")
+	}
 	return nil
 }
 

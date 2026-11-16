@@ -1,0 +1,109 @@
+/* One push attempt anchored inline in the task transcript. */
+
+.entry {
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.8rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  align-items: center;
+  min-height: 28px;
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.icon svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentcolor;
+}
+
+.entry[data-state="pushed"] .icon {
+  color: var(--color-success);
+}
+
+.entry[data-state="failed"] .icon {
+  color: var(--color-danger);
+}
+
+.entry[data-state="cancelled"] .icon {
+  color: var(--color-text-muted);
+}
+
+.spinner {
+  animation: sync-spin 1s linear infinite;
+}
+
+@keyframes sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+.title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.branch {
+  font-family: monospace;
+}
+
+.status,
+.duration {
+  color: var(--color-text-tertiary);
+}
+
+.entry[data-state="failed"] .status {
+  color: var(--color-danger);
+}
+
+/* The cancel button takes the end of the header row, wrapped or not. */
+.cancel {
+  margin-left: auto;
+}
+
+.cancel svg {
+  fill: currentcolor;
+}
+
+.log {
+  max-height: 10rem;
+  padding: 0.25rem 0.5rem;
+  margin: 0.25rem 0 0;
+  overflow: auto;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: var(--color-bg-code);
+  border-radius: var(--radius-sm);
+}
+
+.error {
+  max-height: 8rem;
+  margin: 0.25rem 0 0;
+  overflow: auto;
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

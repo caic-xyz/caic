@@ -103,6 +103,8 @@ import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import NativeAgents, { BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
 import { assignNativeAnchors } from "../nativeSubagents";
+import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
+import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
 import ActionButton from "./ActionButton";
 import TimingIcon from "./TimingIcon";
@@ -295,9 +297,19 @@ export default function TaskDetail(props: Props) {
     ),
   );
   const displayedAtRoot = (event: EventMessage) => historyRoot(event, metadata()?.routing ?? []);
+  // Rebuilt from the record stream, so a reload during a push restores its entry.
+  const syncTracker = new SyncActivityTracker();
+  const syncEntries = createMemo(() => syncTracker.derive(messages()));
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
+  // A failed sync request stays until the next sync. An attempt the server
+  // recorded shows its failure in the timeline entry, which replaces this text.
+  const [syncFailure, setSyncFailure] = createSignal<{ knownSyncs: number; message: string } | null>(null);
+  const unrecordedSyncFailure = () => {
+    const failure = syncFailure();
+    return failure && syncEntries().length === failure.knownSyncs ? failure.message : null;
+  };
   const [passwordCopyError, setPasswordCopyError] = createSignal(false);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [dismissedKey, setDismissedKey] = createSignal<string | null>(null);
@@ -849,6 +861,8 @@ export default function TaskDetail(props: Props) {
     setPendingAction("sync");
     setActionError(null);
     setSafetyIssues([]);
+    setSyncFailure(null);
+    const knownSyncs = syncEntries().length;
     try {
       const resp = await api.syncTask(props.taskId, {
         force,
@@ -859,10 +873,19 @@ export default function TaskDetail(props: Props) {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      setActionError(`sync failed: ${msg}`);
-      setTimeout(() => setActionError(null), 5000);
+      setSyncFailure({ knownSyncs, message: `sync failed: ${msg}` });
     } finally {
       setPendingAction(null);
+    }
+  }
+
+  async function cancelSync(): Promise<boolean> {
+    try {
+      await api.cancelTaskSync(props.taskId);
+      return true;
+    } catch (e) {
+      setActionError(`cancel failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+      return false;
     }
   }
 
@@ -958,9 +981,20 @@ export default function TaskDetail(props: Props) {
     for (const list of nativeByAnchor().values()) for (const a of list) anchored.add(a.id);
     return nativeActivities().filter((activity) => !anchored.has(activity.id));
   });
-  type TranscriptItem = MsgItem | { kind: "native"; activity: HistoryActivity; key: string };
-  // Native cards are keyed siblings, including when no parent content exists
-  // yet. Adding root content or folding lifecycle updates retains their DOM.
+  type TranscriptItem =
+    | MsgItem
+    | { kind: "native"; activity: HistoryActivity; key: string }
+    | { kind: "sync"; entry: SyncEntry; key: string };
+  // Push attempts anchor like native cards, outside every turn, so an elided
+  // turn never hides one.
+  const syncByAnchor = createMemo(() => assignNativeAnchors(transcriptItems(), syncEntries()));
+  const syncUnanchored = createMemo(() => {
+    const anchored = new Set<string>();
+    for (const list of syncByAnchor().values()) for (const entry of list) anchored.add(entry.id);
+    return syncEntries().filter((entry) => !anchored.has(entry.id));
+  });
+  // Native and sync cards are keyed siblings, including when no parent content
+  // exists yet. Adding root content or folding updates retains their DOM.
   const items = createMemo((): TranscriptItem[] => {
     const root = transcriptItems();
     const firstRoot = root.find((item) => item.kind === "group");
@@ -970,6 +1004,7 @@ export default function TaskDetail(props: Props) {
         .filter((activity) => firstRootTs > Date.parse(activity.anchorAt))
         .map((activity) => activity.id),
     );
+    const syncItem = (entry: SyncEntry): TranscriptItem => ({ kind: "sync", entry, key: `sync:${entry.id}` });
     const nativeItem = (activity: HistoryActivity): TranscriptItem => ({
       kind: "native",
       activity,
@@ -987,10 +1022,12 @@ export default function TaskDetail(props: Props) {
       for (const activity of nativeByAnchor().get(item.key) ?? []) {
         if (!early.has(activity.id)) result.push(nativeItem(activity));
       }
+      for (const entry of syncByAnchor().get(item.key) ?? []) result.push(syncItem(entry));
     }
     for (const activity of nativeUnanchored()) {
       if (!early.has(activity.id)) result.push(nativeItem(activity));
     }
+    for (const entry of syncUnanchored()) result.push(syncItem(entry));
     return result;
   });
   const itemsByKey = createMemo<Record<string, TranscriptItem>>(() =>
@@ -1467,6 +1504,12 @@ export default function TaskDetail(props: Props) {
                   item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null;
                 return (
                   <Switch>
+                    <Match when={item().kind === "sync"}>
+                      <SyncActivity
+                        entry={(item() as Extract<TranscriptItem, { kind: "sync" }>).entry}
+                        onCancel={cancelSync}
+                      />
+                    </Match>
                     <Match when={item().kind === "native"}>
                       <NativeAgents
                         activities={
@@ -1818,6 +1861,11 @@ export default function TaskDetail(props: Props) {
           <Show when={actionError()}>
             <div class={styles.actionError}>{actionError()}</div>
           </Show>
+          <Show when={unrecordedSyncFailure()}>
+            <div class={styles.actionError} role="alert">
+              {unrecordedSyncFailure()}
+            </div>
+          </Show>
         </Show>
       </div>
     </MarkdownTaskContext.Provider>
@@ -1926,6 +1974,16 @@ function ArchivedSessionBody(props: {
       ),
     );
   });
+  // Push attempts sit beside the turn they followed, never inside a collapsed one.
+  const syncs = createMemo(() => {
+    const entries = new SyncActivityTracker().derive(body.events().map((event) => event.message));
+    const byTurn = assignNativeAnchors(
+      buildTurnItems(turns(), new Set<string>(), `session:${props.section.id}`),
+      entries,
+    );
+    const anchored = new Set([...byTurn.values()].flat());
+    return { byTurn, unanchored: entries.filter((entry) => !anchored.has(entry)) };
+  });
   return (
     <>
       <Show when={body.loading()}>
@@ -1982,10 +2040,14 @@ function ArchivedSessionBody(props: {
                   )}
                 </div>
               </Show>
+              <For each={syncs().byTurn.get(key()) ?? []}>
+                {(entry) => <SyncActivity entry={entry} onCancel={null} />}
+              </For>
             </>
           );
         }}
       </For>
+      <For each={syncs().unanchored}>{(entry) => <SyncActivity entry={entry} onCancel={null} />}</For>
     </>
   );
 }

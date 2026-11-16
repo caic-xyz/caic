@@ -11,6 +11,7 @@ import type { EventStats, ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
+import { api } from "../api";
 
 const now = () => Date.parse("2026-07-08T12:00:00Z");
 
@@ -766,5 +767,20 @@ describe("TaskCard", () => {
     expect(screen.getByRole("button", { name: "Purge" })).toBeInTheDocument();
     expect(screen.getByTestId("purge-task-icon")).toBeInTheDocument();
     expect(screen.queryByTestId("stop-task-icon")).not.toBeInTheDocument();
+  });
+
+  it("points a failed menu sync at the task's push log", async () => {
+    vi.spyOn(api, "syncTask").mockRejectedValue(new Error("sync to origin: hook rejected"));
+    const onError = vi.fn();
+    const { container } = renderCard(() => <TaskCard {...props({ onError })} />);
+    const card = container.querySelector("[data-task-id='1']");
+    if (!card) throw new Error("task card not rendered");
+    fireEvent.contextMenu(card, { clientX: 20, clientY: 30 });
+    await userEvent.setup().click(screen.getByRole("menuitem", { name: "Push" }));
+    await vi.waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(
+        "sync failed: sync to origin: hook rejected. Open the task to see its push log.",
+      ),
+    );
   });
 });
