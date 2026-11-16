@@ -501,6 +501,50 @@ func TestSourceSections(t *testing.T) {
 			t.Fatalf("setup events = %#v", events)
 		}
 	})
+	t.Run("sync activity streams in order outside setup", func(t *testing.T) {
+		t.Parallel()
+		path := writeFixture(t, claudeHeader,
+			`{"t":"log","line":"setup line"}`,
+			twoTexts,
+			`{"t":"sync_activity","sync_id":"s1","phase":"start","ts":5.000,"target":"origin","branch":"caic-1"}`,
+			`{"t":"sync_activity","sync_id":"s1","phase":"output","ts":6.000,"output":"checking\n"}`,
+			`{"t":"sync_activity","sync_id":"s1","phase":"end","ts":7.000,"status":"failed","error":"rejected","duration_ms":2000}`,
+		)
+		source, _ := newFixtureSource(t, path)
+		snap, err := source.Refresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var phases []v1.EventSyncActivityPhase
+		var logs int
+		for event, err := range source.Events(t.Context(), snap, 1, snap.Through) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Message.Log != nil {
+				logs++
+			}
+			if sa := event.Message.SyncActivity; sa != nil {
+				phases = append(phases, sa.Phase)
+				if event.Message.Kind != v1.EventKindSyncActivity || sa.SyncID != "s1" {
+					t.Errorf("event = %+v", event.Message)
+				}
+				if want := int64(5000 + 1000*len(phases) - 1000); event.Message.Ts != want {
+					t.Errorf("phase %s ts = %d, want %d", sa.Phase, event.Message.Ts, want)
+				}
+			}
+		}
+		if want := []v1.EventSyncActivityPhase{v1.EventSyncActivityPhaseStart, v1.EventSyncActivityPhaseOutput, v1.EventSyncActivityPhaseEnd}; !slices.Equal(phases, want) || logs != 1 {
+			t.Fatalf("phases = %v, logs = %d, want %v and 1", phases, logs, want)
+		}
+		_, _, metadata, err := source.Sections(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if metadata.Setup == nil || metadata.Setup.First != metadata.Setup.Last {
+			t.Fatalf("setup = %+v, want only the setup line", metadata.Setup)
+		}
+	})
 	t.Run("activity homes follow written carried bodies", func(t *testing.T) {
 		t.Parallel()
 		for _, boundary := range []string{"compaction", "changed init"} {

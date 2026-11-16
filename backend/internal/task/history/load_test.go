@@ -1120,6 +1120,63 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("SyncActivityRecords", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 3, Prompt: "sync task", Repos: []v3.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		answer := claudeAssistant(t, map[string]any{"type": "text", "text": "done"})
+		records := []*agent.SyncActivityMessage{
+			{MessageType: "sync_activity", SyncID: "s1", Phase: v3.SyncPhaseStart, Ts: 10, Target: "origin", Branch: "caic-0"},
+			{MessageType: "sync_activity", SyncID: "s1", Phase: v3.SyncPhaseOutput, Ts: 11, Output: "checking\n"},
+			{MessageType: "sync_activity", SyncID: "s1", Phase: v3.SyncPhaseEnd, Ts: 12, Status: v3.SyncStatusFailed, Error: "hook rejected", DurationMS: 2000},
+		}
+		lines := make([]string, 0, 2+len(records))
+		lines = append(lines, meta, answer)
+		for _, r := range records {
+			lines = append(lines, mustJSON(t, r))
+		}
+		writeLogFile(t, dir, "t.jsonl", lines...)
+
+		tasks, err := NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil)).LoadUnsettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+
+		var streamed []*agent.SyncActivityMessage
+		for m, e := range tasks[0].StreamMessages(t.Context()) {
+			if e != nil {
+				t.Fatal(e)
+			}
+			if sync, ok := m.Message.(*agent.SyncActivityMessage); ok {
+				if want := time.Unix(int64(records[len(streamed)].Ts), 0); !m.ProducerTime.Equal(want) {
+					t.Errorf("record %d producer time = %v, want %v", len(streamed), m.ProducerTime, want)
+				}
+				streamed = append(streamed, sync)
+			}
+		}
+		if len(streamed) != len(records) {
+			t.Fatalf("streamed %d sync records, want %d", len(streamed), len(records))
+		}
+		for i, got := range streamed {
+			if *got != *records[i] {
+				t.Errorf("record %d = %+v, want %+v", i, *got, *records[i])
+			}
+		}
+		if err := tasks[0].LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
+		var loaded int
+		for _, entry := range tasks[0].Timeline {
+			if _, ok := entry.Message.(*agent.SyncActivityMessage); ok {
+				loaded++
+			}
+		}
+		if loaded != len(records) {
+			t.Errorf("loaded %d sync records, want %d", loaded, len(records))
+		}
+	})
+
 	t.Run("StreamMessagesIncludesReplayControls", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

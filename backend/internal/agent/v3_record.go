@@ -109,6 +109,10 @@ func (p *LogRecordParser) DecodeFrame(frame *taskslog.Frame) (ParsedRecord, erro
 		msg := LogMessage(*m)
 		msg.MessageType = messageTypeProvisioningLogRecord
 		msgs = []Message{&msg}
+	case *v3.SyncActivityMessage:
+		msg := SyncActivityMessage(*m)
+		msg.MessageType = messageTypeSyncActivity
+		msgs = []Message{&msg}
 	case *v3.TextMessage:
 		msgs = []Message{new(TextMessage(*m))}
 	case *v3.UserInputMessage:

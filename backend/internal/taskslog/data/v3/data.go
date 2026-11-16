@@ -223,6 +223,49 @@ type LogMessage struct {
 	Line        string `json:"line"`
 }
 
+// Sync activity phases.
+const (
+	SyncPhaseStart  = "start"
+	SyncPhaseOutput = "output"
+	SyncPhaseEnd    = "end"
+)
+
+// Sync activity end statuses.
+const (
+	SyncStatusPushed    = "pushed"
+	SyncStatusFailed    = "failed"
+	SyncStatusCancelled = "cancelled"
+)
+
+// SyncActivityMessage is one record of a push attempt. Records of the same
+// attempt share SyncID: a start record, output records in order, then one end
+// record. Fields not owned by the record's Phase are omitted.
+type SyncActivityMessage struct {
+	MessageProvenance
+
+	MessageType string  `json:"t"`
+	SyncID      string  `json:"sync_id"`
+	Phase       string  `json:"phase"`
+	Ts          float64 `json:"ts,omitempty"` // Producer time in Unix seconds.
+
+	// Target is the kind of sync, "origin" or "default". Start only.
+	Target string `json:"target,omitempty"`
+	// Branch is the destination branch of the first repository. Start only.
+	Branch string `json:"branch,omitempty"`
+
+	// Output is a chunk of the hook output, or the truncation marker when
+	// Truncated is set. Output only.
+	Output    string `json:"output,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+
+	// Status is one of the SyncStatus values. End only.
+	Status string `json:"status,omitempty"`
+	// Error is the bounded failure text. End only.
+	Error string `json:"error,omitempty"`
+	// DurationMS is the attempt's wall time in milliseconds. End only.
+	DurationMS int64 `json:"duration_ms,omitempty"`
+}
+
 // StrippedEnvMessage is the persisted StrippedEnvMessage representation.
 type StrippedEnvMessage struct {
 	MessageProvenance

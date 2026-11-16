@@ -108,6 +108,7 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
     case "skillLoad":
     case "subagentEnd":
     case "subagentStart":
+    case "syncActivity":
     case "system":
     case "todo":
       return false;

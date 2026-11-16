@@ -603,6 +603,32 @@ func TestToolTimingTracker(t *testing.T) {
 			}
 		})
 
+		t.Run("sync activity", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name string
+				in   agent.SyncActivityMessage
+				want v1.EventSyncActivity
+			}{
+				{"start", agent.SyncActivityMessage{SyncID: "s", Phase: "start", Target: "origin", Branch: "caic-1"}, v1.EventSyncActivity{SyncID: "s", Phase: v1.EventSyncActivityPhaseStart, Target: "origin", Branch: "caic-1"}},
+				{"output", agent.SyncActivityMessage{SyncID: "s", Phase: "output", Output: "text\n"}, v1.EventSyncActivity{SyncID: "s", Phase: v1.EventSyncActivityPhaseOutput, Output: "text\n"}},
+				{"truncated", agent.SyncActivityMessage{SyncID: "s", Phase: "output", Output: "cut", Truncated: true}, v1.EventSyncActivity{SyncID: "s", Phase: v1.EventSyncActivityPhaseOutput, Output: "cut", Truncated: true}},
+				{"end", agent.SyncActivityMessage{SyncID: "s", Phase: "end", Status: "failed", Error: "rejected", DurationMS: 7}, v1.EventSyncActivity{SyncID: "s", Phase: v1.EventSyncActivityPhaseEnd, Status: v1.EventSyncActivityStatusFailed, Error: "rejected", DurationMS: 7}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					tracker := NewToolTimingTracker("", harness.Claude, "", nil)
+					events := tracker.ConvertMessage(1, 0, &tc.in, time.UnixMilli(5000))
+					if len(events) != 1 || events[0].Kind != v1.EventKindSyncActivity || events[0].Ts != 5000 {
+						t.Fatalf("events = %+v", events)
+					}
+					if got := *events[0].SyncActivity; got != tc.want {
+						t.Errorf("syncActivity = %+v, want %+v", got, tc.want)
+					}
+				})
+			}
+		})
+
 		t.Run("common provenance", func(t *testing.T) {
 			t.Parallel()
 			source := agent.MessageSource{AgentID: "child", DelegationToolUseID: "delegation", ThreadID: "thread", TurnID: "turn", ItemID: "item"}

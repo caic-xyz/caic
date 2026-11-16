@@ -225,7 +225,7 @@ func renderMsg(b *strings.Builder, msg Message) {
 	case *ResultMessage, *UsageMessage, *TextDeltaMessage, *ThinkingDeltaMessage,
 		*ToolOutputDeltaMessage, *WidgetDeltaMessage, *WidgetMessage,
 		*RateLimitMessage, *RawMessage, *PendingUserActionMessage,
-		*LogMessage, *DiffStatMessage, *ExitMessage,
+		*LogMessage, *SyncActivityMessage, *DiffStatMessage, *ExitMessage,
 		*AskMessage, *TodoMessage:
 		// Skip: already captured in metadata, streaming deltas, or not
 		// useful for the exported discussion.

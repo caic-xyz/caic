@@ -421,6 +421,10 @@ sealed interface EventKind {
         override val value = "log"
     }
     @Serializable
+    data object SyncActivity : EventKind {
+        override val value = "syncActivity"
+    }
+    @Serializable
     data object ToolOutputDelta : EventKind {
         override val value = "toolOutputDelta"
     }
@@ -474,6 +478,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "nativeSubagent" -> EventKind.NativeSubagent
             "backgroundCommand" -> EventKind.BackgroundCommand
             "log" -> EventKind.Log
+            "syncActivity" -> EventKind.SyncActivity
             "toolOutputDelta" -> EventKind.ToolOutputDelta
             "widget" -> EventKind.Widget
             "widgetDelta" -> EventKind.WidgetDelta
@@ -590,6 +595,72 @@ object EventRateLimitStatusSerializer : KSerializer<EventRateLimitStatus> {
             "allowed_warning" -> EventRateLimitStatus.AllowedWarning
             "rejected" -> EventRateLimitStatus.Rejected
             else -> EventRateLimitStatus.Other(v)
+        }
+    }
+}
+
+@Serializable(with = EventSyncActivityPhaseSerializer::class)
+sealed interface EventSyncActivityPhase {
+    val value: String
+    @Serializable
+    data object Start : EventSyncActivityPhase {
+        override val value = "start"
+    }
+    @Serializable
+    data object Output : EventSyncActivityPhase {
+        override val value = "output"
+    }
+    @Serializable
+    data object End : EventSyncActivityPhase {
+        override val value = "end"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventSyncActivityPhase
+}
+
+object EventSyncActivityPhaseSerializer : KSerializer<EventSyncActivityPhase> {
+    override val descriptor = PrimitiveSerialDescriptor("EventSyncActivityPhase", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventSyncActivityPhase) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventSyncActivityPhase {
+        val v = decoder.decodeString()
+        return when (v) {
+            "start" -> EventSyncActivityPhase.Start
+            "output" -> EventSyncActivityPhase.Output
+            "end" -> EventSyncActivityPhase.End
+            else -> EventSyncActivityPhase.Other(v)
+        }
+    }
+}
+
+@Serializable(with = EventSyncActivityStatusSerializer::class)
+sealed interface EventSyncActivityStatus {
+    val value: String
+    @Serializable
+    data object Pushed : EventSyncActivityStatus {
+        override val value = "pushed"
+    }
+    @Serializable
+    data object Failed : EventSyncActivityStatus {
+        override val value = "failed"
+    }
+    @Serializable
+    data object Cancelled : EventSyncActivityStatus {
+        override val value = "cancelled"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventSyncActivityStatus
+}
+
+object EventSyncActivityStatusSerializer : KSerializer<EventSyncActivityStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("EventSyncActivityStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventSyncActivityStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventSyncActivityStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "pushed" -> EventSyncActivityStatus.Pushed
+            "failed" -> EventSyncActivityStatus.Failed
+            "cancelled" -> EventSyncActivityStatus.Cancelled
+            else -> EventSyncActivityStatus.Other(v)
         }
     }
 }
@@ -3083,6 +3154,31 @@ data class EventBackgroundCommand(
 data class EventLog(val line: String)
 
 /**
+ * EventSyncActivity is one record of a push attempt. Events with the same
+ * SyncID belong to one attempt: a start, output chunks in order, then an end.
+ * Fields that the Phase does not own are absent.
+ */
+@Serializable
+data class EventSyncActivity(
+    @SerialName("syncID") val syncID: String,
+    val phase: EventSyncActivityPhase,
+    /** Target is the kind of sync, "origin" or "default". Start only. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val target: String? = null,
+    /** Branch is the destination branch of the first repository. Start only. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val branch: String? = null,
+    /**
+     * Output is a chunk of the pre-push hook output, or the truncation notice
+     * when Truncated is set. Output only.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val output: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val truncated: Boolean? = null,
+    /** Status, Error and DurationMS describe the outcome. End only. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val status: EventSyncActivityStatus? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val error: String? = null,
+    @SerialName("durationMS") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val durationMS: Long? = null,
+)
+
+/**
  * EventToolOutputDelta is a streaming output fragment from a running tool.
  * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
  * MCP tool progress messages (item/mcpToolCall/progress).
@@ -3201,6 +3297,7 @@ data class EventMessage(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val nativeSubagent: EventNativeSubagent? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val backgroundCommand: EventBackgroundCommand? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val log: EventLog? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val syncActivity: EventSyncActivity? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolOutputDelta: EventToolOutputDelta? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val widget: EventWidget? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val widgetDelta: EventWidgetDelta? = null,

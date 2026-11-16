@@ -487,6 +487,24 @@ describe("groupMessages", () => {
     expect(groups.some((g) => g.kind === "other")).toBe(false);
   });
 
+  it("sync activity events create no group and do not split tool groups", () => {
+    const groups = groupMessages([
+      toolUseEvent("t1", "Read"),
+      usageEvent(),
+      { kind: "syncActivity", ts: 0, syncActivity: { syncID: "s1", phase: "start", target: "origin" } },
+      { kind: "syncActivity", ts: 0, syncActivity: { syncID: "s1", phase: "output", output: "ok\n" } },
+      {
+        kind: "syncActivity",
+        ts: 0,
+        syncActivity: { syncID: "s1", phase: "end", status: "pushed", durationMS: 5 },
+      },
+      toolUseEvent("t2", "Bash"),
+    ]);
+    expect(groups.some((g) => g.kind === "other")).toBe(false);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.toolCalls).toHaveLength(2);
+  });
+
   it("thinking followed by usage does not create a barrier before tool use", () => {
     // usage after a thinking-only group must not create an OTHER barrier that
     // prevents the merge pass from absorbing thinking into the tool group.

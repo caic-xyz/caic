@@ -656,3 +656,64 @@ func BenchmarkV3AgentRecord(b *testing.B) {
 		})
 	}
 }
+
+func TestSyncActivityRecord(t *testing.T) {
+	t.Parallel()
+	parser := func(t *testing.T) *LogRecordParser {
+		p, err := NewLogRecordParser(&testMessageParser{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, want := range []*SyncActivityMessage{
+			{SyncID: "s1", Phase: logdata.SyncPhaseStart, Ts: 1.5, Target: "origin", Branch: "caic-1"},
+			{SyncID: "s1", Phase: logdata.SyncPhaseOutput, Ts: 2.25, Output: "line one\nline é\n"},
+			{SyncID: "s1", Phase: logdata.SyncPhaseOutput, Ts: 2.5, Output: "[output truncated]", Truncated: true},
+			{SyncID: "s1", Phase: logdata.SyncPhaseEnd, Ts: 3, Status: logdata.SyncStatusFailed, Error: "hook rejected", DurationMS: 1500},
+			{SyncID: "s1", Phase: logdata.SyncPhaseEnd, Ts: 3, Status: logdata.SyncStatusCancelled},
+		} {
+			encoded, err := MarshalLogMessage(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser(t).ParseRecord(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !record.Control || len(record.Messages) != 1 {
+				t.Fatalf("record = %#v", record)
+			}
+			got, ok := record.Messages[0].Message.(*SyncActivityMessage)
+			if !ok {
+				t.Fatalf("message = %#v", record.Messages[0].Message)
+			}
+			wantRoundTrip := *want
+			wantRoundTrip.MessageType = messageTypeSyncActivity
+			if *got != wantRoundTrip {
+				t.Errorf("round trip = %+v, want %+v", *got, wantRoundTrip)
+			}
+			if at := record.Messages[0].ProducerTime; at.UnixMilli() != int64(want.Ts*1000) {
+				t.Errorf("producer time = %v, want ts %v", at, want.Ts)
+			}
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, line, want string }{
+			{"missing id", `{"t":"sync_activity","phase":"start"}`, "sync_id is empty"},
+			{"unknown phase", `{"t":"sync_activity","sync_id":"s","phase":"middle"}`, "unexpected sync phase"},
+			{"negative ts", `{"t":"sync_activity","sync_id":"s","phase":"end","ts":-1}`, "invalid sync activity producer timestamp"},
+			{"unknown field", `{"t":"sync_activity","sync_id":"s","phase":"end","extra":1}`, `unknown top-level field "extra"`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := parser(t).ParseRecord([]byte(tc.line)); err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
+}

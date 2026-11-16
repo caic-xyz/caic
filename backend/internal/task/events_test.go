@@ -15,6 +15,7 @@ func TestExitStatus(t *testing.T) {
 		for _, message := range []agent.Message{
 			&agent.SessionMetadataMessage{ReportedModel: "updated"},
 			&agent.MetaSessionMessage{SessionID: "restored"},
+			&agent.SyncActivityMessage{Phase: "end", Status: "pushed"},
 		} {
 			var status ExitStatus
 			status.Observe(&agent.ExitMessage{ExitCode: 1, Error: "failed"})

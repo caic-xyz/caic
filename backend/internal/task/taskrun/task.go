@@ -944,7 +944,7 @@ func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
 // Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// NativeSubagentMessage, BackgroundCommandMessage, RawMessage) after the ResultMessage are skipped during inference. For
+// NativeSubagentMessage, BackgroundCommandMessage, RawMessage, SyncActivityMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
 // The owned durable prefix and live suffix remain logically contiguous without
@@ -2616,7 +2616,7 @@ func nonSemanticMessage(m agent.Message) bool {
 	case *agent.BackgroundCommandMessage, *agent.DiffStatMessage, *agent.ExitMessage,
 		*agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.MetaSessionMessage,
 		*agent.ModelInfoMessage, *agent.NativeSubagentMessage, *agent.PendingUserActionMessage,
-		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage,
+		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage, *agent.SyncActivityMessage,
 		*agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage, *agent.UsageMessage:
 		return true
 	default:

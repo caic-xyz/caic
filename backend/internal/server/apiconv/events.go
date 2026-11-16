@@ -388,6 +388,22 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			Ts:   ts,
 			Log:  &v1.EventLog{Line: m.Line},
 		}}
+	case *agent.SyncActivityMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindSyncActivity,
+			Ts:   ts,
+			SyncActivity: &v1.EventSyncActivity{
+				SyncID:     m.SyncID,
+				Phase:      v1.EventSyncActivityPhase(m.Phase),
+				Target:     m.Target,
+				Branch:     m.Branch,
+				Output:     m.Output,
+				Truncated:  m.Truncated,
+				Status:     v1.EventSyncActivityStatus(m.Status),
+				Error:      m.Error,
+				DurationMS: m.DurationMS,
+			},
+		}}
 	case *agent.ToolOutputDeltaMessage:
 		if m.Delta != "" {
 			ev := &v1.EventToolOutputDelta{

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"maps"
 	"slices"
@@ -208,14 +209,14 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []F
 }
 
 // RunPrePush runs the repository's pre-push hook in the owning runtime instance.
-func (r *Router) RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs) (err error) {
+func (r *Router) RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs, out io.Writer) (err error) {
 	start := time.Now()
 	defer func() { r.observe(ctx, metricRepoPrePush, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
 	}
-	return rt.RunPrePush(ctx, id, repoIdx, commit, dest)
+	return rt.RunPrePush(ctx, id, repoIdx, commit, dest, out)
 }
 
 // RefreshRefs copies cached upstream refs into the owning runtime instance.

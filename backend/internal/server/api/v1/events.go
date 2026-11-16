@@ -38,6 +38,7 @@ const (
 	EventKindNativeSubagent    EventKind = "nativeSubagent"
 	EventKindBackgroundCommand EventKind = "backgroundCommand"
 	EventKindLog               EventKind = "log"
+	EventKindSyncActivity      EventKind = "syncActivity"
 	EventKindToolOutputDelta   EventKind = "toolOutputDelta"
 	EventKindWidget            EventKind = "widget"
 	EventKindWidgetDelta       EventKind = "widgetDelta"
@@ -84,6 +85,7 @@ type EventMessage struct {
 	NativeSubagent    *EventNativeSubagent    `json:"nativeSubagent,omitempty"`
 	BackgroundCommand *EventBackgroundCommand `json:"backgroundCommand,omitempty"`
 	Log               *EventLog               `json:"log,omitempty"`
+	SyncActivity      *EventSyncActivity      `json:"syncActivity,omitempty"`
 	ToolOutputDelta   *EventToolOutputDelta   `json:"toolOutputDelta,omitempty"`
 	Widget            *EventWidget            `json:"widget,omitempty"`
 	WidgetDelta       *EventWidgetDelta       `json:"widgetDelta,omitempty"`
@@ -418,6 +420,49 @@ type EventNativeSubagent struct {
 // EventLog is a provisioning/startup log line from the runtime backend.
 type EventLog struct {
 	Line string `json:"line"`
+}
+
+// EventSyncActivityPhase identifies which part of a sync attempt an event reports.
+type EventSyncActivityPhase string
+
+// Sync activity phases.
+const (
+	EventSyncActivityPhaseStart  EventSyncActivityPhase = "start"
+	EventSyncActivityPhaseOutput EventSyncActivityPhase = "output"
+	EventSyncActivityPhaseEnd    EventSyncActivityPhase = "end"
+)
+
+// EventSyncActivityStatus is the outcome of a finished sync attempt.
+type EventSyncActivityStatus string
+
+// Sync activity end statuses.
+const (
+	EventSyncActivityStatusPushed    EventSyncActivityStatus = "pushed"
+	EventSyncActivityStatusFailed    EventSyncActivityStatus = "failed"
+	EventSyncActivityStatusCancelled EventSyncActivityStatus = "cancelled"
+)
+
+// EventSyncActivity is one record of a push attempt. Events with the same
+// SyncID belong to one attempt: a start, output chunks in order, then an end.
+// Fields that the Phase does not own are absent.
+type EventSyncActivity struct {
+	SyncID string                 `json:"syncID"`
+	Phase  EventSyncActivityPhase `json:"phase"`
+
+	// Target is the kind of sync, "origin" or "default". Start only.
+	Target string `json:"target,omitempty"`
+	// Branch is the destination branch of the first repository. Start only.
+	Branch string `json:"branch,omitempty"`
+
+	// Output is a chunk of the pre-push hook output, or the truncation notice
+	// when Truncated is set. Output only.
+	Output    string `json:"output,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+
+	// Status, Error and DurationMS describe the outcome. End only.
+	Status     EventSyncActivityStatus `json:"status,omitempty"`
+	Error      string                  `json:"error,omitempty"`
+	DurationMS int64                   `json:"durationMS,omitempty"`
 }
 
 // EventBackgroundCommand reports one harness-native detached shell command's

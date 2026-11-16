@@ -124,6 +124,7 @@ export type EventKind =
   | "nativeSubagent"
   | "backgroundCommand"
   | "log"
+  | "syncActivity"
   | "toolOutputDelta"
   | "widget"
   | "widgetDelta"
@@ -153,6 +154,7 @@ export const EventKindSubagentEnd = "subagentEnd";
 export const EventKindNativeSubagent = "nativeSubagent";
 export const EventKindBackgroundCommand = "backgroundCommand";
 export const EventKindLog = "log";
+export const EventKindSyncActivity = "syncActivity";
 export const EventKindToolOutputDelta = "toolOutputDelta";
 export const EventKindWidget = "widget";
 export const EventKindWidgetDelta = "widgetDelta";
@@ -196,6 +198,28 @@ export type EventRateLimitStatus =
 export const EventRateLimitStatusAllowed = "allowed";
 export const EventRateLimitStatusAllowedWarning = "allowed_warning";
 export const EventRateLimitStatusRejected = "rejected";
+
+export type EventSyncActivityPhase =
+  | "start"
+  | "output"
+  | "end";
+/**
+ * Supported values.
+ */
+export const EventSyncActivityPhaseStart = "start";
+export const EventSyncActivityPhaseOutput = "output";
+export const EventSyncActivityPhaseEnd = "end";
+
+export type EventSyncActivityStatus =
+  | "pushed"
+  | "failed"
+  | "cancelled";
+/**
+ * Supported values.
+ */
+export const EventSyncActivityStatusPushed = "pushed";
+export const EventSyncActivityStatusFailed = "failed";
+export const EventSyncActivityStatusCancelled = "cancelled";
 
 export type EventSystemSubtype =
   | "api_error"
@@ -2178,6 +2202,30 @@ export interface EventLog {
 }
 
 /**
+ * EventSyncActivity is one record of a push attempt. Events with the same
+ * SyncID belong to one attempt: a start, output chunks in order, then an end.
+ * Fields that the Phase does not own are absent.
+ */
+export interface EventSyncActivity {
+  syncID: string;
+  phase: EventSyncActivityPhase;
+  /** Target is the kind of sync, "origin" or "default". Start only. */
+  target?: string;
+  /** Branch is the destination branch of the first repository. Start only. */
+  branch?: string;
+  /**
+   * Output is a chunk of the pre-push hook output, or the truncation notice
+   * when Truncated is set. Output only.
+   */
+  output?: string;
+  truncated?: boolean;
+  /** Status, Error and DurationMS describe the outcome. End only. */
+  status?: EventSyncActivityStatus;
+  error?: string;
+  durationMS?: number /* int64 */;
+}
+
+/**
  * EventToolOutputDelta is a streaming output fragment from a running tool.
  * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
  * MCP tool progress messages (item/mcpToolCall/progress).
@@ -2285,6 +2333,7 @@ export interface EventMessage {
   nativeSubagent?: EventNativeSubagent;
   backgroundCommand?: EventBackgroundCommand;
   log?: EventLog;
+  syncActivity?: EventSyncActivity;
   toolOutputDelta?: EventToolOutputDelta;
   widget?: EventWidget;
   widgetDelta?: EventWidgetDelta;

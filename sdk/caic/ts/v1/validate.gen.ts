@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSyncActivity, EventSyncActivityPhase, EventSyncActivityStatus, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -848,6 +848,23 @@ export function validateEventLog(raw: ValidatorInput): EventLog {
   };
 }
 
+export function validateEventSyncActivity(raw: ValidatorInput): EventSyncActivity {
+  const obj = asObject(raw, "EventSyncActivity");
+  if (!Object.prototype.hasOwnProperty.call(obj, "syncID")) throw new TypeError("missing required field: EventSyncActivity.syncID");
+  if (!Object.prototype.hasOwnProperty.call(obj, "phase")) throw new TypeError("missing required field: EventSyncActivity.phase");
+  return {
+    syncID: asString(obj["syncID"], "EventSyncActivity.syncID"),
+    phase: (asString(obj["phase"], "EventSyncActivity.phase") as EventSyncActivityPhase),
+    ...(Object.prototype.hasOwnProperty.call(obj, "target") ? { target: asString(obj["target"], "EventSyncActivity.target") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "branch") ? { branch: asString(obj["branch"], "EventSyncActivity.branch") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "output") ? { output: asString(obj["output"], "EventSyncActivity.output") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "truncated") ? { truncated: asBoolean(obj["truncated"], "EventSyncActivity.truncated") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "status") ? { status: (asString(obj["status"], "EventSyncActivity.status") as EventSyncActivityStatus) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "EventSyncActivity.error") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "durationMS") ? { durationMS: asNumber(obj["durationMS"], "EventSyncActivity.durationMS") } : {}),
+  };
+}
+
 export function validateEventToolOutputDelta(raw: ValidatorInput): EventToolOutputDelta {
   const obj = asObject(raw, "EventToolOutputDelta");
   if (!Object.prototype.hasOwnProperty.call(obj, "toolUseID")) throw new TypeError("missing required field: EventToolOutputDelta.toolUseID");
@@ -1031,6 +1048,10 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
     case "log":
       if (!Object.prototype.hasOwnProperty.call(obj, "log")) throw new TypeError("missing required field: EventMessage.log");
       Object.defineProperty(result, "log", { value: validateEventLog(obj["log"]), enumerable: true, writable: true, configurable: true });
+      break;
+    case "syncActivity":
+      if (!Object.prototype.hasOwnProperty.call(obj, "syncActivity")) throw new TypeError("missing required field: EventMessage.syncActivity");
+      Object.defineProperty(result, "syncActivity", { value: validateEventSyncActivity(obj["syncActivity"]), enumerable: true, writable: true, configurable: true });
       break;
     case "toolOutputDelta":
       if (!Object.prototype.hasOwnProperty.call(obj, "toolOutputDelta")) throw new TypeError("missing required field: EventMessage.toolOutputDelta");

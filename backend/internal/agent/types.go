@@ -22,6 +22,7 @@ const (
 	messageTypeText                  = "text"
 	messageTypeUserInput             = "user_input"
 	messageTypeProvisioningLog       = "log"
+	messageTypeSyncActivity          = "sync_activity"
 	messageTypeMeta                  = "caic_meta"
 	messageTypeDiffStat              = "caic_diff_stat"
 	messageTypeExit                  = "caic_exit"
@@ -1104,6 +1105,12 @@ type LogMessage v3.LogMessage
 // Type implements Message.
 func (m *LogMessage) Type() string { return messageTypeProvisioningLog }
 
+// SyncActivityMessage records one phase of a push attempt in the task log.
+type SyncActivityMessage v3.SyncActivityMessage
+
+// Type implements Message.
+func (m *SyncActivityMessage) Type() string { return messageTypeSyncActivity }
+
 // StrippedEnvMessage is emitted by the relay when it strips environment
 // variables (e.g. ANTHROPIC_API_KEY) before spawning the agent subprocess.
 // The backend uses these values to re-inject them after auth completes.
@@ -1334,6 +1341,8 @@ func v3ControlToken(m Message) (taskslog.Kind, error) {
 		return taskslog.KindPendingUserAction, nil
 	case messageTypeProvisioningLog:
 		return taskslog.KindProvisioningLog, nil
+	case messageTypeSyncActivity:
+		return taskslog.KindSyncActivity, nil
 	case messageTypeText:
 		return taskslog.KindText, nil
 	case messageTypeUserInput:

@@ -44,6 +44,8 @@ func (t Kind) controlKind() (logControlKind, bool) {
 		return logControlPendingUserAction, true
 	case KindProvisioningLog:
 		return logControlProvisioningLog, true
+	case KindSyncActivity:
+		return logControlSyncActivity, true
 	case KindContextCleared:
 		return logControlContextCleared, true
 	case KindInputDeliveryFailed:
@@ -142,6 +144,7 @@ const (
 	KindTurnCommitSnapshot  Kind = "turn_commit_snapshot"
 	KindPendingUserAction   Kind = "pending_user_action"
 	KindProvisioningLog     Kind = "log"
+	KindSyncActivity        Kind = "sync_activity"
 	KindContextCleared      Kind = "context_cleared"
 	KindInputDeliveryFailed Kind = "input_delivery_failed"
 	KindInputDelivery       Kind = "input_delivery"
@@ -237,6 +240,9 @@ func DecodeFrame(line []byte) (Frame, error) {
 	if snapshot, ok := control.(*v3.TurnCommitSnapshotMessage); ok && snapshot.Ts > 0 {
 		frame.ProducerTime = time.UnixMilli(int64(math.Round(snapshot.Ts * 1000)))
 	}
+	if sync, ok := control.(*v3.SyncActivityMessage); ok && sync.Ts > 0 {
+		frame.ProducerTime = time.UnixMilli(int64(math.Round(sync.Ts * 1000)))
+	}
 	return frame, nil
 }
 
@@ -273,6 +279,7 @@ var v3ControlFields = map[logControlKind][]string{
 	logControlTurnCommitSnapshot:  {"baseline", "change_stat", "repository_commits", "ts"},
 	logControlPendingUserAction:   {"action"},
 	logControlProvisioningLog:     {"line"},
+	logControlSyncActivity:        {"branch", "duration_ms", "error", "output", "phase", "status", "sync_id", "target", "truncated", "ts"},
 	logControlContextCleared:      {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
 	logControlInputDeliveryFailed: {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
 	logControlInputDelivery:       {"context_tokens_after", "context_tokens_before", "detail", "model", "session_id", "subtype", "ts", "uuid"},
@@ -397,6 +404,7 @@ const (
 	logControlTurnCommitSnapshot
 	logControlPendingUserAction
 	logControlProvisioningLog
+	logControlSyncActivity
 	logControlContextCleared
 	logControlInputDeliveryFailed
 	logControlInputDelivery
@@ -432,6 +440,8 @@ func newControl(kind logControlKind) any {
 		out = new(v3.PendingUserActionMessage)
 	case logControlProvisioningLog:
 		out = new(v3.LogMessage)
+	case logControlSyncActivity:
+		out = new(v3.SyncActivityMessage)
 	case logControlContextCleared:
 		out = new(v3.SystemMessage)
 	case logControlInputDeliveryFailed:
@@ -504,6 +514,16 @@ func decodeControl(kind logControlKind, line []byte) (any, error) {
 	case *v3.UserInputMessage:
 		if m.Ts < 0 || m.Ts > float64(math.MaxInt64)/1000 {
 			return nil, errors.New("invalid user input observation timestamp")
+		}
+	case *v3.SyncActivityMessage:
+		if m.SyncID == "" {
+			return nil, errors.New("sync_id is empty")
+		}
+		if m.Phase != v3.SyncPhaseStart && m.Phase != v3.SyncPhaseOutput && m.Phase != v3.SyncPhaseEnd {
+			return nil, fmt.Errorf("unexpected sync phase %q", m.Phase)
+		}
+		if m.Ts < 0 || m.Ts > float64(math.MaxInt64)/1000 {
+			return nil, errors.New("invalid sync activity producer timestamp")
 		}
 	case *v3.RelayGenerationMessage:
 		if m.Generation == "" {

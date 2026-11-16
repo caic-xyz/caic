@@ -18,6 +18,7 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -1444,6 +1445,37 @@ func (c *homeCommandContainer) SSHCommand(_ []string, cmd string) []string {
 	return []string{"bash", "-c", "export HOME=" + shellQuote(c.home) + "; " + cmd}
 }
 
+// firstWriteSink records hook output and closes first on the first write.
+type firstWriteSink struct {
+	first chan struct{}
+	once  sync.Once
+
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *firstWriteSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	n, err := s.buf.Write(p)
+	s.mu.Unlock()
+	s.once.Do(func() { close(s.first) })
+	return n, err
+}
+
+func (s *firstWriteSink) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// failingSink rejects every write.
+type failingSink struct{ writes int }
+
+func (s *failingSink) Write([]byte) (int, error) {
+	s.writes++
+	return 0, errors.New("sink closed")
+}
+
 func TestRunPrePush(t *testing.T) {
 	t.Parallel()
 	newRepo := func(t *testing.T, hook string) (b *Backend, dir, commit, home string) {
@@ -1470,7 +1502,7 @@ func TestRunPrePush(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("dirty\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
 			t.Fatal(err)
 		}
 		got, err := os.ReadFile(out) //nolint:gosec // fixture-owned output.
@@ -1482,8 +1514,49 @@ func TestRunPrePush(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("hook saw %q, want %q", got, want)
 		}
-		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
 			t.Fatalf("reused checkout: %v", err)
+		}
+	})
+
+	t.Run("Streams", func(t *testing.T) {
+		t.Parallel()
+		release := filepath.Join(t.TempDir(), "release")
+		b, _, commit, _ := newRepo(t, "#!/bin/sh\necho first\nwhile [ ! -e "+shellQuote(release)+" ]; do sleep 0.02; done\necho second\n")
+		sink := &firstWriteSink{first: make(chan struct{})}
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		done := make(chan error, 1)
+		go func() { done <- b.RunPrePush(ctx, "docker:ctr", 0, commit, dest(commit), sink) }()
+		select {
+		case <-sink.first:
+		case err := <-done:
+			t.Fatalf("hook ended before the sink saw output: %v", err)
+		case <-time.After(30 * time.Second):
+			t.Fatal("sink saw no output while the hook was running")
+		}
+		if err := os.WriteFile(release, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if got, want := sink.String(), "first\nsecond\n"; got != want {
+			t.Fatalf("sink got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("FailingSink", func(t *testing.T) {
+		t.Parallel()
+		b, _, commit, _ := newRepo(t, "#!/bin/sh\necho one\nsleep 0.1\necho two\nexit 3\n")
+		sink := &failingSink{}
+		err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), sink)
+		// The rejection keeps the full tail although the sink failed on the first write.
+		if err == nil || !strings.HasSuffix(err.Error(), "\none\ntwo\n") {
+			t.Fatalf("err=%q, want the hook's output", err)
+		}
+		if sink.writes != 1 {
+			t.Fatalf("failed sink was written %d times, want 1", sink.writes)
 		}
 	})
 
@@ -1492,7 +1565,7 @@ func TestRunPrePush(t *testing.T) {
 		b, dir, commit, home := newRepo(t, "#!/bin/sh\nexit 0\n")
 		// A directory left by a killed session is replaced.
 		for range 2 {
-			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
 				t.Fatal(err)
 			}
 			if left, _ := filepath.Glob(filepath.Join(home, "src", "*")); len(left) != 0 {
@@ -1508,7 +1581,7 @@ func TestRunPrePush(t *testing.T) {
 	t.Run("MissingHook", func(t *testing.T) {
 		t.Parallel()
 		b, _, commit, _ := newRepo(t, "")
-		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit)); err != nil {
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
 			t.Fatalf("no hook is nothing to run: %v", err)
 		}
 	})
@@ -1518,7 +1591,7 @@ func TestRunPrePush(t *testing.T) {
 		t.Run("Rejection", func(t *testing.T) {
 			t.Parallel()
 			b, _, commit, _ := newRepo(t, "#!/bin/sh\necho check one\necho check two\nexit 77\n")
-			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
+			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil)
 			// The output keeps its line breaks, after the cause.
 			if err == nil || !strings.HasSuffix(err.Error(), "\ncheck one\ncheck two\n") {
 				t.Fatalf("err=%q, want the hook's output on its own lines", err)
@@ -1527,7 +1600,7 @@ func TestRunPrePush(t *testing.T) {
 		t.Run("LongOutput", func(t *testing.T) {
 			t.Parallel()
 			b, _, commit, _ := newRepo(t, "#!/bin/sh\nhead -c 40000 /dev/zero | tr '\\0' x\nprintf '\\nlast\\n'\nexit 1\n")
-			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit))
+			err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil)
 			if err == nil || !strings.HasSuffix(err.Error(), "\nlast\n") || !strings.Contains(err.Error(), "\n…x") || len(err.Error()) > prePushOutputLimit+512 {
 				t.Fatalf("err has %d bytes, want the output tail only", len(err.Error()))
 			}
@@ -1536,14 +1609,14 @@ func TestRunPrePush(t *testing.T) {
 			t.Parallel()
 			b, _, commit, _ := newRepo(t, "#!/bin/sh\n")
 			for name, c := range map[string]string{"ShortCommit": commit[:8], "NoCommit": ""} {
-				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, c, dest(commit)); err == nil {
+				if err := b.RunPrePush(t.Context(), "docker:ctr", 0, c, dest(commit), nil); err == nil {
 					t.Errorf("%s accepted", name)
 				}
 			}
-			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, runtime.PushRefs{Remote: "origin", Branch: "task"}); err == nil {
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, runtime.PushRefs{Remote: "origin", Branch: "task"}, nil); err == nil {
 				t.Error("missing remote commit accepted")
 			}
-			if err := b.RunPrePush(t.Context(), "docker:ctr", 1, commit, dest(commit)); err == nil {
+			if err := b.RunPrePush(t.Context(), "docker:ctr", 1, commit, dest(commit), nil); err == nil {
 				t.Error("repo index out of range accepted")
 			}
 		})

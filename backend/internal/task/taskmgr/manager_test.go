@@ -322,7 +322,7 @@ type blockingPrePushBackend struct {
 	once    sync.Once
 }
 
-func (b *blockingPrePushBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs) error {
+func (b *blockingPrePushBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs, io.Writer) error {
 	b.once.Do(func() { close(b.started) })
 	<-b.release
 	return nil

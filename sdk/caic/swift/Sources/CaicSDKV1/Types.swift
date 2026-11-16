@@ -232,6 +232,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let NativeSubagent = EventKind("nativeSubagent")
     public static let BackgroundCommand = EventKind("backgroundCommand")
     public static let Log = EventKind("log")
+    public static let SyncActivity = EventKind("syncActivity")
     public static let ToolOutputDelta = EventKind("toolOutputDelta")
     public static let Widget = EventKind("widget")
     public static let WidgetDelta = EventKind("widgetDelta")
@@ -308,6 +309,50 @@ public struct EventRateLimitStatus: Codable, Equatable, Hashable {
     public static let Rejected = EventRateLimitStatus("rejected")
 
     public static func other(_ value: String) -> EventRateLimitStatus { EventRateLimitStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct EventSyncActivityPhase: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Start = EventSyncActivityPhase("start")
+    public static let Output = EventSyncActivityPhase("output")
+    public static let End = EventSyncActivityPhase("end")
+
+    public static func other(_ value: String) -> EventSyncActivityPhase { EventSyncActivityPhase(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct EventSyncActivityStatus: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Pushed = EventSyncActivityStatus("pushed")
+    public static let Failed = EventSyncActivityStatus("failed")
+    public static let Cancelled = EventSyncActivityStatus("cancelled")
+
+    public static func other(_ value: String) -> EventSyncActivityStatus { EventSyncActivityStatus(value) }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -4609,6 +4654,38 @@ public struct EventLog: Codable {
     }
 }
 
+/// EventSyncActivity is one record of a push attempt. Events with the same
+/// SyncID belong to one attempt: a start, output chunks in order, then an end.
+/// Fields that the Phase does not own are absent.
+public struct EventSyncActivity: Codable {
+    public let syncID: String
+    public let phase: EventSyncActivityPhase
+    /// Target is the kind of sync, "origin" or "default". Start only.
+    public let target: String?
+    /// Branch is the destination branch of the first repository. Start only.
+    public let branch: String?
+    /// Output is a chunk of the pre-push hook output, or the truncation notice
+    /// when Truncated is set. Output only.
+    public let output: String?
+    public let truncated: Bool?
+    /// Status, Error and DurationMS describe the outcome. End only.
+    public let status: EventSyncActivityStatus?
+    public let error: String?
+    public let durationMS: Int?
+
+    public init(syncID: String, phase: EventSyncActivityPhase, target: String? = nil, branch: String? = nil, output: String? = nil, truncated: Bool? = nil, status: EventSyncActivityStatus? = nil, error: String? = nil, durationMS: Int? = nil) {
+        self.syncID = syncID
+        self.phase = phase
+        self.target = target
+        self.branch = branch
+        self.output = output
+        self.truncated = truncated
+        self.status = status
+        self.error = error
+        self.durationMS = durationMS
+    }
+}
+
 /// EventToolOutputDelta is a streaming output fragment from a running tool.
 /// Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
 /// MCP tool progress messages (item/mcpToolCall/progress).
@@ -4782,6 +4859,7 @@ public struct EventMessage: Codable {
     public let nativeSubagent: EventNativeSubagent?
     public let backgroundCommand: EventBackgroundCommand?
     public let log: EventLog?
+    public let syncActivity: EventSyncActivity?
     public let toolOutputDelta: EventToolOutputDelta?
     public let widget: EventWidget?
     public let widgetDelta: EventWidgetDelta?
@@ -4789,7 +4867,7 @@ public struct EventMessage: Codable {
     public let commitSnapshot: EventCommitSnapshot?
     public let skillLoad: EventSkillLoad?
 
-    public init(source: EventMessageSource? = nil, kind: EventKind, ts: Int, `init`: EventInit? = nil, text: EventText? = nil, textDelta: EventTextDelta? = nil, toolUse: EventToolUse? = nil, toolResult: EventToolResult? = nil, ask: EventAsk? = nil, usage: EventUsage? = nil, result: EventResult? = nil, system: EventSystem? = nil, userInput: Prompt? = nil, todo: EventTodo? = nil, diffStat: EventDiffStat? = nil, error: EventError? = nil, thinking: EventThinking? = nil, thinkingDelta: EventThinkingDelta? = nil, subagentStart: EventSubagentStart? = nil, subagentEnd: EventSubagentEnd? = nil, nativeSubagent: EventNativeSubagent? = nil, backgroundCommand: EventBackgroundCommand? = nil, log: EventLog? = nil, toolOutputDelta: EventToolOutputDelta? = nil, widget: EventWidget? = nil, widgetDelta: EventWidgetDelta? = nil, rateLimit: EventRateLimit? = nil, commitSnapshot: EventCommitSnapshot? = nil, skillLoad: EventSkillLoad? = nil) {
+    public init(source: EventMessageSource? = nil, kind: EventKind, ts: Int, `init`: EventInit? = nil, text: EventText? = nil, textDelta: EventTextDelta? = nil, toolUse: EventToolUse? = nil, toolResult: EventToolResult? = nil, ask: EventAsk? = nil, usage: EventUsage? = nil, result: EventResult? = nil, system: EventSystem? = nil, userInput: Prompt? = nil, todo: EventTodo? = nil, diffStat: EventDiffStat? = nil, error: EventError? = nil, thinking: EventThinking? = nil, thinkingDelta: EventThinkingDelta? = nil, subagentStart: EventSubagentStart? = nil, subagentEnd: EventSubagentEnd? = nil, nativeSubagent: EventNativeSubagent? = nil, backgroundCommand: EventBackgroundCommand? = nil, log: EventLog? = nil, syncActivity: EventSyncActivity? = nil, toolOutputDelta: EventToolOutputDelta? = nil, widget: EventWidget? = nil, widgetDelta: EventWidgetDelta? = nil, rateLimit: EventRateLimit? = nil, commitSnapshot: EventCommitSnapshot? = nil, skillLoad: EventSkillLoad? = nil) {
         self.source = source
         self.kind = kind
         self.ts = ts
@@ -4813,6 +4891,7 @@ public struct EventMessage: Codable {
         self.nativeSubagent = nativeSubagent
         self.backgroundCommand = backgroundCommand
         self.log = log
+        self.syncActivity = syncActivity
         self.toolOutputDelta = toolOutputDelta
         self.widget = widget
         self.widgetDelta = widgetDelta

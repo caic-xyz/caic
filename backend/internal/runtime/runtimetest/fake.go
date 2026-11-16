@@ -4,6 +4,7 @@ package runtimetest
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"iter"
 	"slices"
@@ -180,7 +181,7 @@ func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.Fet
 func (*FakeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
 
 // RunPrePush implements runtime.Repository. The fake has no hook installed.
-func (*FakeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs) error {
+func (*FakeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs, io.Writer) error {
 	return nil
 }
 

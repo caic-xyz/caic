@@ -487,8 +487,13 @@ type Repository interface {
 	// against a clean checkout of commit, with the refs that a push of commit to
 	// remote/branch would report. An instance without a hook,
 	// or a runtime that cannot run commands, has nothing to run. A rejection is an
-	// error carrying the hook's output.
-	RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs) error
+	// error carrying the hook's output tail.
+	//
+	// The combined hook output is written to out as it is produced, before the
+	// hook exits. out may be nil. A failing out never fails the run; it stops
+	// receiving output. out must return promptly: a blocked Write stalls the
+	// hook.
+	RunPrePush(ctx context.Context, id ID, repoIdx int, commit string, dest PushRefs, out io.Writer) error
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 	// CompactRepositoryStatus returns the branch, divergence, working-tree

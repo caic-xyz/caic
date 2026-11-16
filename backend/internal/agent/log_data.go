@@ -39,6 +39,10 @@ func MarshalLogMessage(m Message) ([]byte, error) {
 		r := v3.LogMessage(*m)
 		r.MessageType = string(token)
 		record = r
+	case *SyncActivityMessage:
+		r := v3.SyncActivityMessage(*m)
+		r.MessageType = string(token)
+		record = r
 	case *StrippedEnvMessage:
 		r := v3.StrippedEnvMessage(*m)
 		r.MessageType = string(token)

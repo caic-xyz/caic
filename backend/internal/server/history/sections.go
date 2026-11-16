@@ -818,7 +818,7 @@ func (s *summaryCounter) group(m *v1.EventMessage) {
 		}
 	default:
 		switch m.Kind {
-		case v1.EventKindTodo, v1.EventKindSkillLoad, v1.EventKindLog, v1.EventKindDiffStat, v1.EventKindCommitSnapshot, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand, v1.EventKindSubagentStart, v1.EventKindSubagentEnd:
+		case v1.EventKindTodo, v1.EventKindSkillLoad, v1.EventKindLog, v1.EventKindSyncActivity, v1.EventKindDiffStat, v1.EventKindCommitSnapshot, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand, v1.EventKindSubagentStart, v1.EventKindSubagentEnd:
 			return
 		case v1.EventKindUsage:
 			s.usageSinceTool = true

@@ -706,7 +706,7 @@ var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
 // messages while streaming task history.
 func isHistoryStreamControlMessage(msg agent.Message) bool {
 	switch msg := msg.(type) {
-	case *agent.DiffStatMessage, *agent.ExitMessage, *agent.LogMessage, *agent.TurnCommitSnapshotMessage:
+	case *agent.DiffStatMessage, *agent.ExitMessage, *agent.LogMessage, *agent.SyncActivityMessage, *agent.TurnCommitSnapshotMessage:
 		return true
 	case *agent.SystemMessage:
 		return msg.Subtype == "context_cleared"

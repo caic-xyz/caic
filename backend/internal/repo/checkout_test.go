@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -424,8 +425,12 @@ func TestCheckout(t *testing.T) {
 		}
 		runGit(t, root, "checkout", "-q", "main")
 		sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: next}}
-		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{}); err != nil {
+		var hookOut strings.Builder
+		if _, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{HookOutput: &hookOut}); err != nil {
 			t.Fatal(err)
+		}
+		if got := sc.prePushOuts[len(sc.prePushOuts)-1]; got != io.Writer(&hookOut) {
+			t.Fatalf("RunPrePush sink = %v, want the option's writer", got)
 		}
 		want = runtime.PushRefs{Remote: destinations[0].Remote, Branch: "caic-1", RemoteCommit: tip}
 		if last := sc.prePushes[len(sc.prePushes)-1]; last.commit != next || last.dest != want {
@@ -1063,13 +1068,14 @@ func TestDiffRepoPrefix(t *testing.T) {
 type recordingContainer struct {
 	*runtimetest.FakeBackend
 
-	fetchIDs   []runtime.ID
-	refreshIDs []runtime.ID
-	refreshErr error
-	prePushes  []prePushCall
-	prePushErr error
-	diffIDs    []runtime.ID
-	diffIdxs   []int
+	fetchIDs    []runtime.ID
+	refreshIDs  []runtime.ID
+	refreshErr  error
+	prePushes   []prePushCall
+	prePushOuts []io.Writer
+	prePushErr  error
+	diffIDs     []runtime.ID
+	diffIdxs    []int
 }
 
 // newRecordingContainer builds a recordingContainer with the fixed diff output.
@@ -1077,8 +1083,9 @@ func newRecordingContainer() *recordingContainer {
 	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
 }
 
-func (c *recordingContainer) RunPrePush(_ context.Context, _ runtime.ID, _ int, commit string, dest runtime.PushRefs) error {
+func (c *recordingContainer) RunPrePush(_ context.Context, _ runtime.ID, _ int, commit string, dest runtime.PushRefs, out io.Writer) error {
 	c.prePushes = append(c.prePushes, prePushCall{commit, dest})
+	c.prePushOuts = append(c.prePushOuts, out)
 	return c.prePushErr
 }
 

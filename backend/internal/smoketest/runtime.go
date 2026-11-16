@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"iter"
 	"log/slog"
@@ -247,7 +248,7 @@ func (b *RuntimeBackend) Fetch(ctx context.Context, id runtime.ID, _ runtime.Fet
 func (*RuntimeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
 
 // RunPrePush implements runtime.Repository. Fake repositories have no hooks.
-func (*RuntimeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs) error {
+func (*RuntimeBackend) RunPrePush(context.Context, runtime.ID, int, string, runtime.PushRefs, io.Writer) error {
 	return nil
 }
 

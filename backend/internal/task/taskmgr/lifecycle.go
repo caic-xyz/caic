@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 // Lifecycle coordinates state transitions, session watching, and user
@@ -427,6 +428,9 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 // publishes refreshed diff statistics and repository state after a successful push.
 // It rejects a call while another sync of the task is running: the caller can
 // retry, and the running sync already pushes the task's commits.
+//
+// Once the push destinations are resolved, the sync is recorded in the task log
+// as a start record, bounded hook output records and an end record.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
 	if !r.syncMu.TryLock() {
 		return nil, conflict("a sync of this task is already running")
@@ -452,19 +456,34 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if err != nil {
 		return nil, internalErr(err, "resolve push destination")
 	}
-	opts := repo.PushOptions{}
+	branch := ""
+	if len(destinations) > 0 {
+		branch = destinations[0].Branch
+	}
+	// The records outlive a caller that gave up: the log must show how the push ended.
+	recorder := startSyncRecorder(context.WithoutCancel(ctx), r.manager.log, r.entry.RecordHost, target, branch)
+	opts := repo.PushOptions{HookOutput: recorder}
 	if target != SyncTargetDefault {
-		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true}
+		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true, HookOutput: recorder}
 	}
 	ds, issues, err := checkout.Push(ctx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
+	status := "synced"
+	if err == nil && len(issues) > 0 && !opts.BypassSafety {
+		status = "blocked"
+	} else if err == nil && len(ds) == 0 {
+		status = "empty"
+	}
+	outcome, outcomeErr := v3.SyncStatusPushed, err
+	switch _, refreshFailed := errors.AsType[*repo.PushRefreshError](err); {
+	case err == nil && status == "blocked":
+		outcome, outcomeErr = v3.SyncStatusFailed, fmt.Errorf("blocked by %d safety issue(s)", len(issues))
+	case err != nil && !refreshFailed:
+		// A refresh failure follows pushes that all succeeded; its note keeps it visible.
+		outcome = v3.SyncStatusFailed
+	}
+	recorder.finish(outcome, outcomeErr)
 	if err != nil {
 		return nil, internalErr(err, "sync to "+string(target))
-	}
-	status := "synced"
-	if len(issues) > 0 && !opts.BypassSafety {
-		status = "blocked"
-	} else if len(ds) == 0 {
-		status = "empty"
 	}
 	if status != "blocked" {
 		snapshot, err := checkout.DiffStatAndRepoStates(ctx, r.manager.log, r.manager.Runtimes, gitTarget)

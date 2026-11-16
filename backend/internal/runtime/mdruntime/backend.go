@@ -665,7 +665,7 @@ func (b *Backend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []ru
 }
 
 // RunPrePush implements runtime.Repository.
-func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, commit string, dest runtime.PushRefs) error {
+func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, commit string, dest runtime.PushRefs, out io.Writer) error {
 	defer trace.StartRegion(ctx, "instance.pre_push").End()
 	localID, err := b.localID(id)
 	if err != nil {
@@ -683,10 +683,17 @@ func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, co
 	if err != nil {
 		return err
 	}
-	res, err := b.commandOutput(ctx, ct, cmd)
-	if err != nil {
+	sshArgs := ct.SSHCommand(nil, cmd)
+	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
+	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
+	// prePushCommand merges the hook's stderr into stdout, so Stdout carries the
+	// whole report. exec copies it from one goroutine, so Write is never
+	// concurrent. Shell startup diagnostics on Stderr are dropped.
+	tail := &prePushTail{}
+	c.Stdout = &prePushOutput{tail: tail, sink: out}
+	if err := c.Run(); err != nil {
 		// The hook's output is the message: keep its line breaks.
-		return fmt.Errorf("pre-push hook in container %s: %w\n%s", ct.Name(), err, tailOutput(res.Stdout, prePushOutputLimit))
+		return fmt.Errorf("pre-push hook in container %s: %w\n%s", ct.Name(), err, tailOutput(tail.buf, prePushOutputLimit))
 	}
 	return nil
 }
@@ -1397,27 +1404,6 @@ func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command str
 	return commandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
 }
 
-// commandOutputError describes a failed container Git command. Git reports
-// machine-readable state that can run to megabytes for a worktree full of
-// generated files, so only the tail -- where Git writes its fatal message -- is
-// kept in the error the API returns to the browser.
-func commandOutputError(action string, ct mdContainer, err error, out []byte) error {
-	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, tailOutput(out, 512))
-}
-
-// prePushOutputLimit keeps enough of a failed hook's output to show which
-// check rejected the push.
-const prePushOutputLimit = 16 << 10
-
-// tailOutput keeps the last limit bytes of out, where tools write their fatal
-// message, marking a cut with an ellipsis.
-func tailOutput(out []byte, limit int) []byte {
-	if len(out) <= limit {
-		return out
-	}
-	return append([]byte("…"), out[len(out)-limit:]...)
-}
-
 // repositoryStatusFromProbe runs one git status command in the container and
 // parses its report.
 func (b *Backend) repositoryStatusFromProbe(
@@ -1729,6 +1715,60 @@ func metadataLabels(metadata runtime.Metadata) []string {
 // logWriters returns stdout and stderr writers for md task operations.
 func (b *Backend) logWriters(ctx context.Context, w io.Writer, phase string) (stdout, stderr io.Writer) {
 	return w, &SlogWriter{Context: ctx, Logger: b.log, Phase: phase}
+}
+
+// commandOutputError describes a failed container Git command. Git reports
+// machine-readable state that can run to megabytes for a worktree full of
+// generated files, so only the tail -- where Git writes its fatal message -- is
+// kept in the error the API returns to the browser.
+func commandOutputError(action string, ct mdContainer, err error, out []byte) error {
+	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, tailOutput(out, 512))
+}
+
+// prePushOutputLimit keeps enough of a failed hook's output to show which
+// check rejected the push.
+const prePushOutputLimit = 16 << 10
+
+// prePushOutput receives a hook's output as the SSH process produces it. It
+// feeds the bounded tail kept for a rejection error and the optional caller
+// sink. Output is diagnostic, so a failing sink is dropped for the rest of the
+// run and never fails or aborts the hook. A sink that blocks stalls the hook's
+// output pipe; callers hand in a sink that returns promptly.
+type prePushOutput struct {
+	tail *prePushTail
+	sink io.Writer // nil, or dropped after its first error.
+}
+
+// Write accepts the whole input.
+func (o *prePushOutput) Write(p []byte) (int, error) {
+	o.tail.add(p)
+	if o.sink != nil {
+		if _, err := o.sink.Write(p); err != nil {
+			o.sink = nil
+		}
+	}
+	return len(p), nil
+}
+
+// prePushTail retains the end of a hook's output in bounded memory. It trims
+// to prePushOutputLimit+1 bytes so tailOutput still marks the cut.
+type prePushTail struct{ buf []byte }
+
+// add appends p, compacting once the buffer doubles the limit.
+func (t *prePushTail) add(p []byte) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > 2*prePushOutputLimit {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-prePushOutputLimit-1:]...)
+	}
+}
+
+// tailOutput keeps the last limit bytes of out, where tools write their fatal
+// message, marking a cut with an ellipsis.
+func tailOutput(out []byte, limit int) []byte {
+	if len(out) <= limit {
+		return out
+	}
+	return append([]byte("…"), out[len(out)-limit:]...)
 }
 
 // maxCPUsOrDefault preserves positive limits and delegates the default to md,

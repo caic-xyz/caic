@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -312,7 +313,7 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 			cancel()
 			return ds, allIssues, fmt.Errorf("remote tip of %s/%s: %w", d.Remote, d.Branch, err)
 		}
-		err = runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit})
+		err = runtimes.RunPrePush(pushCtx, id, i, commits[i], runtime.PushRefs{Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit}, opts.HookOutput)
 		if err != nil {
 			cancel()
 			return ds, allIssues, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
@@ -936,6 +937,10 @@ type PushOptions struct {
 	CommitPending bool
 	BypassSafety  bool
 	Force         bool
+
+	// HookOutput receives each destination's pre-push hook output as it is
+	// produced. It may be nil. See runtime.Repository.RunPrePush.
+	HookOutput io.Writer
 }
 
 // PushRefreshError reports a container ref refresh failure after every remote

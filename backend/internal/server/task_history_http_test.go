@@ -640,6 +640,37 @@ func TestHistoryStream(t *testing.T) {
 		}
 		body()
 	})
+	t.Run("sync activity records stream as events", func(t *testing.T) {
+		t.Parallel()
+		s, tk, p := historyHTTPFixture(t)
+		b := historyBootstrap(t, s, tk, "")
+		appendHistory(t, p, strings.Join([]string{
+			`{"t":"sync_activity","sync_id":"s1","phase":"start","ts":5.000,"target":"origin","branch":"caic-1"}`,
+			`{"t":"sync_activity","sync_id":"s1","phase":"output","ts":6.000,"output":"checking\n"}`,
+			`{"t":"sync_activity","sync_id":"s1","phase":"end","ts":7.000,"status":"pushed","duration_ms":2000}`,
+		}, "\n"))
+		r, cancel := historyStream(t, s, tk, b.Cursor, "")
+		t.Cleanup(cancel)
+		assertStatsSnapshot(t, r)
+		var phases []v1.EventSyncActivityPhase
+		for len(phases) < 3 {
+			f := readHistoryFrame(t, r)
+			if f.name != "" {
+				continue
+			}
+			var event v1.HistoryEvent
+			if err := json.Unmarshal([]byte(f.data), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Message.Kind != v1.EventKindSyncActivity || event.Message.SyncActivity == nil || event.Message.SyncActivity.SyncID != "s1" {
+				t.Fatalf("event = %+v", event)
+			}
+			phases = append(phases, event.Message.SyncActivity.Phase)
+		}
+		if want := []v1.EventSyncActivityPhase{v1.EventSyncActivityPhaseStart, v1.EventSyncActivityPhaseOutput, v1.EventSyncActivityPhaseEnd}; !slices.Equal(phases, want) {
+			t.Fatalf("phases = %v, want %v", phases, want)
+		}
+	})
 	t.Run("stale and malformed cursors reset", func(t *testing.T) {
 		t.Parallel()
 		for _, cursor := range []string{"invalid", "1.expired.1.end", "1.expired.99999999999999999999.end"} {

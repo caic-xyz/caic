@@ -4575,6 +4575,7 @@ func TestTask(t *testing.T) {
 				&agent.TextDeltaMessage{Text: "partial"},
 				&agent.RawMessage{},
 				&agent.UsageMessage{},
+				&agent.SyncActivityMessage{Phase: "end", Status: "pushed"},
 			}
 			entries := make([]agent.TimedMessage, len(msgs))
 			for i, message := range msgs {

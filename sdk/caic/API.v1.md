@@ -242,6 +242,7 @@ EventKind identifies the type of SSE event.
 | `nativeSubagent` |  |
 | `backgroundCommand` |  |
 | `log` |  |
+| `syncActivity` |  |
 | `toolOutputDelta` |  |
 | `widget` |  |
 | `widgetDelta` |  |
@@ -281,6 +282,26 @@ or rejected.
 | `allowed` |  |
 | `allowed_warning` |  |
 | `rejected` |  |
+
+### EventSyncActivityPhase
+
+EventSyncActivityPhase identifies which part of a sync attempt an event reports.
+
+| Value | Description |
+|-------|-------------|
+| `start` |  |
+| `output` |  |
+| `end` |  |
+
+### EventSyncActivityStatus
+
+EventSyncActivityStatus is the outcome of a finished sync attempt.
+
+| Value | Description |
+|-------|-------------|
+| `pushed` |  |
+| `failed` |  |
+| `cancelled` |  |
 
 ### EventSystemSubtype
 
@@ -2371,6 +2392,25 @@ EventLog is a provisioning/startup log line from the runtime backend.
 |-------|------|-------------|----------|
 | `line` | `string` |  | yes |
 
+### EventSyncActivity
+
+EventSyncActivity is one record of a push attempt. Events with the same
+SyncID belong to one attempt: a start, output chunks in order, then an end.
+Fields that the Phase does not own are absent.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `syncID` | `string` |  | yes |
+| `phase` | `EventSyncActivityPhase` |  | yes |
+| `target` | `string` | Target is the kind of sync, "origin" or "default". Start only. |  |
+| `branch` | `string` | Branch is the destination branch of the first repository. Start only. |  |
+| `output` | `string` | Output is a chunk of the pre-push hook output, or the truncation notice
+when Truncated is set. Output only. |  |
+| `truncated` | `boolean` |  |  |
+| `status` | `EventSyncActivityStatus` | Status, Error and DurationMS describe the outcome. End only. |  |
+| `error` | `string` |  |  |
+| `durationMS` | `int64` |  |  |
+
 ### EventToolOutputDelta
 
 EventToolOutputDelta is a streaming output fragment from a running tool.
@@ -2489,6 +2529,7 @@ EventMessage is one backend-neutral message in cached history and its live strea
 | `nativeSubagent` | `EventNativeSubagent` |  |  |
 | `backgroundCommand` | `EventBackgroundCommand` |  |  |
 | `log` | `EventLog` |  |  |
+| `syncActivity` | `EventSyncActivity` |  |  |
 | `toolOutputDelta` | `EventToolOutputDelta` |  |  |
 | `widget` | `EventWidget` |  |  |
 | `widgetDelta` | `EventWidgetDelta` |  |  |
