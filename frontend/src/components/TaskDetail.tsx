@@ -3013,7 +3013,7 @@ function ToolCallCard(props: {
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
               <Show when={!toolPending()}>
-                <Switch fallback={<span class={styles.toolDone}>&#10003;</span>}>
+                <Switch>
                   {/* A folded background command outranks every other mark: the
                       chip resolves to the command's outcome instead of leaving a
                       perpetual "running in background" mark on a finished call. */}

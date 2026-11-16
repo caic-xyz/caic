@@ -135,7 +135,6 @@ declare const classes: {
   readonly "toolBlock": string;
   readonly "toolBlockPre": string;
   readonly "toolDetail": string;
-  readonly "toolDone": string;
   readonly "toolDuration": string;
   readonly "toolError": string;
   readonly "toolErrorPre": string;

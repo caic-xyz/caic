@@ -1074,13 +1074,6 @@ a.ciStatus:hover {
   margin-left: 0.4em;
 }
 
-.toolDone {
-  margin-right: 0.3em;
-  font-size: 0.85em;
-  font-weight: bold;
-  color: var(--color-success);
-}
-
 .toolBackground {
   margin-right: 0.3em;
   font-size: 0.85em;
