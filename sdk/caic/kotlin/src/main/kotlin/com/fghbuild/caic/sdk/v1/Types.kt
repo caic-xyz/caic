@@ -2972,6 +2972,12 @@ data class EventToolResult(
     /** Seconds; server-computed; 0 if unknown. */
     val duration: Double,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val error: String? = null,
+    /**
+     * Interrupted is true when the server closed a call that was still open
+     * when its agent process exited or its task settled. The tool reported
+     * neither a result nor an error.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val interrupted: Boolean? = null,
 )
 
 /** AskOption is a single option in an AskUserQuestion. */

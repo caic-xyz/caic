@@ -901,8 +901,8 @@ func TestToolTimingTracker(t *testing.T) {
 			}
 			events := tracker.ConvertMessage(2, 0, &agent.ExitMessage{ExitCode: 1, Error: "killed"}, start.Add(5*time.Second))
 			want := []v1.EventMessage{
-				{Kind: v1.EventKindToolResult, Ts: 6000, ToolResult: &v1.EventToolResult{ToolUseID: "root-tool", Duration: 5, Error: InterruptedToolError}},
-				{Kind: v1.EventKindToolResult, Ts: 6000, Source: v1.EventMessageSource(child), ToolResult: &v1.EventToolResult{ToolUseID: "child-tool", Duration: 4, Error: InterruptedToolError}},
+				{Kind: v1.EventKindToolResult, Ts: 6000, ToolResult: &v1.EventToolResult{ToolUseID: "root-tool", Duration: 5, Interrupted: true}},
+				{Kind: v1.EventKindToolResult, Ts: 6000, Source: v1.EventMessageSource(child), ToolResult: &v1.EventToolResult{ToolUseID: "child-tool", Duration: 4, Interrupted: true}},
 				{Kind: v1.EventKindError, Ts: 6000, Error: &v1.EventError{Err: "killed"}},
 			}
 			if !reflect.DeepEqual(events, want) {
@@ -919,7 +919,7 @@ func TestToolTimingTracker(t *testing.T) {
 			tracker := NewToolTimingTracker("", harness.Codex, "", nil)
 			tracker.ConvertMessage(2, 0, &agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}, time.Time{})
 			events := tracker.InterruptOpenTools(time.Time{})
-			want := []v1.EventMessage{{Kind: v1.EventKindToolResult, ToolResult: &v1.EventToolResult{ToolUseID: "tool", Error: InterruptedToolError}}}
+			want := []v1.EventMessage{{Kind: v1.EventKindToolResult, ToolResult: &v1.EventToolResult{ToolUseID: "tool", Interrupted: true}}}
 			if !reflect.DeepEqual(events, want) {
 				t.Fatalf("interruption events = %#v, want %#v", events, want)
 			}

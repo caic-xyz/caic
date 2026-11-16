@@ -4315,11 +4315,16 @@ public struct EventToolResult: Codable {
     /// Seconds; server-computed; 0 if unknown.
     public let duration: Double
     public let error: String?
+    /// Interrupted is true when the server closed a call that was still open
+    /// when its agent process exited or its task settled. The tool reported
+    /// neither a result nor an error.
+    public let interrupted: Bool?
 
-    public init(toolUseID: String, duration: Double, error: String? = nil) {
+    public init(toolUseID: String, duration: Double, error: String? = nil, interrupted: Bool? = nil) {
         self.toolUseID = toolUseID
         self.duration = duration
         self.error = error
+        self.interrupted = interrupted
     }
 }
 

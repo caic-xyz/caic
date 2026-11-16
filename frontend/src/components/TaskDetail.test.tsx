@@ -3057,6 +3057,26 @@ it("settles background work on its archived tool row across equal-time compactio
   );
 });
 
+it("marks a call the server interrupted as finished without an error", async () => {
+  taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+    for (const message of [
+      { kind: "toolUse", ts: 1000, toolUse: { toolUseID: "read-tool", name: "Read", input: {} } },
+      { kind: "toolResult", ts: 1500, toolResult: { toolUseID: "read-tool", duration: 0.5 } },
+      { kind: "toolUse", ts: 2000, toolUse: { toolUseID: "build-tool", name: "Bash", input: {} } },
+      { kind: "toolResult", ts: 9000, toolResult: { toolUseID: "build-tool", duration: 7, interrupted: true } },
+    ] satisfies EventMessage[])
+      emit(handlers, message);
+    return { close: vi.fn() } as unknown as EventSource;
+  });
+  await renderTaskDetail({ taskId: "interrupted-tool", taskState: "stopped" });
+  const summary = await screen.findByText(/^2\/2 tools: /);
+  expect(within(summary).queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
+  const row = toolRow("build-tool");
+  expect(within(row).getByRole("img", { name: "Interrupted" })).toBeInTheDocument();
+  expect(within(row).queryByText("error")).not.toBeInTheDocument();
+  expect(within(toolRow("read-tool")).queryByRole("img", { name: "Interrupted" })).not.toBeInTheDocument();
+});
+
 it("counts a tool call as unfinished while its background command runs", async () => {
   taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
     for (const message of [

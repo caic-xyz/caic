@@ -638,6 +638,7 @@ export function validateEventToolResult(raw: ValidatorInput): EventToolResult {
     toolUseID: asString(obj["toolUseID"], "EventToolResult.toolUseID"),
     duration: asNumber(obj["duration"], "EventToolResult.duration"),
     ...(Object.prototype.hasOwnProperty.call(obj, "error") ? { error: asString(obj["error"], "EventToolResult.error") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "interrupted") ? { interrupted: asBoolean(obj["interrupted"], "EventToolResult.interrupted") } : {}),
   };
 }
 

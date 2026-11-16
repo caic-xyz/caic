@@ -145,6 +145,7 @@ declare const classes: {
   readonly "toolInputKey": string;
   readonly "toolInputList": string;
   readonly "toolInputRow": string;
+  readonly "toolInterrupted": string;
   readonly "toolOutputDelta": string;
   readonly "toolOutputLink": string;
   readonly "toolPatchFile": string;

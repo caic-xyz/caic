@@ -29,10 +29,6 @@ const InputTruncateThreshold = 4096
 // closes the forgotten calls.
 const maxPendingToolTimings = 1024
 
-// InterruptedToolError is the result error of a tool call that was still open
-// when its agent process exited or its task settled: no result can follow.
-const InterruptedToolError = "interrupted before the tool returned"
-
 // ToolTimingTracker computes per-tool-call duration while converting agent
 // messages to API events, closes tool calls left open by an agent exit or task
 // settlement, and supplies fallback result text from a turn text window.
@@ -128,9 +124,9 @@ func (tt *ToolTimingTracker) InterruptOpenTools(now time.Time) []v1.EventMessage
 			Ts:     ts,
 			Source: v1.EventMessageSource(open.source),
 			ToolResult: &v1.EventToolResult{
-				ToolUseID: key.ToolUseID,
-				Duration:  open.elapsed(now),
-				Error:     InterruptedToolError,
+				ToolUseID:   key.ToolUseID,
+				Duration:    open.elapsed(now),
+				Interrupted: true,
 			},
 		})
 	}

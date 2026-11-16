@@ -254,7 +254,7 @@ func TestSource(t *testing.T) {
 				results = append(results, *r)
 			}
 		}
-		want := []v1.EventToolResult{{ToolUseID: "toolu_1", Error: apiconv.InterruptedToolError}}
+		want := []v1.EventToolResult{{ToolUseID: "toolu_1", Interrupted: true}}
 		if !reflect.DeepEqual(results, want) {
 			t.Fatalf("tool results = %#v, want %#v", results, want)
 		}

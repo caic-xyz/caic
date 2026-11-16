@@ -471,6 +471,8 @@ func (p *taskMetadataProjection) finish(loaded *LoadedTask) {
 	}
 }
 
+// isInventoryOnlyMessage reports whether a control message only describes the
+// task inventory, so the restored task timeline excludes it.
 func isInventoryOnlyMessage(msg agent.Message) bool {
 	switch msg.(type) {
 	case *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage:
@@ -478,6 +480,17 @@ func isInventoryOnlyMessage(msg agent.Message) bool {
 	default:
 		return false
 	}
+}
+
+// isProjectedControl reports whether history projection sees a control
+// message. It excludes inventory facts except the settlement trailer, which
+// proves that no open tool call of the settled run can return. The restored
+// timeline uses isInventoryOnlyMessage and keeps excluding the trailer.
+func isProjectedControl(msg agent.Message) bool {
+	if _, settled := msg.(*agent.MetaResultMessage); settled {
+		return true
+	}
+	return !isInventoryOnlyMessage(msg)
 }
 
 func applySemanticTask(lt, loaded *LoadedTask, messages bool) {

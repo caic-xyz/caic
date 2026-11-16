@@ -1080,6 +1080,20 @@ a.ciStatus:hover {
   color: var(--color-text-muted);
 }
 
+.toolInterrupted {
+  display: inline-flex;
+  margin-right: 0.3em;
+  font-size: 0.85em;
+  vertical-align: middle;
+  color: var(--color-text-muted);
+}
+
+.toolInterrupted svg {
+  width: 1em;
+  height: 1em;
+  fill: currentcolor;
+}
+
 .toolDetail {
   margin-left: 0.5em;
   overflow: hidden;

@@ -2164,6 +2164,7 @@ EventToolResult is emitted when a tool call completes.
 | `toolUseID` | `string` |  | yes |
 | `duration` | `float64` | Seconds; server-computed; 0 if unknown. | yes |
 | `error` | `string` |  |  |
+| `interrupted` | `boolean` | Interrupted is true when the server closed a call that was still open when its agent process exited or its task settled. The tool reported neither a result nor an error. |  |
 
 ### AskOption
 

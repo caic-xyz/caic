@@ -28,6 +28,7 @@ import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.sv
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import EditIcon from "@material-symbols/svg-400/outlined/edit.svg?solid";
 import MoreIcon from "@material-symbols/svg-400/outlined/more_vert.svg?solid";
+import StopCircleIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 
 import type {
   EventMessage,
@@ -40,6 +41,7 @@ import type {
   HistoryTurn,
   TaskPlan,
   EventResult,
+  EventToolResult,
   AskQuestion,
   EventAsk,
   EventTextDelta,
@@ -2188,7 +2190,7 @@ function GroupContent(props: {
                     Tool {tool().result ? "result" : "output"}:{" "}
                     {tool().result?.toolUseID ?? group().events[0]?.toolOutputDelta?.toolUseID}
                   </summary>
-                  <pre>{tool().result?.error || tool().output || "Result received; no output reported."}</pre>
+                  <pre>{toolResultText(tool().result, tool().output)}</pre>
                 </details>
               )}
             </Show>
@@ -2455,9 +2457,7 @@ function MessageItem(props: {
             Tool {props.ev.toolResult ? "result" : "output"}:{" "}
             {props.ev.toolResult?.toolUseID ?? props.ev.toolOutputDelta?.toolUseID}
           </summary>
-          <pre>
-            {props.ev.toolResult?.error || props.ev.toolOutputDelta?.delta || "Result received; no output reported."}
-          </pre>
+          <pre>{toolResultText(props.ev.toolResult, props.ev.toolOutputDelta?.delta)}</pre>
         </details>
       </Match>
       <Match when={props.ev.todo}>
@@ -2548,10 +2548,19 @@ function ResultCard(props: {
   );
 }
 
-// toolCallRunning reports whether a tool row's duration ticks: its folded
-// background command runs, or the call itself has not returned.
+// toolCallRunning is the single rule for a tool call's spinner, finished count,
+// and ticking duration. A folded background command runs until it reports an
+// outcome or the task settles. Otherwise the call runs until its result
+// arrives: the server closes calls left open by an agent exit or a task
+// settlement with an interrupted result.
 function toolCallRunning(call: ToolCall, command: HistoryBackgroundCommand | undefined, settled: boolean): boolean {
-  return !settled && (command ? command.status === "running" : !call.done);
+  return command ? command.status === "running" && !settled : !call.done;
+}
+
+// toolResultText describes a result that has no tool row to render it.
+function toolResultText(result: EventToolResult | undefined, output: string | undefined): string {
+  if (result?.interrupted) return "Interrupted before the tool returned.";
+  return result?.error || output || "Result received; no output reported.";
 }
 
 // toolGroupWork summarizes the commands a group's rows own beyond the group's
@@ -2602,6 +2611,16 @@ function ToolPendingIcon() {
   return <span class={styles.toolPending} role="img" aria-label="Running" />;
 }
 
+// ToolInterruptedIcon marks a call that ended without a result because its
+// agent process exited or its task stopped.
+function ToolInterruptedIcon() {
+  return (
+    <span class={styles.toolInterrupted} role="img" aria-label="Interrupted" title="Interrupted">
+      <StopCircleIcon aria-hidden="true" />
+    </span>
+  );
+}
+
 function ToolMessageGroup(props: {
   toolCalls: ToolCall[];
   taskId: string;
@@ -2632,13 +2651,8 @@ function ToolMessageGroup(props: {
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
   const backgroundCommand = (call: ToolCall) =>
     props.backgroundByToolUseID().get(toolIdentity(call.source, call.use.toolUseID));
-  // A call whose detached command still runs is not done, even though its
-  // launch already returned, like a command that has not returned yet.
   const finishedCount = createMemo(
-    () =>
-      calls().filter(
-        (call) => call.done && (backgroundCommand(call)?.status !== "running" || props.backgroundSettled()),
-      ).length,
+    () => calls().filter((call) => !toolCallRunning(call, backgroundCommand(call), props.backgroundSettled())).length,
   );
   const thinkingEvents = () => (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
@@ -2994,31 +3008,27 @@ function ToolCallCard(props: {
         <summary>
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
-              <Show
-                when={!props.call.done}
-                fallback={
-                  // A folded background command outranks the static badge: the
-                  // chip resolves to the command's outcome instead of leaving a
-                  // perpetual "running in background" mark on a finished call.
-                  <Show
-                    when={props.backgroundCommand}
-                    keyed
-                    fallback={
-                      <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
-                        <span class={styles.toolBackground} title="Running in background">
-                          &#8943;
-                        </span>
-                      </Show>
-                    }
-                  >
-                    {(command) => (
-                      <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
-                    )}
-                  </Show>
-                }
-              >
-                <ToolPendingIcon />
-              </Show>
+              <Switch fallback={<span class={styles.toolDone}>&#10003;</span>}>
+                {/* A folded background command outranks every other mark: the
+                    chip resolves to the command's outcome instead of leaving a
+                    perpetual "running in background" mark on a finished call. */}
+                <Match when={props.backgroundCommand} keyed>
+                  {(command) => (
+                    <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
+                  )}
+                </Match>
+                <Match when={!props.call.done}>
+                  <ToolPendingIcon />
+                </Match>
+                <Match when={props.call.result?.interrupted}>
+                  <ToolInterruptedIcon />
+                </Match>
+                <Match when={props.call.use.background}>
+                  <span class={styles.toolBackground} title="Running in background">
+                    &#8943;
+                  </span>
+                </Match>
+              </Switch>
               {props.call.use.name}
               <For each={props.nativeActivity ?? []}>
                 {(activity) => <NativeActivityStatus activity={activity} settled={props.nativeSettled?.() ?? false} />}

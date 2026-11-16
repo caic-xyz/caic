@@ -75,9 +75,7 @@ func (c *RecordCursor) Read(ctx context.Context) iter.Seq2[Record, error] {
 				if parsed.Control {
 					messages = nil
 					for _, m := range parsed.Messages {
-						// A settlement trailer stays visible: it proves that no
-						// open tool call of the settled run can return.
-						if _, settled := m.Message.(*agent.MetaResultMessage); settled || !isInventoryOnlyMessage(m.Message) {
+						if isProjectedControl(m.Message) {
 							messages = append(messages, m)
 						}
 					}

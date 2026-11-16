@@ -185,6 +185,10 @@ type EventToolResult struct {
 	ToolUseID string  `json:"toolUseID"`
 	Duration  float64 `json:"duration"` // Seconds; server-computed; 0 if unknown.
 	Error     string  `json:"error,omitempty"`
+	// Interrupted is true when the server closed a call that was still open
+	// when its agent process exited or its task settled. The tool reported
+	// neither a result nor an error.
+	Interrupted bool `json:"interrupted,omitempty"`
 }
 
 // AskOption is a single option in an AskUserQuestion.
