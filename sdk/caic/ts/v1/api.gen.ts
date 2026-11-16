@@ -139,6 +139,8 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     getTaskCILog: (id: string, jobID: string, signal?: AbortSignal): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${encodeURIComponent(id)}?jobID=${encodeURIComponent(jobID)}`, undefined, undefined, signal),
     /** Pushes task changes to the remote repository. */
     syncTask: (id: string, req: SyncReq, signal?: AbortSignal): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/sync`, req, undefined, signal),
+    /** Cancels the task's running sync. Responds 409 when no sync is running. */
+    cancelTaskSync: (id: string, signal?: AbortSignal): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/sync/cancel`, undefined, undefined, signal),
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     forkTask: (id: string, req: ForkTaskReq, signal?: AbortSignal): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/fork`, req, undefined, signal),
     /** Builds an editable handoff prompt for continuing a task in a fresh agent session. */

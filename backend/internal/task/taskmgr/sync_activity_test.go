@@ -399,3 +399,135 @@ func TestLifecycleSyncRecords(t *testing.T) {
 		})
 	})
 }
+
+// ctxHookBackend blocks its first pre-push hook until its context ends or
+// release closes; later hooks succeed at once.
+type ctxHookBackend struct {
+	*runtimetest.FakeBackend
+
+	started chan struct{} // Closed when the first hook starts.
+	release chan struct{} // Closed to let the first hook succeed.
+	once    sync.Once
+	ctxErr  chan error // Receives the context error of a cancelled hook.
+}
+
+func (b *ctxHookBackend) RunPrePush(ctx context.Context, _ runtime.ID, _ int, _ string, _ runtime.PushRefs, _ io.Writer) error {
+	first := false
+	b.once.Do(func() { first = true })
+	if !first {
+		return nil
+	}
+	close(b.started)
+	select {
+	case <-ctx.Done():
+		b.ctxErr <- ctx.Err()
+		return ctx.Err()
+	case <-b.release:
+		return nil
+	}
+}
+
+func TestLifecycleCancelSync(t *testing.T) {
+	t.Parallel()
+	newBlocked := func(t *testing.T) (*Entry, *ctxHookBackend) {
+		backend := &ctxHookBackend{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
+		e := newSyncTestEntry(t, func(fetched []runtime.FetchedBranch) testRuntimeBackend {
+			backend.FakeBackend = &runtimetest.FakeBackend{FetchedBranches: fetched}
+			return backend
+		})
+		return e, backend
+	}
+	runSync := func(ctx context.Context, e *Entry) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := e.Lifecycle.Sync(ctx, SyncTargetOrigin, false)
+			done <- err
+		}()
+		return done
+	}
+	waitStarted := func(t *testing.T, b *ctxHookBackend) {
+		select {
+		case <-b.started:
+		case <-time.After(30 * time.Second):
+			t.Fatal("hook did not start")
+		}
+	}
+	waitDone := func(t *testing.T, done <-chan error) error {
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(30 * time.Second):
+			t.Fatal("Sync did not return")
+			return nil
+		}
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		t.Run("cancels_the_hook_and_records_cancelled", func(t *testing.T) {
+			t.Parallel()
+			e, b := newBlocked(t)
+			done := runSync(t.Context(), e)
+			waitStarted(t, b)
+			if err := e.Lifecycle.CancelSync(); err != nil {
+				t.Fatal(err)
+			}
+			err := waitDone(t, done)
+			if got, ok := errors.AsType[*Error](err); !ok || got.Kind != KindConflict || !strings.Contains(got.Msg, "cancelled") {
+				t.Fatalf("Sync error = %v, want a cancelled conflict", err)
+			}
+			got := loggedSyncRecords(t, e)
+			if len(got) != 2 || got[1].Phase != v3.SyncPhaseEnd || got[1].Status != v3.SyncStatusCancelled {
+				t.Fatalf("records = %+v, want start and a cancelled end", got)
+			}
+			// The cancelled sync released its lock: a following sync succeeds.
+			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false); err != nil {
+				t.Fatalf("sync after cancel: %v", err)
+			}
+			got = loggedSyncRecords(t, e)
+			if len(got) != 4 || got[3].Status != v3.SyncStatusPushed {
+				t.Fatalf("records = %+v, want a pushed end after the cancelled one", got)
+			}
+		})
+		t.Run("request_cancel_alone_does_not_cancel", func(t *testing.T) {
+			t.Parallel()
+			e, b := newBlocked(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			done := runSync(ctx, e)
+			waitStarted(t, b)
+			cancel()
+			select {
+			case err := <-b.ctxErr:
+				t.Fatalf("hook context ended with the request: %v", err)
+			case err := <-done:
+				t.Fatalf("Sync ended with the request: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(b.release)
+			// The summary refresh still follows the gone request; the push outcome is what counts.
+			_ = waitDone(t, done)
+			got := loggedSyncRecords(t, e)
+			if end := got[len(got)-1]; end.Status != v3.SyncStatusPushed {
+				t.Fatalf("records = %+v, want a pushed end", got)
+			}
+		})
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("idle_cancel_is_a_conflict", func(t *testing.T) {
+			t.Parallel()
+			e, b := newBlocked(t)
+			close(b.release)
+			err := e.Lifecycle.CancelSync()
+			if got, ok := errors.AsType[*Error](err); !ok || got.Kind != KindConflict {
+				t.Fatalf("CancelSync = %v, want a conflict", err)
+			}
+			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Lifecycle.CancelSync(); err == nil {
+				t.Fatal("CancelSync after the sync ended succeeded")
+			}
+		})
+	})
+}

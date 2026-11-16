@@ -1439,9 +1439,11 @@ type homeCommandContainer struct {
 	gitCommandContainer
 
 	home string
+	opts []string // SSH options of the last command.
 }
 
-func (c *homeCommandContainer) SSHCommand(_ []string, cmd string) []string {
+func (c *homeCommandContainer) SSHCommand(opts []string, cmd string) []string {
+	c.opts = opts
 	return []string{"bash", "-c", "export HOME=" + shellQuote(c.home) + "; " + cmd}
 }
 
@@ -1557,6 +1559,21 @@ func TestRunPrePush(t *testing.T) {
 		}
 		if sink.writes != 1 {
 			t.Fatalf("failed sink was written %d times, want 1", sink.writes)
+		}
+	})
+
+	t.Run("RequestsPty", func(t *testing.T) {
+		t.Parallel()
+		// Without a remote pty, dropping the SSH session leaves the hook running.
+		dir := initStatusRepo(t)
+		commit := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+		ct := &homeCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir}}, home: t.TempDir()}
+		b := newTestBackend(&fakeMDClient{getResult: ct})
+		if err := b.RunPrePush(t.Context(), "docker:ctr", 0, commit, dest(commit), nil); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(ct.opts, []string{"-tt"}) {
+			t.Fatalf("ssh options = %q, want -tt", ct.opts)
 		}
 	})
 

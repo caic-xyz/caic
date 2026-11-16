@@ -513,6 +513,10 @@ public final class ApiClient {
     public func syncTask(id: String, req: SyncReq) async throws -> SyncResp {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/sync", body: try encoder.encode(req))
     }
+    /// Cancels the task's running sync. Responds 409 when no sync is running.
+    public func cancelTaskSync(id: String) async throws -> StatusResp {
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/sync/cancel")
+    }
     /// Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.
     public func forkTask(id: String, req: ForkTaskReq) async throws -> Task {
         try await request("POST", path: "/api/caic/v1/tasks/\(id)/fork", body: try encoder.encode(req))

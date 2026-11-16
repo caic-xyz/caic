@@ -313,6 +313,14 @@ var Routes = []apispec.Route{
 		Resp:     reflect.TypeFor[SyncResp](),
 	},
 	{
+		Name:     "cancelTaskSync",
+		Doc:      "Cancels the task's running sync. Responds 409 when no sync is running.",
+		Method:   "POST",
+		Category: "Tasks",
+		Path:     "/api/caic/v1/tasks/{id}/sync/cancel",
+		Resp:     reflect.TypeFor[StatusResp](),
+	},
+	{
 		Name:     "forkTask",
 		Doc:      "Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.",
 		Method:   "POST",

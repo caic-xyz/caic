@@ -1345,6 +1345,13 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 	return &v1.TaskRepoStatusResp{Repositories: out}, nil
 }
 
+func (s *taskService) cancelTaskSync(_ context.Context, entry *taskmgr.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+	if err := entry.Lifecycle.CancelSync(); err != nil {
+		return nil, toDTO(err)
+	}
+	return &v1.StatusResp{Status: "cancelling"}, nil
+}
+
 func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
 	t := entry.Task()
 	target := taskmgr.SyncTargetOrigin

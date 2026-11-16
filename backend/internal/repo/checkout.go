@@ -235,8 +235,10 @@ func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger
 // straight from its repository, so no host hook or checkout is involved.
 // Successful pushes refresh the runtime's cached upstream refs. No host checkout
 // files or branches change. The returned statistics describe the pre-push diff.
+//
+// Cancelling ctx stops the push at its current step, so a caller that must not
+// lose a push to a disconnecting client passes a detached context.
 func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (v3.DiffStat, []SafetyIssue, error) {
-	ctx = context.WithoutCancel(ctx)
 	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return nil, nil, err

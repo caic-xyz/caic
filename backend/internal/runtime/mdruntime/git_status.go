@@ -101,7 +101,8 @@ func workspaceSteps(repo, commit string) []string {
 
 // prePushCommand runs the repository's pre-push hook in the workspace at
 // commit. The hook sees the same arguments and stdin as during git push, and
-// its output arrives on stdout.
+// its output arrives on stdout. The command runs on a pty (see RunPrePush);
+// stty keeps the pty from rewriting line feeds in the output.
 func prePushCommand(repo, commit string, dest runtime.PushRefs) (string, error) {
 	if !isGitObjectID(commit) {
 		return "", errors.New("pre-push commit must be a full object ID")
@@ -113,7 +114,7 @@ func prePushCommand(repo, commit string, dest runtime.PushRefs) (string, error) 
 		return "", errors.New("pre-push remote and branch are required")
 	}
 	update := "refs/heads/" + dest.Branch + " " + commit + " refs/heads/" + dest.Branch + " " + dest.RemoteCommit
-	steps := append([]string{"exec 2>&1", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit)...)
+	steps := append([]string{"exec 2>&1", "{ stty -onlcr 2>/dev/null || :; }", "export GIT_OPTIONAL_LOCKS=0 LC_ALL=C"}, workspaceSteps(repo, commit)...)
 	return strings.Join(append(steps,
 		`hook=$(git rev-parse --git-path hooks/pre-push)`,
 		`if [ ! -x "$hook" ]; then exit 0; fi`,

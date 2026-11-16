@@ -70,6 +70,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/purge` | Stops a task, then deletes its runtime instance after the configured recovery window unless revived. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
+| POST | `/api/caic/v1/tasks/{id}/sync/cancel` | Cancels the task's running sync. Responds 409 when no sync is running. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/handoff` | Builds an editable handoff prompt for continuing a task in a fresh agent session. |  | `TaskHandoffResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns repository status and the unified diff for a task's branch. |  | `DiffResp` |

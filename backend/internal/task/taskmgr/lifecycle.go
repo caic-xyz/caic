@@ -39,6 +39,9 @@ type Lifecycle struct {
 
 	syncMu sync.Mutex // Held for a whole Sync: verification, push and summary refresh run one at a time.
 
+	syncCancelMu sync.Mutex
+	syncCancel   context.CancelCauseFunc // Non-nil while the push of a running Sync can be cancelled.
+
 	purgeMu         sync.Mutex
 	purgeCancel     context.CancelFunc
 	purgeGeneration uint64
@@ -429,6 +432,10 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 // It rejects a call while another sync of the task is running: the caller can
 // retry, and the running sync already pushes the task's commits.
 //
+// The push runs on a context detached from ctx: a caller that disconnects does
+// not cancel it. Only CancelSync does; the sync then records the cancelled
+// outcome and returns a conflict error.
+//
 // Once the push destinations are resolved, the sync is recorded in the task log
 // as a start record, bounded hook output records and an end record.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
@@ -452,7 +459,14 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if checkout == nil {
 		return nil, conflict("task has no checkout")
 	}
-	gitTarget, destinations, err := checkout.ResolvePushDestinations(ctx, r.manager.log, t.GitTarget(), target == SyncTargetDefault)
+	pushCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	r.setSyncCancel(cancel)
+	endPush := sync.OnceFunc(func() {
+		r.setSyncCancel(nil)
+		cancel(nil)
+	})
+	defer endPush()
+	gitTarget, destinations, err := checkout.ResolvePushDestinations(pushCtx, r.manager.log, t.GitTarget(), target == SyncTargetDefault)
 	if err != nil {
 		return nil, internalErr(err, "resolve push destination")
 	}
@@ -466,15 +480,19 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if target != SyncTargetDefault {
 		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true, HookOutput: recorder}
 	}
-	ds, issues, err := checkout.Push(ctx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
+	ds, issues, err := checkout.Push(pushCtx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
 	status := "synced"
 	if err == nil && len(issues) > 0 && !opts.BypassSafety {
 		status = "blocked"
 	} else if err == nil && len(ds) == 0 {
 		status = "empty"
 	}
+	cancelled := err != nil && errors.Is(context.Cause(pushCtx), errSyncCancelled)
+	endPush()
 	outcome, outcomeErr := v3.SyncStatusPushed, err
 	switch _, refreshFailed := errors.AsType[*repo.PushRefreshError](err); {
+	case cancelled:
+		outcome, outcomeErr = v3.SyncStatusCancelled, errSyncCancelled
 	case err == nil && status == "blocked":
 		outcome, outcomeErr = v3.SyncStatusFailed, fmt.Errorf("blocked by %d safety issue(s)", len(issues))
 	case err != nil && !refreshFailed:
@@ -482,6 +500,9 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		outcome = v3.SyncStatusFailed
 	}
 	recorder.finish(outcome, outcomeErr)
+	if cancelled {
+		return nil, conflict("sync cancelled")
+	}
 	if err != nil {
 		return nil, internalErr(err, "sync to "+string(target))
 	}
@@ -496,6 +517,18 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		}
 	}
 	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
+}
+
+// CancelSync cancels the push of the task's running Sync. It returns a conflict
+// when no sync is running.
+func (r *Lifecycle) CancelSync() error {
+	r.syncCancelMu.Lock()
+	defer r.syncCancelMu.Unlock()
+	if r.syncCancel == nil {
+		return conflict("no sync of this task is running")
+	}
+	r.syncCancel(errSyncCancelled)
+	return nil
 }
 
 // QueueInput appends to a pending prompt, or sends immediately when waiting.
@@ -893,3 +926,9 @@ func (r *Lifecycle) generateTitle() {
 }
 
 var _ io.Closer = (*Lifecycle)(nil)
+
+func (r *Lifecycle) setSyncCancel(cancel context.CancelCauseFunc) {
+	r.syncCancelMu.Lock()
+	r.syncCancel = cancel
+	r.syncCancelMu.Unlock()
+}

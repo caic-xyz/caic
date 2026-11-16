@@ -148,6 +148,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's existing commits to GitHub. Push to task branch (default) or directly to main without rewriting commits.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", m.handleTaskStop), mcp.ToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Stop a task and schedule its container for deletion after the recovery window. Reviving the task during the window cancels deletion.", m.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_cancel_push", "Cancel task push", "Cancel the task's running push started by task_push_branch_to_remote or the web UI. Fails when no push is running.", m.handleTaskCancelPush), mcp.ToolAnnotations{Title: "Cancel task push", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", m.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
 		annotateTool(mcp.NewToolSpec("get_system_stats", "Get system stats", "Read whole-machine CPU, memory, network, and working-filesystem utilization for the caic server. Returns up to 60 five-second samples, including timestamps and capacity totals, plus any sampling warning. The cpus array reports each logical CPU ID and 0–100% usage; sum those percentages for total usage (100% per fully busy CPU). Memory excludes available pages; network sums all interfaces. Works without opening the UI.", m.handleGetSystemStats), mcp.ToolAnnotations{Title: "Get system stats", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
@@ -573,6 +574,17 @@ func (m *mcpTools) handleTaskStop(ctx context.Context, call *mcp.ToolRequest[mcp
 		return domainToolError[mcp.TextOutput](err)
 	}
 	return mcp.TextToolResult(fmt.Sprintf("Stopping task #%d.", num))
+}
+
+func (m *mcpTools) handleTaskCancelPush(ctx context.Context, call *mcp.ToolRequest[mcpschema.TaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
+	}
+	if _, err = m.taskSvc.cancelTaskSync(ctx, entry, &api.EmptyReq{}); err != nil {
+		return domainToolError[mcp.TextOutput](err)
+	}
+	return mcp.TextToolResult(fmt.Sprintf("Cancelling the push of task #%d.", num))
 }
 
 func (m *mcpTools) handleTaskPurge(ctx context.Context, call *mcp.ToolRequest[mcpschema.TaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {

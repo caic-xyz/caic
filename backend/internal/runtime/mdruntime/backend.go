@@ -683,7 +683,10 @@ func (b *Backend) RunPrePush(ctx context.Context, id runtime.ID, repoIdx int, co
 	if err != nil {
 		return err
 	}
-	sshArgs := ct.SSHCommand(nil, cmd)
+	// -tt forces a remote pty: dropping the SSH session on cancel then hangs up
+	// the remote shell and the hook. Without a pty sshd only closes the pipes,
+	// and a silent hook keeps running with its checkout in place.
+	sshArgs := ct.SSHCommand([]string{"-tt"}, cmd)
 	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
 	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
 	// prePushCommand merges the hook's stderr into stdout, so Stdout carries the

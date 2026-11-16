@@ -34,7 +34,8 @@ to continue a task's workspace on a new branch.
 
 Use `task_stop`, `task_revive`, and `task_purge` only when the user asks to
 change the task lifecycle. Use `task_push_branch_to_remote` only when the user
-asks to publish its branch. Use `task_fix_pr` or `bot_fix_ci` only when the
+asks to publish its branch, and `task_cancel_push` only when the user asks to
+stop a running push. Use `task_fix_pr` or `bot_fix_ci` only when the
 user asks to repair failing continuous integration.
 
 ## Repositories and usage

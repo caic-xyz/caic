@@ -41,6 +41,9 @@ const (
 // and, when recovery was attempted, the reconnect failure.
 var ErrNoSession = errors.New("no active session")
 
+// errSyncCancelled is the cancellation cause of a sync stopped by CancelSync.
+var errSyncCancelled = errors.New("sync cancelled")
+
 // NoSessionError wraps the underlying task.SendInput error when there is no
 // active agent session.
 type NoSessionError struct {

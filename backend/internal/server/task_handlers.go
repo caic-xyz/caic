@@ -527,6 +527,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("POST /tasks/{id}/purge", handleWithTask(h, h.taskSvc.purgeTask))
 	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(h, h.taskSvc.reviveTask))
 	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(h, h.taskSvc.syncTask))
+	m.HandleFunc("POST /tasks/{id}/sync/cancel", handleWithTask(h, h.taskSvc.cancelTaskSync))
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
 	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
 	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)

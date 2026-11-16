@@ -726,6 +726,7 @@ func TestMCPTools(t *testing.T) {
 
 		expectedHeaders := map[string]map[string]string{
 			"task_stop":                  {"task_number": "Task-Number"},
+			"task_cancel_push":           {"task_number": "Task-Number"},
 			"task_purge":                 {"task_number": "Task-Number"},
 			"task_revive":                {"task_number": "Task-Number"},
 			"task_fork":                  {"task_number": "Task-Number"},
@@ -2131,7 +2132,7 @@ func TestMCPTools(t *testing.T) {
 	})
 	t.Run("specs/taskFocus", func(t *testing.T) {
 		t.Parallel()
-		for _, name := range []string{"agent_last_message", "task_answer_question", "task_fix_pr", "task_fork", "task_get_detail", "task_purge", "task_push_branch_to_remote", "task_revive", "task_send_message", "task_stop"} {
+		for _, name := range []string{"agent_last_message", "task_answer_question", "task_cancel_push", "task_fix_pr", "task_fork", "task_get_detail", "task_purge", "task_push_branch_to_remote", "task_revive", "task_send_message", "task_stop"} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				for _, ref := range []string{"1", `"#1"`, "id", `"missing"`} {

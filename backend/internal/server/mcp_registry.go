@@ -118,6 +118,7 @@ var mcpToolScopes = map[string]string{
 	"task_create":                mcpScopeTasksCreate,
 	"task_fork":                  mcpScopeTasksWrite,
 	"task_stop":                  mcpScopeTasksWrite,
+	"task_cancel_push":           mcpScopeReposWrite,
 	"task_revive":                mcpScopeTasksWrite,
 	"task_purge":                 mcpScopeTasksAdmin,
 	"clone_repo":                 mcpScopeReposWrite,

@@ -172,6 +172,8 @@ class ApiClient(
     suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/ci/log/$id?jobID=${java.net.URLEncoder.encode(jobID, "UTF-8")}")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
+    /** Cancels the task's running sync. Responds 409 when no sync is running. */
+    suspend fun cancelTaskSync(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/sync/cancel")
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     suspend fun forkTask(id: String, req: ForkTaskReq): Task = request("POST", "/api/caic/v1/tasks/$id/fork", json.encodeToString(req))
     /** Builds an editable handoff prompt for continuing a task in a fresh agent session. */

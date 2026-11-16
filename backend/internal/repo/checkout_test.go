@@ -321,7 +321,7 @@ func TestCheckout(t *testing.T) {
 		if target.Repos[0].GitRoot != roots[0] {
 			t.Fatalf("primary host root not resolved: %+v", target.Repos[0])
 		}
-		ds, issues, err := w.Push(ctx, logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+		ds, issues, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
 		if err != nil || len(issues) != 0 || len(ds) != 2 {
 			t.Fatalf("push pinned commits: stats=%+v issues=%+v err=%v", ds, issues, err)
 		}
@@ -534,7 +534,7 @@ func TestCheckout(t *testing.T) {
 		cancel()
 		target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
 		sc := &timeoutFetchBackend{FakeBackend: &runtimetest.FakeBackend{}}
-		_, _, err := w.Push(ctx, logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+		_, _, err := w.Push(context.WithoutCancel(ctx), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("detached fetch must remain bounded: %v", err)
 		}
