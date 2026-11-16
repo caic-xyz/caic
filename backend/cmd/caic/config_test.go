@@ -290,11 +290,11 @@ model = "gemini-live-test"
 		if len(cfg.Voice.Gateway.Config.Realtime) != 1 || cfg.Voice.Gateway.Config.Realtime[0].Model != "gemini-live-test" {
 			t.Errorf("Voice.Gateway.Config.Model = %q, want gemini-live-test", cfg.Voice.Gateway.Config.Realtime[0].Model)
 		}
-		if cfg.Voice.Gateway.WebRTCUDPPort != 3478 {
-			t.Errorf("Voice.Gateway.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.WebRTCUDPPort)
+		if cfg.Voice.Gateway.WebRTC.UDPPort != 3478 {
+			t.Errorf("Voice.Gateway.WebRTCUDPPort = %d, want 3478", cfg.Voice.Gateway.WebRTC.UDPPort)
 		}
-		if got := cfg.Voice.Gateway.STUNServers; !slices.Equal(got, []string{"stun:stun.example:3478"}) {
-			t.Errorf("Voice.Gateway.STUNServers = %q, want [stun:stun.example:3478]", got)
+		if got := cfg.Voice.Gateway.WebRTC.STUNServers; !slices.Equal(got, []string{"stun:stun.example:3478"}) {
+			t.Errorf("Voice.Gateway.WebRTC.STUNServers = %q, want [stun:stun.example:3478]", got)
 		}
 	})
 

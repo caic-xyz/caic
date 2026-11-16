@@ -646,8 +646,7 @@ ClaudeSettings configures Claude Code sessions.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness
-default; changes apply to new tasks. | yes |
+| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the threshold in tokens. Zero uses the harness default; changes apply to new tasks. | yes |
 
 ### CodexSettings
 
@@ -655,8 +654,7 @@ CodexSettings configures Codex sessions.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the total active context threshold in tokens.
-Zero uses the harness default; changes apply to new tasks. | yes |
+| `autoCompactTokenLimit` | `int` | AutoCompactTokenLimit is the total active context threshold in tokens. Zero uses the harness default; changes apply to new tasks. | yes |
 
 ### DshSettings
 
@@ -702,11 +700,8 @@ RuntimeSettings holds CPU configuration for a single runtime.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `containerPlatform` | `Platform` | ContainerPlatform selects the runtime CPU architecture. Empty means use
-the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
-| `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
-Zero means use the runtime default: leave two CPUs of headroom where
-possible, allowing at least two CPUs when available. |  |
+| `containerPlatform` | `Platform` | ContainerPlatform selects the runtime CPU architecture. Empty means use the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
+| `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use. Zero means use the runtime default: leave two CPUs of headroom where possible, allowing at least two CPUs when available. |  |
 
 ### CacheMappingResp
 
@@ -737,20 +732,14 @@ UserSettings holds user-configurable behavioral settings.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `autoFixOnCIFailure` | `boolean` | AutoFixOnCIFailure automatically starts a new task to fix CI when a
-task's PR CI fails and the original task can no longer receive input.
-Only effective when the GitHub App is configured. | yes |
-| `autoFixOnPROpen` | `boolean` | AutoFixOnPROpen automatically creates a task to review and fix a pull
-request when it is opened or reopened via a forge webhook. | yes |
-| `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use
-the default. |  |
+| `autoFixOnCIFailure` | `boolean` | AutoFixOnCIFailure automatically starts a new task to fix CI when a task's PR CI fails and the original task can no longer receive input. Only effective when the GitHub App is configured. | yes |
+| `autoFixOnPROpen` | `boolean` | AutoFixOnPROpen automatically creates a task to review and fix a pull request when it is opened or reopened via a forge webhook. | yes |
+| `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use the default. |  |
 | `harnesses` | `HarnessSettings` | Harnesses holds the settings for each configured agent harness. |  |
 | `runtimeSettings` | `Record<string, RuntimeSettings>` | RuntimeSettings stores CPU architecture and limits by runtime name. |  |
-| `purgeDelay` | `int64` | PurgeDelay is the recovery window in nanoseconds before a stopped task is
-permanently deleted. | yes |
+| `purgeDelay` | `int64` | PurgeDelay is the recovery window in nanoseconds before a stopped task is permanently deleted. | yes |
 | `runtimeName` | `string` | RuntimeName is the preferred runtime backend for new tasks. |  |
-| `wellKnownCaches` | `Record<string, boolean>` | WellKnownCaches maps cache name to enabled state. Absent or false means
-disabled, true means enabled. Caches are opt-in. |  |
+| `wellKnownCaches` | `Record<string, boolean>` | WellKnownCaches maps cache name to enabled state. Absent or false means disabled, true means enabled. Caches are opt-in. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
 | `customMounts` | `MountMappingResp[]` | CustomMounts are custom non-cache host-to-runtime directory mappings. |  |
 
@@ -946,16 +935,11 @@ outcome, and attribute set.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Name is the measurement identifier, such as "container.launch" or
-"mcp.tool.task_create". | yes |
+| `name` | `string` | Name is the measurement identifier, such as "container.launch" or "mcp.tool.task_create". | yes |
 | `outcome` | `string` | Outcome is "ok" or "error". | yes |
-| `kind` | `string` | Kind is the OpenTelemetry instrument kind: "histogram", "counter",
-"updowncounter", or "gauge". It decides which statistics are meaningful. | yes |
-| `unit` | `string` | Unit is the unit the amounts are expressed in, in UCUM notation: "s" for
-seconds, "By" for bytes, "1" for a dimensionless count. | yes |
-| `attrs` | `Record<string, string>` | Attrs are the bounded dimensions that separate this series from others
-sharing its name and outcome, such as the container runtime. Omitted when
-the measurement has no dimensions. |  |
+| `kind` | `string` | Kind is the OpenTelemetry instrument kind: "histogram", "counter", "updowncounter", or "gauge". It decides which statistics are meaningful. | yes |
+| `unit` | `string` | Unit is the unit the amounts are expressed in, in UCUM notation: "s" for seconds, "By" for bytes, "1" for a dimensionless count. | yes |
+| `attrs` | `Record<string, string>` | Attrs are the bounded dimensions that separate this series from others sharing its name and outcome, such as the container runtime. Omitted when the measurement has no dimensions. |  |
 | `count` | `int64` | Count is the number of recorded measurements. | yes |
 | `samples` | `int64` | Samples is the number of retained measurements used for the percentiles. | yes |
 | `sum` | `float64` | Sum is the total of every recorded amount, in Unit. | yes |
@@ -1074,8 +1058,7 @@ PendingInput is a task's single pending prompt without embedded image payloads.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `delivered` | `boolean` | Delivered means the agent accepted the prompt but clearing the durable pending record failed.
-Clients must not offer to edit and resend it, which would duplicate delivery. |  |
+| `delivered` | `boolean` | Delivered means the agent accepted the prompt but clearing the durable pending record failed. Clients must not offer to edit and resend it, which would duplicate delivery. |  |
 | `delivering` | `boolean` |  |  |
 | `id` | `string` |  | yes |
 | `prompt` | `Prompt` |  | yes |
@@ -1816,15 +1799,9 @@ ProviderQuota is the quota data for one provider.
 | `fetchStatus` | `ProviderFetchStatus` |  | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
 | `unassessedWindows` | `UnassessedQuotaWindow[]` | UnassessedWindows do not carry a utilization fraction or prove capacity. |  |
-| `balance` | `QuotaBalance` | Balance is the provider's money snapshot. Some providers, such as
-Anthropic, report it as "extra usage" on top of the subscription
-instead of a prepaid wallet balance. |  |
-| `pricingPhase` | `string` | PricingPhase reports time-dependent pricing as of the snapshot:
-"peak", "peak-soon", or "off-peak". Empty when the provider's pricing
-does not vary by time of day. |  |
-| `pricingTransitionAt` | `ISOTimestamp` | PricingTransitionAt is when PricingPhase next changes; zero for
-off-peak. Clients should interpolate between snapshots, which arrive
-at the usage cache TTL cadence. |  |
+| `balance` | `QuotaBalance` | Balance is the provider's money snapshot. Some providers, such as Anthropic, report it as "extra usage" on top of the subscription instead of a prepaid wallet balance. |  |
+| `pricingPhase` | `string` | PricingPhase reports time-dependent pricing as of the snapshot: "peak", "peak-soon", or "off-peak". Empty when the provider's pricing does not vary by time of day. |  |
+| `pricingTransitionAt` | `ISOTimestamp` | PricingTransitionAt is when PricingPhase next changes; zero for off-peak. Clients should interpolate between snapshots, which arrive at the usage cache TTL cadence. |  |
 
 ### LocalWindow
 
@@ -2268,10 +2245,8 @@ EventSystem is a harness or caic system event that clients present.
 |-------|------|-------------|----------|
 | `subtype` | `EventSystemSubtype` |  | yes |
 | `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
-| `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a
-compact_boundary. Zero means the harness did not report it. |  |
-| `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
-compact_boundary, measured or estimated. Zero means it did not report it. |  |
+| `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a compact_boundary. Zero means the harness did not report it. |  |
+| `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a compact_boundary, measured or estimated. Zero means it did not report it. |  |
 
 ### TodoItem
 
@@ -2366,8 +2341,7 @@ when the harness did not expose them.
 | `prompt` | `string` |  |  |
 | `status` | `EventNativeSubagentStatus` |  | yes |
 | `result` | `string` |  |  |
-| `background` | `boolean` | Background reports that the harness launched the delegation detached from
-the parent turn, so it can outlive that turn's result. |  |
+| `background` | `boolean` | Background reports that the harness launched the delegation detached from the parent turn, so it can outlive that turn's result. |  |
 
 ### EventBackgroundCommand
 
@@ -2406,8 +2380,7 @@ Fields that the Phase does not own are absent.
 | `phase` | `EventSyncActivityPhase` |  | yes |
 | `target` | `string` | Target is the kind of sync, "origin" or "default". Start only. |  |
 | `branch` | `string` | Branch is the destination branch of the first repository. Start only. |  |
-| `output` | `string` | Output is a chunk of the pre-push hook output, or the truncation notice
-when Truncated is set. Output only. |  |
+| `output` | `string` | Output is a chunk of the pre-push hook output, or the truncation notice when Truncated is set. Output only. |  |
 | `truncated` | `boolean` |  |  |
 | `status` | `EventSyncActivityStatus` | Status, Error and DurationMS describe the outcome. End only. |  |
 | `error` | `string` |  |  |
@@ -2625,8 +2598,7 @@ ownership revisions from new actor output.
 |-------|------|-------------|----------|
 | `id` | `string` |  | yes |
 | `runID` | `string` | RunID distinguishes resumed runs and sorts in execution order per ID. |  |
-| `sectionID` | `string` | SectionID identifies the body containing the earliest actual lifecycle or
-resolved transcript origin, including an unfinished turn carried forward. | yes |
+| `sectionID` | `string` | SectionID identifies the body containing the earliest actual lifecycle or resolved transcript origin, including an unfinished turn carried forward. | yes |
 | `source` | `EventMessageSource` |  |  |
 | `toolUseID` | `string` |  |  |
 | `scope` | `EventNativeSubagentScope` |  |  |

@@ -45,7 +45,7 @@ func defaultConfig() data.Config {
 		VoiceGateway: data.VoiceGateway{
 			TokenMode:   string(server.VoiceTokenModeScoped),
 			Mode:        data.VoiceGatewayModeDisabled,
-			STUNServers: slices.Clone(voicegateway.DefaultSTUNServers),
+			STUNServers: voicegateway.NewWebRTCConfig().STUNServers,
 		},
 		Debug: data.Debug{LogLevel: "info"},
 	}
@@ -224,15 +224,14 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 		},
 		Voice: server.VoiceConfig{
 			Gateway: server.VoiceGatewayConfig{
-				Mode:          voiceGatewayMode,
-				URL:           tc.VoiceGateway.URL,
-				Issuer:        tc.Server.ExternalURL,
-				InstanceID:    tc.VoiceGateway.InstanceID,
-				TokenMode:     voiceTokenMode,
-				SigningKey:    voiceSigningKey,
-				Config:        voiceConfig,
-				WebRTCUDPPort: tc.VoiceGateway.WebRTCUDPPort,
-				STUNServers:   tc.VoiceGateway.STUNServers,
+				Mode:       voiceGatewayMode,
+				URL:        tc.VoiceGateway.URL,
+				Issuer:     tc.Server.ExternalURL,
+				InstanceID: tc.VoiceGateway.InstanceID,
+				TokenMode:  voiceTokenMode,
+				SigningKey: voiceSigningKey,
+				Config:     voiceConfig,
+				WebRTC:     voicegateway.WebRTCConfig{UDPPort: tc.VoiceGateway.WebRTCUDPPort, STUNServers: tc.VoiceGateway.STUNServers},
 			},
 		},
 		Debug: server.DebugConfig{
