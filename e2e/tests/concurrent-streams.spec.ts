@@ -1,4 +1,5 @@
-// Browser coverage for concurrent owned tools, bounded output, independent failures, SSE recovery, and history totals.
+// Browser tests for concurrent owned tools, bounded output, independent failures, SSE drop/replay, and history totals.
+import { ok } from "node:assert/strict";
 import { createServer, request as httpRequest, type ServerResponse } from "node:http";
 import { once } from "node:events";
 
@@ -27,19 +28,26 @@ for (const width of [390, 1280]) {
       const upstream = httpRequest(
         `${testInfo.project.use.baseURL}${request.url}`,
         {
-          headers: request.headers,
+          headers: { ...request.headers, "accept-encoding": "identity" },
         },
         (stream) => {
+          if (response.destroyed) {
+            stream.destroy();
+            return;
+          }
           response.writeHead(stream.statusCode ?? 502, {
             ...stream.headers,
             "access-control-allow-origin": String(testInfo.project.use.baseURL),
             "access-control-allow-credentials": "true",
           });
+          // Set native retry through the real SSE protocol so this test does
+          // not spend most of its deadline waiting for the browser's default.
+          response.write("retry: 100\n\n");
+          connections.add(response);
           stream.on("error", (error) => response.destroy(error));
           stream.pipe(response);
         },
       );
-      connections.add(response);
       response.on("close", () => {
         connections.delete(response);
         upstream.destroy();
@@ -141,11 +149,17 @@ for (const width of [390, 1280]) {
       await expect(cardB.locator(":scope > summary")).toContainText("Running");
       expect((await api.getTask(id)).state).toBe("running");
 
-      // Hold the browser's reconnect before opening upstream. Observe the
-      // missed batch through a separate real SSE reader before releasing it.
+      // The burst can close a bounded live subscription. Wait for its recovery
+      // before injecting our own disconnect, so dropping a stream cannot be a
+      // no-op. Hold that reconnect and observe the missed batch separately.
+      await expect.poll(() => connections.size).toBe(1);
+      const [connection] = connections;
+      ok(connection);
+      const closed = once(connection, "close");
       const requestsBeforeDrop = cursors.length;
       reconnectGate = Promise.withResolvers<void>();
-      for (const response of connections) response.destroy();
+      connection.destroy();
+      await closed;
       await expect.poll(() => cursors.length).toBeGreaterThan(requestsBeforeDrop);
       const cursor = cursors.at(-1);
       expect(cursor).not.toBe("");

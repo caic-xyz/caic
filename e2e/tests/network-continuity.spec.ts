@@ -38,6 +38,9 @@ test("silent streams recover without replacing the conversation being read", asy
           "access-control-allow-credentials": "true",
         });
         response.flushHeaders();
+        // Keep native reconnect timing explicit; the watchdog uses the virtual
+        // page clock, but EventSource's retry timer belongs to the browser.
+        if (path.includes("/history/events?")) response.write("retry: 100\n\n");
         stream.on("data", (chunk: Buffer) => {
           // Continue consuming upstream while the browser's connection remains
           // open but silent: no EOF/error can trigger native EventSource retry.
