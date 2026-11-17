@@ -1,81 +1,98 @@
-// Two browser contexts pair through explicit approval and receive normal caic cookie sessions.
+// Browser journeys cover device approval and cookie use, session management, and host protection.
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import type { UserResp } from "../../sdk/caic/ts/v1/types.gen";
 import { installDeviceLoginAuthBridge } from "../helpers";
 
 const origin = process.env.CAIC_E2E_AUTH_URL ?? "";
 if (!origin) throw new Error("Missing configured device-login test origin");
 
-test("device approval, normal permissions, logout, and network protection", async ({ browser }) => {
+// Other device-session tests use the public APIs for approval setup. The
+// display still exchanges its code through the real browser polling cadence.
+async function signInDevice(screen: Page, approver: BrowserContext) {
+  expect((await approver.request.get("/auth/gitlab/start?next=/device")).ok()).toBe(true);
+  const identityResponse = await approver.request.get("/auth/me");
+  expect(identityResponse.status()).toBe(200);
+  const identity = (await identityResponse.json()) as UserResp;
+  expect(identity.sessionID).toEqual(expect.any(String));
+  await screen.goto("/device-login");
+  const code = await screen.getByLabel("Device code", { exact: true }).innerText();
+  const headers = { Origin: origin, "X-Caic-Session": identity.sessionID };
+  const lookup = await approver.request.post("/auth/device/lookup", { data: { user_code: code }, headers });
+  expect(lookup.status()).toBe(200);
+  const details = (await lookup.json()) as { user_code: string; csrf_token: string };
+  expect(details).toMatchObject({ user_code: code, csrf_token: expect.any(String) });
+  const approved = await approver.request.post("/auth/device/approve", {
+    data: { user_code: code, approve: true },
+    headers: { ...headers, "X-Device-Login-CSRF": details.csrf_token },
+  });
+  expect(approved.status()).toBe(200);
+  expect(await approved.json()).toEqual({ state: "approved" });
+  await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
+}
+
+test("device sign-in requires explicit browser approval and updates native identity", async ({ browser }) => {
   const display = await browser.newContext({ baseURL: origin, viewport: { width: 640, height: 480 } });
   const approver = await browser.newContext({ baseURL: origin });
-  await installDeviceLoginAuthBridge(display, "auth-events");
   const screen = await display.newPage();
   const approval = await approver.newPage();
   const errors: string[] = [];
   screen.on("pageerror", (e) => errors.push(e.message));
   approval.on("pageerror", (e) => errors.push(e.message));
+  await installDeviceLoginAuthBridge(display, "auth-events");
   try {
-    await test.step("signed-in approver explicitly approves the displayed code", async () => {
-      await screen.goto("/");
-      await screen.getByRole("link", { name: "Sign in with another device" }).click();
-      const code = await screen.getByLabel("Device code", { exact: true }).innerText();
-      expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
-      await expect(screen.getByText(`${origin}/device`, { exact: true })).toBeVisible();
-      await expect(screen.getByText(/Expires in/)).toBeVisible();
-      await approval.goto("/device");
-      await expect(approval.getByRole("link", { name: "Sign in with another device" })).toHaveCount(0);
-      await approval.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
-      await expect(approval).toHaveURL(`${origin}/device`);
-      await expect(approval.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
-      await expect(screen.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
+    await screen.goto("/");
+    await screen.getByRole("link", { name: "Sign in with another device" }).click();
+    const code = await screen.getByLabel("Device code", { exact: true }).innerText();
+    expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+    await expect(screen.getByText(`${origin}/device`, { exact: true })).toBeVisible();
+    await expect(screen.getByText(/Expires in/)).toBeVisible();
+    await approval.goto("/device");
+    await expect(approval.getByRole("link", { name: "Sign in with another device" })).toHaveCount(0);
+    await approval.getByRole("link", { name: "Sign in with GitLab", exact: true }).click();
+    await expect(approval).toHaveURL(`${origin}/device`);
+    await expect(approval.getByText("Signed in as device-approver (gitlab).")).toBeVisible();
+    await expect(screen.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
 
-      const input = approval.getByRole("textbox", { name: "Device code" });
-      await expect(input).toBeFocused();
-      await expect(input).toHaveAttribute("inputmode", "text");
-      await expect(approval.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
-      let lookups = 0;
-      approval.on("request", (request) => {
-        if (request.url().endsWith("/auth/device/lookup")) lookups++;
-      });
-      const raw = code.replaceAll("-", "").toLowerCase();
-      await input.pressSequentially(raw.slice(0, -1));
-      await input.press("Enter");
-      expect(lookups).toBe(0);
-      await expect(approval.getByRole("status", { includeHidden: true })).toHaveText("");
-      await expect(input).toHaveValue(code.slice(0, -1));
+    const input = approval.getByRole("textbox", { name: "Device code" });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute("inputmode", "text");
+    await expect(approval.getByRole("link", { name: "Back to caic" })).toHaveCount(0);
+    let lookups = 0;
+    approval.on("request", (request) => {
+      if (request.url().endsWith("/auth/device/lookup")) lookups++;
+    });
+    const raw = code.replaceAll("-", "").toLowerCase();
+    await input.pressSequentially(raw.slice(0, -1));
+    await input.press("Enter");
+    expect(lookups).toBe(0);
+    await expect(approval.getByRole("status", { includeHidden: true })).toHaveText("");
+    await expect(input).toHaveValue(code.slice(0, -1));
 
-      await input.pressSequentially(raw.slice(-1));
-      await expect(approval.getByText("127.0.0.0/24", { exact: true })).toBeVisible();
-      await expect(approval.getByText(/Never approve a code sent by someone else/)).toBeVisible();
-      await expect(approval.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
-      expect(lookups).toBe(1);
+    await input.pressSequentially(raw.slice(-1));
+    await expect(approval.getByText("127.0.0.0/24", { exact: true })).toBeVisible();
+    await expect(approval.getByText(/Never approve a code sent by someone else/)).toBeVisible();
+    await expect(approval.getByRole("button", { name: "Approve sign-in" })).toBeVisible();
+    expect(lookups).toBe(1);
 
-      // Lookup alone must leave the display waiting and unauthenticated.
-      await expect(screen.getByRole("status")).toHaveText("Waiting for approval…");
-      const before = await display.request.get("/auth/me");
-      expect(before.status()).toBe(404);
-      await approval.getByRole("button", { name: "Approve sign-in" }).click();
-      await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
-      expect(
-        await screen.evaluate(() => (JSON.parse(sessionStorage.getItem("auth-events") ?? "[]") as unknown[]).slice(-2)),
-      ).toEqual([{ authChanging: true }, { authChanged: true, nativeAccess: true }]);
-      const me = await display.request.get("/auth/me");
-      expect(me.status()).toBe(200);
-      expect(await me.json()).toMatchObject({
-        username: "device-approver",
-        provider: "gitlab",
-      });
-      // Device sign-in reaches the same write, voice and delegation handlers as provider login.
-      for (const [method, path, data] of [
-        ["POST", "/api/caic/v1/tasks", {}],
-        ["GET", "/api/caic/v1/voice/token", undefined],
-        ["GET", "/oauth/authorize", undefined],
-      ] as const) {
-        const deviceResponse = await display.request.fetch(path, { method, data, maxRedirects: 0 });
-        const providerResponse = await approver.request.fetch(path, { method, data, maxRedirects: 0 });
-        expect(deviceResponse.status()).toBe(providerResponse.status());
-      }
+    // Lookup alone must leave the display waiting and unauthenticated.
+    await expect(screen.getByRole("status")).toHaveText("Waiting for approval…");
+    const before = await display.request.get("/auth/me");
+    expect(before.status()).toBe(404);
+    await approval.getByRole("button", { name: "Approve sign-in" }).click();
+    await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
+    expect(
+      await screen.evaluate(() => (JSON.parse(sessionStorage.getItem("auth-events") ?? "[]") as unknown[]).slice(-2)),
+    ).toEqual([{ authChanging: true }, { authChanged: true, nativeAccess: true }]);
+    const me = await display.request.get("/auth/me");
+    expect(me.status()).toBe(200);
+    expect(await me.json()).toMatchObject({
+      username: "device-approver",
+      provider: "gitlab",
+    });
+    await test.step("the browser accepts and uses the device session cookie", async () => {
+      const session = (await display.cookies()).find((c) => c.name === "caic_session");
+      expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
       const mcp = await display.request.post("/api/caic/v1/mcp", {
         data: {
           jsonrpc: "2.0",
@@ -95,131 +112,122 @@ test("device approval, normal permissions, logout, and network protection", asyn
       });
       expect(created.status()).toBe(200);
       expect((await created.json()).id).toBeTruthy();
-      const deviceSessions = await (await display.request.get("/auth/sessions")).json();
-      const providerSessions = await (await approver.request.get("/auth/sessions")).json();
-      const deviceRecord = deviceSessions.sessions.find((item: { current: boolean }) => item.current);
-      const providerRecord = providerSessions.sessions.find((item: { current: boolean }) => item.current);
-      const deviceLifetime = Date.parse(deviceRecord.expiresAt) - Date.parse(deviceRecord.createdAt);
-      const providerLifetime = Date.parse(providerRecord.expiresAt) - Date.parse(providerRecord.createdAt);
-      expect(Math.abs(deviceLifetime - providerLifetime)).toBeLessThan(1000);
-      expect(Math.abs(deviceLifetime - 30 * 24 * 60 * 60 * 1000)).toBeLessThan(1000);
-      const session = (await display.cookies()).find((c) => c.name === "caic_session");
-      expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
-      expect((await display.request.get("/api/caic/v1/server/config")).status()).toBe(200);
-      expect((await display.request.post("/auth/logout", { headers: { "X-Caic-CSRF": "1" } })).status()).toBe(200);
-      expect((await display.request.get("/auth/me")).status()).toBe(404);
-      expect((await approver.request.get("/auth/me")).status()).toBe(200);
-      expect(
-        (
-          await display.request.get("/auth/me", { headers: { Cookie: "", Authorization: `Bearer ${session?.value}` } })
-        ).status(),
-      ).toBe(404);
-    });
-    await test.step("approver identifies and revokes the display session without ending its own session", async () => {
-      await screen.goto("/device-login");
-      const code = await screen.getByLabel("Device code", { exact: true }).innerText();
-      await approval.goto("/device");
-      await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-      await approval.getByRole("button", { name: "Approve sign-in" }).click();
-      await expect(screen).toHaveURL(`${origin}/`, { timeout: 15_000 });
-      const credential = (await display.cookies()).find((c) => c.name === "caic_session");
-      const response = await display.request.get("/auth/sessions");
-      expect(response.status()).toBe(200);
-      const body: { sessions: { id: string; current: boolean; source: string }[] } = await response.json();
-      const device = body.sessions.find((s) => s.current);
-      expect(device?.source).toBe("device");
-      expect((await display.request.post("/api/caic/v1/tasks", { data: {} })).status()).toBe(400);
-      if (!device) throw new Error("Missing current device session");
-      const csrf = await approver.request.post(`/auth/sessions/${device.id}/revoke`);
-      expect(csrf.status()).toBe(403);
-      const wrongOrigin = await approver.request.post(`/auth/sessions/${device.id}/revoke`, {
-        headers: { "X-Caic-CSRF": "1", Origin: "https://evil.example" },
-      });
-      expect(wrongOrigin.status()).toBe(403);
-      expect((await display.request.get("/auth/me")).status()).toBe(200);
-      await approval.route("**/auth/sessions", (route) =>
-        route.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "injected failure" } }),
-        }),
-      );
-      await approval.goto("/sessions");
-      await expect(approval.getByRole("alert")).toHaveText("Could not load sessions.");
-      await approval.unroute("**/auth/sessions");
-      const initial = Promise.withResolvers<void>();
-      const refreshed = Promise.withResolvers<void>();
-      const revocation = Promise.withResolvers<void>();
-      let reads = 0;
-      let revocations = 0;
-      await approval.route("**/auth/sessions", async (route) => {
-        if (++reads === 1) await initial.promise;
-        else await refreshed.promise;
-        await route.continue();
-      });
-      await approval.route(`**/auth/sessions/${device.id}/revoke`, async (route) => {
-        const response = await route.fetch();
-        revocations++;
-        await revocation.promise;
-        await route.fulfill({ response });
-      });
-      try {
-        await approval.getByRole("button", { name: "Reload sessions" }).click();
-        const heading = approval.getByRole("heading", { name: "Sessions", exact: true });
-        const loading = approval.getByRole("status").filter({ hasText: "Loading sessions…" });
-        await expect(heading).toBeVisible();
-        await expect(loading).toBeVisible();
-        await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
-        initial.resolve();
-        await approval.setViewportSize({ width: 320, height: 960 });
-        await expect
-          .poll(() => approval.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-          .toBe(true);
-        const row = approval.getByTestId(`session-${device.id}`);
-        await expect(row.getByRole("heading", { name: "Device sign-in", exact: true })).toBeVisible();
-        const original = await heading.elementHandle();
-        await row.getByRole("button", { name: "Sign out session" }).click();
-        await expect.poll(() => revocations).toBe(1);
-        const newTask = approval.getByTestId("new-task-button");
-        await newTask.focus();
-        revocation.resolve();
-        await expect.poll(() => reads).toBe(2);
-        await expect(heading).toBeVisible();
-        await expect(loading).toBeVisible();
-        await expect(row).toBeVisible();
-        await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
-        expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
-        await expect(newTask).toBeFocused();
-        refreshed.resolve();
-        await expect(row).toHaveCount(0);
-        await expect(newTask).toBeFocused();
-      } finally {
-        initial.resolve();
-        refreshed.resolve();
-        revocation.resolve();
-      }
-      expect((await display.request.get("/auth/me")).status()).toBe(404);
-      expect(
-        (
-          await display.request.get("/auth/me", {
-            headers: { Cookie: "", Authorization: `Bearer ${credential?.value}` },
-          })
-        ).status(),
-      ).toBe(404);
-      expect((await approver.request.get("/auth/me")).status()).toBe(200);
-    });
-    await test.step("cross-origin host request is rejected", async () => {
-      const response = await display.request.post("/auth/device/start", {
-        headers: { Host: "evil.example", "Content-Type": "application/json" },
-        data: {},
-      });
-      expect(response.status()).toBe(403);
     });
     expect(errors).toEqual([]);
   } finally {
     await display.close();
     await approver.close();
   }
+});
+
+test("session management revokes another device while retaining local loading and focus", async ({ browser }) => {
+  const display = await browser.newContext({ baseURL: origin });
+  const approver = await browser.newContext({ baseURL: origin });
+  const screen = await display.newPage();
+  const approval = await approver.newPage();
+  const errors: string[] = [];
+  screen.on("pageerror", (e) => errors.push(e.message));
+  approval.on("pageerror", (e) => errors.push(e.message));
+  try {
+    await signInDevice(screen, approver);
+    const credential = (await display.cookies()).find((c) => c.name === "caic_session");
+    const response = await display.request.get("/auth/sessions");
+    expect(response.status()).toBe(200);
+    const body: { sessions: { id: string; current: boolean; source: string }[] } = await response.json();
+    const device = body.sessions.find((s) => s.current);
+    expect(device?.source).toBe("device");
+    expect((await display.request.post("/api/caic/v1/tasks", { data: {} })).status()).toBe(400);
+    if (!device) throw new Error("Missing current device session");
+    const csrf = await approver.request.post(`/auth/sessions/${device.id}/revoke`);
+    expect(csrf.status()).toBe(403);
+    const wrongOrigin = await approver.request.post(`/auth/sessions/${device.id}/revoke`, {
+      headers: { "X-Caic-CSRF": "1", Origin: "https://evil.example" },
+    });
+    expect(wrongOrigin.status()).toBe(403);
+    expect((await display.request.get("/auth/me")).status()).toBe(200);
+    await approval.route("**/auth/sessions", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "injected failure" } }),
+      }),
+    );
+    await approval.goto("/sessions");
+    await expect(approval.getByRole("alert")).toHaveText("Could not load sessions.");
+    await approval.unroute("**/auth/sessions");
+    const initial = Promise.withResolvers<void>();
+    const refreshed = Promise.withResolvers<void>();
+    const revocation = Promise.withResolvers<void>();
+    let reads = 0;
+    let revocations = 0;
+    await approval.route("**/auth/sessions", async (route) => {
+      if (++reads === 1) await initial.promise;
+      else await refreshed.promise;
+      await route.continue();
+    });
+    await approval.route(`**/auth/sessions/${device.id}/revoke`, async (route) => {
+      const response = await route.fetch();
+      revocations++;
+      await revocation.promise;
+      await route.fulfill({ response });
+    });
+    try {
+      await approval.getByRole("button", { name: "Reload sessions" }).click();
+      const heading = approval.getByRole("heading", { name: "Sessions", exact: true });
+      const loading = approval.getByRole("status").filter({ hasText: "Loading sessions…" });
+      await expect(heading).toBeVisible();
+      await expect(loading).toBeVisible();
+      await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
+      initial.resolve();
+      await approval.setViewportSize({ width: 320, height: 960 });
+      await expect
+        .poll(() => approval.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+        .toBe(true);
+      const row = approval.getByTestId(`session-${device.id}`);
+      await expect(row.getByRole("heading", { name: "Device sign-in", exact: true })).toBeVisible();
+      const original = await heading.elementHandle();
+      await row.getByRole("button", { name: "Sign out session" }).click();
+      await expect.poll(() => revocations).toBe(1);
+      const newTask = approval.getByTestId("new-task-button");
+      await newTask.focus();
+      revocation.resolve();
+      await expect.poll(() => reads).toBe(2);
+      await expect(heading).toBeVisible();
+      await expect(loading).toBeVisible();
+      await expect(row).toBeVisible();
+      await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
+      expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+      await expect(newTask).toBeFocused();
+      refreshed.resolve();
+      await expect(row).toHaveCount(0);
+      await expect(newTask).toBeFocused();
+    } finally {
+      initial.resolve();
+      refreshed.resolve();
+      revocation.resolve();
+    }
+    expect((await display.request.get("/auth/me")).status()).toBe(404);
+    expect(
+      (
+        await display.request.get("/auth/me", {
+          headers: { Cookie: "", Authorization: `Bearer ${credential?.value}` },
+        })
+      ).status(),
+    ).toBe(404);
+    expect((await approver.request.get("/auth/me")).status()).toBe(200);
+    expect(errors).toEqual([]);
+  } finally {
+    await display.close();
+    await approver.close();
+  }
+});
+
+test("device pairing rejects an untrusted request host", async ({ request }) => {
+  const response = await request.post(`${origin}/auth/device/start`, {
+    headers: { Host: "evil.example", "Content-Type": "application/json" },
+    data: {},
+  });
+  expect(response.status()).toBe(403);
 });
 
 test("shared pairing views fit narrow screens, wide screens, and native 200% zoom", async ({ browser }, testInfo) => {

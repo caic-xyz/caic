@@ -1,4 +1,4 @@
-// Tests host policy, middleware, audit persistence, CSRF, and normal-session device pairing.
+// Tests device pairing, normal credential permissions and lifetime, logout, host policy, and audit persistence.
 
 package server
 
@@ -184,6 +184,10 @@ func TestDeviceLogin(t *testing.T) {
 	})
 	t.Run("normal cookie and single use", func(t *testing.T) {
 		s, h, user, path, credential := setup(t)
+		provider, providerSession, err := s.authHandlers.issueSession(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/", nil), &user, "provider")
+		if err != nil {
+			t.Fatal(err)
+		}
 		c := start(t, h)
 		d := lookup(t, h, credential, c.UserCode)
 		decision := `{"user_code":"` + c.UserCode + `","approve":true}`
@@ -218,6 +222,9 @@ func TestDeviceLogin(t *testing.T) {
 			if len(records) != 1 || time.Until(records[0].ExpiresAt) > sessionTTL || time.Until(records[0].ExpiresAt) < sessionTTL-time.Minute {
 				t.Fatalf("normal session lifetime: %+v", records)
 			}
+			if got, want := records[0].ExpiresAt.Sub(records[0].CreatedAt), providerSession.ExpiresAt.Sub(providerSession.CreatedAt); got-want <= -time.Second || got-want >= time.Second || got < 30*24*time.Hour-time.Second || got > 30*24*time.Hour {
+				t.Fatalf("device lifetime=%v, provider lifetime=%v; want 30 days", got, want)
+			}
 			if !cookie.Expires.Equal(records[0].ExpiresAt) {
 				t.Fatalf("cookie expires at %v, persisted session at %v", cookie.Expires, records[0].ExpiresAt)
 			}
@@ -241,6 +248,14 @@ func TestDeviceLogin(t *testing.T) {
 					h.ServeHTTP(response, req)
 					if response.Code != tc.status {
 						t.Errorf("bearer=%v %s: %d %s", bearer, tc.path, response.Code, response.Body.String())
+					}
+					providerRequest := httptest.NewRequestWithContext(t.Context(), tc.method, "https://caic.example.com"+tc.path, strings.NewReader(tc.body))
+					providerRequest.Header.Set("Content-Type", "application/json")
+					providerRequest.Header.Set("Authorization", "Bearer "+provider)
+					providerResponse := httptest.NewRecorder()
+					h.ServeHTTP(providerResponse, providerRequest)
+					if response.Code != providerResponse.Code {
+						t.Errorf("bearer=%v %s: device=%d, provider=%d", bearer, tc.path, response.Code, providerResponse.Code)
 					}
 				}
 			}
@@ -286,6 +301,40 @@ func TestDeviceLogin(t *testing.T) {
 			events := readAuditEvents(t, path)
 			if len(events) != 5 || events[0].UserID != user.ID || events[0].Decision != "allow" {
 				t.Fatalf("audit: %+v", events)
+			}
+			logout := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://caic.example.com/auth/logout", nil)
+			logout.AddCookie(cookie)
+			logout.Header.Set("X-Caic-Csrf", "1")
+			loggedOut := httptest.NewRecorder()
+			h.ServeHTTP(loggedOut, logout)
+			if loggedOut.Code != http.StatusOK {
+				t.Fatalf("logout: %d %s", loggedOut.Code, loggedOut.Body.String())
+			}
+			cleared := loggedOut.Result().Cookies()
+			if len(cleared) != 1 || cleared[0].Name != cookie.Name || cleared[0].Value != "" || cleared[0].MaxAge != -1 {
+				t.Fatalf("logout cookie: %v", cleared)
+			}
+			// Replaying the original cookie or bearer must fail; the provider
+			// session must survive logging out only the device session.
+			for _, bearer := range []bool{false, true} {
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/me", nil)
+				if bearer {
+					req.Header.Set("Authorization", "Bearer "+cookie.Value)
+				} else {
+					req.AddCookie(cookie)
+				}
+				response := httptest.NewRecorder()
+				h.ServeHTTP(response, req)
+				if response.Code != http.StatusNotFound {
+					t.Errorf("logged-out device bearer=%v: %d", bearer, response.Code)
+				}
+			}
+			providerRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/me", nil)
+			providerRequest.Header.Set("Authorization", "Bearer "+provider)
+			providerResponse := httptest.NewRecorder()
+			h.ServeHTTP(providerResponse, providerRequest)
+			if providerResponse.Code != http.StatusOK {
+				t.Fatalf("provider session after device logout: %d", providerResponse.Code)
 			}
 		})
 	})
