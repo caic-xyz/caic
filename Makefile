@@ -3,7 +3,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help benchmark build coverage custom-gcl fix generate-sdks git-hooks frontend-build frontend-deps playwright-browser screenshots-update test test-e2e test-smoke upgrade verify
 
-FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
+FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs scripts/startup_budget.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
 
 help:
@@ -46,7 +46,11 @@ custom-gcl:
 	echo 'Building custom-gcl with the methodfilecheck plugin (one-off; runs when the config, golangci-lint version, or Go toolchain changes)...'; \
 	go tool golangci-lint custom --version "$$version" && echo "$$want" > .custom-gcl.sha
 
+# The existing CI build gates initial JavaScript/CSS size after compression.
+# Recheck or measure an existing build without rebuilding (about 0.1s warm):
+#   node scripts/startup_budget.mjs --dist backend/frontend/dist --report
 build: frontend-build
+	@node scripts/startup_budget.mjs --dist backend/frontend/dist
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 verify: custom-gcl frontend-deps git-hooks
