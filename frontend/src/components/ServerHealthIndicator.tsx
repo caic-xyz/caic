@@ -6,11 +6,10 @@ import MemoryIcon from "@material-symbols/svg-400/outlined/memory_alt.svg?solid"
 import type { ServerHealth } from "@sdk/types.gen";
 
 import { formatBytes } from "../formatting";
+import { hostCPUPercent, hostLevel, hostMemoryPercent, type ResourceLevel } from "../resourceLevel";
 import styles from "./ServerHealthIndicator.module.css";
 
-type Level = "high" | "normal" | "unavailable" | "warning";
-
-const levelClass: Record<Level, string> = {
+const levelClass: Record<ResourceLevel, string> = {
   high: styles.high,
   normal: styles.normal,
   unavailable: styles.unavailable,
@@ -20,21 +19,19 @@ const levelClass: Record<Level, string> = {
 export default function ServerHealthIndicator(props: { health: ServerHealth | null; connected: boolean }) {
   const [open, setOpen] = createSignal(false);
   const id = createUniqueId();
-  const level = (percent: number | null): Level => {
-    if (!props.connected || props.health?.error || percent === null) return "unavailable";
-    if (percent >= 90) return "high";
-    if (percent >= 80) return "warning";
-    return "normal";
+  const level = (percent: (h: ServerHealth) => number | null): ResourceLevel => {
+    const h = props.health;
+    const p = h && props.connected && !h.error ? percent(h) : null;
+    return p === null ? "unavailable" : hostLevel(p);
   };
-  const cpuLevel = () =>
-    level(props.health && props.health.cpuCount > 0 ? props.health.cpuPerc / props.health.cpuCount : null);
-  const memoryLevel = () =>
-    level(props.health && props.health.memTotal > 0 ? (props.health.memUsed / props.health.memTotal) * 100 : null);
+  const cpuLevel = () => level(hostCPUPercent);
+  const memoryLevel = () => level(hostMemoryPercent);
   const description = () => {
     const h = props.health;
     if (!h) return `Waiting for the first system sample${!props.connected ? "\nUpdates unavailable" : ""}`;
-    const cpu = h.cpuCount > 0 ? `${(h.cpuPerc / h.cpuCount).toFixed(1)}%` : "capacity unknown";
-    const memory = h.memTotal > 0 ? `${((h.memUsed / h.memTotal) * 100).toFixed(1)}%` : "capacity unknown";
+    const percent = (p: number | null) => (p === null ? "capacity unknown" : `${p.toFixed(1)}%`);
+    const cpu = percent(hostCPUPercent(h));
+    const memory = percent(hostMemoryPercent(h));
     const status = [h.error ? `Sampling error: ${h.error}` : "", !props.connected ? "Updates unavailable" : ""]
       .filter(Boolean)
       .join("\n");

@@ -37,6 +37,7 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
     contextWindowLimit: 200_000,
     autoCompactTokenLimit: 0,
     runtime: { id: "rt" },
+    hostPressure: { cpu: null, memory: null },
     selected: false,
     tabIndex: 0,
     now,

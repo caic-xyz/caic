@@ -1,4 +1,4 @@
-// Compact CPU and memory levels link to task performance with accessible container-relative readings.
+// Compact CPU and memory levels link to task performance with container-relative readings and host attribution.
 
 import { A } from "@solidjs/router";
 
@@ -7,10 +7,30 @@ import MemoryIcon from "@material-symbols/svg-400/outlined/memory_alt.svg?solid"
 import type { EventStats } from "@sdk/types.gen";
 
 import { formatBytes } from "../formatting";
+import {
+  busiestShare,
+  isSampleFresh,
+  taskLevel,
+  type HostPressure,
+  type HostShare,
+  type ResourceLevel,
+} from "../resourceLevel";
 import styles from "./TaskResourceIndicator.module.css";
 
-export default function TaskResourceIndicator(props: { href: string; sample: EventStats | null; now: number }) {
-  const stale = () => !props.sample || props.now - props.sample.ts > 15_000;
+const levelClass: Record<ResourceLevel, string> = {
+  high: styles.high,
+  normal: styles.normal,
+  unavailable: styles.unavailable,
+  warning: styles.warning,
+};
+
+export default function TaskResourceIndicator(props: {
+  href: string;
+  sample: EventStats | null;
+  now: number;
+  hostPressure: HostPressure;
+}) {
+  const fresh = () => (props.sample && isSampleFresh(props.sample, props.now) ? props.sample : null);
   const cpu = () => {
     const s = props.sample;
     return s && !s.cpuError && s.cpuCeiling && s.cpuCeiling > 0 ? s.cpuPerc / s.cpuCeiling : null;
@@ -19,12 +39,21 @@ export default function TaskResourceIndicator(props: { href: string; sample: Eve
     const s = props.sample;
     return s && s.memLimit > 0 ? (s.memUsed / s.memLimit) * 100 : null;
   };
-  const level = (percent: number | null) => {
-    if (stale() || percent === null) return styles.unavailable;
-    if (percent >= 75) return styles.high;
-    if (percent >= 50) return styles.warning;
-    return styles.normal;
+  // Stale samples are excluded from the busiest task, so they take no host share.
+  const cpuShare = () => (fresh() ? props.hostPressure.cpu : null);
+  const memoryShare = () => (fresh() ? props.hostPressure.memory : null);
+  const cpuLevel = () => {
+    const s = fresh();
+    return s ? taskLevel(cpu(), s.cpuPerc, cpuShare()) : "unavailable";
   };
+  const memoryLevel = () => {
+    const s = fresh();
+    return s ? taskLevel(memory(), s.memUsed, memoryShare()) : "unavailable";
+  };
+  const hostLine = (name: string, usage: number, share: HostShare | null) =>
+    share
+      ? [`Host ${name} ${share.hostPercent.toFixed(1)}%: ${busiestShare(usage, share).toFixed(0)}% of busiest task`]
+      : [];
   const description = () => {
     const s = props.sample;
     if (!s) return "Resources: pending";
@@ -33,8 +62,10 @@ export default function TaskResourceIndicator(props: { href: string; sample: Eve
     return [
       `CPU: ${(s.cpuPerc / 100).toFixed(2)} / ${s.cpuCeiling ?? "??"} CPUs (${c === null ? "??" : `${c.toFixed(1)}%`})`,
       `RAM: ${formatBytes(s.memUsed)} / ${s.memLimit > 0 ? formatBytes(s.memLimit) : "??"} (${m === null ? "??" : `${m.toFixed(1)}%`})`,
+      ...hostLine("CPU", s.cpuPerc, cpuShare()),
+      ...hostLine("RAM", s.memUsed, memoryShare()),
       ...(s.cpuError ? ["CPU metadata: unavailable"] : []),
-      ...(stale() ? ["Sample: stale"] : []),
+      ...(fresh() ? [] : ["Sample: stale"]),
     ].join("\n");
   };
   return (
@@ -46,10 +77,10 @@ export default function TaskResourceIndicator(props: { href: string; sample: Eve
       data-testid="task-resource-levels"
       onClick={(event) => event.stopPropagation()}
     >
-      <span class={level(cpu())} data-testid="task-cpu-level">
+      <span class={levelClass[cpuLevel()]} data-testid="task-cpu-level">
         <CPUIcon aria-hidden="true" />
       </span>
-      <span class={level(memory())} data-testid="task-memory-level">
+      <span class={levelClass[memoryLevel()]} data-testid="task-memory-level">
         <MemoryIcon aria-hidden="true" />
       </span>
     </A>

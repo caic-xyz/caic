@@ -37,6 +37,7 @@ import styles from "./TaskCard.module.css";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
+import type { HostPressure } from "../resourceLevel";
 import { api } from "../api";
 
 export interface TaskCardProps {
@@ -75,6 +76,7 @@ export interface TaskCardProps {
   inPlanMode?: boolean;
   runtime?: RuntimeInstance;
   resourceUsage?: EventStats;
+  hostPressure: HostPressure;
   gitHubToken?: boolean;
   forgePR?: number;
   ciStatus?: CIStatus;
@@ -509,6 +511,7 @@ export default function TaskCard(props: TaskCardProps) {
                   href={`/task/@${props.id}/stats`}
                   sample={props.resourceUsage ?? null}
                   now={props.now()}
+                  hostPressure={props.hostPressure}
                 />
               </Show>
             </>

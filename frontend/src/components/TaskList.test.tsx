@@ -6,10 +6,11 @@ import { createSignal, type JSX } from "solid-js";
 import { MemoryRouter, Route } from "@solidjs/router";
 import { expect, vi } from "@tests/expect";
 
-import type { Task } from "@sdk/types.gen";
+import type { EventStats, Task } from "@sdk/types.gen";
 
 import TaskList, { type TaskListProps } from "./TaskList";
 import styles from "./TaskList.module.css";
+import levelStyles from "./TaskResourceIndicator.module.css";
 
 function task(id: string): Task {
   return {
@@ -45,6 +46,8 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
     settledLoading: () => false,
     repos: () => [],
     usage: () => null,
+    serverHealth: () => null,
+    connected: () => true,
     sidebarOpen: () => true,
     setSidebarOpen: () => undefined,
     now: () => Date.now(),
@@ -114,6 +117,57 @@ describe("TaskList", () => {
       Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
     scrollIntoView.mockReset();
+  });
+
+  it("colors the tasks that drive host CPU or memory pressure", () => {
+    const now = Date.parse("2026-09-03T00:00:00Z");
+    const usage = (cpuPerc: number, memUsed: number): EventStats => ({
+      ts: now,
+      cpuPerc,
+      cpuCeiling: 16,
+      cpuQuota: 0,
+      runtimeCPUs: 16,
+      memUsed,
+      memLimit: 10_000,
+      memPerc: 0,
+      netRx: 0,
+      netTx: 0,
+      blockRead: 0,
+      blockWrite: 0,
+      diskUsed: -1,
+    });
+    const tasks = [
+      { ...task("busy"), resourceUsage: usage(200, 100) },
+      { ...task("idle"), resourceUsage: usage(20, 1000) },
+    ];
+    const [hostCPU, setHostCPU] = createSignal(760);
+    const { container } = renderList(() => (
+      <TaskList
+        {...taskListProps(tasks)}
+        now={() => now}
+        serverHealth={() => ({
+          cpuPerc: hostCPU(),
+          cpuCount: 8,
+          memUsed: 85,
+          memTotal: 100,
+          cpuHigh: true,
+          memHigh: true,
+        })}
+        selectedId={null}
+      />
+    ));
+    const level = (id: string, resource: "cpu" | "memory") =>
+      container.querySelector(`[data-task-id="${id}"] [data-testid="task-${resource}-level"]`);
+    // Each task uses at most 12.5% of its container.
+    expect(level("busy", "cpu")).toHaveClass(levelStyles.high);
+    expect(level("idle", "cpu")).toHaveClass(levelStyles.normal);
+    expect(level("busy", "memory")).toHaveClass(levelStyles.normal);
+    expect(level("idle", "memory")).toHaveClass(levelStyles.warning);
+    expect(container.querySelector('[data-task-id="busy"] [data-testid="task-resource-levels"]')).toHaveAccessibleName(
+      /Host CPU 95\.0%: 100% of busiest task/,
+    );
+    setHostCPU(400);
+    expect(level("busy", "cpu")).toHaveClass(levelStyles.normal);
   });
 
   it("puts repositories with active tasks first, with natural ordering within each tier", () => {

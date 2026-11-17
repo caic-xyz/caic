@@ -7,7 +7,9 @@ import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.sv
 import ArrowRight from "@material-symbols/svg-400/outlined/arrow_right.svg?solid";
 import ArrowDropDown from "@material-symbols/svg-400/outlined/arrow_drop_down.svg?solid";
 
-import type { Repo, Task, UsageResp } from "@sdk/types.gen";
+import type { Repo, ServerHealth, Task, UsageResp } from "@sdk/types.gen";
+
+import { hostPressure, isSampleFresh, sameHostPressure } from "../resourceLevel";
 
 import TaskCard from "./TaskCard";
 import ActionButton from "./ActionButton";
@@ -20,6 +22,8 @@ export interface TaskListProps {
   settledLoading: Accessor<boolean>;
   repos: Accessor<Repo[]>;
   usage: Accessor<UsageResp | null>;
+  serverHealth: Accessor<ServerHealth | null>;
+  connected: Accessor<boolean>;
   selectedId: string | null;
   sidebarOpen: Accessor<boolean>;
   setSidebarOpen: (open: boolean) => void;
@@ -279,6 +283,18 @@ export default function TaskList(props: TaskListProps) {
     scrollSelectedTaskIntoView();
   });
 
+  const pressure = createMemo(
+    () => {
+      const now = props.now();
+      const samples = props
+        .tasks()
+        .flatMap((t) => (t.resourceUsage && isSampleFresh(t.resourceUsage, now) ? [t.resourceUsage] : []));
+      return hostPressure(props.serverHealth(), props.connected(), samples);
+    },
+    undefined,
+    { equals: sameHostPressure },
+  );
+
   const renderTask = (id: string) => {
     const t = createMemo(() => {
       const task = tasksById().get(id);
@@ -321,6 +337,7 @@ export default function TaskList(props: TaskListProps) {
         inPlanMode={t().inPlanMode}
         runtime={t().runtime}
         resourceUsage={t().resourceUsage}
+        hostPressure={pressure()}
         gitHubToken={t().gitHubToken}
         forgePR={t().forgePR}
         ciStatus={t().ciStatus}

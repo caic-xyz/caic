@@ -230,6 +230,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
             settledLoading={s.settledLoading}
             repos={s.repos}
             usage={s.usage}
+            serverHealth={s.serverHealth}
+            connected={s.connected}
             selectedId={s.selectedId()}
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOverride}
