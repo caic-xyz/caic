@@ -139,8 +139,16 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await expect(input).toHaveAttribute("placeholder", "Session ID to resume");
   await expect(input).not.toHaveAttribute("maxlength");
   await disclosure.focus();
+  // Available capabilities vary by server; enabled toggles precede Runtime.
+  const featureToggles = page.locator("#new-task-features").getByRole("checkbox", { disabled: false });
+  for (const toggle of await featureToggles.all()) {
+    await page.keyboard.press("Tab");
+    await expect(toggle).toBeFocused();
+  }
   await page.keyboard.press("Tab");
   await expect(runtime).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(input).toBeFocused();
   const sessionID = "harness session:';$(opaque) " + "opaque-value-".repeat(12);
   await input.fill(`  ${sessionID}  `);
   expect((await input.boundingBox())!.width).toBeLessThan(450);
