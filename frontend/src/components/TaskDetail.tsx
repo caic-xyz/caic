@@ -94,7 +94,7 @@ import { anchorRow, groupAnchor, sessionAnchor, turnAnchor } from "../anchorKeys
 import { inputImageViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
-import { VisualTimingTracker, formatTimingDuration } from "../timing";
+import { VisualTimingTracker, formatTimingDuration, formatTotalDuration } from "../timing";
 import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
@@ -110,7 +110,7 @@ import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
 import ActionButton from "./ActionButton";
 import TimingIcon from "./TimingIcon";
-import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
+import TurnInvocationDetails, { SessionInvocationDetails } from "./TurnInvocationDetails";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -1543,12 +1543,18 @@ export default function TaskDetail(props: Props) {
                             onClick={(ev) => anchoredToggleTurn(ev, e.key)}
                           >
                             <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
-                            <span class={styles.turnDuration}>
-                              {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
-                            </span>
                           </button>
-                          <Show when={turnTiming(e.turn)}>
-                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
+                          <Show
+                            when={turnTiming(e.turn)}
+                            fallback={<span class={styles.turnDuration}>{formatTotalDuration(e.turn.durationMs)}</span>}
+                          >
+                            {(turn) => (
+                              <TurnInvocationDetails
+                                turn={turn()}
+                                model={props.model ?? null}
+                                duration={formatTotalDuration(e.turn.durationMs)}
+                              />
+                            )}
                           </Show>
                         </div>
                       )}
@@ -1566,12 +1572,18 @@ export default function TaskDetail(props: Props) {
                             onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
                           >
                             <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
-                            <span class={styles.turnDuration}>
-                              {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
-                            </span>
                           </button>
-                          <Show when={turnTiming(h.turn)}>
-                            {(turn) => <TurnInvocationIcon turn={turn()} model={props.model ?? null} />}
+                          <Show
+                            when={turnTiming(h.turn)}
+                            fallback={<span class={styles.turnDuration}>{formatTotalDuration(h.turn.durationMs)}</span>}
+                          >
+                            {(turn) => (
+                              <TurnInvocationDetails
+                                turn={turn()}
+                                model={props.model ?? null}
+                                duration={formatTotalDuration(h.turn.durationMs)}
+                              />
+                            )}
                           </Show>
                         </div>
                       )}
@@ -1917,12 +1929,10 @@ function ArchivedSession(props: {
           aria-expanded={props.open}
         >
           <span class={styles.turnSummaryText}>{summary()}</span>
-          <span class={styles.sessionDuration}>
-            {props.section.durationMs > 0 ? formatTimingDuration(props.section.durationMs) : "0s"}
-          </span>
         </button>
-        <SessionInvocationIcon
+        <SessionInvocationDetails
           turns={turns()}
+          duration={formatTotalDuration(props.section.durationMs)}
           model={props.section.reportedModel ?? null}
           compactionSummary={compaction()}
         />
@@ -2026,12 +2036,18 @@ function ArchivedSessionBody(props: {
                   onClick={(event) => props.onToggleTurn(event, key())}
                 >
                   <span class={styles.turnSummaryText}>{turnSummary(turn)}</span>
-                  <span class={styles.turnDuration}>
-                    {turn.durationMs > 0 ? formatTimingDuration(turn.durationMs) : "0s"}
-                  </span>
                 </button>
-                <Show when={fact()}>
-                  {(value) => <TurnInvocationIcon turn={value()} model={props.section.reportedModel ?? null} />}
+                <Show
+                  when={fact()}
+                  fallback={<span class={styles.turnDuration}>{formatTotalDuration(turn.durationMs)}</span>}
+                >
+                  {(value) => (
+                    <TurnInvocationDetails
+                      turn={value()}
+                      model={props.section.reportedModel ?? null}
+                      duration={formatTotalDuration(turn.durationMs)}
+                    />
+                  )}
                 </Show>
               </div>
               <Show when={expanded()}>
@@ -2524,12 +2540,13 @@ function ResultCard(props: {
         {(turn) => (
           <div class={styles.resultHeader}>
             <strong>{result().isError ? "Error" : "Done"}</strong>
-            <div class={styles.resultTiming}>
-              <span class={styles.resultDuration} data-testid="turn-duration">
-                {turn().durationMs > 0 ? formatTimingDuration(turn().durationMs) : "0s"}
-              </span>
-              <TurnInvocationIcon turn={turn()} model={props.model} />
-            </div>
+            <span class={styles.resultTiming} data-testid="turn-duration">
+              <TurnInvocationDetails
+                turn={turn()}
+                model={props.model}
+                duration={formatTotalDuration(turn().durationMs)}
+              />
+            </span>
           </div>
         )}
       </Show>

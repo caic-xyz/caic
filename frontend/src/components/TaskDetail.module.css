@@ -434,27 +434,16 @@ a.headerPR:hover {
   background: var(--color-danger-bg);
 }
 
-.resultHeader,
-.resultTiming {
-  display: flex;
-  align-items: center;
-}
-
 .resultHeader {
+  display: flex;
   gap: 0.5rem;
+  align-items: center;
   justify-content: space-between;
 }
 
 .resultTiming {
   flex-shrink: 0;
-  gap: 0.15rem;
-}
-
-.resultDuration {
   font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
 }
 
 .resultMeta {
@@ -905,7 +894,9 @@ a.ciStatus:hover {
 }
 
 .elidedTurn {
+  box-sizing: border-box;
   display: flex;
+  gap: 0.5rem;
   align-items: baseline;
   width: 100%;
   padding: 0.25rem 0.5rem;
@@ -949,9 +940,10 @@ a.ciStatus:hover {
   white-space: nowrap;
 }
 
+/* Matches the inset of the duration button that replaces it when details exist. */
 .turnDuration {
-  padding-left: 0.75rem;
-  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0 0.2rem;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
   white-space: nowrap;
@@ -989,7 +981,9 @@ a.ciStatus:hover {
 
 /* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
 .sessionElided {
+  box-sizing: border-box;
   display: flex;
+  gap: 0.5rem;
   align-items: baseline;
   width: 100%;
   padding: 0.3rem 0.6rem;
@@ -1014,14 +1008,6 @@ a.ciStatus:hover {
   cursor: pointer;
   background: transparent;
   border: none;
-}
-
-.sessionDuration {
-  padding-left: 0.75rem;
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
 }
 
 .sessionToggle::before {

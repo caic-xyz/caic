@@ -115,6 +115,11 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
   }
 }
 
+// formatTotalDuration shows "0s" for an unmeasured total instead of "0ms".
+export function formatTotalDuration(ms: number): string {
+  return ms > 0 ? formatTimingDuration(ms) : "0s";
+}
+
 export function formatTimingDuration(ms: number): string {
   if (ms < 500) return `${Math.round(ms)}ms`;
 

@@ -1,21 +1,16 @@
-// TurnInvocationIcon opens per-turn and aggregate session invocation, change, and compaction details.
+// Duration buttons open per-turn and aggregate session invocation, change, and compaction details.
 
 import { createSignal, Show } from "solid-js";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
-import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
 
 import type { EventChangeStat, HistoryTurn } from "@sdk/types.gen";
 import { formatMoney, formatTokens } from "../formatting";
-import { formatTimingDuration } from "../timing";
+import { formatTimingDuration, formatTotalDuration } from "../timing";
 import ModalDialog from "./ModalDialog";
-import styles from "./TurnInvocationIcon.module.css";
+import styles from "./TurnInvocationDetails.module.css";
 
 function formatUSD(usd: number): string {
   return `$${formatMoney(usd, usd < 0.01 ? 4 : 2)}`;
-}
-
-function formatTotalDuration(ms: number): string {
-  return ms > 0 ? formatTimingDuration(ms) : "0s";
 }
 
 function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
@@ -26,7 +21,9 @@ function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
   return `${files} · +${stat.linesAdded} −${stat.linesDeleted}${binary}`;
 }
 
-export default function TurnInvocationIcon(props: { turn: HistoryTurn; model: string | null }) {
+// TurnInvocationDetails shows the turn duration as the button that opens the
+// turn's details, so the row ends with the same time element as other rows.
+export default function TurnInvocationDetails(props: { turn: HistoryTurn; model: string | null; duration: string }) {
   const [open, setOpen] = createSignal(false);
   const result = () => props.turn;
   const usage = () => result().usage;
@@ -38,11 +35,11 @@ export default function TurnInvocationIcon(props: { turn: HistoryTurn; model: st
         type="button"
         class={styles.trigger}
         onClick={() => setOpen(true)}
-        aria-label="Turn invocation details"
-        title="Turn invocation details"
+        aria-label={`Turn invocation details, ${props.duration}`}
+        title="Turn details"
         data-testid="turn-invocation-trigger"
       >
-        <InfoIcon width="13" height="13" aria-hidden="true" />
+        {props.duration}
       </button>
       <Show when={open()}>
         <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="turn-invocation-dialog">
@@ -133,8 +130,9 @@ export default function TurnInvocationIcon(props: { turn: HistoryTurn; model: st
   );
 }
 
-export function SessionInvocationIcon(props: {
+export function SessionInvocationDetails(props: {
   turns: readonly HistoryTurn[];
+  duration: string;
   model: string | null;
   compactionSummary: string;
 }) {
@@ -203,11 +201,11 @@ export function SessionInvocationIcon(props: {
         type="button"
         class={styles.trigger}
         onClick={() => setOpen(true)}
-        aria-label="Session invocation details"
-        title="Session invocation details"
+        aria-label={`Session invocation details, ${props.duration}`}
+        title="Session details"
         data-testid="session-invocation-trigger"
       >
-        <InfoIcon width="13" height="13" aria-hidden="true" />
+        {props.duration}
       </button>
       <Show when={open()}>
         <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="session-invocation-dialog">

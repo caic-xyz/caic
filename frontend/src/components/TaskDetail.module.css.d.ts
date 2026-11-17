@@ -90,7 +90,6 @@ declare const classes: {
   readonly "rateLimitWarning": string;
   readonly "repoStateLinks": string;
   readonly "result": string;
-  readonly "resultDuration": string;
   readonly "resultError": string;
   readonly "resultHeader": string;
   readonly "resultMeta": string;
@@ -98,7 +97,6 @@ declare const classes: {
   readonly "resultText": string;
   readonly "resultTiming": string;
   readonly "safetyWarning": string;
-  readonly "sessionDuration": string;
   readonly "sessionElided": string;
   readonly "sessionElidedExpanded": string;
   readonly "sessionToggle": string;

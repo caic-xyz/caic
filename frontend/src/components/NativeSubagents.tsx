@@ -59,18 +59,20 @@ export function NativeAgentCard(props: {
       }}
     >
       <summary>
-        <span>
-          {activity().scope === "batch" ? "Batch" : "Subagent"}: {activity().label || "Unnamed"}
-        </span>
-        <NativeActivityStatus activity={activity()} settled={props.settled} />
-        <Show when={activity().background}>
-          <span class={styles.background}>background</span>
-        </Show>
-        <Show when={duration() !== null}>
-          <span class={styles.duration} data-testid="native-subagent-duration">
-            {formatTimingDuration(duration() ?? 0)}
+        <span class={styles.summaryContent}>
+          <span class={styles.label}>
+            {activity().scope === "batch" ? "Batch" : "Subagent"}: {activity().label || "Unnamed"}
           </span>
-        </Show>
+          <NativeActivityStatus activity={activity()} settled={props.settled} />
+          <Show when={activity().background}>
+            <span class={styles.background}>background</span>
+          </Show>
+          <Show when={duration() !== null}>
+            <span class={styles.duration} data-testid="native-subagent-duration">
+              {formatTimingDuration(duration() ?? 0)}
+            </span>
+          </Show>
+        </span>
       </summary>
       <Show when={open()}>
         <NativeAgentDetails activity={activity()} renderTranscript={props.renderTranscript} />

@@ -1876,7 +1876,7 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
 
     expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
-    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
+    await user.click(screen.getByRole("button", { name: /^Turn invocation details, 0:01$/ }));
     expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
   });
 
@@ -1905,7 +1905,7 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
 
     const [collapsedTurn] = screen.getAllByRole("button", {
-      name: "Turn invocation details",
+      name: /^Turn invocation details, /,
     });
     assert.ok(collapsedTurn !== undefined);
     await user.click(collapsedTurn);
@@ -1935,7 +1935,8 @@ describe("TaskDetail", () => {
 
     const { getByText } = await renderTaskDetail();
     const duration = getByText("5:32");
-    expect(duration.className).toMatch(/turnDuration/);
+    expect(duration.parentElement?.className).toMatch(/elidedTurn/);
+    expect(duration.parentElement?.lastElementChild).toBe(duration);
   });
 
   it("shows an explicit zero duration on collapsed turns without timing metadata", async () => {
@@ -1962,7 +1963,13 @@ describe("TaskDetail", () => {
 
     const { getAllByText } = await renderTaskDetail();
 
-    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
+    expect(
+      getAllByText("0s").some(
+        (duration) =>
+          duration.parentElement?.className.includes("elidedTurn") &&
+          duration.parentElement.lastElementChild === duration,
+      ),
+    ).toBe(true);
   });
 
   it("summarizes every turn in the collapsed session details", async () => {
@@ -2033,8 +2040,10 @@ describe("TaskDetail", () => {
     const { getByText, queryByText } = await renderTaskDetail();
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
-    expect(getByText("0:05").className).toMatch(/sessionDuration/);
-    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    const duration = getByText("0:05");
+    expect(duration.parentElement?.className).toMatch(/sessionElided/);
+    expect(duration.parentElement?.lastElementChild).toBe(duration);
+    await user.click(duration);
     const dialog = screen.getByTestId("session-invocation-dialog");
     expect(dialog).toHaveTextContent("Combined turn time0:05");
     expect(dialog).toHaveTextContent("Combined API time0:02");

@@ -4,6 +4,8 @@ declare const classes: {
   readonly "background": string;
   readonly "card": string;
   readonly "duration": string;
+  readonly "label": string;
   readonly "status": string;
+  readonly "summaryContent": string;
 };
 export default classes;

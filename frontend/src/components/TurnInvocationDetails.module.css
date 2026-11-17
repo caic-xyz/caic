@@ -1,13 +1,12 @@
-/* Styles for the subtle per-turn invocation details control and dialog. */
+/* Styles for the duration button that opens turn or session details, and its dialog. */
 
 .trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  padding: 0;
-  color: var(--color-text-muted);
+  flex-shrink: 0;
+  padding: 0 0.2rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
   cursor: pointer;
   background: transparent;
   border: none;

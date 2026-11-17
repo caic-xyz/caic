@@ -1,4 +1,4 @@
-// Tests per-turn invocation details surfaced from a completed result card.
+// Tests turn and session details opened from their duration buttons.
 
 import { describe, it } from "node:test";
 import { render, screen } from "@solidjs/testing-library";
@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { expect } from "@tests/expect";
 
 import type { HistoryTurn, ISOTimestamp } from "@sdk/types.gen";
-import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
+import TurnInvocationDetails, { SessionInvocationDetails } from "./TurnInvocationDetails";
 
 const turn: HistoryTurn = {
   recordID: 1,
@@ -29,12 +29,12 @@ const turn: HistoryTurn = {
   waitMs: 3000,
 };
 
-describe("TurnInvocationIcon", () => {
+describe("TurnInvocationDetails", () => {
   it("opens the completed turn's timing, cost, and token details", async () => {
     const user = userEvent.setup();
-    render(() => <TurnInvocationIcon turn={turn} model={null} />);
+    render(() => <TurnInvocationDetails turn={turn} model={null} duration="0:05" />);
 
-    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
+    await user.click(screen.getByRole("button", { name: "Turn invocation details, 0:05" }));
 
     const dialog = screen.getByTestId("turn-invocation-dialog");
     expect(dialog).toHaveTextContent("test-model");
@@ -63,9 +63,9 @@ describe("TurnInvocationIcon", () => {
       usage: { ...turn.usage, reportedModel: "" },
       waitMs: undefined,
     } satisfies HistoryTurn;
-    render(() => <TurnInvocationIcon turn={incomplete} model="configured-model" />);
+    render(() => <TurnInvocationDetails turn={incomplete} model="configured-model" duration="0:05" />);
 
-    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
+    await user.click(screen.getByRole("button", { name: "Turn invocation details, 0:05" }));
 
     const dialog = screen.getByTestId("turn-invocation-dialog");
     expect(dialog).toHaveTextContent("session-model");
@@ -76,16 +76,18 @@ describe("TurnInvocationIcon", () => {
   });
 });
 
-describe("SessionInvocationIcon", () => {
+describe("SessionInvocationDetails", () => {
   it("sums turn costs and identifies an estimate", async () => {
     const user = userEvent.setup();
     const estimated = {
       ...turn,
       cost: { usd: 0.25, source: "estimated" },
     } satisfies HistoryTurn;
-    render(() => <SessionInvocationIcon turns={[turn, estimated]} model={null} compactionSummary="" />);
+    render(() => (
+      <SessionInvocationDetails turns={[turn, estimated]} duration="0:10" model={null} compactionSummary="" />
+    ));
 
-    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    await user.click(screen.getByRole("button", { name: "Session invocation details, 0:10" }));
     expect(screen.getByTestId("session-invocation-dialog")).toHaveTextContent("Estimated cost$0.38");
   });
 
@@ -95,9 +97,11 @@ describe("SessionInvocationIcon", () => {
       ...turn,
       cost: undefined,
     } satisfies HistoryTurn;
-    render(() => <SessionInvocationIcon turns={[turn, unknown]} model={null} compactionSummary="" />);
+    render(() => (
+      <SessionInvocationDetails turns={[turn, unknown]} duration="0:10" model={null} compactionSummary="" />
+    ));
 
-    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    await user.click(screen.getByRole("button", { name: "Session invocation details, 0:10" }));
     expect(screen.getByTestId("session-invocation-dialog")).not.toHaveTextContent("Cost");
   });
 });

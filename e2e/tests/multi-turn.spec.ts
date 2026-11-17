@@ -15,7 +15,9 @@ test("follow-up input streams a new turn and preserves timed history", async ({ 
   await expect(page.getByTestId("task-message-area")).toContainText("A SQL query walks into a bar");
   const task = await waitForTaskState(api, id, "waiting");
   expect(task.numTurns).toBeGreaterThan(initial.numTurns);
-  await expect(page.getByRole("button", { name: /2 messages, 4 tool calls.*0:02$/ })).toBeVisible();
+  const collapsed = page.getByRole("button", { name: /2 messages, 4 tool calls/ });
+  await expect(collapsed).toBeVisible();
+  await expect(collapsed.locator("..").getByRole("button", { name: "Turn invocation details, 0:02" })).toBeVisible();
   await expect(page.getByText(/^wait (?:[1-9]\d*ms|\d+:[0-5]\d(?::[0-5]\d)?)$/)).toBeVisible();
 });
 

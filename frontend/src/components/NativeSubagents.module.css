@@ -42,6 +42,20 @@
   font-weight: 600;
 }
 
+/* Mirrors tool rows: the marker stays, and the duration ends the line. */
+.summaryContent {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  width: calc(100% - 1rem);
+  min-width: 0;
+  vertical-align: top;
+}
+
+.label {
+  min-width: 0;
+}
+
 .status {
   margin-inline: 0.5rem;
   font-size: 0.8rem;
@@ -49,7 +63,10 @@
 }
 
 .duration {
-  font-size: 0.8rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
 }
 
@@ -65,9 +82,15 @@
   color: var(--color-text-secondary);
 }
 
+/* Inline status chips in tool rows keep their margins; the card uses gap. */
+.summaryContent > .status {
+  flex-shrink: 0;
+  margin-inline: 0;
+}
+
 .background {
+  flex-shrink: 0;
   padding: 0 0.3rem;
-  margin-inline-end: 0.5rem;
   font-size: 0.75rem;
   color: var(--color-text-tertiary);
   border: 1px solid var(--color-border-light);
