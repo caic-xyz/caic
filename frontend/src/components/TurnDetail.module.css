@@ -1,0 +1,48 @@
+/* Styles for one turn's Performance view: turn stepper, one-line summary, user wait, timeline load status, and details table. */
+
+.stepper {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.summary {
+  margin: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.summaryPart {
+  white-space: nowrap;
+}
+
+.summaryPart strong {
+  color: var(--color-text-primary);
+}
+
+.separator {
+  color: var(--color-text-tertiary);
+}
+
+.wait {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+}
+
+.status {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.details {
+  margin-top: 0.6rem;
+}
+
+/* A value can be a long model name; it wraps instead of widening the pane. */
+.details .value {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

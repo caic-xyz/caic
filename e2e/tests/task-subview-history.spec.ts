@@ -2,7 +2,7 @@
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
-  for (const subview of ["diff", "info", "processes", "stats", "vnc"]) {
+  for (const subview of ["diff", "info", "perf", "processes", "vnc"]) {
     test(`${subview} preserves the task workspace at ${width}px`, async ({ page, api, uniquePrompt }) => {
       await page.setViewportSize({ width, height: 844 });
       const errors: string[] = [];
@@ -37,7 +37,7 @@ for (const width of [390, 1280]) {
       expect(await taskNode?.evaluate((node) => node.isConnected)).toBe(true);
       const pane = page.getByTestId("task-view-pane");
       await expect(pane).toBeVisible();
-      if (subview === "stats") {
+      if (subview === "perf") {
         await expect(pane.getByText("Performance", { exact: true })).toBeVisible();
         await expect(pane.getByRole("heading", { name: "Resources" })).toBeVisible();
       }
@@ -47,9 +47,9 @@ for (const width of [390, 1280]) {
         const taskBox = await conversation.boundingBox();
         const paneBox = await pane.boundingBox();
         expect(paneBox!.x).toBeGreaterThanOrEqual(taskBox!.x + taskBox!.width);
-        await expect(conversation.locator('a[href$="/stats"]')).toHaveAttribute(
+        await expect(conversation.locator('a[href$="/perf"]')).toHaveAttribute(
           "href",
-          `${new URL(taskURL).pathname}/stats`,
+          `${new URL(taskURL).pathname}/perf`,
         );
       }
       await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeVisible();
@@ -98,11 +98,11 @@ for (const width of [390, 1280]) {
       // Subviews reuse the conversation owner, including its decoded history.
       expect(streams).toBe(initialStreams);
       expect(historyReads).toBe(initialReads);
-      if (subview === "stats" && width === 1280) {
+      if (subview === "perf" && width === 1280) {
         await link.click();
         await page.getByRole("button", { name: "Full screen", exact: true }).click();
         await page.reload();
-        await expect(page).toHaveURL(/\/stats\?fullscreen=1$/);
+        await expect(page).toHaveURL(/\/perf\?fullscreen=1$/);
         await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeFocused();
         await expect(conversation).toBeHidden();
         await page.keyboard.press("Escape");

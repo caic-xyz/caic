@@ -123,7 +123,12 @@ function drawTokenChart(turns: readonly HistoryTurn[], width: number, asShare: b
       : { label: "Tokens", grid: true, tickFormat: formatTokens },
     color: {
       domain: tokenCategories,
-      range: ["var(--color-warning-border)", "var(--color-primary)", "var(--color-success)", "var(--color-plan)"],
+      range: [
+        "var(--color-chart-new-input)",
+        "var(--color-chart-cache-write)",
+        "var(--color-chart-cache-read)",
+        "var(--color-chart-output)",
+      ],
       legend: true,
     },
     marks: [
@@ -278,7 +283,7 @@ export function ResourceCharts(props: {
             drawResourceChart(cpu(), width, {
               axisAnchor: "left",
               axisFormat: (value) => `${Math.round(value)}%`,
-              color: "var(--color-primary)",
+              color: "var(--color-chart-cpu)",
               formatValue: (value) => `${value.toFixed(1)}%`,
               height: heights().value,
               label: "CPU utilization",
@@ -329,7 +334,7 @@ export function ResourceCharts(props: {
             drawResourceChart(memory(), width, {
               axisAnchor: "left",
               axisFormat: (value) => `${Math.round(value)}%`,
-              color: "var(--color-success)",
+              color: "var(--color-chart-memory)",
               formatValue: (value) => `${value.toFixed(1)}%`,
               height: heights().value,
               label: "Memory utilization",

@@ -1,6 +1,12 @@
-// Reads server-owned numeric statistics and lazily refreshes prices by exact history position.
+// Reads server-owned numeric statistics, the running turn, and context sections, and lazily refreshes prices by exact history position.
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
-import type { HistoryTurn, HistoryToolTiming, HistoryTurnEstimate } from "@sdk/types.gen";
+import type {
+  HistoryRunningTurn,
+  HistorySection,
+  HistoryTurn,
+  HistoryToolTiming,
+  HistoryTurnEstimate,
+} from "@sdk/types.gen";
 import type { TaskHistory } from "./taskEventTimeline";
 import { historyPositionKey } from "./historyPosition";
 
@@ -17,9 +23,12 @@ function sameTurn(a: HistoryTurn, b: HistoryTurn | undefined): boolean {
     b !== undefined &&
     a.recordID === b.recordID &&
     a.index === b.index &&
+    a.number === b.number &&
     a.sectionID === b.sectionID &&
+    a.startedAt === b.startedAt &&
     a.at === b.at &&
     a.model === b.model &&
+    a.effort === b.effort &&
     a.durationMs === b.durationMs &&
     a.durationAPIMs === b.durationAPIMs &&
     a.waitMs === b.waitMs &&
@@ -112,6 +121,12 @@ export function createTaskAnalytics(history: TaskHistory) {
       ? previous
       : next;
   }, []);
+  // The running turn keeps its identity while the manifest repeats it.
+  const running = createMemo<HistoryRunningTurn | null>((previous) => {
+    const next = history.manifest()?.metadata.runningTurn ?? null;
+    return next !== null && previous !== null && sameFacts(next, previous) ? previous : next;
+  }, null);
+  const sections = createMemo<readonly HistorySection[]>(() => history.manifest()?.sections ?? []);
   const snapshot = createMemo(() => ({
     turns: turns(),
     tools: tools(),
@@ -120,6 +135,8 @@ export function createTaskAnalytics(history: TaskHistory) {
   }));
   return {
     snapshot,
+    running,
+    sections,
     stats: history.stats,
     loading: () => history.manifest() === null,
     pricing: () => currentPricing()?.pending ?? false,

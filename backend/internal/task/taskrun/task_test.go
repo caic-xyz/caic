@@ -629,8 +629,8 @@ func TestTask(t *testing.T) {
 				if tk.GetState() != task.StateWaiting || tk.sessionMetadata.SessionID != "root" || tk.sessionMetadata.ReportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
 					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionMetadata.SessionID, tk.sessionMetadata.ReportedModel, tk.costTracker.Model, tk.inPlanMode)
 				}
-				if tk.lastAPIUsage.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
-					t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.lastAPIUsage, tk.reportedContextWindow, tk.liveUsage)
+				if tk.contextMeter.API.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
+					t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.contextMeter.API, tk.reportedContextWindow, tk.liveUsage)
 				}
 				if got := tk.LastAgentResult(); got != "root answer" {
 					t.Errorf("last result = %q", got)
@@ -4252,8 +4252,8 @@ func TestTask(t *testing.T) {
 				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
 			got, _ := tk.StatsSince(seq)
-			if len(got) != statsRingSize || got[0].CPUPerc != 40 || got[len(got)-1].CPUPerc != 99 {
-				t.Fatalf("got %d samples from CPU %v to %v, want %d from 40 to 99", len(got), got[0].CPUPerc, got[len(got)-1].CPUPerc, statsRingSize)
+			if len(got) != StatsRingSize || got[0].CPUPerc != 40 || got[len(got)-1].CPUPerc != 99 {
+				t.Fatalf("got %d samples from CPU %v to %v, want %d from 40 to 99", len(got), got[0].CPUPerc, got[len(got)-1].CPUPerc, StatsRingSize)
 			}
 		})
 
@@ -4267,8 +4267,8 @@ func TestTask(t *testing.T) {
 				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
 			history, _ := tk.StatsSince(0)
-			if len(history) != statsRingSize {
-				t.Errorf("history len = %d, want %d (ring capped at size)", len(history), statsRingSize)
+			if len(history) != StatsRingSize {
+				t.Errorf("history len = %d, want %d (ring capped at size)", len(history), StatsRingSize)
 			}
 			if history[0].CPUPerc != 5.0 {
 				t.Errorf("history[0].CPUPerc = %v, want 5.0 (oldest should be off by delta)", history[0].CPUPerc)

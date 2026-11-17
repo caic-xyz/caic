@@ -1,4 +1,4 @@
-// Tests for the task statistics glyph that links from a task header.
+// Tests for the task Performance glyph that links from a task header.
 
 import { afterEach, describe, it } from "node:test";
 import { render } from "@solidjs/testing-library";
@@ -7,7 +7,7 @@ import { expect, vi } from "@tests/expect";
 
 import type { EventStats } from "@sdk/types.gen";
 
-import type { TaskUsageSummary } from "./StatsDetail";
+import type { TaskUsageSummary } from "./PerformanceDetail";
 import StatsIcon from "./StatsIcon";
 
 const usage: TaskUsageSummary = {
@@ -43,7 +43,7 @@ afterEach(() => vi.restoreAllMocks());
 function renderIcon(history: EventStats[]) {
   return render(() => (
     <MemoryRouter>
-      <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={history} usage={usage} />} />
+      <Route path="*" component={() => <StatsIcon href="/task/@task/perf" stats={history} usage={usage} />} />
     </MemoryRouter>
   ));
 }
@@ -51,13 +51,13 @@ function renderIcon(history: EventStats[]) {
 // The glyph draws four bars in order: CPU, memory, network, disk.
 function barHeights(history: EventStats[]): (string | null | undefined)[] {
   const { getByRole } = renderIcon(history);
-  const bars = getByRole("link", { name: "Task statistics" }).querySelectorAll("rect");
+  const bars = getByRole("link", { name: "Task performance" }).querySelectorAll("rect");
   return Array.from(bars, (bar) => bar.getAttribute("height"));
 }
 
 function barClasses(history: EventStats[]): string[] {
   const { getByRole } = renderIcon(history);
-  const bars = getByRole("link", { name: "Task statistics" }).querySelectorAll("rect");
+  const bars = getByRole("link", { name: "Task performance" }).querySelectorAll("rect");
   return Array.from(bars, (bar) => bar.getAttribute("class") ?? "");
 }
 
@@ -65,8 +65,8 @@ describe("StatsIcon", () => {
   it("surfaces task token volume and cost before opening details", () => {
     const { getByRole } = renderIcon([]);
 
-    const trigger = getByRole("link", { name: "Task statistics" });
-    expect(trigger).toHaveAttribute("href", "/task/@task/stats");
+    const trigger = getByRole("link", { name: "Task performance" });
+    expect(trigger).toHaveAttribute("href", "/task/@task/perf");
     expect(trigger).toHaveTextContent("10.5kt");
     expect(trigger).toHaveTextContent("$0.13");
   });
@@ -76,7 +76,7 @@ describe("StatsIcon", () => {
       { ...stats[0], cpuPerc: 50, memPerc: 75, netRx: 3_072, netTx: 1_024, diskUsed: -1 },
     ]);
 
-    const trigger = getByRole("link", { name: "Task statistics" });
+    const trigger = getByRole("link", { name: "Task performance" });
     expect(trigger).toHaveTextContent("50.0% CPU");
     expect(trigger).toHaveTextContent("75.0% memory");
     expect(trigger).toHaveTextContent("4.0 KiB transferred");

@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -470,9 +471,10 @@ func Stats(cs *runtime.Stats) v1.EventStats {
 	}
 }
 
-// StatsSnapshot converts the bounded resource ring, including an empty array.
+// StatsSnapshot converts the bounded resource ring, including an empty array,
+// with its capacity.
 func StatsSnapshot(samples []runtime.Stats) v1.HistoryStats {
-	out := v1.HistoryStats{Samples: make([]v1.EventStats, len(samples))}
+	out := v1.HistoryStats{Samples: make([]v1.EventStats, len(samples)), Retained: taskrun.StatsRingSize}
 	for i := range samples {
 		out.Samples[i] = Stats(&samples[i])
 	}

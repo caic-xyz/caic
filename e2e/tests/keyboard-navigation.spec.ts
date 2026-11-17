@@ -123,8 +123,28 @@ test("Ctrl+Enter submits from a focused feature toggle without toggling it", asy
 });
 
 test("Page Up and Page Down switch tasks while preserving prompt drafts", async ({ page, api, uniquePrompt }) => {
-  const secondId = await createTaskAPI(api, uniquePrompt("page navigation second"));
-  const firstId = await createTaskAPI(api, uniquePrompt("page navigation first"));
+  // Active tasks list by ID, newest first, so a parallel worker's task
+  // created between these two would sit between them. Recreate the pair until
+  // none does; tasks created later sort above both. Purged attempts leave the
+  // active list.
+  const abandoned = new Set<string>();
+  const between = async (low: string, high: string) =>
+    ((await api.listTasks()) ?? []).some(
+      (task) => !abandoned.has(task.id) && task.id.length === low.length && task.id > low && task.id < high,
+    );
+  const adjacentPair = async (): Promise<[string, string]> => {
+    for (;;) {
+      const second = await createTaskAPI(api, uniquePrompt("page navigation second"));
+      const first = await createTaskAPI(api, uniquePrompt("page navigation first"));
+      if (!(await between(second, first))) return [second, first];
+      for (const id of [second, first]) {
+        abandoned.add(id);
+        await waitForTaskState(api, id, "waiting", 30_000);
+        await api.purgeTask(id);
+      }
+    }
+  };
+  const [secondId, firstId] = await adjacentPair();
   await waitForTaskState(api, firstId, "waiting", 30_000);
   await waitForTaskState(api, secondId, "waiting", 30_000);
   await page.goto(`/task/@${firstId}`);

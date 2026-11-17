@@ -17,7 +17,10 @@ test("follow-up input streams a new turn and preserves timed history", async ({ 
   expect(task.numTurns).toBeGreaterThan(initial.numTurns);
   const collapsed = page.getByRole("button", { name: /^2 messages, 4 tool calls/ });
   await expect(collapsed).toBeVisible();
-  await expect(collapsed.locator("..").getByRole("button", { name: "Turn invocation details, 0:02" })).toBeVisible();
+  await expect(collapsed.locator("..").getByRole("link", { name: "Turn 1 performance, 0:02" })).toHaveAttribute(
+    "href",
+    new RegExp(`/task/@${id}[^/]*/perf/turns/1$`),
+  );
   await expect(page.getByText(/^wait (?:[1-9]\d*ms|\d+:[0-5]\d(?::[0-5]\d)?)$/)).toBeVisible();
 });
 

@@ -114,6 +114,9 @@
   --color-text-muted: #475d52;
   --color-text-faint: #495e53;
 
+  /* A value still on screen while its refresh runs; 7.5:1 on white. */
+  --color-text-updating: #555;
+
   /* Workspace surfaces. The application RGB triplet supports alpha gradient stops. */
   --color-bg-app-rgb: 244 248 245;
   --color-bg-elevated: #fff;
@@ -148,6 +151,47 @@
 
   /* Selection */
   --color-selected: #2c8055;
+
+  /* Chart mark states. Hover, linked, and focus (--color-focus-border) stay
+     distinct; the selected mark adds a fill, a band, and a base marker. */
+  --color-mark-hover: #555;
+  --color-mark-linked: #b45f06;
+  --color-mark-selected: var(--color-primary);
+  --color-mark-selected-bg: var(--color-primary-container);
+  --color-mark-selected-marker: #1f2328;
+
+  /* An unselected bar or span: 3.1:1 on the chart surface (--color-bg-surface). */
+  --color-mark-base: #858585;
+
+  /* A mark that still grows, such as a running turn; 3.9:1 on the chart
+     surface. Its hatching, not its color, sets it apart from --color-mark-base. */
+  --color-mark-running: #767676;
+
+  /* Token classes in charts. Each mark, solid or as a hatch stripe, reaches
+     3:1 against the chart surfaces and the context-window band behind it. */
+  --color-chart-new-input: #b35900;
+  --color-chart-cache-write: #2f6fb5;
+  --color-chart-cache-read: #1e7b34;
+  --color-chart-output: #7c3aed;
+  --color-chart-subagent-mark: #4a4a4a;
+  --color-chart-window-band: #eee;
+  --color-chart-window-edge: #888;
+
+  /* A context's size per turn, and the size compaction cut; both reach 3:1
+     against the window band. */
+  --color-chart-context: #3d5a80;
+  --color-chart-compaction: #9a3412;
+
+  /* Turn timeline lanes; each reaches 3:1 on the chart surface: inferred
+     model time 3.1:1 (hatched), child tools 5.5:1, commands 4.9:1. */
+  --color-chart-model: #858585;
+  --color-chart-child-tool: #24619e;
+  --color-chart-command: #666;
+
+  /* Resource series share the task resource charts' encoding: CPU 4.9:1 and
+     memory 5.4:1 on the chart surface. */
+  --color-chart-cpu: var(--color-primary);
+  --color-chart-memory: var(--color-success);
 
   /* User messages and nested session controls use progressively deeper accent tints. */
   --color-user-msg-bg: #e2efe6;
@@ -257,6 +301,7 @@
     --color-text-meta: #a6b9b1;
     --color-text-muted: #a5b8b0;
     --color-text-faint: #9db0a8;
+    --color-text-updating: #bacac4;
     --color-bg-app-rgb: 16 27 27;
     --color-bg-elevated: #1c3030;
     --color-bg-input: #223432;
@@ -271,6 +316,26 @@
     --color-border-medium: #6e8981;
     --color-border-strong: #839c93;
     --color-selected: #82d8a8;
+
+    /* Chart marks keep the light theme's roles; each reaches 3:1 on the chart
+       surface and the window band. */
+    --color-mark-hover: #d0dad5;
+    --color-mark-linked: #ffa94d;
+    --color-mark-selected-marker: #f3f5ec;
+    --color-mark-base: #7d918a;
+    --color-mark-running: #93a69f;
+    --color-chart-new-input: #ffa657;
+    --color-chart-cache-write: #79b8ff;
+    --color-chart-cache-read: #7cdea0;
+    --color-chart-output: #c4a5ff;
+    --color-chart-subagent-mark: #c9d5d0;
+    --color-chart-window-band: #263b38;
+    --color-chart-window-edge: #6e8981;
+    --color-chart-context: #9cc3f0;
+    --color-chart-compaction: #ff9e7a;
+    --color-chart-model: #7d918a;
+    --color-chart-child-tool: #8cc4ff;
+    --color-chart-command: #a6b9b1;
     --color-user-msg-bg: #223a30;
     --color-session-bg: #2b493a;
     --color-session-bg-hover: #385848;
@@ -324,6 +389,13 @@ body {
 ):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--color-focus-border) !important;
+}
+
+/* A value kept on screen while its refresh runs. aria-busy marks the state for
+   assistive technology; italic marks it without color. */
+.updating-value[aria-busy="true"] {
+  font-style: italic;
+  color: var(--color-text-updating);
 }
 
 /* Login page */

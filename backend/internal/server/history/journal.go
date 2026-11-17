@@ -1,9 +1,10 @@
-// Stores compact pricing observations with exact cache-write lifetimes without retaining transcript payloads.
+// Stores compact pricing and per-call usage observations with exact cache-write lifetimes without retaining transcript payloads.
 
 package history
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"iter"
 	"os"
+	"strconv"
 
 	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -75,9 +77,9 @@ func costFactFor(message agent.TimedMessage, position v1.HistoryPosition) *data.
 	case *agent.SystemMessage:
 		fact = &data.Fact{Kind: data.KindSystem, Model: m.ReportedModel, Subtype: m.Subtype}
 	case *agent.UsageMessage:
-		fact = &data.Fact{Kind: data.KindUsage, Model: m.ReportedModel, Usage: usageToData(m.Usage), PerCall: m.PerCall, ModelDerived: m.ModelDerived, CumulativeCostUSD: m.CumulativeCostUSD, ReportedCostUSD: m.ReportedCostUSD}
+		fact = &data.Fact{Kind: data.KindUsage, Model: m.ReportedModel, Usage: usageToData(m.Usage), PerCall: m.PerCall, ModelDerived: m.ModelDerived, CumulativeCostUSD: m.CumulativeCostUSD, ReportedCostUSD: m.ReportedCostUSD, ContextWindow: m.ContextWindow}
 	case *agent.ResultMessage:
-		fact = &data.Fact{Kind: data.KindResult, Usage: usageToData(m.Usage), TotalCostUSD: m.TotalCostUSD, CostReported: m.CostReported}
+		fact = &data.Fact{Kind: data.KindResult, Usage: usageToData(m.Usage), TotalCostUSD: m.TotalCostUSD, CostReported: m.CostReported, ContextWindow: m.ContextWindow}
 	default:
 		return nil
 	}
@@ -108,10 +110,11 @@ func factMessage(f *data.Fact) (agent.Message, error) {
 	}
 }
 
-// facts reads the captured committed journal prefix without decoding transcript data.
-func (j *costJournal) facts(ctx context.Context, end int64, last uint64) iter.Seq2[data.Fact, error] {
+// facts reads the captured committed journal prefix from offset start, a line
+// start, without decoding transcript data.
+func (j *costJournal) facts(ctx context.Context, start, end int64, last uint64) iter.Seq2[data.Fact, error] {
 	return func(yield func(data.Fact, error) bool) {
-		decoder := json.NewDecoder(bufio.NewReaderSize(io.NewSectionReader(j.file, 0, end), 64<<10))
+		decoder := json.NewDecoder(bufio.NewReaderSize(io.NewSectionReader(j.file, start, end-start), 64<<10))
 		for {
 			if err := ctx.Err(); err != nil {
 				yield(data.Fact{}, err)
@@ -132,6 +135,76 @@ func (j *costJournal) facts(ctx context.Context, end int64, last uint64) iter.Se
 			}
 		}
 	}
+}
+
+// seekScanBytes bounds the committed prefix that seek leaves to a linear scan.
+const seekScanBytes = 4 << 10
+
+// recordPrefix starts every encoded fact: data.Fact keeps RecordID first.
+var recordPrefix = []byte(`{"recordID":`)
+
+// seek returns a line start in the committed prefix end at or before the first
+// fact of record first or later. Facts are appended in record order, so a
+// binary search over line starts leaves at most seekScanBytes of earlier facts
+// for the caller to skip, independently of the task's length.
+func (j *costJournal) seek(end int64, first uint64) (int64, error) {
+	lo, hi := int64(0), end
+	var buf [512]byte
+	for hi-lo > seekScanBytes {
+		// The line containing mid ends at its first newline; one read usually
+		// holds the next line's record ID too.
+		at := lo + (hi-lo)/2
+		var line []byte
+		for line == nil {
+			n, err := j.file.ReadAt(buf[:min(int64(len(buf)), hi-at)], at)
+			if n == 0 && err != nil {
+				return 0, err
+			}
+			if i := bytes.IndexByte(buf[:n], '\n'); i >= 0 {
+				at += int64(i) + 1
+				line = buf[i+1 : n]
+			} else {
+				at += int64(n)
+			}
+			if at >= hi {
+				// No line starts in the upper half; the scan covers it.
+				return lo, nil
+			}
+		}
+		if bytes.IndexByte(line, ',') < 0 {
+			n, err := j.file.ReadAt(buf[:min(int64(len(buf)), hi-at)], at)
+			if n == 0 && err != nil {
+				return 0, err
+			}
+			line = buf[:n]
+		}
+		id, err := lineRecordID(line)
+		if err != nil {
+			return 0, err
+		}
+		if id < first {
+			lo = at
+		} else {
+			hi = at
+		}
+	}
+	return lo, nil
+}
+
+// lineRecordID parses the record ID that starts an encoded fact.
+func lineRecordID(line []byte) (uint64, error) {
+	digits, ok := bytes.CutPrefix(line, recordPrefix)
+	if !ok {
+		return 0, errors.New("invalid history cost journal line")
+	}
+	if i := bytes.IndexByte(digits, ','); i >= 0 {
+		digits = digits[:i]
+	}
+	id, err := strconv.ParseUint(string(digits), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid history cost journal record: %w", err)
+	}
+	return id, nil
 }
 
 func usageToData(u agent.Usage) data.Usage {

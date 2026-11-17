@@ -1,0 +1,148 @@
+/* Turn-duration strip: bars on one scale; the current turn adds a band, a darker fill, and a base marker, and the running turn a hatched fill.
+   Dense strips drop the gap; a strip that still overflows fades its clipped edges. */
+
+.chart {
+  --strip-height: 4rem;
+  --strip-marker: 3px;
+  --strip-marker-width: 0.5rem;
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.4rem;
+}
+
+/* The scale labels the top and the zero baseline of the bars. */
+.scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: var(--strip-height);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  text-align: right;
+}
+
+.strip {
+  position: relative;
+  display: flex;
+  gap: 1px;
+
+  /* The inline padding keeps the end bars' wider markers inside the scroll box. */
+  padding: 0 calc(var(--strip-marker-width) / 2) calc(var(--strip-marker) + 1px);
+  margin: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.dense {
+  gap: 0;
+}
+
+.clipStart {
+  mask-image: linear-gradient(to right, transparent, var(--color-mask-opaque) 1.5rem);
+}
+
+.clipEnd {
+  mask-image: linear-gradient(to left, transparent, var(--color-mask-opaque) 1.5rem);
+}
+
+.clipStart.clipEnd {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    var(--color-mask-opaque) 1.5rem,
+    var(--color-mask-opaque) calc(100% - 1.5rem),
+    transparent
+  );
+}
+
+/* Bars widen to fill the strip; many turns scroll at their minimum width. */
+.item {
+  flex: 1 0 0.3rem;
+  max-width: 2rem;
+}
+
+.dense .item {
+  flex-basis: 1px;
+}
+
+.bar {
+  display: flex;
+  align-items: flex-end;
+  height: var(--strip-height);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.fill {
+  --turn-share: 0;
+
+  width: 100%;
+  height: max(1px, calc(var(--turn-share) * 100%));
+  background: var(--color-mark-base);
+}
+
+.bar:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: -2px;
+}
+
+.current {
+  position: relative;
+  background: var(--color-mark-selected-bg);
+}
+
+/* The marker sits below the baseline so the bar keeps its scaled height. It
+   stays at least --strip-marker-width wide, centered on the bar, so the current
+   turn reads without color even when dense bars are 1px wide. */
+.current::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: max(100%, var(--strip-marker-width));
+  height: var(--strip-marker);
+  content: "";
+  background: var(--color-mark-selected-marker);
+  transform: translateX(-50%);
+}
+
+.current .fill {
+  background: var(--color-mark-selected);
+}
+
+/* The running turn's bar is hatched: its height grows until the turn ends. */
+.running .fill {
+  background: repeating-linear-gradient(135deg, var(--color-mark-running) 0 2px, transparent 2px 4px);
+  box-shadow: inset 0 0 0 1px var(--color-mark-running);
+}
+
+.running.current .fill {
+  background: repeating-linear-gradient(135deg, var(--color-mark-selected) 0 2px, transparent 2px 4px);
+  box-shadow: inset 0 0 0 1px var(--color-mark-selected);
+}
+
+.bar:not(.current):hover .fill {
+  background: var(--color-mark-hover);
+}
+
+.running:not(.current):hover .fill {
+  background: repeating-linear-gradient(135deg, var(--color-mark-hover) 0 2px, transparent 2px 4px);
+  box-shadow: inset 0 0 0 1px var(--color-mark-hover);
+}
+
+.range {
+  grid-column: 2;
+  margin: 0;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+  text-align: right;
+}
+
+.empty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-tertiary);
+}

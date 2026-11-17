@@ -392,7 +392,7 @@ func testSourceCachePricing(t *testing.T) {
 			}
 		}
 		count := 0
-		for fact, err := range source.journal.facts(t.Context(), source.journal.end, snapshot.Through) {
+		for fact, err := range source.journal.facts(t.Context(), 0, source.journal.end, snapshot.Through) {
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,4 +1,4 @@
-// Serves account-isolated immutable history, mutable discovery/analytics, and exact raw-cursor SSE.
+// Serves account-isolated immutable history, mutable discovery/analytics and turn timelines, and exact raw-cursor SSE.
 
 package server
 
@@ -309,6 +309,35 @@ func (h *historyHandlers) handleHistoryCosts(w http.ResponseWriter, r *http.Requ
 	if _, err := io.WriteString(w, "]"); err != nil {
 		return
 	}
+}
+
+func (h *historyHandlers) handleHistoryTurn(w http.ResponseWriter, r *http.Request) {
+	e, s, release, err := h.historySource(w, r, false)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	defer release()
+	value := r.PathValue("n")
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 || strconv.Itoa(n) != value {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid turn number"})
+		return
+	}
+	if _, err := h.historySnapshot(r.Context(), e, s, 0, true); err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	timeline, err := s.TurnTimeline(r.Context(), n, time.Now(), e.Task().Pricer)
+	if errors.Is(err, history.ErrUnknownTurn) {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "turn not found"})
+		return
+	}
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	writeHistoryJSON(w, r, timeline)
 }
 
 func historyCacheHeaders(w http.ResponseWriter) {

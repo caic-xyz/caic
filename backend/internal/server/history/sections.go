@@ -1,4 +1,4 @@
-// Indexes context boundaries, compact invocation facts, and payload-free activity state during raw projection.
+// Indexes context boundaries, compact invocation facts, the running turn, and payload-free activity state during raw projection.
 
 package history
 
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
@@ -44,20 +45,41 @@ type sectionIndex struct {
 	lifecycleAnchors   map[string]time.Time
 	metadata           v1.HistoryMetadata
 	waiting            int
-	model              string
-	initialDigest      [32]byte
-	initialEligible    bool
-	rootContent        bool
-	actorRecords       map[string][]uint64
-	delegationRecords  map[delegationScope][]uint64
-	setupRecords       []uint64
+	// The pending start follows TurnMetrics: the first root prompt or root
+	// activity since the last root result starts the next turn unless a context
+	// clear discards it. A failed delivery discards a prompt that no root output
+	// accepted; activity is output, so it accepts the prompt it follows.
+	promptPos      v1.HistoryPosition
+	promptAccepted bool
+	promptWait     int // Turn whose wait the pending prompt ended, or -1.
+	startAt        time.Time
+	startPos       v1.HistoryPosition
+	// halted reports that the harness process exited during the pending turn:
+	// its start stands, but the turn no longer runs until root input or
+	// activity resumes it.
+	halted bool
+	// contextMeter folds raw root records as the task's context meter does,
+	// with the session identity contextSession tracks as the task does.
+	contextMeter   agent.ContextMeter
+	contextSession agent.SessionMetadata
+	// turnStarts holds the position that started each turn in turns, which
+	// bounds the projected records a turn timeline scans.
+	turnStarts        []v1.HistoryPosition
+	model             string
+	effort            string
+	initialDigest     [32]byte
+	initialEligible   bool
+	rootContent       bool
+	actorRecords      map[string][]uint64
+	delegationRecords map[delegationScope][]uint64
+	setupRecords      []uint64
 }
 
 func newSectionIndex() sectionIndex {
 	return sectionIndex{
 		current: v1.HistorySection{ID: "1", Skills: []v1.EventSkillLoad{}},
 		tools:   map[toolKey]toolStart{}, totals: map[string]v1.HistoryToolTiming{},
-		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]v1.HistoryPosition{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1,
+		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]v1.HistoryPosition{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1, promptWait: -1,
 		turns: []v1.HistoryTurn{}, lastResultFact: -1, actorRecords: map[string][]uint64{}, delegationRecords: map[delegationScope][]uint64{},
 	}
 }
@@ -99,11 +121,44 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 				s.sessionID = ""
 			}
 		}
+		if s.promptPos.RecordID != 0 && acceptedOutput(m.Kind) {
+			s.promptAccepted = true
+		}
+		if m.System != nil {
+			switch m.System.Subtype {
+			case v1.EventSystemSubtypeContextCleared:
+				// A cleared context abandons its unfinished turn; compaction continues it.
+				s.clearPrompt()
+			case v1.EventSystemSubtypeInputDeliveryFailed:
+				// An undelivered prompt neither starts a turn nor ends the previous
+				// turn's wait. Projected history omits delivery completion, so only
+				// root output proves that the prompt was accepted.
+				// TODO: Project prompt delivery completion into history. Today a
+				// failed steer that follows a delivered prompt with no root output
+				// yet discards that prompt here, so the turn starts later than
+				// task.TurnMetrics reports. Fix it by recording delivery completion
+				// in the projected events and treating a delivered prompt like
+				// promptAccepted.
+				if !s.promptAccepted {
+					if s.promptWait >= 0 {
+						t := &s.turns[s.promptWait]
+						t.WaitMS, t.WaitInput = nil, nil
+						s.waiting = s.promptWait
+					}
+					if s.startPos == s.promptPos {
+						s.startAt, s.startPos = time.Time{}, v1.HistoryPosition{}
+					}
+					s.promptPos, s.promptAccepted, s.promptWait = v1.HistoryPosition{}, false, -1
+				}
+			default:
+			}
+		}
 		if m.Init != nil {
 			if m.Init.SessionID != "" {
 				s.sessionID = m.Init.SessionID
 			}
 			s.model = m.Init.ReportedModel
+			s.effort = m.Init.ReportedEffort
 			s.current.ReportedModel = s.model
 			if s.metadata.InitialInit == nil {
 				init := *e
@@ -119,6 +174,10 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 				s.initialDigest = sha256.Sum256([]byte(m.UserInput.Text))
 				s.initialEligible = !s.rootContent
 			}
+			if s.promptPos.RecordID == 0 {
+				s.promptPos = p
+			}
+			s.observeStart(p, m.Ts)
 			if s.waiting >= 0 {
 				t := &s.turns[s.waiting]
 				if !t.At.IsZero() && m.Ts > t.At.UnixMilli() {
@@ -126,6 +185,7 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 					t.WaitMS = &wait
 					t.WaitInput = &p
 				}
+				s.promptWait = s.waiting
 				s.waiting = -1
 			}
 		}
@@ -150,8 +210,12 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 			if model == "" {
 				model = s.model
 			}
-			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, SectionID: s.current.ID, At: historyTime(m.Ts), Model: model, Usage: r.Usage, DurationMS: int64(math.Round(r.Duration * 1000)), DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost})
+			// A turn without any root prompt or activity starts at its result.
+			s.observeStart(p, m.Ts)
+			s.turns = append(s.turns, v1.HistoryTurn{HistoryPosition: p, Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt, At: historyTime(m.Ts), Model: model, Effort: s.effort, Usage: r.Usage, DurationMS: int64(math.Round(r.Duration * 1000)), DurationAPIMS: int64(math.Round(r.DurationAPI * 1000)), Cost: r.Cost, ContextTokens: s.contextMeter.Tokens()})
+			s.turnStarts = append(s.turnStarts, s.startPos)
 			s.waiting = len(s.turns) - 1
+			s.clearPrompt()
 		}
 		if m.CommitSnapshot != nil && !m.CommitSnapshot.Baseline && len(s.turns) > 0 {
 			s.turns[len(s.turns)-1].ChangeStat = m.CommitSnapshot.ChangeStat
@@ -160,6 +224,9 @@ func (s *sectionIndex) append(e *v1.HistoryEvent) {
 		case v1.EventKindText, v1.EventKindTextDelta, v1.EventKindThinking, v1.EventKindThinkingDelta, v1.EventKindToolUse, v1.EventKindToolResult, v1.EventKindResult:
 			s.rootContent = true
 		default:
+		}
+		if !historyChild(&m.Source) && turnActivity(m.Kind) {
+			s.observeStart(p, m.Ts)
 		}
 		if m.Result != nil && !historyChild(&m.Source) {
 			s.lastResult = p
@@ -241,6 +308,45 @@ func (s *sectionIndex) close(e *v1.HistoryEvent) {
 	s.activityHomesDirty = true
 }
 
+// clearPrompt discards the pending turn start, as a result or a context clear
+// does.
+func (s *sectionIndex) clearPrompt() {
+	s.halted = false
+	s.promptPos = v1.HistoryPosition{}
+	s.promptAccepted = false
+	s.promptWait = -1
+	s.startAt = time.Time{}
+	s.startPos = v1.HistoryPosition{}
+}
+
+// observeStart records the first root prompt or activity since the last result.
+// Either starts the running turn, or resumes a halted one.
+func (s *sectionIndex) observeStart(p v1.HistoryPosition, ts int64) {
+	if s.halted {
+		s.halted = false
+		s.revision++
+	}
+	if s.startPos.RecordID == 0 {
+		s.startAt = historyTime(ts)
+		s.startPos = p
+		s.revision++
+	}
+}
+
+// observeContext folds one raw record into the root context size.
+func (s *sectionIndex) observeContext(msg agent.Message) {
+	s.contextMeter.Observe(msg, s.contextSession.SessionID)
+	s.contextSession.Apply(msg)
+}
+
+// runningTurn reports the turn in progress, if any.
+func (s *sectionIndex) runningTurn() *v1.HistoryRunningTurn {
+	if s.startPos.RecordID == 0 || s.halted {
+		return nil
+	}
+	return &v1.HistoryRunningTurn{Number: len(s.turns) + 1, SectionID: s.current.ID, StartedAt: s.startAt}
+}
+
 func (s *sectionIndex) addSkill(load v1.EventSkillLoad) {
 	for _, seen := range s.current.Skills {
 		if load.Path != "" && seen.Path == load.Path || load.Path == "" && seen.Path == "" && seen.Skill == load.Skill {
@@ -302,6 +408,7 @@ func (s *sectionIndex) snapshot() ([]v1.HistorySection, v1.HistoryMetadata) {
 		metadata.Setup = &setup
 	}
 	metadata.Turns = slices.Clone(s.turns)
+	metadata.RunningTurn = s.runningTurn()
 	metadata.Tools = make([]v1.HistoryToolTiming, 0, len(s.totals))
 	for _, t := range s.totals {
 		metadata.Tools = append(metadata.Tools, t)
@@ -547,8 +654,13 @@ func (s *sectionIndex) observeActivity(e *v1.HistoryEvent) {
 // exit, clean or not, or the settlement trailer. The process hosts its native
 // subagents and detached commands, so no further lifecycle report can arrive
 // for a running one; its outcome becomes unknown rather than invented. A clean
-// exit projects no event, so Source folds the record itself.
+// exit projects no event, so Source folds the record itself. A pending turn
+// stops running: no result can end it.
 func (s *sectionIndex) hostExited(at time.Time) {
+	if s.startPos.RecordID != 0 && !s.halted {
+		s.halted = true
+		s.revision++
+	}
 	for id := range s.activities {
 		s.retireActivity(id, at)
 	}
@@ -1082,16 +1194,43 @@ func historyChild(src *v1.EventMessageSource) bool {
 	return src.AgentID != "" || src.DelegationToolUseID != "" || src.RootThreadID != "" && src.ThreadID != "" && src.ThreadID != src.RootThreadID
 }
 
+// acceptedOutput mirrors task.AcceptedInputOutput for projected root events:
+// output that proves the harness accepted the pending prompt.
+func acceptedOutput(k v1.EventKind) bool {
+	switch k {
+	case v1.EventKindText, v1.EventKindTextDelta, v1.EventKindThinking, v1.EventKindThinkingDelta,
+		v1.EventKindToolUse, v1.EventKindToolResult, v1.EventKindToolOutputDelta, v1.EventKindSkillLoad,
+		v1.EventKindAsk, v1.EventKindTodo, v1.EventKindResult, v1.EventKindNativeSubagent,
+		v1.EventKindBackgroundCommand, v1.EventKindWidget, v1.EventKindWidgetDelta:
+		return true
+	default:
+		return false
+	}
+}
+
+// turnActivity mirrors the root activity that starts a turn in TurnMetrics. A
+// projected skill load is a confirmed read; inferred reads project nothing.
+func turnActivity(k v1.EventKind) bool {
+	switch k {
+	case v1.EventKindText, v1.EventKindTextDelta, v1.EventKindThinking, v1.EventKindThinkingDelta,
+		v1.EventKindToolUse, v1.EventKindToolResult, v1.EventKindToolOutputDelta, v1.EventKindSkillLoad,
+		v1.EventKindAsk, v1.EventKindTodo, v1.EventKindWidget, v1.EventKindWidgetDelta:
+		return true
+	default:
+		return false
+	}
+}
+
 func rootEvent(m *v1.EventMessage) bool {
 	return !historyChild(&m.Source) || m.Kind == v1.EventKindRateLimit && m.RateLimit != nil && m.RateLimit.RateLimitType != "thread_goal"
 }
 
 func scopedTool(src *v1.EventMessageSource, id string) toolKey {
-	agent := src.AgentID
+	agentID := src.AgentID
 	if src.ThreadID != "" || src.DelegationToolUseID != "" {
-		agent = ""
+		agentID = ""
 	}
-	return toolKey{src.ThreadID, src.DelegationToolUseID, src.TurnID, agent, id}
+	return toolKey{src.ThreadID, src.DelegationToolUseID, src.TurnID, agentID, id}
 }
 
 func resolvedSkills(loads []v1.EventSkillLoad) []v1.EventSkillLoad {

@@ -1,0 +1,53 @@
+/* Tool-time breakdown: one row per tool name; a bar under each name draws its total time on a scale shared by all rows. */
+
+.tools {
+  margin: 0.75rem 0 0;
+}
+
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.note {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+}
+
+.empty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+/* A long tool name, such as an MCP tool's, wraps instead of widening the table
+   past a narrow pane. The scope outranks the shared table's no-wrap rule. */
+.tools .name {
+  position: relative;
+  min-width: 3rem;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* The longest total spans the cell's content box; every other bar scales to it. */
+.bar {
+  --share: 0;
+
+  position: absolute;
+  bottom: 0.1rem;
+  left: 0.4rem;
+  width: calc(var(--share) * (100% - 0.8rem));
+  min-width: 1px;
+  height: 3px;
+  background: var(--color-primary);
+}

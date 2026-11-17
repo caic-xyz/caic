@@ -307,6 +307,19 @@ export const HarnessDsh = "dsh";
 export const HarnessOpenCode = "opencode";
 export const HarnessPi = "pi";
 
+export type HistoryTurnSpanKind =
+  | "background"
+  | "model"
+  | "subagent"
+  | "tool";
+/**
+ * Supported values.
+ */
+export const HistoryTurnSpanKindBackground = "background";
+export const HistoryTurnSpanKindModel = "model";
+export const HistoryTurnSpanKindSubagent = "subagent";
+export const HistoryTurnSpanKindTool = "tool";
+
 export type ImageRefreshState =
   | "idle"
   | "running"
@@ -2456,13 +2469,30 @@ export interface HistoryRoute {
  * HistoryTurn retains numeric invocation facts independently of transcript
  * lifetime. SectionID associates the turn with its context. Pricing is obtained
  * separately through getHistoryCosts using the embedded exact position.
+ *
+ * Number counts root turns from 1 across every context section of the task;
+ * delegated child results are not turns. StartedAt is the first root prompt or
+ * root activity after the previous root result, as in the task's turn metrics.
+ * A turn the harness queues by itself, such as one delivering the end of
+ * background work, starts at its first root activity. Compaction keeps the
+ * start; a context clear discards it, and so does a failed delivery of the
+ * starting prompt before root output accepted it. A turn without any root
+ * prompt or activity starts at its result. At is the result. WaitMS is the
+ * time from At to the prompt at WaitInput, which starts the next turn.
+ * Effort is the root reasoning effort reported by the last init.
+ * ContextTokens is the root context size when the turn ended, as the task's
+ * context meter measures it: the native occupancy when the harness reports it,
+ * else the input context of the last root API call. Zero means unknown.
  */
 export interface HistoryTurn {
   recordID: number /* uint64 */;
   index: number;
+  number: number /* int */;
   sectionID: string;
+  startedAt: ISOTimestamp;
   at: ISOTimestamp;
   model: string;
+  effort?: string;
   usage: EventUsage;
   durationMs: number /* int64 */;
   durationAPIMs: number /* int64 */;
@@ -2470,6 +2500,22 @@ export interface HistoryTurn {
   waitMs?: number /* int64 */;
   changeStat?: EventChangeStat;
   cost?: EventCost;
+  contextTokens?: number /* int */;
+}
+
+/**
+ * HistoryRunningTurn is the root turn in progress: a root prompt or root
+ * activity started it, and no root result has ended it yet. Number is one past
+ * the last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,
+ * so the turn keeps both when it completes. SectionID is the context it runs
+ * in; compaction can move it to a later one. A turn stops running when the
+ * harness process exits without ending it: the turn does not complete, and a
+ * later root prompt or activity resumes it from the same start.
+ */
+export interface HistoryRunningTurn {
+  number: number /* int */;
+  sectionID: string;
+  startedAt: ISOTimestamp;
 }
 
 /** HistoryToolTiming aggregates completed tools across root and child actors. */
@@ -2552,6 +2598,7 @@ export interface HistoryMetadata {
   hasInitialPrompt: boolean;
   setupEndedAt?: ISOTimestamp;
   turns: HistoryTurn[] | null;
+  runningTurn?: HistoryRunningTurn;
   tools: HistoryToolTiming[] | null;
   activities: HistoryActivity[] | null;
   backgroundCommands: HistoryBackgroundCommand[] | null;
@@ -2586,6 +2633,154 @@ export interface HistoryTurnEstimate {
 }
 
 /**
+ * HistoryTurnSpan is one interval of a turn timeline, in milliseconds from the
+ * turn start. EndMS is absent when the span has no observed end: a tool call
+ * still open when the turn ended or still running, a subagent or command whose
+ * Status is running or unknown, or the provisional model span of a running
+ * turn. A subagent or command can end after the turn: EndMS then exceeds the
+ * turn duration.
+ *
+ * The identity locates the span's transcript item. A tool span has Source and
+ * ToolUseID, which scope the call as tool cards do. A command span has
+ * CommandID, plus the Source and ToolUseID of the call that launched it. A
+ * subagent span has ActivityID, a HistoryActivity ID; a tool or command span by
+ * a child actor names its owning activity there when known. A model span has
+ * only times.
+ *
+ * Label is the tool name, subagent label, or command label; Detail is the tool
+ * card's short detail. Status is completed, failed, or interrupted for a tool;
+ * subagents and commands use their HistoryActivity and HistoryBackgroundCommand
+ * status values.
+ */
+export interface HistoryTurnSpan {
+  kind: HistoryTurnSpanKind;
+  startMs: number /* int64 */;
+  endMs?: number /* int64 */;
+  label?: string;
+  detail?: string;
+  status?: string;
+  source?: EventMessageSource;
+  toolUseID?: string;
+  activityID?: string;
+  commandID?: string;
+}
+
+/**
+ * HistoryTurnOmission summarizes the spans of one kind that a timeline omits.
+ * DurationMS sums their durations within the turn, which can overlap: a span
+ * without an end, or one that outlives the turn, counts up to the turn's end.
+ */
+export interface HistoryTurnOmission {
+  kind: HistoryTurnSpanKind;
+  count: number /* int */;
+  durationMs: number /* int64 */;
+}
+
+/**
+ * HistoryTurnCall is one model API call in a turn, by the root agent or a
+ * child actor. Number counts the turn's calls from 1 in the order the harness
+ * reported them, which is the timeline's order. AtMS is when the harness
+ * reported the call, in milliseconds from the turn start: a call reports its
+ * usage when it ends, so AtMS is the end of the model time that produced it.
+ *
+ * The call's context is its input classes summed. ContextWindow is absent
+ * when unknown; root calls without their own report use the window the turn
+ * reports. Cost is absent when the call cannot be priced. It is reported when
+ * the harness prices each call, and otherwise estimated from model token
+ * prices, even when the harness reports the turn's total.
+ */
+export interface HistoryTurnCall {
+  inputTokens: number /* int */;
+  cacheCreationInputTokens: number /* int */;
+  cacheReadInputTokens: number /* int */;
+  outputTokens: number /* int */;
+  reasoningOutputTokens: number /* int */;
+  number: number /* int */;
+  atMs: number /* int64 */;
+  source?: EventMessageSource;
+  activityID?: string;
+  model?: string;
+  contextWindow?: number /* int */;
+  cost?: EventCost;
+}
+
+/** HistoryTurnCallOmission sums the token classes of the calls a timeline omits. */
+export interface HistoryTurnCallOmission {
+  inputTokens: number /* int */;
+  cacheCreationInputTokens: number /* int */;
+  cacheReadInputTokens: number /* int */;
+  outputTokens: number /* int */;
+  reasoningOutputTokens: number /* int */;
+  count: number /* int */;
+}
+
+/**
+ * HistoryTurnTokens are disjoint token classes. The three input classes sum to
+ * a call's input context; ReasoningOutputTokens is a subset of OutputTokens.
+ */
+export interface HistoryTurnTokens {
+  inputTokens: number /* int */;
+  cacheCreationInputTokens: number /* int */;
+  cacheReadInputTokens: number /* int */;
+  outputTokens: number /* int */;
+  reasoningOutputTokens: number /* int */;
+}
+
+/**
+ * HistoryTurnTool sums one tool name's calls that start in the turn, by the
+ * root agent and child actors. DurationMS and LongestMS count only time within
+ * the turn: a call without an end counts up to the turn's end. Concurrent calls
+ * overlap, so durations can sum to more than the turn.
+ */
+export interface HistoryTurnTool {
+  name: string;
+  calls: number /* int */;
+  durationMs: number /* int64 */;
+  longestMs: number /* int64 */;
+}
+
+/**
+ * HistoryTurnTimeline places one root turn's work on one time axis of
+ * DurationMS from StartedAt. For a completed turn, StartedAt and EndedAt match
+ * its HistoryTurn's StartedAt and At. For the HistoryRunningTurn, EndedAt is absent and the axis
+ * ends at the later of the server's clock and the turn's latest observation
+ * when the server derived the timeline; open spans and model time then grow
+ * with each request. It includes tool calls
+ * that start in the turn, from the root agent and from child actors, and the
+ * subagents and detached commands that start in it, including those that
+ * outlive it. Model spans fill the turn time outside root tool calls; ModelMS
+ * is their exact total. Background work and child calls run beside the root
+ * agent, so they do not reduce model time.
+ *
+ * Spans holds at most 500 spans sorted by start: the longest ones, with spans
+ * lacking an end kept first. Omitted counts the shorter spans left out, per
+ * kind. The server derives the timeline from its own history index, so archived
+ * context sections need no transcript download. Durations within the turn count
+ * up to the axis end.
+ *
+ * Calls holds at most 500 API calls sorted by Number: those with the most
+ * tokens. OmittedCalls sums the rest. Calls is empty when the harness reports
+ * usage only per turn. Unattributed sums the root agent's usage reports that
+ * cover no single call, such as cumulative deltas spanning several requests
+ * after a missed event; they are not priced per call. Tools sums every tool
+ * call in the turn by name, longest total first, including calls that Spans
+ * omits.
+ */
+export interface HistoryTurnTimeline {
+  number: number /* int */;
+  startedAt: ISOTimestamp;
+  endedAt?: ISOTimestamp;
+  durationMs: number /* int64 */;
+  modelMs: number /* int64 */;
+  spans: HistoryTurnSpan[] | null;
+  omitted: HistoryTurnOmission[] | null;
+  calls: HistoryTurnCall[] | null;
+  omittedCalls?: HistoryTurnCallOmission;
+  unattributed?: HistoryTurnTokens;
+  tools: HistoryTurnTool[] | null;
+}
+
+/**
  * HistoryCheckpoint advances through all outputs of a physical record,
  * including a record with zero outputs. Cursor is opaque; it encodes projection
  * version, generation, raw record and either output index or end-of-record.
@@ -2598,12 +2793,18 @@ export interface HistoryCheckpoint {
 }
 
 /**
- * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * HistoryStats contains the bounded runtime ring, oldest first.
  * Replace samples sharing a timestamp: disk usage can revise the latest sample.
  * These host observations are separate from immutable raw task history.
  */
 export interface HistoryStats {
   samples: EventStats[] | null;
+  /**
+   * Retained is the ring's capacity: the server keeps at most this many
+   * latest samples, so a full ring has dropped older ones. Clients keep as
+   * many while live samples arrive.
+   */
+  retained: number /* int */;
 }
 
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */

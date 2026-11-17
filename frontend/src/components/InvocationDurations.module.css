@@ -1,0 +1,24 @@
+/* Styles for transcript duration links to turn and context Performance views. */
+
+/* The padding frames the hover background; the negative margin keeps the
+   text on the same right edge as static durations. The dotted underline marks
+   the duration as actionable without hover. */
+.trigger {
+  flex-shrink: 0;
+  padding: 0 0.2rem;
+  margin-right: -0.2rem;
+  color: var(--color-text-tertiary);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  border-radius: var(--radius-sm);
+}
+
+.trigger:hover {
+  text-decoration-style: solid;
+  background: var(--color-bg-hover);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}

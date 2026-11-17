@@ -36,7 +36,16 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
-const statsRingSize = 60
+// StatsRingSize is how many of its latest resource samples a task retains;
+// clients receive it with the samples.
+//
+// TODO: Save more performance metrics. The ring keeps only the latest 60
+// readings, in memory, so the turn view's resource lanes stay empty for a turn
+// older than those readings, and a server restart drops them all. Persist the
+// samples with the task, or a downsampled series per turn, so every turn keeps
+// its CPU and memory readings; the system stats ring in
+// server/system_stats.go has the same 60-reading limit.
+const StatsRingSize = 60
 
 // stateTransitionHistory bounds each task's journal of recent state
 // transitions. It only needs to cover the states a task-list connection can
@@ -117,8 +126,8 @@ type Task struct {
 	mu                     sync.Mutex
 	runtimeInstanceID      runtime.ID
 	runtimeConnection      runtime.ConnectionTarget
-	statsRing              [statsRingSize]runtime.Stats
-	statsRingSeq           [statsRingSize]uint64 // statsSeq at each slot's last write
+	statsRing              [StatsRingSize]runtime.Stats
+	statsRingSeq           [StatsRingSize]uint64 // statsSeq at each slot's last write
 	statsLen               int
 	statsHead              int
 	statsSeq               uint64          // counts ring writes, including disk revisions
@@ -131,7 +140,7 @@ type Task struct {
 	stateSeq               uint64            // Monotonic sequence of recorded state transitions.
 	stateTransitions       []StateTransition // Bounded journal of recent state transitions.
 	sessionMetadata        agent.SessionMetadata
-	contextUsed            *int                            // Latest native occupancy; nil means unknown.
+	contextMeter           agent.ContextMeter              // Root context size, as the history projection folds it.
 	reportedContextWindow  int                             // Context window size reported by the agent (0 = unknown).
 	planFile               string                          // Path to plan file inside instance, captured from Write tool_use.
 	planContent            string                          // Content of the plan file, captured from Write tool_use input.
@@ -165,7 +174,6 @@ type Task struct {
 	turnMetrics    task.TurnMetrics
 	liveUsage      agent.Usage
 	lastUsage      agent.Usage  // Most recent ResultMessage usage (active context).
-	lastAPIUsage   agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
 	cacheExpiresAt time.Time    // When the prompt cache from the last API call expires.
 	liveDiffStat   v3.DiffStat  // Updated by DiffStatMessage from relay.
 	lastGitRead    repo.GitRead // Rejects deferred snapshots older than the applied Git state.
@@ -1242,14 +1250,14 @@ func (t *Task) PushStats(s *runtime.Stats) {
 	} else if t.diskKnown {
 		val.DiskUsed = t.diskUsed
 	}
-	idx := (t.statsHead + t.statsLen) % statsRingSize
+	idx := (t.statsHead + t.statsLen) % StatsRingSize
 	t.statsRing[idx] = val
 	t.statsSeq++
 	t.statsRingSeq[idx] = t.statsSeq
-	if t.statsLen < statsRingSize {
+	if t.statsLen < StatsRingSize {
 		t.statsLen++
 	} else {
-		t.statsHead = (t.statsHead + 1) % statsRingSize
+		t.statsHead = (t.statsHead + 1) % StatsRingSize
 	}
 	wakeLocked(t.statsWakeSubs)
 	t.mu.Unlock()
@@ -1266,7 +1274,7 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 		t.mu.Unlock()
 		return
 	}
-	idx := (t.statsHead + t.statsLen - 1) % statsRingSize
+	idx := (t.statsHead + t.statsLen - 1) % StatsRingSize
 	t.statsRing[idx].DiskUsed = bytes
 	t.statsSeq++
 	t.statsRingSeq[idx] = t.statsSeq
@@ -1294,7 +1302,7 @@ func (t *Task) StatsSince(after uint64) (samples []runtime.Stats, through uint64
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for i := range t.statsLen {
-		idx := (t.statsHead + i) % statsRingSize
+		idx := (t.statsHead + i) % StatsRingSize
 		if t.statsRingSeq[idx] > after {
 			samples = append(samples, t.statsRing[idx])
 		}
@@ -1587,7 +1595,7 @@ func (t *Task) clearContextLocked(at time.Time) {
 func (t *Task) snapshotLocked() Snapshot {
 	var sample *runtime.Stats
 	if t.statsLen > 0 {
-		sample = new(t.statsRing[(t.statsHead+t.statsLen-1)%statsRingSize])
+		sample = new(t.statsRing[(t.statsHead+t.statsLen-1)%StatsRingSize])
 	}
 	return Snapshot{
 		SessionMetadata:    t.sessionMetadata,
@@ -1611,7 +1619,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		RequestedModel:     t.RequestedModel,
 		RequestedEffort:    t.RequestedEffort,
 		ContextWindowLimit: t.reportedContextWindow,
-		ContextUsed:        t.contextUsed,
+		ContextUsed:        t.contextMeter.Used,
 		InPlanMode:         t.inPlanMode,
 		PlanFile:           t.planFile,
 		PlanContent:        t.planContent,
@@ -1623,7 +1631,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		Duration:           t.turnMetrics.Duration,
 		Usage:              t.liveUsage.Clone(),
 		LastUsage:          t.lastUsage.Clone(),
-		LastAPIUsage:       t.lastAPIUsage.Clone(),
+		LastAPIUsage:       t.contextMeter.API.Clone(),
 		CacheExpiresAt:     t.cacheExpiresAt,
 		DiffStat:           t.liveDiffStat,
 		RepoStates:         t.liveRepoStates,
@@ -1754,39 +1762,19 @@ func (t *Task) setLiveRepoStatesLocked(states []v3.RepoState) {
 // observeContextLocked folds root context snapshots independently from billing.
 // The caller holds t.mu.
 func (t *Task) observeContextLocked(msg agent.Message, at time.Time, priorSessionID string) bool {
-	switch m := msg.(type) {
-	case *agent.InitMessage:
-		if m.SessionID == priorSessionID {
-			return false
-		}
-		t.contextUsed = nil
-	case *agent.UsageMessage:
-		// Native occupancy alone does not replace the billed API-call snapshot.
-		if m.ContextUsed == nil || !m.Usage.Equal(agent.Usage{}) || m.PerCall {
-			t.lastAPIUsage = m.Usage
+	change := t.contextMeter.Observe(msg, priorSessionID)
+	if m, ok := msg.(*agent.UsageMessage); ok && change != agent.ContextUnchanged {
+		if change == agent.ContextAPICall {
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
 				t.cacheExpiresAt = at.Add(time.Duration(m.Usage.CacheTTLSeconds) * time.Second)
 			}
 		}
-		if m.ContextUsed != nil {
-			t.contextUsed = m.ContextUsed
-		}
 		if m.ContextWindow > 0 {
 			t.reportedContextWindow = m.ContextWindow
 		}
-	case *agent.SystemMessage:
-		if m.Subtype != agent.SystemSubtypeCompactBoundary && m.Subtype != "context_cleared" {
-			return false
-		}
-		t.contextUsed = nil
-		if m.ContextTokensAfter > 0 {
-			t.lastAPIUsage = agent.Usage{InputTokens: int(m.ContextTokensAfter)}
-		}
-	default:
-		return false
 	}
-	return true
+	return change != agent.ContextUnchanged
 }
 
 // observeUsageLocked accumulates root token contributions while leaving

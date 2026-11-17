@@ -20,6 +20,7 @@ function setup(readCosts: TaskHistory["readCosts"]) {
       manifest,
       messages: () => [],
       stats: () => [],
+      statsRetained: () => 0,
       through: () => 0,
       epoch: () => 0,
       loading: () => false,
@@ -32,6 +33,9 @@ function setup(readCosts: TaskHistory["readCosts"]) {
       readSetup: async () => [],
       readActivity: async () => [],
       readCosts,
+      readTurn: async () => {
+        throw new Error("Analytics must not read turn timelines");
+      },
     };
     return { ...createTaskAnalytics(history), setManifest, dispose };
   });
@@ -42,7 +46,9 @@ function manifestValue() {
     {
       recordID: 4,
       index: 2,
+      number: 1,
       sectionID: "old",
+      startedAt: "2025-12-31T23:59:59Z" as never,
       at: "2026-01-01T00:00:00Z" as never,
       model: "original",
       durationMs: 1000,

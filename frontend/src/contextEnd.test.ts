@@ -1,0 +1,56 @@
+// Tests the shared wording for how a context ended: compaction with and without sizes, a clear, a new session, and the current context.
+
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type { EventMessage, HistorySection } from "@sdk/types.gen";
+import { contextEndDetail, contextEndLabel } from "./contextEnd";
+
+function ended(message: EventMessage | null): HistorySection {
+  return {
+    id: "1",
+    endBoundary: message ? { recordID: 1, index: 0, message } : undefined,
+    turnCount: 1,
+    textCount: 0,
+    toolCount: 0,
+    durationMs: 0,
+    skills: [],
+  };
+}
+
+describe("contextEnd", () => {
+  it("names compaction, with the sizes the harness reported", () => {
+    const sized = ended({
+      kind: "system",
+      ts: 1,
+      system: { subtype: "compact_boundary", contextTokensBefore: 150_000, contextTokensAfter: 20_000 },
+    });
+    assert.equal(contextEndLabel(sized), "Ended by compaction");
+    assert.equal(contextEndDetail(sized), "Ended by compaction from 150,000 to 20,000 tokens");
+    const before = ended({
+      kind: "system",
+      ts: 1,
+      system: { subtype: "compact_boundary", contextTokensBefore: 150_000 },
+    });
+    assert.equal(contextEndDetail(before), "Ended by compaction of 150,000 tokens");
+    const unsized = ended({ kind: "system", ts: 1, system: { subtype: "compact_boundary" } });
+    assert.equal(contextEndDetail(unsized), "Ended by compaction");
+  });
+
+  it("names a clear and a new session", () => {
+    const cleared = ended({ kind: "system", ts: 1, system: { subtype: "context_cleared" } });
+    assert.equal(contextEndLabel(cleared), "Ended by a context clear");
+    assert.equal(contextEndDetail(cleared), "Ended by a context clear");
+    const session = ended({
+      kind: "init",
+      ts: 1,
+      init: { reportedModel: "m", agentVersion: "v", sessionID: "next", tools: [], cwd: "", harness: "h" },
+    });
+    assert.equal(contextEndLabel(session), "Ended by a new session");
+  });
+
+  it("leaves the current context without an end", () => {
+    assert.equal(contextEndLabel(ended(null)), null);
+    assert.equal(contextEndDetail(ended(null)), "Current context");
+  });
+});

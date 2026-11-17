@@ -36,9 +36,11 @@
   border-bottom: 1px solid var(--color-border-light);
 }
 
-/* A table of labels rather than numbers reads from the left. */
+/* A table of labels rather than numbers reads from the left, and so does a
+   text column of a table of numbers. */
 .labels th,
-.labels td {
+.labels td,
+.table [data-align="text"] {
   text-align: left;
 }
 

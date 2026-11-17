@@ -1,4 +1,4 @@
-// Tests context manifests, payload-free summaries, exact slices, and finite activity disclosures.
+// Tests context manifests, payload-free summaries, exact slices, finite activity disclosures, and turn context sizes that match the task meter.
 
 package history
 
@@ -26,10 +26,80 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/maruel/ksid"
 )
 
 func TestSourceSections(t *testing.T) {
 	t.Parallel()
+	t.Run("turns record the context size the task meter shows", func(t *testing.T) {
+		t.Parallel()
+		child := taskslogv3.MessageSource{AgentID: "child"}
+		compaction := func(after int64) agent.Message {
+			return &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: after}
+		}
+		usage := func(u agent.Usage) agent.Message { return &agent.UsageMessage{Usage: u} }
+		occupancy := func(used int, perCall bool) agent.Message {
+			return &agent.UsageMessage{ContextUsed: new(used), PerCall: perCall}
+		}
+		groups := [][]agent.Message{
+			{&agent.InitMessage{SessionID: "one"}},
+			// The last root call's input context, not a child's.
+			{usage(agent.Usage{InputTokens: 10, CacheCreationInputTokens: 100, CacheReadInputTokens: 1000, OutputTokens: 5})},
+			{&agent.UsageMessage{Source: child, Usage: agent.Usage{InputTokens: 99_999}}},
+			{&agent.ResultMessage{}},
+			// Native occupancy takes precedence over billed calls.
+			{occupancy(5000, false)},
+			{usage(agent.Usage{InputTokens: 7, CacheReadInputTokens: 2000})},
+			{&agent.ResultMessage{}},
+			// Compaction discards the occupancy and reports the context after it.
+			{compaction(300)},
+			{&agent.ResultMessage{}},
+			// One API call that reports only occupancy replaces the call
+			// snapshot, so a later compaction without a size leaves none.
+			{occupancy(800, true)},
+			{&agent.ResultMessage{}},
+			{compaction(0)},
+			{&agent.ResultMessage{}},
+			// Only a new session discards the occupancy.
+			{usage(agent.Usage{InputTokens: 50})},
+			{&agent.InitMessage{SessionID: "one"}, occupancy(900, false)},
+			{&agent.ResultMessage{}},
+			{&agent.InitMessage{SessionID: "two"}},
+			{&agent.ResultMessage{}},
+		}
+		source, _ := costFixture(t, harness.Codex, groups...)
+		if _, err := source.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		_, _, metadata, err := source.Sections(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]int, 0, len(metadata.Turns))
+		for _, turn := range metadata.Turns {
+			got = append(got, turn.ContextTokens)
+		}
+		// The live task folds the same records into the same sizes.
+		var meter []int
+		var messages []agent.Message
+		for _, group := range groups {
+			messages = append(messages, group...)
+			if _, ok := group[0].(*agent.ResultMessage); !ok {
+				continue
+			}
+			tk, err := taskrun.NewTask(ksid.NewID(), agent.Prompt{Text: "context"}, harness.Codex, "", "", "", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
+			snap := tk.Snapshot()
+			meter = append(meter, (&agent.ContextMeter{Used: snap.ContextUsed, API: snap.LastAPIUsage}).Tokens())
+		}
+		if want := []int{1110, 5000, 300, 800, 0, 900, 50}; !slices.Equal(got, want) || !slices.Equal(meter, want) {
+			t.Fatalf("turn context tokens = %v, task meter = %v, want %v", got, meter, want)
+		}
+	})
 	t.Run("resumed transcript anchor survives routing changes and rebuilds", func(t *testing.T) {
 		t.Parallel()
 		for _, incremental := range []bool{true, false} {
@@ -892,6 +962,101 @@ func TestSectionIndex(t *testing.T) {
 					t.Fatalf("summary = %#v", sections[0])
 				}
 			})
+		}
+	})
+	t.Run("turns are numbered across contexts with explicit starts", func(t *testing.T) {
+		t.Parallel()
+		s := newSectionIndex()
+		child := v1.EventMessageSource{AgentID: "child"}
+		input := func(ts int64) v1.EventMessage {
+			return v1.EventMessage{Kind: v1.EventKindUserInput, Ts: ts, UserInput: &v1.Prompt{Text: "prompt"}}
+		}
+		failed := func(ts int64) v1.EventMessage {
+			return v1.EventMessage{Kind: v1.EventKindSystem, Ts: ts, System: &v1.EventSystem{Subtype: v1.EventSystemSubtypeInputDeliveryFailed}}
+		}
+		result := func(ts int64, src v1.EventMessageSource) v1.EventMessage {
+			return v1.EventMessage{Kind: v1.EventKindResult, Ts: ts, Source: src, Result: &v1.EventResult{Duration: 0.5}}
+		}
+		for i, m := range []v1.EventMessage{
+			input(1000),
+			{Kind: v1.EventKindInit, Ts: 1500, Init: &v1.EventInit{SessionID: "first", ReportedModel: "model", ReportedEffort: "high"}},
+			result(1800, child),
+			result(2000, v1.EventMessageSource{}),
+			input(3000),
+			{Kind: v1.EventKindSystem, Ts: 3500, System: &v1.EventSystem{Subtype: "compact_boundary"}},
+			result(4000, v1.EventMessageSource{}),
+			// A turn the harness queues after background work ends starts at its
+			// first root activity, not at the lifecycle update or child output.
+			{Kind: v1.EventKindBackgroundCommand, Ts: 4200, BackgroundCommand: &v1.EventBackgroundCommand{ID: "cmd", Status: "completed"}},
+			{Kind: v1.EventKindText, Ts: 4300, Source: child, Text: &v1.EventText{Text: "child"}},
+			{Kind: v1.EventKindThinking, Ts: 4600, Thinking: &v1.EventThinking{}},
+			result(5000, v1.EventMessageSource{}),
+			// The cleared context abandons this prompt's unfinished turn; a turn
+			// without root prompt or activity starts at its result.
+			input(6000),
+			{Kind: v1.EventKindSystem, Ts: 6500, System: &v1.EventSystem{Subtype: "context_cleared"}},
+			{Kind: v1.EventKindInit, Ts: 6600, Init: &v1.EventInit{SessionID: "second", ReportedModel: "model"}},
+			result(7000, v1.EventMessageSource{}),
+			// An undelivered prompt neither starts the turn nor ends the wait.
+			input(8000),
+			failed(8100),
+			input(9000),
+			result(10000, v1.EventMessageSource{}),
+			// Root output accepted the prompt; a later failed steer keeps it.
+			input(11000),
+			{Kind: v1.EventKindText, Ts: 11500, Text: &v1.EventText{Text: "working"}},
+			input(11800),
+			failed(11900),
+			result(12000, v1.EventMessageSource{}),
+			// Activity before a failed prompt keeps the turn's start.
+			{Kind: v1.EventKindToolUse, Ts: 13000, ToolUse: &v1.EventToolUse{ToolUseID: "tool", Name: "Bash"}},
+			input(13500),
+			failed(13600),
+			result(14000, v1.EventMessageSource{}),
+		} {
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
+		}
+		sections, metadata := s.snapshot()
+		if len(sections) != 3 {
+			t.Fatalf("sections = %#v", sections)
+		}
+		type turn struct {
+			number         int
+			section        string
+			started, ended int64
+			effort         string
+		}
+		got := make([]turn, 0, len(metadata.Turns))
+		for _, tr := range metadata.Turns {
+			got = append(got, turn{tr.Number, tr.SectionID, tr.StartedAt.UnixMilli(), tr.At.UnixMilli(), tr.Effort})
+		}
+		want := []turn{
+			{1, "1", 1000, 2000, "high"},
+			{2, "2", 3000, 4000, "high"},
+			{3, "2", 4600, 5000, "high"},
+			{4, "3", 7000, 7000, ""},
+			{5, "3", 9000, 10000, ""},
+			{6, "3", 11000, 12000, ""},
+			{7, "3", 13000, 14000, ""},
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("turns = %+v, want %+v", got, want)
+		}
+		// Each wait ends at the delivered prompt that starts the next turn.
+		for i, w := range []struct {
+			ms     int64
+			record uint64
+		}{{1000, 5}, {}, {1000, 12}, {2000, 18}, {1000, 20}, {}} {
+			tr := metadata.Turns[i]
+			if w.ms == 0 {
+				if tr.WaitMS != nil || tr.WaitInput != nil {
+					t.Errorf("turn %d wait = %v at %v, want none", tr.Number, *tr.WaitMS, tr.WaitInput)
+				}
+				continue
+			}
+			if tr.WaitMS == nil || *tr.WaitMS != w.ms || tr.WaitInput == nil || tr.WaitInput.RecordID != w.record {
+				t.Errorf("turn %d wait = %v at %v, want %dms at record %d", tr.Number, tr.WaitMS, tr.WaitInput, w.ms, w.record)
+			}
 		}
 	})
 	t.Run("consolidated and interrupted text counts", func(t *testing.T) {

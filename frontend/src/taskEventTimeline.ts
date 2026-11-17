@@ -1,4 +1,4 @@
-// Shares current-context history, server summaries, and disclosure reads across selected-task subviews.
+// Shares current-context history, server summaries, disclosure reads, and turn timelines across selected-task subviews.
 import { createMemo, untrack, type Accessor } from "solid-js";
 import type {
   EventMessage,
@@ -9,6 +9,7 @@ import type {
   HistoryPosition,
   HistorySection,
   HistoryTurnEstimate,
+  HistoryTurnTimeline,
 } from "@sdk/types.gen";
 import { createTaskHistory } from "./taskHistory";
 
@@ -17,6 +18,8 @@ export interface TaskHistory {
   messages: Accessor<readonly EventMessage[]>;
   manifest: Accessor<HistoryManifest | null>;
   stats: Accessor<EventStats[]>;
+  // statsRetained is the server's resource ring capacity; zero until known.
+  statsRetained: Accessor<number>;
   through: Accessor<number>;
   epoch: Accessor<number>;
   loading: Accessor<boolean>;
@@ -32,6 +35,9 @@ export interface TaskHistory {
     signal: AbortSignal,
   ) => Promise<HistoryEvent[]>;
   readCosts: (signal: AbortSignal) => Promise<HistoryTurnEstimate[]>;
+  // readTurn fetches root turn number's server-derived timeline: a completed
+  // turn, or the running one as far as the server has observed it.
+  readTurn: (number: number, signal: AbortSignal) => Promise<HistoryTurnTimeline>;
 }
 
 export function createTaskEventTimeline(options: { taskId: Accessor<string> }): TaskHistory {
@@ -48,6 +54,7 @@ export function createTaskEventTimeline(options: { taskId: Accessor<string> }): 
     messages: () => source().messages(),
     manifest: () => source().manifest(),
     stats: () => source().stats(),
+    statsRetained: () => source().statsRetained(),
     through: () => source().through(),
     epoch,
     loading: () => source().loading(),
@@ -58,5 +65,6 @@ export function createTaskEventTimeline(options: { taskId: Accessor<string> }): 
     readSetup: (signal) => source().readSetup(signal),
     readActivity: (activity, through, after, signal) => source().readActivity(activity, through, after, signal),
     readCosts: (signal) => source().readCosts(signal),
+    readTurn: (number, signal) => source().readTurn(number, signal),
   };
 }

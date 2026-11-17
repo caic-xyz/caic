@@ -1,4 +1,4 @@
-// Waits for lazily rendered transcript elements, cancels on user scrolling, and reveals one: opens, scrolls, focuses, marks.
+// Waits for lazily rendered or hidden transcript elements, cancels on user scrolling, and reveals one: opens, scrolls, marks, and optionally focuses.
 
 const HIGHLIGHT_MS = 1_600;
 // One element carries the mark at a time: a later reveal moves it.
@@ -53,18 +53,68 @@ export function waitForElement(
   });
 }
 
-// Opens the enclosing disclosures, scrolls to the target, focuses its control,
-// and briefly highlights it. The default scroll centers it with reduced-motion
-// support. A caller that owns the viewport can supply its own positioning.
-export function revealElement(el: HTMLElement, highlightClass: string, scroll?: (target: HTMLElement) => void): void {
+// whenVisible resolves true once visible() holds for el, after two more frames
+// so that layout corrections made when el reappears do not move a later
+// reveal; false on abort or timeout.
+export function whenVisible(
+  el: Element | undefined,
+  visible: () => boolean,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (!el || signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let frame = 0;
+    const finish = (shown: boolean) => {
+      observer.disconnect();
+      clearTimeout(timer);
+      cancelAnimationFrame(frame);
+      signal.removeEventListener("abort", abort);
+      resolve(shown);
+    };
+    const settle = () => {
+      if (frame !== 0 || !visible()) return;
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => finish(true));
+      });
+    };
+    const observer = new ResizeObserver(settle);
+    const abort = () => finish(false);
+    const timer = setTimeout(abort, timeoutMs);
+    observer.observe(el);
+    signal.addEventListener("abort", abort);
+    settle();
+  });
+}
+
+// RevealOptions selects what a reveal does beyond scrolling and marking.
+export interface RevealOptions {
+  // focus moves focus to el's summary or button, or el itself.
+  focus: boolean;
+  // open also opens el when it is a disclosure, such as the tool call or
+  // agent card the user asked to see.
+  open?: boolean;
+  // scroll positions el in place of the default centering, for a caller that
+  // owns the viewport.
+  scroll?: (target: HTMLElement) => void;
+}
+
+// revealElement opens the disclosures around el, and el itself when asked,
+// scrolls it into view, and marks it with highlightClass for a short time. The
+// default scroll centers el vertically, or puts its top at the top of the view
+// when it is taller; smooth scrolling honors reduced motion.
+export function revealElement(el: HTMLElement, highlightClass: string, options: RevealOptions): void {
   for (let d = el.parentElement?.closest("details"); d; d = d.parentElement?.closest("details")) d.open = true;
-  (scroll ?? scrollToCenter)(el);
-  let control = el.querySelector<HTMLElement>(":scope > summary, :scope > button");
-  if (!control) {
-    if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
-    control = el;
+  if (options.open && el.matches("details")) el.open = true;
+  (options.scroll ?? scrollToCenter)(el);
+  if (options.focus) {
+    let control = el.querySelector<HTMLElement>(":scope > summary, :scope > button");
+    if (!control) {
+      if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
+      control = el;
+    }
+    control.focus({ preventScroll: true });
   }
-  control.focus({ preventScroll: true });
   if (marked) {
     clearTimeout(marked.timer);
     marked.el.classList.remove(marked.className);
@@ -84,7 +134,8 @@ export function revealElement(el: HTMLElement, highlightClass: string, scroll?: 
 }
 
 // scrollToCenter scrolls only vertically: scrollIntoView would also scroll a
-// page sideways to the start of a row wider than a narrow viewport.
+// page sideways to the start of a row wider than a narrow viewport. An element
+// taller than the view keeps its top, and so its summary, in view.
 function scrollToCenter(el: HTMLElement): void {
   const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   let scroller: Element | null = el.parentElement;
@@ -95,8 +146,8 @@ function scrollToCenter(el: HTMLElement): void {
   const box = el.getBoundingClientRect();
   if (scroller) {
     const view = scroller.getBoundingClientRect();
-    scroller.scrollBy({ top: box.top - view.top - (view.height - box.height) / 2, behavior });
+    scroller.scrollBy({ top: box.top - view.top - Math.max(0, (view.height - box.height) / 2), behavior });
   } else {
-    window.scrollBy({ top: box.top - (window.innerHeight - box.height) / 2, behavior });
+    window.scrollBy({ top: box.top - Math.max(0, (window.innerHeight - box.height) / 2), behavior });
   }
 }

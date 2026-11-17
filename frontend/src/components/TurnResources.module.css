@@ -1,0 +1,91 @@
+/* Resource lanes under the turn timeline: the same axis width and gridlines, a line and dots per series on an explicit domain, and a coverage note. */
+
+.resources {
+  --resource-track-height: 1.75rem;
+  --resource-dot: 4px;
+
+  margin-top: 0.45rem;
+}
+
+/* The timeline plot reserves this room right of its axis; the lanes keep it so
+   both tracks share one width. */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-right: 0.75rem;
+}
+
+.lane {
+  --series-color: var(--color-chart-cpu);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.lane[data-series="memory"] {
+  --series-color: var(--color-chart-memory);
+}
+
+.label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.summary {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+}
+
+/* The bottom border is the domain's zero; the right border is the axis end. */
+.track {
+  --tick-share: 1;
+
+  position: relative;
+  height: var(--resource-track-height);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-border-light) 0 1px,
+    transparent 1px calc(var(--tick-share) * 100%)
+  );
+  border-right: 1px solid var(--color-border-strong);
+  border-bottom: 1px solid var(--color-border-medium);
+}
+
+.line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.line polyline {
+  fill: none;
+  stroke: var(--series-color);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.dot {
+  --x: 0;
+  --y: 0;
+
+  position: absolute;
+  bottom: calc(var(--y) * 100%);
+  left: calc(var(--x) * 100%);
+  width: var(--resource-dot);
+  height: var(--resource-dot);
+  background: var(--series-color);
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+}
+
+.note {
+  margin: 0.4rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+}

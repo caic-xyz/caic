@@ -116,6 +116,12 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
   }
 }
 
+// formatExactSeconds states a duration to the millisecond in one unit, so a
+// column of them aligns and compares; text alternatives use it for exact values.
+export function formatExactSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(3)} s`;
+}
+
 // formatTotalDuration shows "0s" for an unmeasured total instead of "0ms".
 export function formatTotalDuration(ms: number): string {
   return ms > 0 ? formatTimingDuration(ms) : "0s";

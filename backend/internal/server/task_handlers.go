@@ -515,6 +515,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/activity/{activity}/{through}", hh.handleHistoryActivity)
 	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}", hh.handleHistorySetup)
 	m.HandleFunc("GET /tasks/{id}/history/costs", hh.handleHistoryCosts)
+	m.HandleFunc("GET /tasks/{id}/history/turns/{n}", hh.handleHistoryTurn)
 	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)
 	m.HandleFunc("GET /tasks/{id}/input/{inputID}/images/{index}", h.handleQueuedInputImage)
 	m.HandleFunc("POST /tasks/{id}/input/cancel", handleWithTask(h, h.taskSvc.cancelQueuedInput))

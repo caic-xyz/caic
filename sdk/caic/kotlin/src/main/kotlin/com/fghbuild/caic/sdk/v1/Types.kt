@@ -913,6 +913,44 @@ object HarnessSerializer : KSerializer<Harness> {
     }
 }
 
+@Serializable(with = HistoryTurnSpanKindSerializer::class)
+sealed interface HistoryTurnSpanKind {
+    val value: String
+    @Serializable
+    data object Background : HistoryTurnSpanKind {
+        override val value = "background"
+    }
+    @Serializable
+    data object Model : HistoryTurnSpanKind {
+        override val value = "model"
+    }
+    @Serializable
+    data object Subagent : HistoryTurnSpanKind {
+        override val value = "subagent"
+    }
+    @Serializable
+    data object Tool : HistoryTurnSpanKind {
+        override val value = "tool"
+    }
+    @Serializable
+    data class Other(override val value: String) : HistoryTurnSpanKind
+}
+
+object HistoryTurnSpanKindSerializer : KSerializer<HistoryTurnSpanKind> {
+    override val descriptor = PrimitiveSerialDescriptor("HistoryTurnSpanKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: HistoryTurnSpanKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): HistoryTurnSpanKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "background" -> HistoryTurnSpanKind.Background
+            "model" -> HistoryTurnSpanKind.Model
+            "subagent" -> HistoryTurnSpanKind.Subagent
+            "tool" -> HistoryTurnSpanKind.Tool
+            else -> HistoryTurnSpanKind.Other(v)
+        }
+    }
+}
+
 @Serializable(with = ImageRefreshStateSerializer::class)
 sealed interface ImageRefreshState {
     val value: String
@@ -3442,14 +3480,31 @@ data class HistoryRoute(
  * HistoryTurn retains numeric invocation facts independently of transcript
  * lifetime. SectionID associates the turn with its context. Pricing is obtained
  * separately through getHistoryCosts using the embedded exact position.
+ *
+ * Number counts root turns from 1 across every context section of the task;
+ * delegated child results are not turns. StartedAt is the first root prompt or
+ * root activity after the previous root result, as in the task's turn metrics.
+ * A turn the harness queues by itself, such as one delivering the end of
+ * background work, starts at its first root activity. Compaction keeps the
+ * start; a context clear discards it, and so does a failed delivery of the
+ * starting prompt before root output accepted it. A turn without any root
+ * prompt or activity starts at its result. At is the result. WaitMS is the
+ * time from At to the prompt at WaitInput, which starts the next turn.
+ * Effort is the root reasoning effort reported by the last init.
+ * ContextTokens is the root context size when the turn ended, as the task's
+ * context meter measures it: the native occupancy when the harness reports it,
+ * else the input context of the last root API call. Zero means unknown.
  */
 @Serializable
 data class HistoryTurn(
     @SerialName("recordID") val recordID: Long,
     val index: Long,
+    val number: Int,
     @SerialName("sectionID") val sectionID: String,
+    val startedAt: Instant,
     val at: Instant,
     val model: String,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val effort: String? = null,
     val usage: EventUsage,
     val durationMs: Long,
     @SerialName("durationAPIMs") val durationAPIMs: Long,
@@ -3457,6 +3512,23 @@ data class HistoryTurn(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val waitMs: Long? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val changeStat: EventChangeStat? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val cost: EventCost? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val contextTokens: Int? = null,
+)
+
+/**
+ * HistoryRunningTurn is the root turn in progress: a root prompt or root
+ * activity started it, and no root result has ended it yet. Number is one past
+ * the last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,
+ * so the turn keeps both when it completes. SectionID is the context it runs
+ * in; compaction can move it to a later one. A turn stops running when the
+ * harness process exits without ending it: the turn does not complete, and a
+ * later root prompt or activity resumes it from the same start.
+ */
+@Serializable
+data class HistoryRunningTurn(
+    val number: Int,
+    @SerialName("sectionID") val sectionID: String,
+    val startedAt: Instant,
 )
 
 /** HistoryToolTiming aggregates completed tools across root and child actors. */
@@ -3543,6 +3615,7 @@ data class HistoryMetadata(
     val hasInitialPrompt: Boolean,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val setupEndedAt: Instant? = null,
     val turns: List<HistoryTurn>?,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val runningTurn: HistoryRunningTurn? = null,
     val tools: List<HistoryToolTiming>?,
     val activities: List<HistoryActivity>?,
     val backgroundCommands: List<HistoryBackgroundCommand>?,
@@ -3579,6 +3652,161 @@ data class HistoryTurnEstimate(
 )
 
 /**
+ * HistoryTurnSpan is one interval of a turn timeline, in milliseconds from the
+ * turn start. EndMS is absent when the span has no observed end: a tool call
+ * still open when the turn ended or still running, a subagent or command whose
+ * Status is running or unknown, or the provisional model span of a running
+ * turn. A subagent or command can end after the turn: EndMS then exceeds the
+ * turn duration.
+ *
+ * The identity locates the span's transcript item. A tool span has Source and
+ * ToolUseID, which scope the call as tool cards do. A command span has
+ * CommandID, plus the Source and ToolUseID of the call that launched it. A
+ * subagent span has ActivityID, a HistoryActivity ID; a tool or command span by
+ * a child actor names its owning activity there when known. A model span has
+ * only times.
+ *
+ * Label is the tool name, subagent label, or command label; Detail is the tool
+ * card's short detail. Status is completed, failed, or interrupted for a tool;
+ * subagents and commands use their HistoryActivity and HistoryBackgroundCommand
+ * status values.
+ */
+@Serializable
+data class HistoryTurnSpan(
+    val kind: HistoryTurnSpanKind,
+    val startMs: Long,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val endMs: Long? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val label: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val detail: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val status: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val source: EventMessageSource? = null,
+    @SerialName("toolUseID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolUseID: String? = null,
+    @SerialName("activityID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val activityID: String? = null,
+    @SerialName("commandID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val commandID: String? = null,
+)
+
+/**
+ * HistoryTurnOmission summarizes the spans of one kind that a timeline omits.
+ * DurationMS sums their durations within the turn, which can overlap: a span
+ * without an end, or one that outlives the turn, counts up to the turn's end.
+ */
+@Serializable
+data class HistoryTurnOmission(
+    val kind: HistoryTurnSpanKind,
+    val count: Int,
+    val durationMs: Long,
+)
+
+/**
+ * HistoryTurnCall is one model API call in a turn, by the root agent or a
+ * child actor. Number counts the turn's calls from 1 in the order the harness
+ * reported them, which is the timeline's order. AtMS is when the harness
+ * reported the call, in milliseconds from the turn start: a call reports its
+ * usage when it ends, so AtMS is the end of the model time that produced it.
+ *
+ * The call's context is its input classes summed. ContextWindow is absent
+ * when unknown; root calls without their own report use the window the turn
+ * reports. Cost is absent when the call cannot be priced. It is reported when
+ * the harness prices each call, and otherwise estimated from model token
+ * prices, even when the harness reports the turn's total.
+ */
+@Serializable
+data class HistoryTurnCall(
+    val inputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val outputTokens: Int,
+    val reasoningOutputTokens: Int,
+    val number: Int,
+    val atMs: Long,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val source: EventMessageSource? = null,
+    @SerialName("activityID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val activityID: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val model: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val contextWindow: Int? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val cost: EventCost? = null,
+)
+
+/** HistoryTurnCallOmission sums the token classes of the calls a timeline omits. */
+@Serializable
+data class HistoryTurnCallOmission(
+    val inputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val outputTokens: Int,
+    val reasoningOutputTokens: Int,
+    val count: Int,
+)
+
+/**
+ * HistoryTurnTokens are disjoint token classes. The three input classes sum to
+ * a call's input context; ReasoningOutputTokens is a subset of OutputTokens.
+ */
+@Serializable
+data class HistoryTurnTokens(
+    val inputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val outputTokens: Int,
+    val reasoningOutputTokens: Int,
+)
+
+/**
+ * HistoryTurnTool sums one tool name's calls that start in the turn, by the
+ * root agent and child actors. DurationMS and LongestMS count only time within
+ * the turn: a call without an end counts up to the turn's end. Concurrent calls
+ * overlap, so durations can sum to more than the turn.
+ */
+@Serializable
+data class HistoryTurnTool(
+    val name: String,
+    val calls: Int,
+    val durationMs: Long,
+    val longestMs: Long,
+)
+
+/**
+ * HistoryTurnTimeline places one root turn's work on one time axis of
+ * DurationMS from StartedAt. For a completed turn, StartedAt and EndedAt match
+ * its HistoryTurn's StartedAt and At. For the HistoryRunningTurn, EndedAt is absent and the axis
+ * ends at the later of the server's clock and the turn's latest observation
+ * when the server derived the timeline; open spans and model time then grow
+ * with each request. It includes tool calls
+ * that start in the turn, from the root agent and from child actors, and the
+ * subagents and detached commands that start in it, including those that
+ * outlive it. Model spans fill the turn time outside root tool calls; ModelMS
+ * is their exact total. Background work and child calls run beside the root
+ * agent, so they do not reduce model time.
+ *
+ * Spans holds at most 500 spans sorted by start: the longest ones, with spans
+ * lacking an end kept first. Omitted counts the shorter spans left out, per
+ * kind. The server derives the timeline from its own history index, so archived
+ * context sections need no transcript download. Durations within the turn count
+ * up to the axis end.
+ *
+ * Calls holds at most 500 API calls sorted by Number: those with the most
+ * tokens. OmittedCalls sums the rest. Calls is empty when the harness reports
+ * usage only per turn. Unattributed sums the root agent's usage reports that
+ * cover no single call, such as cumulative deltas spanning several requests
+ * after a missed event; they are not priced per call. Tools sums every tool
+ * call in the turn by name, longest total first, including calls that Spans
+ * omits.
+ */
+@Serializable
+data class HistoryTurnTimeline(
+    val number: Int,
+    val startedAt: Instant,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val endedAt: Instant? = null,
+    val durationMs: Long,
+    val modelMs: Long,
+    val spans: List<HistoryTurnSpan>?,
+    val omitted: List<HistoryTurnOmission>?,
+    val calls: List<HistoryTurnCall>?,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val omittedCalls: HistoryTurnCallOmission? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val unattributed: HistoryTurnTokens? = null,
+    val tools: List<HistoryTurnTool>?,
+)
+
+/**
  * HistoryCheckpoint advances through all outputs of a physical record,
  * including a record with zero outputs. Cursor is opaque; it encodes projection
  * version, generation, raw record and either output index or end-of-record.
@@ -3589,12 +3817,20 @@ data class HistoryTurnEstimate(
 data class HistoryCheckpoint(val cursor: String, val through: Long)
 
 /**
- * HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+ * HistoryStats contains the bounded runtime ring, oldest first.
  * Replace samples sharing a timestamp: disk usage can revise the latest sample.
  * These host observations are separate from immutable raw task history.
  */
 @Serializable
-data class HistoryStats(val samples: List<EventStats>?)
+data class HistoryStats(
+    val samples: List<EventStats>?,
+    /**
+     * Retained is the ring's capacity: the server keeps at most this many
+     * latest samples, so a full ring has dropped older ones. Clients keep as
+     * many while live samples arrive.
+     */
+    val retained: Int,
+)
 
 /** HistoryReset tells an SSE client to close the stream and rediscover bootstrap. */
 @Serializable

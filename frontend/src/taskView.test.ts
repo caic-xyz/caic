@@ -19,11 +19,13 @@ describe("taskViewMode", () => {
     expect(taskViewMode("/task/@abc+slug/view", "?path=%2Fnotes.md&fullscreen=1")).toBe("fullscreen");
   });
   it("supports task tools without requiring a file path", () => {
-    for (const path of ["diff", "info", "processes", "stats", "vnc"]) {
+    for (const path of ["diff", "info", "perf", "perf/turns/3", "perf/contexts/2", "processes", "vnc"]) {
       expect(taskViewMode(`/task/@abc/${path}`, "")).toBe("docked");
       expect(taskViewMode(`/task/@abc+slug/${path}`, "?fullscreen=1")).toBe("fullscreen");
     }
     expect(taskViewMode("/task/@abc/unknown", "?fullscreen=1")).toBe("closed");
-    expect(taskViewMode("/task/@abc/stats/nested", "?fullscreen=1")).toBe("closed");
+    expect(taskViewMode("/task/@abc/perf/nested", "?fullscreen=1")).toBe("closed");
+    expect(taskViewMode("/task/@abc/perf/turns/3/nested", "?fullscreen=1")).toBe("closed");
+    expect(taskViewMode("/task/@abc/perf/contexts/2/nested", "?fullscreen=1")).toBe("closed");
   });
 });

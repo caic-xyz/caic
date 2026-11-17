@@ -35,14 +35,22 @@ interface HistoryAttempt {
   retryTimer: ReturnType<typeof setTimeout> | null;
   watchdog: ReturnType<typeof setTimeout> | null;
   aliveUntil: number;
-  incomingStats: EventStats[] | null;
+  incomingStats: RetainedStats | null;
   observedThrough: number;
+}
+
+// RetainedStats is the resource ring as the stream delivered it: its samples
+// and the server's capacity, which bounds the samples kept.
+interface RetainedStats {
+  samples: EventStats[];
+  retained: number;
 }
 
 export function createTaskHistory(id: string): TaskHistory {
   const [messages, setMessages] = createSignal<EventMessage[]>([], { equals: false });
   const [manifest, setManifest] = createSignal<HistoryManifest | null>(null);
   const [stats, setStats] = createSignal<EventStats[]>([]);
+  const [statsRetained, setStatsRetained] = createSignal(0);
   const [through, setThrough] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [loading, setLoading] = createSignal(true);
@@ -222,7 +230,8 @@ export function createTaskHistory(id: string): TaskHistory {
         )
           setEpoch((revision) => revision + 1);
         setManifest(owner.manifest ?? value);
-        setStats(owner.incomingStats ?? (sameScope ? untrack(stats) : []));
+        setStats(owner.incomingStats?.samples ?? (sameScope ? untrack(stats) : []));
+        setStatsRetained(owner.incomingStats?.retained ?? (sameScope ? untrack(statsRetained) : 0));
         setThrough(owner.observedThrough);
         setMessages(decoded);
         publish(owner);
@@ -344,15 +353,23 @@ export function createTaskHistory(id: string): TaskHistory {
         onStatsSnapshot: (snapshot) => {
           if (current(owner)) {
             alive(owner);
-            owner.incomingStats = mergeStats([], snapshot.samples ?? []);
-            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats);
+            const retained = snapshot.retained;
+            owner.incomingStats = { samples: mergeStats([], snapshot.samples ?? [], retained), retained };
+            if (owner.bootstrap.kind === "live")
+              batch(() => {
+                setStats(owner.incomingStats?.samples ?? []);
+                setStatsRetained(retained);
+              });
           }
         },
         onStats: (sample) => {
-          if (current(owner)) {
+          // Every connection sends the snapshot, which carries the bound,
+          // before live samples.
+          const incoming = owner.incomingStats;
+          if (current(owner) && incoming) {
             alive(owner);
-            owner.incomingStats = mergeStats(owner.incomingStats ?? [], [sample]);
-            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats);
+            owner.incomingStats = { ...incoming, samples: mergeStats(incoming.samples, [sample], incoming.retained) };
+            if (owner.bootstrap.kind === "live") setStats(owner.incomingStats.samples);
           }
         },
         onReset: () => {
@@ -416,6 +433,7 @@ export function createTaskHistory(id: string): TaskHistory {
       setMessages([]);
       setManifest(null);
       setStats([]);
+      setStatsRetained(0);
     });
   });
   void discover();
@@ -423,6 +441,7 @@ export function createTaskHistory(id: string): TaskHistory {
     messages,
     manifest,
     stats,
+    statsRetained,
     through,
     epoch,
     loading,
@@ -455,6 +474,10 @@ export function createTaskHistory(id: string): TaskHistory {
         : client(signal)
             .getHistoryCosts(id, value.bootstrap.generation, String(through()))
             .then((costs) => costs ?? []);
+    },
+    readTurn: (number, request) => {
+      const { value, signal } = capture(request);
+      return client(signal).getHistoryTurn(id, String(number), value.bootstrap.generation);
     },
   };
 }

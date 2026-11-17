@@ -26,7 +26,9 @@ describe("taskIdFromPath", () => {
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/diff")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/processes")).toBe("abc123");
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/stats")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/perf")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/perf/turns/12")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/perf/contexts/2")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/vnc")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/info")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123/view")).toBe("abc123");
@@ -34,6 +36,6 @@ describe("taskIdFromPath", () => {
 
   it("extracts IDs from slugless task subroutes", () => {
     expect(taskIdFromPath("/task/@abc123/info")).toBe("abc123");
-    expect(taskIdFromPath("/task/@abc123/stats")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123/perf")).toBe("abc123");
   });
 });

@@ -12,7 +12,9 @@ import type { EventMessage, HistoryEvent, ISOTimestamp, TaskPlan } from "@sdk/ty
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 
 import TaskDetail from "./TaskDetail";
-import { TaskTimelineProvider, useTaskTimeline } from "../TaskTimelineContext";
+import { TaskTimelineProvider, useTaskTimeline, useTranscriptLinks } from "../TaskTimelineContext";
+import { toolIdentity } from "../grouping";
+import { toolLinkKey, type TranscriptLinks } from "../transcriptLinks";
 import { api } from "../api";
 import { HostModeProvider } from "@gomodedev/gomode/web/HostMode";
 
@@ -222,7 +224,7 @@ it("never mounts completed context content while canonical history is published"
     view = await renderTaskDetail({ taskId: "canonical-publication" });
     expect(screen.getByText("Current context response")).toBeInTheDocument();
     expect(rendered).toHaveLength(0);
-    await userEvent.setup().click(screen.getByRole("button", { name: /Compacted session/ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /Ended by compaction/ }));
     await userEvent.setup().click(await screen.findByRole("button", { name: /^1 message/ }));
     expect(screen.getByRole("img", { name: "Historical render probe" })).toBeInTheDocument();
     expect(rendered.length).toBeGreaterThan(0);
@@ -704,7 +706,7 @@ describe("TaskDetail", () => {
     // Agents that report no turn or item identity still anchor on their events.
     expect(live.some((key) => key?.startsWith("ev:"))).toBe(true);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Compacted session · 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended by compaction · 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     await screen.findByText("archived answer", { exact: true });
     expect(unique().some((key) => key?.startsWith("turn:"))).toBe(true);
@@ -786,10 +788,10 @@ describe("TaskDetail", () => {
     });
     await renderTaskDetail({ taskId: "closed-context-identity" });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Compacted session · 1 turn/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended by compaction · 1 turn/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     const body = await screen.findByText("old context", { exact: true });
-    const toggle = screen.getByRole("button", { name: /^Compacted session · 1 turn/ });
+    const toggle = screen.getByRole("button", { name: /^Ended by compaction · 1 turn/ });
     toggle.focus();
     const boundaries: EventMessage[] = [
       { kind: "system", ts: 10, system: { subtype: "compact_boundary" } },
@@ -806,7 +808,7 @@ describe("TaskDetail", () => {
       send?.(resultEvent(boundary.ts + 2));
       await screen.findByText(`later response ${boundary.ts}`, { exact: true });
       expect(screen.getByText("old context", { exact: true })).toBe(body);
-      expect(screen.getAllByRole("button", { name: /^Compacted session · 1 turn/ })[0]).toBe(toggle);
+      expect(screen.getAllByRole("button", { name: /^Ended by compaction · 1 turn/ })[0]).toBe(toggle);
       expect(toggle).toHaveFocus();
     }
   });
@@ -977,13 +979,13 @@ describe("TaskDetail", () => {
     expect(screen.queryByText("Diff")).not.toBeInTheDocument();
   });
 
-  it("links task statistics to the full detail route", async () => {
+  it("links task performance to the Performance view", async () => {
     await renderTaskDetail();
 
-    expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute("href", "/task/@abc+test-task/stats");
+    expect(screen.getByRole("link", { name: "Task performance" })).toHaveAttribute("href", "/task/@abc+test-task/perf");
   });
 
-  it("shows the loading spinner in the header next to task statistics while loading", async () => {
+  it("shows the loading spinner in the header next to task performance while loading", async () => {
     let resolveHistory!: (value: Response) => void;
     const historyPromise = new Promise<Response>((resolve) => {
       resolveHistory = resolve;
@@ -1017,7 +1019,7 @@ describe("TaskDetail", () => {
     const header = screen.getByTestId("task-detail-header");
     const spinner = within(header).getByRole("status", { name: "Loading history" });
     expect(spinner).toBeInTheDocument();
-    const stats = within(header).getByRole("link", { name: "Task statistics" });
+    const stats = within(header).getByRole("link", { name: "Task performance" });
     expect(stats).toBeInTheDocument();
     expect(spinner.previousElementSibling).toBe(stats);
 
@@ -1219,7 +1221,11 @@ describe("TaskDetail", () => {
       expect(screen.getByRole("navigation", { name: "Loaded skills" })).toBeInTheDocument();
       send?.({ kind: "system", ts: 3, system: { subtype } });
       await waitFor(() => expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument());
-      await userEvent.setup().click(screen.getByRole("button", { name: /^(Compacted|Cleared) session/ }));
+      await userEvent.setup().click(
+        screen.getByRole("button", {
+          name: subtype === "compact_boundary" ? /^Ended by compaction/ : /^Ended by a context clear/,
+        }),
+      );
       const prior = await screen.findByRole("navigation", { name: "Previous context skills" });
       expect(within(prior).getByRole("link", { name: "review" })).toHaveAttribute(
         "href",
@@ -1270,13 +1276,13 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
     const user = userEvent.setup();
     expect(screen.queryByRole("navigation", { name: "Previous context skills" })).not.toBeInTheDocument();
-    const sessions = screen.getAllByRole("button", { name: /^Compacted session/ });
+    const sessions = screen.getAllByRole("button", { name: /^Ended by compaction/ });
     assert.ok(sessions[0]);
     await user.click(sessions[0]);
     expect(
       within(screen.getByRole("navigation", { name: "Previous context skills" })).getByRole("link"),
     ).toHaveTextContent("review");
-    const secondSession = screen.getAllByRole("button", { name: /^Compacted session/ })[1];
+    const secondSession = screen.getAllByRole("button", { name: /^Ended by a context clear/ })[0];
     assert.ok(secondSession);
     await user.click(secondSession);
     const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
@@ -1349,7 +1355,7 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
     expect(screen.getByText("Execute the new plan", { exact: true })).toBeVisible();
     expect(screen.getByText("Executing the new plan", { exact: true })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: /^Compacted session/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Ended by a context clear/ })).toHaveLength(1);
   });
 
   it("keeps same-session content stable and exposes it through an archive after compaction", async () => {
@@ -1379,7 +1385,7 @@ describe("TaskDetail", () => {
     await screen.findByText("Current response", { exact: true });
     expect(screen.queryByText("First response", { exact: true })).not.toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+    await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
     await user.click(await screen.findByRole("button", { name: /^1 message/ }));
     expect(await screen.findByText("First response", { exact: true })).toBeVisible();
   });
@@ -1946,7 +1952,7 @@ describe("TaskDetail", () => {
     expect(getByText("Provider request failed.")).toBeInTheDocument();
   });
 
-  it("opens invocation details from a completed turn's result card", async () => {
+  it("opens the turn's Performance view from its result card", async () => {
     const user = userEvent.setup();
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const event = resultEvent(2_000);
@@ -1964,8 +1970,8 @@ describe("TaskDetail", () => {
     await renderTaskDetail();
 
     expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
-    await user.click(screen.getByRole("button", { name: /^Turn invocation details, 0:01$/ }));
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
+    await user.click(screen.getByRole("link", { name: "Turn 1 performance, 0:01" }));
+    expect(window.location.pathname).toBe("/task/@abc+test-task/perf/turns/1");
   });
 
   it("toggles result text from the header, left of the duration", async () => {
@@ -1992,7 +1998,7 @@ describe("TaskDetail", () => {
     expect(screen.getByText("**bold** result").tagName).toBe("PRE");
   });
 
-  it("opens invocation details from a collapsed turn without expanding it", async () => {
+  it("opens a collapsed turn's Performance view without expanding it", async () => {
     const user = userEvent.setup();
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(2_000);
@@ -2016,13 +2022,73 @@ describe("TaskDetail", () => {
 
     await renderTaskDetail();
 
-    const [collapsedTurn] = screen.getAllByRole("button", {
-      name: /^Turn invocation details, /,
-    });
-    assert.ok(collapsedTurn !== undefined);
-    await user.click(collapsedTurn);
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("collapsed-model");
+    await user.click(screen.getByRole("link", { name: /^Turn 1 performance, / }));
+    expect(window.location.pathname).toBe("/task/@abc+test-task/perf/turns/1");
     expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
+  });
+
+  it("reveals a turn-view span's call in a collapsed turn and marks its spans while hovered", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      const events: EventMessage[] = [
+        { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "bash", name: "Bash", input: { command: "go test" } } },
+        { kind: "toolResult", ts: 1_500, toolResult: { toolUseID: "bash", duration: 0.5 } },
+        resultEvent(2_000),
+        { kind: "userInput", ts: 3_000, userInput: { text: "continue" } },
+        resultEvent(4_000),
+      ];
+      for (const event of events) emit(handlers, event);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    let links: TranscriptLinks | undefined;
+    const Probe = () => {
+      links = useTranscriptLinks();
+      return null;
+    };
+    window.history.replaceState(null, "", "/task/@abc+test-task");
+    render(() => (
+      <Router>
+        <Route
+          path="/*"
+          component={() => (
+            <HostModeProvider>
+              <TaskTimelineProvider taskId="reveal">
+                <Probe />
+                {/* Expanded turns persist per task ID across tests. */}
+                <TaskDetail {...baseProps} taskId="reveal" />
+              </TaskTimelineProvider>
+            </HostModeProvider>
+          )}
+        />
+      </Router>
+    ));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading history" })).not.toBeInTheDocument());
+    assert.ok(links);
+    const revealer = links.revealer();
+    assert.ok(revealer);
+    expect(revealer.visible()).toBe(true);
+    expect(screen.queryAllByTestId("tool-call")).toEqual([]);
+
+    const prompt = screen.getByRole("textbox");
+    prompt.focus();
+    const key = toolIdentity(undefined, "bash");
+    // Reveal listens on window with an abort signal, which jsdom requires to be its own.
+    const nodeAbortController = globalThis.AbortController;
+    globalThis.AbortController = window.AbortController;
+    try {
+      revealer.reveal({ toolKey: key, nativeID: null, ownerAgentID: null, at: 1_000 }, false);
+    } finally {
+      globalThis.AbortController = nodeAbortController;
+    }
+    await waitFor(() => expect(toolRow("bash").className).toMatch(/_revealed_/));
+    // The named call opens, not only the turn around it.
+    expect((toolRow("bash") as HTMLDetailsElement).open).toBe(true);
+    // The timeline keeps focus while the conversation beside it scrolls.
+    expect(document.activeElement).toBe(prompt);
+
+    fireEvent.pointerOver(within(toolRow("bash")).getByText("Bash"));
+    expect(links.hovered()).toBe(toolLinkKey(key));
+    fireEvent.pointerOut(toolRow("bash"), { relatedTarget: document.body });
+    expect(links.hovered()).toBeNull();
   });
 
   it("right-aligns the duration on collapsed turns", async () => {
@@ -2052,8 +2118,7 @@ describe("TaskDetail", () => {
     expect(row?.lastElementChild?.contains(duration)).toBe(true);
   });
 
-  it("shows the same time on a collapsed turn and in its details", async () => {
-    const user = userEvent.setup();
+  it("shows the reported time on a collapsed turn's Performance link", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       // No reported duration: the event span alone would read 0:09.
       const firstResult = resultEvent(10_000);
@@ -2075,11 +2140,7 @@ describe("TaskDetail", () => {
 
     await renderTaskDetail();
 
-    const [collapsed] = screen.getAllByRole("button", { name: /^Turn invocation details, / });
-    assert.ok(collapsed !== undefined);
-    expect(collapsed).toHaveTextContent("0s");
-    await user.click(collapsed);
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("Turn time0s");
+    expect(screen.getByRole("link", { name: "Turn 1 performance, 0s" })).toHaveTextContent("0s");
   });
 
   it("shows an explicit zero duration on collapsed turns without timing metadata", async () => {
@@ -2114,16 +2175,13 @@ describe("TaskDetail", () => {
     ).toBe(true);
   });
 
-  it("summarizes every turn in the collapsed session details", async () => {
-    const user = userEvent.setup();
+  it("links a collapsed session's time to its context Performance view", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
       firstResult.result.duration = 2;
       secondResult.result.duration = 3;
-      firstResult.result.usage.inputTokens = 100;
-      secondResult.result.usage.inputTokens = 200;
       const events: EventMessage[] = [
         {
           kind: "init",
@@ -2186,14 +2244,7 @@ describe("TaskDetail", () => {
     const row = duration.closest("[data-anchor-key]");
     expect(row?.className).toMatch(/sessionElided/);
     expect(row?.lastElementChild?.contains(duration)).toBe(true);
-    await user.click(duration);
-    const dialog = screen.getByTestId("session-invocation-dialog");
-    expect(dialog).toHaveTextContent("Combined turn time0:05");
-    expect(dialog).toHaveTextContent("Combined API time0:02");
-    expect(dialog).toHaveTextContent("Time awaiting user response0:59");
-    expect(dialog).toHaveTextContent("Generated change6 file changes · +30 −8 · 1 binary");
-    expect(dialog).toHaveTextContent("Cost$0");
-    expect(dialog).toHaveTextContent("New input300t");
+    expect(duration.closest("a")?.getAttribute("href")).toMatch(/\/perf\/contexts\/1$/);
     expect(queryByText("first response")).not.toBeInTheDocument();
   });
 
@@ -3107,7 +3158,7 @@ it("cancels a gated archived body when collapsed and keeps the current DOM mount
   });
   const view = await renderTaskDetail({ taskId: "archive-cancellation" });
   const current = screen.getByText("Stable current response");
-  const header = screen.getByRole("button", { name: /^Compacted session/ });
+  const header = screen.getByRole("button", { name: /^Ended by compaction/ });
   const user = userEvent.setup();
   await user.click(header);
   await waitFor(() => assert.ok(signal));
@@ -3116,7 +3167,7 @@ it("cancels a gated archived body when collapsed and keeps the current DOM mount
   release(historyResponse(events.slice(0, 3)));
   expect(screen.queryByText("Never mounted archive")).not.toBeInTheDocument();
   expect(screen.getByText("Stable current response")).toBe(current);
-  expect(screen.getByRole("button", { name: /^Compacted session/ })).toBe(header);
+  expect(screen.getByRole("button", { name: /^Ended by compaction/ })).toBe(header);
   view.unmount();
 });
 
@@ -3150,7 +3201,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   const user = userEvent.setup();
   await user.click(summary);
   await screen.findByText("Old child output");
-  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+  await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
   summary.focus();
   send?.({
     kind: "nativeSubagent",
@@ -3164,7 +3215,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   await user.click(summary);
   await waitFor(() => expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1));
   expect(screen.getByTestId("native-subagent-card")).not.toBe(card);
-  await waitFor(() => expect(screen.getByRole("button", { name: /^Compacted session/ })).toHaveFocus());
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Ended by compaction/ })).toHaveFocus());
   expect(
     within(screen.getByTestId("native-subagent-card")).getByRole("img", { name: "Completed" }),
   ).toBeInTheDocument();
@@ -3200,7 +3251,7 @@ it("settles background work on its archived tool row across equal-time compactio
   await renderTaskDetail({ taskId: "background-origin" });
   expect(screen.queryByTestId("tool-call")).not.toBeInTheDocument();
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /^Compacted session/ }));
+  await user.click(screen.getByRole("button", { name: /^Ended by compaction/ }));
   await user.click(await screen.findByRole("button", { name: /^1 tool call/ }));
   await waitFor(() =>
     expect(within(toolRow("origin-tool")).getByTestId("background-command-chip")).toHaveTextContent("Completed"),
@@ -3389,7 +3440,9 @@ for (const boundary of ["compaction", "changed init"]) {
     expect(screen.getByTestId("native-subagent-card")).toBe(card);
     expect(summary).toHaveFocus();
     const archive = screen.getByTestId("history-section");
-    const archived = within(archive).getByRole("button", { name: /^Compacted session/ });
+    const archived = within(archive).getByRole("button", {
+      name: boundary === "compaction" ? /^Ended by compaction/ : /^Ended by a new session/,
+    });
     await user.click(archived);
     expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1);
     expect(screen.getAllByTestId("background-command-chip")).toHaveLength(1);

@@ -22,7 +22,7 @@ test("task-card resources open performance from either icon and the keyboard", a
     await page.setViewportSize({ width, height: 900 });
     await expect(levels).toBeVisible();
     const link = card.getByRole("link", { name: /^Task performance:/ });
-    await expect(link).toHaveAttribute("href", `/task/@${id}/stats`);
+    await expect(link).toHaveAttribute("href", `/task/@${id}/perf`);
     await expect(link).toHaveAttribute("title", /CPU: [\d.]+ \/ [\d.]+ CPUs/);
     await expect(link).toHaveAttribute("title", /RAM: /);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -31,14 +31,14 @@ test("task-card resources open performance from either icon and the keyboard", a
     await page.screenshot({ path: `test-results/task-card-resources-${width}.png` });
     expect(histories).toEqual([]);
     await card.getByTestId(width === 1280 ? "task-cpu-level" : "task-memory-level").click();
-    await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}/perf$`));
     await expect(page.getByTestId("resource-charts")).toBeVisible();
     await page.goto("/");
     histories.length = 0;
   }
   await levels.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
+  await expect(page).toHaveURL(new RegExp(`/task/@${id}/perf$`));
   expect(errors).toEqual([]);
 });
 
@@ -69,10 +69,10 @@ test("task CPU configured ceilings and metadata failures stay distinct", async (
   await page.route(`**/api/caic/v1/tasks/${id}/history/events?*`, (route) =>
     route.fulfill({
       contentType: "text/event-stream",
-      body: `event: statsSnapshot\ndata: ${JSON.stringify({ samples: [event.stats] })}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`,
+      body: `event: statsSnapshot\ndata: ${JSON.stringify(validateHistoryStats({ samples: [event.stats], retained: 60 }))}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`,
     }),
   );
-  await page.goto(`/task/@${id}/stats`);
+  await page.goto(`/task/@${id}/perf`);
   const resources = page.getByTestId("resource-charts");
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -122,7 +122,7 @@ for (const history of ["clustered", "live"] as const) {
       diskUsed: -1,
     }));
     const snapshot = () =>
-      `event: statsSnapshot\ndata: ${JSON.stringify(validateHistoryStats({ samples }))}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`;
+      `event: statsSnapshot\ndata: ${JSON.stringify(validateHistoryStats({ samples, retained: 60 }))}\n\nevent: checkpoint\ndata: ${JSON.stringify({ cursor: "fixture", through })}\n\n`;
     const clients = new Set<ServerResponse>();
     const server =
       history === "live"
@@ -151,8 +151,8 @@ for (const history of ["clustered", "live"] as const) {
       }
 
       await page.goto(`/task/@${id}`);
-      await page.getByRole("link", { name: "Task statistics" }).click();
-      await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
+      await page.getByRole("link", { name: "Task performance", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/task/@${id}/perf$`));
 
       const resources = page.getByTestId("resource-charts");
       const sampleTable = page.getByTestId("exact-samples");

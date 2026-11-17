@@ -1,0 +1,446 @@
+// Tests the Performance view's section naming, usage summary, charts, resource samples, and their text alternatives.
+
+import { afterEach, describe, it } from "node:test";
+import { render, within } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
+import { expect, vi } from "@tests/expect";
+
+import type { EventStats, ISOTimestamp } from "@sdk/types.gen";
+
+import type { HistoryTurn } from "@sdk/types.gen";
+
+import PerformanceContent, { PerformanceSection, type TaskUsageSummary } from "./PerformanceDetail";
+
+const usage: TaskUsageSummary = {
+  cacheReadInputTokens: 7_000,
+  cacheWriteInputTokens: 2_000,
+  costUSD: 0.125,
+  costKnown: true,
+  costComplete: true,
+  inputTokens: 1_000,
+  outputTokens: 500,
+};
+
+const turns: [HistoryTurn] = [
+  {
+    recordID: 1,
+    index: 0,
+    number: 1,
+    sectionID: "1",
+    startedAt: "2025-12-31T23:59:55Z" as ISOTimestamp,
+    at: "2026-01-01T00:00:00Z" as ISOTimestamp,
+    model: "test-model",
+    durationMs: 5000,
+    durationAPIMs: 4000,
+    waitMs: 3000,
+
+    cost: { usd: 0.125, source: "reported" },
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheCreationInputTokens: 2000,
+      cacheReadInputTokens: 7000,
+      reasoningOutputTokens: 200,
+      reportedModel: "test-model",
+    },
+  },
+];
+
+const stats: [EventStats, EventStats, EventStats] = [
+  {
+    ts: 1_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
+    cpuCeiling: 4,
+    cpuPerc: 10,
+    memUsed: 1_024,
+    memLimit: 4_096,
+    memPerc: 25,
+    netRx: 0,
+    netTx: 0,
+    blockRead: 0,
+    blockWrite: 0,
+    diskUsed: -1,
+  },
+  {
+    ts: 2_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
+    cpuCeiling: 4,
+    cpuPerc: 140.25,
+    memUsed: 2_048,
+    memLimit: 4_096,
+    memPerc: 50,
+    netRx: 2_048,
+    netTx: 1_024,
+    blockRead: 0,
+    blockWrite: 0,
+    diskUsed: 1_048_576,
+  },
+  {
+    ts: 3_000,
+    cpuQuota: null,
+    runtimeCPUs: null,
+    cpuCeiling: 4,
+    cpuPerc: 50,
+    memUsed: 3_072,
+    memLimit: 4_096,
+    memPerc: 75,
+    netRx: 3_072,
+    netTx: 1_024,
+    blockRead: 0,
+    blockWrite: 0,
+    diskUsed: -1,
+  },
+];
+
+afterEach(() => vi.restoreAllMocks());
+
+// Half the width of the longest pointer readout, mirroring the constant the
+// resource charts use to keep the readout inside the frame.
+// Observable Plot reads pointer coordinates from the event and maps them over
+// its own pixel geometry, so a synthetic move is enough to focus a sample. The
+// resource charts are a few dozen pixels tall and pointerX ignores the vertical
+// distance, so one fixed vertical position serves every chart.
+function hover(chart: Element, clientX: number): void {
+  chart.dispatchEvent(new MouseEvent("pointermove", { clientX, clientY: 29, bubbles: true }));
+}
+
+// Plot positions text marks with a translate() transform.
+function readoutCenter(chart: Element): number {
+  const transform = chart.querySelector('[aria-label="text"] text')?.getAttribute("transform") ?? "";
+  return Number(/translate\(([-\d.]+)/u.exec(transform)?.[1] ?? Number.NaN);
+}
+
+describe("PerformanceContent", () => {
+  it("keeps partial zero qualified despite fully priced visible turns", () => {
+    const view = render(() => (
+      <PerformanceContent
+        tools={[]}
+        stats={[]}
+        turns={turns}
+        usage={{ ...usage, costUSD: 0, costKnown: true, costComplete: false }}
+      />
+    ));
+    expect(view.getByText("$0 known subtotal")).toBeInTheDocument();
+    expect(view.queryByText("Effective")).not.toBeInTheDocument();
+  });
+
+  it("separates token categories and reports cache efficiency", async () => {
+    const { findByTestId, getByTestId } = render(() => (
+      <PerformanceContent
+        tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]}
+        stats={[]}
+        turns={turns}
+        usage={usage}
+      />
+    ));
+
+    const summary = getByTestId("task-usage-summary");
+    expect(summary).toHaveTextContent("New input1kt");
+    expect(summary).toHaveTextContent("Cache write2kt");
+    expect(summary).toHaveTextContent("Cache read7kt");
+    expect(summary).toHaveTextContent("Output500t");
+    expect(summary).toHaveTextContent("Thinking200t");
+    expect(summary).toHaveTextContent("Cache hit 70%");
+
+    expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
+  });
+
+  it("shows an unavailable cost instead of zero when the harness reports none", () => {
+    const { getByTestId } = render(() => (
+      <PerformanceContent
+        tools={[]}
+        stats={[]}
+        turns={[]}
+        usage={{ ...usage, costKnown: false, costComplete: false, costUSD: 0 }}
+      />
+    ));
+
+    expect(getByTestId("task-usage-summary")).toHaveTextContent("Cost —");
+  });
+
+  it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const manyTurns = Array.from({ length: 12 }, () => turns[0]);
+    const { findByTestId } = render(() => <PerformanceContent tools={[]} stats={[]} turns={manyTurns} usage={usage} />);
+    const chart = await findByTestId("turn-token-chart");
+    const labels = Array.from(
+      chart.querySelectorAll('[aria-label="x-axis tick label"] text'),
+      (label) => label.textContent,
+    );
+    expect(labels).toEqual(Array.from({ length: 12 }, (_, i) => String(i + 1)));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("shows aligned resource history and network throughput", async () => {
+    const { findByLabelText, findByTestId } = render(() => (
+      <PerformanceContent tools={[]} stats={stats} turns={[]} usage={usage} />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("CPU50.0% · 0.50 CPUs");
+    expect(resources).toHaveTextContent("configured ceiling ≤ 4 CPUs");
+    expect(resources).toHaveTextContent("Memory3.0 KiB / 4.0 KiB");
+    expect(resources).toHaveTextContent("NetworkRX 3.0 KiB · TX 1.0 KiB");
+    expect(resources).toHaveTextContent("DiskUnavailable");
+    const cpuChart = await findByLabelText("CPU utilization over time");
+    expect(cpuChart).toBeInTheDocument();
+    const cpuDots = Array.from(cpuChart.querySelectorAll("circle"));
+    expect(cpuDots.every((dot) => Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r")))).toBe(true);
+    const cpuScaleLabels = Array.from(
+      cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
+      (label) => label.textContent,
+    );
+    // Every value axis carries zero, its midpoint, and its maximum, so the grid
+    // reads the same on every chart.
+    expect(cpuScaleLabels).toEqual(["0%", "200%", "400%"]);
+    expect(await findByLabelText("Memory utilization over time")).toBeInTheDocument();
+    const rxChart = await findByLabelText("Network receive throughput over time");
+    const txChart = await findByLabelText("Network transmit throughput over time");
+    expect(resources).toHaveTextContent("RX/s1.0 KiB/s");
+    expect(resources).toHaveTextContent("TX/s0 B/s");
+    expect(resources).not.toHaveTextContent("network chart shows throughput");
+    expect(
+      Array.from(rxChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
+    ).toEqual(["0 B/s", "1.0 KiB/s", "2.0 KiB/s"]);
+    expect(
+      Array.from(txChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
+    ).toEqual(["0 B/s", "512 B/s", "1.0 KiB/s"]);
+    expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "end");
+    expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "start");
+    expect(await findByLabelText("Writable disk usage over time")).toBeInTheDocument();
+    // Both charts sample the same instants, so one pointer position reads both.
+    hover(rxChart, 140);
+    hover(txChart, 140);
+    expect(rxChart).toHaveTextContent("RX 2.0 KiB/s");
+    expect(txChart).toHaveTextContent("TX 1.0 KiB/s");
+    // The samples sit in their own block, outside the resource charts.
+    expect(within(resources).queryByTestId("exact-samples")).toBeNull();
+    const samples = await findByTestId("exact-samples");
+    const scroller = within(samples).getByRole("region", {
+      name: "Exact resource samples",
+    });
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    scroller.focus();
+    expect(scroller).toHaveFocus();
+    const table = within(samples).getByRole("table");
+    // A task pane keeps the measured values: the throughput and CPU-metadata
+    // columns its charts and caption already state stay out.
+    expect(table).toHaveTextContent("CPU");
+    expect(table).not.toHaveTextContent("RX/s");
+    expect(table).not.toHaveTextContent("Configured CPU ceiling");
+    expect(table).not.toHaveTextContent("Runtime CPUs");
+    expect(table).toHaveTextContent("1.0 MiB");
+  });
+
+  it("shows CPU equivalents without inventing unknown capacity", async () => {
+    const { findByTestId } = render(() => (
+      <PerformanceContent
+        tools={[]}
+        stats={[{ ...stats[0], cpuPerc: 150, cpuCeiling: null }]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("CPU150.0% · 1.50 CPUs");
+    expect(resources).toHaveTextContent("capacity unknown");
+    expect(resources).toHaveTextContent("quota unknown");
+  });
+
+  it("distinguishes a fractional quota and configured ceiling from effective capacity", async () => {
+    const { findByTestId } = render(() => (
+      <PerformanceContent
+        tools={[]}
+        stats={[
+          {
+            ...stats[0],
+            cpuPerc: 150,
+            cpuCeiling: 1.5,
+            cpuQuota: 1.5,
+            runtimeCPUs: 8,
+          },
+        ]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("effective capacity unknown · configured ceiling ≤ 1.5 CPUs");
+    expect(resources).toHaveTextContent("Runtime: 8 CPUs · quota 1.5 CPUs");
+    expect(resources).toHaveTextContent("Inherited CPU limits and process affinity are unreported.");
+    expect(resources).not.toHaveTextContent("of capacity");
+  });
+
+  it("keeps an unrestricted quota distinct from the configured ceiling", async () => {
+    const { findByTestId } = render(() => (
+      <PerformanceContent tools={[]} stats={[{ ...stats[0], cpuQuota: 0, runtimeCPUs: 8 }]} turns={[]} usage={usage} />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("no explicit quota");
+    expect(resources).toHaveTextContent("configured ceiling ≤ 4 CPUs");
+  });
+
+  it("explains a metadata failure while preserving usage and the runtime ceiling", async () => {
+    const { findByTestId } = render(() => (
+      <PerformanceContent
+        tools={[]}
+        stats={[{ ...stats[0], cpuQuota: null, runtimeCPUs: 4, cpuError: "inspect unavailable" }]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("quota unknown");
+    const warning = within(resources).getByText("CPU metadata warning");
+    await userEvent.click(warning);
+    expect(resources).toHaveTextContent("inspect unavailable");
+  });
+
+  it("reads resource samples through the crosshair without clipping the readout", async () => {
+    const { findByLabelText } = render(() => <PerformanceContent tools={[]} stats={stats} turns={[]} usage={usage} />);
+    const cpuChart = await findByLabelText("CPU utilization over time");
+    const width = Number(cpuChart.getAttribute("width"));
+    const frameLeft = 40; // the CPU chart reserves room for its left axis
+    const frameRight = width - 3;
+
+    expect(readoutCenter(cpuChart)).toBeNaN();
+    // The outermost samples sit on the frame edge, where a centered readout
+    // would be clipped; it parks inside the frame instead.
+    hover(cpuChart, frameLeft + 4);
+    expect(cpuChart).toHaveTextContent("10.0%");
+    expect(readoutCenter(cpuChart)).toBeGreaterThan(frameLeft);
+    hover(cpuChart, frameRight - 4);
+    expect(cpuChart).toHaveTextContent("50.0%");
+    expect(readoutCenter(cpuChart)).toBeLessThan(frameRight);
+
+    // Only the middle disk sample carries a measurement, and a sample without
+    // one must not produce a readout.
+    const diskChart = await findByLabelText("Writable disk usage over time");
+    hover(diskChart, 6);
+    expect(diskChart).not.toHaveTextContent("MB");
+    hover(diskChart, 140);
+    expect(diskChart).toHaveTextContent("1.0 MiB");
+  });
+
+  it("rounds the exact sample table to readable precision", async () => {
+    const irregularStats: [EventStats, EventStats] = [
+      {
+        ...stats[0],
+        ts: 1_234,
+        cpuPerc: 12.34567,
+        memPerc: 23.45678,
+        netRx: 100,
+        netTx: 200,
+      },
+      {
+        ...stats[1],
+        ts: 3_234,
+        cpuPerc: 87.65432,
+        memPerc: 76.54321,
+        netRx: 1_601,
+        netTx: 201,
+        diskUsed: 1_537,
+      },
+    ];
+    const { findByTestId } = render(() => (
+      <PerformanceContent tools={[]} stats={irregularStats} turns={[]} usage={usage} />
+    ));
+    const table = within(await findByTestId("exact-samples")).getByRole("table");
+    // Local time, one decimal per percentage, and whole bytes per rate.
+    expect(table).toHaveTextContent(new Date(3_234).toLocaleString());
+    expect(table).not.toHaveTextContent("1970-01-01T");
+    expect(table).toHaveTextContent("87.7%");
+    expect(table).toHaveTextContent("76.5%");
+    expect(table).toHaveTextContent("12.3%");
+    expect(table).toHaveTextContent("23.5%");
+    expect(table).toHaveTextContent("1.5 KiB");
+  });
+
+  it("does not infer network throughput from one sample", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { findByTestId } = render(() => (
+      <PerformanceContent tools={[]} stats={[stats[0]]} turns={[]} usage={usage} />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("Waiting for another sample");
+    expect(resources).toHaveTextContent("No disk history available");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("names each chart for assistive technology", async () => {
+    const { findByRole } = render(() => <PerformanceContent tools={[]} stats={stats} turns={turns} usage={usage} />);
+
+    expect(await findByRole("img", { name: "CPU utilization over time" })).toBeInTheDocument();
+    expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
+  });
+
+  it("qualifies what the token chart aggregates", async () => {
+    const { findByRole } = render(() => <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />);
+
+    expect(await findByRole("img", { name: "Token volume by turn" })).toHaveAttribute(
+      "aria-description",
+      expect.stringContaining("cache reads usually dominate"),
+    );
+  });
+
+  it("switches the token chart between volume and each turn's share", async () => {
+    const user = userEvent.setup();
+    const { findByRole, findByTestId } = render(() => (
+      <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />
+    ));
+    const figure = await findByTestId("turn-token-chart");
+    expect(await findByRole("img", { name: "Token volume by turn" })).toBeInTheDocument();
+
+    await user.click(within(figure).getByLabelText("Show each turn as a share of its own tokens"));
+
+    expect(await findByRole("img", { name: "Token share by turn" })).toBeInTheDocument();
+    expect(
+      Array.from(figure.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
+    ).toEqual(["0%", "50%", "100%"]);
+  });
+
+  it("lists the exact turn token counts as the chart's text alternative", async () => {
+    const user = userEvent.setup();
+    const { findByTestId } = render(() => <PerformanceContent tools={[]} stats={[]} turns={turns} usage={usage} />);
+    const figure = await findByTestId("turn-token-chart");
+
+    await user.click(within(figure).getByText("Turn tokens (1)"));
+
+    const table = within(figure).getByRole("table");
+    expect(table).toHaveTextContent("Turn 1");
+    expect(table).toHaveTextContent("7kt");
+    // The shared formatter keeps one decimal, so a 10.5kt total stays exact.
+    expect(table).toHaveTextContent("10.5kt");
+  });
+
+  it("lists cumulative tool time as the chart's text alternative", async () => {
+    const user = userEvent.setup();
+    const { findByTestId } = render(() => (
+      <PerformanceContent tools={[{ name: "Bash", calls: 1, durationMs: 1000 }]} stats={[]} turns={[]} usage={usage} />
+    ));
+    const figure = await findByTestId("tool-time-chart");
+
+    await user.click(within(figure).getByText("Tool timings (1)"));
+
+    const table = within(figure).getByRole("table");
+    expect(table).toHaveTextContent("Bash");
+  });
+});
+
+describe("PerformanceSection", () => {
+  it("shows a title as a heading or names an untitled section programmatically", () => {
+    const titled = render(() => <PerformanceSection title="Turns">body</PerformanceSection>);
+    expect(titled.getByRole("heading", { name: "Turns" })).toBeInTheDocument();
+    titled.unmount();
+
+    const labeled = render(() => <PerformanceSection label="Turn 2">body</PerformanceSection>);
+    expect(labeled.getByRole("region", { name: "Turn 2" })).toBeInTheDocument();
+    expect(labeled.queryByRole("heading")).not.toBeInTheDocument();
+    labeled.unmount();
+
+    // @ts-expect-error A section needs a title or a label.
+    render(() => <PerformanceSection>body</PerformanceSection>).unmount();
+  });
+});

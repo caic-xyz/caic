@@ -20,7 +20,7 @@ export type TaskViewMode = "closed" | "docked" | "fullscreen";
 
 export function taskViewMode(pathname: string, search: string): TaskViewMode {
   const query = new URLSearchParams(search);
-  const match = /^\/task\/[^/]+\/(diff|info|processes|stats|view|vnc)$/.exec(pathname);
+  const match = /^\/task\/[^/]+\/(diff|info|perf(?:\/(?:turns|contexts)\/[^/]+)?|processes|view|vnc)$/.exec(pathname);
   if (!match || (match[1] === "view" && !query.get("path") && !query.get("attachment") && !query.get("image")))
     return "closed";
   return query.get("fullscreen") === "1" ? "fullscreen" : "docked";

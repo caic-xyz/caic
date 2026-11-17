@@ -1,0 +1,100 @@
+/* Styles for the Performance frame: header, breadcrumb, result notices, hidden transient status, loading notice, and unknown-turn notice. */
+
+.container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.headerMeta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.headerRepo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.headerBranch {
+  padding: 0 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+/* Loading and pricing are announced without taking space in the layout. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.loading {
+  padding: 0.5rem 1rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.status p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.breadcrumb {
+  min-width: 0;
+}
+
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.breadcrumb li + li::before {
+  margin-right: 0.35rem;
+  color: var(--color-text-tertiary);
+  content: "›";
+}
+
+.breadcrumb li[aria-current="page"] {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.notFound {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}

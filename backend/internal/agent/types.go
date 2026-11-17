@@ -579,6 +579,11 @@ func (u *Usage) Equal(v Usage) bool {
 	return u.InputTokens == v.InputTokens && u.OutputTokens == v.OutputTokens && u.CacheCreationInputTokens == v.CacheCreationInputTokens && u.CacheReadInputTokens == v.CacheReadInputTokens && u.ReasoningOutputTokens == v.ReasoningOutputTokens && u.CacheTTLSeconds == v.CacheTTLSeconds && slices.Equal(u.CacheWrites, v.CacheWrites)
 }
 
+// HasTokens reports any billed token class.
+func (u *Usage) HasTokens() bool {
+	return u.InputTokens != 0 || u.OutputTokens != 0 || u.CacheCreationInputTokens != 0 || u.CacheReadInputTokens != 0 || u.ReasoningOutputTokens != 0
+}
+
 // Clone returns usage whose duration buckets can be independently owned.
 func (u *Usage) Clone() Usage {
 	out := *u

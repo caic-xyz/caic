@@ -177,7 +177,7 @@ test("task-card fixtures distinguish known zero from unknown cost", async ({ pag
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`cost-provenance-${width}.png`) });
     await page.goto(`/task/@${partialID}`);
-    await page.getByTestId("conversation-pane").getByRole("link", { name: "Task statistics", exact: true }).click();
+    await page.getByTestId("conversation-pane").getByRole("link", { name: "Task performance", exact: true }).click();
     await expect(page.getByTestId("task-usage-summary")).toContainText("Cost $0 known subtotal");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`cost-subtotal-stats-${width}.png`) });

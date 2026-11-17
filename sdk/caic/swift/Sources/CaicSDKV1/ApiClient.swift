@@ -585,6 +585,10 @@ public final class ApiClient {
     public func getHistoryCosts(id: String, generation: String, through: String) async throws -> [HistoryTurnEstimate]? {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/costs?generation=\(generation.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")&through=\(through.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")")
     }
+    /// Returns root turn n's timeline, counted from 1 across context sections: tool calls, subagents, detached commands, and inferred model time on one axis relative to the turn start, plus per-call token usage and per-tool time. n is a completed turn or the manifest's running turn, whose timeline grows until it completes. It is mutable: subagents and commands started in the turn can end later, and cost estimates follow current prices. Archived sections need no transcript download. An optional generation must match the manifest bootstrap.
+    public func getHistoryTurn(id: String, n: String, generation: String) async throws -> HistoryTurnTimeline {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/history/turns/\(n)?generation=\(generation.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? "")")
+    }
 
     // SSE endpoints
     /// Streams task list updates for all tasks via SSE.

@@ -1,4 +1,4 @@
-// Tests waiting for lazily rendered elements, cancellation on user scrolling, and revealing one with focus and a mark.
+// Tests waiting for lazily rendered elements, cancellation on user scrolling, and revealing one with a mark, optional focus, and optional opening.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -31,8 +31,8 @@ describe("revealElement", () => {
         "<details id='group'><summary>group</summary><details id='call'><summary>call</summary></details></details>";
       const call = document.getElementById("call") as HTMLDetailsElement;
       const group = document.getElementById("group") as HTMLDetailsElement;
-      revealElement(group, "mark");
-      revealElement(call, "mark");
+      revealElement(group, "mark", { focus: true });
+      revealElement(call, "mark", { focus: true });
       expect(group.classList.contains("mark")).toBe(false);
       expect((document.getElementById("group") as HTMLDetailsElement).open).toBe(true);
       expect(call.open).toBe(false);
@@ -46,12 +46,35 @@ describe("revealElement", () => {
     }
   });
 
+  it("opens the element itself only when asked", () => {
+    document.body.innerHTML =
+      "<details id='group'><summary>group</summary><details id='call'><summary>call</summary></details></details>";
+    const call = document.getElementById("call") as HTMLDetailsElement;
+    revealElement(call, "mark", { focus: false });
+    expect(call.open).toBe(false);
+    revealElement(call, "mark", { focus: false, open: true });
+    expect(call.open).toBe(true);
+    expect((document.getElementById("group") as HTMLDetailsElement).open).toBe(true);
+    document.body.innerHTML = "";
+  });
+
   it("focuses a row without a control through a programmatic tab stop", () => {
     document.body.innerHTML = "<div id='row'><p>text</p></div>";
     const row = document.getElementById("row") as HTMLElement;
-    revealElement(row, "mark");
+    revealElement(row, "mark", { focus: true });
     expect(row.tabIndex).toBe(-1);
     expect(document.activeElement).toBe(row);
+    document.body.innerHTML = "";
+  });
+
+  it("marks without moving focus when the caller keeps it", () => {
+    document.body.innerHTML = "<button id='origin'>span</button><details id='call'><summary>call</summary></details>";
+    const origin = document.getElementById("origin") as HTMLButtonElement;
+    const call = document.getElementById("call") as HTMLDetailsElement;
+    origin.focus();
+    revealElement(call, "mark", { focus: false });
+    expect(document.activeElement).toBe(origin);
+    expect(call.classList.contains("mark")).toBe(true);
     document.body.innerHTML = "";
   });
 });

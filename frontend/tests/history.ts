@@ -7,6 +7,7 @@ import type {
   HistoryRoute,
   ISOTimestamp,
   EventBackgroundCommand,
+  EventKind,
   EventMessage,
   EventMessageSource,
 } from "@sdk/types.gen";
@@ -16,6 +17,25 @@ import { isChildEvent } from "../src/grouping";
 import { NativeActivityTracker } from "../src/nativeSubagents";
 import { ContextSkillsTracker } from "./contextSkills";
 import { compareHistoryPosition } from "../src/historyPosition";
+
+// Root output that proves the harness accepted the pending prompt.
+const acceptedOutputKinds: ReadonlySet<EventKind> = new Set<EventKind>([
+  "text",
+  "textDelta",
+  "thinking",
+  "thinkingDelta",
+  "toolUse",
+  "toolResult",
+  "toolOutputDelta",
+  "skillLoad",
+  "ask",
+  "todo",
+  "result",
+  "nativeSubagent",
+  "backgroundCommand",
+  "widget",
+  "widgetDelta",
+]);
 
 export function historyArray(events: readonly HistoryEvent[]): string {
   const lines = events.map((event) => JSON.stringify(event));
@@ -74,30 +94,64 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
   if (!sections.length) sections.push({ id: "1", turnCount: 0, textCount: 0, toolCount: 0, durationMs: 0, skills: [] });
   const turns: HistoryTurn[] = [];
   let model = "";
+  let effort = "";
   let waiting = -1;
+  // Mirrors sectionIndex: a failed delivery discards the pending prompt and
+  // restores the previous turn's wait unless root output accepted the prompt.
+  let promptAt = 0;
+  let promptAccepted = false;
+  let promptWait = -1;
+  const clearPrompt = () => {
+    promptAt = 0;
+    promptAccepted = false;
+    promptWait = -1;
+  };
+  const iso = (ts: number) => new Date(ts).toISOString() as ISOTimestamp;
   for (const event of events) {
     const m = event.message;
     if (isChildEvent(m)) continue;
-    if (m.init) model = m.init.reportedModel;
+    if (m.init) {
+      model = m.init.reportedModel;
+      effort = m.init.reportedEffort ?? "";
+    }
+    if (promptAt && acceptedOutputKinds.has(m.kind)) promptAccepted = true;
+    if (m.system?.subtype === "context_cleared") clearPrompt();
+    if (m.system?.subtype === "input_delivery_failed" && !promptAccepted) {
+      const turn = turns[promptWait];
+      if (turn) {
+        delete turn.waitMs;
+        delete turn.waitInput;
+        waiting = promptWait;
+      }
+      clearPrompt();
+    }
+    if (m.userInput && promptAt === 0) promptAt = m.ts;
     if (m.result) {
-      const section = sections.find(
+      const sectionIndex = sections.findIndex(
         (section) =>
           section.body &&
           compareHistoryPosition(event, section.body.first) >= 0 &&
           compareHistoryPosition(event, section.body.last) <= 0,
       );
+      const section = sections[sectionIndex];
+      const sectionStart = sectionIndex > 0 ? (section?.boundary?.message.ts ?? 0) : (events[0]?.message.ts ?? 0);
+      const previousEnd = turns.length ? Date.parse(turns.at(-1)!.at) : 0;
       turns.push({
         recordID: event.recordID,
         index: event.index,
+        number: turns.length + 1,
         sectionID: section?.id ?? "1",
-        at: new Date(m.ts).toISOString() as ISOTimestamp,
+        startedAt: iso(promptAt || Math.max(sectionStart, previousEnd)),
+        at: iso(m.ts),
         model: m.result.usage.reportedModel || model,
+        effort: effort || undefined,
         usage: m.result.usage,
         durationMs: m.result.duration * 1000,
         durationAPIMs: m.result.durationAPI * 1000,
         cost: m.result.cost,
       });
       waiting = turns.length - 1;
+      clearPrompt();
     }
     if (m.commitSnapshot && !m.commitSnapshot.baseline && turns.length)
       turns.at(-1)!.changeStat = m.commitSnapshot.changeStat;
@@ -108,6 +162,7 @@ export function historyManifest(events: readonly HistoryEvent[], initialPrompt: 
         turn.waitMs = wait;
         turn.waitInput = { recordID: event.recordID, index: event.index };
       }
+      promptWait = waiting;
       waiting = -1;
     }
   }

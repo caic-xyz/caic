@@ -461,7 +461,7 @@ a.headerPR:hover {
 
 /* Glyph-only header link. Inline-flex centers the glyph on the row axis instead
    of leaving it on the text baseline, and the square box gives it the same hit
-   target and hover treatment as the statistics link. */
+   target and hover treatment as the Performance link. */
 .glyphLink {
   display: inline-flex;
   flex-shrink: 0;

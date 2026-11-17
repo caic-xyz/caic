@@ -60,6 +60,7 @@ import { formatMoney } from "../formatting";
 import { RootConversationProjection } from "../rootConversation";
 import type { DraftImage } from "../images";
 import { rememberTaskViewOrigin } from "../taskView";
+import { taskPathFromPathname, taskPerformancePath } from "../taskPath";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "@gomodedev/gomode/web/HostMode";
@@ -87,7 +88,7 @@ import { displayedAtRoot as historyRoot } from "../historyRouting";
 import { createHistoryDisclosure } from "../historyDisclosure";
 import { compareHistoryPosition, historyPositionKey } from "../historyPosition";
 import { createLiveDuration } from "../liveDuration";
-import { useTaskTimeline } from "../TaskTimelineContext";
+import { useTaskTimeline, useTranscriptLinks } from "../TaskTimelineContext";
 import { createHistoryScroll } from "../historyScroll";
 import { anchorRow, groupAnchor, sessionAnchor, turnAnchor } from "../anchorKeys";
 import { inputImageViewURL, taskViewURL } from "../runtimePath";
@@ -104,7 +105,8 @@ import Markdown, { MarkdownRawToolbar, MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import { activeBackgroundItems, commandSettled, type BackgroundItem } from "../backgroundActivity";
-import { abortOnUserScroll, revealElement, waitForElement } from "../revealElement";
+import { abortOnUserScroll, revealElement, waitForElement, whenVisible } from "../revealElement";
+import { linkKeyAt, type TranscriptTarget } from "../transcriptLinks";
 import NativeAgents, { BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
 import { assignNativeAnchors } from "../nativeSubagents";
 import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
@@ -114,7 +116,8 @@ import StatusIcon from "./StatusIcon";
 import ActionButton from "./ActionButton";
 import Duration from "./Duration";
 import TimingIcon from "./TimingIcon";
-import TurnInvocationDetails, { SessionInvocationDetails } from "./TurnInvocationDetails";
+import { ContextDurationLink, TurnDurationLink } from "./InvocationDurations";
+import { contextEndLabel } from "../contextEnd";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -160,7 +163,6 @@ interface Props {
   ciStatus?: string;
   ciChecks?: ForgeCheck[];
   harness: string;
-  model?: string;
   costUSD?: number;
   costKnown?: boolean;
   costComplete?: boolean;
@@ -255,7 +257,7 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
-  const taskPath = () => location.pathname.split("/").slice(0, 3).join("/");
+  const taskPath = () => taskPathFromPathname(location.pathname);
   const timeline = useTaskTimeline();
   const messages = timeline.messages;
   const metadata = () => timeline.manifest()?.metadata;
@@ -952,7 +954,6 @@ export default function TaskDetail(props: Props) {
                 lastAskGroup={() => null}
                 onAskAnswer={sendAskAnswer}
                 currentPlan={null}
-                model={props.model ?? null}
                 turnTiming={() => undefined}
                 nativeByToolUseID={nativeByToolUseID}
                 nativeSettled={nativeSettled}
@@ -1057,72 +1058,99 @@ export default function TaskDetail(props: Props) {
     return byTool;
   });
   const backgroundItems = createMemo(() => activeBackgroundItems(metadata(), backgroundSettled()));
-  // A chip reveals the element that started its item, in the first place that
-  // holds it: the current transcript (expanding its past turn), the owning
-  // agent's card, the archived context that predates it, or the transcript row
-  // nearest its start. Each step lands on the closest visible ancestor while
-  // lazily rendered bodies load. User scrolling cancels the remaining steps.
+  // A chip or a turn-view span reveals its transcript element in the first
+  // place that holds it: the current transcript (expanding its past turn), the
+  // owning agent's card, the archived context that predates it, or the
+  // transcript row nearest its time. The tool call or agent card it names
+  // opens too. Each step lands on the closest visible
+  // ancestor while lazily rendered bodies load. User scrolling cancels the
+  // remaining steps. A hidden conversation, such as behind a full-screen turn
+  // view, waits until navigation shows it.
   let revealAbort: AbortController | null = null;
   onCleanup(() => revealAbort?.abort());
-  const revealBackground = (item: BackgroundItem) => {
+  const reveal = (target: TranscriptTarget, focus: boolean) => {
     revealAbort?.abort();
     const abort = new AbortController();
     revealAbort = abort;
     abortOnUserScroll(abort);
-    void revealBackgroundItem(item, abort.signal).finally(() => abort.abort());
+    void revealTarget(target, focus, abort.signal).finally(() => abort.abort());
   };
-  const revealBackgroundItem = async (item: BackgroundItem, signal: AbortSignal) => {
+  const revealBackground = (item: BackgroundItem) =>
+    reveal(
+      {
+        toolKey: item.toolKey,
+        nativeID: item.kind === "agent" ? item.id : null,
+        ownerAgentID: item.ownerAgentID,
+        at: item.startedAt,
+      },
+      true,
+    );
+  // The workspace makes a conversation hidden behind a subview inert.
+  const conversationVisible = () => {
+    const area = messageArea();
+    return !!area && !area.closest("[inert]");
+  };
+  const links = useTranscriptLinks();
+  const revealer = { visible: conversationVisible, reveal };
+  links.setRevealer(revealer);
+  onCleanup(() => {
+    if (links.revealer() === revealer) links.setRevealer(null);
+  });
+  const revealTarget = async (target: TranscriptTarget, focus: boolean, signal: AbortSignal) => {
     const root = messageContentRef;
     if (!root) return;
-    const land = (el: HTMLElement) => {
+    if (!conversationVisible() && !(await whenVisible(messageArea(), conversationVisible, signal, REVEAL_TIMEOUT_MS)))
+      return;
+    // open is set only for the named target, not the rows on the way to it.
+    const land = (el: HTMLElement, open = false) => {
       if (signal.aborted) return;
       const desktopTool = el.hasAttribute("data-tool-key") && !shellViewport();
-      revealElement(el, styles.revealed, desktopTool ? historyScroll.reveal : undefined);
+      revealElement(el, styles.revealed, { focus, open, scroll: desktopTool ? historyScroll.reveal : undefined });
     };
     const wait = (find: () => HTMLElement | null) => waitForElement(root, find, signal, REVEAL_TIMEOUT_MS);
-    const toolKey = item.toolKey;
+    const toolKey = target.toolKey;
     const selector =
       toolKey !== null
         ? `[data-testid="tool-call"][data-tool-key="${CSS.escape(toolKey)}"]`
-        : item.kind === "agent"
-          ? `[data-native-id="${CSS.escape(item.id)}"]`
+        : target.nativeID !== null
+          ? `[data-native-id="${CSS.escape(target.nativeID)}"]`
           : null;
     const findTarget = () => (selector ? root.querySelector<HTMLElement>(selector) : null);
-    if (toolKey !== null) {
-      const turn = completedTurnItems().find(
-        (entry) =>
-          entry.kind === "elided" &&
-          entry.turn.groups.some((group) =>
-            group.toolCalls.some((call) => toolIdentity(call.source, call.use.toolUseID) === toolKey),
-          ),
-      );
-      // Solid renders the expanded turn synchronously.
-      if (turn) toggleTurn(turn.key);
-    }
+    const turn = completedTurnItems().find(
+      (entry) =>
+        entry.kind === "elided" &&
+        (toolKey !== null
+          ? entry.turn.groups.some((group) =>
+              group.toolCalls.some((call) => toolIdentity(call.source, call.use.toolUseID) === toolKey),
+            )
+          : selector === null && target.at !== null && turnCovers(entry.turn, target.at)),
+    );
+    // Solid renders the expanded turn synchronously.
+    if (turn) toggleTurn(turn.key);
     const direct = findTarget();
-    if (direct) return land(direct);
-    const card = item.ownerAgentID
-      ? root.querySelector<HTMLDetailsElement>(`[data-native-id="${CSS.escape(item.ownerAgentID)}"]`)
+    if (direct) return land(direct, true);
+    const card = target.ownerAgentID
+      ? root.querySelector<HTMLDetailsElement>(`[data-native-id="${CSS.escape(target.ownerAgentID)}"]`)
       : null;
     if (card) {
       land(card);
       card.open = true;
       const call = await wait(findTarget);
-      if (call) land(call);
+      if (call) land(call, true);
       return;
     }
-    const section = archivedSectionAt(item.startedAt);
+    const section = archivedSectionAt(target.at);
     if (section) {
       if (!expandedSessionKeys().has(section.id)) toggleSession(section.id);
       const row = anchorRow(root, sessionAnchor(section.id));
       if (row) land(row);
-      const turnRow = await wait(() => archivedTurnRow(root, section.id, item.startedAt));
+      const turnRow = await wait(() => archivedTurnRow(root, section.id, target.at));
       if (!turnRow) return;
       land(turnRow);
       if (!selector) return;
       // A settled agent's card renders only inside its archived context.
-      if (item.ownerAgentID) {
-        const selectOwner = `[data-native-id="${CSS.escape(item.ownerAgentID)}"]`;
+      if (target.ownerAgentID) {
+        const selectOwner = `[data-native-id="${CSS.escape(target.ownerAgentID)}"]`;
         const owner = await wait(() => root.querySelector<HTMLElement>(selectOwner));
         if (!owner || signal.aborted) return;
         land(owner);
@@ -1132,12 +1160,22 @@ export default function TaskDetail(props: Props) {
         if (!expandedTurnKeys().has(turnKey)) toggleTurn(turnKey);
       }
       const call = await wait(findTarget);
-      if (call) land(call);
+      if (call) land(call, true);
       return;
     }
-    const nearest = currentRowAt(root, item.startedAt) ?? messageArea();
+    const nearest = currentRowAt(root, target.at) ?? messageArea();
     if (nearest) land(nearest);
   };
+  // Hovering or focusing a tool call or native card marks its turn-view spans.
+  const markLinked = (event: Event) => {
+    const key = linkKeyAt(event.target instanceof Element ? event.target : null);
+    if (links.hovered() !== key) links.setHovered(key);
+  };
+  const clearLinked = (event: FocusEvent | PointerEvent) => {
+    const next = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+    if (!next || !messageContentRef?.contains(next)) links.setHovered(null);
+  };
+  onCleanup(() => links.setHovered(null));
   // archivedSectionAt is the archived context that was current at startedAt,
   // or null when the item started in the current context.
   const archivedSectionAt = (startedAt: number | null) => {
@@ -1204,7 +1242,6 @@ export default function TaskDetail(props: Props) {
               currentPlan={null}
               onClearAndExecutePlan={clearAndExecutePlan}
               pendingAction={pendingAction}
-              model={props.model ?? null}
               turnTiming={(event) => {
                 const key = position(event);
                 return key ? numericTurns().get(key) : undefined;
@@ -1468,7 +1505,7 @@ export default function TaskDetail(props: Props) {
             </span>
           </Show>
           <StatsIcon
-            href={`${taskPath()}/stats`}
+            href={taskPerformancePath(taskPath())}
             stats={statsHistory()}
             usage={{
               inputTokens: props.cumulativeInputTokens ?? 0,
@@ -1573,7 +1610,14 @@ export default function TaskDetail(props: Props) {
           data-testid="task-message-area"
           aria-busy={timeline.loading()}
         >
-          <div ref={messageContentRef} class={styles.messageContent}>
+          <div
+            ref={messageContentRef}
+            class={styles.messageContent}
+            onPointerOver={markLinked}
+            onFocusIn={markLinked}
+            onPointerOut={clearLinked}
+            onFocusOut={clearLinked}
+          >
             <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
               {(prompt) => (
                 <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
@@ -1669,7 +1713,7 @@ export default function TaskDetail(props: Props) {
                               <Duration class={styles.turnDuration}>{formatTotalDuration(e.turn.durationMs)}</Duration>
                             }
                           >
-                            {(turn) => <TurnInvocationDetails turn={turn()} model={props.model ?? null} />}
+                            {(turn) => <TurnDurationLink turn={turn()} />}
                           </Show>
                         </div>
                       )}
@@ -1694,7 +1738,7 @@ export default function TaskDetail(props: Props) {
                               <Duration class={styles.turnDuration}>{formatTotalDuration(h.turn.durationMs)}</Duration>
                             }
                           >
-                            {(turn) => <TurnInvocationDetails turn={turn()} model={props.model ?? null} />}
+                            {(turn) => <TurnDurationLink turn={turn()} />}
                           </Show>
                         </div>
                       )}
@@ -1738,7 +1782,6 @@ export default function TaskDetail(props: Props) {
                               currentPlan={props.currentPlan}
                               onClearAndExecutePlan={clearAndExecutePlan}
                               pendingAction={pendingAction}
-                              model={props.model ?? null}
                               turnTiming={(event) => turnForEvent(event)}
                               nativeByToolUseID={nativeByToolUseID}
                               nativeSettled={nativeSettled}
@@ -2010,23 +2053,15 @@ function ArchivedSession(props: {
   renderGroups: (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => JSX.Element;
   renderActivities: () => JSX.Element;
 }) {
-  const timeline = useTaskTimeline();
-  const turns = () => (timeline.manifest()?.metadata.turns ?? []).filter((turn) => turn.sectionID === props.section.id);
   const summary = () => {
     const section = props.section;
     const parts = [
-      section.boundary?.message.system?.subtype === "context_cleared" ? "Cleared session" : "Compacted session",
+      contextEndLabel(section) ?? "Current context",
       `${section.turnCount} ${section.turnCount === 1 ? "turn" : "turns"}`,
     ];
     if (section.textCount) parts.push(`${section.textCount} ${section.textCount === 1 ? "message" : "messages"}`);
     if (section.toolCount) parts.push(`${section.toolCount} ${section.toolCount === 1 ? "tool call" : "tool calls"}`);
     return parts.join(" · ");
-  };
-  const compaction = () => {
-    const boundary = props.section.endBoundary?.message.system;
-    return boundary?.subtype === "compact_boundary"
-      ? compactTokenSummary(boundary.contextTokensBefore, boundary.contextTokensAfter)
-      : "";
   };
   return (
     <section data-testid="history-section" data-section-id={props.section.id}>
@@ -2042,12 +2077,7 @@ function ArchivedSession(props: {
         >
           <span class={styles.turnSummaryText}>{summary()}</span>
         </button>
-        <SessionInvocationDetails
-          turns={turns()}
-          duration={formatTotalDuration(props.section.durationMs)}
-          model={props.section.reportedModel ?? null}
-          compactionSummary={compaction()}
-        />
+        <ContextDurationLink section={props.section} />
       </div>
       <Show when={props.open}>
         <div class={styles.indentSession}>
@@ -2153,7 +2183,7 @@ function ArchivedSessionBody(props: {
                   when={fact()}
                   fallback={<Duration class={styles.turnDuration}>{formatTotalDuration(turn.durationMs)}</Duration>}
                 >
-                  {(value) => <TurnInvocationDetails turn={value()} model={props.section.reportedModel ?? null} />}
+                  {(value) => <TurnDurationLink turn={value()} />}
                 </Show>
               </div>
               <Show when={expanded()}>
@@ -2258,7 +2288,6 @@ function GroupContent(props: {
   currentPlan: TaskPlan | null;
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
-  model: string | null;
   turnTiming: (event: EventMessage) => HistoryTurn | undefined;
   nativeByToolUseID: () => ReadonlyMap<string, HistoryActivity[]>;
   nativeSettled: () => boolean;
@@ -2341,7 +2370,7 @@ function GroupContent(props: {
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => <MessageItem ev={ev} taskId={props.taskId} model={props.model} turnTiming={props.turnTiming(ev)} />}
+          {(ev) => <MessageItem ev={ev} taskId={props.taskId} turnTiming={props.turnTiming(ev)} />}
         </For>
       </Match>
     </Switch>
@@ -2386,6 +2415,13 @@ function compactTokenSummary(before: number | undefined, after: number | undefin
 
 // A chip waits this long for a lazily loaded body to render its target.
 const REVEAL_TIMEOUT_MS = 10_000;
+
+// turnCovers reports whether a loaded turn's events span at, in epoch ms.
+function turnCovers(turn: Turn, at: number): boolean {
+  const first = turn.groups[0]?.events[0]?.ts;
+  const last = turn.groups.at(-1)?.events.at(-1)?.ts;
+  return first !== undefined && last !== undefined && first <= at && at <= last;
+}
 
 // archivedTurnRow is the collapsed turn row of an archived context whose first
 // event is the latest at or before startedAt, or the first row when the start
@@ -2567,7 +2603,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   );
 }
 
-function MessageItem(props: { taskId: string; ev: EventMessage; model: string | null; turnTiming?: HistoryTurn }) {
+function MessageItem(props: { taskId: string; ev: EventMessage; turnTiming?: HistoryTurn }) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -2609,7 +2645,7 @@ function MessageItem(props: { taskId: string; ev: EventMessage; model: string | 
         )}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
+        {(result) => <ResultCard result={result} turnTiming={props.turnTiming} />}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => <div class={styles.agentError}>Agent exited: {err.err}</div>}
@@ -2621,7 +2657,7 @@ function MessageItem(props: { taskId: string; ev: EventMessage; model: string | 
   );
 }
 
-function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: HistoryTurn }) {
+function ResultCard(props: { result: EventResult; turnTiming?: HistoryTurn }) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
@@ -2645,7 +2681,7 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
           <Show when={props.turnTiming}>
             {(turn) => (
               <span data-testid="turn-duration">
-                <TurnInvocationDetails turn={turn()} model={props.model} />
+                <TurnDurationLink turn={turn()} />
               </span>
             )}
           </Show>

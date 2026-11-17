@@ -6,7 +6,7 @@ import { A } from "@solidjs/router";
 import type { EventStats } from "@sdk/types.gen";
 
 import { formatBytes, formatTokens } from "../formatting";
-import type { TaskUsageSummary } from "./StatsDetail";
+import type { TaskUsageSummary } from "./PerformanceDetail";
 import styles from "./StatsIcon.module.css";
 
 function formatUSD(usd: number): string {
@@ -59,12 +59,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
   const tokens = () => totalTokens(props.usage);
 
   return (
-    <A
-      class={styles.iconLink}
-      href={props.href}
-      title="Task usage and performance statistics"
-      aria-label="Task statistics"
-    >
+    <A class={styles.iconLink} href={props.href} title="Task usage and performance" aria-label="Task performance">
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" data-generated-svg="">
         <rect
           x="0"

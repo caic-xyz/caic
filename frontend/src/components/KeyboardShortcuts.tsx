@@ -19,6 +19,7 @@ const navigationShortcutsAfterModelSettings = [
   { keys: "/", action: "Focus the current prompt" },
   { keys: "↓ / Page Down", action: "Select the next task" },
   { keys: "↑ / Page Up", action: "Select the previous task" },
+  { keys: "← / →", action: "Show the previous or next turn in a turn's Performance view" },
   { keys: "Tab", action: "Move from a task card to its prompt" },
   { keys: "Shift + Tab", action: "Return from a prompt to its task card" },
   { keys: "Esc", action: "Close a dialog, otherwise focus the new-task prompt" },
@@ -36,7 +37,7 @@ const taskActionShortcuts = [
   { keys: "Shift + Delete", action: "Purge the selected task" },
 ];
 
-function isEditing(target: EventTarget | null): boolean {
+export function isEditing(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']") !== null

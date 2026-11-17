@@ -959,6 +959,15 @@ func benchmarkSource(b *testing.B, path string, appends []string) {
 			}
 		}
 	})
+	// Turn 1001 carries one of the fixture's large tool outputs.
+	b.Run("WarmTurnTimeline", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if _, err := source.TurnTimeline(b.Context(), 1_001, time.Time{}, journalPricer{}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 	b.Run("WarmCurrentSection", func(b *testing.B) {
 		_, sections, _, err := source.Sections(b.Context(), "history")
 		if err != nil {

@@ -1093,6 +1093,8 @@ it("shares conversation and numeric statistics subscriptions across task switche
         index: 0,
         message: { kind: "text", ts: 1000, text: { text: `Transcript for ${id}` } },
       });
+      // The stream bounds live samples with its snapshot first.
+      handlers.onStatsSnapshot?.({ samples: [], retained: 60 });
       handlers.onStats?.({
         ts: 1000,
         cpuCeiling: null,
@@ -1111,16 +1113,95 @@ it("shares conversation and numeric statistics subscriptions across task switche
     });
     return new FakeEventSource("", []) as unknown as EventSource;
   });
-  const { history } = renderApp("/task/@first/stats");
+  const { history } = renderApp("/task/@first/perf");
   // Initial history loading shares the CI worker with the rest of the suite.
   // Allow it to complete under concurrent load.
   await screen.findByText("Transcript for first", {}, { timeout: 5000 });
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("11.0%"));
-  history.set({ value: "/task/@second/stats" });
+  history.set({ value: "/task/@second/perf" });
   await screen.findByText("Transcript for second");
   await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("88.0%"));
   expect(screen.queryByText("Transcript for first")).not.toBeInTheDocument();
   expect(api.historyEvents).toHaveBeenCalledTimes(2);
+});
+
+describe("Performance turn view", () => {
+  function turnsManifest(count: number) {
+    const manifest = historyManifest([], "");
+    manifest.metadata.turns = Array.from({ length: count }, (_, i) => ({
+      recordID: i + 1,
+      index: 0,
+      number: i + 1,
+      sectionID: "1",
+      startedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+      at: "2026-01-01T00:00:00Z" as ISOTimestamp,
+      model: "model",
+      durationMs: (i + 1) * 1000,
+      durationAPIMs: 0,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        reportedModel: "",
+      },
+    }));
+    return manifest;
+  }
+
+  it("opens a turn from the overview strip and returns through the breadcrumb", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getTask).mockResolvedValue(makeTask());
+    // Routes match in registration order; this manifest precedes the empty default.
+    fetchRouter.routes.unshift({ method: "GET", match: /\/history\/manifest$/, respond: () => turnsManifest(2) });
+    const { history } = renderApp("/task/@task1+do-something/perf");
+
+    const strip = await screen.findByTestId("turn-strip");
+    // The fixture turns carry no cost; only the all-turns overview reports it.
+    expect(await screen.findByText("Some turn costs are unavailable.")).toBeInTheDocument();
+    await user.click(within(strip).getByRole("link", { name: "Turn 2, 2.000 s" }));
+
+    expect(history.get()).toBe("/task/@task1+do-something/perf/turns/2");
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb).toHaveTextContent("Turn 2 of 2");
+    expect(screen.queryByText("Some turn costs are unavailable.")).not.toBeInTheDocument();
+    await user.click(within(breadcrumb).getByRole("link", { name: "Performance" }));
+    expect(history.get()).toBe("/task/@task1+do-something/perf");
+    expect(screen.getByTestId("conversation-pane")).toBeInTheDocument();
+  });
+
+  it("announces loading and pricing in a mounted live region, never as a block above the view", async () => {
+    vi.mocked(api.getTask).mockResolvedValue(makeTask());
+    let release: (value: unknown) => void = () => {};
+    fetchRouter.routes.unshift(
+      { method: "GET", match: /\/history\/manifest$/, respond: () => turnsManifest(2) },
+      { method: "GET", match: /\/history\/costs\?/, respond: () => new Promise((resolve) => (release = resolve)) },
+    );
+    renderApp("/task/@task1+do-something/perf/turns/2");
+
+    const live = screen.getByTestId("performance-transient-status");
+    expect(live).toHaveAttribute("role", "status");
+    await screen.findByTestId("turn-detail");
+    await waitFor(() => expect(live).toHaveTextContent("Updating cost estimates…"));
+    // The result block is the only one above the view, and pricing is not a result.
+    expect(screen.queryByText("Updating cost estimates…", { selector: ":not([data-testid])" })).not.toBeInTheDocument();
+    release([]);
+    await waitFor(() => expect(live).toHaveTextContent(""));
+    expect(screen.getByTestId("performance-transient-status")).toBe(live);
+  });
+
+  it("reports an unknown turn inside the pane", async () => {
+    vi.mocked(api.getTask).mockResolvedValue(makeTask());
+    fetchRouter.routes.unshift({ method: "GET", match: /\/history\/manifest$/, respond: () => turnsManifest(2) });
+    renderApp("/task/@task1+do-something/perf/turns/9");
+
+    expect(await screen.findByRole("heading", { name: "Turn 9 not found" })).toBeInTheDocument();
+    expect(screen.getByTestId("turn-not-found")).toHaveTextContent("This task has 2 completed turns.");
+    expect(within(screen.getByTestId("task-view-pane")).getByRole("link", { name: "Show all turns" })).toHaveAttribute(
+      "href",
+      "/task/@task1+do-something/perf",
+    );
+  });
 });
 
 describe("App keyboard shortcuts", () => {
@@ -1538,18 +1619,18 @@ describe("App keyboard shortcuts", () => {
   it("keeps slash in the subview and focuses the prompt from the conversation pane", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getTask).mockResolvedValue(makeTask());
-    const { history } = renderApp("/task/@task1+do-something/stats");
+    const { history } = renderApp("/task/@task1+do-something/perf");
     const close = await screen.findByRole("button", { name: "Close view" });
     close.focus();
 
     await user.keyboard("/");
 
-    expect(history.get()).toContain("/stats");
+    expect(history.get()).toContain("/perf");
     expect(close).toHaveFocus();
     screen.getByTestId("conversation-pane").focus();
     await user.keyboard("/");
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
-    expect(history.get()).toContain("/stats");
+    expect(history.get()).toContain("/perf");
   });
 
   it("leaves slash with an open dialog", async () => {

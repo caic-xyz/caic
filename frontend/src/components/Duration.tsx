@@ -1,10 +1,19 @@
 // Duration renders an elapsed time in the transcript's shared duration style; callers own its placement.
 
-import { splitProps, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 
 import styles from "./Duration.module.css";
 
-export default function Duration(props: JSX.HTMLAttributes<HTMLSpanElement>) {
-  const [local, rest] = splitProps(props, ["class"]);
-  return <span {...rest} class={local.class ? `${styles.duration} ${local.class}` : styles.duration} />;
+// Duration reads each prop in place. splitProps would copy the caller's getters
+// onto new objects, and V8 can keep such a getter in a shared hidden class after
+// the copy dies: its closure then pins the caller's detached DOM and data.
+export default function Duration(props: { class?: string; "data-testid"?: string; children: JSX.Element }) {
+  return (
+    <span
+      class={props.class ? `${styles.duration} ${props.class}` : styles.duration}
+      data-testid={props["data-testid"]}
+    >
+      {props.children}
+    </span>
+  );
 }

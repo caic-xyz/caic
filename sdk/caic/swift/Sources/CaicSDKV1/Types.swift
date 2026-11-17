@@ -507,6 +507,29 @@ public struct Harness: Codable, Equatable, Hashable {
     }
 }
 
+public struct HistoryTurnSpanKind: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Background = HistoryTurnSpanKind("background")
+    public static let Model = HistoryTurnSpanKind("model")
+    public static let Subagent = HistoryTurnSpanKind("subagent")
+    public static let Tool = HistoryTurnSpanKind("tool")
+
+    public static func other(_ value: String) -> HistoryTurnSpanKind { HistoryTurnSpanKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct ImageRefreshState: Codable, Equatable, Hashable {
     public let value: String
 
@@ -5116,12 +5139,29 @@ public struct HistoryRoute: Codable {
 /// HistoryTurn retains numeric invocation facts independently of transcript
 /// lifetime. SectionID associates the turn with its context. Pricing is obtained
 /// separately through getHistoryCosts using the embedded exact position.
+///
+/// Number counts root turns from 1 across every context section of the task;
+/// delegated child results are not turns. StartedAt is the first root prompt or
+/// root activity after the previous root result, as in the task's turn metrics.
+/// A turn the harness queues by itself, such as one delivering the end of
+/// background work, starts at its first root activity. Compaction keeps the
+/// start; a context clear discards it, and so does a failed delivery of the
+/// starting prompt before root output accepted it. A turn without any root
+/// prompt or activity starts at its result. At is the result. WaitMS is the
+/// time from At to the prompt at WaitInput, which starts the next turn.
+/// Effort is the root reasoning effort reported by the last init.
+/// ContextTokens is the root context size when the turn ended, as the task's
+/// context meter measures it: the native occupancy when the harness reports it,
+/// else the input context of the last root API call. Zero means unknown.
 public struct HistoryTurn: Codable {
     public let recordID: Int
     public let index: UInt32
+    public let number: Int
     public let sectionID: String
+    public let startedAt: ISOTimestamp
     public let at: ISOTimestamp
     public let model: String
+    public let effort: String?
     public let usage: EventUsage
     public let durationMs: Int
     public let durationAPIMs: Int
@@ -5129,13 +5169,17 @@ public struct HistoryTurn: Codable {
     public let waitMs: Int?
     public let changeStat: EventChangeStat?
     public let cost: EventCost?
+    public let contextTokens: Int?
 
-    public init(recordID: Int, index: UInt32, sectionID: String, at: ISOTimestamp, model: String, usage: EventUsage, durationMs: Int, durationAPIMs: Int, waitInput: HistoryPosition? = nil, waitMs: Int? = nil, changeStat: EventChangeStat? = nil, cost: EventCost? = nil) {
+    public init(recordID: Int, index: UInt32, number: Int, sectionID: String, startedAt: ISOTimestamp, at: ISOTimestamp, model: String, effort: String? = nil, usage: EventUsage, durationMs: Int, durationAPIMs: Int, waitInput: HistoryPosition? = nil, waitMs: Int? = nil, changeStat: EventChangeStat? = nil, cost: EventCost? = nil, contextTokens: Int? = nil) {
         self.recordID = recordID
         self.index = index
+        self.number = number
         self.sectionID = sectionID
+        self.startedAt = startedAt
         self.at = at
         self.model = model
+        self.effort = effort
         self.usage = usage
         self.durationMs = durationMs
         self.durationAPIMs = durationAPIMs
@@ -5143,6 +5187,26 @@ public struct HistoryTurn: Codable {
         self.waitMs = waitMs
         self.changeStat = changeStat
         self.cost = cost
+        self.contextTokens = contextTokens
+    }
+}
+
+/// HistoryRunningTurn is the root turn in progress: a root prompt or root
+/// activity started it, and no root result has ended it yet. Number is one past
+/// the last completed HistoryTurn, and StartedAt follows the HistoryTurn rules,
+/// so the turn keeps both when it completes. SectionID is the context it runs
+/// in; compaction can move it to a later one. A turn stops running when the
+/// harness process exits without ending it: the turn does not complete, and a
+/// later root prompt or activity resumes it from the same start.
+public struct HistoryRunningTurn: Codable {
+    public let number: Int
+    public let sectionID: String
+    public let startedAt: ISOTimestamp
+
+    public init(number: Int, sectionID: String, startedAt: ISOTimestamp) {
+        self.number = number
+        self.sectionID = sectionID
+        self.startedAt = startedAt
     }
 }
 
@@ -5256,6 +5320,7 @@ public struct HistoryMetadata: Codable {
     public let hasInitialPrompt: Bool
     public let setupEndedAt: ISOTimestamp?
     public let turns: [HistoryTurn]?
+    public let runningTurn: HistoryRunningTurn?
     public let tools: [HistoryToolTiming]?
     public let activities: [HistoryActivity]?
     public let backgroundCommands: [HistoryBackgroundCommand]?
@@ -5270,6 +5335,7 @@ public struct HistoryMetadata: Codable {
         case hasInitialPrompt
         case setupEndedAt
         case turns
+        case runningTurn
         case tools
         case activities
         case backgroundCommands
@@ -5279,12 +5345,13 @@ public struct HistoryMetadata: Codable {
         case todo
     }
 
-    public init(routingRevision: Int, routing: [HistoryRoute]?, hasInitialPrompt: Bool, setupEndedAt: ISOTimestamp? = nil, turns: [HistoryTurn]?, tools: [HistoryToolTiming]?, activities: [HistoryActivity]?, backgroundCommands: [HistoryBackgroundCommand]?, initialInit: HistoryEvent? = nil, initialInput: HistoryPosition? = nil, setup: HistorySlice? = nil, todo: EventTodo? = nil) {
+    public init(routingRevision: Int, routing: [HistoryRoute]?, hasInitialPrompt: Bool, setupEndedAt: ISOTimestamp? = nil, turns: [HistoryTurn]?, runningTurn: HistoryRunningTurn? = nil, tools: [HistoryToolTiming]?, activities: [HistoryActivity]?, backgroundCommands: [HistoryBackgroundCommand]?, initialInit: HistoryEvent? = nil, initialInput: HistoryPosition? = nil, setup: HistorySlice? = nil, todo: EventTodo? = nil) {
         self.routingRevision = routingRevision
         self.routing = routing
         self.hasInitialPrompt = hasInitialPrompt
         self.setupEndedAt = setupEndedAt
         self.turns = turns
+        self.runningTurn = runningTurn
         self.tools = tools
         self.activities = activities
         self.backgroundCommands = backgroundCommands
@@ -5301,6 +5368,7 @@ public struct HistoryMetadata: Codable {
         self.hasInitialPrompt = try c.decode(Bool.self, forKey: .hasInitialPrompt)
         self.setupEndedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .setupEndedAt)
         self.turns = try c.decode([HistoryTurn]?.self, forKey: .turns)
+        self.runningTurn = try c.decodeIfPresent(HistoryRunningTurn.self, forKey: .runningTurn)
         self.tools = try c.decode([HistoryToolTiming]?.self, forKey: .tools)
         self.activities = try c.decode([HistoryActivity]?.self, forKey: .activities)
         self.backgroundCommands = try c.decode([HistoryBackgroundCommand]?.self, forKey: .backgroundCommands)
@@ -5317,6 +5385,7 @@ public struct HistoryMetadata: Codable {
         try c.encode(self.hasInitialPrompt, forKey: .hasInitialPrompt)
         try c.encodeIfPresent(self.setupEndedAt, forKey: .setupEndedAt)
         try c.encode(self.turns, forKey: .turns)
+        try c.encodeIfPresent(self.runningTurn, forKey: .runningTurn)
         try c.encode(self.tools, forKey: .tools)
         try c.encode(self.activities, forKey: .activities)
         try c.encode(self.backgroundCommands, forKey: .backgroundCommands)
@@ -5381,6 +5450,258 @@ public struct HistoryTurnEstimate: Codable {
     }
 }
 
+/// HistoryTurnSpan is one interval of a turn timeline, in milliseconds from the
+/// turn start. EndMS is absent when the span has no observed end: a tool call
+/// still open when the turn ended or still running, a subagent or command whose
+/// Status is running or unknown, or the provisional model span of a running
+/// turn. A subagent or command can end after the turn: EndMS then exceeds the
+/// turn duration.
+///
+/// The identity locates the span's transcript item. A tool span has Source and
+/// ToolUseID, which scope the call as tool cards do. A command span has
+/// CommandID, plus the Source and ToolUseID of the call that launched it. A
+/// subagent span has ActivityID, a HistoryActivity ID; a tool or command span by
+/// a child actor names its owning activity there when known. A model span has
+/// only times.
+///
+/// Label is the tool name, subagent label, or command label; Detail is the tool
+/// card's short detail. Status is completed, failed, or interrupted for a tool;
+/// subagents and commands use their HistoryActivity and HistoryBackgroundCommand
+/// status values.
+public struct HistoryTurnSpan: Codable {
+    public let kind: HistoryTurnSpanKind
+    public let startMs: Int
+    public let endMs: Int?
+    public let label: String?
+    public let detail: String?
+    public let status: String?
+    public let source: EventMessageSource?
+    public let toolUseID: String?
+    public let activityID: String?
+    public let commandID: String?
+
+    public init(kind: HistoryTurnSpanKind, startMs: Int, endMs: Int? = nil, label: String? = nil, detail: String? = nil, status: String? = nil, source: EventMessageSource? = nil, toolUseID: String? = nil, activityID: String? = nil, commandID: String? = nil) {
+        self.kind = kind
+        self.startMs = startMs
+        self.endMs = endMs
+        self.label = label
+        self.detail = detail
+        self.status = status
+        self.source = source
+        self.toolUseID = toolUseID
+        self.activityID = activityID
+        self.commandID = commandID
+    }
+}
+
+/// HistoryTurnOmission summarizes the spans of one kind that a timeline omits.
+/// DurationMS sums their durations within the turn, which can overlap: a span
+/// without an end, or one that outlives the turn, counts up to the turn's end.
+public struct HistoryTurnOmission: Codable {
+    public let kind: HistoryTurnSpanKind
+    public let count: Int
+    public let durationMs: Int
+
+    public init(kind: HistoryTurnSpanKind, count: Int, durationMs: Int) {
+        self.kind = kind
+        self.count = count
+        self.durationMs = durationMs
+    }
+}
+
+/// HistoryTurnCall is one model API call in a turn, by the root agent or a
+/// child actor. Number counts the turn's calls from 1 in the order the harness
+/// reported them, which is the timeline's order. AtMS is when the harness
+/// reported the call, in milliseconds from the turn start: a call reports its
+/// usage when it ends, so AtMS is the end of the model time that produced it.
+///
+/// The call's context is its input classes summed. ContextWindow is absent
+/// when unknown; root calls without their own report use the window the turn
+/// reports. Cost is absent when the call cannot be priced. It is reported when
+/// the harness prices each call, and otherwise estimated from model token
+/// prices, even when the harness reports the turn's total.
+public struct HistoryTurnCall: Codable {
+    public let inputTokens: Int
+    public let cacheCreationInputTokens: Int
+    public let cacheReadInputTokens: Int
+    public let outputTokens: Int
+    public let reasoningOutputTokens: Int
+    public let number: Int
+    public let atMs: Int
+    public let source: EventMessageSource?
+    public let activityID: String?
+    public let model: String?
+    public let contextWindow: Int?
+    public let cost: EventCost?
+
+    public init(inputTokens: Int, cacheCreationInputTokens: Int, cacheReadInputTokens: Int, outputTokens: Int, reasoningOutputTokens: Int, number: Int, atMs: Int, source: EventMessageSource? = nil, activityID: String? = nil, model: String? = nil, contextWindow: Int? = nil, cost: EventCost? = nil) {
+        self.inputTokens = inputTokens
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.number = number
+        self.atMs = atMs
+        self.source = source
+        self.activityID = activityID
+        self.model = model
+        self.contextWindow = contextWindow
+        self.cost = cost
+    }
+}
+
+/// HistoryTurnCallOmission sums the token classes of the calls a timeline omits.
+public struct HistoryTurnCallOmission: Codable {
+    public let inputTokens: Int
+    public let cacheCreationInputTokens: Int
+    public let cacheReadInputTokens: Int
+    public let outputTokens: Int
+    public let reasoningOutputTokens: Int
+    public let count: Int
+
+    public init(inputTokens: Int, cacheCreationInputTokens: Int, cacheReadInputTokens: Int, outputTokens: Int, reasoningOutputTokens: Int, count: Int) {
+        self.inputTokens = inputTokens
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.count = count
+    }
+}
+
+/// HistoryTurnTokens are disjoint token classes. The three input classes sum to
+/// a call's input context; ReasoningOutputTokens is a subset of OutputTokens.
+public struct HistoryTurnTokens: Codable {
+    public let inputTokens: Int
+    public let cacheCreationInputTokens: Int
+    public let cacheReadInputTokens: Int
+    public let outputTokens: Int
+    public let reasoningOutputTokens: Int
+
+    public init(inputTokens: Int, cacheCreationInputTokens: Int, cacheReadInputTokens: Int, outputTokens: Int, reasoningOutputTokens: Int) {
+        self.inputTokens = inputTokens
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+    }
+}
+
+/// HistoryTurnTool sums one tool name's calls that start in the turn, by the
+/// root agent and child actors. DurationMS and LongestMS count only time within
+/// the turn: a call without an end counts up to the turn's end. Concurrent calls
+/// overlap, so durations can sum to more than the turn.
+public struct HistoryTurnTool: Codable {
+    public let name: String
+    public let calls: Int
+    public let durationMs: Int
+    public let longestMs: Int
+
+    public init(name: String, calls: Int, durationMs: Int, longestMs: Int) {
+        self.name = name
+        self.calls = calls
+        self.durationMs = durationMs
+        self.longestMs = longestMs
+    }
+}
+
+/// HistoryTurnTimeline places one root turn's work on one time axis of
+/// DurationMS from StartedAt. For a completed turn, StartedAt and EndedAt match
+/// its HistoryTurn's StartedAt and At. For the HistoryRunningTurn, EndedAt is absent and the axis
+/// ends at the later of the server's clock and the turn's latest observation
+/// when the server derived the timeline; open spans and model time then grow
+/// with each request. It includes tool calls
+/// that start in the turn, from the root agent and from child actors, and the
+/// subagents and detached commands that start in it, including those that
+/// outlive it. Model spans fill the turn time outside root tool calls; ModelMS
+/// is their exact total. Background work and child calls run beside the root
+/// agent, so they do not reduce model time.
+///
+/// Spans holds at most 500 spans sorted by start: the longest ones, with spans
+/// lacking an end kept first. Omitted counts the shorter spans left out, per
+/// kind. The server derives the timeline from its own history index, so archived
+/// context sections need no transcript download. Durations within the turn count
+/// up to the axis end.
+///
+/// Calls holds at most 500 API calls sorted by Number: those with the most
+/// tokens. OmittedCalls sums the rest. Calls is empty when the harness reports
+/// usage only per turn. Unattributed sums the root agent's usage reports that
+/// cover no single call, such as cumulative deltas spanning several requests
+/// after a missed event; they are not priced per call. Tools sums every tool
+/// call in the turn by name, longest total first, including calls that Spans
+/// omits.
+public struct HistoryTurnTimeline: Codable {
+    public let number: Int
+    public let startedAt: ISOTimestamp
+    public let endedAt: ISOTimestamp?
+    public let durationMs: Int
+    public let modelMs: Int
+    public let spans: [HistoryTurnSpan]?
+    public let omitted: [HistoryTurnOmission]?
+    public let calls: [HistoryTurnCall]?
+    public let omittedCalls: HistoryTurnCallOmission?
+    public let unattributed: HistoryTurnTokens?
+    public let tools: [HistoryTurnTool]?
+
+    private enum CodingKeys: String, CodingKey {
+        case number
+        case startedAt
+        case endedAt
+        case durationMs
+        case modelMs
+        case spans
+        case omitted
+        case calls
+        case omittedCalls
+        case unattributed
+        case tools
+    }
+
+    public init(number: Int, startedAt: ISOTimestamp, endedAt: ISOTimestamp? = nil, durationMs: Int, modelMs: Int, spans: [HistoryTurnSpan]?, omitted: [HistoryTurnOmission]?, calls: [HistoryTurnCall]?, omittedCalls: HistoryTurnCallOmission? = nil, unattributed: HistoryTurnTokens? = nil, tools: [HistoryTurnTool]?) {
+        self.number = number
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.durationMs = durationMs
+        self.modelMs = modelMs
+        self.spans = spans
+        self.omitted = omitted
+        self.calls = calls
+        self.omittedCalls = omittedCalls
+        self.unattributed = unattributed
+        self.tools = tools
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Self.CodingKeys.self)
+        self.number = try c.decode(Int.self, forKey: .number)
+        self.startedAt = try c.decode(ISOTimestamp.self, forKey: .startedAt)
+        self.endedAt = try c.decodeIfPresent(ISOTimestamp.self, forKey: .endedAt)
+        self.durationMs = try c.decode(Int.self, forKey: .durationMs)
+        self.modelMs = try c.decode(Int.self, forKey: .modelMs)
+        self.spans = try c.decode([HistoryTurnSpan]?.self, forKey: .spans)
+        self.omitted = try c.decode([HistoryTurnOmission]?.self, forKey: .omitted)
+        self.calls = try c.decode([HistoryTurnCall]?.self, forKey: .calls)
+        self.omittedCalls = try c.decodeIfPresent(HistoryTurnCallOmission.self, forKey: .omittedCalls)
+        self.unattributed = try c.decodeIfPresent(HistoryTurnTokens.self, forKey: .unattributed)
+        self.tools = try c.decode([HistoryTurnTool]?.self, forKey: .tools)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Self.CodingKeys.self)
+        try c.encode(self.number, forKey: .number)
+        try c.encode(self.startedAt, forKey: .startedAt)
+        try c.encodeIfPresent(self.endedAt, forKey: .endedAt)
+        try c.encode(self.durationMs, forKey: .durationMs)
+        try c.encode(self.modelMs, forKey: .modelMs)
+        try c.encode(self.spans, forKey: .spans)
+        try c.encode(self.omitted, forKey: .omitted)
+        try c.encode(self.calls, forKey: .calls)
+        try c.encodeIfPresent(self.omittedCalls, forKey: .omittedCalls)
+        try c.encodeIfPresent(self.unattributed, forKey: .unattributed)
+        try c.encode(self.tools, forKey: .tools)
+    }
+}
+
 /// HistoryCheckpoint advances through all outputs of a physical record,
 /// including a record with zero outputs. Cursor is opaque; it encodes projection
 /// version, generation, raw record and either output index or end-of-record.
@@ -5396,28 +5717,36 @@ public struct HistoryCheckpoint: Codable {
     }
 }
 
-/// HistoryStats contains the bounded 60-sample runtime ring, oldest first.
+/// HistoryStats contains the bounded runtime ring, oldest first.
 /// Replace samples sharing a timestamp: disk usage can revise the latest sample.
 /// These host observations are separate from immutable raw task history.
 public struct HistoryStats: Codable {
     public let samples: [EventStats]?
+    /// Retained is the ring's capacity: the server keeps at most this many
+    /// latest samples, so a full ring has dropped older ones. Clients keep as
+    /// many while live samples arrive.
+    public let retained: Int
 
     private enum CodingKeys: String, CodingKey {
         case samples
+        case retained
     }
 
-    public init(samples: [EventStats]?) {
+    public init(samples: [EventStats]?, retained: Int) {
         self.samples = samples
+        self.retained = retained
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Self.CodingKeys.self)
         self.samples = try c.decode([EventStats]?.self, forKey: .samples)
+        self.retained = try c.decode(Int.self, forKey: .retained)
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Self.CodingKeys.self)
         try c.encode(self.samples, forKey: .samples)
+        try c.encode(self.retained, forKey: .retained)
     }
 }
 

@@ -208,6 +208,8 @@ class ApiClient(
     suspend fun getHistoryActivity(id: String, scope: String, version: String, generation: String, activity: String, through: String, afterRecordID: String, afterIndex: String): List<HistoryEvent>? = request("GET", "/api/caic/v1/tasks/$id/history/$scope/$version/$generation/activity/$activity/$through?afterRecordID=${java.net.URLEncoder.encode(afterRecordID, "UTF-8")}&afterIndex=${java.net.URLEncoder.encode(afterIndex, "UTF-8")}")
     /** Streams mutable pricing estimates in one fold over raw records 1 through the requested snapshot end; do not reprice each chunk independently. */
     suspend fun getHistoryCosts(id: String, generation: String, through: String): List<HistoryTurnEstimate>? = request("GET", "/api/caic/v1/tasks/$id/history/costs?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}&through=${java.net.URLEncoder.encode(through, "UTF-8")}")
+    /** Returns root turn n's timeline, counted from 1 across context sections: tool calls, subagents, detached commands, and inferred model time on one axis relative to the turn start, plus per-call token usage and per-tool time. n is a completed turn or the manifest's running turn, whose timeline grows until it completes. It is mutable: subagents and commands started in the turn can end later, and cost estimates follow current prices. Archived sections need no transcript download. An optional generation must match the manifest bootstrap. */
+    suspend fun getHistoryTurn(id: String, n: String, generation: String): HistoryTurnTimeline = request("GET", "/api/caic/v1/tasks/$id/history/turns/$n?generation=${java.net.URLEncoder.encode(generation, "UTF-8")}")
 
     // SSE endpoints
     /** Streams task list updates for all tasks via SSE. */

@@ -1,0 +1,212 @@
+/* Styles for one context's Performance view: context stepper, summary, end reason, per-turn context growth against the window and compaction level, and totals. */
+
+.stepper {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.summary {
+  margin: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.summaryPart {
+  white-space: nowrap;
+}
+
+.summaryPart strong {
+  color: var(--color-text-primary);
+}
+
+.separator {
+  color: var(--color-text-tertiary);
+}
+
+.end {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.growth {
+  --growth-context: var(--color-chart-context);
+  --growth-window: var(--color-chart-window-band);
+  --growth-window-edge: var(--color-chart-window-edge);
+  --growth-compaction: var(--color-chart-compaction);
+  --growth-height: 6rem;
+  --growth-label-height: 0.9rem;
+  --growth-gap: 0.2rem;
+  --growth-rule: 2px;
+
+  margin: 0.75rem 0 0;
+}
+
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.note {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+}
+
+.chart {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.4rem;
+}
+
+/* The scale spans the plot only; the label row sits below it. Both start
+   below the room the columns keep for a compaction rule at the top. */
+.scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: var(--growth-height);
+  margin-top: var(--growth-rule);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  text-align: right;
+}
+
+/* The inline padding keeps the end columns' centered labels inside the scroll
+   box, and the top padding keeps a compaction rule at the top of the domain
+   inside it. */
+.columns {
+  display: flex;
+  gap: 1px;
+  padding: var(--growth-rule) 0.6rem 0;
+  margin: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+/* Columns widen to fill the chart; long contexts scroll at their minimum width. */
+.column {
+  display: flex;
+  flex: 1 0 0.25rem;
+  flex-direction: column;
+  gap: var(--growth-gap);
+  max-width: 2rem;
+}
+
+.plot {
+  position: relative;
+  height: var(--growth-height);
+  border-bottom: 1px solid var(--color-border-strong);
+  isolation: isolate;
+}
+
+/* The window shades the column from zero to its size; the unshaded part above
+   the context bar is the turn's headroom. */
+.window,
+.fill,
+.compacted {
+  --share: 0;
+
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+}
+
+.window {
+  z-index: -1;
+  height: calc(var(--share) * 100%);
+  background: var(--growth-window);
+  border-top: 1px solid var(--growth-window-edge);
+}
+
+.fill {
+  height: calc(var(--share) * 100%);
+  background: var(--growth-context);
+}
+
+/* A dashed rule across every column marks the context size compaction cut. */
+.compacted {
+  bottom: calc(var(--share) * 100%);
+  height: 0;
+  border-top: var(--growth-rule) dashed var(--growth-compaction);
+}
+
+.label {
+  height: var(--growth-label-height);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--growth-label-height);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Labels center on narrow columns without widening them. */
+.label:not(:empty) {
+  display: flex;
+  justify-content: center;
+  overflow: visible;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  padding: 0;
+  margin: 0.35rem 0;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  list-style: none;
+}
+
+.legend li {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 1px;
+}
+
+.fillSwatch {
+  background: var(--growth-context);
+}
+
+.windowSwatch {
+  background: var(--growth-window);
+  border-top: 1px solid var(--growth-window-edge);
+}
+
+.compactedSwatch {
+  height: 0;
+  border-top: 2px dashed var(--growth-compaction);
+  border-radius: 0;
+}
+
+.details {
+  margin-top: 0.6rem;
+}
+
+/* A value can list several long model names; it wraps instead of widening the pane. */
+.details .value {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

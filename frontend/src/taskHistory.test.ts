@@ -1,4 +1,4 @@
-// Tests owned history bootstrap, boundary waits, exact live handoff, retries, and disclosure cancellation.
+// Tests owned history bootstrap, boundary waits, exact live handoff, retries, disclosure cancellation, and the server-bounded resource ring.
 import { defined } from "@tests/history";
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
@@ -7,7 +7,7 @@ import { createRoot, createEffect } from "solid-js";
 import { vi } from "@tests/expect";
 import { historyResponse, historyManifest, fixtureHistoryResponse } from "@tests/history";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
-import type { HistoryEvent, HistoryManifest, ISOTimestamp } from "@sdk/types.gen";
+import type { EventStats, HistoryEvent, HistoryManifest, ISOTimestamp } from "@sdk/types.gen";
 import { api } from "./api";
 import { createTaskEventTimeline, type TaskHistory } from "./taskEventTimeline";
 const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -80,6 +80,39 @@ describe("section history owner", () => {
     }
     window.dispatchEvent(new Event("online"));
     assert.equal(owner.connections.length, 2);
+  });
+  it("keeps as many resource samples as the server's ring retains", async () => {
+    const events = [text(1, "first", 0)];
+    const owner = fixture(events, historyManifest(events, ""));
+    const sample = (ts: number): EventStats => ({
+      ts,
+      cpuPerc: 0,
+      cpuCeiling: 1,
+      cpuQuota: 0,
+      runtimeCPUs: 1,
+      memUsed: 0,
+      memLimit: 0,
+      memPerc: 0,
+      netRx: 0,
+      netTx: 0,
+      blockRead: 0,
+      blockWrite: 0,
+      diskUsed: 0,
+    });
+    try {
+      await loaded(owner);
+      const handlers = defined(owner.connections.at(-1)).handlers;
+      assert.equal(owner.statsRetained(), 0);
+      handlers.onStatsSnapshot?.({ samples: [sample(1), sample(2)], retained: 2 });
+      assert.equal(owner.statsRetained(), 2);
+      handlers.onStats?.(sample(3));
+      assert.deepEqual(
+        owner.stats().map((s) => s.ts),
+        [2, 3],
+      );
+    } finally {
+      owner.dispose();
+    }
   });
   it("keeps the published snapshot and message identities until rediscovery commits", async () => {
     const events = [text(1, "retained", 0)];

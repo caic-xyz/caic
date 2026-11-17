@@ -1,6 +1,6 @@
 // Shared formatting utilities for caic web UI values.
 
-import type { TaskState } from "@sdk/types.gen";
+import type { EventChangeStat, TaskState } from "@sdk/types.gen";
 
 /** Returns the currency symbol for a currency code. Unknown codes return "??". */
 export function currencySign(currency: string): string {
@@ -18,6 +18,21 @@ export function formatBalance(currency: string, total: number): string {
 // fractional part that is entirely zero so 200.00 reads as 200.
 export function formatMoney(amount: number, decimals: number): string {
   return amount.toFixed(decimals).replace(/\.0+$/, "");
+}
+
+// formatUSD keeps four decimals below one cent so small turn costs stay visible.
+export function formatUSD(usd: number): string {
+  return `$${formatMoney(usd, usd < 0.01 ? 4 : 2)}`;
+}
+
+// formatChangeStat summarizes a generated change; an aggregate counts file
+// changes because the same file can change in several turns.
+export function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
+  const files = aggregate
+    ? `${stat.files} ${stat.files === 1 ? "file change" : "file changes"}`
+    : `${stat.files} ${stat.files === 1 ? "file" : "files"}`;
+  const binary = stat.binaryFiles > 0 ? ` · ${stat.binaryFiles} ${stat.binaryFiles === 1 ? "binary" : "binaries"}` : "";
+  return `${files} · +${stat.linesAdded} −${stat.linesDeleted}${binary}`;
 }
 
 export function formatCost(usd: number): string {

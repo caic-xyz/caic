@@ -42,6 +42,7 @@ import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
 import type { HostPressure } from "../resourceLevel";
 import { api } from "../api";
+import { taskPerformancePath } from "../taskPath";
 
 export interface TaskCardProps {
   id: string;
@@ -525,7 +526,7 @@ export default function TaskCard(props: TaskCardProps) {
               </Tooltip>
               <Show when={props.runtime?.id && !isTerminal()}>
                 <TaskResourceIndicator
-                  href={`/task/@${props.id}/stats`}
+                  href={taskPerformancePath(`/task/@${props.id}`)}
                   sample={props.resourceUsage ?? null}
                   now={props.now()}
                   hostPressure={props.hostPressure}

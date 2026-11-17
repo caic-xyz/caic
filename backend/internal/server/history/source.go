@@ -1,4 +1,4 @@
-// Package history incrementally projects raw task records into immutable bodies, section summaries, and pricing observations.
+// Package history incrementally projects raw task records into immutable bodies, section summaries, turn timelines, and pricing observations.
 package history
 
 import (
@@ -126,7 +126,6 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 		var events []v1.HistoryEvent
-		var exits []hostExit
 		for messageIndex, parsed := range record.Messages {
 			m := parsed.Message
 			index := uint32(len(events)) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
@@ -144,28 +143,25 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			} else if s.exitStatus.Observe(m) {
 				projected = s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			}
+			first := len(events)
 			for i := range projected {
 				events = append(events, v1.HistoryEvent{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
+			}
+			// The context meter folds raw messages, as the task does, before
+			// their events can end a turn.
+			s.sections.observeContext(m)
+			for i := first; i < len(events); i++ {
+				s.sections.append(&events[i])
 			}
 			// Every root exit ends the hosted cards, including one that projects
 			// no event: a clean exit or the exit of a requested stop. The
 			// settlement trailer ends them too: the agent process can die with
 			// its container without recording an exit.
 			if endsHost(m) {
-				exits = append(exits, hostExit{after: len(events), at: historyTime(parsed.ProducerTime.UnixMilli())})
+				s.sections.hostExited(historyTime(parsed.ProducerTime.UnixMilli()))
 			}
 		}
 		encoded.Reset()
-		appended := 0
-		for _, exit := range exits {
-			for ; appended < exit.after; appended++ {
-				s.sections.append(&events[appended])
-			}
-			s.sections.hostExited(exit.at)
-		}
-		for ; appended < len(events); appended++ {
-			s.sections.append(&events[appended])
-		}
 		encoded.WriteByte('[')
 		encoder := json.NewEncoder(&encoded)
 		for i := range events {
@@ -278,7 +274,7 @@ func (s *Source) TurnCosts(ctx context.Context, snapshot Snapshot, last uint64, 
 		end := s.journal.end
 		s.unlock()
 		tracker := task.CostTracker{Harness: s.cursor.Harness, Model: s.cursor.RequestedModel}
-		for fact, err := range s.journal.facts(ctx, end, last) {
+		for fact, err := range s.journal.facts(ctx, 0, end, last) {
 			if err != nil {
 				yield(TurnEstimate{}, err)
 				return
@@ -540,6 +536,56 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, th
 	return writeHistoryEvents(w, events)
 }
 
+// TurnTimeline derives the spans and API calls of root turn number, counted
+// from 1: a completed turn, or the running turn through the projected prefix,
+// whose axis ends at the later of now and its latest observation. Tool calls
+// come from the turn's projected records, read one record at a time from the
+// spool; subagents and commands come from the lifecycle index, so their ends
+// can follow the turn. API calls come from the compact pricing journal, priced
+// with pricer when the harness does not report their cost.
+func (s *Source) TurnTimeline(ctx context.Context, number int, now time.Time, pricer usage.ModelPricer) (v1.HistoryTurnTimeline, error) {
+	if err := s.lock(ctx); err != nil {
+		return v1.HistoryTurnTimeline{}, err
+	}
+	if s.err != nil {
+		err := s.err
+		s.unlock()
+		return v1.HistoryTurnTimeline{}, err
+	}
+	// The lifecycle index and the projected prefix advance together under the
+	// lock, so the running turn's records end at this prefix.
+	snap := Snapshot{Through: s.through, MetadataRevision: s.sections.revision}
+	b, err := newTurnBuilder(&s.sections, snap.Through, number)
+	if err == nil {
+		err = s.journal.writer.Flush()
+		if err != nil {
+			s.err = err
+		}
+	}
+	end := s.journal.end
+	s.unlock()
+	if err != nil {
+		return v1.HistoryTurnTimeline{}, err
+	}
+	for e, err := range s.Events(ctx, snap, b.first.RecordID, b.last.RecordID) {
+		if err != nil {
+			return v1.HistoryTurnTimeline{}, err
+		}
+		b.observe(&e)
+	}
+	start, err := s.journal.seek(end, b.first.RecordID)
+	if err != nil {
+		return v1.HistoryTurnTimeline{}, err
+	}
+	for fact, err := range s.journal.facts(ctx, start, end, b.last.RecordID) {
+		if err != nil {
+			return v1.HistoryTurnTimeline{}, err
+		}
+		b.observeFact(&fact)
+	}
+	return b.timeline(now, pricer), nil
+}
+
 func (s *Source) lock(ctx context.Context) error {
 	select {
 	case s.gate <- struct{}{}:
@@ -653,11 +699,4 @@ func endsHost(m agent.Message) bool {
 	default:
 		return false
 	}
-}
-
-// hostExit is the end of the root harness process, which follows the first
-// after projected events of its record.
-type hostExit struct {
-	after int
-	at    time.Time
 }

@@ -282,7 +282,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
         requiredBox(desktopHeaderStats.first().locator("xpath=../..")),
         requiredBox(desktopHeader.getByRole("link", { name: "Task info" })),
         requiredBox(desktopHeader.getByRole("link", { name: "Task processes" })),
-        requiredBox(desktopHeader.getByRole("link", { name: "Task statistics" })),
+        requiredBox(desktopHeader.getByRole("link", { name: "Task performance", exact: true })),
       ]);
       const centers = boxes.map((box) => box.y + box.height / 2);
       return Math.max(...centers) - Math.min(...centers);
@@ -549,9 +549,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (let i = 0; i < 2; i++) {
     await expect(headerStats.nth(i)).toBeHidden();
   }
-  // Task statistics is a router link to the task's stats route, not a button.
-  const taskStatistics = detailHeader.getByRole("link", { name: "Task statistics" });
-  await expect(taskStatistics).toBeVisible();
+  // Task performance is a router link to the task's Performance route, not a button.
+  const taskPerformance = detailHeader.getByRole("link", { name: "Task performance", exact: true });
+  await expect(taskPerformance).toBeVisible();
   const infoLink = detailHeader.getByRole("link", { name: "Task info" });
   await expect(infoLink).toBeVisible();
   const titleBox = await detailHeader
@@ -659,7 +659,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
   await captureScreenshotPair(page, "desktop", "task-native-subagents");
 
-  await page.goto(`/task/@${id1}/stats`);
+  await page.goto(`/task/@${id1}/perf`);
   await expect(page.getByTestId("resource-charts")).toBeVisible();
   await expect(page.getByTestId("task-analytics-charts")).toBeVisible();
   // The list scrolls the selected card into view a frame after the tasks load.

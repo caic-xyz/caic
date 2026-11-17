@@ -32,9 +32,14 @@ export function deriveNetworkRates(stats: readonly EventStats[]): NetworkRateSam
   });
 }
 
-// mergeStats keeps the newest revision of each timestamp in the bounded ring.
-export function mergeStats(first: readonly EventStats[], latest: readonly EventStats[]): EventStats[] {
+// mergeStats keeps the newest revision of each timestamp, and the latest
+// retained samples: the capacity of the server's ring.
+export function mergeStats(
+  first: readonly EventStats[],
+  latest: readonly EventStats[],
+  retained: number,
+): EventStats[] {
   const values = new Map(first.map((sample) => [sample.ts, sample]));
   for (const sample of latest) values.set(sample.ts, sample);
-  return [...values.values()].sort((a, b) => a.ts - b.ts).slice(-60);
+  return [...values.values()].sort((a, b) => a.ts - b.ts).slice(-retained);
 }

@@ -11,7 +11,8 @@ export default function Table(props: {
   dense?: boolean;
   // A page fills its panel; a pane table fits its few columns instead.
   fit?: boolean;
-  // A table of labels rather than numbers reads from the left.
+  // A table of labels rather than numbers reads from the left. In a table of
+  // numbers, a cell with data-align="text" reads from the left too.
   align?: "numbers" | "labels";
   class?: string;
   children: JSX.Element;

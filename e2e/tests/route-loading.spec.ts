@@ -154,7 +154,7 @@ test("a failed nested chart download retries within the current document", async
     if (++requests === 1) await route.abort("failed");
     else await route.continue();
   });
-  await page.goto(`/task/@${id}/stats`);
+  await page.goto(`/task/@${id}/perf`);
   const failure = page.getByTestId("error-fallback");
   await expect(failure).toContainText("Page content could not be loaded.");
   const documentStartedAt = await page.evaluate(() => performance.timeOrigin);

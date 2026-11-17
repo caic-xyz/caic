@@ -1,4 +1,4 @@
-// Package data defines the private, rebuildable history pricing journal schema.
+// Package data defines the private, rebuildable history journal schema for pricing and per-call usage.
 package data
 
 import (
@@ -46,8 +46,11 @@ type Usage struct {
 	CacheWrites              []CacheWrite `json:"cacheWrites,omitempty"`
 }
 
-// Fact contains only inputs consumed by the authoritative pricing fold. Index
-// identifies the normalized output when Kind is Result; controls need no output.
+// Fact contains only inputs consumed by the authoritative pricing fold and by
+// the per-call usage of turn timelines. Index identifies the normalized output
+// when Kind is Result or Usage; controls need no output. ContextWindow is zero
+// when unknown. RecordID stays the first field: the journal locates a record by
+// each line's prefix.
 type Fact struct {
 	RecordID          uint64    `json:"recordID"`
 	Index             uint32    `json:"index,omitempty"`
@@ -63,4 +66,5 @@ type Fact struct {
 	ReportedCostUSD   *float64  `json:"reportedCostUSD,omitempty"`
 	CostReported      bool      `json:"costReported,omitempty"`
 	TotalCostUSD      float64   `json:"totalCostUSD,omitempty"`
+	ContextWindow     int       `json:"contextWindow,omitempty"`
 }

@@ -1,4 +1,4 @@
-# Fake agent emits immediate deterministic e2e scenarios with explicit input gates and ordered message identity.
+# Fake agent emits deterministic e2e scenarios with input gates, ordered message identity, and fixture time.
 #
 # Each envelope's message is a flat object whose "type" field maps directly to
 # an agent.Message type (init, text, text_delta, tool_use, ask, widget,
@@ -460,6 +460,12 @@ def emit(obj: dict) -> None:
     sys.stdout.flush()
 
 
+def advance_clock(ms: int) -> None:
+    """Move the timestamps of later messages forward without waiting."""
+    global last_timestamp_ms
+    last_timestamp_ms = max(int(time.time() * 1000), last_timestamp_ms) + ms
+
+
 def emit_text(text: str) -> None:
     """Emit streaming text deltas followed by the complete text message."""
     # Split roughly in half for two streaming deltas.
@@ -852,6 +858,225 @@ def emit_background_watch_only_turn(turns: int) -> None:
     emit_result(turns, "Checks passed")
 
 
+TIMELINE_READS = [
+    f"backend/internal/server/{name}.go"
+    for name in (
+        "router",
+        "middleware",
+        "auth",
+        "session",
+        "task_handlers",
+        "task_history_http",
+        "usage_handlers",
+        "config",
+        "errors",
+        "events",
+        "metrics",
+        "limits",
+    )
+]
+TIMELINE_BACKGROUND = {
+    "tool": "toolu_tl_bg",
+    "watch": False,
+    "id": "claude:shell:btl5race1",
+    "description": "Race tests",
+    "output": "/tmp/claude-1000/-workspace/test-session/tasks/btl5race1.output",
+}
+
+
+def emit_timed_tool(tool_id: str, name: str, input_obj: dict, ms: int, source: dict | None) -> None:
+    extra = {"source": source} if source else {}
+    emit({"type": "tool_use", "id": tool_id, "name": name, "input": input_obj, **extra})
+    advance_clock(ms)
+    emit({"type": "tool_result", "tool_use_id": tool_id, "duration_ms": ms, **extra})
+
+
+class TimelineCalls:
+    """Emits per-call usage whose context grows as tool results join the prompt.
+
+    The root caches its prompt prefix, so each call reads the previous context
+    from cache and writes only what the last step added. A subagent starts
+    from its own small prompt and reports no context window.
+    """
+
+    def __init__(self, model: str, context: int, window: int, source: dict | None) -> None:
+        self.model = model
+        self.context = 0
+        self.pending = context
+        self.window = window
+        self.source = source
+        self.count = 0
+        self.totals: dict[str, int] = {}
+
+    def call(self, added: int, output: int, reasoning: int) -> None:
+        self.count += 1
+        self.pending += added
+        usage = {
+            "input_tokens": 3 + self.count % 7,
+            "cache_creation_input_tokens": self.pending,
+            "cache_read_input_tokens": self.context,
+            "output_tokens": output,
+            "reasoning_output_tokens": reasoning,
+        }
+        for key, value in usage.items():
+            self.totals[key] = self.totals.get(key, 0) + value
+        record = {"type": "usage", "usage": usage, "model": self.model, "per_call": True}
+        if self.window:
+            record["context_window"] = self.window
+        if self.source:
+            record["source"] = self.source
+        emit(record)
+        self.context += self.pending + output
+        self.pending = 0
+
+
+def emit_turn_timeline_turn(turns: int) -> None:
+    """Emit a dense turn spread over a minute of fixture time for the turn view.
+
+    Many short reads crowd the Tools lane, two searches overlap, a subagent runs
+    its own tools, an edit fails, and a background command outlives the result.
+    Eleven tool names, three of them concurrent, fill the tool-time breakdown.
+    Every API call reports its own usage. A harness-queued turn without a prompt
+    reports the command's end.
+    """
+    started = last_timestamp_ms
+    root = TimelineCalls("claude-opus-5-5", 14000, 200000, None)
+    emit({"type": "thinking", "text": "Finding where requests enter the server before adding rate limits."})
+    advance_clock(1200)
+    root.call(0, 180, 120)
+    emit_text("Reading the server package to find the request entry points.")
+    for i, path in enumerate(TIMELINE_READS):
+        advance_clock(300 + (i * 211) % 700)
+        root.call(1200 + (i * 613) % 2400, 60 + (i * 37) % 90, 0)
+        emit_timed_tool(f"toolu_tl_read_{i}", "Read", {"file_path": path}, 120 + (i * 97) % 400, None)
+    advance_clock(900)
+    root.call(2100, 240, 160)
+    emit_tool_use("toolu_tl_grep", "Grep", {"pattern": "http.Handle", "path": "backend/internal/server"})
+    emit_tool_use("toolu_tl_glob", "Glob", {"pattern": "backend/**/*_test.go"})
+    advance_clock(700)
+    emit_tool_result("toolu_tl_glob", 700)
+    advance_clock(900)
+    emit_tool_result("toolu_tl_grep", 1600)
+    advance_clock(1500)
+    root.call(5200, 420, 300)
+    agent = {"tool": "toolu_tl_agent", "id": "claude:task:tl7review"}
+    emit_tool_use(
+        agent["tool"],
+        "Agent",
+        {"description": "Review rate limit tests", "prompt": "Find tests that exercise request limits."},
+    )
+    subagent = {
+        "tool_use_id": agent["tool"],
+        "id": agent["id"],
+        "label": "Review rate limit tests",
+        "prompt": "Find tests that exercise request limits.",
+        "status": "running",
+    }
+    emit({"type": "native_subagent", "subagent": subagent})
+    child = {"agentID": agent["id"]}
+    helper = TimelineCalls("claude-haiku-5-5", 6000, 0, child)
+    advance_clock(800)
+    helper.call(0, 90, 0)
+    emit({"type": "text", "text": "Searching the tests for request limits.", "source": child})
+    for i, path in enumerate(("router_test.go", "middleware_test.go", "limits_test.go")):
+        advance_clock(400)
+        helper.call(1800, 70, 0)
+        emit_timed_tool(f"toolu_tl_child_{i}", "Read", {"file_path": f"backend/internal/server/{path}"}, 300, child)
+    advance_clock(600)
+    helper.call(2200, 110, 0)
+    emit_timed_tool(
+        "toolu_tl_child_test", "Bash", {"command": "go test ./backend/internal/server -run Limit"}, 6400, child
+    )
+    advance_clock(900)
+    helper.call(900, 160, 0)
+    emit(
+        {
+            "type": "native_subagent",
+            "subagent": {"id": agent["id"], "status": "completed", "result": "No test covers limits."},
+        }
+    )
+    emit_tool_result(agent["tool"], 11000)
+    advance_clock(2400)
+    root.call(600, 520, 380)
+    emit(
+        {
+            "type": "tool_use",
+            "id": "toolu_tl_edit_1",
+            "name": "Edit",
+            "input": {"file_path": "backend/internal/server/router.go", "old_string": "mux :=", "new_string": "mux :="},
+        }
+    )
+    advance_clock(200)
+    emit({"type": "tool_result", "tool_use_id": "toolu_tl_edit_1", "error": "old_string not found"})
+    advance_clock(1800)
+    root.call(400, 300, 90)
+    emit_timed_tool(
+        "toolu_tl_edit_2",
+        "Edit",
+        {
+            "file_path": "backend/internal/server/router.go",
+            "old_string": "return mux",
+            "new_string": "return limit(mux)",
+        },
+        250,
+        None,
+    )
+    advance_clock(1500)
+    root.call(300, 140, 0)
+    emit_background_bash(TIMELINE_BACKGROUND)
+    advance_clock(900)
+    root.call(250, 90, 0)
+    emit_timed_tool("toolu_tl_vet", "Bash", {"command": "go vet ./backend/..."}, 5200, None)
+    advance_clock(300)
+    root.call(1100, 260, 70)
+    emit_timed_tool(
+        "toolu_tl_todo", "TodoWrite", {"todos": [{"content": "Document the limiter", "status": "pending"}]}, 90, None
+    )
+    advance_clock(200)
+    root.call(300, 210, 0)
+    emit_tool_use("toolu_tl_search", "WebSearch", {"query": "token bucket rate limiter Go"})
+    emit_tool_use("toolu_tl_fetch", "WebFetch", {"url": "https://pkg.go.dev/golang.org/x/time/rate", "prompt": "Burst"})
+    emit_tool_use("toolu_tl_docs", "mcp__docs__search_documentation", {"query": "rate limit headers"})
+    advance_clock(300)
+    emit_tool_result("toolu_tl_docs", 300)
+    advance_clock(250)
+    emit_tool_result("toolu_tl_search", 550)
+    advance_clock(250)
+    emit_tool_result("toolu_tl_fetch", 800)
+    advance_clock(200)
+    root.call(6400, 640, 210)
+    emit_timed_tool(
+        "toolu_tl_write",
+        "Write",
+        {"file_path": "docs/rate_limits.md", "content": "# Rate limits\n"},
+        110,
+        None,
+    )
+    advance_clock(400)
+    root.call(200, 90, 0)
+    emit_text("Requests now pass through the limiter. The race tests run in the background.")
+    # The result sums the calls, as Claude's does, and keeps the harness cost.
+    emit(
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": "Rate limits added",
+            "num_turns": turns,
+            "total_cost_usd": 0.01,
+            "duration_ms": last_timestamp_ms - started,
+            "duration_api_ms": 0,
+            "context_window": 200000,
+            "usage": {key: root.totals[key] + helper.totals[key] for key in root.totals},
+        }
+    )
+    advance_clock(25000)
+    emit_command_end(TIMELINE_BACKGROUND, f'Background command "{TIMELINE_BACKGROUND["description"]}" completed', 0)
+    queued = last_timestamp_ms
+    advance_clock(1500)
+    emit_text("The race tests passed.")
+    emit_result(turns, "Race tests passed", duration=last_timestamp_ms - queued)
+
+
 def emit_native_subagents_turn(turns: int) -> None:
     """Emit canonical concurrent activity; this is UI coverage, not harness evidence."""
     # Parent narration before, between, and after the runs gives the transcript
@@ -943,6 +1168,26 @@ def gate(command: str) -> bool:
     if json.loads(line)["text"] != command:
         raise ValueError(f"Expected fake-agent command {command!r}, got {line!r}")
     return True
+
+
+def emit_live_turn(turns: int) -> None:
+    """Emit a turn whose tools arrive across input gates, so an open turn view grows.
+
+    A read starts at once. FAKE_LIVE_CONTINUE ends it and starts a test run;
+    FAKE_LIVE_FINISH ends the run and the turn.
+    """
+    emit_text("Reading the server entry point.")
+    emit_tool_use("toolu_live_read", "Read", {"file_path": "backend/cmd/caic/main.go"})
+    if not gate("FAKE_LIVE_CONTINUE"):
+        return
+    emit_tool_result("toolu_live_read", 400)
+    emit_text("Running the server tests.")
+    emit_tool_use("toolu_live_test", "Bash", {"command": "go test ./backend/..."})
+    if not gate("FAKE_LIVE_FINISH"):
+        return
+    emit_tool_result("toolu_live_test", 1200)
+    emit_text("The server tests pass.")
+    emit_result(turns, "Live turn complete")
 
 
 def emit_concurrent_streams_turn(turns: int) -> None:
@@ -1156,6 +1401,12 @@ def main() -> None:
                 emit_text("Loaded code-quality and review into this context.")
             emit_result(turns, "Skill context updated")
             continue
+        if line.startswith("FAKE_LIVE_TURN"):
+            emit_live_turn(turns)
+            continue
+        if line.startswith("FAKE_TURN_TIMELINE"):
+            emit_turn_timeline_turn(turns)
+            continue
         if line.startswith("FAKE_NATIVE_SUBAGENTS"):
             emit_native_subagents_turn(turns)
             continue
@@ -1170,6 +1421,20 @@ def main() -> None:
             continue
         if line.startswith("FAKE_BACKGROUND_WORK"):
             emit_background_turn(turns, True)
+            continue
+        if line.startswith("FAKE_COMPACT"):
+            # The harness compacts before answering, as on reaching its threshold.
+            emit(
+                {
+                    "type": "system",
+                    "subtype": "compact_boundary",
+                    "context_tokens_before": 150000,
+                    "context_tokens_after": 20000,
+                }
+            )
+            emit({"type": "usage", "usage": {}, "context_used": 26000, "context_window": 200000})
+            emit_text("Context compacted; continuing from the summary.")
+            emit_result(turns, "Compaction complete")
             continue
         if line.startswith("FAKE_CONTEXT_OCCUPANCY"):
             if " RESET" in line:

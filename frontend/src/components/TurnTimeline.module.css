@@ -1,0 +1,270 @@
+/* Turn timeline: labelled lanes over one time axis; hatching marks inferred model time, a dashed outline its provisional end, and an arrow spans that outlast the axis. */
+
+.timeline {
+  --lane-model: var(--color-chart-model);
+  --lane-tools: var(--color-primary);
+  --lane-child-tools: var(--color-chart-child-tool);
+  --lane-subagents: var(--color-plan);
+  --lane-background: var(--color-chart-command);
+  --span-height: 0.75rem;
+
+  margin: 0.75rem 0 0;
+}
+
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.note {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+}
+
+.plot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+
+  /* Room for the arrows of spans that continue after the turn and for the
+     hit area of a span at the turn end. */
+  padding-right: 0.75rem;
+}
+
+/* Tick labels sit at their share of the axis; the end label owns the right edge. */
+.axis {
+  position: relative;
+  height: 0.9rem;
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.9rem;
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-border-medium);
+}
+
+.tick {
+  --at: 0;
+
+  position: absolute;
+  left: calc(var(--at) * 100%);
+  padding-left: 2px;
+  white-space: nowrap;
+  border-left: 1px solid var(--color-border-medium);
+}
+
+.end {
+  position: absolute;
+  right: 0;
+  padding-right: 2px;
+  white-space: nowrap;
+  border-right: 1px solid var(--color-border-strong);
+}
+
+.lane {
+  --lane-color: var(--lane-tools);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.lane[data-lane="model"] {
+  --lane-color: var(--lane-model);
+}
+
+.lane[data-lane="childTools"] {
+  --lane-color: var(--lane-child-tools);
+}
+
+.lane[data-lane="subagents"] {
+  --lane-color: var(--lane-subagents);
+}
+
+.lane[data-lane="background"] {
+  --lane-color: var(--lane-background);
+}
+
+.laneLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.laneSummary {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+}
+
+/* Gridlines repeat at the tick step; the right border is the turn end. The
+   track isolates its stacking order: every hit area paints below every drawn
+   span, and every state ring above them. */
+.track {
+  --tick-share: 1;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: var(--span-height);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-border-light) 0 1px,
+    transparent 1px calc(var(--tick-share) * 100%)
+  );
+  border-right: 1px solid var(--color-border-strong);
+  isolation: isolate;
+}
+
+/* A row box would otherwise take the clicks meant for the hit areas below it. */
+.row {
+  position: relative;
+  height: var(--span-height);
+  pointer-events: none;
+}
+
+.span {
+  --start: 0;
+  --length: 0;
+
+  position: absolute;
+  top: 0;
+  left: calc(var(--start) * 100%);
+  width: max(2px, calc(var(--length) * 100%));
+  height: 100%;
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--lane-color);
+  border: none;
+  border-radius: 1px;
+}
+
+/* The hit area is at least 1.5rem square, centered on the drawn span, so
+   narrow spans can be tapped; the drawn geometry stays exact. It paints below
+   the track's drawn spans, so a drawn span always takes its own clicks; where
+   only hit areas overlap, the later span takes them. The button has no
+   z-index or transform in any state, so it never lifts its hit area. */
+.span::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: max(100%, 1.5rem);
+  height: max(100%, 1.5rem);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+/* State rings paint above the drawn spans and take no clicks. */
+.span::after {
+  position: absolute;
+  inset: -3px;
+  z-index: 1;
+  pointer-events: none;
+  content: "";
+  border-radius: 2px;
+}
+
+/* Inferred model time is hatched, so it reads as estimated without color. */
+.inferred .span {
+  background: repeating-linear-gradient(135deg, var(--lane-color) 0 2px, transparent 2px 4px);
+  box-shadow: inset 0 0 0 1px var(--lane-color);
+}
+
+/* Hover, linked, and focus rings differ in width and style as well as color. */
+.span:hover::after {
+  inset: -2px;
+  border: 1px solid var(--color-mark-hover);
+}
+
+/* An arrow past the turn-end rule marks a span that continues after the turn. */
+.arrow {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  border-block: calc(var(--span-height) / 2) solid transparent;
+  border-left: 0.4rem solid var(--lane-color);
+  transform: translateY(-50%);
+}
+
+.failed {
+  box-shadow: inset 0 -3px 0 var(--color-danger);
+}
+
+.linked::after {
+  border: 2px dashed var(--color-mark-linked);
+}
+
+.span:focus-visible::after {
+  border: 2px solid var(--color-focus-border);
+}
+
+.omitted {
+  margin: 0.4rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+}
+
+.spans {
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+
+.spans summary {
+  width: fit-content;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.spanTable {
+  max-height: 14rem;
+  margin-top: 0.3rem;
+}
+
+/* The item column takes the width the others leave and truncates its names;
+   the end wraps its "after the turn" note, so the table fits a narrow pane. */
+.spanTable td.item {
+  width: 100%;
+  max-width: 0;
+}
+
+.spanTable td.endCell {
+  min-width: 4.5rem;
+  white-space: normal;
+}
+
+.itemLink {
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: inherit;
+  color: var(--color-link);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.itemLink:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+}
+
+/* A running turn's latest model time is provisional: the hatch keeps the
+   inferred encoding and a dashed outline replaces the solid one. */
+.inferred .provisional {
+  outline: 1px dashed var(--lane-color);
+  outline-offset: -1px;
+  box-shadow: none;
+}

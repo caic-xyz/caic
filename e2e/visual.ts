@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { validateHistoryEvent, validateHistoryManifest, validateTask } from "../sdk/caic/ts/v1/validate.gen";
 import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
-import type { HistoryManifest, ImageRefreshStatus, ISOTimestamp } from "../sdk/caic/ts/v1/types.gen";
+import type { HistoryManifest, HistoryStats, ImageRefreshStatus, ISOTimestamp } from "../sdk/caic/ts/v1/types.gen";
 import {
   resourceHistory,
   serverHealth,
@@ -166,6 +166,8 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
         metadata.setupEndedAt = iso(Math.min(...setupEnd) - history.start + history.taskStart);
       }
       for (const turn of metadata.turns ?? []) {
+        // A turn keeps its server-measured length on the visual clock.
+        turn.startedAt = iso(positionTime(turn) - (Date.parse(turn.at) - Date.parse(turn.startedAt)));
         turn.at = iso(positionTime(turn));
         if (turn.waitInput) turn.waitMs = positionTime(turn.waitInput) - positionTime(turn);
       }
@@ -267,7 +269,8 @@ export async function prepareVisualPage(page: Page): Promise<VisualPage> {
           Object.defineProperty(event, "data", { value: JSON.stringify(value) });
         });
         this.addEventListener("statsSnapshot", (event) => {
-          Object.defineProperty(event, "data", { value: JSON.stringify({ samples }) });
+          const value = JSON.parse(event.data) as HistoryStats;
+          Object.defineProperty(event, "data", { value: JSON.stringify({ ...value, samples }) });
         });
         this.addEventListener("stats", (event) => event.stopImmediatePropagation());
       }

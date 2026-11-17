@@ -7,7 +7,7 @@
 
 .details summary {
   width: fit-content;
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
   cursor: pointer;
 }
 

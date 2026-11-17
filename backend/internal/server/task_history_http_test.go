@@ -331,6 +331,40 @@ func TestHistoryResources(t *testing.T) {
 			t.Fatalf("projection failure cached: %d %v", failed.Code, failed.Header())
 		}
 	})
+	t.Run("turn timeline", func(t *testing.T) {
+		t.Parallel()
+		s, tk, p := historyHTTPFixture(t)
+		b := historyBootstrap(t, s, tk, "")
+		base := "/tasks/" + tk.ID.String() + "/history/turns/"
+		timeline := func() v1.HistoryTurnTimeline {
+			w := historyRequest(t, s, base+"1?generation="+b.Generation, "")
+			if w.Code != 200 || w.Header().Get("ETag") == "" {
+				t.Fatalf("timeline %d: %s", w.Code, w.Body)
+			}
+			var got v1.HistoryTurnTimeline
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		// The text at 1s starts the turn. While it runs, its provisional model
+		// span reaches the server's clock and has no end.
+		got := timeline()
+		if got.Number != 1 || !got.EndedAt.IsZero() || got.DurationMS < 2000 || len(got.Spans) != 1 || got.Spans[0].EndMS != nil {
+			t.Fatalf("running timeline = %+v", got)
+		}
+		appendHistory(t, p, `{"t":"agent","ts":3.000,"msg":{"type":"result","subtype":"success","duration_ms":2000,"usage":{"input_tokens":10}}}`)
+		// No tool covers the completed turn.
+		got = timeline()
+		if got.Number != 1 || got.DurationMS != 2000 || got.ModelMS != 2000 || len(got.Spans) != 1 || got.Spans[0].Kind != v1.HistoryTurnSpanKindModel || got.Spans[0].EndMS == nil || got.Omitted == nil {
+			t.Fatalf("completed timeline = %+v", got)
+		}
+		for target, code := range map[string]int{base + "2": 404, base + "01": 400, base + "0": 400, base + "1?generation=expired": 409} {
+			if w := historyRequest(t, s, target, ""); w.Code != code || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("%s: %d %s, want %d", target, w.Code, w.Body, code)
+			}
+		}
+	})
 	t.Run("account isolation including legacy shared task", func(t *testing.T) {
 		t.Parallel()
 		s, tk, _ := historyHTTPFixture(t)
@@ -350,7 +384,7 @@ func TestHistoryResources(t *testing.T) {
 			t.Fatalf("cross-account resource %d %s", w.Code, w.Body)
 		}
 		tk.OwnerID = "alice"
-		for _, target := range []string{"/tasks/" + tk.ID.String() + "/history/manifest", recentHistoryURL(&b), "/tasks/" + tk.ID.String() + "/history/events?cursor=" + b.Cursor, "/tasks/" + tk.ID.String() + "/history/costs"} {
+		for _, target := range []string{"/tasks/" + tk.ID.String() + "/history/manifest", recentHistoryURL(&b), "/tasks/" + tk.ID.String() + "/history/events?cursor=" + b.Cursor, "/tasks/" + tk.ID.String() + "/history/costs", "/tasks/" + tk.ID.String() + "/history/turns/1"} {
 			w := historyRequest(t, s, target, "bob")
 			if w.Code != 403 || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("unauthorized %s: %d", target, w.Code)
@@ -505,6 +539,9 @@ func assertStatsSnapshot(t testing.TB, r *bufio.Reader) {
 	}
 	if stats.Samples == nil {
 		t.Fatal("resource snapshot must contain an array")
+	}
+	if stats.Retained != taskrun.StatsRingSize {
+		t.Fatalf("retained = %d, want the ring size %d", stats.Retained, taskrun.StatsRingSize)
 	}
 }
 
