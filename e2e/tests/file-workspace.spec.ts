@@ -49,6 +49,7 @@ for (const width of [390, 1280]) {
       .toBe(true);
     const taskURL = page.url();
     await page.getByRole("link", { name: "Guide", exact: true }).click();
+    await expect(page).toHaveURL(/\/view\?path=%2Fguide.md$/);
     const guideURL = page.url();
     await page.getByRole("link", { name: "Notes", exact: true }).click();
     await expect(page).toHaveURL(/path=%2Fnotes.md/);
@@ -73,6 +74,7 @@ for (const width of [390, 1280]) {
     // A direct full-screen link restores its pane before closing to the conversation.
     await page.goto("/");
     await page.goto(`${guideURL}&fullscreen=1`);
+    await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(guideURL);
     await page.getByRole("button", { name: "Close view", exact: true }).click();

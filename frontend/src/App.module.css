@@ -1,4 +1,4 @@
-/* Styles for the app shell and its diagnostic error fallback. */
+/* Styles for the app shell, route-loading status, and diagnostic error fallback. */
 
 .app {
   position: fixed;
@@ -33,6 +33,17 @@
   min-height: 0;
 }
 
+.routeLoading {
+  position: absolute;
+  right: 0;
+  bottom: -0.125rem;
+  left: 0;
+  width: 100%;
+  height: 0.125rem;
+  accent-color: var(--color-primary);
+  border: 0;
+}
+
 .voiceShell {
   /* Keep overflowed mobile task cards below voice recovery controls. */
   flex-shrink: 0;
@@ -44,6 +55,7 @@
 }
 
 .navbar {
+  position: relative;
   display: flex;
   gap: 0.25rem;
   align-items: center;
@@ -263,7 +275,6 @@
 
 @media (width <= 480px) {
   .navbar {
-    position: relative;
     display: flow-root;
     line-height: 2rem;
   }

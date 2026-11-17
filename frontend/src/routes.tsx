@@ -1,22 +1,23 @@
-// Application routes shared by entry point and tests, including public device pairing pages.
+// Application routes keep task creation and conversations eager and load optional pages on navigation.
 
 import { Route } from "@solidjs/router";
-import type { JSX } from "solid-js";
+import { lazy, type JSX } from "solid-js";
 
 import App from "./App";
 import { DeviceLoginPage, DeviceApprovalPage } from "./pages/DeviceLoginPage";
 import MainLayout from "./components/MainLayout";
 import EmptyPage from "./pages/EmptyPage";
 import TaskWorkspace from "./components/TaskWorkspace";
-import DiffPage from "./pages/DiffPage";
-import FileViewerPage from "./pages/FileViewerPage";
-import ProcessesPage from "./pages/ProcessesPage";
-import StatsPage from "./pages/StatsPage";
-import TaskInfoPage from "./pages/TaskInfoPage";
-import VncPage from "./pages/VncPage";
-import SessionsPage from "./pages/SessionsPage";
-import SettingsPage from "./pages/SettingsPage";
-import MonitoringPage from "./pages/MonitoringPage";
+
+const DiffPage = lazy(() => import("./pages/DiffPage"));
+const FileViewerPage = lazy(() => import("./pages/FileViewerPage"));
+const MonitoringPage = lazy(() => import("./pages/MonitoringPage"));
+const ProcessesPage = lazy(() => import("./pages/ProcessesPage"));
+const SessionsPage = lazy(() => import("./pages/SessionsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const StatsPage = lazy(() => import("./pages/StatsPage"));
+const TaskInfoPage = lazy(() => import("./pages/TaskInfoPage"));
+const VncPage = lazy(() => import("./pages/VncPage"));
 
 /**
  * The application's route definitions. Returned as JSX (not a component) so it can be

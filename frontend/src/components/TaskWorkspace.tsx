@@ -1,5 +1,5 @@
-// Keeps the conversation live beside documents and task subviews across responsive layouts and full screen.
-import { type JSX, Show, createSignal, createEffect, onCleanup } from "solid-js";
+// Keeps the conversation live while optional documents and task subviews load, resize, and fill the screen.
+import { type JSX, Show, Suspense, createSignal, createEffect, onCleanup } from "solid-js";
 import { useLocation, useParams } from "@solidjs/router";
 import TaskDetailPage from "../pages/TaskDetailPage";
 import { taskIdFromParam, taskIdFromPath } from "../taskPath";
@@ -73,7 +73,7 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
 
               data-testid="task-view-pane"
             >
-              {props.children}
+              <Suspense fallback={<p role="status">Loading view…</p>}>{props.children}</Suspense>
             </div>
           </div>
         </TaskTimelineProvider>

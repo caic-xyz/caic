@@ -1,4 +1,4 @@
-// SessionsPage binds tracked session actions to their originating identity and shows login origins and expiry.
+// SessionsPage keeps session-list loading local and binds sign-out actions to their originating identity.
 
 import { createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { APIError, createApiClient } from "@sdk/api.gen";
@@ -34,12 +34,19 @@ export default function SessionsPage() {
       return { sid, response };
     },
   );
+  // Reading the resource directly would suspend the enclosing route during
+  // refresh. Keep its last successful value and local loading/error feedback.
+  const sessionData = () => {
+    if (sessions.state !== "ready" && sessions.state !== "refreshing") return null;
+    const data = sessions.latest;
+    return data.sid === auth.user()?.sessionID ? data : null;
+  };
   const [error, setError] = createSignal("");
   const [revoking, setRevoking] = createSignal("");
   let revokeOperation = 0;
   async function revoke(id: string, current: boolean) {
     const sid = auth.user()?.sessionID;
-    if (!sid || sessions()?.sid !== sid) return;
+    if (!sid || !sessionData()) return;
     const isCurrent = () => !disposed && auth.ready() && auth.user()?.sessionID === sid;
     const operation = ++revokeOperation;
     const client = sessionClient(sid);
@@ -80,7 +87,7 @@ export default function SessionsPage() {
         </Show>
         <Show when={!sessions.error}>
           <ul class={styles.list}>
-            <For each={sessions()?.sid === auth.user()?.sessionID ? sessions()?.response.sessions : []}>
+            <For each={sessionData()?.response.sessions}>
               {(session) => (
                 <li class={styles.session} data-testid={`session-${session.id}`}>
                   <div class={styles.details}>

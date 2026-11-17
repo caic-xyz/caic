@@ -1,7 +1,17 @@
-// Application shell: top-level chrome, dialogs, mobile voice view, diagnostic error boundary, and routed panes.
+// Application shell: persistent chrome, dialogs, mobile voice, diagnostic errors, and scoped route loading.
 
-import { createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { useLocation } from "@solidjs/router";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  ErrorBoundary,
+  onCleanup,
+  onMount,
+  Show,
+  Suspense,
+  type JSX,
+} from "solid-js";
+import { useIsRouting, useLocation } from "@solidjs/router";
 
 import { ConversationViewportContext } from "./ConversationViewportContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
@@ -113,6 +123,7 @@ function SessionCheckPage() {
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
   const location = useLocation();
+  const routing = useIsRouting();
   const hostMode = useHostMode();
   const auth = s.auth;
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
@@ -178,11 +189,14 @@ function Shell(props: { children?: JSX.Element }) {
                 <ServerHealthIndicator health={s.serverHealth()} connected={s.connected()} />
                 <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
               </div>
+              <Show when={routing()}>
+                <progress class={styles.routeLoading} aria-label="Loading page" title="Loading page" />
+              </Show>
             </header>
 
             <ErrorBoundary fallback={(error: unknown, reset) => <ErrorFallback error={error} reset={reset} />}>
               <ConversationViewportContext.Provider value={conversationViewport}>
-                {props.children}
+                <Suspense fallback={<p role="status">Loading page…</p>}>{props.children}</Suspense>
               </ConversationViewportContext.Provider>
             </ErrorBoundary>
           </div>

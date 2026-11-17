@@ -147,15 +147,57 @@ test("device approval, normal permissions, logout, and network protection", asyn
       await approval.goto("/sessions");
       await expect(approval.getByRole("alert")).toHaveText("Could not load sessions.");
       await approval.unroute("**/auth/sessions");
-      await approval.getByRole("button", { name: "Reload sessions" }).click();
-      await approval.setViewportSize({ width: 320, height: 960 });
-      await expect
-        .poll(() => approval.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-        .toBe(true);
-      const row = approval.getByTestId(`session-${device.id}`);
-      await expect(row.getByRole("heading", { name: "Device sign-in", exact: true })).toBeVisible();
-      await row.getByRole("button", { name: "Sign out session" }).click();
-      await expect(row).toHaveCount(0);
+      const initial = Promise.withResolvers<void>();
+      const refreshed = Promise.withResolvers<void>();
+      const revocation = Promise.withResolvers<void>();
+      let reads = 0;
+      let revocations = 0;
+      await approval.route("**/auth/sessions", async (route) => {
+        if (++reads === 1) await initial.promise;
+        else await refreshed.promise;
+        await route.continue();
+      });
+      await approval.route(`**/auth/sessions/${device.id}/revoke`, async (route) => {
+        const response = await route.fetch();
+        revocations++;
+        await revocation.promise;
+        await route.fulfill({ response });
+      });
+      try {
+        await approval.getByRole("button", { name: "Reload sessions" }).click();
+        const heading = approval.getByRole("heading", { name: "Sessions", exact: true });
+        const loading = approval.getByRole("status").filter({ hasText: "Loading sessions…" });
+        await expect(heading).toBeVisible();
+        await expect(loading).toBeVisible();
+        await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
+        initial.resolve();
+        await approval.setViewportSize({ width: 320, height: 960 });
+        await expect
+          .poll(() => approval.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+          .toBe(true);
+        const row = approval.getByTestId(`session-${device.id}`);
+        await expect(row.getByRole("heading", { name: "Device sign-in", exact: true })).toBeVisible();
+        const original = await heading.elementHandle();
+        await row.getByRole("button", { name: "Sign out session" }).click();
+        await expect.poll(() => revocations).toBe(1);
+        const newTask = approval.getByTestId("new-task-button");
+        await newTask.focus();
+        revocation.resolve();
+        await expect.poll(() => reads).toBe(2);
+        await expect(heading).toBeVisible();
+        await expect(loading).toBeVisible();
+        await expect(row).toBeVisible();
+        await expect(approval.getByText("Loading page…", { exact: true })).toHaveCount(0);
+        expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+        await expect(newTask).toBeFocused();
+        refreshed.resolve();
+        await expect(row).toHaveCount(0);
+        await expect(newTask).toBeFocused();
+      } finally {
+        initial.resolve();
+        refreshed.resolve();
+        revocation.resolve();
+      }
       expect((await display.request.get("/auth/me")).status()).toBe(404);
       expect(
         (
