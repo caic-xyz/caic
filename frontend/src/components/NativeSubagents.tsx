@@ -6,6 +6,7 @@ import type { HistoryActivity, HistoryBackgroundCommand } from "@sdk/types.gen";
 import { createActivityHistory } from "../historyDisclosure";
 import { NativeActivityTracker } from "../nativeSubagents";
 import Button from "./Button";
+import Duration from "./Duration";
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import { backgroundCommandStatus, nativeActivityStatus, nativeTerminal } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
@@ -68,9 +69,9 @@ export function NativeAgentCard(props: {
             <span class={styles.background}>background</span>
           </Show>
           <Show when={duration() !== null}>
-            <span class={styles.duration} data-testid="native-subagent-duration">
+            <Duration class={styles.duration} data-testid="native-subagent-duration">
               {formatTimingDuration(duration() ?? 0)}
-            </span>
+            </Duration>
           </Show>
         </span>
       </summary>

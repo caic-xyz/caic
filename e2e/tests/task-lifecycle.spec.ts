@@ -312,47 +312,35 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
   await test.step("timing and Raw controls wrap message content", async () => {
     const rawButton = page.getByRole("button", { name: "raw", exact: true }).nth(1);
     await expect(rawButton).toBeAttached();
+    // Measures the Raw toolbar against the floated time of its message group.
+    const layout = () =>
+      rawButton.evaluate((button) => {
+        const toolbar = button.parentElement;
+        const anchor = toolbar?.parentElement;
+        const message = button.closest("[data-markdown-wrap]")?.parentElement ?? null;
+        let content: HTMLElement | null = message;
+        while (content && !content.querySelector("[data-testid='timing-duration']")) content = content.parentElement;
+        const timing = content?.querySelector("[data-testid='timing-duration']")?.parentElement?.parentElement;
+        if (!toolbar || !anchor || !message || !timing) return null;
+        const raw = toolbar.getBoundingClientRect();
+        const time = timing.getBoundingClientRect();
+        return {
+          messagePadding: getComputedStyle(message).paddingRight,
+          // The hidden toolbar must not shorten the first line of text.
+          anchorWidth: getComputedStyle(anchor).width,
+          timingFloat: getComputedStyle(timing).float,
+          timingOpacity: getComputedStyle(timing).opacity,
+          clear: raw.right <= time.left || raw.top >= time.bottom,
+        };
+      });
     await expect
-      .poll(async () =>
-        rawButton.evaluate((button) => {
-          const toolbar = button.parentElement;
-          const message = toolbar?.parentElement?.parentElement;
-          return message ? getComputedStyle(message).paddingRight : null;
-        }),
-      )
-      .toBe("0px");
-    await expect
-      .poll(async () =>
-        rawButton.evaluate((button) => {
-          const toolbar = button.parentElement;
-          const content = toolbar?.parentElement?.parentElement?.parentElement;
-          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement
-            ?.parentElement;
-          return timing ? getComputedStyle(timing).float : null;
-        }),
-      )
-      .toBe("right");
+      .poll(layout)
+      .toMatchObject({ messagePadding: "0px", anchorWidth: "0px", timingFloat: "right", timingOpacity: "1" });
 
     // The timing stays visible on hover; the Raw toolbar sits left of it, or
     // below it when the timing belongs to an earlier line of the group.
     await rawButton.hover();
-    await expect
-      .poll(async () =>
-        rawButton.evaluate((button) => {
-          const toolbar = button.parentElement;
-          const content = toolbar?.parentElement?.parentElement?.parentElement;
-          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement
-            ?.parentElement;
-          if (!toolbar || !timing) return null;
-          const raw = toolbar.getBoundingClientRect();
-          const time = timing.getBoundingClientRect();
-          return {
-            opacity: getComputedStyle(timing).opacity,
-            clear: raw.right <= time.left || raw.top >= time.bottom,
-          };
-        }),
-      )
-      .toEqual({ opacity: "1", clear: true });
+    await expect.poll(layout).toMatchObject({ timingOpacity: "1", clear: true });
   });
 
   await test.step("detail pane has no extra gutters or horizontal overflow", async () => {

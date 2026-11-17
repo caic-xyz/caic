@@ -2,7 +2,6 @@
 declare const classes: {
   readonly "branch": string;
   readonly "cancel": string;
-  readonly "duration": string;
   readonly "entry": string;
   readonly "error": string;
   readonly "header": string;
@@ -12,5 +11,6 @@ declare const classes: {
   readonly "status": string;
   readonly "sync-spin": string;
   readonly "title": string;
+  readonly "trailing": string;
 };
 export default classes;

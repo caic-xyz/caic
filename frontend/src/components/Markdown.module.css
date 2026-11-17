@@ -4,15 +4,29 @@
   position: relative;
 }
 
-.rawToolbar {
+/* A zero-size float keeps the hidden toolbar from shortening the first line.
+   The revealed toolbar overlays the end of that line, left of a floated time. */
+.rawAnchor {
   position: relative;
   z-index: 1;
   float: right;
+  width: 0;
+  height: 0;
+}
+
+.rawToolbar {
   display: flex;
   gap: 0.2em;
-  margin-left: 0.4em;
+  align-items: center;
+  white-space: nowrap;
   opacity: 0;
   transition: opacity 0.15s;
+}
+
+.rawAnchor > .rawToolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .rawToolbar:focus-within,
@@ -105,11 +119,16 @@
 .markdown {
   margin-bottom: 0.25rem;
 
-  /* Contain positioned author content inside the rendered document. */
-  contain: paint;
-  overflow-clip-margin: 3px; /* Match the global keyboard focus ring. */
+  /* Contain positioned author content inside the rendered document without
+     contain: paint, whose formatting context would move the whole document
+     beside a floated time instead of letting its lines flow under it. The
+     identity transform makes this the containing block for fixed and absolute
+     descendants; overflow: clip clips them without a formatting context. */
+  overflow: clip;
   line-height: 1.5;
   overflow-wrap: break-word;
+  transform: translate(0);
+  overflow-clip-margin: 3px; /* Match the global keyboard focus ring. */
 }
 
 .markdown p {

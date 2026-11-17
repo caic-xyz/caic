@@ -32,7 +32,7 @@ const turn: HistoryTurn = {
 describe("TurnInvocationDetails", () => {
   it("opens the completed turn's timing, cost, and token details", async () => {
     const user = userEvent.setup();
-    render(() => <TurnInvocationDetails turn={turn} model={null} duration="0:05" />);
+    render(() => <TurnInvocationDetails turn={turn} model={null} />);
 
     await user.click(screen.getByRole("button", { name: "Turn invocation details, 0:05" }));
 
@@ -63,7 +63,7 @@ describe("TurnInvocationDetails", () => {
       usage: { ...turn.usage, reportedModel: "" },
       waitMs: undefined,
     } satisfies HistoryTurn;
-    render(() => <TurnInvocationDetails turn={incomplete} model="configured-model" duration="0:05" />);
+    render(() => <TurnInvocationDetails turn={incomplete} model="configured-model" />);
 
     await user.click(screen.getByRole("button", { name: "Turn invocation details, 0:05" }));
 

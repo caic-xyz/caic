@@ -96,7 +96,6 @@ declare const classes: {
   readonly "resultMeta": string;
   readonly "resultSuccess": string;
   readonly "resultText": string;
-  readonly "resultTiming": string;
   readonly "reveal-fade": string;
   readonly "revealed": string;
   readonly "safetyWarning": string;

@@ -1959,8 +1959,39 @@ describe("TaskDetail", () => {
 
     const { getByText } = await renderTaskDetail();
     const duration = getByText("5:32");
-    expect(duration.parentElement?.className).toMatch(/elidedTurn/);
-    expect(duration.parentElement?.lastElementChild).toBe(duration);
+    const row = duration.closest("[data-anchor-key]");
+    expect(row?.className).toMatch(/elidedTurn/);
+    expect(row?.lastElementChild?.contains(duration)).toBe(true);
+  });
+
+  it("shows the same time on a collapsed turn and in its details", async () => {
+    const user = userEvent.setup();
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      // No reported duration: the event span alone would read 0:09.
+      const firstResult = resultEvent(10_000);
+      if (firstResult.result) firstResult.result.duration = 0;
+      const events: EventMessage[] = [
+        { kind: "userInput", ts: 1_000, userInput: { text: "first" } },
+        { kind: "text", ts: 2_000, text: { text: "first response" } },
+        firstResult,
+        { kind: "userInput", ts: 11_000, userInput: { text: "second" } },
+        resultEvent(12_000),
+      ];
+      for (const event of events) emit(handlers, event);
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    await renderTaskDetail();
+
+    const [collapsed] = screen.getAllByRole("button", { name: /^Turn invocation details, / });
+    assert.ok(collapsed !== undefined);
+    expect(collapsed).toHaveTextContent("0s");
+    await user.click(collapsed);
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("Turn time0s");
   });
 
   it("shows an explicit zero duration on collapsed turns without timing metadata", async () => {
@@ -1988,11 +2019,10 @@ describe("TaskDetail", () => {
     const { getAllByText } = await renderTaskDetail();
 
     expect(
-      getAllByText("0s").some(
-        (duration) =>
-          duration.parentElement?.className.includes("elidedTurn") &&
-          duration.parentElement.lastElementChild === duration,
-      ),
+      getAllByText("0s").some((duration) => {
+        const row = duration.closest("[data-anchor-key]");
+        return row?.className.includes("elidedTurn") && row.lastElementChild?.contains(duration);
+      }),
     ).toBe(true);
   });
 
@@ -2065,8 +2095,9 @@ describe("TaskDetail", () => {
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     const duration = getByText("0:05");
-    expect(duration.parentElement?.className).toMatch(/sessionElided/);
-    expect(duration.parentElement?.lastElementChild).toBe(duration);
+    const row = duration.closest("[data-anchor-key]");
+    expect(row?.className).toMatch(/sessionElided/);
+    expect(row?.lastElementChild?.contains(duration)).toBe(true);
     await user.click(duration);
     const dialog = screen.getByTestId("session-invocation-dialog");
     expect(dialog).toHaveTextContent("Combined turn time0:05");

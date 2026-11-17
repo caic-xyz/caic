@@ -14,6 +14,7 @@ declare const classes: {
   readonly "mermaidSource": string;
   readonly "mermaidToggleBtn": string;
   readonly "mermaidToolbar": string;
+  readonly "rawAnchor": string;
   readonly "rawCopyBtn": string;
   readonly "rawText": string;
   readonly "rawToolbar": string;

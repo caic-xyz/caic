@@ -1,12 +1,16 @@
 /* Styles for the duration button that opens turn or session details, and its dialog. */
 
+/* The padding frames the hover background; the negative margin keeps the
+   text on the same right edge as static durations. The dotted underline marks
+   the duration as actionable without hover. */
 .trigger {
   flex-shrink: 0;
   padding: 0 0.2rem;
+  margin-right: -0.2rem;
   font: inherit;
-  font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
-  white-space: nowrap;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
   cursor: pointer;
   background: transparent;
   border: none;
@@ -14,7 +18,7 @@
 }
 
 .trigger:hover {
-  color: var(--color-text-secondary);
+  text-decoration-style: solid;
   background: var(--color-bg-hover);
 }
 

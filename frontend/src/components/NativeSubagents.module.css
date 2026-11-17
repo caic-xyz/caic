@@ -15,6 +15,28 @@
   border-radius: var(--radius-sm);
 }
 
+/* A drawn marker keeps the summary a flex row, so its duration ends at the
+   card's content edge like every other transcript row. */
+.card > summary {
+  display: flex;
+  align-items: baseline;
+  list-style: none;
+}
+
+.card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.card > summary::before {
+  margin-right: 0.4em;
+  font-size: 0.7em;
+  content: "▶" / "";
+}
+
+.card[open] > summary::before {
+  content: "▼" / "";
+}
+
 .card summary {
   cursor: pointer;
 }
@@ -44,12 +66,11 @@
 
 /* Mirrors tool rows: the marker stays, and the duration ends the line. */
 .summaryContent {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
   gap: 0.5rem;
   align-items: baseline;
-  width: calc(100% - 1rem);
   min-width: 0;
-  vertical-align: top;
 }
 
 .label {
@@ -65,9 +86,6 @@
 .duration {
   flex-shrink: 0;
   margin-left: auto;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-tertiary);
 }
 
 .status[data-state="failed"] {

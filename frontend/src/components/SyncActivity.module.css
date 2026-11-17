@@ -67,8 +67,7 @@
   font-family: monospace;
 }
 
-.status,
-.duration {
+.status {
   color: var(--color-text-tertiary);
 }
 
@@ -76,8 +75,11 @@
   color: var(--color-danger);
 }
 
-/* The cancel button takes the end of the header row, wrapped or not. */
-.cancel {
+/* Cancel and the duration take the end of the header row, wrapped or not. */
+.trailing {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
   margin-left: auto;
 }
 

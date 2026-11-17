@@ -11,6 +11,7 @@ import { createLiveDuration } from "../liveDuration";
 import type { SyncEntry } from "../syncActivity";
 import { formatTimingDuration } from "../timing";
 import ActionButton from "./ActionButton";
+import Duration from "./Duration";
 import styles from "./SyncActivity.module.css";
 
 const statusLabels = { pushed: "Pushed", failed: "Failed", cancelled: "Cancelled" } as const;
@@ -96,26 +97,23 @@ export default function SyncActivity(props: Props) {
         <span class={styles.status} role="status">
           {props.entry.status ? statusLabels[props.entry.status] : "Running"}
         </span>
-        <Show when={duration()}>
-          {(value) => (
-            <span class={styles.duration} data-testid="sync-duration">
-              {value()}
-            </span>
-          )}
-        </Show>
-        <Show when={running() && props.onCancel} keyed>
-          {(onCancel) => (
-            <ActionButton
-              class={styles.cancel}
-              label="Cancel push"
-              disabled={cancelling()}
-              aria-busy={cancelling() ? true : undefined}
-              onClick={() => void cancel(onCancel)}
-            >
-              <CancelIcon width={20} height={20} />
-            </ActionButton>
-          )}
-        </Show>
+        {/* Actions sit left of the duration, which ends the row as on every transcript row. */}
+        <span class={styles.trailing}>
+          <Show when={running() && props.onCancel} keyed>
+            {(onCancel) => (
+              <ActionButton
+                class={styles.cancel}
+                label="Cancel push"
+                disabled={cancelling()}
+                aria-busy={cancelling() ? true : undefined}
+                onClick={() => void cancel(onCancel)}
+              >
+                <CancelIcon width={20} height={20} />
+              </ActionButton>
+            )}
+          </Show>
+          <Show when={duration()}>{(value) => <Duration data-testid="sync-duration">{value()}</Duration>}</Show>
+        </span>
       </div>
       <Show when={props.entry.output}>
         <pre

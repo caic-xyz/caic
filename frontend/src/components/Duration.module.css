@@ -1,0 +1,8 @@
+/* One visual style for every elapsed time in the task transcript. */
+
+.duration {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}

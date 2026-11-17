@@ -1,4 +1,4 @@
-// TimingIcon shows compact event, turn, and user-response timing details, ticking while owned work runs.
+// TimingIcon shows a compact event, turn, or user-response duration with details, ticking while owned work runs.
 
 import { createMemo, Show } from "solid-js";
 
@@ -6,6 +6,7 @@ import type { EventMessage } from "@sdk/types.gen";
 
 import { createLiveDuration } from "../liveDuration";
 import { formatTimingDuration, IncrementalEventTimingTracker } from "../timing";
+import Duration from "./Duration";
 import Tooltip from "./Tooltip";
 import styles from "./TimingIcon.module.css";
 
@@ -21,6 +22,9 @@ interface Props {
   // makes the duration tick.
   workEnd?: number;
   running?: boolean;
+  // Inside another control, such as a disclosure summary, the details move to
+  // a title so the value adds no nested focus target.
+  nested?: boolean;
 }
 
 export default function TimingIcon(props: Props) {
@@ -124,14 +128,19 @@ export default function TimingIcon(props: Props) {
   return (
     <Show when={details()} keyed>
       {(text) => (
-        <Tooltip text={text} class={styles.tooltip}>
-          <span class={styles.content} aria-label="Timing details" data-testid="timing-duration">
+        <Tooltip text={text} class={styles.tooltip} disabled={props.nested}>
+          <span
+            class={props.nested ? styles.content : `${styles.content} ${styles.interactive}`}
+            aria-label={props.nested ? undefined : "Timing details"}
+            title={props.nested ? text : undefined}
+            data-testid="timing-duration"
+          >
             <Show when={displayedDuration()} keyed>
               {(duration) => (
-                <span class={styles.value}>
+                <Duration>
                   {duration.prefix}
                   {duration.ms === 0 ? "0s" : formatTimingDuration(duration.ms)}
-                </span>
+                </Duration>
               )}
             </Show>
           </span>

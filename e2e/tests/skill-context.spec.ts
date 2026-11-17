@@ -40,7 +40,7 @@ for (const width of [390, 1280]) {
     await expect(prior.getByRole("link")).toHaveCount(2);
     // A later root completion must not replace a disclosed older context or
     // steal focus while the user is reading its skills.
-    const turns = page.getByRole("button", { name: /^[▶▼]\s*\d+ messages?/ });
+    const turns = page.getByRole("button", { name: /^\d+ messages?/ });
     // Skill metadata appears before the disclosed transcript finishes loading.
     await expect(turns).toHaveCount(1);
     const turnCount = await turns.count();

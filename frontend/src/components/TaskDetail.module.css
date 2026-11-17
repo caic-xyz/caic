@@ -204,7 +204,7 @@ a.headerPR:hover {
 .taskSetupTitle::before {
   margin-right: 0.4em;
   font-size: 0.7em;
-  content: "▶";
+  content: "▶" / "";
 }
 
 .taskSetup:hover .taskSetupTitle,
@@ -213,7 +213,7 @@ a.headerPR:hover {
 }
 
 .taskSetup[open] .taskSetupTitle::before {
-  content: "▼";
+  content: "▼" / "";
 }
 
 .taskSetupLogs {
@@ -442,10 +442,6 @@ a.headerPR:hover {
   flex-shrink: 0;
   gap: 0.4rem;
   align-items: center;
-}
-
-.resultTiming {
-  font-size: 0.8rem;
 }
 
 .resultMeta {
@@ -792,13 +788,34 @@ a.ciStatus:hover {
   cursor: pointer;
 }
 
+/* A drawn marker keeps the summary a flex row, so its duration ends at the
+   block's content edge like every other transcript row. */
+.toolBlock > summary {
+  display: flex;
+  align-items: baseline;
+  list-style: none;
+}
+
+.toolBlock > summary::-webkit-details-marker {
+  display: none;
+}
+
+.toolBlock > summary::before {
+  margin-right: 0.4em;
+  font-size: 0.7em;
+  content: "▶" / "";
+}
+
+.toolBlock[open] > summary::before {
+  content: "▼" / "";
+}
+
 .toolSummaryContent {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
   gap: 0.5rem;
   align-items: baseline;
-  width: calc(100% - 1rem);
   min-width: 0;
-  vertical-align: top;
 }
 
 .toolSummaryMain {
@@ -927,7 +944,7 @@ a.ciStatus:hover {
 .turnToggle::before {
   margin-right: 0.4em;
   font-size: 0.7em;
-  content: "▶";
+  content: "▶" / "";
 }
 
 .turnToggle:focus-visible {
@@ -942,13 +959,8 @@ a.ciStatus:hover {
   white-space: nowrap;
 }
 
-/* Matches the inset of the duration button that replaces it when details exist. */
 .turnDuration {
   flex-shrink: 0;
-  padding: 0 0.2rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
 }
 
 .elidedTurn:hover {
@@ -961,7 +973,7 @@ a.ciStatus:hover {
 }
 
 .elidedTurnExpanded .turnToggle::before {
-  content: "▼";
+  content: "▼" / "";
 }
 
 /* Left-border indent lines: indicate which container an item belongs to, like the task sidebar.
@@ -1015,7 +1027,7 @@ a.ciStatus:hover {
 .sessionToggle::before {
   margin-right: 0.4em;
   font-size: 0.7em;
-  content: "▶";
+  content: "▶" / "";
 }
 
 .sessionToggle:focus-visible {
@@ -1033,7 +1045,7 @@ a.ciStatus:hover {
 }
 
 .sessionElidedExpanded .sessionToggle::before {
-  content: "▼";
+  content: "▼" / "";
 }
 
 @keyframes tool-spin {
@@ -1095,9 +1107,6 @@ a.ciStatus:hover {
 .toolDuration {
   flex-shrink: 0;
   margin-left: auto;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-tertiary);
 }
 
 .toolError {

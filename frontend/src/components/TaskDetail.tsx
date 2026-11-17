@@ -112,6 +112,7 @@ import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
 import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
 import ActionButton from "./ActionButton";
+import Duration from "./Duration";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationDetails, { SessionInvocationDetails } from "./TurnInvocationDetails";
 import WidgetCard from "./WidgetCard";
@@ -1658,15 +1659,11 @@ export default function TaskDetail(props: Props) {
                           </button>
                           <Show
                             when={turnTiming(e.turn)}
-                            fallback={<span class={styles.turnDuration}>{formatTotalDuration(e.turn.durationMs)}</span>}
+                            fallback={
+                              <Duration class={styles.turnDuration}>{formatTotalDuration(e.turn.durationMs)}</Duration>
+                            }
                           >
-                            {(turn) => (
-                              <TurnInvocationDetails
-                                turn={turn()}
-                                model={props.model ?? null}
-                                duration={formatTotalDuration(e.turn.durationMs)}
-                              />
-                            )}
+                            {(turn) => <TurnInvocationDetails turn={turn()} model={props.model ?? null} />}
                           </Show>
                         </div>
                       )}
@@ -1687,15 +1684,11 @@ export default function TaskDetail(props: Props) {
                           </button>
                           <Show
                             when={turnTiming(h.turn)}
-                            fallback={<span class={styles.turnDuration}>{formatTotalDuration(h.turn.durationMs)}</span>}
+                            fallback={
+                              <Duration class={styles.turnDuration}>{formatTotalDuration(h.turn.durationMs)}</Duration>
+                            }
                           >
-                            {(turn) => (
-                              <TurnInvocationDetails
-                                turn={turn()}
-                                model={props.model ?? null}
-                                duration={formatTotalDuration(h.turn.durationMs)}
-                              />
-                            )}
+                            {(turn) => <TurnInvocationDetails turn={turn()} model={props.model ?? null} />}
                           </Show>
                         </div>
                       )}
@@ -2152,15 +2145,9 @@ function ArchivedSessionBody(props: {
                 </button>
                 <Show
                   when={fact()}
-                  fallback={<span class={styles.turnDuration}>{formatTotalDuration(turn.durationMs)}</span>}
+                  fallback={<Duration class={styles.turnDuration}>{formatTotalDuration(turn.durationMs)}</Duration>}
                 >
-                  {(value) => (
-                    <TurnInvocationDetails
-                      turn={value()}
-                      model={props.section.reportedModel ?? null}
-                      duration={formatTotalDuration(turn.durationMs)}
-                    />
-                  )}
+                  {(value) => <TurnInvocationDetails turn={value()} model={props.section.reportedModel ?? null} />}
                 </Show>
               </div>
               <Show when={expanded()}>
@@ -2214,6 +2201,7 @@ function SetupHistory(props: { startedAt?: string }) {
           }
           range={range()}
           showZero
+          nested
         />
       </summary>
       <Show when={open()}>
@@ -2676,12 +2664,8 @@ function ResultCard(props: {
           </Show>
           <Show when={props.turnTiming}>
             {(turn) => (
-              <span class={styles.resultTiming} data-testid="turn-duration">
-                <TurnInvocationDetails
-                  turn={turn()}
-                  model={props.model}
-                  duration={formatTotalDuration(turn().durationMs)}
-                />
+              <span data-testid="turn-duration">
+                <TurnInvocationDetails turn={turn()} model={props.model} />
               </span>
             )}
           </Show>
@@ -3204,9 +3188,9 @@ function ToolCallCard(props: {
               <ToolPendingIcon />
             </Show>
             <Show when={durationMs() !== null}>
-              <span class={styles.toolDuration} data-testid="tool-duration">
+              <Duration class={styles.toolDuration} data-testid="tool-duration">
                 {formatTimingDuration(durationMs() ?? 0)}
-              </span>
+              </Duration>
             </Show>
           </span>
         </summary>

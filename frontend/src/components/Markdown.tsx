@@ -155,50 +155,48 @@ export function MarkdownRawToolbar(props: { text: string; raw: boolean; onToggle
   const [copied, setCopied] = createSignal(false);
   const [copyError, setCopyError] = createSignal(false);
   return (
-    <>
-      <div class={styles.rawToolbar}>
-        <button
-          class={styles.rawToolbarBtn}
-          onClick={() => {
-            props.onToggle();
-            setCopyError(false);
-          }}
-          title={props.raw ? "Show rendered" : "Show raw"}
-        >
-          {props.raw ? "rendered" : "raw"}
-        </button>
-        <Show when={props.raw}>
-          <button
-            class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
-            onClick={() => {
-              setCopyError(false);
-              if (!navigator.clipboard) {
-                setCopyError(true);
-                return;
-              }
-              navigator.clipboard
-                .writeText(props.text)
-                .then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-                .catch(() => setCopyError(true));
-            }}
-            title="Copy to clipboard"
-          >
-            <CopyIcon width={14} height={14} class={styles.copyIcon} />
-            <CheckIcon width={14} height={14} class={styles.checkIcon} />
-          </button>
-        </Show>
-      </div>
+    <div class={styles.rawToolbar}>
       <Show when={props.raw}>
         <span role="status">{copyError() ? "Copy failed" : ""}</span>
       </Show>
-    </>
+      <button
+        class={styles.rawToolbarBtn}
+        onClick={() => {
+          props.onToggle();
+          setCopyError(false);
+        }}
+        title={props.raw ? "Show rendered" : "Show raw"}
+      >
+        {props.raw ? "rendered" : "raw"}
+      </button>
+      <Show when={props.raw}>
+        <button
+          class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
+          onClick={() => {
+            setCopyError(false);
+            if (!navigator.clipboard) {
+              setCopyError(true);
+              return;
+            }
+            navigator.clipboard
+              .writeText(props.text)
+              .then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              })
+              .catch(() => setCopyError(true));
+          }}
+          title="Copy to clipboard"
+        >
+          <CopyIcon width={14} height={14} class={styles.copyIcon} />
+          <CheckIcon width={14} height={14} class={styles.checkIcon} />
+        </button>
+      </Show>
+    </div>
   );
 }
 
-// Markdown renders its raw toolbar at its top right unless the caller sets raw,
+// Markdown overlays its raw toolbar at its top right unless the caller sets raw,
 // which means the caller places MarkdownRawToolbar itself, such as in a card
 // header beside the time.
 export default function Markdown(props: {
@@ -331,7 +329,9 @@ export default function Markdown(props: {
       }}
     >
       <Show when={props.raw === undefined}>
-        <MarkdownRawToolbar text={props.text} raw={localRaw()} onToggle={() => setLocalRaw(!localRaw())} />
+        <div class={styles.rawAnchor}>
+          <MarkdownRawToolbar text={props.text} raw={localRaw()} onToggle={() => setLocalRaw(!localRaw())} />
+        </div>
       </Show>
       <Show
         when={raw()}

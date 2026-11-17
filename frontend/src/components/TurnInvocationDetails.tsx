@@ -6,6 +6,7 @@ import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import type { EventChangeStat, HistoryTurn } from "@sdk/types.gen";
 import { formatMoney, formatTokens } from "../formatting";
 import { formatTimingDuration, formatTotalDuration } from "../timing";
+import Duration from "./Duration";
 import ModalDialog from "./ModalDialog";
 import styles from "./TurnInvocationDetails.module.css";
 
@@ -23,7 +24,8 @@ function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
 
 // TurnInvocationDetails shows the turn duration as the button that opens the
 // turn's details, so the row ends with the same time element as other rows.
-export default function TurnInvocationDetails(props: { turn: HistoryTurn; model: string | null; duration: string }) {
+// The button and the dialog read the same reported turn time.
+export default function TurnInvocationDetails(props: { turn: HistoryTurn; model: string | null }) {
   const [open, setOpen] = createSignal(false);
   const result = () => props.turn;
   const usage = () => result().usage;
@@ -35,11 +37,11 @@ export default function TurnInvocationDetails(props: { turn: HistoryTurn; model:
         type="button"
         class={styles.trigger}
         onClick={() => setOpen(true)}
-        aria-label={`Turn invocation details, ${props.duration}`}
+        aria-label={`Turn invocation details, ${formatTotalDuration(result().durationMs)}`}
         title="Turn details"
         data-testid="turn-invocation-trigger"
       >
-        {props.duration}
+        <Duration>{formatTotalDuration(result().durationMs)}</Duration>
       </button>
       <Show when={open()}>
         <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="turn-invocation-dialog">
@@ -66,7 +68,7 @@ export default function TurnInvocationDetails(props: { turn: HistoryTurn; model:
             </Show>
             <div>
               <dt>Turn time</dt>
-              <dd>{formatTimingDuration(result().durationMs)}</dd>
+              <dd>{formatTotalDuration(result().durationMs)}</dd>
             </div>
             <Show when={result().durationAPIMs > 0}>
               <div>
@@ -205,7 +207,7 @@ export function SessionInvocationDetails(props: {
         title="Session details"
         data-testid="session-invocation-trigger"
       >
-        {props.duration}
+        <Duration>{props.duration}</Duration>
       </button>
       <Show when={open()}>
         <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="session-invocation-dialog">
