@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/genai"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"

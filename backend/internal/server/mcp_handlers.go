@@ -11,11 +11,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/maruel/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver"
 	"github.com/maruel/ksid"
 
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth/oauthserver"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/task"

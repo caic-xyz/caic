@@ -118,7 +118,7 @@
 #
 # Embedded mode reads its voice choices and stages from voice-choices.toml
 # beside this file. Without it, caic uses the defaults built into this release:
-# https://github.com/maruel/gomode/blob/main/voicegateway/voice-choices.toml
+# https://github.com/gomodedev/gomode/blob/main/voicegateway/voice-choices.toml
 # Copy that file to customize it; a copy replaces the defaults entirely.
 
 # ── AI ───────────────────────────────────────────────────────────────────────

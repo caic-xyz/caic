@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/gittest"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway"
 	"golang.org/x/sync/errgroup"
 )
 

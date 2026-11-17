@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/config/data"
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 // uncommentDirective strips the leading '#' from a commented-out TOML directive

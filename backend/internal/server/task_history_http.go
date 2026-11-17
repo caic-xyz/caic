@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/sse"
+	"github.com/gomodedev/gomode/sse"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"

@@ -27,9 +27,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 	"github.com/maruel/genai/acp"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
 )
 
 // TestDSHLiveConfiguredDiscovery checks explicit configured credentials and a

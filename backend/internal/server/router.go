@@ -17,15 +17,15 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/devicelogin"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/oauth/oauthserver"
-	"github.com/maruel/gomode/voicegateway"
-	"github.com/maruel/gomode/voicegateway/voicertc"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/devicelogin"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/oauth/oauthserver"
+	"github.com/gomodedev/gomode/voicegateway"
+	"github.com/gomodedev/gomode/voicegateway/voicertc"
 
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -40,7 +40,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/autoupdate"
+	"github.com/gomodedev/gomode/autoupdate"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,

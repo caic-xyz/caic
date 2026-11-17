@@ -28,7 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 // MakeMetadata builds runtime metadata for a task instance.

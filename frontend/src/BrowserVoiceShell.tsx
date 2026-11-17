@@ -2,9 +2,9 @@
 
 import { createEffect, onCleanup, Show, type Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
-import SharedBrowserVoiceShell from "@maruel/gomode/web/BrowserVoiceShell";
-import type { ServiceAuthorization } from "@maruel/gomode/sdk/voicegateway/v2/types.gen.ts";
-import type { voiceSession } from "@maruel/gomode/web/VoiceSession";
+import SharedBrowserVoiceShell from "@gomodedev/gomode/web/BrowserVoiceShell";
+import type { ServiceAuthorization } from "@gomodedev/gomode/sdk/voicegateway/v2/types.gen.ts";
+import type { voiceSession } from "@gomodedev/gomode/web/VoiceSession";
 import { useAppState } from "./AppState";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./voiceTaskState";

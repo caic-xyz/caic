@@ -19,7 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/maruel/gomode/sse"
+	"github.com/gomodedev/gomode/sse"
 	"github.com/maruel/ksid"
 )
 

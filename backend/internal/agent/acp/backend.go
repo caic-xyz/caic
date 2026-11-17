@@ -20,7 +20,7 @@ import (
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	acpdata "github.com/caic-xyz/caic/backend/internal/agent/acp/data"

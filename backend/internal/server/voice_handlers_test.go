@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/voicegateway"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/oauth"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
 )
 
 type fakeVoiceTokenIssuer struct {

@@ -23,7 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/md/git"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 	"github.com/maruel/ksid"
 )
 

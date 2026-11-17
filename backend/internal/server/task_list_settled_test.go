@@ -20,7 +20,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 	"github.com/maruel/ksid"
 )
 

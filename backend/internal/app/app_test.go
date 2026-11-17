@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"

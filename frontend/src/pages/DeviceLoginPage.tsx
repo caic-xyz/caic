@@ -1,7 +1,7 @@
 // Public pairing pages refresh the approving account/session in place and expose shared recovery with normal caic cookie sessions.
 
 import { Show } from "solid-js";
-import { DeviceLoginApproval, DeviceLoginDisplay } from "@maruel/gomode/web/DeviceLogin";
+import { DeviceLoginApproval, DeviceLoginDisplay } from "@gomodedev/gomode/web/DeviceLogin";
 import { useAuth } from "../AuthContext";
 import LoginPage from "./LoginPage";
 import styles from "./DeviceLoginPage.module.css";

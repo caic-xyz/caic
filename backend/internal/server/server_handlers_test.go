@@ -23,7 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/maruel/gomode/autoupdate"
+	"github.com/gomodedev/gomode/autoupdate"
 )
 
 func TestServerHandlers(t *testing.T) {

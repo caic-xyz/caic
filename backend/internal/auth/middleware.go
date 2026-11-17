@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth"
 )
 
 type contextKey struct{}

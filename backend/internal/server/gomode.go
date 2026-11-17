@@ -4,8 +4,8 @@ package server
 
 import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 const (

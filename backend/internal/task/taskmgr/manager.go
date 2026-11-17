@@ -45,7 +45,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 type relayReader interface {

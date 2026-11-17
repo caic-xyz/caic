@@ -16,7 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
-	"github.com/maruel/gomode/devicelogin"
+	"github.com/gomodedev/gomode/devicelogin"
 )
 
 type auditStore struct {

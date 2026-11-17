@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"

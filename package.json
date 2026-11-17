@@ -21,7 +21,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@maruel/gomode": "github:maruel/gomode#122084a377775ce51e44d641f3c18700647d2093",
+    "@gomodedev/gomode": "github:gomodedev/gomode#1d9ef781b340187c2029ffc9025d3bc2399f6f2d",
     "@material-symbols/svg-400": "0.47.4",
     "@novnc/novnc": "1.7.0",
     "@observablehq/plot": "0.6.17",

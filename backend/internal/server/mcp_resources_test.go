@@ -23,7 +23,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 func TestMCPResources(t *testing.T) {

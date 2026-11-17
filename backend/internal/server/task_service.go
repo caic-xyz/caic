@@ -23,7 +23,7 @@ import (
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
-	"github.com/maruel/gomode"
+	"github.com/gomodedev/gomode"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"

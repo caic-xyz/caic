@@ -31,8 +31,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 // expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.

@@ -10,8 +10,8 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/maruel/gomode/devicelogin"
-	"github.com/maruel/gomode/httpserver"
+	"github.com/gomodedev/gomode/devicelogin"
+	"github.com/gomodedev/gomode/httpserver"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )

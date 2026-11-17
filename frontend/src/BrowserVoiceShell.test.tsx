@@ -7,7 +7,7 @@ import { createSignal } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 
 import { VoiceTaskUpdates } from "./BrowserVoiceShell";
-import { voiceSession } from "@maruel/gomode/web/VoiceSession";
+import { voiceSession } from "@gomodedev/gomode/web/VoiceSession";
 import { getVoiceTaskNumber } from "./voiceTaskState";
 
 const injectTextMock = vi.spyOn(voiceSession, "injectText");

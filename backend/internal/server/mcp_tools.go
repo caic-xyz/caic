@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode"
+	"github.com/gomodedev/gomode"
 
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
@@ -25,8 +25,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/gomodedev/gomode/mcp"
 	"github.com/invopop/jsonschema"
-	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
 	orderedmap "github.com/pb33f/ordered-map/v2"
 )
@@ -123,7 +123,7 @@ func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (m
 // should become asynchronous (Gemini behavior NON_BLOCKING) so the assistant
 // can keep talking while it runs. Switching an individual tool needs a mode
 // hint carried from this catalog through ToolDeclaration to the adapter; see
-// github.com/maruel/gomode/voicegateway/voicertc/AGENTS.md.
+// github.com/gomodedev/gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpTools) specs() []mcp.ToolSpec {
 	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task with zero or more repositories. Confirm repositories and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()

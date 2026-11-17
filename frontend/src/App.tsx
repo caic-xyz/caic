@@ -16,7 +16,7 @@ import { useIsRouting, useLocation } from "@solidjs/router";
 import { ConversationViewportContext } from "./ConversationViewportContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
 import BrowserVoiceShell from "./BrowserVoiceShell";
-import { HostModeProvider, useHostMode } from "@maruel/gomode/web/HostMode";
+import { HostModeProvider, useHostMode } from "@gomodedev/gomode/web/HostMode";
 
 import { currentErrorReport } from "./errorReport";
 import { AppStateProvider, useAppState } from "./AppState";

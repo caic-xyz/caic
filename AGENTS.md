@@ -18,7 +18,7 @@ caic manages multiple coding agents in parallel. Each task runs in an isolated [
 ### Frontend / Go Mode Boundary
 
 `frontend/` (SolidJS) owns caic screen-mode product UI. The standalone
-`github.com/maruel/gomode` repository owns the Android shell around
+`github.com/gomodedev/gomode` repository owns the Android shell around
 backend-hosted frontends. caic task-list/detail/diff/widget UI stays in the
 hosted web frontend.
 

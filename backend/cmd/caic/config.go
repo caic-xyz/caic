@@ -15,13 +15,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/voicegateway"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/caic-xyz/caic/backend/internal/config/data"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/maruel/gomode/autoupdate"
+	"github.com/gomodedev/gomode/autoupdate"
 )
 
 // defaultConfig returns a data.Config with sensible defaults pre-populated.

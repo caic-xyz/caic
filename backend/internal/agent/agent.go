@@ -58,7 +58,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"

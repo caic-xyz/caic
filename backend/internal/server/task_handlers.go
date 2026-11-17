@@ -26,7 +26,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/maruel/ksid"
 
-	"github.com/maruel/gomode/sse"
+	"github.com/gomodedev/gomode/sse"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"

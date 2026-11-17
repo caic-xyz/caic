@@ -13,10 +13,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 // Config bundles values read once at startup from config.toml, environment

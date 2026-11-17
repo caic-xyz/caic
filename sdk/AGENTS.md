@@ -8,7 +8,7 @@ Do not edit generated SDK files directly. Update the source declarations and
 run `make fix`.
 
 - `caic/`: generated from `backend/internal/server/api/v1`.
-The standalone `github.com/maruel/gomode` repository owns Go Mode, MCP, voice
+The standalone `github.com/gomodedev/gomode` repository owns Go Mode, MCP, voice
 gateway, and OAuth SDK generation. caic imports its browser library.
 
 The generator owns each complete SDK package directory, including TypeScript,

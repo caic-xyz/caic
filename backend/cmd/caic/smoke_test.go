@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/httpserver/geoip"
 
 	"golang.org/x/sync/errgroup"
 

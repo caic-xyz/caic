@@ -11,8 +11,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth"
 	"github.com/maruel/ksid"
 )
 

@@ -11,8 +11,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 func TestMCPExecutor(t *testing.T) {

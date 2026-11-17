@@ -10,7 +10,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"

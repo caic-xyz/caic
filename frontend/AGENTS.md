@@ -28,7 +28,7 @@ Restore the pinned dependency before committing or running release validation:
 
 ```bash
 cd ~/src/caic
-pnpm unlink @maruel/gomode
+pnpm unlink @gomodedev/gomode
 ```
 
 pnpm 12 updates `pnpm-workspace.yaml` and `pnpm-lock.yaml` when linking.

@@ -152,13 +152,13 @@ async function waitForTaskEventsSubscription() {
 
 import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
-import { notifications } from "@maruel/gomode/web/notifications";
-import { executeFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
+import { notifications } from "@gomodedev/gomode/web/notifications";
+import { executeFrontendVoiceTool } from "@gomodedev/gomode/web/FrontendVoiceTools";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
 import { AuthProvider, useAuth } from "./AuthContext";
 import VoiceTaskFocus from "./VoiceTaskFocus";
-import { HostModeProvider } from "@maruel/gomode/web/HostMode";
+import { HostModeProvider } from "@gomodedev/gomode/web/HostMode";
 import { AppStateProvider, useAppState, type AppStore } from "./AppState";
 import { focusedVoiceTask } from "./voiceTaskState";
 import { installFetchRouter } from "@tests/fetch-router";

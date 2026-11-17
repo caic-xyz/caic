@@ -16,9 +16,9 @@ import (
 	"testing"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gomodedev/gomode/httpserver"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
-	"github.com/maruel/gomode/httpserver"
 )
 
 type flushErrorWriteCloser struct {

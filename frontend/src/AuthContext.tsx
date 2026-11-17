@@ -5,7 +5,7 @@ import { batch, createContext, createSignal, useContext, onCleanup, onMount, typ
 import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
 import { APIError, createApiClient } from "@sdk/api.gen";
 import { api } from "./api";
-import { createFrontendPreparationClient, type FrontendPreparation } from "@maruel/gomode/web/FrontendVoiceTools";
+import { createFrontendPreparationClient, type FrontendPreparation } from "@gomodedev/gomode/web/FrontendVoiceTools";
 
 interface AuthState {
   /** True once the initial auth check has completed. */

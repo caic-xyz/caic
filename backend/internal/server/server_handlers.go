@@ -34,8 +34,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
 )
 
 type serverHandlers struct {

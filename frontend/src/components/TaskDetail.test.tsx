@@ -14,7 +14,7 @@ import type { HistoryEventsHandlers } from "@sdk/api.gen";
 import TaskDetail from "./TaskDetail";
 import { TaskTimelineProvider, useTaskTimeline } from "../TaskTimelineContext";
 import { api } from "../api";
-import { HostModeProvider } from "@maruel/gomode/web/HostMode";
+import { HostModeProvider } from "@gomodedev/gomode/web/HostMode";
 
 // Spies on the real api singleton replace the former module mocks.
 let taskEventStreamMock = vi.spyOn(api, "historyEvents");

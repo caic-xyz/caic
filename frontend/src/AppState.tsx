@@ -42,14 +42,14 @@ import type {
   WarningDetail,
 } from "@sdk/types.gen";
 
-import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
-import { useHostMode } from "@maruel/gomode/web/HostMode";
-import type { FrontendPreparationScope } from "@maruel/gomode/web/FrontendVoiceTools";
+import { observeNetworkChanges } from "@gomodedev/gomode/web/NetworkChanges";
+import { useHostMode } from "@gomodedev/gomode/web/HostMode";
+import type { FrontendPreparationScope } from "@gomodedev/gomode/web/FrontendVoiceTools";
 
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { focusedVoiceTask, setFocusedVoiceTask } from "./voiceTaskState";
-import { notifications } from "@maruel/gomode/web/notifications";
+import { notifications } from "@gomodedev/gomode/web/notifications";
 import { QuotaRecoveryTracker, quotaDismissalKey } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";

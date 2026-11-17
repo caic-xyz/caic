@@ -22,4 +22,4 @@ For other installation workflows, [build caic from source](../README.md#from-sou
 and install [md](https://github.com/caic-xyz/md) separately.
 
 For standalone voice gateway installation and deployment, see the
-[Go Mode deployment guide](https://github.com/maruel/gomode/tree/main/contrib).
+[Go Mode deployment guide](https://github.com/gomodedev/gomode/tree/main/contrib).

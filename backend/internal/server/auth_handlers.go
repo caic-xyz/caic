@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/gomode/devicelogin"
-	"github.com/maruel/gomode/httpserver"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/gomodedev/gomode/devicelogin"
+	"github.com/gomodedev/gomode/httpserver"
+	"github.com/gomodedev/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/oauth/oauthserver"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"

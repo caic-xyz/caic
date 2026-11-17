@@ -5,8 +5,8 @@ package agenttest
 import (
 	"context"
 
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 // BlockingRegistry waits for Release before completing admitted calls. Started

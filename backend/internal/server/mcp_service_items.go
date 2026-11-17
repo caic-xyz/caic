@@ -27,7 +27,7 @@ func newActiveTask(tasks []v1.Task, activeTaskID string) v1.ServiceActiveTask {
 // snapshot order within each remaining priority group. A lone task has no reference.
 func serviceItems(tasks []v1.Task) []mcpschema.ServiceItem {
 	// The service owns ordering, stable references, and attention priority; see
-	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#server-owned-model-context.
+	// github.com/gomodedev/gomode/docs/ANDROID_SHELL.md#server-owned-model-context.
 	// Number tasks only when more than one is visible: a lone task needs no
 	// disambiguating reference in voice context.
 	numbered := len(tasks) > 1

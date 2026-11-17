@@ -1,5 +1,5 @@
 // Publishes coherent history snapshots through owned bootstrap attempts, live handoff, and resource-bound disclosures.
-import { observeNetworkChanges } from "@maruel/gomode/web/NetworkChanges";
+import { observeNetworkChanges } from "@gomodedev/gomode/web/NetworkChanges";
 import { batch, createSignal, onCleanup, untrack } from "solid-js";
 import type {
   EventMessage,

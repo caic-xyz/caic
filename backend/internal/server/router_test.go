@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/gomode/httpserver"
+	"github.com/gomodedev/gomode/httpserver"
 
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -35,12 +35,12 @@ import (
 
 	"github.com/maruel/ksid"
 
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
-	"github.com/maruel/gomode/voicegateway/voicertc"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
+	"github.com/gomodedev/gomode/voicegateway/voicertc"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"

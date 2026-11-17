@@ -31,8 +31,8 @@ import (
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp/mcptest"
 )
 
 func TestPrepareRelay(t *testing.T) {

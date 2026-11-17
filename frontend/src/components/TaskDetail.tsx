@@ -63,8 +63,8 @@ import type { DraftImage } from "../images";
 import { rememberTaskViewOrigin } from "../taskView";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
-import { useHostMode } from "@maruel/gomode/web/HostMode";
-import { notifications } from "@maruel/gomode/web/notifications";
+import { useHostMode } from "@gomodedev/gomode/web/HostMode";
+import { notifications } from "@gomodedev/gomode/web/notifications";
 
 import {
   isChildEvent,

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 // MCPExecutor owns admitted registry calls independently of any agent stream.

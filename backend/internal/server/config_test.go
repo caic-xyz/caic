@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/voicegateway"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {

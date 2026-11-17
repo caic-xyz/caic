@@ -21,9 +21,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/maruel/gomode/devicelogin"
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/devicelogin"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )

@@ -17,16 +17,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/gomode/autoupdate"
-	"github.com/maruel/gomode/httpserver"
+	"github.com/gomodedev/gomode/autoupdate"
+	"github.com/gomodedev/gomode/httpserver"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/voicegateway/voicertc"
 	"github.com/maruel/genai"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/voicegateway/voicertc"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"

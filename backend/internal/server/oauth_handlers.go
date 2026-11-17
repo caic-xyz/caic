@@ -14,8 +14,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/gomodedev/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth/oauthserver"
 )
 
 //go:embed oauth_consent.html

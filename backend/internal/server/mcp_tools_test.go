@@ -50,7 +50,7 @@ import (
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 type staticUsageFetcher struct {

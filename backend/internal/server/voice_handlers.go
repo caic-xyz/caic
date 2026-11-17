@@ -11,11 +11,11 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/maruel/gomode"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/voicegateway"
-	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
-	"github.com/maruel/gomode/voicegateway/voicertc"
+	"github.com/gomodedev/gomode"
+	"github.com/gomodedev/gomode/oauth"
+	"github.com/gomodedev/gomode/voicegateway"
+	voicev1 "github.com/gomodedev/gomode/voicegateway/api/v1"
+	"github.com/gomodedev/gomode/voicegateway/voicertc"
 )
 
 // voiceTokenIssuer mints a narrow OAuth access token for the external gateway.

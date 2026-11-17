@@ -21,11 +21,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maruel/gomode/httpserver/geoip"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
-	"github.com/maruel/gomode/oauth/oauthclient"
-	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/gomodedev/gomode/httpserver/geoip"
+	"github.com/gomodedev/gomode/mcp"
+	"github.com/gomodedev/gomode/oauth"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/oauth/oauthserver"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"

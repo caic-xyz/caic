@@ -16,8 +16,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gomodedev/gomode/mcp/mcptest"
 	"github.com/maruel/genai/providers/codex"
-	"github.com/maruel/gomode/mcp/mcptest"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"

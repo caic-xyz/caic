@@ -1,7 +1,7 @@
 // Registers account-scoped task focus and mirrors native voice task navigation.
 
 import { createEffect, on, onCleanup, type Accessor } from "solid-js";
-import { useHostMode } from "@maruel/gomode/web/HostMode";
+import { useHostMode } from "@gomodedev/gomode/web/HostMode";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { useAppState } from "./AppState";
 import {

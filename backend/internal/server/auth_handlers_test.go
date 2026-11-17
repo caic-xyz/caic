@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/gomodedev/gomode/oauth/oauthclient"
 )
 
 func TestAuthHandlers(t *testing.T) {

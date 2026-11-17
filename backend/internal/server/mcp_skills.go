@@ -12,7 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
-	"github.com/maruel/gomode/mcp"
+	"github.com/gomodedev/gomode/mcp"
 )
 
 const (

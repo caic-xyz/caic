@@ -19,8 +19,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/maruel/gomode/sse"
-	voiceapi "github.com/maruel/gomode/voicegateway/api"
+	"github.com/gomodedev/gomode/sse"
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
 )
 
 type validatable interface {
