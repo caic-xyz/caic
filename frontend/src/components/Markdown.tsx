@@ -1,4 +1,4 @@
-// Markdown safely renders prompt, agent, and file text with optional soft breaks, viewer links, copyable code, Pele diagrams, and a raw toggle.
+// Markdown safely renders prompt, agent, and file text with optional soft breaks, viewer links, copyable code, Pele diagrams, and a placeable raw toggle.
 
 import {
   Show,
@@ -148,7 +148,66 @@ function isLocalPath(dest: string): boolean {
  * baseDir is the runtime directory of the rendered document. Relative links
  * and images resolve against it; without it the task checkout owns them.
  */
-export default function Markdown(props: { text: string; baseDir?: string; breaks?: boolean; hideControls?: boolean }) {
+// MarkdownRawToolbar switches a Markdown between rendered and raw text and
+// copies the raw text. A hovered or focused ancestor marked data-raw-scope
+// reveals it.
+export function MarkdownRawToolbar(props: { text: string; raw: boolean; onToggle: () => void }) {
+  const [copied, setCopied] = createSignal(false);
+  const [copyError, setCopyError] = createSignal(false);
+  return (
+    <>
+      <div class={styles.rawToolbar}>
+        <button
+          class={styles.rawToolbarBtn}
+          onClick={() => {
+            props.onToggle();
+            setCopyError(false);
+          }}
+          title={props.raw ? "Show rendered" : "Show raw"}
+        >
+          {props.raw ? "rendered" : "raw"}
+        </button>
+        <Show when={props.raw}>
+          <button
+            class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
+            onClick={() => {
+              setCopyError(false);
+              if (!navigator.clipboard) {
+                setCopyError(true);
+                return;
+              }
+              navigator.clipboard
+                .writeText(props.text)
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+                .catch(() => setCopyError(true));
+            }}
+            title="Copy to clipboard"
+          >
+            <CopyIcon width={14} height={14} class={styles.copyIcon} />
+            <CheckIcon width={14} height={14} class={styles.checkIcon} />
+          </button>
+        </Show>
+      </div>
+      <Show when={props.raw}>
+        <span role="status">{copyError() ? "Copy failed" : ""}</span>
+      </Show>
+    </>
+  );
+}
+
+// Markdown renders its raw toolbar at its top right unless the caller sets raw,
+// which means the caller places MarkdownRawToolbar itself, such as in a card
+// header beside the time.
+export default function Markdown(props: {
+  text: string;
+  baseDir?: string;
+  breaks?: boolean;
+  hideControls?: boolean;
+  raw?: boolean;
+}) {
   const taskId = useContext(MarkdownTaskContext);
   const navigate = useNavigate();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
@@ -202,9 +261,8 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
       FORBID_ATTR: ["form", "formaction", "formenctype", "formmethod", "formtarget"],
     }),
   );
-  const [raw, setRaw] = createSignal(false);
-  const [copied, setCopied] = createSignal(false);
-  const [copyError, setCopyError] = createSignal(false);
+  const [localRaw, setLocalRaw] = createSignal(false);
+  const raw = () => props.raw ?? localRaw();
   let wrapperRef: HTMLDivElement | undefined;
 
   function onWrapperClick(event: MouseEvent) {
@@ -267,47 +325,13 @@ export default function Markdown(props: { text: string; baseDir?: string; breaks
     <div
       class={`${styles.markdownWrap} ${props.hideControls ? styles.controlsHidden : ""}`}
       data-markdown-wrap
+      data-raw-scope
       ref={(el) => {
         wrapperRef = el;
       }}
     >
-      <div class={styles.rawToolbar}>
-        <button
-          class={styles.rawToolbarBtn}
-          onClick={() => {
-            setRaw(!raw());
-            setCopyError(false);
-          }}
-          title={raw() ? "Show rendered" : "Show raw"}
-        >
-          {raw() ? "rendered" : "raw"}
-        </button>
-        <Show when={raw()}>
-          <button
-            class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
-            onClick={() => {
-              setCopyError(false);
-              if (!navigator.clipboard) {
-                setCopyError(true);
-                return;
-              }
-              navigator.clipboard
-                .writeText(props.text)
-                .then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-                .catch(() => setCopyError(true));
-            }}
-            title="Copy to clipboard"
-          >
-            <CopyIcon width={14} height={14} class={styles.copyIcon} />
-            <CheckIcon width={14} height={14} class={styles.checkIcon} />
-          </button>
-        </Show>
-      </div>
-      <Show when={raw()}>
-        <span role="status">{copyError() ? "Copy failed" : ""}</span>
+      <Show when={props.raw === undefined}>
+        <MarkdownRawToolbar text={props.text} raw={localRaw()} onToggle={() => setLocalRaw(!localRaw())} />
       </Show>
       <Show
         when={raw()}

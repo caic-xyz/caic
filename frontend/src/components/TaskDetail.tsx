@@ -100,7 +100,7 @@ import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
-import Markdown, { MarkdownTaskContext } from "./Markdown";
+import Markdown, { MarkdownRawToolbar, MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import NativeAgents, { BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
@@ -2534,29 +2534,36 @@ function ResultCard(props: {
     if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });
+  const bodyText = () => (props.hideText ? "" : result().result);
+  // The header owns the raw toggle so the text spans the card's full width.
+  const [raw, setRaw] = createSignal(false);
   return (
-    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
-      <Show when={props.turnTiming}>
-        {(turn) => (
-          <div class={styles.resultHeader}>
-            <strong>{result().isError ? "Error" : "Done"}</strong>
-            <span class={styles.resultTiming} data-testid="turn-duration">
-              <TurnInvocationDetails
-                turn={turn()}
-                model={props.model}
-                duration={formatTotalDuration(turn().durationMs)}
-              />
-            </span>
+    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`} data-raw-scope>
+      <div class={styles.resultHeader}>
+        <strong>{result().isError ? "Error" : "Done"}</strong>
+        <span class={styles.resultControls}>
+          <Show when={bodyText()}>
+            {(value) => <MarkdownRawToolbar text={value()} raw={raw()} onToggle={() => setRaw(!raw())} />}
+          </Show>
+          <Show when={props.turnTiming}>
+            {(turn) => (
+              <span class={styles.resultTiming} data-testid="turn-duration">
+                <TurnInvocationDetails
+                  turn={turn()}
+                  model={props.model}
+                  duration={formatTotalDuration(turn().durationMs)}
+                />
+              </span>
+            )}
+          </Show>
+        </span>
+      </div>
+      <Show when={bodyText()}>
+        {(value) => (
+          <div class={styles.resultText}>
+            <Markdown text={value()} raw={raw()} />
           </div>
         )}
-      </Show>
-      <Show when={!props.turnTiming}>
-        <strong>{result().isError ? "Error" : "Done"}</strong>
-      </Show>
-      <Show when={!props.hideText && result().result}>
-        <div class={styles.resultText}>
-          <Markdown text={result().result} />
-        </div>
       </Show>
       <Show when={meta()} keyed>
         {(text) => <div class={styles.resultMeta}>{text}</div>}

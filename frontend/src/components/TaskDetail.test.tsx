@@ -1880,6 +1880,30 @@ describe("TaskDetail", () => {
     expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
   });
 
+  it("toggles result text from the header, left of the duration", async () => {
+    const user = userEvent.setup();
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.result = "**bold** result";
+      emit(handlers, event);
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    await renderTaskDetail();
+
+    const toggle = screen.getByTitle("Show raw");
+    const duration = screen.getByTestId("turn-duration");
+    expect(toggle.compareDocumentPosition(duration) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByTitle("Show raw")).toHaveLength(1);
+    await user.click(toggle);
+    expect(screen.getByText("**bold** result").tagName).toBe("PRE");
+  });
+
   it("opens invocation details from a collapsed turn without expanding it", async () => {
     const user = userEvent.setup();
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {

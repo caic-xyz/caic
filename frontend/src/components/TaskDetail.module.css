@@ -249,17 +249,12 @@ a.headerPR:hover {
   min-width: 0;
 }
 
+/* The Markdown raw toolbar floats inside the text, so it lands left of this. */
 .messageTiming {
   position: relative;
   z-index: 2;
   float: right;
   margin: 0.15rem 0.5rem 0;
-  transition: opacity 0.15s;
-}
-
-.timedItemContent:has([data-markdown-wrap]:hover) > .messageTiming {
-  pointer-events: none;
-  opacity: 0;
 }
 
 .inputForm {
@@ -441,8 +436,14 @@ a.headerPR:hover {
   justify-content: space-between;
 }
 
-.resultTiming {
+.resultControls {
+  display: flex;
   flex-shrink: 0;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.resultTiming {
   font-size: 0.8rem;
 }
 

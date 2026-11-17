@@ -90,6 +90,7 @@ declare const classes: {
   readonly "rateLimitWarning": string;
   readonly "repoStateLinks": string;
   readonly "result": string;
+  readonly "resultControls": string;
   readonly "resultError": string;
   readonly "resultHeader": string;
   readonly "resultMeta": string;

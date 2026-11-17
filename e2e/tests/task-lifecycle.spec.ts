@@ -268,6 +268,8 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
       )
       .toBe("right");
 
+    // The timing stays visible on hover; the Raw toolbar sits left of it, or
+    // below it when the timing belongs to an earlier line of the group.
     await rawButton.hover();
     await expect
       .poll(async () =>
@@ -276,10 +278,16 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
           const content = toolbar?.parentElement?.parentElement?.parentElement;
           const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement
             ?.parentElement;
-          return timing ? getComputedStyle(timing).opacity : null;
+          if (!toolbar || !timing) return null;
+          const raw = toolbar.getBoundingClientRect();
+          const time = timing.getBoundingClientRect();
+          return {
+            opacity: getComputedStyle(timing).opacity,
+            clear: raw.right <= time.left || raw.top >= time.bottom,
+          };
         }),
       )
-      .toBe("0");
+      .toEqual({ opacity: "1", clear: true });
   });
 
   await test.step("detail pane has no extra gutters or horizontal overflow", async () => {

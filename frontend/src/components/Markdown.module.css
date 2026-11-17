@@ -15,7 +15,8 @@
   transition: opacity 0.15s;
 }
 
-.markdownWrap:hover .rawToolbar {
+.rawToolbar:focus-within,
+[data-raw-scope]:hover .rawToolbar {
   opacity: 1;
 }
 
