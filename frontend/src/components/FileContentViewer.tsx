@@ -1,5 +1,6 @@
 // Renders task-runtime directories, Markdown, images, native audio/video, lazy PDFs, bounded text, and unsupported downloads.
 
+import { loadCode } from "../codeLoad";
 import {
   For,
   Match,
@@ -27,7 +28,7 @@ import { splitFrontMatter } from "../frontMatter";
 import { formatBytes } from "../formatting";
 import { readTaskFilePreview, type TaskFilePreview } from "../taskFile";
 
-const PdfPreview = lazy(() => import("./PdfPreview"));
+const PdfPreview = lazy(() => loadCode(import("./PdfPreview")));
 
 interface Props {
   scrollWithPage?: boolean;

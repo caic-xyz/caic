@@ -1,4 +1,4 @@
-// Frontend error diagnostics: formats copyable browser context for render-failure reports.
+// Frontend error diagnostics: formats copyable browser context and original causes for failure reports.
 
 export type ErrorReportContext = {
   occurredAt: Date;
@@ -10,8 +10,18 @@ export type ErrorReportContext = {
 };
 
 function errorDetails(error: unknown): string {
-  if (error instanceof Error && error.stack) return error.stack;
-  return String(error);
+  const details: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (!seen.has(current)) {
+    seen.add(current);
+    details.push(current instanceof Error && current.stack ? current.stack : String(current));
+    if (!(current instanceof Error) || !Object.hasOwn(current, "cause")) return details.join("\n");
+    details.push("Caused by:");
+    current = current.cause;
+  }
+  details.push("[Circular error cause]");
+  return details.join("\n");
 }
 
 export function formatErrorReport(error: unknown, context: ErrorReportContext): string {

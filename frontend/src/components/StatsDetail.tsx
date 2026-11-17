@@ -1,5 +1,6 @@
 // Renders compact task usage, turn/tool analytics, and bounded resource history.
 
+import { loadCode } from "../codeLoad";
 import { createMemo, lazy, Show, Suspense, type JSX } from "solid-js";
 import TaskViewHeader from "./TaskViewHeader";
 
@@ -10,7 +11,7 @@ import type { ToolTimingSummary } from "../taskStats";
 import type { HistoryTurn } from "@sdk/types.gen";
 import styles from "./StatsDetail.module.css";
 
-const statsCharts = () => import("./StatsCharts");
+const statsCharts = () => loadCode(import("./StatsCharts"));
 const StatsCharts = lazy(() => statsCharts().then((module) => ({ default: module.default })));
 const SampleTable = lazy(() => statsCharts().then((module) => ({ default: module.ResourceSamples })));
 const noStats: readonly EventStats[] = [];

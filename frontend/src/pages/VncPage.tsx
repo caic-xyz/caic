@@ -1,5 +1,6 @@
 // VncPage is the /task/:taskId/vnc route with the lazily-loaded noVNC desktop viewer.
 
+import { loadCode } from "../codeLoad";
 import { Show, Suspense, lazy } from "solid-js";
 import { useParams } from "@solidjs/router";
 
@@ -8,7 +9,7 @@ import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import { DetailPane } from "../components/Layout";
 import styles from "./VncPage.module.css";
 
-const VncViewer = lazy(() => import("../components/VncViewer"));
+const VncViewer = lazy(() => loadCode(import("../components/VncViewer")));
 
 export default function VncPage() {
   const s = useAppState();

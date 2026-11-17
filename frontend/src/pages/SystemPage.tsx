@@ -1,5 +1,6 @@
 // SystemPage is Monitoring's live whole-machine resource history and logical-CPU view.
 
+import { loadCode } from "../codeLoad";
 import { For, Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js";
 import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 import type { SystemStatsResp } from "@sdk/types.gen";
@@ -10,7 +11,7 @@ import type { ResourceSample } from "../components/StatsCharts";
 import SectionControls from "../components/SectionControls";
 import styles from "./SystemPage.module.css";
 
-const statsCharts = () => import("../components/StatsCharts");
+const statsCharts = () => loadCode(import("../components/StatsCharts"));
 const ResourceCharts = lazy(() => statsCharts().then((m) => ({ default: m.ResourceCharts })));
 const ResourceSamples = lazy(() => statsCharts().then((m) => ({ default: m.ResourceSamples })));
 

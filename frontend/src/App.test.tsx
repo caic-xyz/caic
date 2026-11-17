@@ -1,4 +1,4 @@
-// Tests app-shell task creation, workspace navigation, account/connection isolation, image drafts, warnings, health, and preferences.
+// Tests app-shell state, workspace navigation, account/connection isolation, image drafts, and render-error recovery.
 
 import assert from "node:assert/strict";
 import { historyManifest } from "@tests/history";
@@ -152,6 +152,7 @@ async function waitForTaskEventsSubscription() {
 
 import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
+import App from "./App";
 import { notifications } from "@gomodedev/gomode/web/notifications";
 import { executeFrontendVoiceTool } from "@gomodedev/gomode/web/FrontendVoiceTools";
 import { api } from "./api";
@@ -4669,3 +4670,32 @@ for (const outcome of ["download failure", "new draft", "navigation"] as const) 
     fetch.mockRestore();
   });
 }
+
+it("retries an ordinary component-render failure without replacing the document", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  let fail = true;
+  function RetryablePage() {
+    if (fail) throw new Error("Temporary render failure");
+    return <p>Recovered routed content</p>;
+  }
+  const view = render(() => (
+    <AuthProvider>
+      <MemoryRouter>
+        <Route path="/" component={App}>
+          <Route path="/" component={RetryablePage} />
+        </Route>
+      </MemoryRouter>
+    </AuthProvider>
+  ));
+  try {
+    await screen.findByText("Temporary render failure");
+    expect(screen.getByRole("button", { name: "Reload page" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Copy diagnostic details" })).toBeVisible();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Recovered routed content")).toBeVisible();
+    expect(screen.queryByTestId("error-fallback")).toBeNull();
+  } finally {
+    view.unmount();
+  }
+});

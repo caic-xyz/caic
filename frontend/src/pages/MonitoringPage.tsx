@@ -1,5 +1,6 @@
 // MonitoringPage groups lazy usage, system, and metrics views behind URL-addressable navigation.
 
+import { loadCode } from "../codeLoad";
 import { useLocation, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, lazy, Match, Suspense, Switch } from "solid-js";
 
@@ -7,9 +8,9 @@ import { Layout } from "../components/Layout";
 import { ControlsHost } from "../components/SectionControls";
 import styles from "./MonitoringPage.module.css";
 
-const UsagePage = lazy(() => import("./UsagePage"));
-const SystemPage = lazy(() => import("./SystemPage"));
-const MetricsPage = lazy(() => import("./MetricsPage"));
+const UsagePage = lazy(() => loadCode(import("./UsagePage")));
+const SystemPage = lazy(() => loadCode(import("./SystemPage")));
+const MetricsPage = lazy(() => loadCode(import("./MetricsPage")));
 const sections = [
   { id: "usage", label: "Usage" },
   { id: "system", label: "System" },

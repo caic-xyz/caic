@@ -1,4 +1,4 @@
-// Application shell: persistent chrome, dialogs, mobile voice, diagnostic errors, and scoped route loading.
+// Application shell: persistent chrome, scoped loading, and render/import failures with their recovery actions.
 
 import {
   createEffect,
@@ -19,6 +19,7 @@ import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "@gomodedev/gomode/web/HostMode";
 
 import { currentErrorReport } from "./errorReport";
+import { CodeLoadError } from "./codeLoad";
 import { AppStateProvider, useAppState } from "./AppState";
 import { useAuth } from "./AuthContext";
 import LoginPage from "./pages/LoginPage";
@@ -39,6 +40,8 @@ import { taskViewMode } from "./taskView";
 function ErrorFallback(props: { error: unknown; reset: () => void }) {
   const [copyError, setCopyError] = createSignal("");
   const [copied, setCopied] = createSignal(false);
+  const codeLoadFailure = () => props.error instanceof CodeLoadError;
+  const reloadRequired = () => props.error instanceof CodeLoadError && !props.error.canRetry;
   const message = () => (props.error instanceof Error ? props.error.message : String(props.error));
   const report = createMemo(() => currentErrorReport(props.error));
   createEffect(() => console.error("caic frontend ErrorBoundary caught a render error.\n" + report()));
@@ -56,12 +59,18 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
 
   return (
     <div class={styles.errorFallback} role="alert" data-testid="error-fallback">
-      <p class={styles.errorTitle}>Something went wrong.</p>
-      <pre class={styles.errorMessage}>{message()}</pre>
+      <p class={styles.errorTitle}>
+        {codeLoadFailure() ? "Page content could not be loaded." : "Something went wrong."}
+      </p>
+      <Show when={!codeLoadFailure()}>
+        <pre class={styles.errorMessage}>{message()}</pre>
+      </Show>
       <div class={styles.errorActions}>
-        <Button type="button" variant="gray" onClick={props.reset}>
-          Try again
-        </Button>
+        <Show when={!reloadRequired()}>
+          <Button type="button" variant="gray" onClick={props.reset}>
+            Try again
+          </Button>
+        </Show>
         <Button type="button" variant="gray" onClick={() => window.location.reload()}>
           Reload page
         </Button>

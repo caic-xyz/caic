@@ -1,5 +1,6 @@
 // UsagePage shows cross-task analytics in Monitoring with URL-backed range and subject filters.
 
+import { loadCode } from "../codeLoad";
 import { createMemo, createSignal, For, lazy, onMount, Show, Suspense } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
@@ -24,7 +25,7 @@ import {
 } from "../usageDashboard";
 import styles from "./UsagePage.module.css";
 
-const UsageCharts = lazy(() => import("../components/UsageCharts"));
+const UsageCharts = lazy(() => loadCode(import("../components/UsageCharts")));
 
 function formatUsageDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(1)} ms`;

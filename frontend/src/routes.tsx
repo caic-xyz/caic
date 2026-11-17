@@ -1,5 +1,6 @@
 // Application routes keep task creation and conversations eager and load optional pages on navigation.
 
+import { loadCode } from "./codeLoad";
 import { Route } from "@solidjs/router";
 import { lazy, type JSX } from "solid-js";
 
@@ -9,15 +10,15 @@ import MainLayout from "./components/MainLayout";
 import EmptyPage from "./pages/EmptyPage";
 import TaskWorkspace from "./components/TaskWorkspace";
 
-const DiffPage = lazy(() => import("./pages/DiffPage"));
-const FileViewerPage = lazy(() => import("./pages/FileViewerPage"));
-const MonitoringPage = lazy(() => import("./pages/MonitoringPage"));
-const ProcessesPage = lazy(() => import("./pages/ProcessesPage"));
-const SessionsPage = lazy(() => import("./pages/SessionsPage"));
-const SettingsPage = lazy(() => import("./pages/SettingsPage"));
-const StatsPage = lazy(() => import("./pages/StatsPage"));
-const TaskInfoPage = lazy(() => import("./pages/TaskInfoPage"));
-const VncPage = lazy(() => import("./pages/VncPage"));
+const DiffPage = lazy(() => loadCode(import("./pages/DiffPage")));
+const FileViewerPage = lazy(() => loadCode(import("./pages/FileViewerPage")));
+const MonitoringPage = lazy(() => loadCode(import("./pages/MonitoringPage")));
+const ProcessesPage = lazy(() => loadCode(import("./pages/ProcessesPage")));
+const SessionsPage = lazy(() => loadCode(import("./pages/SessionsPage")));
+const SettingsPage = lazy(() => loadCode(import("./pages/SettingsPage")));
+const StatsPage = lazy(() => loadCode(import("./pages/StatsPage")));
+const TaskInfoPage = lazy(() => loadCode(import("./pages/TaskInfoPage")));
+const VncPage = lazy(() => loadCode(import("./pages/VncPage")));
 
 /**
  * The application's route definitions. Returned as JSX (not a component) so it can be
