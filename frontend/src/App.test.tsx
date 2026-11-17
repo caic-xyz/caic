@@ -1212,7 +1212,7 @@ describe("App keyboard shortcuts", () => {
     );
   });
 
-  it("focuses runtime with F3 when multiple runtimes are available", async () => {
+  it("focuses the first enabled feature with F3 and keeps the runtime selection", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getConfig).mockResolvedValue({
       imageConstraints: {
@@ -1240,7 +1240,9 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument());
 
     await user.keyboard("{F3}");
-    await waitFor(() => expect(runtime).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" })).toHaveFocus(),
+    );
     expect(runtime).toBeVisible();
     expect(screen.getByRole("button", { name: "Hide features" })).toHaveAttribute("aria-expanded", "true");
     await user.selectOptions(runtime, "podman");

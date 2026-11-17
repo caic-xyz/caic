@@ -109,22 +109,22 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           />
         </button>
         <div id="new-task-features" class={styles.featurePanel} hidden={!s.featuresOpen()}>
-          {s.runtimes().length > 1 && (
-            <ControlSelect
-              aria-label="Runtime"
-              data-testid="runtime-select"
-              value={s.selectedRuntimeName()}
-              onChange={(e) => s.setSelectedRuntimeName(e.currentTarget.value)}
-            >
-              <For each={s.runtimes()}>
-                {(rt) => (
-                  <option value={rt.name} selected={rt.name === s.selectedRuntimeName()}>
-                    {rt.name}
-                  </option>
-                )}
-              </For>
-            </ControlSelect>
-          )}
+          <ToggleChip
+            checked={s.gitHubTokenEnabled()}
+            disabled={!s.gitHubTokenAvailable()}
+            title={s.gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}
+            onChange={s.setGitHubTokenEnabled}
+          >
+            <TokenIcon width="1.2em" height="1.2em" />
+          </ToggleChip>
+          <ToggleChip
+            checked={s.sudoEnabled()}
+            disabled={!s.sudoAvailable()}
+            title={s.sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}
+            onChange={s.setSudoEnabled}
+          >
+            <SudoIcon width="1.2em" height="1.2em" />
+          </ToggleChip>
           <ToggleChip
             checked={s.tailscaleEnabled()}
             disabled={!s.tailscaleAvailable()}
@@ -149,25 +149,25 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           >
             <DisplayIcon width="1.2em" height="1.2em" />
           </ToggleChip>
-          <ToggleChip
-            checked={s.sudoEnabled()}
-            disabled={!s.sudoAvailable()}
-            title={s.sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}
-            onChange={s.setSudoEnabled}
-          >
-            <SudoIcon width="1.2em" height="1.2em" />
-          </ToggleChip>
-          <ToggleChip
-            checked={s.gitHubTokenEnabled()}
-            disabled={!s.gitHubTokenAvailable()}
-            title={s.gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}
-            onChange={s.setGitHubTokenEnabled}
-          >
-            <TokenIcon width="1.2em" height="1.2em" />
-          </ToggleChip>
           <ToggleChip checked={s.caicMCP()} title="Enable CAIC MCP delegation for this task" onChange={s.setCaicMCP}>
             <AccountTreeIcon width="1.2em" height="1.2em" />
           </ToggleChip>
+          {s.runtimes().length > 1 && (
+            <ControlSelect
+              aria-label="Runtime"
+              data-testid="runtime-select"
+              value={s.selectedRuntimeName()}
+              onChange={(e) => s.setSelectedRuntimeName(e.currentTarget.value)}
+            >
+              <For each={s.runtimes()}>
+                {(rt) => (
+                  <option value={rt.name} selected={rt.name === s.selectedRuntimeName()}>
+                    {rt.name}
+                  </option>
+                )}
+              </For>
+            </ControlSelect>
+          )}
           <input
             class={styles.sessionInput}
             type="text"

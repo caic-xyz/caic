@@ -93,6 +93,16 @@ export default function ForkDialog() {
           </p>
         </Show>
         <div class={styles.forkRow}>
+          <Show when={s.gitHubTokenAvailable()}>
+            <ToggleChip checked={s.forkGitHubToken()} title="Enable GitHub token" onChange={s.setForkGitHubToken}>
+              <TokenIcon width="1.2em" height="1.2em" />
+            </ToggleChip>
+          </Show>
+          <Show when={s.sudoAvailable()}>
+            <ToggleChip checked={s.forkSudo()} title="Enable root access" onChange={s.setForkSudo}>
+              <SudoIcon width="1.2em" height="1.2em" />
+            </ToggleChip>
+          </Show>
           <Show when={s.tailscaleAvailable()}>
             <ToggleChip checked={s.forkTailscale()} title="Enable Tailscale networking" onChange={s.setForkTailscale}>
               <TailscaleIcon width="1.2em" height="1.2em" />
@@ -106,16 +116,6 @@ export default function ForkDialog() {
           <Show when={s.displayAvailable()}>
             <ToggleChip checked={s.forkDisplay()} title="Enable virtual display" onChange={s.setForkDisplay}>
               <DisplayIcon width="1.2em" height="1.2em" />
-            </ToggleChip>
-          </Show>
-          <Show when={s.sudoAvailable()}>
-            <ToggleChip checked={s.forkSudo()} title="Enable root access" onChange={s.setForkSudo}>
-              <SudoIcon width="1.2em" height="1.2em" />
-            </ToggleChip>
-          </Show>
-          <Show when={s.gitHubTokenAvailable()}>
-            <ToggleChip checked={s.forkGitHubToken()} title="Enable GitHub token" onChange={s.setForkGitHubToken}>
-              <TokenIcon width="1.2em" height="1.2em" />
             </ToggleChip>
           </Show>
         </div>

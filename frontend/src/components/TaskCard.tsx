@@ -283,6 +283,16 @@ export default function TaskCard(props: TaskCardProps) {
             </strong>
           </Tooltip>
           <span class={styles.stateGroup}>
+            <Show when={props.gitHubToken}>
+              <span class={styles.featureIconBadge} title="GitHub token">
+                <TokenIcon width="0.7rem" height="0.7rem" />
+              </span>
+            </Show>
+            <Show when={props.runtime?.sudo}>
+              <span class={styles.featureIconBadge} title="Sudo">
+                <SudoIcon width="0.7rem" height="0.7rem" />
+              </span>
+            </Show>
             <Show when={props.runtime?.tailscale} keyed>
               {(ts) =>
                 ts.startsWith("https://") ? (
@@ -311,16 +321,6 @@ export default function TaskCard(props: TaskCardProps) {
             <Show when={props.runtime?.display}>
               <span class={styles.featureIconBadge} title="Display">
                 <DisplayIcon width="0.7rem" height="0.7rem" />
-              </span>
-            </Show>
-            <Show when={props.runtime?.sudo}>
-              <span class={styles.featureIconBadge} title="Sudo">
-                <SudoIcon width="0.7rem" height="0.7rem" />
-              </span>
-            </Show>
-            <Show when={props.gitHubToken}>
-              <span class={styles.featureIconBadge} title="GitHub token">
-                <TokenIcon width="0.7rem" height="0.7rem" />
               </span>
             </Show>
             {/* Mobile exposes revive without selection; purge still requires selection. */}
