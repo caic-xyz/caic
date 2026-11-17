@@ -1,4 +1,6 @@
-# Generated files - keep ours on merge conflicts (regenerate after merge)
-# Note: Can't use `binary` macro as it expands to `-diff -merge -text`, overriding merge=ours
-backend/frontend/dist/** -diff -text merge=ours
-sdk/caic/** -diff -text merge=ours
+# Generated files are rebuilt, never resolved by picking a side.
+# Resolve dist bundle with `make frontend-build`, which also regenerates the SDKs, then stage backend/frontend/dist and
+# sdk/caic.
+backend/frontend/dist/** -diff -text -merge
+# SDKs are text and merge line by line; `make verify` checks them against the generator.
+sdk/caic/** -diff -text

@@ -142,7 +142,6 @@ coverage: frontend-deps
 
 git-hooks:
 	@./scripts/install-git-hooks.sh
-	@git config merge.ours.driver true
 	@hooks=$$(git config --local --get core.hooksPath); \
 	  [ "$$hooks" = "scripts/hooks" ] || { \
 	    echo "core.hooksPath is '$$hooks', want scripts/hooks; run make git-hooks" >&2; exit 1; \
