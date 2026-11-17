@@ -1,5 +1,6 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { ok } from "node:assert/strict";
+import type { Config } from "../../sdk/caic/ts/v1/types.gen";
 import { test, expect, waitForTaskState, createTaskAPI } from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
@@ -92,102 +93,132 @@ test("new-task effort stays compact and features follow the selectors", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("collapsed task features preserve opaque session IDs on desktop and mobile", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
-  const config = await api.getConfig();
-  const runtimes = config.runtimes;
-  if (!runtimes?.length) throw new Error("Fake server must expose a runtime");
-  const runtimeConfig = runtimes[0];
-  ok(runtimeConfig);
-  await page.route("**/server/config", (route) =>
-    route.fulfill({
-      json: { ...config, runtimes: [...runtimes, { name: "standby" }] },
-    }),
-  );
-  await page.goto("/");
-  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
-  const runtime = page.getByRole("combobox", { name: "Runtime" });
-  const disclosure = page.getByRole("button", { name: /^(Show|Hide) features$/ });
-  const input = page.getByRole("textbox", { name: "Session ID to resume" });
-  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-  await expect(input).toBeHidden();
-  await expect(runtime).toBeHidden();
-  const harness = page.getByTestId("harness-select");
-  await expect
-    .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
-    .toBeLessThan(1);
+for (const capabilitiesAvailable of [false, true]) {
+  test(`collapsed task features preserve opaque session IDs with capabilities ${capabilitiesAvailable ? "enabled" : "disabled"}`, async ({
+    page,
+    api,
+    uniquePrompt,
+  }) => {
+    const config = await api.getConfig();
+    const runtimes = config.runtimes;
+    if (!runtimes?.length) throw new Error("Fake server must expose a runtime");
+    const runtimeConfig = runtimes[0];
+    ok(runtimeConfig);
+    await page.route("**/server/config", (route) =>
+      route.fulfill({
+        json: {
+          ...config,
+          displayAvailable: capabilitiesAvailable,
+          gitHubTokenAvailable: capabilitiesAvailable,
+          sudoAvailable: capabilitiesAvailable,
+          tailscaleAvailable: capabilitiesAvailable,
+          usbAvailable: capabilitiesAvailable,
+          runtimes: [...runtimes, { name: "standby" }],
+        } satisfies Config,
+      }),
+    );
+    await page.goto("/");
+    await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+    const runtime = page.getByRole("combobox", { name: "Runtime" });
+    const disclosure = page.getByRole("button", { name: /^(Show|Hide) features$/ });
+    const input = page.getByRole("textbox", { name: "Session ID to resume" });
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await expect(input).toBeHidden();
+    await expect(runtime).toBeHidden();
+    const harness = page.getByTestId("harness-select");
+    await expect
+      .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
+      .toBeLessThan(1);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect
-    .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
-    .toBeLessThan(1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect
+      .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
+      .toBeLessThan(1);
 
-  await page.setViewportSize({ width: 1280, height: 844 });
-  await disclosure.focus();
-  await page.keyboard.press("Tab");
-  await expect(page.getByTestId("prompt-input")).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(disclosure).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-  await expect(input).toBeVisible();
-  await expect(runtime).toBeVisible();
-  await runtime.selectOption(runtimeConfig.name);
-  await expect(input).toHaveAttribute("placeholder", "Session ID to resume");
-  await expect(input).not.toHaveAttribute("maxlength");
-  await disclosure.focus();
-  // Available capabilities vary by server; enabled toggles precede Runtime.
-  const featureToggles = page.locator("#new-task-features").getByRole("checkbox", { disabled: false });
-  for (const toggle of await featureToggles.all()) {
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await disclosure.focus();
     await page.keyboard.press("Tab");
-    await expect(toggle).toBeFocused();
-  }
-  await page.keyboard.press("Tab");
-  await expect(runtime).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(input).toBeFocused();
-  const sessionID = "harness session:';$(opaque) " + "opaque-value-".repeat(12);
-  await input.fill(`  ${sessionID}  `);
-  expect((await input.boundingBox())!.width).toBeLessThan(450);
+    await expect(page.getByTestId("prompt-input")).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(disclosure).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await expect(input).toBeVisible();
+    await expect(runtime).toBeVisible();
+    await runtime.selectOption(runtimeConfig.name);
+    await expect(input).toHaveAttribute("placeholder", "Session ID to resume");
+    await expect(input).not.toHaveAttribute("maxlength");
+    await disclosure.focus();
+    const featurePanel = page.locator("#new-task-features");
+    await expect(featurePanel.getByRole("checkbox")).toHaveCount(6);
+    const capabilityNames = [
+      ["Enable GitHub token", "GitHub token is not available on this server"],
+      ["Enable root access", "Root access (sudo) is not available on this server"],
+      ["Enable Tailscale networking", "Tailscale is not available on this server"],
+      ["Enable USB passthrough", "USB passthrough is not available on this server"],
+      ["Enable virtual display", "Virtual display is not available on this server"],
+    ];
+    for (const [enabledName, disabledName] of capabilityNames) {
+      const capability = featurePanel.getByRole("checkbox", {
+        name: capabilitiesAvailable ? enabledName : disabledName,
+        exact: true,
+      });
+      if (capabilitiesAvailable) {
+        await expect(capability).toBeEnabled();
+        await page.keyboard.press("Tab");
+        await expect(capability).toBeFocused();
+      } else {
+        await expect(capability).toBeDisabled();
+      }
+    }
+    await page.keyboard.press("Tab");
+    await expect(
+      featurePanel.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(runtime).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(input).toBeFocused();
+    const sessionID = "harness session:';$(opaque) " + "opaque-value-".repeat(12);
+    await input.fill(`  ${sessionID}  `);
+    expect((await input.boundingBox())!.width).toBeLessThan(450);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(input).toHaveValue(`  ${sessionID}  `);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const bounds = await input.boundingBox();
-  expect(bounds!.width).toBeGreaterThan(250);
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(input).toHaveValue(`  ${sessionID}  `);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const bounds = await input.boundingBox();
+    expect(bounds!.width).toBeGreaterThan(250);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
 
-  const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
-  await toggle.focus();
-  await page.keyboard.press("Space");
-  await expect(toggle).not.toBeChecked();
-  await page.getByRole("button", { name: "Hide features" }).click();
-  await expect(input).toBeHidden();
-  await expect(runtime).toBeHidden();
-  await expect(page.getByRole("button", { name: "Show features" })).toBeFocused();
-  await page.getByRole("button", { name: "Show features" }).click();
-  await expect(input).toHaveValue(`  ${sessionID}  `);
-  await expect(runtime).toHaveValue(runtimeConfig.name);
-  await expect(toggle).not.toBeChecked();
-  await page.getByRole("button", { name: "Hide features" }).click();
+    const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    await expect(toggle).not.toBeChecked();
+    await page.getByRole("button", { name: "Hide features" }).click();
+    await expect(input).toBeHidden();
+    await expect(runtime).toBeHidden();
+    await expect(page.getByRole("button", { name: "Show features" })).toBeFocused();
+    await page.getByRole("button", { name: "Show features" }).click();
+    await expect(input).toHaveValue(`  ${sessionID}  `);
+    await expect(runtime).toHaveValue(runtimeConfig.name);
+    await expect(toggle).not.toBeChecked();
+    await page.getByRole("button", { name: "Hide features" }).click();
 
-  const prompt = uniquePrompt("Continue the existing session");
-  await page.getByTestId("prompt-input").fill(prompt);
-  const request = page.waitForRequest((req) => req.method() === "POST" && req.url().endsWith("/api/caic/v1/tasks"));
-  await page.getByTestId("submit-task").click();
-  const body = (await request).postDataJSON();
-  expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimeConfig.name });
-  expect(body.caicMCP).toBeUndefined();
-  await expect(page).toHaveURL(/\/task\//);
-  const tasks = (await api.listTasks()) ?? [];
-  const task = tasks.find((t) => t.initialPrompt === prompt);
-  expect(task).toBeTruthy();
-  await waitForTaskState(api, task!.id, "waiting");
-  await api.stopTask(task!.id);
-});
+    const prompt = uniquePrompt("Continue the existing session");
+    await page.getByTestId("prompt-input").fill(prompt);
+    const request = page.waitForRequest((req) => req.method() === "POST" && req.url().endsWith("/api/caic/v1/tasks"));
+    await page.getByTestId("submit-task").click();
+    const body = (await request).postDataJSON();
+    expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimeConfig.name });
+    expect(body.caicMCP).toBeUndefined();
+    await expect(page).toHaveURL(/\/task\//);
+    const tasks = (await api.listTasks()) ?? [];
+    const task = tasks.find((t) => t.initialPrompt === prompt);
+    expect(task).toBeTruthy();
+    await waitForTaskState(api, task!.id, "waiting");
+    await api.stopTask(task!.id);
+  });
+}
 
 test("mobile stopped task card exposes Revive without selection", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
