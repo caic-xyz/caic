@@ -1,4 +1,4 @@
-// TaskDetail renders current-context history, archived disclosures, queued prompt appending and keyboard editing, file links, and task actions.
+// TaskDetail renders current-context history, archived disclosures, background-work reveal, queued prompt appending and keyboard editing, file links, and task actions.
 
 import {
   createSignal,
@@ -98,11 +98,14 @@ import { VisualTimingTracker, formatTimingDuration, formatTotalDuration } from "
 import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
+import BackgroundStrip from "./BackgroundStrip";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
 import Markdown, { MarkdownRawToolbar, MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
+import { activeBackgroundItems, commandSettled, type BackgroundItem } from "../backgroundActivity";
+import { abortOnUserScroll, revealElement, waitForElement } from "../revealElement";
 import NativeAgents, { BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
 import { assignNativeAnchors } from "../nativeSubagents";
 import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
@@ -1047,6 +1050,115 @@ export default function TaskDetail(props: Props) {
     }
     return byTool;
   });
+  const backgroundItems = createMemo(() => activeBackgroundItems(metadata(), backgroundSettled()));
+  // A chip reveals the element that started its item, in the first place that
+  // holds it: the current transcript (expanding its past turn), the owning
+  // agent's card, the archived context that predates it, or the transcript row
+  // nearest its start. Each step lands on the closest visible ancestor while
+  // lazily rendered bodies load. User scrolling cancels the remaining steps.
+  let revealAbort: AbortController | null = null;
+  onCleanup(() => revealAbort?.abort());
+  const revealBackground = (item: BackgroundItem) => {
+    revealAbort?.abort();
+    const abort = new AbortController();
+    revealAbort = abort;
+    abortOnUserScroll(abort);
+    void revealBackgroundItem(item, abort.signal).finally(() => abort.abort());
+  };
+  const revealBackgroundItem = async (item: BackgroundItem, signal: AbortSignal) => {
+    const root = messageContentRef;
+    if (!root) return;
+    const land = (el: HTMLElement) => {
+      if (!signal.aborted) revealElement(el, styles.revealed);
+    };
+    const wait = (find: () => HTMLElement | null) => waitForElement(root, find, signal, REVEAL_TIMEOUT_MS);
+    const toolKey = item.toolKey;
+    const selector =
+      toolKey !== null
+        ? `[data-testid="tool-call"][data-tool-key="${CSS.escape(toolKey)}"]`
+        : item.kind === "agent"
+          ? `[data-native-id="${CSS.escape(item.id)}"]`
+          : null;
+    const findTarget = () => (selector ? root.querySelector<HTMLElement>(selector) : null);
+    if (toolKey !== null) {
+      const turn = completedTurnItems().find(
+        (entry) =>
+          entry.kind === "elided" &&
+          entry.turn.groups.some((group) =>
+            group.toolCalls.some((call) => toolIdentity(call.source, call.use.toolUseID) === toolKey),
+          ),
+      );
+      // Solid renders the expanded turn synchronously.
+      if (turn) toggleTurn(turn.key);
+    }
+    const direct = findTarget();
+    if (direct) return land(direct);
+    const card = item.ownerAgentID
+      ? root.querySelector<HTMLDetailsElement>(`[data-native-id="${CSS.escape(item.ownerAgentID)}"]`)
+      : null;
+    if (card) {
+      land(card);
+      card.open = true;
+      const call = await wait(findTarget);
+      if (call) land(call);
+      return;
+    }
+    const section = archivedSectionAt(item.startedAt);
+    if (section) {
+      if (!expandedSessionKeys().has(section.id)) toggleSession(section.id);
+      const row = anchorRow(root, sessionAnchor(section.id));
+      if (row) land(row);
+      const turnRow = await wait(() => archivedTurnRow(root, section.id, item.startedAt));
+      if (!turnRow) return;
+      land(turnRow);
+      if (!selector) return;
+      // A settled agent's card renders only inside its archived context.
+      if (item.ownerAgentID) {
+        const selectOwner = `[data-native-id="${CSS.escape(item.ownerAgentID)}"]`;
+        const owner = await wait(() => root.querySelector<HTMLElement>(selectOwner));
+        if (!owner || signal.aborted) return;
+        land(owner);
+        if (owner instanceof HTMLDetailsElement) owner.open = true;
+      } else {
+        const turnKey = (turnRow.dataset.anchorKey ?? "").slice(turnAnchor("").length);
+        if (!expandedTurnKeys().has(turnKey)) toggleTurn(turnKey);
+      }
+      const call = await wait(findTarget);
+      if (call) land(call);
+      return;
+    }
+    const nearest = currentRowAt(root, item.startedAt) ?? messageArea();
+    if (nearest) land(nearest);
+  };
+  // archivedSectionAt is the archived context that was current at startedAt,
+  // or null when the item started in the current context.
+  const archivedSectionAt = (startedAt: number | null) => {
+    const archived = sections().slice(0, -1);
+    const currentStart = currentSection()?.boundary?.message.ts ?? 0;
+    if (startedAt === null || archived.length === 0 || startedAt >= currentStart) return null;
+    return archived.findLast((section) => (section.boundary?.message.ts ?? 0) <= startedAt) ?? archived[0] ?? null;
+  };
+  // currentRowAt is the current transcript row through which content existed at
+  // startedAt; the newest row when the start is unknown.
+  const currentRowAt = (root: HTMLElement, startedAt: number | null) => {
+    const rows = transcriptItems();
+    const key =
+      startedAt === null
+        ? rows.at(-1)?.key
+        : assignNativeAnchors(rows, [{ anchorTs: startedAt }])
+            .keys()
+            .next().value;
+    const row = rows.find((item) => item.key === key);
+    const anchor =
+      row?.kind === "group"
+        ? groupAnchor(row.group)
+        : row?.kind === "elided"
+          ? turnAnchor(row.key)
+          : row?.kind === "expandedHeader"
+            ? turnAnchor(row.turnKey)
+            : undefined;
+    return anchorRow(root, anchor ?? null);
+  };
 
   const renderArchivedGroups = (groups: Accessor<MessageGroup[]>, position: (event: EventMessage) => string | null) => {
     const waits = createMemo(() => {
@@ -1726,6 +1838,7 @@ export default function TaskDetail(props: Props) {
             class={styles.inputForm}
             data-testid="task-detail-form"
           >
+            <BackgroundStrip items={backgroundItems()} onReveal={revealBackground} />
             <PromptInput
               ref={setPromptRef}
               value={props.inputDraft}
@@ -2285,6 +2398,22 @@ function compactTokenSummary(before: number | undefined, after: number | undefin
   return "";
 }
 
+// A chip waits this long for a lazily loaded body to render its target.
+const REVEAL_TIMEOUT_MS = 10_000;
+
+// archivedTurnRow is the collapsed turn row of an archived context whose first
+// event is the latest at or before startedAt, or the first row when the start
+// is unknown. It is null until the context body renders its rows.
+function archivedTurnRow(root: HTMLElement, sectionID: string, startedAt: number | null): HTMLElement | null {
+  const prefix = turnAnchor(`session:${sectionID}:turn:`);
+  const rows = [
+    ...root.querySelectorAll<HTMLElement>(`[data-section-id="${CSS.escape(sectionID)}"] [data-anchor-key]`),
+  ].filter((row) => row.dataset.anchorKey?.startsWith(prefix));
+  if (startedAt === null) return rows[0] ?? null;
+  const first = (row: HTMLElement) => Number((row.dataset.anchorKey ?? "").split(":").at(-1));
+  return rows.findLast((row) => first(row) <= startedAt) ?? rows[0] ?? null;
+}
+
 function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: string }) {
   const byKey = createMemo(
     () => new Map(props.skills.map((skill) => [JSON.stringify([skill.path ?? null, skill.skill]), skill])),
@@ -2574,11 +2703,11 @@ function ResultCard(props: {
 
 // toolCallRunning is the single rule for a tool call's spinner, finished count,
 // and ticking duration. A folded background command runs until it reports an
-// outcome or the task settles. Otherwise the call runs until its result
-// arrives: the server closes calls left open by an agent exit or a task
-// settlement with an interrupted result.
+// outcome or, when its end wakes the agent, the task settles. Otherwise the
+// call runs until its result arrives: the server closes calls left open by an
+// agent exit or a task settlement with an interrupted result.
 function toolCallRunning(call: ToolCall, command: HistoryBackgroundCommand | undefined, settled: boolean): boolean {
-  return command ? command.status === "running" && !settled : !call.done;
+  return command ? command.status === "running" && !commandSettled(command, settled) : !call.done;
 }
 
 // toolResultText describes a result that has no tool row to render it.
@@ -3043,7 +3172,10 @@ function ToolCallCard(props: {
                       perpetual "running in background" mark on a finished call. */}
                   <Match when={props.backgroundCommand} keyed>
                     {(command) => (
-                      <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
+                      <BackgroundCommandStatusChip
+                        command={command}
+                        settled={commandSettled(command, props.backgroundSettled?.() ?? false)}
+                      />
                     )}
                   </Match>
                   <Match when={props.call.result?.interrupted}>

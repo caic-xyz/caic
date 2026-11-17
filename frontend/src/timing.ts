@@ -105,6 +105,7 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
     case "log":
     case "nativeSubagent":
     case "backgroundCommand":
+    case "backgroundRetired":
     case "skillLoad":
     case "subagentEnd":
     case "subagentStart":

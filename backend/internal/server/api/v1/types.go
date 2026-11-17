@@ -438,6 +438,7 @@ type Task struct {
 	Runtime         RuntimeInstance `json:"runtime"`
 	ResourceUsage   *EventStats     `json:"resourceUsage,omitempty"` // Latest runtime sample; absent before sampling. Not persisted.
 	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"`      // Current quota block resolved by the backend.
+	Background      TaskBackground  `json:"background,omitzero"`     // Running background work; absent when none runs.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
@@ -447,6 +448,15 @@ type TaskStartupFailure struct {
 	Harness Harness `json:"harness"`
 	Phase   string  `json:"phase"`
 	Cause   string  `json:"cause"`
+}
+
+// TaskBackground counts a task's running background work. Agents and the
+// commands whose end wakes the agent keep the task running after its turn ends;
+// watches and other commands do not.
+type TaskBackground struct {
+	Commands int `json:"commands"` // Detached commands that are not watches, waking the agent or not.
+	Watches  int `json:"watches"`  // Commands that only relay events, such as Claude Code's Monitor tool.
+	Agents   int `json:"agents"`   // Background native subagents.
 }
 
 // TaskRateLimit is the current quota block resolved by the backend for one task.

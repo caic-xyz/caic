@@ -1,4 +1,4 @@
-// Tests Pi discovery, startup recovery, wire configuration, and automatic reply delivery.
+// Tests Pi discovery, startup recovery, wire configuration, self-started runs, and automatic reply delivery.
 
 package pi
 
@@ -773,6 +773,48 @@ func TestPiWireFormat(t *testing.T) {
 		}
 		if rl.QuotaProvider != agent.QuotaProviderCodex || rl.QuotaLabel != "Codex" || rl.QuotaWindow != agent.QuotaWindowRequest {
 			t.Fatalf("RateLimitMessage attribution = %q/%q/%q, want codex/Codex/request", rl.QuotaProvider, rl.QuotaLabel, rl.QuotaWindow)
+		}
+	})
+
+	t.Run("QueuedTurn", func(t *testing.T) {
+		t.Parallel()
+		// queued returns the index of each line that reports a queued turn.
+		queued := func(t *testing.T, lines ...string) []int {
+			wire := New("", nil).NewWire()
+			var got []int
+			for i, line := range lines {
+				msgs, err := wire.ParseOutput([]byte(line))
+				if err != nil {
+					t.Fatalf("line %d: %v", i, err)
+				}
+				for _, msg := range msgs {
+					if _, ok := msg.(*agent.TurnQueuedMessage); ok {
+						got = append(got, i)
+					}
+				}
+			}
+			return got
+		}
+		const (
+			agentStart = `{"type":"agent_start"}`
+			turnStart  = `{"type":"turn_start"}`
+			system     = `{"type":"message_start","message":{"role":"system","content":""}}`
+			assistant  = `{"type":"message_start","message":{"role":"assistant","content":[],"provider":"openrouter","model":"m"}}`
+		)
+		// Minimized from task 44KFPPA9I000: the pi-subagents extension woke the
+		// idle parent after a detached run ended.
+		notify := `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
+		// Minimized from task 42FVQSTV6000: Pi retried a rate-limited request.
+		retry := `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429"}`
+		prompt := `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Fix it"}]}}`
+		if got := queued(t, agentStart, turnStart, notify, assistant); !slices.Equal(got, []int{2}) {
+			t.Errorf("extension wake: queued at %v, want [2]", got)
+		}
+		if got := queued(t, retry, agentStart, turnStart, assistant, assistant); !slices.Equal(got, []int{3}) {
+			t.Errorf("retry: queued at %v, want [3]", got)
+		}
+		if got := queued(t, agentStart, turnStart, system, prompt, assistant); len(got) != 0 {
+			t.Errorf("prompt: queued at %v, want none", got)
 		}
 	})
 

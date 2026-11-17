@@ -182,6 +182,8 @@ type wireFormat struct {
 
 	nativeSubagents    nativeSubagents
 	backgroundCommands backgroundCommands
+	liveTasks          liveTasks
+	turnQueue          turnQueue
 	widgetTracker      *WidgetTracker
 	// pendingSkillUses maps a Skill tool use ID to the skill its success
 	// loads into the main context, until the paired tool result arrives. The
@@ -206,6 +208,7 @@ func newWireFormat() *wireFormat {
 			resumes: make(map[delegationKey]struct{}),
 		},
 		backgroundCommands: backgroundCommands{known: make(map[string]bool), monitors: make(map[delegationKey]struct{})},
+		turnQueue:          turnQueue{queued: make(map[string]string), childTools: make(map[string]struct{})},
 		widgetTracker:      newWidgetTracker(),
 		pendingSkillUses:   make(map[agent.ToolKey]string),
 		askSources:         make(map[agent.ToolKey]agent.MessageSource),
@@ -254,8 +257,16 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A retired card has no terminal record and so queues no turn: keep it out
+	// of turnQueue.
+	var retired []agent.Message
+	for _, id := range w.liveTasks.parse(&record) {
+		retired = append(retired, w.nativeSubagents.retire(id)...)
+		retired = append(retired, w.backgroundCommands.retire(id)...)
+	}
 	msgs = append(msgs, native...)
 	msgs = append(msgs, w.backgroundCommands.parse(&record, msgs)...)
+	msgs = w.turnQueue.parse(&record, subagent, msgs)
 	for i, message := range msgs {
 		if message.Provenance().IsZero() || record.harnessRecord {
 			*message.Provenance() = record.source
@@ -423,6 +434,12 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		if keep {
 			out = append(out, msg)
 		}
+	}
+	if len(retired) != 0 {
+		for _, m := range retired {
+			*m.Provenance() = agent.MessageSource{ThreadID: w.sessionID}
+		}
+		out = append(retired, out...)
 	}
 	if loaded != nil {
 		out = append([]agent.Message{loaded}, out...)

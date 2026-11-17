@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	serverhistory "github.com/caic-xyz/caic/backend/internal/server/history"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
@@ -249,7 +251,7 @@ func TestMCPTools(t *testing.T) {
 			{ProducerTime: start.Add(2 * time.Second), Message: &agent.ResultMessage{}},
 			{ProducerTime: start.Add(time.Hour), Message: &agent.UserInputMessage{Text: "second"}},
 			{ProducerTime: start.Add(time.Hour + 3*time.Second), Message: &agent.ResultMessage{}},
-		})
+		}, nil)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
 		entry, _ := s.taskMgr.GetEntry(tk.ID)
@@ -267,6 +269,167 @@ func TestMCPTools(t *testing.T) {
 		out := taskDetailOutput(t, detail.Structured)
 		if out.NumTurns != 2 || out.DurationSeconds != 5 || out.CostKnown {
 			t.Fatalf("MCP detail metrics = %+v", out)
+		}
+	})
+	t.Run("handleTaskGetDetail/background work", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first"}, harness.Claude)
+		tk.SetState(task.StateRunning)
+		start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{
+			{ProducerTime: start, Message: &agent.UserInputMessage{Text: "first"}},
+			{ProducerTime: start.Add(time.Second), Message: &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "w", Label: "results", Status: agent.BackgroundCommandStatusRunning, Watch: true}}},
+			{ProducerTime: start.Add(2 * time.Second), Message: &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "c", Label: "Run tests", Status: agent.BackgroundCommandStatusRunning, WakesAgent: true}}},
+			{ProducerTime: start.Add(3 * time.Second), Message: &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "a", Label: "Fix", Status: agent.NativeSubagentStatusRunning, Background: true}}},
+			// A command whose end wakes no agent counts and shows, but keeps nothing running.
+			{ProducerTime: start.Add(4 * time.Second), Message: &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "n", Label: "serve", Status: agent.BackgroundCommandStatusRunning}}},
+			{ProducerTime: start.Add(5 * time.Second), Message: &agent.ResultMessage{}},
+		}, nil)
+		insertTestTask(s, tk.ID, tk)
+		entry, _ := s.taskMgr.GetEntry(tk.ID)
+		entry.LogPath.Set("/cache/tasks/example.jsonl")
+		c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+		detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(tk.ID.String())}})
+		if detail.IsError || detail.Meta != nil {
+			t.Fatal(detail)
+		}
+		out := taskDetailOutput(t, detail.Structured)
+		wantItems := []v1.MCPBackgroundItem{
+			{Kind: v1.MCPBackgroundKindWatch, Label: "results", StartedAt: start.Add(time.Second)},
+			{Kind: v1.MCPBackgroundKindCommand, Label: "Run tests", StartedAt: start.Add(2 * time.Second)},
+			{Kind: v1.MCPBackgroundKindAgent, Label: "Fix", StartedAt: start.Add(3 * time.Second)},
+			{Kind: v1.MCPBackgroundKindCommand, Label: "serve", StartedAt: start.Add(4 * time.Second)},
+		}
+		if out.State != v1.TaskStateRunning || out.Background != (v1.TaskBackground{Commands: 2, Watches: 1, Agents: 1}) || !slices.Equal(out.BackgroundItems, wantItems) || out.BackgroundItemsTruncated {
+			t.Fatalf("background = %v %+v %+v truncated=%t", out.State, out.Background, out.BackgroundItems, out.BackgroundItemsTruncated)
+		}
+		if out.LogPath != "/cache/tasks/example.jsonl" {
+			t.Fatalf("logPath = %q", out.LogPath)
+		}
+		if want := "Task " + tk.ID.String() + ": first\nState: running\nTurn ended; still running in background: 1 command and 1 agent"; out.Result != want {
+			t.Fatalf("result = %q, want %q", out.Result, want)
+		}
+	})
+	t.Run("handleTaskGetDetail/background start matches history", func(t *testing.T) {
+		t.Parallel()
+		// An agent pauses and runs again in the same run; a command is retired
+		// from Claude's live task list and runs again. Both keep their first
+		// running time in the task history and in MCP.
+		const session = `"session_id":"s"`
+		native := []string{
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"description":"Fix","prompt":"Fix","subagent_type":"general-purpose","run_in_background":true}}]},` + session + `}`,
+			`{"type":"system","subtype":"task_started","task_id":"a1","run_id":"001","tool_use_id":"toolu_agent","description":"Fix","is_backgrounded":true,"task_type":"local_agent",` + session + `}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"make test","run_in_background":true}}]},` + session + `}`,
+			`{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_bash","description":"Run tests","is_backgrounded":true,"task_type":"local_bash",` + session + `}`,
+			`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a1","run_id":"001","task_type":"local_agent"},{"task_id":"b1","task_type":"local_bash"}],` + session + `}`,
+			`{"type":"system","subtype":"task_updated","task_id":"a1","run_id":"001","patch":{"status":"paused"},` + session + `}`,
+			`{"type":"system","subtype":"task_updated","task_id":"a1","run_id":"001","patch":{"status":"running"},` + session + `}`,
+			`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a1","run_id":"001","task_type":"local_agent"}],` + session + `}`,
+			`{"type":"system","subtype":"status","status":"requesting",` + session + `}`,
+			`{"type":"system","subtype":"task_updated","task_id":"b1","patch":{"status":"running"},` + session + `}`,
+			`{"type":"result","subtype":"success","is_error":false,"result":"Done",` + session + `}`,
+		}
+		lines := make([]string, 0, 1+len(native))
+		lines = append(lines, `{"t":"caic_meta","version":3,"harness":"claude","prompt":"first"}`)
+		for i, msg := range native {
+			lines = append(lines, fmt.Sprintf(`{"t":"agent","ts":%d.000,"msg":%s}`, 1_800_000_000+i, msg))
+		}
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		resolver := backends.Default("", nil)
+		var timeline []agent.TimedMessage
+		var paused, retired bool
+		err := taskslog.ScanFile(path, true, func(_ os.FileInfo, scanner *taskslog.Scanner, _ logdata.MetaMessage) error {
+			wire, err := resolver.ResolveParser(harness.Claude)
+			if err != nil {
+				return err
+			}
+			parser, err := agent.NewLogRecordParser(wire)
+			if err != nil {
+				return err
+			}
+			if _, err := parser.DecodeFrame(&scanner.HeaderFrame); err != nil {
+				return err
+			}
+			for scanner.Scan() {
+				record, err := parser.DecodeFrame(scanner.Frame())
+				if err != nil {
+					return err
+				}
+				for _, m := range record.Messages {
+					switch msg := m.Message.(type) {
+					case *agent.NativeSubagentMessage:
+						paused = paused || msg.Subagent.Status == agent.NativeSubagentStatusPaused
+					case *agent.BackgroundRetiredMessage:
+						retired = true
+					}
+				}
+				timeline = append(timeline, record.Messages...)
+			}
+			return scanner.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !paused || !retired {
+			t.Fatalf("fixture paused = %t, retired = %t; want both", paused, retired)
+		}
+
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first"}, harness.Claude)
+		tk.SetState(task.StateRunning)
+		tk.SeedTimelineParts(nil, timeline, nil)
+		insertTestTask(s, tk.ID, tk)
+		entry, _ := s.taskMgr.GetEntry(tk.ID)
+		entry.LogPath.Set(path)
+		c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+		detail := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpschema.TaskGetDetailArgs]{Arguments: mcpschema.TaskGetDetailArgs{Task: mcpschema.TaskReference(tk.ID.String())}})
+		if detail.IsError {
+			t.Fatal(detail)
+		}
+		out := taskDetailOutput(t, detail.Structured)
+
+		source, err := serverhistory.NewSource(t.Context(), path, "", resolver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = source.Close() })
+		if _, err := source.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		_, _, meta, err := source.Sections(t.Context(), "first")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]time.Time{}
+		for _, a := range meta.Activities {
+			if a.Status == "running" && a.StartedAt != nil {
+				want["agent "+a.Label] = *a.StartedAt
+			}
+		}
+		for _, cmd := range meta.BackgroundCommands {
+			if cmd.Status == "running" && cmd.StartedAt != nil {
+				want["command "+cmd.Label] = *cmd.StartedAt
+			}
+		}
+		got := map[string]time.Time{}
+		for _, item := range out.BackgroundItems {
+			got[string(item.Kind)+" "+item.Label] = item.StartedAt
+		}
+		first := time.Unix(1_800_000_000, 0).UTC()
+		if len(got) != 2 || !got["agent Fix"].Equal(first.Add(time.Second)) || !got["command Run tests"].Equal(first.Add(3*time.Second)) {
+			t.Fatalf("MCP starts = %v, want the first running observations", got)
+		}
+		if len(want) != len(got) {
+			t.Fatalf("history starts = %v, MCP starts = %v", want, got)
+		}
+		for k, at := range want {
+			if !got[k].Equal(at) {
+				t.Errorf("%s: MCP startedAt = %v, history StartedAt = %v", k, got[k], at)
+			}
 		}
 	})
 	t.Run("handleTaskSendMessage", func(t *testing.T) {
@@ -575,7 +738,7 @@ func TestMCPTools(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "unpriced"}, harness.Dsh)
-		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{}}})
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{}}}, nil)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{usage: s.usageHandlers}
 		result := c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{})
@@ -585,7 +748,7 @@ func TestMCPTools(t *testing.T) {
 			t.Fatalf("local usage lines = %q; want %q", got, want)
 		}
 		priced := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "reported"}, harness.Claude)
-		priced.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{TotalCostUSD: 0.25}}})
+		priced.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{TotalCostUSD: 0.25}}}, nil)
 		insertTestTask(s, priced.ID, priced)
 		result = c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{})
 		got = strings.Split(toolTextOutput(t, result.Structured), "\n")
@@ -2197,7 +2360,7 @@ func TestMCPTools(t *testing.T) {
 				&agent.TextMessage{Source: root},
 				&agent.ResultMessage{Source: root},
 				&agent.AskMessage{Source: root},
-			}))
+			}), nil)
 			entry := s.taskMgr.NewEntry(tk, nil)
 			s.taskMgr.Insert(tk.ID, entry)
 			svc := testTaskHandlers(s).taskSvc
@@ -2474,7 +2637,7 @@ func TestMCPTools(t *testing.T) {
 				&agent.TextMessage{Text: "old result"},
 				&agent.ToolUseMessage{ToolUseID: "tool-1", Input: json.RawMessage(`{"command":"make check"}`)},
 				&agent.TextMessage{Text: "live result"},
-			}))
+			}), nil)
 			entry := s.taskMgr.NewEntry(tk, nil)
 			s.taskMgr.Insert(tk.ID, entry)
 

@@ -1,4 +1,4 @@
-// Tests native Claude lifecycle correlation and detached shell folding from recorded evidence.
+// Tests native Claude lifecycle correlation, detached shell folding, queued notification turns, and snapshot retirement from recorded evidence.
 
 package claudecode
 
@@ -372,7 +372,7 @@ func TestBackgroundCommandLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("SnapshotDropped", func(t *testing.T) {
+	t.Run("SnapshotCreatesNoCard", func(t *testing.T) {
 		t.Parallel()
 		for _, line := range []string{backgroundSnapshotOne, backgroundSnapshotTwo} {
 			wire := newWireFormat()
@@ -447,5 +447,236 @@ func TestBackgroundCommandLifecycle(t *testing.T) {
 		if !slices.EqualFunc(first, second, func(a, b agent.BackgroundCommand) bool { return sameCard(&a, &b) }) {
 			t.Fatalf("replay cards differ:\nfirst  = %#v\nsecond = %#v", first, second)
 		}
+	})
+}
+
+func TestTurnQueue(t *testing.T) {
+	t.Parallel()
+	// queued returns, per line, the card kinds in emission order, with "turn"
+	// for a TurnQueuedMessage.
+	queued := func(t *testing.T, lines ...string) [][]string {
+		wire := newWireFormat()
+		out := make([][]string, len(lines))
+		for i, line := range lines {
+			msgs, err := wire.ParseOutput([]byte(line))
+			if err != nil {
+				t.Fatalf("line %d: %v", i, err)
+			}
+			for _, msg := range msgs {
+				switch m := msg.(type) {
+				case *agent.TurnQueuedMessage:
+					if m.Source.IsChild() {
+						t.Fatalf("line %d: queued turn has child provenance %#v", i, m.Source)
+					}
+					out[i] = append(out[i], "turn")
+				case *agent.NativeSubagentMessage:
+					out[i] = append(out[i], "agent:"+string(m.Subagent.Status))
+				case *agent.BackgroundCommandMessage:
+					out[i] = append(out[i], "command:"+string(m.Command.Status))
+				}
+			}
+		}
+		return out
+	}
+	want := func(t *testing.T, got [][]string, line int, kinds ...string) {
+		for i, g := range got {
+			if i == line {
+				if !slices.Equal(g, kinds) {
+					t.Errorf("line %d = %q, want %q", i, g, kinds)
+				}
+			} else if slices.Contains(g, "turn") {
+				t.Errorf("line %d = %q, want no queued turn", i, g)
+			}
+		}
+	}
+	// Minimized from task 4VN78Q1IU000: a background agent ends after the
+	// parent result; Claude Code then starts a turn to deliver the notification.
+	const (
+		agentUse      = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_014N3CgJTcnLGnbSbium2crh","name":"Agent","input":{"description":"Commit fixture fix","prompt":"Fix","subagent_type":"general-purpose","run_in_background":true}}]},"session_id":"fe242f82"}`
+		agentStarted  = `{"type":"system","subtype":"task_started","task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","tool_use_id":"toolu_014N3CgJTcnLGnbSbium2crh","description":"Commit fixture fix","is_backgrounded":true,"task_type":"local_agent","session_id":"fe242f82"}`
+		agentUpdated  = `{"type":"system","subtype":"task_updated","task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","patch":{"status":"completed","end_time":1794867732246},"session_id":"fe242f82"}`
+		agentNotified = `{"type":"system","subtype":"task_notification","task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","tool_use_id":"toolu_014N3CgJTcnLGnbSbium2crh","status":"completed","summary":"Fixed","session_id":"fe242f82"}`
+	)
+	t.Run("BackgroundAgent", func(t *testing.T) {
+		t.Parallel()
+		got := queued(t, agentUse, agentStarted, agentUpdated, agentNotified)
+		want(t, got, 2, "turn", "agent:completed")
+	})
+	t.Run("ResumedAgentQueuesAgain", func(t *testing.T) {
+		t.Parallel()
+		resumed := strings.ReplaceAll(agentStarted, "0mwjtvyk3-60e1451f", "0mwjtvyk4-00000000")
+		got := queued(t, agentUse, agentStarted, agentNotified, resumed, strings.ReplaceAll(agentUpdated, "0mwjtvyk3-60e1451f", "0mwjtvyk4-00000000"))
+		if !slices.Equal(got[2], []string{"turn", "agent:completed"}) || !slices.Equal(got[4], []string{"turn", "agent:completed"}) {
+			t.Fatalf("got %q, want a queued turn at the end of each run", got)
+		}
+	})
+	t.Run("BackgroundCommandNotificationOnly", func(t *testing.T) {
+		t.Parallel()
+		got := queued(t, backgroundStartedRerun, backgroundNotifiedRerun)
+		want(t, got, 1, "turn", "command:completed")
+	})
+	t.Run("BackgroundCommandUpdateThenNotification", func(t *testing.T) {
+		t.Parallel()
+		got := queued(t, backgroundStartedLint, backgroundUpdatedLint, backgroundNotifiedLint)
+		want(t, got, 1, "turn", "command:completed")
+	})
+	t.Run("WatchExpiry", func(t *testing.T) {
+		t.Parallel()
+		got := queued(t, monitorToolUse, monitorStarted, monitorKilled, monitorNotified)
+		want(t, got, 2, "turn", "command:interrupted")
+	})
+	t.Run("ForegroundTasks", func(t *testing.T) {
+		t.Parallel()
+		got := queued(t,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
+			`{"type":"system","subtype":"task_started","task_id":"fg","tool_use_id":"spawn","task_type":"local_agent"}`,
+			`{"type":"system","subtype":"task_notification","task_id":"fg","tool_use_id":"spawn","status":"completed","summary":"Joke"}`,
+			foregroundStartedCommit,
+			foregroundNotifiedCommit,
+		)
+		want(t, got, -1)
+	})
+	t.Run("SubagentCommand", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 4VN78Q1IU000: the watch a subagent armed expired
+		// and resumed that subagent; the parent started no turn.
+		childUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01BZYJG5Hou8GZuKXutqD1Jf","name":"Monitor","input":{"command":"tail -f log","description":"NeMo smoke results"}}]},"parent_tool_use_id":"toolu_011Y7rdVxNjW1QcFj63n31FG","session_id":"fe242f82"}`
+		started := `{"type":"system","subtype":"task_started","task_id":"bw2u31182","run_id":"0mwif2bex-f5f2cde1","tool_use_id":"toolu_01BZYJG5Hou8GZuKXutqD1Jf","description":"NeMo smoke results","is_backgrounded":true,"task_type":"local_bash","session_id":"fe242f82"}`
+		killed := `{"type":"system","subtype":"task_updated","task_id":"bw2u31182","run_id":"0mwif2bex-f5f2cde1","patch":{"status":"killed","end_time":1794783538399},"session_id":"fe242f82"}`
+		if got := queued(t, childUse, started, killed); slices.ContainsFunc(got, func(g []string) bool { return slices.Contains(g, "turn") }) {
+			t.Errorf("subagent tool use: got %q, want no queued turn", got)
+		}
+		owned := strings.Replace(started, `"is_backgrounded":true`, `"owned_by_subagent":true,"is_backgrounded":true,"parent_task_id":"a5ae28ce78d5b5f5e"`, 1)
+		if got := queued(t, owned, killed); slices.ContainsFunc(got, func(g []string) bool { return slices.Contains(g, "turn") }) {
+			t.Errorf("owned_by_subagent: got %q, want no queued turn", got)
+		}
+	})
+}
+
+// Records from task 50R144VRE000 (Claude Code 2.1.325). A snapshot names a
+// task before its task_started; the snapshot after the terminal records drops
+// it. Monitor records above come from the same session.
+const (
+	liveSession          = `"session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"`
+	liveSnapshotCommand  = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bhvck4yky","run_id":"0mwjoh868-a2e497da","task_type":"local_bash","description":"Run fix, verify, test in caic and mddb"}],` + liveSession + `}`
+	liveStartedCommand   = `{"type":"system","subtype":"task_started","task_id":"bhvck4yky","run_id":"0mwjoh868-a2e497da","tool_use_id":"toolu_01TA2sDMpDmEFCS1oXRsK8tT","description":"Run fix, verify, test in caic and mddb","is_backgrounded":true,"task_type":"local_bash",` + liveSession + `}`
+	liveUpdatedCommand   = `{"type":"system","subtype":"task_updated","task_id":"bhvck4yky","run_id":"0mwjoh868-a2e497da","patch":{"status":"completed","end_time":1794858889153},` + liveSession + `}`
+	liveNotifiedCommand  = `{"type":"system","subtype":"task_notification","task_id":"bhvck4yky","run_id":"0mwjoh868-a2e497da","tool_use_id":"toolu_01TA2sDMpDmEFCS1oXRsK8tT","status":"completed","output_file":"/tmp/claude-1000/tasks/bhvck4yky.output","summary":"Background command \"Run fix, verify, test in caic and mddb\" completed (exit code 0)",` + liveSession + `}`
+	liveSnapshotDropped  = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","task_type":"local_bash","description":"caic/mddb make fix/verify/test results"},{"task_id":"bivzo0lc8","run_id":"0mwjohf5a-17c20a43","task_type":"local_bash","description":"wait for all six make runs"}],` + liveSession + `}`
+	liveSnapshotWatch    = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","task_type":"local_bash","description":"caic/mddb make fix/verify/test results"}],` + liveSession + `}`
+	liveSnapshotEmpty    = `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + liveSession + `}`
+	liveInit             = `{"type":"system","subtype":"init","cwd":"/home/user/src/gomode",` + liveSession + `}`
+	liveStatusRequesting = `{"type":"system","subtype":"status","status":"requesting",` + liveSession + `}`
+
+	// Task 4VN78Q1IU000 (Claude Code 2.1.325): a background agent run.
+	agentSession       = `"session_id":"fe242f82-bdf6-4830-aaa7-3ed146718f34"`
+	agentSnapshotLive  = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","task_type":"local_agent","subagent_type":"general-purpose","description":"Phase go-test-helper-check"}],` + agentSession + `}`
+	agentStartedLive   = `{"type":"system","subtype":"task_started","task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","tool_use_id":"toolu_014N3CgJTcnLGnbSbium2crh","description":"Phase go-test-helper-check","subagent_type":"general-purpose","is_backgrounded":true,"spawn_depth":1,"task_type":"local_agent","prompt":"Review BLOCKED one item.",` + agentSession + `}`
+	agentSnapshotEmpty = `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + agentSession + `}`
+	agentInit          = `{"type":"system","subtype":"init","cwd":"/home/user/src/genai",` + agentSession + `}`
+
+	// Task 44HVBS5RG000 (Claude Code 2.1.283) emits the dropping snapshot
+	// before the terminal task_updated.
+	backgroundSnapshotEmpty = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"uuid":"d657ecde-e616-4889-8b13-c1580134f270","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
+	backgroundStatus        = `{"type":"system","subtype":"status","status":"requesting","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
+)
+
+func TestLiveTasks(t *testing.T) {
+	t.Parallel()
+	// events returns, per line, what the wire emitted for the cards: "turn",
+	// "retired:<id>", "agent:<status>", or "command:<status>".
+	events := func(t *testing.T, lines ...string) [][]string {
+		wire := newWireFormat()
+		out := make([][]string, len(lines))
+		for i, line := range lines {
+			msgs, err := wire.ParseOutput([]byte(line))
+			if err != nil {
+				t.Fatalf("line %d: %v", i, err)
+			}
+			for _, msg := range msgs {
+				switch m := msg.(type) {
+				case *agent.TurnQueuedMessage:
+					out[i] = append(out[i], "turn")
+				case *agent.BackgroundRetiredMessage:
+					if m.Source.IsChild() {
+						t.Fatalf("line %d: retirement has child provenance %#v", i, m.Source)
+					}
+					out[i] = append(out[i], "retired:"+m.ID)
+				case *agent.NativeSubagentMessage:
+					out[i] = append(out[i], "agent:"+string(m.Subagent.Status))
+				case *agent.BackgroundCommandMessage:
+					out[i] = append(out[i], "command:"+string(m.Command.Status))
+				}
+			}
+		}
+		return out
+	}
+	check := func(t *testing.T, got, want [][]string) {
+		if !slices.EqualFunc(got, want, slices.Equal) {
+			t.Errorf("got  %q\nwant %q", got, want)
+		}
+	}
+	t.Run("LostTerminalRetired", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Command", func(t *testing.T) {
+			t.Parallel()
+			got := events(t, liveSnapshotCommand, liveStartedCommand, liveSnapshotDropped, liveInit, liveStatusRequesting)
+			check(t, got, [][]string{nil, {"command:running"}, nil, {"retired:claude:shell:bhvck4yky"}, nil})
+		})
+		t.Run("Watch", func(t *testing.T) {
+			t.Parallel()
+			got := events(t, monitorToolUse, liveSnapshotWatch, monitorStarted, liveSnapshotEmpty, liveInit)
+			check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"retired:claude:shell:bizvx8b6o"}})
+		})
+		t.Run("Agent", func(t *testing.T) {
+			t.Parallel()
+			got := events(t, agentSnapshotLive, agentStartedLive, agentSnapshotEmpty, agentInit)
+			check(t, got, [][]string{nil, {"agent:running"}, nil, {"retired:claude:task:a3635a9373e98f76a"}})
+		})
+		t.Run("NextSnapshot", func(t *testing.T) {
+			t.Parallel()
+			// A snapshot that follows the dropping snapshot ends the drop too.
+			got := events(t, liveSnapshotCommand, liveStartedCommand, liveSnapshotDropped, liveSnapshotEmpty)
+			check(t, got, [][]string{nil, {"command:running"}, nil, {"retired:claude:shell:bhvck4yky"}})
+		})
+	})
+	t.Run("SnapshotBeforeStartKeepsCard", func(t *testing.T) {
+		t.Parallel()
+		got := events(t, liveSnapshotCommand, liveStartedCommand, liveInit, liveSnapshotCommand, liveStatusRequesting)
+		check(t, got, [][]string{nil, {"command:running"}, nil, nil, nil})
+	})
+	t.Run("StartAfterDropKeepsCard", func(t *testing.T) {
+		t.Parallel()
+		// Only a task the previous snapshot listed can be dropped, and its
+		// task_started cancels the drop.
+		got := events(t, liveSnapshotDropped, liveStartedCommand, liveSnapshotEmpty, liveInit)
+		check(t, got, [][]string{nil, {"command:running"}, nil, nil})
+		got = events(t, liveSnapshotCommand, liveSnapshotEmpty, liveStartedCommand, liveInit)
+		check(t, got, [][]string{nil, nil, {"command:running"}, nil})
+	})
+	t.Run("TerminalNotReopened", func(t *testing.T) {
+		t.Parallel()
+		got := events(t, liveSnapshotCommand, liveStartedCommand, liveUpdatedCommand, liveNotifiedCommand, liveSnapshotDropped, liveInit, liveSnapshotCommand, liveStatusRequesting)
+		check(t, got, [][]string{nil, {"command:running"}, {"turn", "command:completed"}, {"command:completed"}, nil, nil, nil, nil})
+	})
+	t.Run("DropBeforeTerminal", func(t *testing.T) {
+		t.Parallel()
+		// Claude Code 2.1.283: the terminal records follow the dropping snapshot
+		// and settle the card before the drop takes effect.
+		got := events(t, backgroundSnapshotOne, backgroundStartedLint, backgroundSnapshotEmpty, backgroundUpdatedLint, backgroundNotifiedLint, backgroundStatus)
+		check(t, got, [][]string{nil, {"command:running"}, nil, {"turn", "command:completed"}, {"command:completed"}, nil})
+	})
+	t.Run("ForegroundAgentKept", func(t *testing.T) {
+		t.Parallel()
+		foreground := strings.Replace(agentStartedLive, `"is_backgrounded":true`, `"is_backgrounded":false`, 1)
+		got := events(t, agentSnapshotLive, foreground, agentSnapshotEmpty, agentInit)
+		check(t, got, [][]string{nil, {"agent:running"}, nil, nil})
+	})
+	t.Run("InterleavedTasks", func(t *testing.T) {
+		t.Parallel()
+		// The watch's task_started does not cancel the command's drop, and each
+		// drop retires only its own card.
+		got := events(t, monitorToolUse, liveSnapshotCommand, liveStartedCommand, liveSnapshotWatch, monitorStarted, liveSnapshotDropped, liveInit, liveSnapshotEmpty, liveStatusRequesting)
+		check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"command:running"}, {"retired:claude:shell:bhvck4yky"}, nil, nil, {"retired:claude:shell:bizvx8b6o"}})
 	})
 }

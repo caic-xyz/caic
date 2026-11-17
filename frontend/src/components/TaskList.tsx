@@ -341,6 +341,7 @@ export default function TaskList(props: TaskListProps) {
         gitHubToken={t().gitHubToken}
         forgePR={t().forgePR}
         ciStatus={t().ciStatus}
+        background={t().background}
         ciChecks={t().ciChecks}
         autoFixPR={props.autoFixPR()}
         rateLimit={t().rateLimit}

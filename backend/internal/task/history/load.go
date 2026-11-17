@@ -104,6 +104,7 @@ type LoadedTask struct {
 	LastTrailer                    *task.Result // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
 	OpenSync                       string       // Sync ID of the last sync_activity start with no end record; empty when every sync ended. Not cached.
 	Timeline                       []agent.TimedMessage
+	Settlements                    []int // Timeline length at each settlement trailer, whose run's agent process ended there.
 
 	path           string         // Absolute path for lazy message loading via LoadMessages.
 	resolver       ParserResolver // Fresh parser factory supplied by the task owner.
@@ -117,6 +118,9 @@ func loadSemanticTask(path string, resolver ParserResolver) (*LoadedTask, error)
 		projection.apply(loaded, record.Messages)
 		for _, parsed := range record.Messages {
 			if record.Control && isInventoryOnlyMessage(parsed.Message) {
+				if _, settled := parsed.Message.(*agent.MetaResultMessage); settled {
+					loaded.Settlements = append(loaded.Settlements, len(loaded.Timeline))
+				}
 				continue
 			}
 			loaded.Timeline = append(loaded.Timeline, parsed)
@@ -515,6 +519,7 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 	}
 	if messages {
 		lt.Timeline = loaded.Timeline
+		lt.Settlements = loaded.Settlements
 		lt.messagesLoaded = true
 	}
 }

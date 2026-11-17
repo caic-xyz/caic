@@ -123,6 +123,7 @@ export type EventKind =
   | "subagentEnd"
   | "nativeSubagent"
   | "backgroundCommand"
+  | "backgroundRetired"
   | "log"
   | "syncActivity"
   | "toolOutputDelta"
@@ -153,6 +154,7 @@ export const EventKindSubagentStart = "subagentStart";
 export const EventKindSubagentEnd = "subagentEnd";
 export const EventKindNativeSubagent = "nativeSubagent";
 export const EventKindBackgroundCommand = "backgroundCommand";
+export const EventKindBackgroundRetired = "backgroundRetired";
 export const EventKindLog = "log";
 export const EventKindSyncActivity = "syncActivity";
 export const EventKindToolOutputDelta = "toolOutputDelta";
@@ -1105,6 +1107,20 @@ export interface TaskRateLimit {
   resetsAt?: ISOTimestamp;
 }
 
+/**
+ * TaskBackground counts a task's running background work. Agents and the
+ * commands whose end wakes the agent keep the task running after its turn ends;
+ * watches and other commands do not.
+ */
+export interface TaskBackground {
+  /** Detached commands that are not watches, waking the agent or not. */
+  commands: number /* int */;
+  /** Commands that only relay events, such as Claude Code's Monitor tool. */
+  watches: number /* int */;
+  /** Background native subagents. */
+  agents: number /* int */;
+}
+
 /** Task is the JSON representation sent to the frontend. */
 export interface Task {
   pendingInput: PendingInput | null;
@@ -1182,6 +1198,8 @@ export interface Task {
   resourceUsage?: EventStats;
   /** Current quota block resolved by the backend. */
   rateLimit?: TaskRateLimit;
+  /** Running background work; absent when none runs. */
+  background?: TaskBackground;
   /** Per-task feature flags. */
   gitHubToken?: boolean;
 }
@@ -2202,6 +2220,27 @@ export interface EventBackgroundCommand {
   exitCode?: number /* int */;
   outputRef?: string;
   toolUseID?: string;
+  /**
+   * Watch marks a command that only relays events to the agent, such as
+   * Claude Code's Monitor tool. A running watch never keeps the task running.
+   */
+  watch?: boolean;
+  /**
+   * WakesAgent marks a command whose end the harness delivers to the agent in
+   * a turn it starts by itself. Only such a running command keeps the task
+   * running; another one stays visible while the task waits.
+   */
+  wakesAgent?: boolean;
+}
+
+/**
+ * EventBackgroundRetired reports that the harness stopped listing a running
+ * native subagent or background command without reporting its outcome. ID
+ * matches EventNativeSubagent.ID or EventBackgroundCommand.ID. A running card
+ * with that ID becomes unknown; other cards are unchanged.
+ */
+export interface EventBackgroundRetired {
+  id: string;
 }
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */
@@ -2340,6 +2379,7 @@ export interface EventMessage {
   subagentEnd?: EventSubagentEnd;
   nativeSubagent?: EventNativeSubagent;
   backgroundCommand?: EventBackgroundCommand;
+  backgroundRetired?: EventBackgroundRetired;
   log?: EventLog;
   syncActivity?: EventSyncActivity;
   toolOutputDelta?: EventToolOutputDelta;
@@ -2463,6 +2503,10 @@ export interface HistoryBackgroundCommand {
   endedAt?: ISOTimestamp;
   exitCode?: number /* int */;
   outputRef?: string;
+  /** See EventBackgroundCommand.Watch. */
+  watch?: boolean;
+  /** See EventBackgroundCommand.WakesAgent. */
+  wakesAgent?: boolean;
 }
 
 /**

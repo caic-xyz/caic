@@ -64,7 +64,7 @@ func newSectionIndex() sectionIndex {
 
 func (s *sectionIndex) append(e *Event) {
 	m := &e.Message
-	if m.Init != nil || m.Result != nil || m.ToolResult != nil || m.NativeSubagent != nil || m.BackgroundCommand != nil || m.UserInput != nil || m.SkillLoad != nil || m.Todo != nil || m.Log != nil || m.CommitSnapshot != nil || m.System != nil {
+	if m.Init != nil || m.Result != nil || m.ToolResult != nil || m.NativeSubagent != nil || m.BackgroundCommand != nil || m.BackgroundRetired != nil || m.UserInput != nil || m.SkillLoad != nil || m.Todo != nil || m.Log != nil || m.CommitSnapshot != nil || m.System != nil {
 		s.revision++
 	}
 	p := eventPosition(e)
@@ -178,6 +178,11 @@ func (s *sectionIndex) indexRecords(e *Event) {
 	}
 	if n := m.NativeSubagent; n != nil {
 		s.actorRecords[n.ID] = appendRecord(s.actorRecords[n.ID], e.RecordID)
+	}
+	if r := m.BackgroundRetired; r != nil {
+		if _, ok := s.activities[r.ID]; ok {
+			s.actorRecords[r.ID] = appendRecord(s.actorRecords[r.ID], e.RecordID)
+		}
 	}
 	if m.Source.AgentID == "" && m.Source.DelegationToolUseID != "" {
 		namespace := m.Source.RootThreadID
@@ -386,7 +391,7 @@ func (s *sectionIndex) observeTool(m *v1.EventMessage) {
 
 func (s *sectionIndex) observeActivity(e *Event) {
 	m := &e.Message
-	body := m.NativeSubagent == nil && m.BackgroundCommand == nil && (m.Kind != v1.EventKindRateLimit || m.RateLimit != nil && m.RateLimit.RateLimitType == "thread_goal")
+	body := m.NativeSubagent == nil && m.BackgroundCommand == nil && m.BackgroundRetired == nil && (m.Kind != v1.EventKindRateLimit || m.RateLimit != nil && m.RateLimit.RateLimitType == "thread_goal")
 	if body && (m.Source.AgentID != "" || m.Source.DelegationToolUseID != "") {
 		namespace := m.Source.RootThreadID
 		if namespace == "" {
@@ -422,8 +427,8 @@ func (s *sectionIndex) observeActivity(e *Event) {
 			}
 		}
 	}
-	if m.Error != nil && !historyChild(&m.Source) {
-		s.hostExited(historyTime(m.Ts))
+	if r := m.BackgroundRetired; r != nil {
+		s.retire(r.ID, historyTime(m.Ts))
 		return
 	}
 	id := ""
@@ -535,31 +540,51 @@ func (s *sectionIndex) observeActivity(e *Event) {
 	s.activities[id] = a
 }
 
-// hostExited folds a failed root harness process exit. The process hosts its
-// native subagents and detached commands, so no further lifecycle report can
-// arrive for a running one; its outcome becomes unknown rather than invented.
-// A clean exit emits no event and leaves running cards untouched.
+// hostExited folds the end of the root harness process, as taskrun does: its
+// exit, clean or not, or the settlement trailer. The process hosts its native
+// subagents and detached commands, so no further lifecycle report can arrive
+// for a running one; its outcome becomes unknown rather than invented. A clean
+// exit projects no event, so Source folds the record itself.
 func (s *sectionIndex) hostExited(at time.Time) {
 	for id := range s.activities {
-		a := s.activities[id]
-		if a.Status != string(v1.EventNativeSubagentStatusRunning) {
-			continue
-		}
-		a.Status = string(v1.EventNativeSubagentStatusUnknown)
-		if !at.IsZero() {
-			if _, hasTranscript := s.transcripts[id]; !hasTranscript {
-				a.AnchorAt = at
-			}
-			s.lifecycleAnchors[id] = at
-		}
-		s.activities[id] = a
-		s.revision++
+		s.retireActivity(id, at)
 	}
 	for i := range s.backgroundCommands {
-		if c := &s.backgroundCommands[i]; c.Status == "running" {
-			c.Status = "unknown"
-			s.revision++
+		s.retireCommand(i)
+	}
+}
+
+// retire folds a card that the harness stopped listing without an outcome: a
+// running card with the identity becomes unknown, as on host exit. Unlike a
+// lifecycle update with an unknown status, which leaves the status unchanged,
+// a retirement ends the running state.
+func (s *sectionIndex) retire(id string, at time.Time) {
+	s.retireActivity(id, at)
+	if i, ok := s.backgroundIndex[id]; ok {
+		s.retireCommand(i)
+	}
+}
+
+func (s *sectionIndex) retireActivity(id string, at time.Time) {
+	a, ok := s.activities[id]
+	if !ok || a.Status != string(v1.EventNativeSubagentStatusRunning) {
+		return
+	}
+	a.Status = string(v1.EventNativeSubagentStatusUnknown)
+	if !at.IsZero() {
+		if _, hasTranscript := s.transcripts[id]; !hasTranscript {
+			a.AnchorAt = at
 		}
+		s.lifecycleAnchors[id] = at
+	}
+	s.activities[id] = a
+	s.revision++
+}
+
+func (s *sectionIndex) retireCommand(i int) {
+	if c := &s.backgroundCommands[i]; c.Status == "running" {
+		c.Status = "unknown"
+		s.revision++
 	}
 }
 
@@ -585,6 +610,8 @@ func (s *sectionIndex) observeBackgroundCommand(m *v1.EventMessage) {
 	}
 	c.ExitCode = b.ExitCode
 	c.OutputRef = b.OutputRef
+	c.Watch = c.Watch || b.Watch
+	c.WakesAgent = c.WakesAgent || b.WakesAgent
 	if at := historyTime(m.Ts); !at.IsZero() {
 		if c.StartedAt == nil && b.Status == "running" {
 			c.StartedAt = &at
@@ -818,7 +845,7 @@ func (s *summaryCounter) group(m *v1.EventMessage) {
 		}
 	default:
 		switch m.Kind {
-		case v1.EventKindTodo, v1.EventKindSkillLoad, v1.EventKindLog, v1.EventKindSyncActivity, v1.EventKindDiffStat, v1.EventKindCommitSnapshot, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand, v1.EventKindSubagentStart, v1.EventKindSubagentEnd:
+		case v1.EventKindTodo, v1.EventKindSkillLoad, v1.EventKindLog, v1.EventKindSyncActivity, v1.EventKindDiffStat, v1.EventKindCommitSnapshot, v1.EventKindNativeSubagent, v1.EventKindBackgroundCommand, v1.EventKindBackgroundRetired, v1.EventKindSubagentStart, v1.EventKindSubagentEnd:
 			return
 		case v1.EventKindUsage:
 			s.usageSinceTool = true

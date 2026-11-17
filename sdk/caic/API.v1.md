@@ -242,6 +242,7 @@ EventKind identifies the type of SSE event.
 | `subagentEnd` |  |
 | `nativeSubagent` |  |
 | `backgroundCommand` |  |
+| `backgroundRetired` |  |
 | `log` |  |
 | `syncActivity` |  |
 | `toolOutputDelta` |  |
@@ -1180,6 +1181,18 @@ TaskRateLimit is the current quota block resolved by the backend for one task.
 | `window` | `string` |  |  |
 | `resetsAt` | `ISOTimestamp` |  |  |
 
+### TaskBackground
+
+TaskBackground counts a task's running background work. Agents and the
+commands whose end wakes the agent keep the task running after its turn ends;
+watches and other commands do not.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `commands` | `int` | Detached commands that are not watches, waking the agent or not. | yes |
+| `watches` | `int` | Commands that only relay events, such as Claude Code's Monitor tool. | yes |
+| `agents` | `int` | Background native subagents. | yes |
+
 ### Task
 
 Task is the JSON representation sent to the frontend.
@@ -1241,6 +1254,7 @@ Task is the JSON representation sent to the frontend.
 | `runtime` | `RuntimeInstance` |  | yes |
 | `resourceUsage` | `EventStats` | Latest runtime sample; absent before sampling. Not persisted. |  |
 | `rateLimit` | `TaskRateLimit` | Current quota block resolved by the backend. |  |
+| `background` | `TaskBackground` | Running background work; absent when none runs. |  |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
 ### BotFixPRReq
@@ -2360,6 +2374,19 @@ caic resource.
 | `exitCode` | `int` |  |  |
 | `outputRef` | `string` |  |  |
 | `toolUseID` | `string` |  |  |
+| `watch` | `boolean` | Watch marks a command that only relays events to the agent, such as Claude Code's Monitor tool. A running watch never keeps the task running. |  |
+| `wakesAgent` | `boolean` | WakesAgent marks a command whose end the harness delivers to the agent in a turn it starts by itself. Only such a running command keeps the task running; another one stays visible while the task waits. |  |
+
+### EventBackgroundRetired
+
+EventBackgroundRetired reports that the harness stopped listing a running
+native subagent or background command without reporting its outcome. ID
+matches EventNativeSubagent.ID or EventBackgroundCommand.ID. A running card
+with that ID becomes unknown; other cards are unchanged.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
 
 ### EventLog
 
@@ -2504,6 +2531,7 @@ EventMessage is one backend-neutral message in cached history and its live strea
 | `subagentEnd` | `EventSubagentEnd` |  |  |
 | `nativeSubagent` | `EventNativeSubagent` |  |  |
 | `backgroundCommand` | `EventBackgroundCommand` |  |  |
+| `backgroundRetired` | `EventBackgroundRetired` |  |  |
 | `log` | `EventLog` |  |  |
 | `syncActivity` | `EventSyncActivity` |  |  |
 | `toolOutputDelta` | `EventToolOutputDelta` |  |  |
@@ -2631,6 +2659,8 @@ ToolUseID; OutputRef names the container file holding its output.
 | `endedAt` | `ISOTimestamp` |  |  |
 | `exitCode` | `int` |  |  |
 | `outputRef` | `string` |  |  |
+| `watch` | `boolean` | See EventBackgroundCommand.Watch. |  |
+| `wakesAgent` | `boolean` | See EventBackgroundCommand.WakesAgent. |  |
 
 ### HistoryMetadata
 

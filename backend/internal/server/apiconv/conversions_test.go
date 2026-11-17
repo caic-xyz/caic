@@ -382,7 +382,7 @@ func TestTask(t *testing.T) {
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.UsageMessage{Usage: agent.Usage{InputTokens: 123, CacheReadInputTokens: 456}},
 			&agent.UsageMessage{ContextUsed: &zero},
-		}))
+		}), nil)
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
@@ -447,10 +447,10 @@ func TestTask(t *testing.T) {
 			&agent.ToolUseMessage{ToolUseID: "root-exit", Name: "ExitPlanMode"},
 			agent.ContextCleared(),
 		}
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages[:2]))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages[:2]), nil)
 		snapshot := tk.Snapshot()
 		tk = mustNewTask(t, tk.ID, tk.InitialPrompt)
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 		captured, err := Task(&TaskInput{Task: tk, Snapshot: snapshot})
 		if err != nil {
 			t.Fatal(err)
@@ -475,7 +475,7 @@ func TestTask(t *testing.T) {
 			ResetsAt:       time.Now().Add(time.Hour),
 			RateLimitType:  "five_hour",
 			IsUsingOverage: true,
-		}}))
+		}}), nil)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -504,7 +504,7 @@ func TestTask(t *testing.T) {
 				QuotaProvider: agent.QuotaProviderClaudeCode,
 				QuotaWindow:   "7d",
 			},
-		}))
+		}), nil)
 
 		gotTask, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -523,7 +523,7 @@ func TestTask(t *testing.T) {
 			Status:      agent.RateLimitStatusRejected,
 			ResetsAt:    time.Now().Add(time.Hour),
 			QuotaWindow: "5h",
-		}}))
+		}}), nil)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -542,7 +542,7 @@ func TestTask(t *testing.T) {
 			ResetsAt:      time.Now().Add(time.Hour),
 			QuotaProvider: agent.QuotaProvider("other"),
 			QuotaWindow:   "5h",
-		}}))
+		}}), nil)
 
 		if _, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()}); err == nil {
 			t.Fatal("Task() error = nil, want unsupported quota provider error")

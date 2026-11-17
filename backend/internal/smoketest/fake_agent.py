@@ -2,7 +2,8 @@
 #
 # Each envelope's message is a flat object whose "type" field maps directly to
 # an agent.Message type (init, text, text_delta, tool_use, ask, widget,
-# widget_delta, tool_result, result).
+# widget_delta, tool_result, native_subagent, background_command, turn_queued,
+# result).
 #
 # Reads plain text from stdin (one prompt per line), responds with streaming
 # text deltas followed by complete messages.  Exits on EOF or null-byte
@@ -613,52 +614,232 @@ def emit_quota_recovery_turn(turns: int) -> None:
     emit_result(turns, "Quota exhausted")
 
 
-def emit_background_commands_turn(turns: int) -> None:
-    """Emit detached shell lifecycles; one settles, one stays running past the result."""
-    emit_text("Kicking off the lint check in the background.")
-    emit_tool_use("bgtool", "Bash", {"command": "pnpm install && pnpm lint", "run_in_background": True})
+# Background work mirrors Claude Code task records as the claudecode adapter
+# folds them: a backgrounded Bash and a Monitor start local_bash tasks, a
+# backgrounded Agent starts a local_agent task. Labels are the tool
+# descriptions; summaries follow task_notification. Claude starts a turn by
+# itself to deliver each notification, so each terminal update follows a
+# turn_queued and precedes that turn's result.
+BG_CHECKS = {
+    "tool": "toolu_bg_checks",
+    "watch": False,
+    "id": "claude:shell:bchk7x2qa",
+    "description": "Run fix, verify, and test",
+    "output": "/tmp/claude-1000/-workspace/test-session/tasks/bchk7x2qa.output",
+}
+BG_WATCH = {
+    "tool": "toolu_bg_watch",
+    "watch": True,
+    "id": "claude:shell:bwch4m8re",
+    "description": "fix/verify/test results",
+    "output": "/tmp/claude-1000/-workspace/test-session/tasks/bwch4m8re.output",
+}
+BG_REVIEW = {
+    "tool": "toolu_bg_review",
+    "id": "claude:task:a6c1e0f4b9d27e835",
+    "run": "0mwk1a2b3-5d6e7f80",
+    "description": "Review the API handlers",
+    "prompt": "Review backend/internal/server for missing input validation. Report each finding with its location.",
+}
+
+
+def emit_tool_started(tool: str) -> None:
+    # Claude Code reports no duration for a tool that only starts a task.
+    emit({"type": "tool_result", "tool_use_id": tool})
+
+
+def emit_background_bash(item: dict) -> None:
+    emit_tool_use(
+        item["tool"],
+        "Bash",
+        {
+            "command": 'make fix verify test > /tmp/checks.log 2>&1; echo "exit=$?"',
+            "description": item["description"],
+            "timeout": 600000,
+            "run_in_background": True,
+        },
+    )
+    command = {"id": item["id"], "label": item["description"], "status": "running", "tool_use_id": item["tool"]}
+    emit({"type": "background_command", "command": command})
+    emit_tool_started(item["tool"])
+
+
+def emit_monitor(item: dict) -> None:
+    emit_tool_use(
+        item["tool"],
+        "Monitor",
+        {
+            "command": "tail -n +1 -f /tmp/checks.log | grep --line-buffered -E 'FAIL|exit='",
+            "description": item["description"],
+            "timeout_ms": 1800000,
+        },
+    )
+    command = {
+        "id": item["id"],
+        "label": item["description"],
+        "status": "running",
+        "tool_use_id": item["tool"],
+        "watch": item["watch"],
+    }
+    emit({"type": "background_command", "command": command})
+    emit_tool_started(item["tool"])
+
+
+def emit_command_end(item: dict, summary: str, exit_code: int | None) -> None:
+    """Emit task_updated then task_notification, as the adapter folds them."""
+    emit({"type": "turn_queued"})
+    command = {
+        "id": item["id"],
+        "label": item["description"],
+        "status": "completed",
+        "tool_use_id": item["tool"],
+        **({"watch": True} if item["watch"] else {}),
+    }
+    emit({"type": "background_command", "command": command})
+    command = {**command, "result": summary, "output_ref": item["output"]}
+    if exit_code is not None:
+        command["exit_code"] = exit_code
+    emit({"type": "background_command", "command": command})
+
+
+def emit_background_turn(turns: int, gated: bool) -> None:
+    """Start a command, a watch, and an agent that all outlive the result.
+
+    Ungated, all three keep running. Gated, FAKE_BACKGROUND_SETTLE_WORK ends
+    the command and the agent; the watch remains and the task waits.
+    FAKE_BACKGROUND_SETTLE_WATCH ends the watch.
+    """
+    emit_text("Starting the checks in the background, with a watch on failures and a review agent.")
+    emit_background_bash(BG_CHECKS)
+    emit_monitor(BG_WATCH)
+    emit_tool_use(
+        BG_REVIEW["tool"],
+        "Agent",
+        {
+            "description": BG_REVIEW["description"],
+            "subagent_type": "general-purpose",
+            "prompt": BG_REVIEW["prompt"],
+            "run_in_background": True,
+        },
+    )
+    subagent = {
+        "run_id": BG_REVIEW["run"],
+        "tool_use_id": BG_REVIEW["tool"],
+        "id": BG_REVIEW["id"],
+        "label": BG_REVIEW["description"],
+        "prompt": BG_REVIEW["prompt"],
+        "status": "running",
+        "background": True,
+    }
+    emit({"type": "native_subagent", "subagent": subagent})
+    emit_tool_started(BG_REVIEW["tool"])
+    emit_text("The checks, the watch, and the review run in the background. I will report when they finish.")
+    emit_result(turns, "Background work started")
+    if not gated or not gate("FAKE_BACKGROUND_SETTLE_WORK"):
+        return
+    emit_text("The checks and the review are still running.")
+    emit_result(turns, "Background work running")
+    emit_command_end(BG_CHECKS, f'Background command "{BG_CHECKS["description"]}" completed (exit code 0)', 0)
+    emit_text("The checks passed with exit code 0.")
+    emit_result(turns, "Checks passed")
+    emit({"type": "turn_queued"})
+    emit({"type": "native_subagent", "subagent": {**subagent, "status": "completed"}})
+    review = "The handlers validate every input. I found no missing checks."
+    emit({"type": "native_subagent", "subagent": {**subagent, "status": "completed", "result": review}})
+    emit_text("The review found no missing input validation.")
+    emit_result(turns, "Review finished")
+    if not gate("FAKE_BACKGROUND_SETTLE_WATCH"):
+        return
+    emit_text("The watch is still open.")
+    emit_result(turns, "Watch running")
+    emit_command_end(BG_WATCH, f'Monitor "{BG_WATCH["description"]}" stream ended', None)
+    emit_text("The watch ended without a failure.")
+    emit_result(turns, "Watch ended")
+
+
+BG_EDGE_WATCH = {
+    "tool": "toolu_edge_watch",
+    "watch": True,
+    "id": "claude:shell:bedge1wch",
+    "description": "deploy log errors",
+}
+BG_EDGE_AGENT = {
+    "tool": "toolu_edge_agent",
+    "id": "claude:task:edge7agent",
+    "description": "Profile the build",
+}
+
+
+def emit_background_edges_turn(turns: int) -> None:
+    """Start background work that the root transcript does not show directly.
+
+    A command runs inside a background agent's transcript, a command has no
+    launching call, and a watch runs in the root. A later compaction archives
+    the watch's call. Only FAKE_BACKGROUND_EDGE_AGENT_DONE settles anything:
+    the agent.
+    """
+    emit_text("Starting a watch on the deploy log and a background profiling agent.")
+    emit_monitor(BG_EDGE_WATCH)
+    emit_tool_use(
+        BG_EDGE_AGENT["tool"],
+        "Agent",
+        {"description": BG_EDGE_AGENT["description"], "prompt": "Profile the build.", "run_in_background": True},
+    )
+    subagent = {
+        "tool_use_id": BG_EDGE_AGENT["tool"],
+        "id": BG_EDGE_AGENT["id"],
+        "label": BG_EDGE_AGENT["description"],
+        "prompt": "Profile the build.",
+        "status": "running",
+        "background": True,
+    }
+    emit({"type": "native_subagent", "subagent": subagent})
+    emit_tool_started(BG_EDGE_AGENT["tool"])
+    child = {"agentID": BG_EDGE_AGENT["id"]}
+    emit({"type": "text", "text": "Profiling the build in the background.", "source": child})
+    emit(
+        {
+            "type": "tool_use",
+            "id": "toolu_edge_child",
+            "name": "Bash",
+            "input": {"command": "make profile", "description": "Profile build", "run_in_background": True},
+            "source": child,
+        }
+    )
+    command = {
+        "id": "claude:shell:bedge2chd",
+        "label": "Profile build",
+        "status": "running",
+        "tool_use_id": "toolu_edge_child",
+    }
+    emit({"type": "background_command", "command": command, "source": child})
+    emit({"type": "tool_result", "tool_use_id": "toolu_edge_child", "source": child})
     emit(
         {
             "type": "background_command",
-            "command": {
-                "id": "claude:shell:lint1",
-                "label": "Install and run lint",
-                "status": "running",
-                "tool_use_id": "bgtool",
-            },
+            "command": {"id": "claude:shell:bedge3orp", "label": "Detached cleanup", "status": "running"},
         }
     )
-    emit_tool_result("bgtool", 120)
-    # A second detached command the turn never waits on.
-    emit_tool_use("bgwatch", "Bash", {"command": "pnpm build --watch", "run_in_background": True})
-    emit(
-        {
-            "type": "background_command",
-            "command": {
-                "id": "claude:shell:watch1",
-                "label": "Watch build output",
-                "status": "running",
-                "tool_use_id": "bgwatch",
-            },
-        }
-    )
-    emit_tool_result("bgwatch", 120)
-    emit_text("The lint command finished while I kept working.")
-    emit(
-        {
-            "type": "background_command",
-            "command": {
-                "id": "claude:shell:lint1",
-                "status": "completed",
-                "result": 'Background command "Install and run lint" completed (exit code 0)',
-                "exit_code": 0,
-                "output_ref": "/tmp/tasks/lint1.output",
-            },
-        }
-    )
-    # The second command stays running past the result, so a settled replay must
-    # report it as last-observed-running instead of inventing an outcome.
-    emit_result(turns, "Background commands finished")
+    emit_text("The watch, the agent, and the cleanup run in the background.")
+    emit_result(turns, "Background edges started")
+
+
+def emit_background_edge_agent_done_turn(turns: int) -> None:
+    """Finish the edge agent while the command in its transcript keeps running."""
+    subagent = {"id": BG_EDGE_AGENT["id"], "status": "completed", "result": "The build profile is ready."}
+    emit({"type": "native_subagent", "subagent": subagent})
+    emit_text("The profiling agent finished; its command still runs.")
+    emit_result(turns, "Edge agent finished")
+
+
+def emit_background_watch_only_turn(turns: int) -> None:
+    """Settle a command during the turn and leave only a watch after the result."""
+    emit_text("Starting the checks in the background, with a watch on failures.")
+    emit_background_bash(BG_CHECKS)
+    emit_monitor(BG_WATCH)
+    emit_command_end(BG_CHECKS, f'Background command "{BG_CHECKS["description"]}" completed (exit code 0)', 0)
+    emit_text("The checks passed with exit code 0. The watch stays open.")
+    emit_result(turns, "Checks passed")
 
 
 def emit_native_subagents_turn(turns: int) -> None:
@@ -967,8 +1148,17 @@ def main() -> None:
         if line.startswith("FAKE_NATIVE_SUBAGENTS"):
             emit_native_subagents_turn(turns)
             continue
-        if line.startswith("FAKE_BACKGROUND_COMMANDS"):
-            emit_background_commands_turn(turns)
+        if line.startswith("FAKE_BACKGROUND_WATCH_ONLY"):
+            emit_background_watch_only_turn(turns)
+            continue
+        if line.startswith("FAKE_BACKGROUND_EDGE_AGENT_DONE"):
+            emit_background_edge_agent_done_turn(turns)
+            continue
+        if line.startswith("FAKE_BACKGROUND_EDGES"):
+            emit_background_edges_turn(turns)
+            continue
+        if line.startswith("FAKE_BACKGROUND_WORK"):
+            emit_background_turn(turns, True)
             continue
         if line.startswith("FAKE_CONTEXT_OCCUPANCY"):
             if " RESET" in line:
@@ -1011,7 +1201,7 @@ def main() -> None:
             emit_native_subagents_turn(turns)
             continue
         if NATURAL_BACKGROUND_RE.search(lower):
-            emit_background_commands_turn(turns)
+            emit_background_turn(turns, False)
             continue
         if NATURAL_PLAN_RE.search(lower):
             emit_plan_turn(turns)

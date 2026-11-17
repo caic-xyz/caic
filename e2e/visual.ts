@@ -74,17 +74,27 @@ export async function prepareVisualPage(page: Page): Promise<void> {
       if (events && !events.ok()) throw new Error(`Visual timeline fetch failed: ${events.status()}`);
       const raw: unknown = events ? await events.json() : [];
       if (!Array.isArray(raw)) throw new Error("Visual timeline must be an array");
-      const timestamps = raw.map((value: unknown): [number, number, number] => {
-        const event = validateHistoryEvent(value);
-        return [event.recordID, event.index, event.message.ts];
+      const validated = raw.map((value: unknown) => validateHistoryEvent(value));
+      const timestamps = validated.map((event): [number, number, number] => [
+        event.recordID,
+        event.index,
+        event.message.ts,
+      ]);
+      // Background command times have no history position, so retime them by
+      // the lifecycle records that reported them.
+      const lifecycles = validated.flatMap((event): [number, number, string, string][] => {
+        const command = event.message.backgroundCommand;
+        return command ? [[event.recordID, event.index, command.id, command.status]] : [];
       });
       const normalized = await page.evaluate(
-        ({ id, start, timestamps, manifest }) => {
-          const event = new CustomEvent("caic-visual-history", { detail: { id, start, timestamps, manifest } });
+        ({ id, start, timestamps, lifecycles, manifest }) => {
+          const event = new CustomEvent("caic-visual-history", {
+            detail: { id, start, timestamps, lifecycles, manifest },
+          });
           window.dispatchEvent(event);
           return event.detail.manifest;
         },
-        { id: task.id, start, timestamps, manifest },
+        { id: task.id, start, timestamps, lifecycles, manifest },
       );
       await route.fulfill({ json: normalized });
       return;
@@ -108,7 +118,8 @@ export async function prepareVisualPage(page: Page): Promise<void> {
   // capture would record whichever CPU level the machine happened to report.
   const fixtures = { samples: resourceHistory(), health: serverHealth(), stride: visualRecordStrideMs };
   await page.addInitScript(({ samples, health, stride }) => {
-    const histories = new Map<string, { start: number; timestamps: Map<string, number> }>();
+    type Lifecycle = { recordID: number; index: number; id: string; status: string };
+    const histories = new Map<string, { start: number; timestamps: Map<string, number>; lifecycles: Lifecycle[] }>();
     function normalize(id: string, manifest: HistoryManifest) {
       const history = histories.get(id);
       if (!history) throw new Error(`Visual task has no timestamp map: ${id}`);
@@ -141,19 +152,44 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         if (activity.startedAt) activity.startedAt = iso(Date.parse(activity.startedAt) + offset);
         if (activity.endedAt) activity.endedAt = iso(Date.parse(activity.endedAt) + offset);
       }
+      // A command starts at its first running record and ends at its first
+      // terminal record, both anchored on the task start like every position.
+      for (const command of metadata.backgroundCommands ?? []) {
+        const records = history.lifecycles.filter((record) => record.id === command.id);
+        const started = records.find((record) => record.status === "running");
+        const ended = records.find((record) => record.status !== "running");
+        if (command.startedAt) {
+          if (!started) throw new Error(`Visual command has no running record: ${command.id}`);
+          command.startedAt = iso(positionTime(started));
+        }
+        if (command.endedAt) {
+          if (!ended) throw new Error(`Visual command has no terminal record: ${command.id}`);
+          command.endedAt = iso(positionTime(ended));
+        }
+      }
     }
     window.addEventListener("caic-visual-history", (event) => {
-      const { id, start, timestamps, manifest } = (
+      const { id, start, timestamps, lifecycles, manifest } = (
         event as CustomEvent<{
           id: string;
           start: number;
           timestamps: [number, number, number][];
+          lifecycles: [number, number, string, string][];
           manifest: HistoryManifest;
         }>
       ).detail;
       const map = new Map<string, number>();
       for (const [recordID, index, original] of timestamps) map.set(`${recordID}:${index}`, original);
-      histories.set(id, { start, timestamps: map });
+      histories.set(id, {
+        start,
+        timestamps: map,
+        lifecycles: lifecycles.map(([recordID, index, commandID, status]) => ({
+          recordID,
+          index,
+          id: commandID,
+          status,
+        })),
+      });
       normalize(id, manifest);
     });
     const NativeEventSource = window.EventSource;
@@ -174,11 +210,23 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         const id = task?.[1];
         if (!id) return;
         this.addEventListener("message", (event) => {
-          const value = JSON.parse(event.data) as { recordID: number; index: number; message: { ts: number } };
+          const value = JSON.parse(event.data) as {
+            recordID: number;
+            index: number;
+            message: { ts: number; backgroundCommand?: { id: string; status: string } };
+          };
           const history = histories.get(id);
           if (!history) throw new Error("Visual live history has no timestamp map");
           const ts = history.start + (value.recordID - 2) * stride + value.index;
           history.timestamps.set(`${value.recordID}:${value.index}`, value.message.ts);
+          const command = value.message.backgroundCommand;
+          if (command)
+            history.lifecycles.push({
+              recordID: value.recordID,
+              index: value.index,
+              id: command.id,
+              status: command.status,
+            });
           value.message.ts = ts;
           Object.defineProperty(event, "data", { value: JSON.stringify(value) });
         });

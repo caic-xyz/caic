@@ -1,4 +1,4 @@
-// Package pi implements Pi RPC sessions, native compaction budgets, and shared token accounting.
+// Package pi implements Pi RPC sessions, native compaction budgets, shared token accounting, and runs Pi starts by itself.
 //
 // Pi uses a custom type-dispatched JSONL protocol over stdin/stdout (not
 // JSON-RPC 2.0). There is no handshake — the subprocess is immediately ready
@@ -366,6 +366,10 @@ type piWireFormat struct {
 
 	nativeSubagents nativeSubagents
 
+	// runOpening is set from agent_start until the run's first non-system
+	// message_start, whose role tells who started the run.
+	runOpening bool
+
 	// Per-tool accumulated output length for computing incremental deltas.
 	// Pi's tool_execution_update events carry the full accumulated output;
 	// we track the previous length to emit only the new portion.
@@ -416,11 +420,17 @@ func (w *piWireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/agent/src/agent-loop.ts
 	if typ == pi.EventAgentStart {
 		w.usageSinceResult = false
+		w.runOpening = true
+	}
+	queued, err := w.queuedTurn(typ, line)
+	if err != nil {
+		return nil, err
 	}
 	msgs, err := w.parseNativeMessage(typ, line)
 	if err != nil {
 		return nil, err
 	}
+	msgs = append(queued, msgs...)
 	w.applyMetadata(msgs)
 	w.markAccounting(typ, msgs)
 	return msgs, nil
@@ -456,6 +466,37 @@ func (w *piWireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(typ), Raw: append([]byte(nil), line...)}}, nil
+	}
+}
+
+// queuedTurn reports a run that Pi started by itself. A prompt's run opens
+// with its user message; caic sends prompts with steer streaming behavior, so
+// a prompt never opens a run while another one streams. Any other opening is
+// Pi's: an extension wake message (role custom, such as the pi-subagents
+// extension's subagent-notify after a detached run ends) or an automatic retry
+// (role assistant after auto_retry_start).
+//
+// The extension holds a wake after a user abort, during compaction, or while
+// another wake is starting, so the run end it reports cannot predict a turn.
+// The task therefore shows waiting from that report until this record, at
+// most 0.15 s in recorded logs.
+func (w *piWireFormat) queuedTurn(typ pi.EventType, line []byte) ([]agent.Message, error) {
+	if typ != pi.EventMessageStart || !w.runOpening {
+		return nil, nil
+	}
+	role, err := agent.JSONString(line, "message", "role")
+	if err != nil {
+		return nil, err
+	}
+	switch pi.Role(role) {
+	case pi.RoleSystem:
+		return nil, nil
+	case pi.RoleUser:
+		w.runOpening = false
+		return nil, nil
+	default:
+		w.runOpening = false
+		return []agent.Message{&agent.TurnQueuedMessage{}}, nil
 	}
 }
 

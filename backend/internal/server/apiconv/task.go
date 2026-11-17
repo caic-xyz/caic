@@ -157,6 +157,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 		out.DiffStat = DiffStat(snap.DiffStat)
 	}
 	out.TurnError = snap.TurnError
+	out.Background = v1.TaskBackground{Commands: snap.Background.Commands, Watches: snap.Background.Watches, Agents: snap.Background.Agents}
 	out.RepoStates = RepoStates(snap.RepoStates, in.Repos)
 	out.ForgeOwner = snap.ForgeOwner
 	out.ForgeRepo = snap.ForgeRepo

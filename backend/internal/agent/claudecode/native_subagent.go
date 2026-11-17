@@ -1,10 +1,11 @@
-// Resolves Claude native ownership, correlates Agent invocations with task updates, and folds detached shell commands outside subagent cards.
+// Resolves Claude native ownership, correlates Agent invocations with task updates, folds detached shell commands outside subagent cards, retires cards Claude stops listing, and reports the turns their ends queue.
 
 package claudecode
 
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -179,6 +180,17 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 	return n.timeline.Observe(&s), nil
 }
 
+// retire ends the running background card of a task that Claude Code stopped
+// listing. Claude Code lists only background agents, so the absence of a
+// foreground agent proves nothing.
+func (n *nativeSubagents) retire(taskID string) []agent.Message {
+	id := "claude:task:" + taskID
+	if !n.tasks[id].Background || !n.timeline.Retire(id) {
+		return nil
+	}
+	return []agent.Message{&agent.BackgroundRetiredMessage{ID: id}}
+}
+
 // resolveOwner distinguishes missing delegation evidence from a recorded
 // collision. Explicit known native identity can resolve a shared delegation,
 // while contradictory known identities never enrich the source.
@@ -312,6 +324,13 @@ func claudeShellIdentity(taskID string) string {
 // notification's summary prose ("Background command ... completed (exit code 0)").
 var exitCodePattern = regexp.MustCompile(`\(exit code (\d+)\)`)
 
+// Claude Code tools that spawn a backgrounded local_bash task. Bash with
+// run_in_background spawns a command; Monitor spawns a watch.
+const (
+	ToolBash    = "Bash"
+	ToolMonitor = "Monitor"
+)
+
 // backgroundCommands folds Claude's detached shell evidence into canonical
 // lifecycles. It shares the nativeSubagents adapter's decoded records but keeps
 // its own card set: a background bash command is not a subagent, and folding it
@@ -334,7 +353,7 @@ type backgroundCommands struct {
 func (b *backgroundCommands) parse(record *decodedLine, messages []agent.Message) []agent.Message {
 	sessionID := record.source.ThreadID
 	for _, message := range messages {
-		if use, ok := message.(*agent.ToolUseMessage); ok && use.Name == "Monitor" && use.ToolUseID != "" {
+		if use, ok := message.(*agent.ToolUseMessage); ok && use.Name == ToolMonitor && use.ToolUseID != "" {
 			b.monitors[delegationKey{sessionID: sessionID, toolUseID: use.ToolUseID}] = struct{}{}
 		}
 	}
@@ -356,7 +375,8 @@ func (b *backgroundCommands) parse(record *decodedLine, messages []agent.Message
 
 // parseStarted proves a background command. A local_bash task started without
 // is_backgrounded runs synchronously inside its tool result; only a detached
-// one outlives that result and needs a card.
+// one outlives that result and needs a card. Claude Code starts a turn to
+// deliver every background task's end, so each card wakes the agent.
 func (b *backgroundCommands) parseStarted(ev *claudecode.OutputSystemMsg, sessionID string) []agent.Message {
 	if ev.TaskType != "local_bash" || !ev.IsBackgrounded || ev.TaskID == "" {
 		return nil
@@ -364,7 +384,7 @@ func (b *backgroundCommands) parseStarted(ev *claudecode.OutputSystemMsg, sessio
 	id := claudeShellIdentity(ev.TaskID)
 	b.known[id] = true
 	_, watch := b.monitors[delegationKey{sessionID: sessionID, toolUseID: ev.ToolUseID}]
-	s := agent.BackgroundCommand{ID: id, Label: ev.Description, Status: agent.BackgroundCommandStatusRunning, ToolUseID: ev.ToolUseID, Watch: watch}
+	s := agent.BackgroundCommand{ID: id, Label: ev.Description, Status: agent.BackgroundCommandStatusRunning, ToolUseID: ev.ToolUseID, Watch: watch, WakesAgent: true}
 	return b.timeline.Observe(&s)
 }
 
@@ -409,6 +429,62 @@ func (b *backgroundCommands) parseNotification(ev *claudecode.OutputSystemMsg) [
 	return b.timeline.Observe(&s)
 }
 
+// retire ends the running card of a command or watch that Claude Code stopped
+// listing.
+func (b *backgroundCommands) retire(taskID string) []agent.Message {
+	id := claudeShellIdentity(taskID)
+	if !b.timeline.Retire(id) {
+		return nil
+	}
+	return []agent.Message{&agent.BackgroundRetiredMessage{ID: id}}
+}
+
+// liveTasks follows background_tasks_changed, the list of every live
+// background task, to retire cards whose terminal records never arrived.
+//
+// A snapshot names a task before its task_started and can keep naming a
+// settled agent, so a listing proves nothing about a card. Only a drop counts:
+// the previous snapshot named the task and this one does not. Claude Code
+// 2.1.289 and older emit that snapshot one record before the task's terminal
+// task_updated, so a drop takes effect at the next record that is not a task
+// lifecycle record; a task_started in between cancels it.
+type liveTasks struct {
+	listed  []string // task IDs that the last snapshot named
+	dropped []string // task IDs that the last snapshot dropped and that are not yet retired
+}
+
+// parse returns the IDs of the tasks whose running cards end before record.
+func (l *liveTasks) parse(record *decodedLine) []string {
+	due := l.dropped
+	l.dropped = nil
+	ev := record.system
+	if ev == nil {
+		return due
+	}
+	switch ev.Subtype {
+	case claudecode.SystemTaskStarted:
+		l.dropped = slices.DeleteFunc(due, func(id string) bool { return id == ev.TaskID })
+		return nil
+	case claudecode.SystemTaskUpdated, claudecode.SystemTaskNotification:
+		l.dropped = due
+		return nil
+	case claudecode.SystemBackgroundTasksChanged:
+		listed := make([]string, 0, len(ev.Tasks))
+		for i := range ev.Tasks {
+			listed = append(listed, ev.Tasks[i].TaskID)
+		}
+		for _, id := range l.listed {
+			if !slices.Contains(listed, id) {
+				l.dropped = append(l.dropped, id)
+			}
+		}
+		l.listed = listed
+		return due
+	default:
+		return due
+	}
+}
+
 // claudeBackgroundCommandStatus maps the protocol's reported task status onto
 // the canonical lifecycle. "pending" is a queued command that has not started,
 // which the canonical vocabulary does not distinguish from running; "killed"
@@ -427,4 +503,88 @@ func claudeBackgroundCommandStatus(status string) agent.BackgroundCommandStatus 
 	default:
 		return ""
 	}
+}
+
+// turnQueue reports the turns Claude Code starts by itself. When a background
+// agent or command spawned by the parent ends, Claude Code starts a turn to
+// deliver its task_notification, even while the parent waits for the user.
+// The queued turn ends at the next root result.
+//
+// A background task that a subagent spawned notifies that subagent, not the
+// parent, so it queues no parent turn. Its task records reach the root stream
+// without parent_tool_use_id. The spawning tool use comes from a subagent
+// record, and newer Claude Code versions also mark task_started with
+// owned_by_subagent and parent_task_id.
+//
+// TODO: A notification that arrives during a parent turn can also queue a turn
+// after that turn's result. Task 4VN78Q1IU000 shows it once: a background agent
+// completed 1.4 s before the root result, then init and a task-notification
+// turn followed within 30 ms. Of the 7 other local root results that followed
+// such a notification, 4 preceded an idle notification and 3 preceded no turn
+// that the notification explains. The root result clears the queued turn, so
+// the task shows waiting for about 5 s. A fix needs evidence that tells the
+// cases apart, such as a field of the result or of the notification.
+type turnQueue struct {
+	queued     map[string]string   // card ID → run ID whose end queued a turn
+	childTools map[string]struct{} // tool use IDs that a subagent owns
+}
+
+// parse returns messages with a TurnQueuedMessage before each background card
+// that a task_updated or task_notification record settled. Only the first
+// terminal record of a run queues a turn.
+func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.Message) []agent.Message {
+	if subagent {
+		for _, message := range messages {
+			if use, ok := message.(*agent.ToolUseMessage); ok && use.ToolUseID != "" {
+				q.childTools[use.ToolUseID] = struct{}{}
+			}
+		}
+		return messages
+	}
+	ev := record.system
+	if ev == nil {
+		return messages
+	}
+	if ev.Subtype == claudecode.SystemTaskStarted {
+		if (ev.OwnedBySubagent || ev.ParentTaskID != "") && ev.ToolUseID != "" {
+			q.childTools[ev.ToolUseID] = struct{}{}
+		}
+		return messages
+	}
+	out := messages[:0:0]
+	for _, message := range messages {
+		if q.settles(message) {
+			out = append(out, &agent.TurnQueuedMessage{})
+		}
+		out = append(out, message)
+	}
+	return out
+}
+
+// settles reports whether message is the first terminal update of a
+// background run that the parent spawned, and records that run.
+func (q *turnQueue) settles(message agent.Message) bool {
+	var id, runID, toolUseID string
+	switch m := message.(type) {
+	case *agent.NativeSubagentMessage:
+		if !m.Subagent.Background || !m.Subagent.Status.Terminal() {
+			return false
+		}
+		id, runID, toolUseID = m.Subagent.ID, m.Subagent.RunID, m.Subagent.ToolUseID
+	case *agent.BackgroundCommandMessage:
+		if !m.Command.Status.Terminal() {
+			return false
+		}
+		id, toolUseID = m.Command.ID, m.Command.ToolUseID
+	default:
+		return false
+	}
+	if run, ok := q.queued[id]; ok && run == runID {
+		return false
+	}
+	if _, child := q.childTools[toolUseID]; child {
+		return false
+	}
+	q.queued[id] = runID
+	return true
 }

@@ -72,6 +72,61 @@ func TestSourceSections(t *testing.T) {
 			t.Fatalf("activity = %#v, want the reopened run", a)
 		}
 	})
+	t.Run("clean root exit ends a command that does not wake the agent", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 4HM3VRG10000: the Codex process outlived its turn,
+		// and the harness exited cleanly before reporting its end.
+		path := writeFixture(t,
+			`{"t":"caic_meta","version":3,"harness":"codex","prompt":"hi"}`,
+			`{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}}`,
+			`{"t":"agent","ts":1.001,"msg":{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-smoke","command":"go test ./...","source":"unifiedExecStartup","status":"inProgress"},"threadId":"thread-root","turnId":"turn-1"}}}`,
+			`{"t":"agent","ts":1.002,"msg":{"method":"turn/completed","params":{"threadId":"thread-root","turn":{"id":"turn-1","status":"completed"}}}}`,
+		)
+		source, _ := newFixtureSource(t, path)
+		command := func(t *testing.T) v1.HistoryBackgroundCommand {
+			if _, err := source.Refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_, _, metadata, err := source.Sections(t.Context(), "hi")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(metadata.BackgroundCommands) != 1 {
+				t.Fatalf("background commands = %#v, want one", metadata.BackgroundCommands)
+			}
+			return metadata.BackgroundCommands[0]
+		}
+		if got := command(t); got.Status != "running" || got.WakesAgent {
+			t.Fatalf("command = %#v, want running without waking the agent", got)
+		}
+		appendFixture(t, path, `{"t":"exit","ts":2.000,"exit_code":0}`+"\n")
+		if got := command(t); got.Status != "unknown" {
+			t.Fatalf("status after a clean exit = %q, want unknown", got.Status)
+		}
+	})
+	t.Run("settlement trailer ends a command without an exit record", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 4RSNU5UFS000: the log has no exit record and ends
+		// with the purge trailer while a Codex process was last seen running.
+		path := writeFixture(t,
+			`{"t":"caic_meta","version":3,"harness":"codex","prompt":"hi"}`,
+			`{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}}`,
+			`{"t":"agent","ts":1.001,"msg":{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-serve","command":"npm run dev","source":"unifiedExecStartup","status":"inProgress"},"threadId":"thread-root","turnId":"turn-1"}}}`,
+			`{"t":"agent","ts":1.002,"msg":{"method":"turn/completed","params":{"threadId":"thread-root","turn":{"id":"turn-1","status":"completed"}}}}`,
+			`{"t":"result","state":"purged","title":"t"}`,
+		)
+		source, _ := newFixtureSource(t, path)
+		if _, err := source.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		_, _, metadata, err := source.Sections(t.Context(), "hi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metadata.BackgroundCommands) != 1 || metadata.BackgroundCommands[0].Status != "unknown" {
+			t.Fatalf("background commands = %#v, want one unknown", metadata.BackgroundCommands)
+		}
+	})
 	t.Run("native settings preserve session sections across restart", func(t *testing.T) {
 		t.Parallel()
 		path := writeFixture(t,
@@ -1032,12 +1087,12 @@ func TestSectionIndex(t *testing.T) {
 			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "done", Status: v1.EventNativeSubagentStatusRunning}},
 			{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "done", Status: v1.EventNativeSubagentStatusCompleted}},
 			{Kind: v1.EventKindBackgroundCommand, Ts: 2000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "watch", Status: "running"}},
-			// A child's own exit does not end its siblings.
+			// An exit error event alone ends nothing: Source folds the exit record.
 			{Kind: v1.EventKindError, Ts: 2500, Source: child, Error: &v1.EventError{Err: "child exited"}},
-			{Kind: v1.EventKindError, Ts: 3000, Error: &v1.EventError{Err: "agent subprocess killed by signal 6 (aborted)"}},
 		} {
 			s.append(&Event{RecordID: uint64(i + 1), Message: m})
 		}
+		s.hostExited(time.UnixMilli(3000).UTC())
 		_, meta := s.snapshot()
 		statuses := map[string]string{}
 		for _, a := range meta.Activities {
@@ -1061,13 +1116,46 @@ func TestSectionIndex(t *testing.T) {
 			}
 		}
 	})
+	t.Run("retirement ends only the named running card", func(t *testing.T) {
+		t.Parallel()
+		s := newSectionIndex()
+		for i, m := range []v1.EventMessage{
+			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "agent", Status: v1.EventNativeSubagentStatusRunning, Background: true}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 1000, NativeSubagent: &v1.EventNativeSubagent{ID: "kept", Status: v1.EventNativeSubagentStatusRunning, Background: true}},
+			// A lifecycle update without a status, as Codex re-sends, keeps running.
+			{Kind: v1.EventKindNativeSubagent, Ts: 1500, NativeSubagent: &v1.EventNativeSubagent{ID: "kept", Status: v1.EventNativeSubagentStatusUnknown}},
+			{Kind: v1.EventKindBackgroundCommand, Ts: 1000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "cmd", Status: "running"}},
+			{Kind: v1.EventKindBackgroundCommand, Ts: 1000, BackgroundCommand: &v1.EventBackgroundCommand{ID: "done", Status: "completed"}},
+			{Kind: v1.EventKindBackgroundRetired, Ts: 2000, BackgroundRetired: &v1.EventBackgroundRetired{ID: "agent"}},
+			{Kind: v1.EventKindBackgroundRetired, Ts: 2000, BackgroundRetired: &v1.EventBackgroundRetired{ID: "cmd"}},
+			{Kind: v1.EventKindBackgroundRetired, Ts: 2000, BackgroundRetired: &v1.EventBackgroundRetired{ID: "done"}},
+		} {
+			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+		}
+		_, meta := s.snapshot()
+		statuses := map[string]string{}
+		for _, a := range meta.Activities {
+			statuses[a.ID] = a.Status
+			// The disclosure body includes the retirement.
+			if a.ID == "agent" && a.BodyThrough != 6 {
+				t.Errorf("bodyThrough = %d, want the retirement record", a.BodyThrough)
+			}
+		}
+		for _, c := range meta.BackgroundCommands {
+			statuses[c.ID] = c.Status
+		}
+		if want := map[string]string{"agent": "unknown", "kept": "running", "cmd": "unknown", "done": "completed"}; !reflect.DeepEqual(statuses, want) {
+			t.Fatalf("statuses = %v, want %v", statuses, want)
+		}
+	})
 	t.Run("background commands fold outside native activities", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()
 		source := v1.EventMessageSource{ThreadID: "root"}
 		exit := 2
 		for i, b := range []v1.EventBackgroundCommand{
-			{ID: "watch", ToolUseID: "watch-tool", Status: "running"},
+			{ID: "watch", ToolUseID: "watch-tool", Status: "running", Watch: true, WakesAgent: true},
+			{ID: "watch", Status: "running"},
 			{ID: "lint", ToolUseID: "lint-tool", Label: "make lint", Status: "running"},
 			{ID: "lint", Status: "failed", ExitCode: &exit, OutputRef: "/tmp/lint.output"},
 		} {
@@ -1077,9 +1165,9 @@ func TestSectionIndex(t *testing.T) {
 		if len(meta.Activities) != 0 {
 			t.Fatalf("activities = %#v", meta.Activities)
 		}
-		started, watchStarted, ended := time.UnixMilli(2000).UTC(), time.UnixMilli(1000).UTC(), time.UnixMilli(3000).UTC()
+		started, watchStarted, ended := time.UnixMilli(3000).UTC(), time.UnixMilli(1000).UTC(), time.UnixMilli(4000).UTC()
 		want := []v1.HistoryBackgroundCommand{
-			{ID: "watch", Source: source, ToolUseID: "watch-tool", Status: "running", StartedAt: &watchStarted},
+			{ID: "watch", Source: source, ToolUseID: "watch-tool", Status: "running", StartedAt: &watchStarted, Watch: true, WakesAgent: true},
 			{ID: "lint", Source: source, ToolUseID: "lint-tool", Label: "make lint", Status: "failed", StartedAt: &started, EndedAt: &ended, ExitCode: &exit, OutputRef: "/tmp/lint.output"},
 		}
 		if !reflect.DeepEqual(meta.BackgroundCommands, want) {

@@ -46,6 +46,17 @@ The authoritative ACP projection is
 https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/acp/event.ts,
 which emits `tool_call` and `tool_call_update` session updates from tool parts.
 
+## Background work
+
+OpenCode reports no work that outlives a turn. The 4 local OpenCode logs hold
+3 prompts and 2 `task` calls; both settled inside their prompt. No
+`session/update` arrived outside a prompt, except a relay re-send of one
+prompt's records in task 43IN396JK000. In v1.18.31, `task` runs a background
+subagent and notifies the parent at its end only when
+`OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`, which caic does not set:
+https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/tool/task.ts.
+The shell tool has no background mode.
+
 ## Key Design Decisions
 
 - **Upstream naming**: Go types mirror ACP SDK naming (e.g. `AgentMessageChunkUpdate`,

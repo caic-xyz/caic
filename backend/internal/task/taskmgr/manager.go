@@ -2363,7 +2363,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if err := lt.LoadMessages(); err != nil {
 		return nil, fmt.Errorf("load reconciled task history %s: %w", taskID, err)
 	}
-	t.SeedTimelineParts(lt.Timeline, nil)
+	t.SeedTimelineParts(lt.Timeline, nil, lt.Settlements)
 	m.log.DebugContext(ctx, "relay", "msg", "restored ordered history", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(lt.Timeline))
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)

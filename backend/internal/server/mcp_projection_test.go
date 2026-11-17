@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
@@ -34,7 +35,7 @@ func TestTaskMCPDetail(t *testing.T) {
 	t.Run("cost provenance", func(t *testing.T) {
 		t.Parallel()
 		for _, known := range []bool{false, true} {
-			out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), CostKnown: known})
+			out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), CostKnown: known}, &mcpTaskRuntime{})
 			if err != nil || out.CostKnown != known || out.CostUSD != 0 {
 				t.Fatalf("zero cost with known=%v: detail=%+v, err=%v", known, out, err)
 			}
@@ -48,7 +49,7 @@ func TestTaskMCPDetail(t *testing.T) {
 			ReportedEffort: "high", RequestedEffort: "low", Runtime: v1.RuntimeInstance{RuntimeName: "docker"},
 			Result: strings.Repeat("result \"\n", 10000), Error: strings.Repeat("error \"\n", 10000),
 		}
-		out, err := taskMCPDetail(3, &task)
+		out, err := taskMCPDetail(3, &task, &mcpTaskRuntime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,9 +70,73 @@ func TestTaskMCPDetail(t *testing.T) {
 			t.Fatalf("fields unexpectedly share a budget: bytes=%d, err=%v", len(encoded), err)
 		}
 	})
+	t.Run("background", func(t *testing.T) {
+		t.Parallel()
+		at := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+		t.Run("bounded items", func(t *testing.T) {
+			t.Parallel()
+			rt := mcpTaskRuntime{background: taskrun.BackgroundActivity{
+				Counts: taskrun.BackgroundCounts{Commands: 1, Agents: maxMCPBackgroundItems + 5},
+				Items:  []taskrun.BackgroundItem{{Kind: taskrun.BackgroundKindCommand, Label: strings.Repeat("label", 1000), StartedAt: at}},
+			}}
+			for range maxMCPBackgroundItems + 5 {
+				rt.background.Items = append(rt.background.Items, taskrun.BackgroundItem{Kind: taskrun.BackgroundKindAgent, Label: "agent"})
+			}
+			out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID()}, &rt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.BackgroundItems) != maxMCPBackgroundItems || !out.BackgroundItemsTruncated || len(out.BackgroundItems[0].Label) > maxMCPBackgroundLabel || !out.BackgroundItems[0].StartedAt.Equal(at) {
+				t.Fatalf("items = %d, truncated = %t, first = %+v", len(out.BackgroundItems), out.BackgroundItemsTruncated, out.BackgroundItems[0])
+			}
+			if out.Background != (v1.TaskBackground{Commands: 1, Agents: maxMCPBackgroundItems + 5}) {
+				t.Fatalf("counts = %+v", out.Background)
+			}
+		})
+		t.Run("unknown kind", func(t *testing.T) {
+			t.Parallel()
+			rt := mcpTaskRuntime{background: taskrun.BackgroundActivity{Items: []taskrun.BackgroundItem{{Kind: "other"}}}}
+			if _, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID()}, &rt); err == nil {
+				t.Fatal("an unknown kind was accepted")
+			}
+		})
+		t.Run("long log path", func(t *testing.T) {
+			t.Parallel()
+			out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID()}, &mcpTaskRuntime{logPath: "/" + strings.Repeat("d/", maxMCPLogPath)})
+			if err != nil || !slices.Equal(out.TruncatedFields, []string{"logPath"}) || len(out.LogPath) > maxMCPLogPath {
+				t.Fatalf("detail = %v %d, %v", out.TruncatedFields, len(out.LogPath), err)
+			}
+		})
+		t.Run("summary", func(t *testing.T) {
+			t.Parallel()
+			const reason = "\nTurn ended; still running in background: "
+			for _, c := range []struct {
+				name      string
+				state     v1.TaskState
+				turnEnded bool
+				bg        taskrun.BackgroundCounts
+				waking    int
+				want      string
+			}{
+				{"commands", v1.TaskStateRunning, true, taskrun.BackgroundCounts{Commands: 2, Watches: 1}, 2, reason + "2 commands"},
+				{"agent", v1.TaskStateRunning, true, taskrun.BackgroundCounts{Agents: 1}, 0, reason + "1 agent"},
+				{"waking only", v1.TaskStateRunning, true, taskrun.BackgroundCounts{Commands: 2, Agents: 1}, 1, reason + "1 command and 1 agent"},
+				// A queued turn keeps the task running; a command that wakes no agent does not.
+				{"not waking", v1.TaskStateRunning, true, taskrun.BackgroundCounts{Commands: 1}, 0, ""},
+				{"during turn", v1.TaskStateRunning, false, taskrun.BackgroundCounts{Commands: 1}, 1, ""},
+				{"watch only", v1.TaskStateWaiting, true, taskrun.BackgroundCounts{Watches: 1}, 0, ""},
+			} {
+				rt := mcpTaskRuntime{background: taskrun.BackgroundActivity{Counts: c.bg, WakingCommands: c.waking, TurnEnded: c.turnEnded}}
+				out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), Title: "t", State: c.state}, &rt)
+				if want := "Task #1: t\nState: " + string(c.state) + c.want; err != nil || out.Result != want {
+					t.Errorf("%s: result = %q, want %q (%v)", c.name, out.Result, want, err)
+				}
+			}
+		})
+	})
 	t.Run("turn error", func(t *testing.T) {
 		t.Parallel()
-		out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), State: v1.TaskStateWaiting, TurnError: "INVALID_ARGUMENT (code 400)"})
+		out, err := taskMCPDetail(1, &v1.Task{ID: ksid.NewID(), State: v1.TaskStateWaiting, TurnError: "INVALID_ARGUMENT (code 400)"}, &mcpTaskRuntime{})
 		if err != nil || out.TurnError != "INVALID_ARGUMENT (code 400)" || !strings.Contains(out.Result, "turnError") {
 			t.Fatalf("detail = %+v, %v", out, err)
 		}
@@ -84,7 +149,7 @@ func TestTaskMCPDetail(t *testing.T) {
 				Error:     strings.Repeat("error \"\n", 2000),
 				Delivered: state == v1.MCPPendingInputDelivered, Delivering: state == v1.MCPPendingInputDelivering,
 			}
-			out, err := taskMCPDetail(0, &v1.Task{ID: ksid.NewID(), PendingInput: pending})
+			out, err := taskMCPDetail(0, &v1.Task{ID: ksid.NewID(), PendingInput: pending}, &mcpTaskRuntime{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +174,7 @@ func BenchmarkTaskMCPDetail(b *testing.B) {
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := taskMCPDetail(1, &task)
+				out, err := taskMCPDetail(1, &task, &mcpTaskRuntime{})
 				if err != nil || out.PendingInput == nil || !out.PendingInput.TextTruncated {
 					b.Fatalf("projection = %+v, err=%v", out, err)
 				}

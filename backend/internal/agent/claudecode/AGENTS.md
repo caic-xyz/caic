@@ -76,6 +76,36 @@ expires (`task_updated` `killed`, then `task_notification` `stopped`), so it
 outlives the turn while the agent waits for the user. caic marks its card as
 a watch, which never keeps the task running.
 
+When a background task that the parent spawned ends, Claude Code starts a
+turn by itself to deliver the notification: `task_updated` (terminal
+`patch.status`), `task_notification`, `background_tasks_changed`, then `init`
+about 20 ms later, assistant output, and a `result` with `origin.kind:
+"task-notification"`. In 1,585 local task logs, 67 such notifications arrived
+while the parent was idle: 43 started a turn within 1 s, 21 were followed by
+another notification first, and 3 by user input first. None ended without a
+turn. The statuses were `local_agent` completed and `local_bash` completed,
+failed, and stopped (a watch expiry). `turnQueue` in `native_subagent.go`
+owns this mapping, and every background command card sets `WakesAgent`.
+
+A task that a subagent spawned notifies that subagent. Its task records reach
+the parent stream without `parent_tool_use_id`, and newer versions add
+`owned_by_subagent` and `parent_task_id` to `task_started`. In task
+4VN78Q1IU000, the expiry of such a watch resumed its subagent and started no
+parent turn.
+
+`system/background_tasks_changed` lists every live background task:
+`local_bash` commands and watches, background `local_agent` runs, and tasks
+that a subagent spawned (with `parent_task_id`). In 106 local Claude task logs
+(2.1.270 to 2.1.325), no snapshot listed an agent that stayed in the
+foreground; 3 agents were listed when moved to the background. No entry set
+`ambient`. Each of 294 listed tasks appeared in a snapshot before its
+`task_started`, and a settled agent can stay listed. Claude Code 2.1.295 and
+later sent the terminal `task_updated` before the snapshot that dropped the
+task (267 of 267). Versions 2.1.278 to 2.1.289 sent that snapshot one record
+before it (21 of 21). No dropped task lacked a terminal record, and a replay
+of the same logs retires no card. `liveTasks` in `native_subagent.go` owns
+this mapping.
+
 Claude Code plugins:
 - https://code.claude.com/docs/en/plugins: plugin creation, `--plugin-dir`, plugin structure overview
 - https://code.claude.com/docs/en/plugins-reference: full schema for plugin.json, MCP/LSP/hooks config, debugging

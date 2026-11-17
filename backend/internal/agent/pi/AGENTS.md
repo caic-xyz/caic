@@ -122,6 +122,33 @@ to completed or failed from the reported success and exit codes,
 and `paused` to the non-terminal paused state, because the extension can resume
 a paused run. An unrecognized state stays unknown instead of being invented.
 
+## Background work
+
+Pi reports no detached shell work: core `bash` is synchronous, and the 56,033
+tool calls in 223 local Pi logs use no background-shell tool. Detached agents
+are the `subagent` extension's async runs (86 async tool ends in 19 logs),
+mapped above.
+
+Pi starts runs by itself. Of 2,331 runs, 2,130 open with the user message of
+a caic prompt; caic sends prompts with steer streaming behavior, so a prompt
+never opens a run while another one streams. The other 201 open with:
+
+- a `custom` message from the `pi-subagents` extension (121): 72
+  `subagent-notify` after a detached run ends, 37
+  `subagent_supervisor_request`, 11 `subagent_control_notice`, and 1
+  `subagent-incremental-child-notify`;
+- an `assistant` message after `auto_retry_start` (80).
+
+The extension wakes an idle parent with `sendMessage` and `triggerTurn`, but
+holds the wake after a user abort, during compaction, or while another wake
+starts:
+https://github.com/nicobailon/pi-subagents/blob/4aa4ddb0ecb7ad56a6c9e56c96f39f7877a1550f/src/shared/parent-wake.ts.
+In the 72 `subagent-notify` wakes, `agent_start` followed the async-status
+widget's completion after 0.126 s (median), 0.153 s at most. The first
+assistant output followed the opening message after 2.4 s (median), 6.1 s at
+the 90th percentile. `queuedTurn` in `pi.go` maps such an opening to a
+`TurnQueuedMessage`.
+
 ## Upstream Source
 
 Type definitions in `github.com/maruel/genai/providers/pi` follow the upstream TypeScript:

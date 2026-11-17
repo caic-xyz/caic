@@ -161,7 +161,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 			// Timestamp-less entry (adopted task): forwarded with a zero time
 			// so the sink applies its no-watermark rule.
 			{Message: &agent.ToolUseMessage{Name: "Edit"}},
-		})
+		}, nil)
 
 		if len(sink.Observes) != 3 {
 			t.Fatalf("observes = %d, want 3", len(sink.Observes))
@@ -215,7 +215,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		}
 		addTaskMessage(tk, &agent.ResultMessage{MessageType: "result"})
 		tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
-		tk2.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{MessageType: "result"}}})
+		tk2.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{MessageType: "result"}}}, nil)
 	})
 
 	t.Run("discard stops ingress", func(t *testing.T) {
@@ -338,7 +338,7 @@ func TestTaskRollupResume(t *testing.T) {
 		s1 := newRollupStore(t, dir)
 		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk.Rollup = s1
-		tk.SeedTimelineParts(nil, history)
+		tk.SeedTimelineParts(nil, history, nil)
 		if err := s1.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -352,7 +352,7 @@ func TestTaskRollupResume(t *testing.T) {
 		s2 := newRollupStore(t, dir)
 		tk2 := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk2.Rollup = s2
-		tk2.SeedTimelineParts(nil, history)
+		tk2.SeedTimelineParts(nil, history, nil)
 		if rows := readUsageRows(t, dir, "2026-02-05"); len(rows) != len(before) {
 			t.Fatalf("rows after duplicate replay = %d, want %d", len(rows), len(before))
 		}
@@ -364,7 +364,7 @@ func TestTaskRollupResume(t *testing.T) {
 		}
 		tk3 := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk3.Rollup = s2
-		tk3.SeedTimelineParts(nil, tail)
+		tk3.SeedTimelineParts(nil, tail, nil)
 		rows := readUsageRows(t, dir, "2026-02-05")
 		if len(rows) != 2 {
 			t.Fatalf("rows after tail = %d, want 2", len(rows))
@@ -396,7 +396,7 @@ func TestTaskRollupResume(t *testing.T) {
 		s := newRollupStore(t, dir)
 		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk.Rollup = s
-		tk.SeedTimelineParts(nil, noTime)
+		tk.SeedTimelineParts(nil, noTime, nil)
 		rows := readUsageRows(t, dir, time.Now().UTC().Format("2006-01-02"))
 		if len(rows) != 2 {
 			t.Fatalf("adopted rows = %d, want 2 (both turns, nothing lost at the boundary)", len(rows))
@@ -409,7 +409,7 @@ func TestTaskRollupResume(t *testing.T) {
 		// the degenerate cost of identity-less events.
 		tk2 := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk2.Rollup = s
-		tk2.SeedTimelineParts(nil, noTime)
+		tk2.SeedTimelineParts(nil, noTime, nil)
 		if rows = readUsageRows(t, dir, time.Now().UTC().Format("2006-01-02")); len(rows) != 4 {
 			t.Errorf("rows after re-replay = %d, want 4 (documented duplication)", len(rows))
 		}

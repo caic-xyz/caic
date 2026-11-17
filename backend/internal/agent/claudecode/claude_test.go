@@ -828,7 +828,7 @@ func TestControlConn(t *testing.T) {
 			&agent.AskMessage{ToolUseID: "ask", Questions: []v3.AskQuestion{{Question: "Which?"}}},
 			&agent.PendingUserActionMessage{Action: v3.PendingUserAction{Kind: agent.PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "ask", Ask: v3.PendingAskAction{Questions: []v3.AskQuestion{{Question: "Which?"}}}}},
 			agent.InputDeliveryStarted(), &agent.UserInputMessage{Text: "answer"}, agent.InputDeliveryCompleted(),
-		}))
+		}), nil)
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
 		if err := c.restorePendingActions(tk.PendingUserActions()); err != nil {
@@ -883,7 +883,7 @@ func TestControlConn(t *testing.T) {
 			delivery(agent.InputDeliveryCompleted(), "retry"),
 			request("unconfirmed", v3.MessageSource{}),
 			delivery(agent.InputDeliveryStarted(), "unconfirmed"), response("unconfirmed"),
-		}))
+		}), nil)
 		c := &controlConn{Conn: &fakeConn{}}
 		replies, err := c.unansweredReplies(tk.CurrentTurnProtocolMessages())
 		if err != nil {
@@ -956,7 +956,7 @@ func TestControlConn(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				tk.SeedTimelineParts(nil, handler.Events())
+				tk.SeedTimelineParts(nil, handler.Events(), nil)
 				replies, err := (&controlConn{Conn: &fakeConn{}}).unansweredReplies(tk.CurrentTurnProtocolMessages())
 				if err != nil {
 					t.Fatal(err)

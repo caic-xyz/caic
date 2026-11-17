@@ -37,6 +37,7 @@ const (
 	EventKindSubagentEnd       EventKind = "subagentEnd"
 	EventKindNativeSubagent    EventKind = "nativeSubagent"
 	EventKindBackgroundCommand EventKind = "backgroundCommand"
+	EventKindBackgroundRetired EventKind = "backgroundRetired"
 	EventKindLog               EventKind = "log"
 	EventKindSyncActivity      EventKind = "syncActivity"
 	EventKindToolOutputDelta   EventKind = "toolOutputDelta"
@@ -84,6 +85,7 @@ type EventMessage struct {
 	SubagentEnd       *EventSubagentEnd       `json:"subagentEnd,omitempty"`
 	NativeSubagent    *EventNativeSubagent    `json:"nativeSubagent,omitempty"`
 	BackgroundCommand *EventBackgroundCommand `json:"backgroundCommand,omitempty"`
+	BackgroundRetired *EventBackgroundRetired `json:"backgroundRetired,omitempty"`
 	Log               *EventLog               `json:"log,omitempty"`
 	SyncActivity      *EventSyncActivity      `json:"syncActivity,omitempty"`
 	ToolOutputDelta   *EventToolOutputDelta   `json:"toolOutputDelta,omitempty"`
@@ -481,6 +483,21 @@ type EventBackgroundCommand struct {
 	ExitCode  *int   `json:"exitCode,omitempty"`
 	OutputRef string `json:"outputRef,omitempty"`
 	ToolUseID string `json:"toolUseID,omitempty"`
+	// Watch marks a command that only relays events to the agent, such as
+	// Claude Code's Monitor tool. A running watch never keeps the task running.
+	Watch bool `json:"watch,omitempty"`
+	// WakesAgent marks a command whose end the harness delivers to the agent in
+	// a turn it starts by itself. Only such a running command keeps the task
+	// running; another one stays visible while the task waits.
+	WakesAgent bool `json:"wakesAgent,omitempty"`
+}
+
+// EventBackgroundRetired reports that the harness stopped listing a running
+// native subagent or background command without reporting its outcome. ID
+// matches EventNativeSubagent.ID or EventBackgroundCommand.ID. A running card
+// with that ID becomes unknown; other cards are unchanged.
+type EventBackgroundRetired struct {
+	ID string `json:"id"`
 }
 
 // EventToolOutputDelta is a streaming output fragment from a running tool.

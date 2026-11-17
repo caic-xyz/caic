@@ -39,7 +39,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
@@ -140,7 +142,7 @@ func BenchmarkTask(b *testing.B) {
 				for range turns {
 					history = append(history, &agent.UserInputMessage{Text: "Recent prompt"}, &agent.ResultMessage{Result: strings.Repeat("result ", 300)})
 				}
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				p := &titleBenchmarkProvider{}
 				tk.Provider = p
 				log := testLogger()
@@ -209,7 +211,7 @@ func TestTask(t *testing.T) {
 					agent.TimedMessage{ProducerTime: at.Add(time.Second), Message: zero},
 				)
 				if mode == "restored" {
-					tk.SeedTimelineParts(nil, history)
+					tk.SeedTimelineParts(nil, history, nil)
 				} else {
 					for _, message := range history {
 						tk.addParsedMessage(message)
@@ -249,7 +251,7 @@ func TestTask(t *testing.T) {
 							{ProducerTime: at, Message: tc.boundary},
 						}
 						if mode == "restored" {
-							tk.SeedTimelineParts(nil, messages)
+							tk.SeedTimelineParts(nil, messages, nil)
 						} else {
 							for _, message := range messages {
 								tk.addParsedMessage(message)
@@ -275,7 +277,7 @@ func TestTask(t *testing.T) {
 					&agent.UsageMessage{Usage: agent.Usage{InputTokens: 15_000}},
 				}
 				if mode == "restored" {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				} else {
 					for _, message := range messages {
 						addTaskMessage(tk, message)
@@ -322,7 +324,7 @@ func TestTask(t *testing.T) {
 					tk := live
 					if mode == "restored" {
 						tk = mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Dsh, "", "")
-						tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+						tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 					} else {
 						addTaskMessage(tk, step.message)
 					}
@@ -372,7 +374,7 @@ func TestTask(t *testing.T) {
 				}
 				seeded := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				seeded.SetState(task.StateRunning)
-				seeded.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+				seeded.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				if got := live.LastExitError(); got != want {
 					t.Fatalf("live exit = %q, want %q", got, want)
 				}
@@ -420,7 +422,7 @@ func TestTask(t *testing.T) {
 							restored = append(restored, message.Message)
 						}
 					}
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(restored))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(restored), nil)
 					accepted := tc.accepted
 					if got := tk.HasAcceptedInputEvidence(); got != accepted {
 						t.Fatalf("evidence = %t, want %t", got, accepted)
@@ -437,7 +439,7 @@ func TestTask(t *testing.T) {
 			&agent.ResultMessage{Result: "done"},
 			agent.InputDeliveryStarted(),
 			&agent.UserInputMessage{Text: "unresolved"},
-		}))
+		}), nil)
 		if got := tk.GetState(); got != task.StateWaiting {
 			t.Fatalf("state = %s, want previous completed turn to remain waiting", got)
 		}
@@ -451,7 +453,7 @@ func TestTask(t *testing.T) {
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first"}`)},
 			&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
-		}))
+		}), nil)
 		tk.SetState(task.StateRunning)
 		if changed := tk.addParsedMessage(agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "edit", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"first","new_string":"revised"}`)}}); !changed {
 			t.Fatal("visible plan edit did not notify task summary subscribers")
@@ -477,7 +479,7 @@ func TestTask(t *testing.T) {
 				for range restored {
 					history = append(history, &agent.ResultMessage{}, &agent.ResultMessage{Source: agent.MessageSource{AgentID: "child"}})
 				}
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				for n := restored + 1; n <= 151; n++ {
 					tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{Source: agent.MessageSource{AgentID: "child"}}})
 					tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{NumTurns: 99}})
@@ -522,7 +524,7 @@ func TestTask(t *testing.T) {
 					&agent.ResultMessage{},
 				)
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 			tk.SetTitle("Current title")
 			p := &titleSequenceProvider{replies: []string{"Recent subject"}}
 			tk.Provider = p
@@ -549,7 +551,7 @@ func TestTask(t *testing.T) {
 			for range 10 {
 				history = append(history, &agent.UserInputMessage{Text: text}, &agent.ResultMessage{Result: text})
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 			p := &titleSequenceProvider{replies: []string{"Short title"}}
 			tk.Provider = p
 			tk.GenerateTitle(t.Context(), testLogger(), func() {})
@@ -624,7 +626,7 @@ func TestTask(t *testing.T) {
 				if live {
 					addTaskMessage(tk, quota)
 				} else {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{quota}))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{quota}), nil)
 				}
 				history, _, unsub := tk.SubscribeRateLimits(t.Context())
 				unsub()
@@ -669,7 +671,7 @@ func TestTask(t *testing.T) {
 						addTaskMessage(tk, message)
 					}
 				} else {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				}
 				if tk.GetState() != task.StateWaiting || tk.sessionMetadata.SessionID != "root" || tk.sessionMetadata.ReportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
 					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionMetadata.SessionID, tk.sessionMetadata.ReportedModel, tk.costTracker.Model, tk.inPlanMode)
@@ -705,7 +707,7 @@ func TestTask(t *testing.T) {
 			&agent.ToolResultMessage{Source: child, ToolUseID: "same"},
 			&agent.ToolOutputDeltaMessage{Source: child, ToolUseID: "same", Delta: "child output"},
 			&agent.ToolResultMessage{Source: child, ToolUseID: "same"},
-		}))
+		}), nil)
 		if got, ok := tk.timeline[0].Message.(*agent.ToolOutputDeltaMessage); !ok || got.Delta != "parent output" {
 			t.Fatal("child completion erased parent output")
 		}
@@ -767,7 +769,7 @@ func TestTask(t *testing.T) {
 		restored.SetState(task.StateRunning)
 		restored.SeedTimelineParts(nil, []agent.TimedMessage{{ProducerTime: usageAt, Message: &agent.UsageMessage{
 			Usage: agent.Usage{CacheReadInputTokens: 100, CacheTTLSeconds: 300},
-		}}})
+		}}}, nil)
 		if got := restored.Snapshot().CacheExpiresAt; !got.Equal(want) {
 			t.Errorf("seeded CacheExpiresAt = %s, want %s", got, want)
 		}
@@ -788,7 +790,7 @@ func TestTask(t *testing.T) {
 	t.Run("SeededResultContextWindowUpdatesSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{Result: "done", ContextWindow: 180_000}}))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{Result: "done", ContextWindow: 180_000}}), nil)
 		if got := tk.Snapshot().ContextWindowLimit; got != 180_000 {
 			t.Fatalf("ContextWindowLimit = %d, want 180000", got)
 		}
@@ -812,7 +814,7 @@ func TestTask(t *testing.T) {
 		}
 		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "", "")
 		replayed.SetState(task.StateWaiting)
-		replayed.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ExitMessage{ExitCode: 1, Error: "failed"}, message}))
+		replayed.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ExitMessage{ExitCode: 1, Error: "failed"}, message}), nil)
 		if got := replayed.Snapshot(); got.SessionMetadata != after.SessionMetadata || got.NumTurns != after.NumTurns || replayed.LastExitError() != tk.LastExitError() {
 			t.Fatalf("replay settings/activity = %+v, exit=%q", got, replayed.LastExitError())
 		}
@@ -914,7 +916,7 @@ func TestTask(t *testing.T) {
 							t.Fatal(err)
 						}
 						replayed := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
-						replayed.SeedTimelineParts(lt.Timeline, nil)
+						replayed.SeedTimelineParts(lt.Timeline, nil, nil)
 						if got := replayed.Snapshot().SessionMetadata; got != step.want {
 							t.Fatalf("step %d %s persisted replay metadata = %+v, want %+v", i, cache, got, step.want)
 						}
@@ -928,7 +930,7 @@ func TestTask(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		first := &agent.TextMessage{Text: "first"}
 		last := &agent.TextMessage{Text: "last"}
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{first, &agent.LogMessage{Line: "skip"}, last}))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{first, &agent.LogMessage{Line: "skip"}, last}), nil)
 		messages := tk.BackwardMessages()
 		addTaskMessage(tk, &agent.TextMessage{Text: "after snapshot"})
 
@@ -992,7 +994,7 @@ func TestTask(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		message := &agent.TextMessage{Text: "timed"}
 		const timestamp = int64(1_788_122_692_466)
-		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: message, ProducerTime: time.UnixMilli(timestamp)}})
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: message, ProducerTime: time.UnixMilli(timestamp)}}, nil)
 
 		history, _, unsubscribe := tk.Subscribe(t.Context())
 		defer unsubscribe()
@@ -1015,7 +1017,7 @@ func TestTask(t *testing.T) {
 			toolDelta,
 			&agent.ToolResultMessage{ToolUseID: "tool-1"},
 			unfinished,
-		}))
+		}), nil)
 
 		if compacted, ok := tk.timeline[0].Message.(*agent.TextDeltaMessage); !ok || compacted == textDelta || compacted.Text != "" {
 			t.Errorf("text delta = %#v, want shared empty delta", tk.timeline[0].Message)
@@ -1044,7 +1046,7 @@ func TestTask(t *testing.T) {
 			{Message: delta},
 		}
 		suffix := []agent.TimedMessage{{Message: &agent.TextMessage{Text: "complete"}}}
-		tk.SeedTimelineParts(prefix, suffix)
+		tk.SeedTimelineParts(prefix, suffix, nil)
 
 		if tk.timelinePrefix[1].Message != compactedTextDelta {
 			t.Errorf("prefix delta = %#v, want compacted placeholder", tk.timelinePrefix[1].Message)
@@ -1090,7 +1092,7 @@ func TestTask(t *testing.T) {
 					} else {
 						prefix := []agent.TimedMessage{{Message: messages[0]}, {Message: messages[1]}}
 						suffix := []agent.TimedMessage{{Message: messages[2]}, {Message: messages[3]}, {Message: messages[4]}}
-						tk.SeedTimelineParts(prefix, suffix)
+						tk.SeedTimelineParts(prefix, suffix, nil)
 					}
 					history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
 					defer unsubscribe()
@@ -1190,7 +1192,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		first := &agent.TextMessage{Text: "first"}
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{first}))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{first}), nil)
 		history, live, unsubscribe := tk.SubscribeSnapshot(t.Context())
 		defer unsubscribe()
 		defer history.Release()
@@ -1274,7 +1276,7 @@ func TestTask(t *testing.T) {
 
 		// Seeding a fresh task from the same log recovers the rate limit.
 		seeded := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		seeded.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{message}))
+		seeded.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{message}), nil)
 		if got := seeded.Snapshot().RateLimit; got.Status != "rejected" || !got.ResetsAt.Equal(resetAt) {
 			t.Errorf("seeded RateLimit = %+v, want rejected until %v", got, resetAt)
 		}
@@ -1378,7 +1380,7 @@ func TestTask(t *testing.T) {
 	t.Run("SeedTimelineCapturesExitError", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}}))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}}), nil)
 		if got := tk.LastExitError(); got != "Unknown option: --approve" {
 			t.Errorf("LastExitError = %q, want relay stderr", got)
 		}
@@ -1390,7 +1392,7 @@ func TestTask(t *testing.T) {
 			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
 			&agent.InitMessage{SessionID: "new-session"},
 			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
-		}))
+		}), nil)
 		if got := tk.LastExitError(); got != "" {
 			t.Errorf("LastExitError = %q, want stale exit error cleared", got)
 		}
@@ -1403,7 +1405,7 @@ func TestTask(t *testing.T) {
 			&agent.InitMessage{SessionID: "session"},
 			&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"},
 			&agent.ExitMessage{ExitCode: 2, Error: "stale crash"},
-		}))
+		}), nil)
 		if got := tk.LastExitError(); got != "" {
 			t.Errorf("LastExitError = %q, want trailing exit ignored", got)
 		}
@@ -2442,7 +2444,7 @@ func TestTask(t *testing.T) {
 					MessageType: "caic_diff_stat",
 					DiffStat:    v3.DiffStat{{Path: "latest.go", LinesAdded: 5}},
 				},
-			}))
+			}), nil)
 			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "latest.go" {
 				t.Errorf("DiffStat = %+v, want latest.go", got)
@@ -2462,7 +2464,7 @@ func TestTask(t *testing.T) {
 					MessageType: "result",
 					DiffStat:    v3.DiffStat{{Path: "authoritative.go", LinesAdded: 10}},
 				},
-			}))
+			}), nil)
 			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "authoritative.go" {
 				t.Errorf("DiffStat = %+v, want authoritative.go", got)
@@ -2482,7 +2484,7 @@ func TestTask(t *testing.T) {
 					MessageType: "caic_diff_stat",
 					DiffStat:    v3.DiffStat{{Path: "relay.go", LinesAdded: 3}},
 				},
-			}))
+			}), nil)
 			got := tk.Snapshot().DiffStat
 			if len(got) != 1 || got[0].Path != "relay.go" {
 				t.Errorf("DiffStat = %+v, want relay.go", got)
@@ -2511,7 +2513,7 @@ func TestTask(t *testing.T) {
 					MessageType: "caic_diff_stat",
 					DiffStat:    v3.DiffStat{},
 				},
-			}))
+			}), nil)
 			got := tk.Snapshot().DiffStat
 			if len(got) != 0 {
 				t.Fatalf("DiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
@@ -2587,7 +2589,7 @@ func TestTask(t *testing.T) {
 				MessageType: "result",
 				Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, ReasoningOutputTokens: 11},
 			},
-		}))
+		}), nil)
 		snapshot := tk.Snapshot()
 		usage, lastUsage := snapshot.Usage, snapshot.LastUsage
 		if usage.InputTokens != 300 {
@@ -2635,7 +2637,7 @@ func TestTask(t *testing.T) {
 			live.addParsedMessage(entry)
 		}
 		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		replayed.SeedTimelineParts(nil, entries)
+		replayed.SeedTimelineParts(nil, entries, nil)
 		for _, tk := range []*Task{live, replayed} {
 			if snap := tk.Snapshot(); snap.Duration != 2*time.Second || snap.NumTurns != 1 {
 				t.Fatalf("duration = %v, turns = %d; want 2s, 1", snap.Duration, snap.NumTurns)
@@ -2659,7 +2661,7 @@ func TestTask(t *testing.T) {
 			live.addParsedMessage(message)
 		}
 		replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		replayed.SeedTimelineParts(nil, messages)
+		replayed.SeedTimelineParts(nil, messages, nil)
 		for _, tk := range []*Task{live, replayed} {
 			snapshot := tk.Snapshot()
 			turns, duration := snapshot.NumTurns, snapshot.Duration
@@ -2784,7 +2786,7 @@ func TestTask(t *testing.T) {
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 946943},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 5278},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 214500},
-		}))
+		}), nil)
 		snapshot := tk.Snapshot()
 		numTurns, duration := snapshot.NumTurns, snapshot.Duration
 		if numTurns != 3 {
@@ -2818,7 +2820,7 @@ func TestTask(t *testing.T) {
 				NumTurns:     2,
 				DurationMs:   3000,
 			},
-		}))
+		}), nil)
 		snapshot := tk.Snapshot()
 		costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 		if costUSD != 15.0 {
@@ -2894,7 +2896,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := newTask()
 			tk.SetState(task.StatePurged)
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMsgs()))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMsgs()), nil)
 			snapshot := tk.Snapshot()
 			costUSD, numTurns, duration := snapshot.CostUSD, snapshot.NumTurns, snapshot.Duration
 			if costUSD != 15.0 {
@@ -2933,7 +2935,7 @@ func TestTask(t *testing.T) {
 				t.Parallel()
 				tk := newTask()
 				tk.SetState(task.StatePurged)
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMsgList()))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMsgList()), nil)
 				usage := tk.Snapshot().LastAPIUsage
 				if usage.InputTokens != 12_000 || usage.CacheReadInputTokens != 0 {
 					t.Errorf("lastAPIUsage = %+v, want only 12000 input tokens", usage)
@@ -2953,7 +2955,7 @@ func TestTask(t *testing.T) {
 					t.Error("SeedTimelineParts on a task with messages did not panic")
 				}
 			}()
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.TextMessage{Text: "from log"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.TextMessage{Text: "from log"}}), nil)
 		})
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
@@ -2964,7 +2966,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "hello"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 
 			if len(tk.Messages()) != 3 {
 				t.Fatalf("Messages() len = %d, want 3", len(tk.Messages()))
@@ -2985,7 +2987,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "s"},
-			}))
+			}), nil)
 			if got := tk.GetState(); got != task.StateWaiting {
 				t.Errorf("state = %v, want %v (trailing metadata is not semantic)", got, task.StateWaiting)
 			}
@@ -2998,7 +3000,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, []agent.TimedMessage{
 				{Message: &agent.TextMessage{Text: "working"}, ProducerTime: start},
 				{Message: &agent.ResultMessage{MessageType: "result", DurationMs: 120000}, ProducerTime: start.Add(2 * time.Minute)},
-			})
+			}, nil)
 			snap := tk.Snapshot()
 			if !snap.StateUpdatedAt.Equal(start.Add(2 * time.Minute)) {
 				t.Errorf("StateUpdatedAt = %v, want result producer time %v", snap.StateUpdatedAt, start.Add(2*time.Minute))
@@ -3020,7 +3022,7 @@ func TestTask(t *testing.T) {
 				{Message: &agent.ResultMessage{MessageType: "result", DurationMs: 60000}, ProducerTime: start.Add(time.Minute)},
 				{Message: &agent.UserInputMessage{Text: "next"}, ProducerTime: start.Add(5 * time.Minute)},
 				{Message: &agent.TextMessage{Text: "working"}, ProducerTime: start.Add(5*time.Minute + time.Second)},
-			})
+			}, nil)
 			snap := tk.Snapshot()
 			if snap.State != task.StateRunning {
 				t.Fatalf("state = %v, want running", snap.State)
@@ -3039,7 +3041,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, []agent.TimedMessage{
 				{Message: &agent.AskMessage{ToolUseID: "ask1", Questions: []v3.AskQuestion{{Question: "which?"}}}, ProducerTime: askAt},
 				{Message: &agent.ResultMessage{MessageType: "result"}, ProducerTime: askAt.Add(10 * time.Second)},
-			})
+			}, nil)
 			snap := tk.Snapshot()
 			if snap.State != task.StateAsking {
 				t.Fatalf("state = %v, want asking", snap.State)
@@ -3060,7 +3062,7 @@ func TestTask(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateAsking {
 				t.Errorf("state = %v, want %v (should infer asking from AskMessage + ResultMessage)", tk.GetState(), task.StateAsking)
 			}
@@ -3076,7 +3078,7 @@ func TestTask(t *testing.T) {
 					Questions: []v3.AskQuestion{{Question: "which?"}},
 				},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateAsking {
 				t.Errorf("state = %v, want %v (should infer asking from trailing AskMessage)", tk.GetState(), task.StateAsking)
 			}
@@ -3093,7 +3095,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolResultMessage{ToolUseID: "ask1"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateWaiting {
 				t.Errorf("state = %v, want %v (answered AskUserQuestion should not remain asking)", tk.GetState(), task.StateWaiting)
 			}
@@ -3110,7 +3112,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolResultMessage{ToolUseID: "ask1", Error: "permission denied"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateAsking {
 				t.Errorf("state = %v, want %v (errored AskUserQuestion result should remain asking)", tk.GetState(), task.StateAsking)
 			}
@@ -3127,7 +3129,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateHasPlan {
 				t.Errorf("state = %v, want %v", tk.GetState(), task.StateHasPlan)
 			}
@@ -3146,7 +3148,7 @@ func TestTask(t *testing.T) {
 					DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 1}},
 				},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetState() != task.StateWaiting {
 				t.Errorf("state = %v, want %v (trailing DiffStatMessage should be skipped)", tk.GetState(), task.StateWaiting)
 			}
@@ -3159,7 +3161,7 @@ func TestTask(t *testing.T) {
 				&agent.InitMessage{SessionID: "s1"},
 				&agent.TextMessage{Text: "hello"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			// No trailing ResultMessage → agent was still producing output.
 			if tk.GetState() != task.StateRunning {
 				t.Errorf("state = %v, want %v (no ResultMessage → still running)", tk.GetState(), task.StateRunning)
@@ -3174,7 +3176,7 @@ func TestTask(t *testing.T) {
 					&agent.TextMessage{Text: "hello"},
 					&agent.ResultMessage{MessageType: "result"},
 				}
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 				if tk.GetState() != state {
 					t.Errorf("state = %v, want %v (terminal state must not be overridden)", tk.GetState(), state)
 				}
@@ -3188,7 +3190,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "hello"},
 				&agent.InitMessage{SessionID: "new"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 
 			if tk.GetSessionID() != "new" {
 				t.Errorf("SessionID = %q, want %q", tk.GetSessionID(), "new")
@@ -3205,7 +3207,7 @@ func TestTask(t *testing.T) {
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.GetPlanFile() != "/home/user/.claude/plans/my-plan.md" {
 				t.Errorf("PlanFile = %q, want %q", tk.GetPlanFile(), "/home/user/.claude/plans/my-plan.md")
 			}
@@ -3223,7 +3225,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu3", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if tk.Snapshot().InPlanMode {
 				t.Error("InPlanMode = true, want false (ExitPlanMode should clear it)")
 			}
@@ -3234,7 +3236,7 @@ func TestTask(t *testing.T) {
 			// Without ExitPlanMode, should stay in plan mode.
 			tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk2.SetState(task.StateRunning)
-			tk2.SeedTimelineParts(nil, agenttest.TimedMessages(msgs[:1]))
+			tk2.SeedTimelineParts(nil, agenttest.TimedMessages(msgs[:1]), nil)
 			if !tk2.Snapshot().InPlanMode {
 				t.Error("InPlanMode = false, want true (only EnterPlanMode seen)")
 			}
@@ -3259,7 +3261,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			snap := tk.Snapshot()
 			if snap.InPlanMode {
 				t.Error("InPlanMode = true, want false (context_cleared should reset)")
@@ -3297,7 +3299,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			snap := tk.Snapshot()
 			if snap.PlanContent != "" {
 				t.Errorf("PlanContent = %q, want empty (plan written after context_cleared should be suppressed)", snap.PlanContent)
@@ -3324,7 +3326,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if got := tk.Snapshot().PlanExitID; got == "tu2" {
 				t.Errorf("superseded plan owner = %q", got)
 			}
@@ -3352,7 +3354,7 @@ func TestTask(t *testing.T) {
 				&agent.ToolUseMessage{ToolUseID: "tu5", Name: "ExitPlanMode"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			if got := tk.Snapshot().PlanExitID; got == "tu2" {
 				t.Errorf("superseded plan owner = %q", got)
 			}
@@ -3382,12 +3384,12 @@ func TestTask(t *testing.T) {
 			}
 			a := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			b := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			a.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			a.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			afterFirst, err := json.Marshal(msgs)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
-			b.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			b.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 			afterSecond, err := json.Marshal(msgs)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -3437,7 +3439,7 @@ func TestTask(t *testing.T) {
 				tk.SeedTimelineParts(nil, []agent.TimedMessage{
 					{Message: result(), ProducerTime: resultAt},
 					{Message: native("child-1", agent.NativeSubagentStatusRunning), ProducerTime: resultAt.Add(time.Second)},
-				})
+				}, nil)
 				if got := tk.GetState(); got != task.StateRunning {
 					t.Errorf("state = %v, want %v (a background subagent is still active)", got, task.StateRunning)
 				}
@@ -3455,7 +3457,7 @@ func TestTask(t *testing.T) {
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 					result(),
 					foreground("child-1", agent.NativeSubagentStatusRunning),
-				}))
+				}), nil)
 				if got := tk.GetState(); got != task.StateWaiting {
 					t.Errorf("state = %v, want %v (a foreground card cannot outlive the turn)", got, task.StateWaiting)
 				}
@@ -3468,7 +3470,7 @@ func TestTask(t *testing.T) {
 					result(),
 					native("child-1", agent.NativeSubagentStatusRunning),
 					native("child-1", agent.NativeSubagentStatusCompleted),
-				}))
+				}), nil)
 				if got := tk.GetState(); got != task.StateWaiting {
 					t.Errorf("state = %v, want %v (the trailing native update settled the child)", got, task.StateWaiting)
 				}
@@ -3480,7 +3482,7 @@ func TestTask(t *testing.T) {
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 					result(),
 					native("child-1", agent.NativeSubagentStatusPaused),
-				}))
+				}), nil)
 				if got := tk.GetState(); got != task.StateWaiting {
 					t.Errorf("state = %v, want %v (paused evidence is not active)", got, task.StateWaiting)
 				}
@@ -3518,7 +3520,7 @@ func TestTask(t *testing.T) {
 					native("child-1", agent.NativeSubagentStatusRunning),
 					result(),
 					exit(),
-				}))
+				}), nil)
 				if got := replay.GetState(); got != task.StateWaiting {
 					t.Errorf("replay state = %v, want %v after the host exited", got, task.StateWaiting)
 				}
@@ -3600,7 +3602,7 @@ func TestTask(t *testing.T) {
 					native("child-1", agent.NativeSubagentStatusRunning),
 					native("child-1", agent.NativeSubagentStatusCompleted),
 					&agent.ExitMessage{ExitCode: -2},
-				}))
+				}), nil)
 				if got := replayed.LastExitError(); got != "" {
 					t.Errorf("replayed LastExitError = %q, want the exit dropped after a clean turn", got)
 				}
@@ -3612,8 +3614,9 @@ func TestTask(t *testing.T) {
 		t.Run("BackgroundCommandState", func(t *testing.T) {
 			t.Parallel()
 			// Detached checks keep the task busy even when the agent turn ends.
+			// command builds a card whose end wakes the agent, as Claude Code's do.
 			command := func(id string, status agent.BackgroundCommandStatus) *agent.BackgroundCommandMessage {
-				return &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: id, Status: status}}
+				return &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: id, Status: status, WakesAgent: true}}
 			}
 			result := func() *agent.ResultMessage { return &agent.ResultMessage{MessageType: "result"} }
 			t.Run("ShellOutlivesSubagentAndHostExitRetiresIt", func(t *testing.T) {
@@ -3636,7 +3639,7 @@ func TestTask(t *testing.T) {
 				addTaskMessage(live, messages[len(messages)-1])
 				replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				replay.SetState(task.StateRunning)
-				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				for _, tk := range []*Task{live, replay} {
 					if tk.GetState() != task.StateWaiting || tk.backgroundCommands.Commands()[0].Status != agent.BackgroundCommandStatusUnknown {
 						t.Fatalf("state = %v, commands = %#v after host exit", tk.GetState(), tk.backgroundCommands.Commands())
@@ -3690,7 +3693,7 @@ func TestTask(t *testing.T) {
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 					result(),
 					command("shell-1", agent.BackgroundCommandStatusRunning),
-				}))
+				}), nil)
 				if got := tk.GetState(); got != task.StateRunning {
 					t.Errorf("state = %v, want running while a detached command runs", got)
 				}
@@ -3707,7 +3710,7 @@ func TestTask(t *testing.T) {
 				}
 				replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				replay.SetState(task.StateRunning)
-				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				replay.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				for _, tk := range []*Task{live, replay} {
 					if got := tk.GetState(); got != task.StateWaiting {
 						t.Fatalf("state = %v, want waiting while only a watch runs", got)
@@ -3747,9 +3750,385 @@ func TestTask(t *testing.T) {
 					result(),
 					command("shell-1", agent.BackgroundCommandStatusCompleted),
 					&agent.ExitMessage{ExitCode: -2},
-				}))
+				}), nil)
 				if got := replayed.LastExitError(); got != "" {
 					t.Errorf("replayed LastExitError = %q, want the exit dropped after a clean turn", got)
+				}
+			})
+		})
+		t.Run("QueuedTurnState", func(t *testing.T) {
+			t.Parallel()
+			// Minimized from task 4VN78Q1IU000: when background work ends after the
+			// parent result, Claude Code starts a turn to deliver its notification.
+			// The task stays running from the terminal update through that turn.
+			const (
+				session  = `"session_id":"fe242f82"`
+				text     = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]},` + session + `}`
+				result   = `{"type":"result","subtype":"success","is_error":false,"result":"Done",` + session + `}`
+				init     = `{"type":"system","subtype":"init","cwd":"/src",` + session + `}`
+				notified = `{"type":"result","subtype":"success","is_error":false,"result":"Done","origin":{"kind":"task-notification","producer":"session-task"},` + session + `}`
+			)
+			// parseWire parses native output lines with one wire, one second apart.
+			parseWire := func(t *testing.T, wire agent.WireFormat, lines ...string) []agent.TimedMessage {
+				start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+				var entries []agent.TimedMessage
+				for i, line := range lines {
+					msgs, err := wire.ParseOutput([]byte(line))
+					if err != nil {
+						t.Fatalf("line %d: %v", i, err)
+					}
+					for _, m := range msgs {
+						entries = append(entries, agent.TimedMessage{Message: m, ProducerTime: start.Add(time.Duration(i) * time.Second)})
+					}
+				}
+				return entries
+			}
+			parse := func(t *testing.T, lines ...string) []agent.TimedMessage {
+				return parseWire(t, claudecode.New().NewWire(), lines...)
+			}
+			// fold returns the live state and background counts after each entry,
+			// and fails when a replay of that prefix infers others.
+			fold := func(t *testing.T, entries []agent.TimedMessage) ([]task.State, []BackgroundCounts) {
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(task.StateRunning)
+				states := make([]task.State, len(entries))
+				counts := make([]BackgroundCounts, len(entries))
+				for i, entry := range entries {
+					live.addParsedMessage(entry)
+					snap := live.Snapshot()
+					states[i], counts[i] = snap.State, snap.Background
+					replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					replay.SetState(task.StateRunning)
+					replay.SeedTimelineParts(nil, slices.Clone(entries[:i+1]), nil)
+					if got := replay.Snapshot(); got.State != states[i] || got.Background != counts[i] {
+						t.Errorf("entry %d (%T): replay = %v %+v, live = %v %+v", i, entry.Message, got.State, got.Background, states[i], counts[i])
+					}
+					got, want := replay.BackgroundActivity(), live.BackgroundActivity()
+					if got.Counts != want.Counts || got.WakingCommands != want.WakingCommands || got.TurnEnded != want.TurnEnded || !slices.Equal(got.Items, want.Items) {
+						t.Errorf("entry %d (%T): replay items = %+v, live items = %+v", i, entry.Message, got, want)
+					}
+				}
+				return states, counts
+			}
+			// countsAt returns the counts at the first root result and at the end.
+			countsAt := func(entries []agent.TimedMessage, counts []BackgroundCounts) (atResult, final BackgroundCounts) {
+				i := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.ResultMessage); return ok })
+				return counts[i], counts[len(counts)-1]
+			}
+			// runsUntilNotificationTurn checks that no waiting state appears between
+			// the first root result and the notification turn's result, which
+			// settles the task.
+			runsUntilNotificationTurn := func(t *testing.T, entries []agent.TimedMessage, states []task.State) {
+				var results []int
+				for i, entry := range entries {
+					if r, ok := entry.Message.(*agent.ResultMessage); ok && !r.Source.IsChild() {
+						results = append(results, i)
+					}
+				}
+				if len(results) != 2 {
+					t.Fatalf("root results at %v, want 2", results)
+				}
+				for i := results[0]; i < results[1]; i++ {
+					if states[i] != task.StateRunning {
+						t.Errorf("entry %d (%T): state = %v, want running until the notification turn's result", i, entries[i].Message, states[i])
+					}
+				}
+				if got := states[results[1]]; got != task.StateWaiting {
+					t.Errorf("state after the notification turn = %v, want waiting", got)
+				}
+			}
+			agentUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_spawn","name":"Agent","input":{"description":"Fix","prompt":"Fix","subagent_type":"general-purpose","run_in_background":true}}]},` + session + `}`
+			agentStarted := `{"type":"system","subtype":"task_started","task_id":"a3635a","run_id":"001","tool_use_id":"toolu_spawn","description":"Fix","is_backgrounded":true,"task_type":"local_agent",` + session + `}`
+			agentLaunched := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_spawn","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully."}]}]},"tool_use_result":{"status":"async_launched"},` + session + `}`
+			agentUpdated := `{"type":"system","subtype":"task_updated","task_id":"a3635a","run_id":"001","patch":{"status":"completed"},` + session + `}`
+			agentNotified := `{"type":"system","subtype":"task_notification","task_id":"a3635a","run_id":"001","tool_use_id":"toolu_spawn","status":"completed","summary":"Fixed",` + session + `}`
+			t.Run("BackgroundAgent", func(t *testing.T) {
+				t.Parallel()
+				entries := parse(t, agentUse, agentStarted, agentLaunched, text, result, agentUpdated, agentNotified, init, text, notified)
+				states, counts := fold(t, entries)
+				runsUntilNotificationTurn(t, entries, states)
+				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{Agents: 1}) || final != (BackgroundCounts{}) {
+					t.Errorf("counts at result = %+v, final = %+v, want 1 agent then none", atResult, final)
+				}
+			})
+			t.Run("BackgroundCommand", func(t *testing.T) {
+				t.Parallel()
+				bashUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"make test","run_in_background":true}}]},` + session + `}`
+				started := `{"type":"system","subtype":"task_started","task_id":"b3xwrrd6m","tool_use_id":"toolu_bash","description":"Run tests","is_backgrounded":true,"task_type":"local_bash",` + session + `}`
+				backgrounded := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bash","type":"tool_result","content":"Command running in background with ID: b3xwrrd6m"}]},` + session + `}`
+				updated := `{"type":"system","subtype":"task_updated","task_id":"b3xwrrd6m","patch":{"status":"completed"},` + session + `}`
+				notifiedCmd := `{"type":"system","subtype":"task_notification","task_id":"b3xwrrd6m","tool_use_id":"toolu_bash","status":"completed","summary":"Background command \"Run tests\" completed (exit code 0)",` + session + `}`
+				entries := parse(t, bashUse, started, backgrounded, text, result, updated, notifiedCmd, init, text, notified)
+				// Claude Code wakes the agent when the command ends, so the command
+				// keeps the task running until that turn.
+				for _, e := range entries {
+					if m, ok := e.Message.(*agent.BackgroundCommandMessage); ok && !m.Command.WakesAgent {
+						t.Fatalf("command = %#v, want it to wake the agent", m.Command)
+					}
+				}
+				states, counts := fold(t, entries)
+				runsUntilNotificationTurn(t, entries, states)
+				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{Commands: 1}) || final != (BackgroundCounts{}) {
+					t.Errorf("counts at result = %+v, final = %+v, want 1 command then none", atResult, final)
+				}
+			})
+			t.Run("WatchExpiryWakesWaitingTask", func(t *testing.T) {
+				t.Parallel()
+				monitorUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_watch","name":"Monitor","input":{"command":"tail -f out","description":"results"}}]},` + session + `}`
+				started := `{"type":"system","subtype":"task_started","task_id":"bizvx8b6o","tool_use_id":"toolu_watch","description":"results","is_backgrounded":true,"task_type":"local_bash",` + session + `}`
+				killed := `{"type":"system","subtype":"task_updated","task_id":"bizvx8b6o","patch":{"status":"killed"},` + session + `}`
+				stopped := `{"type":"system","subtype":"task_notification","task_id":"bizvx8b6o","tool_use_id":"toolu_watch","status":"stopped","summary":"results",` + session + `}`
+				entries := parse(t, monitorUse, started, text, result, killed, stopped, init, text, notified)
+				states, counts := fold(t, entries)
+				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{Watches: 1}) || final != (BackgroundCounts{}) {
+					t.Errorf("counts at result = %+v, final = %+v, want 1 watch then none", atResult, final)
+				}
+				if got := states[slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.ResultMessage); return ok })]; got != task.StateWaiting {
+					t.Fatalf("state with only a watch running = %v, want waiting", got)
+				}
+				var queued int
+				for i, entry := range entries {
+					if _, ok := entry.Message.(*agent.TurnQueuedMessage); ok {
+						queued = i
+					}
+				}
+				if queued == 0 {
+					t.Fatal("watch expiry queued no turn")
+				}
+				for i := queued; i < len(entries)-1; i++ {
+					if states[i] != task.StateRunning {
+						t.Errorf("entry %d (%T): state = %v, want running until the notification turn's result", i, entries[i].Message, states[i])
+					}
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("final state = %v, want waiting", got)
+				}
+			})
+			t.Run("HostExitClearsQueuedTurn", func(t *testing.T) {
+				t.Parallel()
+				entries := parse(t, agentUse, agentStarted, agentLaunched, text, result, agentUpdated)
+				entries = append(entries, agent.TimedMessage{Message: &agent.ExitMessage{ExitCode: -1}})
+				states, _ := fold(t, entries)
+				if got := states[len(states)-2]; got != task.StateRunning {
+					t.Errorf("state before the exit = %v, want running for the queued turn", got)
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("state after the host exit = %v, want waiting", got)
+				}
+			})
+			t.Run("HostExitClearsCounts", func(t *testing.T) {
+				t.Parallel()
+				bashUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"make test","run_in_background":true}}]},` + session + `}`
+				bashStarted := `{"type":"system","subtype":"task_started","task_id":"b3xwrrd6m","tool_use_id":"toolu_bash","description":"Run tests","is_backgrounded":true,"task_type":"local_bash",` + session + `}`
+				entries := parse(t, agentUse, agentStarted, agentLaunched, bashUse, bashStarted, text, result)
+				entries = append(entries, agent.TimedMessage{Message: &agent.ExitMessage{ExitCode: -1}})
+				_, counts := fold(t, entries)
+				if got := counts[len(counts)-2]; got != (BackgroundCounts{Commands: 1, Agents: 1}) {
+					t.Errorf("counts before the exit = %+v, want 1 command and 1 agent", got)
+				}
+				if got := counts[len(counts)-1]; got != (BackgroundCounts{}) {
+					t.Errorf("counts after the host exit = %+v, want none", got)
+				}
+			})
+			t.Run("CountOnlyChangeRefreshesSummary", func(t *testing.T) {
+				t.Parallel()
+				start := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(task.StateRunning)
+				tk.addParsedMessage(agent.TimedMessage{Message: &agent.TextMessage{Text: "working"}})
+				watch := &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "w", Label: "results", Status: agent.BackgroundCommandStatusRunning, Watch: true}}
+				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start, Message: watch}); !changed {
+					t.Fatal("a new watch did not report a summary change")
+				}
+				cmd := &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "c", Label: "Run tests", Status: agent.BackgroundCommandStatusRunning, WakesAgent: true}}
+				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(time.Second), Message: cmd}); !changed {
+					t.Fatal("a new command did not report a summary change")
+				}
+				if changed := tk.addParsedMessage(agent.TimedMessage{ProducerTime: start.Add(2 * time.Second), Message: cmd}); changed {
+					t.Fatal("a repeated observation reported a summary change")
+				}
+				snap := tk.Snapshot()
+				if snap.State != task.StateRunning || snap.Background != (BackgroundCounts{Commands: 1, Watches: 1}) {
+					t.Fatalf("snapshot = %v %+v, want running with 1 command and 1 watch", snap.State, snap.Background)
+				}
+				want := []BackgroundItem{
+					{Kind: BackgroundKindWatch, Label: "results", StartedAt: start},
+					{Kind: BackgroundKindCommand, Label: "Run tests", StartedAt: start.Add(time.Second)},
+				}
+				if got := tk.BackgroundActivity(); !slices.Equal(got.Items, want) || got.Counts != snap.Background || got.TurnEnded {
+					t.Fatalf("activity = %+v, want %+v during the turn", got, want)
+				}
+				tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result"}})
+				if got := tk.BackgroundActivity(); !got.TurnEnded || tk.GetState() != task.StateRunning {
+					t.Fatalf("turn ended %t, state %v, want an ended turn kept running", got.TurnEnded, tk.GetState())
+				}
+			})
+			t.Run("CodexCommandOutlivesTurn", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from task 4HM3VRG10000: the agent ended its turn while its
+				// smoke test still ran; Codex reported the exit later and started no
+				// turn, so the command shows but the task waits for the user.
+				const (
+					thread    = `{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}`
+					started   = `{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-smoke","command":"/bin/bash -lc 'go test -tags=smoke ./...'","source":"unifiedExecStartup","status":"inProgress"},"threadId":"thread-root","turnId":"turn-1"}}`
+					answer    = `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"The smoke suite is still running."},"threadId":"thread-root","turnId":"turn-1"}}`
+					idle      = `{"method":"thread/status/changed","params":{"threadId":"thread-root","status":{"type":"idle"}}}`
+					turnDone  = `{"method":"turn/completed","params":{"threadId":"thread-root","turn":{"id":"turn-1","status":"completed"}}}`
+					output    = `{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-root","turnId":"turn-1","itemId":"exec-smoke","delta":"ok"}}`
+					completed = `{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-smoke","command":"/bin/bash -lc 'go test -tags=smoke ./...'","source":"unifiedExecStartup","status":"completed","aggregatedOutput":"ok","exitCode":0},"threadId":"thread-root","turnId":"turn-1"}}`
+				)
+				entries := parseWire(t, codex.New("", nil).NewWire(), thread, started, answer, idle, turnDone, output, completed)
+				states, counts := fold(t, entries)
+				result := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.ResultMessage); return ok })
+				command := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.BackgroundCommandMessage); return ok })
+				if command <= result {
+					t.Fatalf("command card at %d, result at %d, want the card after the result", command, result)
+				}
+				// The late output and tool result precede the command's completion
+				// and must not reopen the settled turn.
+				for i := result; i < len(entries); i++ {
+					if states[i] != task.StateWaiting {
+						t.Errorf("entry %d (%T): state = %v, want waiting", i, entries[i].Message, states[i])
+					}
+					if want := (BackgroundCounts{Commands: 1}); i >= command && i < len(entries)-1 && counts[i] != want {
+						t.Errorf("entry %d (%T): counts = %+v, want %+v while the command runs", i, entries[i].Message, counts[i], want)
+					}
+				}
+				if !slices.ContainsFunc(entries[result:], func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.ToolOutputDeltaMessage); return ok }) {
+					t.Fatal("no late tool output")
+				}
+				if _, ok := entries[len(entries)-2].Message.(*agent.ToolResultMessage); !ok {
+					t.Fatalf("entry %d = %T, want the late tool result", len(entries)-2, entries[len(entries)-2].Message)
+				}
+				if got := counts[len(counts)-1]; got != (BackgroundCounts{}) {
+					t.Errorf("counts after the command exit = %+v, want none", got)
+				}
+			})
+			t.Run("SettlementEndsHostedCommand", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from task 4RSNU5UFS000: the log has no exit record and ends
+				// with the purge trailer while a Codex process was last seen running.
+				const (
+					thread   = `{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}`
+					started  = `{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-serve","command":"npm run dev","source":"unifiedExecStartup","status":"inProgress"},"threadId":"thread-root","turnId":"turn-1"}}`
+					turnDone = `{"method":"turn/completed","params":{"threadId":"thread-root","turn":{"id":"turn-1","status":"completed"}}}`
+				)
+				entries := parseWire(t, codex.New("", nil).NewWire(), thread, started, turnDone)
+				running := BackgroundCounts{Commands: 1}
+				t.Run("Live", func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					tk.SetState(task.StateRunning)
+					for _, entry := range entries {
+						tk.addParsedMessage(entry)
+					}
+					if got := tk.Snapshot().Background; got != running {
+						t.Fatalf("counts before the trailer = %+v, want %+v", got, running)
+					}
+					if changed := tk.addParsedMessage(agent.TimedMessage{Message: &agent.MetaResultMessage{}}); !changed {
+						t.Error("the trailer did not report a summary change")
+					}
+					if got := tk.BackgroundActivity(); got.Counts != (BackgroundCounts{}) || len(got.Items) != 0 {
+						t.Fatalf("activity after the trailer = %+v, want none", got)
+					}
+				})
+				t.Run("Restored", func(t *testing.T) {
+					t.Parallel()
+					for _, c := range []struct {
+						name    string
+						settled []int
+						want    BackgroundCounts
+					}{
+						{"after", []int{len(entries)}, BackgroundCounts{}},
+						// A card a later run reports again outlives an earlier trailer.
+						{"before", []int{0}, running},
+					} {
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+						tk.SetState(task.StateRunning)
+						tk.SeedTimelineParts(nil, slices.Clone(entries), c.settled)
+						if got := tk.BackgroundActivity(); got.Counts != c.want || len(got.Items) != c.want.Commands {
+							t.Errorf("%s: activity = %+v, want %+v", c.name, got, c.want)
+						}
+					}
+				})
+			})
+			t.Run("PiExtensionWake", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from task 44KFPPA9I000: the pi-subagents extension woke the
+				// idle parent after a detached run ended.
+				const (
+					agentStart = `{"type":"agent_start"}`
+					prompt     = `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Start the worker"}]}}`
+					delta      = `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done"}}`
+					agentEnd   = `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Done"}],"usage":{"input":10,"output":5}}]}`
+					notify     = `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
+					assistant  = `{"type":"message_start","message":{"role":"assistant","content":[]}}`
+				)
+				entries := parseWire(t, pi.New("", nil).NewWire(), agentStart, prompt, delta, agentEnd, agentStart, notify, assistant, delta, agentEnd)
+				states, _ := fold(t, entries)
+				queued := slices.IndexFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.TurnQueuedMessage); return ok })
+				if queued < 0 {
+					t.Fatal("the extension wake queued no turn")
+				}
+				if got := states[queued-1]; got != task.StateWaiting {
+					t.Errorf("state before the wake = %v, want waiting", got)
+				}
+				for i := queued; i < len(entries)-1; i++ {
+					if states[i] != task.StateRunning {
+						t.Errorf("entry %d (%T): state = %v, want running until the wake's result", i, entries[i].Message, states[i])
+					}
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("final state = %v, want waiting", got)
+				}
+			})
+			t.Run("ForegroundAgent", func(t *testing.T) {
+				t.Parallel()
+				use := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fg","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]},` + session + `}`
+				started := `{"type":"system","subtype":"task_started","task_id":"fg","tool_use_id":"toolu_fg","task_type":"local_agent",` + session + `}`
+				done := `{"type":"system","subtype":"task_notification","task_id":"fg","tool_use_id":"toolu_fg","status":"completed","summary":"Joke",` + session + `}`
+				answer := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_fg","type":"tool_result","content":[{"type":"text","text":"Joke"}]}]},` + session + `}`
+				entries := parse(t, use, started, done, answer, text, result)
+				states, counts := fold(t, entries)
+				if got := counts[1]; got != (BackgroundCounts{}) {
+					t.Errorf("counts with a running foreground agent = %+v, want none", got)
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("state after a foreground agent = %v, want waiting", got)
+				}
+			})
+			t.Run("SnapshotRetiresLostCard", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from task 4VN78Q1IU000: a snapshot drops background work
+				// whose terminal records were lost. The card ends as on host exit
+				// and the task settles without a queued turn.
+				listed := `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a3635a","run_id":"001","task_type":"local_agent"},{"task_id":"b3xwrrd6m","task_type":"local_bash"}],` + session + `}`
+				dropped := `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + session + `}`
+				status := `{"type":"system","subtype":"status","status":"requesting",` + session + `}`
+				bashUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"make test","run_in_background":true}}]},` + session + `}`
+				bashStarted := `{"type":"system","subtype":"task_started","task_id":"b3xwrrd6m","tool_use_id":"toolu_bash","description":"Run tests","is_backgrounded":true,"task_type":"local_bash",` + session + `}`
+				entries := parse(t, listed, agentUse, agentStarted, agentLaunched, bashUse, bashStarted, text, result, dropped, status)
+				states, counts := fold(t, entries)
+				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{Commands: 1, Agents: 1}) || final != (BackgroundCounts{}) {
+					t.Errorf("counts at result = %+v, final = %+v, want 1 command and 1 agent then none", atResult, final)
+				}
+				retired := 0
+				for i, entry := range entries {
+					switch entry.Message.(type) {
+					case *agent.BackgroundRetiredMessage:
+						retired++
+					case *agent.TurnQueuedMessage:
+						t.Errorf("entry %d: retirement queued a turn", i)
+					}
+					if _, ok := entry.Message.(*agent.ResultMessage); ok && states[i] != task.StateRunning {
+						t.Errorf("state with background work = %v, want running", states[i])
+					}
+				}
+				if retired != 2 {
+					t.Errorf("retired cards = %d, want 2", retired)
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("state after the retirement = %v, want waiting", got)
 				}
 			})
 		})
@@ -3760,7 +4139,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "msg1"},
 				&agent.TextMessage{Text: "msg2"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 
 			// A subscriber should see restored messages in the history snapshot.
 			history, _, unsub := tk.Subscribe(t.Context())
@@ -3784,7 +4163,7 @@ func TestTask(t *testing.T) {
 				&agent.TextMessage{Text: "done"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 
 			if got := tk.LastAgentResult(); got != "done" {
 				t.Errorf("result = %q, want %q", got, "done")
@@ -3806,7 +4185,7 @@ func TestTask(t *testing.T) {
 				&agent.TextDeltaMessage{Text: "thinking"},
 				&agent.ResultMessage{MessageType: "result"},
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 
 			if got := tk.LastAgentResult(); got != "after thinking" {
 				t.Errorf("result = %q, want %q (thinking excluded)", got, "after thinking")
@@ -3986,7 +4365,7 @@ func TestTask(t *testing.T) {
 					addTaskMessage(tk, &agent.UsageMessage{ReportedModel: "claude-opus-4-6"})
 				}},
 				{"replay", func(tk *Task) {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UsageMessage{ReportedModel: "claude-opus-4-6"}}))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UsageMessage{ReportedModel: "claude-opus-4-6"}}), nil)
 				}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -4054,7 +4433,7 @@ func TestTask(t *testing.T) {
 		t.Run("SeedTimelineRecordsVersionWithoutSession", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.InitMessage{Version: "1.2.3"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.InitMessage{Version: "1.2.3"}}), nil)
 			if snap := tk.Snapshot(); snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
 			}
@@ -4204,7 +4583,7 @@ func TestTask(t *testing.T) {
 					case "output":
 						history = append(history, &agent.TextDeltaMessage{Text: "working"})
 					}
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 					want := 1
 					if outcome == "completed" || outcome == "output" {
 						want = 0
@@ -4239,7 +4618,7 @@ func TestTask(t *testing.T) {
 					}
 					history = append(history, messages...)
 				}
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				if got := tk.PendingUserActions(); len(got) != 0 {
 					t.Errorf("initialized=%t: ambiguous control restored root action: %#v", initialized, got)
 				}
@@ -4265,7 +4644,7 @@ func TestTask(t *testing.T) {
 					},
 				},
 				&agent.ResultMessage{MessageType: "result"},
-			}))
+			}), nil)
 
 			got := tk.PendingUserActions()
 			if len(got) != 1 {
@@ -4284,42 +4663,27 @@ func TestTask(t *testing.T) {
 				t.Errorf("question = %q, want Which?", got[0].Ask.Questions[0].Question)
 			}
 		})
+		// askPair is a restored question and its pending action.
+		askPair := func(question, requestID, toolUseID string) []agent.Message {
+			questions := []v3.AskQuestion{{Question: question}}
+			return []agent.Message{
+				&agent.AskMessage{ToolUseID: toolUseID, Questions: questions},
+				&agent.PendingUserActionMessage{
+					MessageType: agent.PendingUserActionMessageType,
+					Action: v3.PendingUserAction{
+						Kind:      agent.PendingUserActionAskUserQuestion,
+						RequestID: requestID,
+						ToolUseID: toolUseID,
+						Ask:       v3.PendingAskAction{Questions: questions},
+					},
+				},
+			}
+		}
 		t.Run("DedupesDuplicatedRestoredAsk", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
-				&agent.AskMessage{
-					ToolUseID: "toolu-1",
-					Questions: []v3.AskQuestion{{Question: "Which?"}},
-				},
-				&agent.PendingUserActionMessage{
-					MessageType: agent.PendingUserActionMessageType,
-					Action: v3.PendingUserAction{
-						Kind:      agent.PendingUserActionAskUserQuestion,
-						RequestID: "req-1",
-						ToolUseID: "toolu-1",
-						Ask: v3.PendingAskAction{
-							Questions: []v3.AskQuestion{{Question: "Which?"}},
-						},
-					},
-				},
-				&agent.AskMessage{
-					ToolUseID: "toolu-1",
-					Questions: []v3.AskQuestion{{Question: "Which?"}},
-				},
-				&agent.PendingUserActionMessage{
-					MessageType: agent.PendingUserActionMessageType,
-					Action: v3.PendingUserAction{
-						Kind:      agent.PendingUserActionAskUserQuestion,
-						RequestID: "req-1",
-						ToolUseID: "toolu-1",
-						Ask: v3.PendingAskAction{
-							Questions: []v3.AskQuestion{{Question: "Which?"}},
-						},
-					},
-				},
-				&agent.ResultMessage{MessageType: "result"},
-			}))
+			ask := askPair("Which?", "req-1", "toolu-1")
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(slices.Concat(ask, ask, []agent.Message{&agent.ResultMessage{MessageType: "result"}})), nil)
 
 			got := tk.PendingUserActions()
 			if len(got) != 1 {
@@ -4335,39 +4699,7 @@ func TestTask(t *testing.T) {
 		t.Run("RestoresMultipleCurrentAsks", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
-				&agent.AskMessage{
-					ToolUseID: "toolu-1",
-					Questions: []v3.AskQuestion{{Question: "First?"}},
-				},
-				&agent.PendingUserActionMessage{
-					MessageType: agent.PendingUserActionMessageType,
-					Action: v3.PendingUserAction{
-						Kind:      agent.PendingUserActionAskUserQuestion,
-						RequestID: "req-1",
-						ToolUseID: "toolu-1",
-						Ask: v3.PendingAskAction{
-							Questions: []v3.AskQuestion{{Question: "First?"}},
-						},
-					},
-				},
-				&agent.AskMessage{
-					ToolUseID: "toolu-2",
-					Questions: []v3.AskQuestion{{Question: "Second?"}},
-				},
-				&agent.PendingUserActionMessage{
-					MessageType: agent.PendingUserActionMessageType,
-					Action: v3.PendingUserAction{
-						Kind:      agent.PendingUserActionAskUserQuestion,
-						RequestID: "req-2",
-						ToolUseID: "toolu-2",
-						Ask: v3.PendingAskAction{
-							Questions: []v3.AskQuestion{{Question: "Second?"}},
-						},
-					},
-				},
-				&agent.ResultMessage{MessageType: "result"},
-			}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(slices.Concat(askPair("First?", "req-1", "toolu-1"), askPair("Second?", "req-2", "toolu-2"), []agent.Message{&agent.ResultMessage{MessageType: "result"}})), nil)
 
 			got := tk.PendingUserActions()
 			if len(got) != 2 {
@@ -4398,7 +4730,7 @@ func TestTask(t *testing.T) {
 				},
 				&agent.ToolResultMessage{ToolUseID: "toolu-1"},
 				&agent.ResultMessage{MessageType: "result"},
-			}))
+			}), nil)
 
 			if got := tk.PendingUserActions(); len(got) != 0 {
 				t.Fatalf("PendingUserActions = %#v, want none", got)
@@ -4426,7 +4758,7 @@ func TestTask(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.TextMessage{Text: "new turn"},
 				&agent.ResultMessage{MessageType: "result"},
-			}))
+			}), nil)
 
 			if got := tk.PendingUserActions(); len(got) != 0 {
 				t.Fatalf("PendingUserActions = %#v, want none", got)
@@ -4656,7 +4988,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: watcherDiff},
-			}))
+			}), nil)
 			snap := tk.Snapshot()
 			if !reflect.DeepEqual(snap.RepoStates, probe) {
 				t.Fatalf("RepoStates = %+v, want the latest probe %+v", snap.RepoStates, probe)
@@ -4843,7 +5175,7 @@ func TestPricedCost(t *testing.T) {
 					&agent.ResultMessage{Usage: agent.Usage{InputTokens: 7}},
 				}
 				if replay {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				} else {
 					for _, m := range messages {
 						addTaskMessage(tk, m)
@@ -4870,7 +5202,7 @@ func TestPricedCost(t *testing.T) {
 		for _, replay := range []bool{false, true} {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "anthropic/claude-opus-4-6", "")
 			if replay {
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 			} else {
 				for _, msg := range messages {
 					addTaskMessage(tk, msg)
@@ -4924,7 +5256,7 @@ func TestPricedCost(t *testing.T) {
 				sink := &rollupSpy{}
 				tk.Rollup = sink
 				if replay {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 				} else {
 					for _, msg := range messages {
 						addTaskMessage(tk, msg)
@@ -4954,7 +5286,7 @@ func TestPricedCost(t *testing.T) {
 			second := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 50_000, OutputTokens: 10_000}}
 			messages := []agent.Message{first, &agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"}, second}
 			if replay {
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 			} else {
 				for _, m := range messages {
 					addTaskMessage(tk, m)
@@ -4991,7 +5323,7 @@ func TestPricedCost(t *testing.T) {
 			tk.Pricer = prices
 			tk.SetState(task.StateRunning)
 			if replay {
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMessages()))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages(newMessages()), nil)
 			} else {
 				for _, m := range newMessages() {
 					addTaskMessage(tk, m)
@@ -5043,7 +5375,7 @@ func TestPricedCost(t *testing.T) {
 				t.Parallel()
 				tk := newTask(t)
 				if tc.restore {
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages()))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages()), nil)
 				} else {
 					for _, m := range messages() {
 						addTaskMessage(tk, m)
@@ -5234,7 +5566,7 @@ func TestPricedCost(t *testing.T) {
 			&agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"},
 			&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1},
-		}))
+		}), nil)
 		costUSD := tk.Snapshot().CostUSD
 		if costUSD != 0.15 {
 			t.Errorf("costUSD = %v, want 0.15", costUSD)
@@ -5259,7 +5591,7 @@ func BenchmarkTaskCacheWriteReplay(b *testing.B) {
 	for b.Loop() {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "cache replay"}, harness.Pi, model, "")
 		tk.Pricer = prices
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 	}
 }
 
@@ -5290,7 +5622,7 @@ func BenchmarkCodexResultPricing(b *testing.B) {
 	for b.Loop() {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Codex, model, "")
 		tk.Pricer = prices
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 	}
 }
 
@@ -5311,6 +5643,6 @@ func BenchmarkCodexRequestPricing(b *testing.B) {
 	for b.Loop() {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Codex, model, "")
 		tk.Pricer = prices
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 	}
 }

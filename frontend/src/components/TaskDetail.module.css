@@ -259,6 +259,7 @@ a.headerPR:hover {
 
 .inputForm {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   align-items: flex-end;
   margin-top: 0.5rem;
@@ -1317,6 +1318,28 @@ a.ciStatus:hover {
 
 .safetyWarning li {
   margin-bottom: 0.15rem;
+}
+
+/* A background chip marks the element it revealed; the mark fades unless motion is reduced. */
+.revealed {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .revealed {
+    animation: reveal-fade 1.6s ease-in forwards;
+  }
+}
+
+@keyframes reveal-fade {
+  60% {
+    outline-color: var(--color-focus-border);
+  }
+
+  100% {
+    outline-color: transparent;
+  }
 }
 
 /* Mobile: <=768px */

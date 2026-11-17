@@ -258,6 +258,19 @@ describe("TaskCard", () => {
     expect(screen.queryByTestId("task-card-cost")).not.toBeInTheDocument();
   });
 
+  it("names running background work in the card's accessible name and omits the row without any", () => {
+    const [background, setBackground] = createSignal<TaskCardProps["background"]>({
+      commands: 0,
+      watches: 1,
+      agents: 2,
+    });
+    renderCard(() => <TaskCard {...props({ background: background() })} />);
+    expect(screen.getByTestId("task-card-background")).toHaveTextContent(/^Background: 2 agents · 1 watch$/);
+    expect(screen.getByRole("button", { name: /Background: 2 agents · 1 watch/ })).toBeInTheDocument();
+    setBackground(undefined);
+    expect(screen.queryByTestId("task-card-background")).not.toBeInTheDocument();
+  });
+
   it("renders every repository and branch before Git status is available", () => {
     renderCard(() => (
       <TaskCard

@@ -97,6 +97,12 @@ func (f *notificationFeed) notifications(ctx context.Context, svc *taskService, 
 	return f.reconcileLocked(ctx, tasks, replays, usage, activeTaskID)
 }
 
+// TODO: A voice client reported repeated "has a question" announcements for
+// one Claude task (4VN78Q1IU000). A replay of that task's log through taskrun
+// shows a single asking transition, so the cause is not in task state; the
+// hypothesis is a re-announcement in this feed (owner eviction, generations,
+// or replayed state history). Capture the feed's output for a task while it
+// asks, and check that one transition yields one alert.
 func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()

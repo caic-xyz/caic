@@ -1,0 +1,59 @@
+/* Background-work chips in one scrollable row above the task prompt input. */
+
+.strip {
+  display: flex;
+  flex: 0 0 100%;
+  gap: 0.25rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.scroller {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* The padding keeps the focus ring inside the scroll container. */
+.list {
+  display: flex;
+  gap: 0.35rem;
+  width: max-content;
+  padding: 0.25rem;
+  margin: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--color-bg-input);
+  border: none;
+  border-radius: var(--radius-md);
+}
+
+.chip:hover {
+  background: var(--color-bg-input-hover);
+}
+
+.kind {
+  font-weight: 600;
+}
+
+.label {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.duration {
+  font-variant-numeric: tabular-nums;
+}

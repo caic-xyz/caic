@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSyncActivity, EventSyncActivityPhase, EventSyncActivityStatus, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventBackgroundRetired, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSyncActivity, EventSyncActivityPhase, EventSyncActivityStatus, EventSystem, EventSystemSubtype, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBackgroundCommand, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, InputImage, LocalUsage, LocalWindow, PendingInput, Prompt, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, StreamHeartbeat, Task, TaskBackground, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -250,6 +250,18 @@ export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
   };
 }
 
+export function validateTaskBackground(raw: ValidatorInput): TaskBackground {
+  const obj = asObject(raw, "TaskBackground");
+  if (!Object.prototype.hasOwnProperty.call(obj, "commands")) throw new TypeError("missing required field: TaskBackground.commands");
+  if (!Object.prototype.hasOwnProperty.call(obj, "watches")) throw new TypeError("missing required field: TaskBackground.watches");
+  if (!Object.prototype.hasOwnProperty.call(obj, "agents")) throw new TypeError("missing required field: TaskBackground.agents");
+  return {
+    commands: asNumber(obj["commands"], "TaskBackground.commands"),
+    watches: asNumber(obj["watches"], "TaskBackground.watches"),
+    agents: asNumber(obj["agents"], "TaskBackground.agents"),
+  };
+}
+
 export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
   if (!Object.prototype.hasOwnProperty.call(obj, "pendingInput")) throw new TypeError("missing required field: Task.pendingInput");
@@ -330,6 +342,7 @@ export function validateTask(raw: ValidatorInput): Task {
     runtime: validateRuntimeInstance(obj["runtime"]),
     ...(Object.prototype.hasOwnProperty.call(obj, "resourceUsage") ? { resourceUsage: validateEventStats(obj["resourceUsage"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "rateLimit") ? { rateLimit: validateTaskRateLimit(obj["rateLimit"]) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "background") ? { background: validateTaskBackground(obj["background"]) } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "gitHubToken") ? { gitHubToken: asBoolean(obj["gitHubToken"], "Task.gitHubToken") } : {}),
   };
 }
@@ -839,6 +852,16 @@ export function validateEventBackgroundCommand(raw: ValidatorInput): EventBackgr
     ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "EventBackgroundCommand.exitCode") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "EventBackgroundCommand.outputRef") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "toolUseID") ? { toolUseID: asString(obj["toolUseID"], "EventBackgroundCommand.toolUseID") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "watch") ? { watch: asBoolean(obj["watch"], "EventBackgroundCommand.watch") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "wakesAgent") ? { wakesAgent: asBoolean(obj["wakesAgent"], "EventBackgroundCommand.wakesAgent") } : {}),
+  };
+}
+
+export function validateEventBackgroundRetired(raw: ValidatorInput): EventBackgroundRetired {
+  const obj = asObject(raw, "EventBackgroundRetired");
+  if (!Object.prototype.hasOwnProperty.call(obj, "id")) throw new TypeError("missing required field: EventBackgroundRetired.id");
+  return {
+    id: asString(obj["id"], "EventBackgroundRetired.id"),
   };
 }
 
@@ -1047,6 +1070,10 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
       if (!Object.prototype.hasOwnProperty.call(obj, "backgroundCommand")) throw new TypeError("missing required field: EventMessage.backgroundCommand");
       Object.defineProperty(result, "backgroundCommand", { value: validateEventBackgroundCommand(obj["backgroundCommand"]), enumerable: true, writable: true, configurable: true });
       break;
+    case "backgroundRetired":
+      if (!Object.prototype.hasOwnProperty.call(obj, "backgroundRetired")) throw new TypeError("missing required field: EventMessage.backgroundRetired");
+      Object.defineProperty(result, "backgroundRetired", { value: validateEventBackgroundRetired(obj["backgroundRetired"]), enumerable: true, writable: true, configurable: true });
+      break;
     case "log":
       if (!Object.prototype.hasOwnProperty.call(obj, "log")) throw new TypeError("missing required field: EventMessage.log");
       Object.defineProperty(result, "log", { value: validateEventLog(obj["log"]), enumerable: true, writable: true, configurable: true });
@@ -1250,6 +1277,8 @@ export function validateHistoryBackgroundCommand(raw: ValidatorInput): HistoryBa
     ...(Object.prototype.hasOwnProperty.call(obj, "endedAt") ? { endedAt: asString(obj["endedAt"], "HistoryBackgroundCommand.endedAt") as ISOTimestamp } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "exitCode") ? { exitCode: asNumber(obj["exitCode"], "HistoryBackgroundCommand.exitCode") } : {}),
     ...(Object.prototype.hasOwnProperty.call(obj, "outputRef") ? { outputRef: asString(obj["outputRef"], "HistoryBackgroundCommand.outputRef") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "watch") ? { watch: asBoolean(obj["watch"], "HistoryBackgroundCommand.watch") } : {}),
+    ...(Object.prototype.hasOwnProperty.call(obj, "wakesAgent") ? { wakesAgent: asBoolean(obj["wakesAgent"], "HistoryBackgroundCommand.wakesAgent") } : {}),
   };
 }
 

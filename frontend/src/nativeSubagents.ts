@@ -118,10 +118,23 @@ export class NativeActivityTracker {
       const ev = messages[i];
       if (!ev) throw new Error("Missing timeline event");
       // Lifecycle subjects must fold globally even when their actor is another child.
-      const lifecycle = ev.kind === "nativeSubagent" || ev.kind === "backgroundCommand";
+      const lifecycle =
+        ev.kind === "nativeSubagent" || ev.kind === "backgroundCommand" || ev.kind === "backgroundRetired";
       const childID = lifecycle ? null : this.ownerFor(ev);
       if (childID !== null) {
         if (ev.kind !== "rateLimit" || ev.rateLimit?.rateLimitType === "thread_goal") appendChildMessage(childID, ev);
+        continue;
+      }
+      // A card the harness stopped listing ends as unknown, unlike a lifecycle
+      // update with an unknown status, which keeps the folded status.
+      const retired = ev.kind === "backgroundRetired" ? this.byID.get(ev.backgroundRetired?.id ?? "") : undefined;
+      if (retired?.status === "running") {
+        this.byID.set(retired.id, {
+          ...retired,
+          status: "unknown",
+          anchorTs: this.messagesByAgent.has(retired.id) || ev.ts <= 0 ? retired.anchorTs : ev.ts,
+        });
+        changed = true;
         continue;
       }
       const s = ev.nativeSubagent;

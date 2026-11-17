@@ -296,7 +296,7 @@ func TestTaskHandlersHandoff(t *testing.T) {
 	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 		&agent.UserInputMessage{Text: "finish the feature"},
 		&agent.TextMessage{Text: "The API remains to be connected."},
-	}))
+	}), nil)
 	insertTestTask(s, tk.ID, tk)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+tk.ID.String()+"/handoff", nil)

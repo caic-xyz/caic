@@ -143,7 +143,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 // correlation itself.
 type decodedLine struct {
 	reasoningEstimate int                                 // Nonnegative thinking-token estimate from a system record.
-	system            *claudecode.OutputSystemMsg         // Set for a task lifecycle record.
+	system            *claudecode.OutputSystemMsg         // Set for a task lifecycle record or a background-task snapshot.
 	user              *claudecode.OutputUserMsg           // Set for a decoded user record.
 	source            agent.MessageSource                 // Actual session and delegating tool metadata of this record.
 	askControl        bool                                // Native Ask controls match actual Ask ownership before session fallback.
@@ -397,20 +397,16 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 		return nil, err
 	}
 	switch w.Subtype {
-	case claudecode.SystemTaskStarted, claudecode.SystemTaskUpdated, claudecode.SystemTaskNotification:
+	case claudecode.SystemTaskStarted, claudecode.SystemTaskUpdated, claudecode.SystemTaskNotification, claudecode.SystemBackgroundTasksChanged:
 		// Lifecycle correlation belongs to the stateful adapter, which requires
 		// task_type "local_agent" as proof, so hand it the decoded record rather
 		// than let it decode the same line again. These records also describe shell
 		// tasks, so they stay out of the transcript: rendering them would add
 		// "[task_started]" noise and split surrounding tool groups, and they are
 		// not subagent evidence on their own. The background-command adapter folds
-		// the detached shell subset from the same record.
+		// the detached shell subset from the same record. A snapshot of the live
+		// background-task list only retires cards whose terminal records were lost.
 		record.system = &w
-		return nil, nil
-	case claudecode.SystemBackgroundTasksChanged:
-		// A snapshot of the live background-task list; the per-task records above
-		// already carry the same facts with richer lifecycle detail, so emitting
-		// the snapshot would only duplicate them as bracket noise.
 		return nil, nil
 	case claudecode.SystemStatus, claudecode.SystemTaskProgress, claudecode.SystemCommandsChanged, claudecode.SystemTurnDuration:
 		return nil, nil
@@ -612,7 +608,7 @@ func inferredSkillReads(name string, input json.RawMessage, sourceID string) []a
 			return nil
 		}
 		return agent.InferredSkillReadFromPath(in.FilePath, sourceID)
-	case "Bash":
+	case ToolBash:
 		var in struct {
 			Command string `json:"command"`
 		}

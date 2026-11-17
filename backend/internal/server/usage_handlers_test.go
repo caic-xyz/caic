@@ -51,7 +51,7 @@ func TestLocalUsage(t *testing.T) {
 					messages = append(messages, agent.TimedMessage{Message: &agent.UsageMessage{Additive: true, PerCall: true, Usage: agent.Usage{InputTokens: 20}}})
 				}
 				messages = append(messages, agent.TimedMessage{Message: &agent.ResultMessage{}})
-				live.SeedTimelineParts(nil, messages)
+				live.SeedTimelineParts(nil, messages, nil)
 				snapshot := live.Snapshot()
 				result := &task.Result{State: task.StatePurged, CostUSD: snapshot.CostUSD, CostKnown: snapshot.CostKnown, CostComplete: snapshot.CostComplete, Usage: snapshot.Usage}
 				dir := t.TempDir()
@@ -105,7 +105,7 @@ func TestLocalUsage(t *testing.T) {
 							}
 						}
 						summary := taskMCPSummary(1, &dto)
-						detail, err := taskMCPDetail(1, &dto)
+						detail, err := taskMCPDetail(1, &dto, &mcpTaskRuntime{})
 						if err != nil || !summary.CostKnown || !detail.CostKnown || summary.CostComplete == tc.mixed || detail.CostComplete == tc.mixed {
 							t.Fatalf("MCP coverage lost: %+v %+v %v", summary, detail, err)
 						}
@@ -143,7 +143,7 @@ func TestLocalUsage(t *testing.T) {
 					t.Parallel()
 					s := newTestRouter(t, nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, h)
-					tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{CostReported: known}}})
+					tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{CostReported: known}}}, nil)
 					insertTestTask(s, tk.ID, tk)
 					if terminal {
 						entry, _ := s.taskMgr.GetEntry(tk.ID)

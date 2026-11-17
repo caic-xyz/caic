@@ -832,11 +832,17 @@ type BackgroundCommand struct {
 	// events to the agent, such as Claude Code's Monitor tool. A watch can
 	// outlive the turn by design while the agent waits for the user.
 	Watch bool `json:"watch,omitempty"`
+	// WakesAgent reports that the harness starts a turn to deliver the
+	// command's end to the agent, as Claude Code does with task notifications.
+	// Only such a command keeps its task running after the turn ends: when the
+	// harness reports the end without a turn, as Codex does for a process that
+	// outlives its turn, the agent waits for the user meanwhile.
+	WakesAgent bool `json:"wakes_agent,omitempty"`
 }
 
 // BackgroundCommandMessage records an observed background-command lifecycle
-// update. A running command keeps its task running after the turn ends; a
-// running watch does not.
+// update. A running command that wakes the agent keeps its task running after
+// the turn ends; a watch or a command that does not wake the agent does not.
 type BackgroundCommandMessage struct {
 	MessageProvenance
 
@@ -845,6 +851,33 @@ type BackgroundCommandMessage struct {
 
 // Type implements Message.
 func (m *BackgroundCommandMessage) Type() string { return "background_command" }
+
+// TurnQueuedMessage reports that the harness queued a turn by itself, without
+// user input, for example to deliver the outcome of background work. The turn
+// ends at the next root ResultMessage. An adapter emits it before the lifecycle
+// update that causes the turn, so a consumer never sees that update settle the
+// task while the turn is pending. It is derived from native records and is not
+// part of the transcript.
+type TurnQueuedMessage struct {
+	MessageProvenance
+}
+
+// Type implements Message.
+func (m *TurnQueuedMessage) Type() string { return "turn_queued" }
+
+// BackgroundRetiredMessage reports that the harness stopped listing a running
+// background card, a native subagent or a command, without reporting its
+// outcome. The card ends as unknown, as on host exit. It is derived from
+// native records and is not part of the transcript.
+type BackgroundRetiredMessage struct {
+	MessageProvenance
+
+	// ID is the card's NativeSubagent.ID or BackgroundCommand.ID.
+	ID string `json:"id"`
+}
+
+// Type implements Message.
+func (m *BackgroundRetiredMessage) Type() string { return "background_retired" }
 
 // MaxWidgetHTMLBytes is the maximum size of widget HTML the backend will
 // forward to clients. Widgets exceeding this limit are replaced with an

@@ -183,6 +183,37 @@ func TestRun(t *testing.T) {
 			})
 		}
 	})
+	t.Run("BackgroundCountChangeNotifies", func(t *testing.T) {
+		t.Parallel()
+		// A watch starting mid-turn changes the card summary but not the state.
+		id := ksid.NewID()
+		synctest.Test(t, func(t *testing.T) {
+			r := newTestAgentRuntime(t, nil, "", nil)
+			notifications := make(chan struct{}, 16)
+			r.NotifyTaskChange = func() { notifications <- struct{}{} }
+			tk := mustNewTask(t, id, agent.Prompt{Text: "initial"}, harness.Claude, "", "")
+			tk.SetState(task.StateRunning)
+			run := beginTestExecution(t, r, tk)
+			const session = `"session_id":"s"`
+			if err := taskNative(t.Context(), run.records, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_watch","name":"Monitor","input":{"command":"tail -f out","description":"results"}}]},`+session+`}`); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			for len(notifications) > 0 {
+				<-notifications
+			}
+			if err := taskNative(t.Context(), run.records, `{"type":"system","subtype":"task_started","task_id":"w","tool_use_id":"toolu_watch","description":"results","is_backgrounded":true,"task_type":"local_bash",`+session+`}`); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			if len(notifications) == 0 {
+				t.Fatal("a watch start did not notify task-list subscribers")
+			}
+			if snap := tk.Snapshot(); snap.State != task.StateRunning || snap.Background != (BackgroundCounts{Watches: 1}) {
+				t.Fatalf("snapshot = %v %+v, want running with 1 watch", snap.State, snap.Background)
+			}
+		})
+	})
 	t.Run("PrepareRecords", func(t *testing.T) {
 		t.Parallel()
 		t.Run("turn_snapshot_precedes_later_input", func(t *testing.T) {

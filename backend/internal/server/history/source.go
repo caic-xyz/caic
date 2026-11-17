@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
@@ -128,6 +129,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 		var events []Event
+		var exits []hostExit
 		for messageIndex, parsed := range record.Messages {
 			m := parsed.Message
 			index := uint32(len(events)) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
@@ -142,19 +144,30 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 				// The host settled the task, possibly after its container died
 				// without recording an exit: no open tool call can return.
 				projected = s.tracker.InterruptOpenTools(parsed.ProducerTime)
-			} else {
-				if !s.exitStatus.Observe(m) {
-					continue
-				}
+			} else if s.exitStatus.Observe(m) {
 				projected = s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			}
 			for i := range projected {
 				events = append(events, Event{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			}
+			// Every root exit ends the hosted cards, including one that projects
+			// no event: a clean exit or the exit of a requested stop. The
+			// settlement trailer ends them too: the agent process can die with
+			// its container without recording an exit.
+			if endsHost(m) {
+				exits = append(exits, hostExit{after: len(events), at: historyTime(parsed.ProducerTime.UnixMilli())})
+			}
 		}
 		encoded.Reset()
-		for i := range events {
-			s.sections.append(&events[i])
+		appended := 0
+		for _, exit := range exits {
+			for ; appended < exit.after; appended++ {
+				s.sections.append(&events[appended])
+			}
+			s.sections.hostExited(exit.at)
+		}
+		for ; appended < len(events); appended++ {
+			s.sections.append(&events[appended])
 		}
 		encoded.WriteByte('[')
 		encoder := json.NewEncoder(&encoded)
@@ -521,7 +534,7 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, th
 				continue
 			}
 			m := &e.Message
-			matches := m.NativeSubagent != nil && m.NativeSubagent.ID == id || activityOwner(&m.Source, routes, pending) == id
+			matches := m.NativeSubagent != nil && m.NativeSubagent.ID == id || m.BackgroundRetired != nil && m.BackgroundRetired.ID == id || activityOwner(&m.Source, routes, pending) == id
 			if matches && !yield(e, nil) {
 				return
 			}
@@ -630,4 +643,24 @@ func (s *Source) frames(ctx context.Context, snapshot Snapshot, first, last uint
 			offset += size
 		}
 	}
+}
+
+// endsHost reports whether m ends the root harness process: its exit, clean or
+// not, or the settlement trailer.
+func endsHost(m agent.Message) bool {
+	switch m := m.(type) {
+	case *agent.ExitMessage:
+		return !m.Source.IsChild()
+	case *agent.MetaResultMessage:
+		return true
+	default:
+		return false
+	}
+}
+
+// hostExit is the end of the root harness process, which follows the first
+// after projected events of its record.
+type hostExit struct {
+	after int
+	at    time.Time
 }

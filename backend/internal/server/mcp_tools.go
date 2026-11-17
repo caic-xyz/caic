@@ -142,7 +142,7 @@ func (m *mcpTools) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get structured task status and pending prompt identity, text, and delivery status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Fields have independent limits and explicit truncation indicators.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get structured task status, running background work, the raw task log path, and pending prompt identity, text, and delivery status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Fields have independent limits and explicit truncation indicators.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to an agent by task number. Choose steer for immediate delivery, append to preserve and extend pending input, or replace to overwrite the entire pending prompt. Queued input is delivered when waiting; append and replace are rejected once delivery starts.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's existing commits to GitHub. Push to task branch (default) or directly to main without rewriting commits.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
@@ -475,25 +475,26 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 	if err != nil {
 		return domainToolError[v1.MCPTaskDetail](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()})
 	}
-	var t v1.Task
+	var ent *taskmgr.Entry
 	if number != 0 {
-		t, err = m.taskByNumber(ctx, number)
+		ent, err = m.entryByNumber(ctx, number)
 	} else {
-		t, err = m.taskByID(ctx, id)
+		ent, err = m.entryByID(ctx, id)
 	}
 	if err != nil {
 		return domainToolError[v1.MCPTaskDetail](err)
 	}
-	out, err := taskMCPDetail(number, &t)
+	t, err := m.taskDTO(ctx, ent)
+	if err != nil {
+		return domainToolError[v1.MCPTaskDetail](err)
+	}
+	rt := mcpTaskRuntime{background: ent.Task().BackgroundActivity(), logPath: ent.LogPath.Get()}
+	out, err := taskMCPDetail(number, &t, &rt)
 	if err != nil {
 		return domainToolError[v1.MCPTaskDetail](err)
 	}
 	// Repository probes happen only when explicitly requested.
 	if call.Arguments.IncludeDiffstat {
-		ent, ok := inspectableTaskEntry(ctx, m.taskSvc, t.ID)
-		if !ok {
-			return domainToolError[v1.MCPTaskDetail](taskNotFoundError())
-		}
 		idx, err := m.taskSvc.taskDiffIndex(ctx, ent)
 		if err != nil {
 			msg, code := err.Error(), api.CodeInternalError
@@ -513,7 +514,7 @@ func (m *mcpTools) handleTaskGetDetail(ctx context.Context, call *mcp.ToolReques
 		}
 	}
 	res := mcp.TypedToolResult(out)
-	if len(out.TruncatedFields) > 0 || out.ChangedPathsTruncated ||
+	if len(out.TruncatedFields) > 0 || out.ChangedPathsTruncated || out.BackgroundItemsTruncated ||
 		(out.PendingInput != nil && (out.PendingInput.TextTruncated || out.PendingInput.ErrorTruncated)) ||
 		(out.Diffstat != nil && out.Diffstat.Truncated) {
 		res.Meta = mcp.MetaObject{mcpTruncatedMetaKey: true}
@@ -881,21 +882,18 @@ func (m *mcpTools) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, fie
 	return mcp.TextToolResult(fmt.Sprintf(format, num))
 }
 
-func (m *mcpTools) taskByNumber(ctx context.Context, num int) (v1.Task, error) {
+func (m *mcpTools) entryByNumber(ctx context.Context, num int) (*taskmgr.Entry, error) {
 	_, entry, err := m.entryByTaskRef(ctx, mcpschema.TaskReference(strconv.Itoa(num)), false)
-	if err != nil {
-		return v1.Task{}, err
-	}
-	return m.taskDTO(ctx, entry)
+	return entry, err
 }
 
-func (m *mcpTools) taskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
+func (m *mcpTools) entryByID(ctx context.Context, id ksid.ID) (*taskmgr.Entry, error) {
 	entry, ok := inspectableTaskEntry(ctx, m.taskSvc, id)
 	if !ok {
-		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
 	}
 	m.taskSvc.focusTask(ctx, id)
-	return m.taskDTO(ctx, entry)
+	return entry, nil
 }
 
 func (m *mcpTools) taskDTO(ctx context.Context, entry *taskmgr.Entry) (v1.Task, error) {

@@ -79,11 +79,27 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 // later running observation from a resumed host reopens the card.
 func (t *NativeSubagentTimeline) HostExited() {
 	for _, id := range t.order {
-		if s := t.byID[id]; s.Status == NativeSubagentStatusRunning {
-			s.Status = NativeSubagentStatusUnknown
-			t.byID[id] = s
-		}
+		t.Retire(id)
 	}
+}
+
+// Retire makes a running card unknown, as HostExited does for every card, when
+// the harness stops reporting it without an outcome. It reports whether the
+// card changed. A later running observation can reopen the card.
+func (t *NativeSubagentTimeline) Retire(id string) bool {
+	s, ok := t.byID[id]
+	if !ok || s.Status != NativeSubagentStatusRunning {
+		return false
+	}
+	s.Status = NativeSubagentStatusUnknown
+	t.byID[id] = s
+	return true
+}
+
+// Subagent returns the card with the identity, if any.
+func (t *NativeSubagentTimeline) Subagent(id string) (NativeSubagent, bool) {
+	s, ok := t.byID[id]
+	return s, ok
 }
 
 // Subagents returns the replayed cards in first-observed order. The returned
@@ -188,6 +204,7 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 		old.OutputRef = observed.OutputRef
 	}
 	old.Watch = old.Watch || observed.Watch
+	old.WakesAgent = old.WakesAgent || observed.WakesAgent
 	if old.ExitCode == nil && observed.ExitCode != nil {
 		code := *observed.ExitCode
 		old.ExitCode = &code
@@ -203,12 +220,36 @@ func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
 	t.byID[observed.ID] = old
 }
 
-// Active returns the number of detached commands reported as running,
-// excluding watches: a watch waits on events and performs no work.
+// Active returns the number of running commands that keep the task running:
+// not watches, which wait on events and perform no work, and only commands
+// whose end wakes the agent.
 func (t *BackgroundCommandTimeline) Active() int {
 	active := 0
 	for _, s := range t.byID {
+		if s.Status == BackgroundCommandStatusRunning && !s.Watch && s.WakesAgent {
+			active++
+		}
+	}
+	return active
+}
+
+// Running returns the number of running commands that are not watches,
+// whether or not their end wakes the agent.
+func (t *BackgroundCommandTimeline) Running() int {
+	running := 0
+	for _, s := range t.byID {
 		if s.Status == BackgroundCommandStatusRunning && !s.Watch {
+			running++
+		}
+	}
+	return running
+}
+
+// ActiveWatches returns the number of watches reported as running.
+func (t *BackgroundCommandTimeline) ActiveWatches() int {
+	active := 0
+	for _, s := range t.byID {
+		if s.Status == BackgroundCommandStatusRunning && s.Watch {
 			active++
 		}
 	}
@@ -218,12 +259,28 @@ func (t *BackgroundCommandTimeline) Active() int {
 // HostExited retires active commands without claiming a successful outcome.
 // The host can no longer report whether its detached commands finished.
 func (t *BackgroundCommandTimeline) HostExited() {
-	for id, s := range t.byID {
-		if s.Status == BackgroundCommandStatusRunning {
-			s.Status = BackgroundCommandStatusUnknown
-			t.byID[id] = s
-		}
+	for _, id := range t.order {
+		t.Retire(id)
 	}
+}
+
+// Retire makes a running command unknown, as HostExited does for every
+// command, when the harness stops reporting it without an outcome. It reports
+// whether the card changed.
+func (t *BackgroundCommandTimeline) Retire(id string) bool {
+	s, ok := t.byID[id]
+	if !ok || s.Status != BackgroundCommandStatusRunning {
+		return false
+	}
+	s.Status = BackgroundCommandStatusUnknown
+	t.byID[id] = s
+	return true
+}
+
+// Command returns the card with the identity, if any.
+func (t *BackgroundCommandTimeline) Command(id string) (BackgroundCommand, bool) {
+	s, ok := t.byID[id]
+	return s, ok
 }
 
 // Commands returns the replayed cards in first-observed order. The returned

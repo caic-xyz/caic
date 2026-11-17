@@ -1,4 +1,4 @@
-// Normalizes Codex spawn and coordination observations using native receiver identities.
+// Normalizes Codex spawn and coordination observations using native receiver identities, and processes that outlive their turn.
 
 package codex
 
@@ -201,6 +201,118 @@ func (n *nativeSubagents) observeCollabToolCall(item *codex.CollabAgentToolCallI
 		out = append(out, n.timeline.Observe(&s)...)
 	}
 	return out
+}
+
+// backgroundCommands folds unified-exec processes that outlive their turn
+// into canonical background commands. Codex runs every command as a
+// unified-exec process; when the turn ends while the process still runs, the
+// process keeps running and Codex reports its exit later with an item/completed
+// that carries the original turn ID. A command that settles inside its turn
+// never becomes a card. Child threads follow the same lifecycle: their
+// processes report their exits, including signal exits when the child shuts
+// down, and a host exit retires the rest.
+//
+// Codex starts no turn when such a process ends, so a card never wakes the
+// agent and never keeps the task running.
+//
+// Only the full projection carries the item payload; the metadata projection
+// tracks no command.
+type backgroundCommands struct {
+	timeline agent.BackgroundCommandTimeline
+	running  []runningCommand // Command items started and not completed, in start order.
+}
+
+// parse folds one routed record. The caller emits a command's completion after
+// the late tool result of the same record.
+func (b *backgroundCommands) parse(method codex.Method, record *decodedItem) ([]agent.Message, error) {
+	if record.turnCompleted != nil {
+		return b.detach(record.source.ThreadID, record.source.TurnID), nil
+	}
+	if record.typ != codex.ItemTypeCommandExecution || record.raw == nil {
+		return nil, nil
+	}
+	key := streamItem{threadID: record.source.ThreadID, itemID: record.source.ItemID}
+	switch method {
+	case codex.MethodItemStarted:
+		var item codex.CommandExecutionItem
+		if err := json.Unmarshal(record.raw, &item); err != nil {
+			return nil, err
+		}
+		// A relay replay can repeat the start of an item the wire already holds.
+		c := runningCommand{item: key, turnID: record.source.TurnID, label: item.Command}
+		if i := slices.IndexFunc(b.running, func(c runningCommand) bool { return c.item == key }); i >= 0 {
+			b.running[i] = c
+		} else {
+			b.running = append(b.running, c)
+		}
+		return nil, nil
+	case codex.MethodItemCompleted:
+		i := slices.IndexFunc(b.running, func(c runningCommand) bool { return c.item == key })
+		if i < 0 {
+			return nil, nil
+		}
+		detached := b.running[i].detached
+		b.running = slices.Delete(b.running, i, i+1)
+		if !detached {
+			return nil, nil
+		}
+		var item codex.CommandExecutionItem
+		if err := json.Unmarshal(record.raw, &item); err != nil {
+			return nil, err
+		}
+		s := agent.BackgroundCommand{ID: codexCommandIdentity(key), Status: codexBackgroundCommandStatus(item.Status), ExitCode: item.ExitCode}
+		return b.timeline.Observe(&s), nil
+	default:
+		return nil, nil
+	}
+}
+
+// detach marks the running commands of a completed turn as background
+// commands.
+func (b *backgroundCommands) detach(threadID, turnID string) []agent.Message {
+	var out []agent.Message
+	for i := range b.running {
+		c := &b.running[i]
+		if c.detached || c.item.threadID != threadID || c.turnID != turnID {
+			continue
+		}
+		c.detached = true
+		s := agent.BackgroundCommand{ID: codexCommandIdentity(c.item), Label: c.label, Status: agent.BackgroundCommandStatusRunning, ToolUseID: c.item.itemID}
+		out = append(out, b.timeline.Observe(&s)...)
+	}
+	return out
+}
+
+// reset forgets the commands of a Codex process that a new one replaced; their
+// exits can no longer reach the wire.
+func (b *backgroundCommands) reset() {
+	b.running = nil
+}
+
+// runningCommand is one command item in flight.
+type runningCommand struct {
+	item     streamItem
+	turnID   string
+	label    string
+	detached bool // Its turn completed: it is a background command card.
+}
+
+// codexCommandIdentity is the canonical card identity for a Codex command
+// item. Item IDs are unique only within their thread.
+func codexCommandIdentity(item streamItem) string {
+	return "codex:exec:" + item.threadID + ":" + item.itemID
+}
+
+// codexBackgroundCommandStatus maps a completed command item's status.
+func codexBackgroundCommandStatus(status codex.CommandExecutionStatus) agent.BackgroundCommandStatus {
+	switch status {
+	case codex.CommandExecutionStatusCompleted:
+		return agent.BackgroundCommandStatusCompleted
+	case codex.CommandExecutionStatusFailed, codex.CommandExecutionStatusDeclined:
+		return agent.BackgroundCommandStatusFailed
+	default:
+		return agent.BackgroundCommandStatusUnknown
+	}
 }
 
 // codexThreadIdentity is the canonical card identity for a Codex agent thread.

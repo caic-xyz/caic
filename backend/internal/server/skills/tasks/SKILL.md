@@ -18,7 +18,10 @@ repository's branch, upstream, ahead/behind counts, local and missing upstream
 commits, and committed and uncommitted file diffstats, including binary sizes.
 Check field truncation indicators before treating previews as complete;
 `diffstat.totals` includes omitted rows. `pendingInput` exposes the queued
-prompt's ID, text, and delivery status. The text `result` is only a short summary.
+prompt's ID, text, and delivery status. `background` counts running commands,
+watches, and agents, and `backgroundItems` lists them; commands and agents keep
+a task running after its turn ends, watches do not. `logPath` is the raw task
+log on the caic server host. The text `result` is only a short summary.
 Use your stable task ID to inspect your own workspace.
 
 Use `agent_last_message` to check what a

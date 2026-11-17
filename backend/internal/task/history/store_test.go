@@ -1065,6 +1065,10 @@ func TestStore(t *testing.T) {
 					if calls != 1 || len(loaded.Timeline) != 3 {
 						t.Fatalf("native parses=%d,timeline=%#v", calls, loaded.Timeline)
 					}
+					// The trailer stays out of the timeline but marks where its run ended.
+					if !slices.Equal(loaded.Settlements, []int{3}) {
+						t.Fatalf("settlements = %v, want [3]", loaded.Settlements)
+					}
 					if session, ok := loaded.Timeline[0].Message.(*agent.MetaSessionMessage); !ok || session.SessionID != "session-1" {
 						t.Fatalf("restoration=%#v", loaded.Timeline[0].Message)
 					}

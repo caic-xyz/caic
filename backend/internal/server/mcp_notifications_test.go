@@ -100,7 +100,7 @@ func TestNotificationFeed(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, id, agent.Prompt{Text: "Resume task"}, "claude")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{Status: agent.RateLimitStatusRejected, ResetsAt: time.Now().Add(time.Hour), QuotaProvider: agent.QuotaProviderAnthropic, RateLimitType: "fivehour"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{Status: agent.RateLimitStatusRejected, ResetsAt: time.Now().Add(time.Hour), QuotaProvider: agent.QuotaProviderAnthropic, RateLimitType: "fivehour"}}), nil)
 			tk.SetState(taskstate.StateWaiting)
 			insertTestTask(s, id, tk)
 			feed := newNotificationFeed()

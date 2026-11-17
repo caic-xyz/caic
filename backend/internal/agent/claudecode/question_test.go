@@ -521,7 +521,7 @@ func TestWireFormat(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 					pending := tk.PendingUserActions()
 					if len(pending) != 1 || pending[0].RequestID != "request" {
 						t.Fatalf("attempt closed pending Ask: %#v", pending)
@@ -550,7 +550,7 @@ func TestWireFormat(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					restored.SeedTimelineParts(nil, agenttest.TimedMessages(history))
+					restored.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 					if pending := restored.PendingUserActions(); len(pending) != 0 {
 						t.Fatalf("completed retry did not close Ask: %#v", pending)
 					}

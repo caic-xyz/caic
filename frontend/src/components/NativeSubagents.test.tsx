@@ -255,6 +255,10 @@ describe("background summaries", () => {
     setActivity({ ...command, status: "completed", exitCode: 0 });
     expect(chip).toHaveTextContent("exit 0");
   });
+  it("says a running watch is watching", () => {
+    render(() => <BackgroundCommandStatusChip command={{ ...command, watch: true }} settled={false} />);
+    expect(screen.getByTestId("background-command-chip")).toHaveTextContent(/^watching$/);
+  });
 });
 it("reloads the finite actor once when a delayed manifest resolves earlier delegation ownership", async () => {
   const start = lifecycle(1, "running", "");

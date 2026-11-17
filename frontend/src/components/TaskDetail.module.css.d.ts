@@ -97,6 +97,8 @@ declare const classes: {
   readonly "resultSuccess": string;
   readonly "resultText": string;
   readonly "resultTiming": string;
+  readonly "reveal-fade": string;
+  readonly "revealed": string;
   readonly "safetyWarning": string;
   readonly "sessionElided": string;
   readonly "sessionElidedExpanded": string;

@@ -164,6 +164,9 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
     case "agent":
     case "subagent":
       return typeof input.description === "string" ? input.description : "";
+    case "monitor":
+      if (typeof input.description === "string" && input.description) return input.description;
+      return typeof input.command === "string" ? input.command.trimStart() : "";
     case "webfetch":
       return typeof input.url === "string" ? input.url : "";
     case "websearch":

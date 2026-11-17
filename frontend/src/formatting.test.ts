@@ -103,6 +103,11 @@ describe("toolCallDetail", () => {
     expect(toolCallDetail("subagent", input)).toBe("Review the diff");
   });
 
+  it("names a Monitor watch by its description, else its command", () => {
+    expect(toolCallDetail("Monitor", { description: "test results", command: "tail -f log" })).toBe("test results");
+    expect(toolCallDetail("Monitor", { command: "  tail -f log" })).toBe("tail -f log");
+  });
+
   it("summarises Pi path-based file tools", () => {
     expect(toolCallDetail("read", { path: "gomode/docs/SERVER_LIBRARY.md" })).toBe("SERVER_LIBRARY.md");
     expect(

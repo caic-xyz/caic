@@ -1158,8 +1158,12 @@ func TestWireFormat(t *testing.T) {
 				t.Fatalf("new authoritative root treated as child: %+v", source)
 			}
 			msgs, err = w.ParseOutput([]byte(`{"method":"turn/completed","params":{"threadId":"` + id + `","turn":{"id":"turn","status":"completed"}}}`))
-			if err != nil || len(msgs) != 1 {
+			// The still-running command outlives the turn and follows its result.
+			if err != nil || len(msgs) != 2 {
 				t.Fatalf("new root completion suppressed: %v %v", msgs, err)
+			}
+			if _, ok := msgs[0].(*agent.ResultMessage); !ok {
+				t.Fatalf("new root completion = %T, want *agent.ResultMessage", msgs[0])
 			}
 		}
 	})

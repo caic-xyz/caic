@@ -151,6 +151,8 @@ type Task struct {
 	timelineCompactPending []int                           // Final-message indexes waiting for readers to release timeline slots.
 	nativeSubagents        agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands     agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
+	backgroundStarts       map[string]backgroundStart      // First running observation of each card's current run, by card ID.
+	turnQueued             bool                            // A root TurnQueuedMessage arrived after the last root result or host exit.
 	skillReads             agent.SkillReadTracker
 
 	subs            []*sub          // active sequenced message subscribers
@@ -702,6 +704,55 @@ type Snapshot struct {
 	CIChecks           []forge.Check
 	RateLimit          RateLimit
 	TurnError          string // Latest root turn failure; empty after a successful or new turn.
+	Background         BackgroundCounts
+}
+
+// BackgroundCounts counts running background work by kind. Agents and the
+// commands whose end wakes the agent keep the task running after its turn ends;
+// watches and other commands do not.
+type BackgroundCounts struct {
+	Commands int // Running detached commands that are not watches, waking the agent or not.
+	Watches  int // Running watches, such as Claude Code's Monitor tool.
+	Agents   int // Running background native subagents.
+}
+
+// BackgroundKind classifies one running background item.
+type BackgroundKind string
+
+// Background item kinds, matching the BackgroundCounts fields.
+const (
+	BackgroundKindAgent   BackgroundKind = "agent"
+	BackgroundKindCommand BackgroundKind = "command"
+	BackgroundKindWatch   BackgroundKind = "watch"
+)
+
+// BackgroundItem is one running background card.
+type BackgroundItem struct {
+	Kind  BackgroundKind
+	Label string
+	// StartedAt is the first running observation of the card's current run,
+	// as in the task history; zero when that observation carried no time.
+	StartedAt time.Time
+}
+
+// BackgroundActivity is one consistent read of running background work.
+type BackgroundActivity struct {
+	Counts BackgroundCounts
+	Items  []BackgroundItem // Running work that Counts counts, oldest first.
+	// WakingCommands counts the running commands in Counts.Commands whose end
+	// wakes the agent: with Counts.Agents, the work that keeps the task running.
+	WakingCommands int
+	// TurnEnded reports that the last root turn has a trailing result, so only
+	// background work or a queued turn can keep the task running.
+	TurnEnded bool
+}
+
+// backgroundStart records the first running observation of a card's run. Run
+// is the subagent RunID: only a new run restarts the clock. Pauses,
+// retirements, and host exits keep it, matching the task history's StartedAt.
+type backgroundStart struct {
+	run string
+	at  time.Time
 }
 
 // RateLimit records the active quota block resolved for a task. It is retained
@@ -748,6 +799,34 @@ func (t *Task) SnapshotWithStateHistory(after uint64) (Snapshot, uint64, []State
 		}
 	}
 	return t.snapshotLocked(), t.stateSeq, history
+}
+
+// BackgroundActivity returns the running background work, its counts, and
+// whether the last root turn ended, read under one lock.
+func (t *Task) BackgroundActivity() BackgroundActivity {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	a := BackgroundActivity{Counts: t.backgroundCountsLocked(), WakingCommands: t.backgroundCommands.Active(), TurnEnded: lastAgentMessage(t.timelineViewLocked()) != nil}
+	var items []BackgroundItem
+	for _, c := range t.backgroundCommands.Commands() {
+		if c.Status != agent.BackgroundCommandStatusRunning {
+			continue
+		}
+		kind := BackgroundKindCommand
+		if c.Watch {
+			kind = BackgroundKindWatch
+		}
+		items = append(items, BackgroundItem{Kind: kind, Label: c.Label, StartedAt: t.backgroundStarts[c.ID].at})
+	}
+	subagents := t.nativeSubagents.Subagents()
+	for i := range subagents {
+		if s := &subagents[i]; s.Background && s.Status == agent.NativeSubagentStatusRunning {
+			items = append(items, BackgroundItem{Kind: BackgroundKindAgent, Label: s.Label, StartedAt: t.backgroundStarts[s.ID].at})
+		}
+	}
+	slices.SortStableFunc(items, func(a, b BackgroundItem) int { return a.StartedAt.Compare(b.StartedAt) })
+	a.Items = items
+	return a
 }
 
 // Messages returns a copy of all received agent messages.
@@ -940,17 +1019,21 @@ func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking
-//   - Trailing ResultMessage and active detached work → StateRunning
-//   - Trailing ResultMessage (no ask, no detached work) → StateWaiting
+//   - Trailing ResultMessage and active detached work or a queued turn → StateRunning
+//   - Trailing ResultMessage (no ask, no detached work, no queued turn) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
 // Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// NativeSubagentMessage, BackgroundCommandMessage, RawMessage, SyncActivityMessage) after the ResultMessage are skipped during inference. For
+// NativeSubagentMessage, BackgroundCommandMessage, BackgroundRetiredMessage, TurnQueuedMessage, RawMessage, SyncActivityMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
 // The owned durable prefix and live suffix remain logically contiguous without
 // concatenation. Both slices transfer to the task.
-func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
+//
+// settled lists, in order, the number of entries that precede each settlement
+// trailer of the log. A trailer ends the agent process there, as on the live
+// path, which can die with its container without recording an exit.
+func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage, settled []int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.timelineLenLocked() > 0 {
@@ -975,20 +1058,18 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// Live stats: Claude's TotalCostUSD is cumulative until context_cleared.
 	// Completed root metrics preserve native values or measure producer time.
 	// Token usage is always summed.
-	for _, entry := range view.Forward() {
+	next := 0
+	for i, entry := range view.Forward() {
+		for ; next < len(settled) && settled[next] <= i; next++ {
+			t.hostExitedLocked()
+		}
 		msg := entry.Message
 		t.turnMetrics.Observe(msg, entry.ProducerTime)
 		t.exitStatus.Observe(msg)
 		if msg.Provenance().IsChild() {
-			switch m := msg.(type) {
-			case *agent.NativeSubagentMessage:
-				t.nativeSubagents.Apply(&m.Subagent)
-			case *agent.BackgroundCommandMessage:
-				t.backgroundCommands.Apply(&m.Command)
-			case *agent.RateLimitMessage:
-				if !m.IsChildThreadGoal() {
-					t.recordRateLimitLocked(m)
-				}
+			t.foldBackgroundLocked(msg, entry.ProducerTime)
+			if m, ok := msg.(*agent.RateLimitMessage); ok && !m.IsChildThreadGoal() {
+				t.recordRateLimitLocked(m)
 			}
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
@@ -999,8 +1080,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		t.sessionMetadata.Apply(msg)
 		t.observeUsageLocked(msg)
 		if _, ok := msg.(*agent.ExitMessage); ok {
-			t.nativeSubagents.HostExited()
-			t.backgroundCommands.HostExited()
+			t.hostExitedLocked()
 			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
 		}
@@ -1014,10 +1094,10 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			}
 		case *agent.RateLimitMessage:
 			t.recordRateLimitLocked(m)
-		case *agent.NativeSubagentMessage:
-			t.nativeSubagents.Apply(&m.Subagent)
-		case *agent.BackgroundCommandMessage:
-			t.backgroundCommands.Apply(&m.Command)
+		case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage:
+			t.foldBackgroundLocked(m, entry.ProducerTime)
+		case *agent.TurnQueuedMessage:
+			t.turnQueued = true
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
 		case *agent.DiffStatMessage:
@@ -1026,6 +1106,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			}
 		case *agent.ResultMessage:
 			t.completedRootTurns++
+			t.turnQueued = false
 			t.planDismissed = false
 			if m.ContextWindow > 0 {
 				t.reportedContextWindow = m.ContextWindow
@@ -1040,6 +1121,9 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 		// snapshot reflecting every prior entry, so resumed replays carry the
 		// correct cost delta for the unflushed tail.
 		t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
+	}
+	for ; next < len(settled); next++ {
+		t.hostExitedLocked()
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
@@ -1695,7 +1779,66 @@ func (t *Task) snapshotLocked() Snapshot {
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
 		RateLimit:          t.rateLimit,
 		TurnError:          t.exitStatus.TurnError,
+		Background:         t.backgroundCountsLocked(),
 	}
+}
+
+func (t *Task) backgroundCountsLocked() BackgroundCounts {
+	return BackgroundCounts{
+		Commands: t.backgroundCommands.Running(),
+		Watches:  t.backgroundCommands.ActiveWatches(),
+		Agents:   t.nativeSubagents.ActiveBackground(),
+	}
+}
+
+// foldBackgroundLocked folds a background lifecycle message into the card
+// timelines and records the first running observation of each card's run.
+// Other messages are ignored.
+func (t *Task) foldBackgroundLocked(m agent.Message, at time.Time) {
+	switch m := m.(type) {
+	case *agent.NativeSubagentMessage:
+		t.nativeSubagents.Apply(&m.Subagent)
+		s, _ := t.nativeSubagents.Subagent(m.Subagent.ID)
+		t.observeBackgroundStartLocked(s.ID, s.RunID, s.Status == agent.NativeSubagentStatusRunning, at)
+	case *agent.BackgroundCommandMessage:
+		t.backgroundCommands.Apply(&m.Command)
+		c, _ := t.backgroundCommands.Command(m.Command.ID)
+		t.observeBackgroundStartLocked(c.ID, "", c.Status == agent.BackgroundCommandStatusRunning, at)
+	case *agent.BackgroundRetiredMessage:
+		t.nativeSubagents.Retire(m.ID)
+		t.backgroundCommands.Retire(m.ID)
+	}
+}
+
+// observeBackgroundStartLocked applies the task history's StartedAt rule: a
+// card's run starts at its first running observation, and only a new run
+// forgets that start.
+func (t *Task) observeBackgroundStartLocked(id, run string, running bool, at time.Time) {
+	if id == "" {
+		return
+	}
+	if s, ok := t.backgroundStarts[id]; ok {
+		if s.run == run {
+			return
+		}
+		delete(t.backgroundStarts, id)
+	}
+	// History also ignores a zero time and takes the next observation's.
+	if !running || at.IsZero() {
+		return
+	}
+	if t.backgroundStarts == nil {
+		t.backgroundStarts = make(map[string]backgroundStart)
+	}
+	t.backgroundStarts[id] = backgroundStart{run: run, at: at}
+}
+
+// hostExitedLocked ends every running card and the queued turn: the root
+// harness process hosted them and can no longer report them.
+func (t *Task) hostExitedLocked() {
+	t.nativeSubagents.HostExited()
+	t.backgroundCommands.HostExited()
+	t.turnQueued = false
 }
 
 // latestCommitSnapshot returns a copy of the most recently recorded repository
@@ -1848,12 +1991,15 @@ func (t *Task) recordStateTransition(s task.State, at time.Time) {
 
 // settledTurnStateLocked returns the state a parent turn settles into once its
 // trailing ResultMessage has arrived: asking or presenting a plan when the user
-// still owes input, running while a detached subagent or shell command is
-// active, and waiting otherwise. A watch never keeps the task running: it only
-// relays events to the agent, which can wait for the user meanwhile. A harness can end the parent turn while
-// background work continues, so a running background card keeps the task busy
-// after the parent stops producing output; a foreground card that
-// is still running then is stale evidence and falls back to waiting.
+// still owes input, running while the harness has queued a turn by itself or a
+// detached subagent or a shell command whose end wakes the agent is active, and
+// waiting otherwise. A harness can end the parent turn while background work
+// continues, so such a card keeps the task busy after the parent stops
+// producing output. When that work ends, the harness queues a turn to report
+// it; the task stays running until that turn's result or a host exit. A
+// running watch or a command whose end wakes no agent never keeps the task
+// running: the agent waits for the user meanwhile. A foreground card that is
+// still running at the result is stale evidence and falls back to waiting.
 //
 // The caller must hold t.mu.
 func (t *Task) settledTurnStateLocked() task.State {
@@ -1862,7 +2008,7 @@ func (t *Task) settledTurnStateLocked() task.State {
 		return task.StateAsking
 	case lastTurnHasExitPlan(t.timelineViewLocked()) && t.planContent != "":
 		return task.StateHasPlan
-	case t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
+	case t.turnQueued || t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
 		return task.StateRunning
 	default:
 		return task.StateWaiting
@@ -1885,9 +2031,17 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		return changed
 	}
 	switch m.(type) {
-	case *agent.MetaMessage, *agent.MetaResultMessage:
+	case *agent.MetaMessage:
 		t.mu.Unlock()
 		return false
+	case *agent.MetaResultMessage:
+		// The settlement trailer ends the agent process, which can die with its
+		// container without recording an exit. It is not part of the timeline.
+		before := t.backgroundCountsLocked()
+		t.hostExitedLocked()
+		changed := t.backgroundCountsLocked() != before
+		t.mu.Unlock()
+		return changed
 	}
 	initialState := t.state
 	initialPlanMode, initialPlanID, initialPlanContent := t.inPlanMode, t.planExitID, t.planContent
@@ -1984,6 +2138,12 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 				if t.state == task.StateAsking && lastTurnHasUnansweredAsk(t.timelineViewLocked()) {
 					break
 				}
+				// Output of a process that outlived its settled turn starts no
+				// turn, as lastAgentMessage infers on replay. The scan runs only
+				// outside a turn, so streamed output does not repeat it.
+				if _, ok := m.(*agent.ToolOutputDeltaMessage); ok && lastAgentMessage(t.timelineViewLocked()) != nil {
+					break
+				}
 				t.setState(task.StateRunning)
 			}
 		}
@@ -1994,21 +2154,29 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// delegates in the background, so a trailing ResultMessage is not enough
 	// evidence that the task is idle: a detached child keeps it running, and the
 	// last detached child settling returns it to waiting.
-	if ns, ok := m.(*agent.NativeSubagentMessage); ok {
-		t.nativeSubagents.Apply(&ns.Subagent)
-	}
-	// The root harness process hosts its native subagents, so its exit ends
-	// their observable lifecycle and they no longer keep the task running.
-	if _, ok := m.(*agent.ExitMessage); ok && !child {
-		t.nativeSubagents.HostExited()
-		t.backgroundCommands.HostExited()
-	}
-	// Detached shell checks keep the task busy after the agent ends its turn.
-	if bc, ok := m.(*agent.BackgroundCommandMessage); ok {
-		t.backgroundCommands.Apply(&bc.Command)
-	}
+	// Detached shell commands whose end wakes the agent keep the task busy after
+	// the agent ends its turn, and a card the harness stopped listing ends as on
+	// host exit.
 	switch m.(type) {
-	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.ExitMessage:
+	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.TurnQueuedMessage, *agent.ExitMessage:
+		before := t.backgroundCountsLocked()
+		t.foldBackgroundLocked(m, at)
+		switch m.(type) {
+		case *agent.ExitMessage:
+			// The root harness process hosts its native subagents, so its exit ends
+			// their observable lifecycle and they no longer keep the task running.
+			if !child {
+				t.hostExitedLocked()
+			}
+		case *agent.TurnQueuedMessage:
+			// A turn the harness queued by itself keeps the task running until its
+			// result, even when the work that queued it has already settled.
+			if !child {
+				t.turnQueued = true
+			}
+		}
+		// Counts change the card summary without a state change.
+		summaryChanged = summaryChanged || t.backgroundCountsLocked() != before
 		if (t.state == task.StateWaiting || t.state == task.StateRunning) && lastAgentMessage(t.timelineViewLocked()) != nil {
 			if next := t.settledTurnStateLocked(); next != t.state {
 				t.setState(next)
@@ -2032,6 +2200,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
 		t.completedRootTurns++
+		t.turnQueued = false
 		if len(rm.DiffStat) > 0 {
 			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
@@ -2616,11 +2785,11 @@ func turnStartTime(entries timelineEntries) time.Time {
 // neither settles a turn nor starts one.
 func nonSemanticMessage(m agent.Message) bool {
 	switch m.(type) {
-	case *agent.BackgroundCommandMessage, *agent.DiffStatMessage, *agent.ExitMessage,
+	case *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.DiffStatMessage, *agent.ExitMessage,
 		*agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.MetaSessionMessage,
 		*agent.ModelInfoMessage, *agent.NativeSubagentMessage, *agent.PendingUserActionMessage,
 		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage, *agent.SyncActivityMessage,
-		*agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage, *agent.UsageMessage:
+		*agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage, *agent.TurnQueuedMessage, *agent.UsageMessage:
 		return true
 	default:
 		return false
@@ -2631,6 +2800,11 @@ func nonSemanticMessage(m agent.Message) bool {
 // messages, and returns the trailing ResultMessage if the last semantically
 // meaningful message is a result. Returns nil if it is not a ResultMessage
 // (agent still producing output) or msgs is empty.
+//
+// It also skips tool output and results: one whose tool use is in the
+// current turn ends the scan at that use, and one that reaches a result
+// belongs to a settled turn, such as the late exit of a Codex process that
+// outlived its turn.
 func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 	var rejected map[*agent.UserInputMessage]struct{}
 	checkedInputs := false
@@ -2639,6 +2813,8 @@ func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 			continue
 		}
 		switch m := entry.Message.(type) {
+		case *agent.ToolOutputDeltaMessage, *agent.ToolResultMessage:
+			continue
 		case *agent.SystemMessage:
 			if m.Subtype == agent.SystemSubtypeInputDeliveryFailed || agent.IsInputDeliveryControl(m) {
 				continue

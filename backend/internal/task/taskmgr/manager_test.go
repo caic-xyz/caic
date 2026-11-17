@@ -1389,7 +1389,7 @@ func TestManager(t *testing.T) {
 					QuotaProvider: agent.QuotaProviderClaudeCode,
 					QuotaWindow:   "five_hour",
 					Utilization:   1,
-				}}))
+				}}), nil)
 				m.Insert(tk.ID, m.NewEntry(tk, nil))
 				_, live, unsubscribe := tk.Subscribe(m.serverCtx)
 				t.Cleanup(unsubscribe)
@@ -1556,7 +1556,7 @@ func TestManager(t *testing.T) {
 				QuotaWindow:   "7d",
 				Utilization:   0.91,
 			},
-		}))
+		}), nil)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
@@ -1594,7 +1594,7 @@ func TestManager(t *testing.T) {
 				QuotaWindow:   "7d",
 				Utilization:   -1,
 			},
-		}))
+		}), nil)
 		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
@@ -2031,7 +2031,7 @@ func TestManager(t *testing.T) {
 								t.Fatal(err)
 							}
 							adopted := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "requested")
-							adopted.SeedTimelineParts(lt.Timeline, nil)
+							adopted.SeedTimelineParts(lt.Timeline, nil, lt.Settlements)
 							applyLoadedSessionMetadata(adopted, lt)
 							if snap := adopted.Snapshot(); snap.SessionMetadata != want || snap.RequestedModel != "requested" {
 								t.Fatalf("%s adopted metadata = %+v, requested model = %q, want %+v and requested", source, snap.SessionMetadata, snap.RequestedModel, want)
@@ -2063,7 +2063,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_preserves_live_session", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.InitMessage{SessionID: "live"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.InitMessage{SessionID: "live"}}), nil)
 			applyLoadedSessionMetadata(tk, &taskhistory.LoadedTask{SessionID: "persisted"})
 			if got := tk.GetSessionID(); got != "live" {
 				t.Errorf("SessionID = %q, want live", got)
@@ -2877,7 +2877,7 @@ func TestManager(t *testing.T) {
 					},
 				},
 				&agent.ResultMessage{MessageType: "result"},
-			}))
+			}), nil)
 			logW, path, err := (taskhistory.NewStore(testLogger(), taskslog.NewStore(logDir), backends.Default("", nil))).Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
 				t.Fatal(err)
@@ -3286,7 +3286,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.TextMessage{Text: "first"}, &agent.TextMessage{Text: "second"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.TextMessage{Text: "first"}, &agent.TextMessage{Text: "second"}}), nil)
 			entry := m.NewEntry(tk, nil)
 			ctx, cancel := context.WithCancel(t.Context())
 			t.Cleanup(cancel)
@@ -3320,7 +3320,7 @@ func TestManager(t *testing.T) {
 				last,
 				&agent.TextMessage{Source: root},
 				&agent.ResultMessage{Source: root},
-			}))
+			}), nil)
 			entry := m.NewEntry(tk, nil)
 			got, err := m.LastAgentMessage(t.Context(), entry)
 			if err != nil {
@@ -3379,7 +3379,7 @@ func TestManager(t *testing.T) {
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
 				&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
-			}))
+			}), nil)
 			entry := m.NewEntry(tk, nil)
 			if _, err := m.ToolInput(t.Context(), entry, &ToolInputQuery{ToolUseID: "local"}); !errors.Is(err, ErrToolUseAmbiguous) {
 				t.Fatalf("ambiguous query = %v", err)
@@ -4062,7 +4062,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}), nil)
 
 			t.Cleanup(func() {
 				close(releaseWire)
@@ -4363,7 +4363,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(task.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}), nil)
 
 			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Revive(); err != nil {
@@ -4405,7 +4405,7 @@ func TestManager(t *testing.T) {
 			entry.LogPath.Set(path)
 			m.Insert(tk.ID, entry)
 
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "x"}}), nil)
 			firstChanged := m.Changed()
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
@@ -7166,7 +7166,7 @@ func TestLastResultText(t *testing.T) {
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", Result: "first"},
 			&agent.ResultMessage{MessageType: "result", Result: "last"},
-		}))
+		}), nil)
 		if got := lastResultText(tk); got != "last" {
 			t.Errorf("lastResultText = %q, want %q", got, "last")
 		}
@@ -7735,7 +7735,7 @@ func TestCanRecoverImportedTask(t *testing.T) {
 			if tc.exit {
 				messages = append(messages, &agent.ExitMessage{ExitCode: 1, Error: "agent failed"})
 			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 			lt := &taskhistory.LoadedTask{State: tc.state}
 			if tc.err != "" {
 				lt.LastTrailer = &task.Result{Err: errors.New(tc.err)}
@@ -7770,7 +7770,7 @@ func TestLifecycleImportedRecoveryReservation(t *testing.T) {
 	tk.SetState(task.StateFailed)
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
 	tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}))
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}), nil)
 	tk.SetState(task.StateFailed)
 	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {

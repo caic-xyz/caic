@@ -428,6 +428,20 @@ func TestToolTimingTracker(t *testing.T) {
 				t.Fatalf("native subagent = %#v", got)
 			}
 		})
+		t.Run("BackgroundLifecycle", func(t *testing.T) {
+			t.Parallel()
+			gt := NewToolTimingTracker("", harness.Claude, "", nil)
+			events := gt.ConvertMessage(2, 0, &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{
+				ID: "claude:shell:w", Label: "results", Status: agent.BackgroundCommandStatusRunning, Watch: true, WakesAgent: true,
+			}}, time.Now())
+			if len(events) != 1 || events[0].BackgroundCommand == nil || !events[0].BackgroundCommand.Watch || !events[0].BackgroundCommand.WakesAgent {
+				t.Fatalf("events = %#v, want one watch command that wakes the agent", events)
+			}
+			events = gt.ConvertMessage(3, 0, &agent.BackgroundRetiredMessage{ID: "claude:shell:w"}, time.Now())
+			if len(events) != 1 || events[0].Kind != v1.EventKindBackgroundRetired || events[0].BackgroundRetired == nil || events[0].BackgroundRetired.ID != "claude:shell:w" {
+				t.Fatalf("events = %#v, want one retirement", events)
+			}
+		})
 		t.Run("GenericConvertRawMessageFiltered", func(t *testing.T) {
 			t.Parallel()
 			gt := NewToolTimingTracker("", harness.Claude, "", nil)

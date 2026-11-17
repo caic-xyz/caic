@@ -272,6 +272,24 @@ describe("NativeActivityTracker", () => {
     expect(nativeActivityStatus(folded[0], false)).toBe("Completion not reported");
   });
 
+  it("ends a retired running card as unknown but keeps it on an unknown-status update", () => {
+    const tracker = new NativeActivityTracker();
+    const messages: EventMessage[] = [
+      event("retired", "running", 1000, { background: true }),
+      event("kept", "running", 1000, { background: true }),
+      event("kept", "unknown", 1500, {}),
+      { kind: "backgroundRetired", ts: 2000, backgroundRetired: { id: "retired" } },
+    ];
+    const folded = tracker.derive(messages);
+    expect(folded.map((a) => [a.id, a.status, a.anchorTs])).toEqual([
+      ["retired", "unknown", 2000],
+      ["kept", "running", 1000],
+    ]);
+    expect(new NativeActivityTracker().derive(messages)).toEqual(folded);
+    messages.push(event("retired", "running", 3000, {}));
+    expect(tracker.derive(messages)[0]?.status).toBe("running");
+  });
+
   it("keeps a detached launch marked after later foreground observations", () => {
     const tracker = new NativeActivityTracker();
     const folded = tracker.derive([

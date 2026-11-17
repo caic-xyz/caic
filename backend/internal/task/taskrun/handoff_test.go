@@ -52,7 +52,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 				QuotaLabel:    "Codex",
 				QuotaWindow:   "5h",
 			},
-		}))
+		}), nil)
 
 		assertHandoffGolden(t, "normal.md", BuildHandoffPrompt(tk, 0))
 	})
@@ -71,7 +71,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.UserInputMessage{Text: `Credentials: {"access_token":"oauthvalue123"}; AWS_SECRET_ACCESS_KEY: AbCd1234; Authorization: Basic dXNlcjpwYXNz`},
 			&agent.TextMessage{Text: "I used sk-assistant-secret while investigating. " + strings.Repeat("\u754c", 1200)},
 			&agent.ResultMessage{Result: "Stopped safely before printing github_pat_result_secret."},
-		}))
+		}), nil)
 
 		const maxBytes = 900
 		got := BuildHandoffPrompt(tk, maxBytes)
@@ -122,7 +122,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.ResultMessage{IsError: true, Result: "stale failure"},
 			&agent.TextMessage{Text: "The newer turn completed successfully."},
 			&agent.ResultMessage{},
-		}))
+		}), nil)
 		got := BuildHandoffPrompt(tk, 0)
 		if !strings.Contains(got, "## Latest assistant result") || !strings.Contains(got, "The newer turn completed successfully.") {
 			t.Errorf("prompt does not use the current turn result:\n%s", got)
@@ -142,7 +142,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			QuotaProvider: agent.QuotaProviderCodex,
 			QuotaLabel:    "Codex",
 			QuotaWindow:   "thread_goal",
-		}}))
+		}}), nil)
 		got := BuildHandoffPrompt(tk, 0)
 		if !strings.Contains(got, "Quota block: Codex thread_goal window rejected the request") {
 			t.Errorf("prompt does not contain no-reset quota reason:\n%s", got)
@@ -159,7 +159,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.TextMessage{Text: "most recent assistant context"},
 			&agent.ResultMessage{Result: "latest result marker"},
 			&agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "current-change.go", LinesAdded: 2}}},
-		}))
+		}), nil)
 		got := BuildHandoffPrompt(tk, 0)
 		if len(got) > defaultHandoffPromptMaxBytes {
 			t.Fatalf("prompt length = %d, want at most %d", len(got), defaultHandoffPromptMaxBytes)
@@ -184,7 +184,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.UserInputMessage{Text: "  follow-up  \n"},
 			&agent.TextMessage{Text: "  assistant context  \n"},
 			&agent.ResultMessage{Result: "  exact result  \n"},
-		}))
+		}), nil)
 		got := BuildHandoffPrompt(tk, 0)
 		for _, preserved := range []string{
 			">   indented request\n> \tcode line\n> \n",
@@ -260,7 +260,7 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 		t.Fatalf("foreign activity replaced root answer: %q", window.Value())
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Research geometry"}, harness.Antigravity, "", "")
-	tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages))
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
 	result := lastAgentMessage(tk.timelineViewLocked())
 	if result == nil || !result.IsError || !strings.Contains(result.Result, "root failure") {
 		t.Fatalf("foreign activity replaced root result: %+v", result)

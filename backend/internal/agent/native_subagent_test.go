@@ -246,18 +246,33 @@ func TestBackgroundCommandTimeline(t *testing.T) {
 	t.Run("WatchSurvivesUpdatesAndIsNotActive", func(t *testing.T) {
 		t.Parallel()
 		var timeline BackgroundCommandTimeline
-		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusRunning, Watch: true})
+		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusRunning, Watch: true, WakesAgent: true})
 		// Later task records do not repeat the spawning tool.
 		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusRunning})
-		if !timeline.Commands()[0].Watch {
-			t.Fatal("a later observation cleared Watch")
+		if got := timeline.Commands()[0]; !got.Watch || !got.WakesAgent {
+			t.Fatalf("watch = %#v, a later observation cleared Watch or WakesAgent", got)
 		}
 		if got := timeline.Active(); got != 0 {
 			t.Fatalf("Active() = %d, want 0 for a running watch", got)
 		}
-		timeline.Apply(&BackgroundCommand{ID: "work", Status: BackgroundCommandStatusRunning})
+		timeline.Apply(&BackgroundCommand{ID: "work", Status: BackgroundCommandStatusRunning, WakesAgent: true})
 		if got := timeline.Active(); got != 1 {
 			t.Fatalf("Active() = %d, want 1 for the running command", got)
+		}
+		if got := timeline.ActiveWatches(); got != 1 {
+			t.Fatalf("ActiveWatches() = %d, want 1", got)
+		}
+		timeline.Apply(&BackgroundCommand{ID: "watch", Status: BackgroundCommandStatusInterrupted})
+		if got := timeline.ActiveWatches(); got != 0 {
+			t.Fatalf("ActiveWatches() = %d, want 0 after the watch expired", got)
+		}
+	})
+	t.Run("CommandNotWakingAgentIsRunningButNotActive", func(t *testing.T) {
+		t.Parallel()
+		var timeline BackgroundCommandTimeline
+		timeline.Apply(&BackgroundCommand{ID: "server", Status: BackgroundCommandStatusRunning})
+		if active, running := timeline.Active(), timeline.Running(); active != 0 || running != 1 {
+			t.Fatalf("Active(), Running() = %d, %d, want 0, 1", active, running)
 		}
 	})
 	t.Run("TerminalIsFrozenAndResultUpgrades", func(t *testing.T) {

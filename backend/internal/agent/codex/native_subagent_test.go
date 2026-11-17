@@ -1,9 +1,11 @@
-// Tests Codex native-subagent adapter correlation over app-server wire events.
+// Tests Codex native-subagent correlation and commands that outlive their turn over app-server wire events.
 
 package codex
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/maruel/genai/providers/codex"
@@ -354,6 +356,99 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("parent turn result = %#v, want a ResultMessage", msgs)
+		}
+	})
+}
+
+func TestBackgroundCommand(t *testing.T) {
+	t.Parallel()
+	// Minimized from task 4HM3VRG10000: the agent ended its turn while its
+	// unified-exec smoke test still ran, and Codex reported the process exit
+	// 8 minutes later with the original turn ID.
+	const (
+		threadStarted = `{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}`
+		childStarted  = `{"method":"thread/started","params":{"thread":{"id":"thread-child","parentThreadId":"thread-root"}}}`
+		started       = `{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-smoke","command":"/bin/bash -lc 'go test -tags=smoke ./... > /tmp/smoke.log 2>&1'","cwd":"/src","processId":"3159","source":"unifiedExecStartup","status":"inProgress","aggregatedOutput":null,"exitCode":null,"durationMs":null},"threadId":"thread-root","turnId":"turn-1"}}`
+		idle          = `{"method":"thread/status/changed","params":{"threadId":"thread-root","status":{"type":"idle"}}}`
+		turnCompleted = `{"method":"turn/completed","params":{"threadId":"thread-root","turn":{"id":"turn-1","status":"completed"}}}`
+		completed     = `{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-smoke","command":"/bin/bash -lc 'go test -tags=smoke ./... > /tmp/smoke.log 2>&1'","cwd":"/src","processId":"3159","source":"unifiedExecStartup","status":"completed","aggregatedOutput":null,"exitCode":0,"durationMs":1663959},"threadId":"thread-root","turnId":"turn-1"}}`
+	)
+	// feed returns, per line, the background commands and results in emission
+	// order.
+	feed := func(t *testing.T, lines ...string) ([][]string, []*agent.BackgroundCommandMessage) {
+		wire := New("", nil).NewWire()
+		kinds := make([][]string, len(lines))
+		var commands []*agent.BackgroundCommandMessage
+		for i, line := range lines {
+			msgs, err := wire.ParseOutput([]byte(line))
+			if err != nil {
+				t.Fatalf("line %d: %v", i, err)
+			}
+			for _, msg := range msgs {
+				switch m := msg.(type) {
+				case *agent.BackgroundCommandMessage:
+					kinds[i] = append(kinds[i], "command:"+string(m.Command.Status))
+					commands = append(commands, m)
+				case *agent.ResultMessage:
+					kinds[i] = append(kinds[i], "result")
+				}
+			}
+		}
+		return kinds, commands
+	}
+	t.Run("OutlivesTurn", func(t *testing.T) {
+		t.Parallel()
+		kinds, commands := feed(t, threadStarted, started, idle, turnCompleted, completed)
+		if !slices.Equal(kinds[3], []string{"result", "command:running"}) || !slices.Equal(kinds[4], []string{"command:completed"}) {
+			t.Fatalf("kinds = %q, want the result, the command running, then completed", kinds)
+		}
+		running, done := commands[0].Command, commands[1].Command
+		// Codex starts no turn when the process ends.
+		if running.ID != "codex:exec:thread-root:exec-smoke" || running.ToolUseID != "exec-smoke" || running.Label != "/bin/bash -lc 'go test -tags=smoke ./... > /tmp/smoke.log 2>&1'" || running.Watch || running.WakesAgent {
+			t.Fatalf("running = %#v, want the reported command, not waking the agent", running)
+		}
+		if done.ID != running.ID || done.ExitCode == nil || *done.ExitCode != 0 {
+			t.Fatalf("completed = %#v, want exit code 0", done)
+		}
+	})
+	t.Run("Failed", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 45566775I000: the process was killed (143).
+		failed := strings.Replace(strings.Replace(completed, `"status":"completed"`, `"status":"failed"`, 1), `"exitCode":0`, `"exitCode":143`, 1)
+		_, commands := feed(t, threadStarted, started, turnCompleted, failed)
+		if len(commands) != 2 || commands[1].Command.Status != agent.BackgroundCommandStatusFailed || commands[1].Command.ExitCode == nil || *commands[1].Command.ExitCode != 143 {
+			t.Fatalf("commands = %#v, want a failed command with exit code 143", commands)
+		}
+	})
+	t.Run("SettledInTurn", func(t *testing.T) {
+		t.Parallel()
+		if _, commands := feed(t, threadStarted, started, completed, turnCompleted); len(commands) != 0 {
+			t.Fatalf("commands = %#v, want none for a command that ended in its turn", commands)
+		}
+	})
+	t.Run("ReplayedStart", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 459P2FK8M000: a relay reattach replayed the start of
+		// a command that then completed inside its turn.
+		if _, commands := feed(t, threadStarted, started, started, completed, turnCompleted); len(commands) != 0 {
+			t.Fatalf("commands = %#v, want none for a command that ended in its turn", commands)
+		}
+	})
+	t.Run("ChildThread", func(t *testing.T) {
+		t.Parallel()
+		// Minimized from task 44N5K67J2000: a child's command outlived the
+		// child's turn and Codex reported its exit on the child thread.
+		child := func(line string) string {
+			return strings.ReplaceAll(line, `"threadId":"thread-root"`, `"threadId":"thread-child"`)
+		}
+		_, commands := feed(t, threadStarted, childStarted, child(started), child(turnCompleted), child(completed))
+		if len(commands) != 2 || commands[0].Command.Status != agent.BackgroundCommandStatusRunning || commands[1].Command.Status != agent.BackgroundCommandStatusCompleted {
+			t.Fatalf("commands = %#v, want the child command running, then completed", commands)
+		}
+		for _, m := range commands {
+			if m.Command.ID != "codex:exec:thread-child:exec-smoke" || !m.Source.IsChild() || m.Source.ThreadID != "thread-child" {
+				t.Fatalf("command = %#v from %#v, want the child's thread-qualified card", m.Command, m.Source)
+			}
 		}
 	})
 }

@@ -362,10 +362,11 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, close
 // request ID counter, accumulated token usage from thread/tokenUsage/updated,
 // and the requested reasoning effort level.
 type wireFormat struct {
-	nativeSubagents nativeSubagents
-	requests        []recordedRequest // Directional parsing owns request correlation.
-	inputTurns      []recordedInputTurn
-	nextID          atomic.Int64
+	nativeSubagents    nativeSubagents
+	backgroundCommands backgroundCommands
+	requests           []recordedRequest // Directional parsing owns request correlation.
+	inputTurns         []recordedInputTurn
+	nextID             atomic.Int64
 
 	mu                sync.Mutex
 	threadID          string
@@ -727,6 +728,11 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 			return ok
 		})
 	}
+	commands, err := w.backgroundCommands.parse(codex.Method(probe.Method), &record)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, commands...)
 	native, err := w.nativeSubagents.parse(&record)
 	if err != nil {
 		return nil, err
@@ -794,6 +800,7 @@ func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
 	if codex.RequestMethod(probe.Method) == codex.RequestInitialize {
 		w.requests = nil
 		w.inputTurns = nil
+		w.backgroundCommands.reset()
 	}
 	var numericID int64
 	if json.Unmarshal(probe.ID, &numericID) == nil {

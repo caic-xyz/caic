@@ -1,4 +1,4 @@
-// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs and caic's parsers, and lists the newest harness version each harness ran.
+// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs and caic's parsers, flags unclassified Claude background tools, and lists the newest harness version each harness ran.
 package main
 
 import (
@@ -340,7 +340,7 @@ func checkFile(path string, cutoff time.Time, resolver agent.Backends) (result f
 		}
 	}
 
-	checker := &messageChecker{path: path, harness: harnessID, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method)}
+	checker := &messageChecker{path: path, harness: harnessID, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method), claudeTools: claudeBackgroundTools{names: make(map[claudeToolKey]string)}}
 	parser, err := agent.NewLogRecordParser(checker)
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
@@ -447,6 +447,7 @@ type messageChecker struct {
 	harness         string
 	line            int
 	openCodeMethods map[openCodeRequestKey]acp.Method
+	claudeTools     claudeBackgroundTools
 	findings        []finding
 }
 
@@ -459,6 +460,18 @@ func (c *messageChecker) ParseOutput(message []byte) ([]agent.Message, error) {
 func (c *messageChecker) check(message []byte, input bool) ([]agent.Message, error) {
 	if f := checkMessage(c.path, c.line, c.harness, message, input, c.openCodeMethods); f != nil {
 		c.findings = append(c.findings, *f)
+	}
+	if c.harness == "claude" && !input {
+		if err := c.claudeTools.observe(message); err != nil {
+			c.findings = append(c.findings, finding{
+				path:    c.path,
+				line:    c.line,
+				harness: c.harness,
+				dto:     "*claudecode.OutputSystemMsg",
+				err:     err,
+				hint:    "update: backend/internal/agent/claudecode/native_subagent.go",
+			})
+		}
 	}
 	return nil, nil
 }

@@ -700,5 +700,29 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await captureScreenshot(page, "desktop", "usage.png");
   await page.setViewportSize({ width: 390, height: 844 });
   await captureScreenshot(page, "mobile", "usage.png");
+
+  // Screenshot 11: Background work keeps a task running after its result; the
+  // card row and the strip above the input name it. It runs last so its task
+  // card stays out of every earlier capture.
+  // TODO: task-background.png is registered but not published. With the fixed
+  // visual clock its running chips and tool rows show "0ms". Give the scene a
+  // realistic elapsed time (advance the clock past the re-timed starts in
+  // e2e/visual.ts), then run `make screenshots-update`.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const backgroundId = await createTask("Run the checks as background commands and watch the results");
+  await expect
+    .poll(async () => (await api.getTask(backgroundId)).background)
+    .toEqual({ commands: 1, watches: 1, agents: 1 });
+  await page.goto(`/task/@${backgroundId}`);
+  await expect(page.locator(`[data-task-id="${backgroundId}"]`).getByTestId("task-card-background")).toHaveText(
+    "Background: 1 command · 1 agent · 1 watch",
+  );
+  await expect(page.getByTestId("background-strip").getByTestId("background-chip")).toHaveCount(3);
+  // The open tool group shows the command and the watch beside their chips.
+  await page.getByText(/^1\/3 tools: /).click();
+  await expect(page.getByTestId("background-command-chip").filter({ hasText: "watching" })).toBeVisible();
+  await captureScreenshot(page, "desktop", "task-background.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "task-background.png");
   await convertPngsToWebp(screenshotRoot);
 });

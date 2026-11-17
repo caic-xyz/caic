@@ -643,7 +643,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				t.Fatal(err)
 			}
 			restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "restored"}, "", "", "")
-			restored.SeedTimelineParts(nil, rows[0].Timeline)
+			restored.SeedTimelineParts(nil, rows[0].Timeline, nil)
 			if !reflect.DeepEqual(tk.Snapshot().DiffStat, restored.Snapshot().DiffStat) || !reflect.DeepEqual(tk.Snapshot().RepoStates, restored.Snapshot().RepoStates) {
 				t.Fatal("replay lost partial summary")
 			}
@@ -718,7 +718,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 						t.Fatal(err)
 					}
 					restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "restored"}, harness.Claude, "", "")
-					restored.SeedTimelineParts(nil, rows[0].Timeline)
+					restored.SeedTimelineParts(nil, rows[0].Timeline, nil)
 					live, replay := tk.Snapshot(), restored.Snapshot()
 					if !reflect.DeepEqual(live.DiffStat, replay.DiffStat) || !reflect.DeepEqual(live.RepoStates, replay.RepoStates) {
 						t.Fatalf("live %+v %+v; replay %+v %+v", live.DiffStat, live.RepoStates, replay.DiffStat, replay.RepoStates)
@@ -1066,7 +1066,7 @@ else:
 							},
 						},
 					},
-				}))
+				}), nil)
 
 				h, err := r.Reconnect(t.Context(), tk)
 				if err != nil {
@@ -1837,7 +1837,7 @@ else:
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(task.StateRunning)
 				tk.SetTitle("Stable title")
-				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}}))
+				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}}), nil)
 				provider := &titleProviderSpy{calls: make(chan struct{}, 4)}
 				tk.Provider = provider
 				_, ch, unsub := tk.Subscribe(t.Context())
@@ -1945,7 +1945,7 @@ else:
 					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 						&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 						&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
-					}))
+					}), nil)
 					tk.SetState(task.StateHasPlan)
 					changes := make(chan Snapshot, 4)
 					r.NotifyTaskChange = func() { changes <- tk.Snapshot() }
@@ -2592,7 +2592,7 @@ else:
 					NumTurns:     5,
 					DurationMs:   12345,
 				},
-			}))
+			}), nil)
 
 			result := r.Cleanup(t.Context(), tk, task.StatePurged)
 			if result.State != task.StatePurged {
@@ -2679,7 +2679,7 @@ else:
 						{Path: "b.go", LinesAdded: 5, LinesDeleted: 0},
 					},
 				},
-			}))
+			}), nil)
 
 			result := r.Cleanup(t.Context(), tk, task.StatePurged)
 			if len(result.DiffStat) != 2 {
@@ -2739,7 +2739,7 @@ else:
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
-			}))
+			}), nil)
 
 			r.Cleanup(t.Context(), tk, task.StatePurged)
 
@@ -2853,7 +2853,7 @@ else:
 				&agent.UserInputMessage{Text: "accepted"},
 				&agent.ResultMessage{},
 				&agent.ResultMessage{},
-			}))
+			}), nil)
 			tk.SetState(task.StateStopped)
 			tk.SetTitle("existing title")
 			provider := &titleProviderSpy{calls: make(chan struct{}, 1)}
@@ -2926,7 +2926,7 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "already accepted"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1"})
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}}), nil)
 			tk.SetState(task.StateStopped)
 
 			previousLog, err := r.openLog(tk)
@@ -3026,7 +3026,7 @@ else:
 					r := newTestAgentRuntimeWithRuntime(t, tc.runtime, tc.backends, logDir)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}))
+					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
 					tk.SetState(task.StateStopped)
 					log, err := r.openLog(tk)
 					if err != nil {
@@ -3072,7 +3072,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}), nil)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
 			tk.SetState(task.StateStopped)
 			log, err := r.openLog(tk)
@@ -3095,7 +3095,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}))
+			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
 			tk.SetState(task.StateStopped)
 
 			previousLog, err := r.openLog(tk)
@@ -3512,7 +3512,7 @@ func BenchmarkSeedTimeline(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		mustNewAdoptionTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimelineParts(nil, entries)
+		mustNewAdoptionTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimelineParts(nil, entries, nil)
 	}
 }
 
@@ -3527,7 +3527,7 @@ func BenchmarkBackwardMessagesLatestMatch(b *testing.B) {
 	want := &agent.ToolUseMessage{ToolUseID: "target"}
 	msgs = append(msgs, want)
 	tk := mustNewAdoptionTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark lookup"})
-	tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs))
+	tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
 	b.ReportAllocs()
 
 	for b.Loop() {

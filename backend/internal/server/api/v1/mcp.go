@@ -1,6 +1,8 @@
-// Structured task-detail responses for MCP callers, with independent field truncation metadata.
+// Structured task-detail responses for MCP callers, with background work, log location, and independent field truncation metadata.
 
 package v1
+
+import "time"
 
 // MCPTaskDetail is the structured result of the task_get_detail tool.
 type MCPTaskDetail struct {
@@ -26,7 +28,29 @@ type MCPTaskDetail struct {
 	ChangedPathsTruncated bool             `json:"changedPathsTruncated"`
 	PendingInput          *MCPPendingInput `json:"pendingInput" jsonschema:"nullable"`
 	Diffstat              *MCPTaskDiffstat `json:"diffstat,omitempty"`
-	TruncatedFields       []string         `json:"truncatedFields,omitempty"` // Scalar field names shortened or repaired for valid UTF-8.
+	Background            TaskBackground   `json:"background"`
+	// BackgroundItems lists the running work that Background counts, oldest first.
+	BackgroundItems          []MCPBackgroundItem `json:"backgroundItems"`
+	BackgroundItemsTruncated bool                `json:"backgroundItemsTruncated" jsonschema_description:"Whether items or labels were omitted or shortened"`
+	LogPath                  string              `json:"logPath,omitempty" jsonschema_description:"Raw task log path on the caic server host; absent before the log opens"`
+	TruncatedFields          []string            `json:"truncatedFields,omitempty"` // Scalar field names shortened or repaired for valid UTF-8.
+}
+
+// MCPBackgroundKind classifies running background work.
+type MCPBackgroundKind string
+
+// Background work kinds; see TaskBackground.
+const (
+	MCPBackgroundKindAgent   MCPBackgroundKind = "agent"
+	MCPBackgroundKindCommand MCPBackgroundKind = "command"
+	MCPBackgroundKindWatch   MCPBackgroundKind = "watch"
+)
+
+// MCPBackgroundItem is one running background command, watch, or agent.
+type MCPBackgroundItem struct {
+	Kind      MCPBackgroundKind `json:"kind" jsonschema:"enum=agent,enum=command,enum=watch"`
+	Label     string            `json:"label"`
+	StartedAt time.Time         `json:"startedAt,omitzero" jsonschema_description:"When caic first observed the current run; absent when unknown"`
 }
 
 // MCPPendingInputState identifies the current delivery status of a pending prompt.

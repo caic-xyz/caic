@@ -113,7 +113,7 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 		&agent.ToolUseMessage{ToolUseID: "enter", Name: "EnterPlanMode"},
 		&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 		&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
-	}))
+	}), nil)
 	tk.SetState(task.StateRunning)
 	if snap := tk.Snapshot(); snap.PlanExitID != "exit" || snap.PlanContent != "first plan" {
 		t.Fatal("fixture has no mutable visible-plan state")

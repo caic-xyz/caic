@@ -417,6 +417,10 @@ sealed interface EventKind {
         override val value = "backgroundCommand"
     }
     @Serializable
+    data object BackgroundRetired : EventKind {
+        override val value = "backgroundRetired"
+    }
+    @Serializable
     data object Log : EventKind {
         override val value = "log"
     }
@@ -477,6 +481,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "subagentEnd" -> EventKind.SubagentEnd
             "nativeSubagent" -> EventKind.NativeSubagent
             "backgroundCommand" -> EventKind.BackgroundCommand
+            "backgroundRetired" -> EventKind.BackgroundRetired
             "log" -> EventKind.Log
             "syncActivity" -> EventKind.SyncActivity
             "toolOutputDelta" -> EventKind.ToolOutputDelta
@@ -2050,6 +2055,21 @@ data class TaskRateLimit(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val resetsAt: Instant? = null,
 )
 
+/**
+ * TaskBackground counts a task's running background work. Agents and the
+ * commands whose end wakes the agent keep the task running after its turn ends;
+ * watches and other commands do not.
+ */
+@Serializable
+data class TaskBackground(
+    /** Detached commands that are not watches, waking the agent or not. */
+    val commands: Int,
+    /** Commands that only relay events, such as Claude Code's Monitor tool. */
+    val watches: Int,
+    /** Background native subagents. */
+    val agents: Int,
+)
+
 /** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
@@ -2128,6 +2148,8 @@ data class Task(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val resourceUsage: EventStats? = null,
     /** Current quota block resolved by the backend. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val rateLimit: TaskRateLimit? = null,
+    /** Running background work; absent when none runs. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val background: TaskBackground? = null,
     /** Per-task feature flags. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val gitHubToken: Boolean? = null,
 )
@@ -3155,7 +3177,27 @@ data class EventBackgroundCommand(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val exitCode: Int? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val outputRef: String? = null,
     @SerialName("toolUseID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolUseID: String? = null,
+    /**
+     * Watch marks a command that only relays events to the agent, such as
+     * Claude Code's Monitor tool. A running watch never keeps the task running.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val watch: Boolean? = null,
+    /**
+     * WakesAgent marks a command whose end the harness delivers to the agent in
+     * a turn it starts by itself. Only such a running command keeps the task
+     * running; another one stays visible while the task waits.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val wakesAgent: Boolean? = null,
 )
+
+/**
+ * EventBackgroundRetired reports that the harness stopped listing a running
+ * native subagent or background command without reporting its outcome. ID
+ * matches EventNativeSubagent.ID or EventBackgroundCommand.ID. A running card
+ * with that ID becomes unknown; other cards are unchanged.
+ */
+@Serializable
+data class EventBackgroundRetired(val id: String)
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */
 @Serializable
@@ -3304,6 +3346,7 @@ data class EventMessage(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val subagentEnd: EventSubagentEnd? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val nativeSubagent: EventNativeSubagent? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val backgroundCommand: EventBackgroundCommand? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val backgroundRetired: EventBackgroundRetired? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val log: EventLog? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val syncActivity: EventSyncActivity? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val toolOutputDelta: EventToolOutputDelta? = null,
@@ -3434,6 +3477,10 @@ data class HistoryBackgroundCommand(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val endedAt: Instant? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val exitCode: Int? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val outputRef: String? = null,
+    /** See EventBackgroundCommand.Watch. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val watch: Boolean? = null,
+    /** See EventBackgroundCommand.WakesAgent. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val wakesAgent: Boolean? = null,
 )
 
 /**

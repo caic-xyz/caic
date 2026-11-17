@@ -105,6 +105,38 @@ https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/
 it emits `spawn_agent` items from spawn begin/end events and separate `wait`,
 send-input, close, and resume items.
 
+## Background work
+
+Codex runs every command as a unified-exec process: all 117,659 command items
+in 403 local Codex logs have `source: unifiedExecStartup`, and 117,647 have a
+`processId`.
+The process can outlive its turn. Codex calls it a background terminal
+(`thread/backgroundTerminals/list`) and stops it only at session shutdown, on
+`thread/backgroundTerminals/clean`, which caic does not send, or by pruning.
+An exit watcher sends the item's `item/completed` with the original `turnId`
+when the process exits:
+https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/core/src/unified_exec/async_watcher.rs
+(`spawn_exit_watcher`). Relay replays excluded, the logs contain:
+
+- 20 root-thread commands still running at `turn/completed` (14 completed and
+  6 failed turns). 13 reported their exit 0.8 s to 18.5 h later; 7 ended with
+  the host. Their 423 `outputDelta` records arrived after the turn. In task
+  4HM3VRG10000, the final answer says the smoke suite still runs; its exit
+  arrived 8 minutes later.
+- 28 child-thread commands still running at the child's `turn/completed`: 22
+  reported their exit, 9 of them by a signal (exit code 130, 137, or 143), and
+  6 never did: 4 until the host exit and 2 in logs without an exit record.
+
+`native_subagent.go` maps a root or child command that outlives its turn to
+a background command, keyed by thread and item. caic opts out of
+`item/commandExecution/terminalInteraction`, so no log contains one.
+
+Codex starts no turn by itself. Of 3,168 root `turn/started` records, 3,162
+have a `turn/start` response; the other 6 are `thread/compact/start`
+compactions that caic requested. A process exit starts no turn, so the card
+does not wake the agent and does not keep the task running: in task
+44PSC62MQ000, a `sudo` password prompt stayed open across 48 turns.
+
 ## References
 
 Source code:

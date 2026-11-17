@@ -1,4 +1,4 @@
-// Compact sidebar task card with container resource levels and per-repository Git markers.
+// Compact sidebar task card with background-work counts, container resource levels, and per-repository Git markers.
 
 import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -21,6 +21,7 @@ import type {
   RuntimeInstance,
   TaskRateLimit,
   TaskRepo,
+  TaskBackground,
   TaskState,
   SyncTarget,
 } from "@sdk/types.gen";
@@ -34,6 +35,7 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
+import { backgroundSummary } from "../backgroundActivity";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
@@ -80,6 +82,8 @@ export interface TaskCardProps {
   gitHubToken?: boolean;
   forgePR?: number;
   ciStatus?: CIStatus;
+  /** Running background work, which explains a running task after its result. */
+  background?: TaskBackground;
   ciChecks?: ForgeCheck[];
   autoFixPR?: boolean;
   rateLimit?: TaskRateLimit;
@@ -535,6 +539,14 @@ export default function TaskCard(props: TaskCardProps) {
             </div>
           );
         })()}
+
+        <Show when={backgroundSummary(props.background)}>
+          {(text) => (
+            <div class={styles.meta} data-testid="task-card-background">
+              {text()}
+            </div>
+          )}
+        </Show>
 
         {/* Line 3: harness · model · effort · tokens */}
         <Show when={props.harness || props.model}>

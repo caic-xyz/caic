@@ -73,6 +73,21 @@ an independent native session and retaining caic's source-task lineage.
 The separate discovery scenario uses actual temporary md instances and custom
 storage beneath the persistent `.dsh` mount, without inference prompts.
 
+No dsh work outlives a turn in the local logs. The 3 local dsh logs hold 24
+prompts, all answered with `end_turn`, and no `session/update` outside a
+prompt. The ACP prompt settles only after the root agent and its subagent tree
+are idle:
+https://github.com/deepseek-ai/deepseek-harness/blob/39163dd30f703a79079e2d2446545cff3c453738/packages/acp/acp/src/session.ts.
+In task 4RPPHQEJQ000, the `subagent` call started the child at record 1142,
+the parent reported its completion at 1147, and the prompt response followed
+at 1152.
+
+`bash` with `run_in_background` (1 call) returns `started background job
+<id>`, and dsh moves a foreground command past its timeout to a background
+job. `job_kill` (1 call) returns only `requested cancellation of job <id>`.
+No ACP record reports a job's end, so caic does not map jobs. The recorded job
+started and was killed inside one prompt.
+
 Authoritative protocol sources:
 - https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/acp/acp
 - https://github.com/maruel/genai/tree/main/providers/dsh

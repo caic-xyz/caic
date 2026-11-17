@@ -93,7 +93,12 @@ function NativeAgentDetails(props: { activity: HistoryActivity; renderTranscript
     if (!props.renderTranscript) return [];
     const activity = props.activity;
     const grouped = grouper.group(
-      body.messages().filter((event) => event.kind !== "nativeSubagent" && event.kind !== "backgroundCommand"),
+      body
+        .messages()
+        .filter(
+          (event) =>
+            event.kind !== "nativeSubagent" && event.kind !== "backgroundCommand" && event.kind !== "backgroundRetired",
+        ),
     );
     return aggregateMessageGroups(nativeTerminal(activity.status) ? grouper.finish() : grouped);
   });
@@ -175,7 +180,8 @@ export default function NativeAgents(props: {
 
 // BackgroundCommandStatusChip is the compact tool-row indicator: it resolves a
 // detached shell's outcome instead of leaving a perpetual "running in
-// background" badge on the tool call that spawned it.
+// background" badge on the tool call that spawned it. A running watch only
+// relays events, so it says "watching".
 export function BackgroundCommandStatusChip(props: { command: HistoryBackgroundCommand; settled: boolean }) {
   return (
     <span class={styles.status} data-state={props.command.status} data-testid="background-command-chip">
@@ -190,7 +196,7 @@ export function BackgroundCommandStatusChip(props: { command: HistoryBackgroundC
           </Show>
         }
       >
-        running in background
+        {props.command.watch ? "watching" : "running in background"}
       </Show>
     </span>
   );

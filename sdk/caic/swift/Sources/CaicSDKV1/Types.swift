@@ -231,6 +231,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let SubagentEnd = EventKind("subagentEnd")
     public static let NativeSubagent = EventKind("nativeSubagent")
     public static let BackgroundCommand = EventKind("backgroundCommand")
+    public static let BackgroundRetired = EventKind("backgroundRetired")
     public static let Log = EventKind("log")
     public static let SyncActivity = EventKind("syncActivity")
     public static let ToolOutputDelta = EventKind("toolOutputDelta")
@@ -2165,6 +2166,24 @@ public struct TaskRateLimit: Codable {
     }
 }
 
+/// TaskBackground counts a task's running background work. Agents and the
+/// commands whose end wakes the agent keep the task running after its turn ends;
+/// watches and other commands do not.
+public struct TaskBackground: Codable {
+    /// Detached commands that are not watches, waking the agent or not.
+    public let commands: Int
+    /// Commands that only relay events, such as Claude Code's Monitor tool.
+    public let watches: Int
+    /// Background native subagents.
+    public let agents: Int
+
+    public init(commands: Int, watches: Int, agents: Int) {
+        self.commands = commands
+        self.watches = watches
+        self.agents = agents
+    }
+}
+
 /// Task is the JSON representation sent to the frontend.
 public struct Task: Codable {
     public let pendingInput: PendingInput?
@@ -2242,6 +2261,8 @@ public struct Task: Codable {
     public let resourceUsage: EventStats?
     /// Current quota block resolved by the backend.
     public let rateLimit: TaskRateLimit?
+    /// Running background work; absent when none runs.
+    public let background: TaskBackground?
     /// Per-task feature flags.
     public let gitHubToken: Bool?
 
@@ -2301,10 +2322,11 @@ public struct Task: Codable {
         case runtime
         case resourceUsage
         case rateLimit
+        case background
         case gitHubToken
     }
 
-    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, turnError: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, gitHubToken: Bool? = nil) {
+    public init(pendingInput: PendingInput?, id: String, initialPrompt: String, title: String, repos: [TaskRepo]? = nil, state: TaskState, stateUpdatedAt: ISOTimestamp, diffStat: DiffStat? = nil, repoStates: [GitRepositoryState]? = nil, costUSD: Double, costKnown: Bool, costComplete: Bool, duration: Double, numTurns: Int, cumulativeInputTokens: Int, cumulativeOutputTokens: Int, cumulativeCacheCreationInputTokens: Int, cumulativeCacheReadInputTokens: Int, activeInputTokens: Int, activeCacheReadTokens: Int, cacheTTLSeconds: Int? = nil, cacheExpiresAt: ISOTimestamp? = nil, stoppedDiskUsedBytes: Int, contextUsed: Int? = nil, contextWindowLimit: Int, autoCompactTokenLimit: Int, error: String? = nil, turnError: String? = nil, startupFailure: TaskStartupFailure? = nil, result: String? = nil, forgeOwner: String? = nil, forgeRepo: String? = nil, forgePR: Int? = nil, forgePRState: ForgePRState? = nil, forgeIssue: Int? = nil, ciStatus: CIStatus? = nil, ciChecks: [ForgeCheck]? = nil, owner: String? = nil, forkedFromTaskID: String? = nil, parentTaskID: String? = nil, caicMCP: Bool? = nil, harness: Harness, requestedModel: String? = nil, requestedEffort: String? = nil, reportedModel: String? = nil, reportedEffort: String? = nil, agentVersion: String? = nil, sessionID: String? = nil, startedAt: ISOTimestamp? = nil, turnStartedAt: ISOTimestamp? = nil, inPlanMode: Bool? = nil, currentPlan: TaskPlan? = nil, runtime: RuntimeInstance, resourceUsage: EventStats? = nil, rateLimit: TaskRateLimit? = nil, background: TaskBackground? = nil, gitHubToken: Bool? = nil) {
         self.pendingInput = pendingInput
         self.id = id
         self.initialPrompt = initialPrompt
@@ -2360,6 +2382,7 @@ public struct Task: Codable {
         self.runtime = runtime
         self.resourceUsage = resourceUsage
         self.rateLimit = rateLimit
+        self.background = background
         self.gitHubToken = gitHubToken
     }
 
@@ -2420,6 +2443,7 @@ public struct Task: Codable {
         self.runtime = try c.decode(RuntimeInstance.self, forKey: .runtime)
         self.resourceUsage = try c.decodeIfPresent(EventStats.self, forKey: .resourceUsage)
         self.rateLimit = try c.decodeIfPresent(TaskRateLimit.self, forKey: .rateLimit)
+        self.background = try c.decodeIfPresent(TaskBackground.self, forKey: .background)
         self.gitHubToken = try c.decodeIfPresent(Bool.self, forKey: .gitHubToken)
     }
 
@@ -2480,6 +2504,7 @@ public struct Task: Codable {
         try c.encode(self.runtime, forKey: .runtime)
         try c.encodeIfPresent(self.resourceUsage, forKey: .resourceUsage)
         try c.encodeIfPresent(self.rateLimit, forKey: .rateLimit)
+        try c.encodeIfPresent(self.background, forKey: .background)
         try c.encodeIfPresent(self.gitHubToken, forKey: .gitHubToken)
     }
 }
@@ -4644,8 +4669,15 @@ public struct EventBackgroundCommand: Codable {
     public let exitCode: Int?
     public let outputRef: String?
     public let toolUseID: String?
+    /// Watch marks a command that only relays events to the agent, such as
+    /// Claude Code's Monitor tool. A running watch never keeps the task running.
+    public let watch: Bool?
+    /// WakesAgent marks a command whose end the harness delivers to the agent in
+    /// a turn it starts by itself. Only such a running command keeps the task
+    /// running; another one stays visible while the task waits.
+    public let wakesAgent: Bool?
 
-    public init(id: String, label: String? = nil, status: String, result: String? = nil, exitCode: Int? = nil, outputRef: String? = nil, toolUseID: String? = nil) {
+    public init(id: String, label: String? = nil, status: String, result: String? = nil, exitCode: Int? = nil, outputRef: String? = nil, toolUseID: String? = nil, watch: Bool? = nil, wakesAgent: Bool? = nil) {
         self.id = id
         self.label = label
         self.status = status
@@ -4653,6 +4685,20 @@ public struct EventBackgroundCommand: Codable {
         self.exitCode = exitCode
         self.outputRef = outputRef
         self.toolUseID = toolUseID
+        self.watch = watch
+        self.wakesAgent = wakesAgent
+    }
+}
+
+/// EventBackgroundRetired reports that the harness stopped listing a running
+/// native subagent or background command without reporting its outcome. ID
+/// matches EventNativeSubagent.ID or EventBackgroundCommand.ID. A running card
+/// with that ID becomes unknown; other cards are unchanged.
+public struct EventBackgroundRetired: Codable {
+    public let id: String
+
+    public init(id: String) {
+        self.id = id
     }
 }
 
@@ -4869,6 +4915,7 @@ public struct EventMessage: Codable {
     public let subagentEnd: EventSubagentEnd?
     public let nativeSubagent: EventNativeSubagent?
     public let backgroundCommand: EventBackgroundCommand?
+    public let backgroundRetired: EventBackgroundRetired?
     public let log: EventLog?
     public let syncActivity: EventSyncActivity?
     public let toolOutputDelta: EventToolOutputDelta?
@@ -4878,7 +4925,7 @@ public struct EventMessage: Codable {
     public let commitSnapshot: EventCommitSnapshot?
     public let skillLoad: EventSkillLoad?
 
-    public init(source: EventMessageSource? = nil, kind: EventKind, ts: Int, `init`: EventInit? = nil, text: EventText? = nil, textDelta: EventTextDelta? = nil, toolUse: EventToolUse? = nil, toolResult: EventToolResult? = nil, ask: EventAsk? = nil, usage: EventUsage? = nil, result: EventResult? = nil, system: EventSystem? = nil, userInput: Prompt? = nil, todo: EventTodo? = nil, diffStat: EventDiffStat? = nil, error: EventError? = nil, thinking: EventThinking? = nil, thinkingDelta: EventThinkingDelta? = nil, subagentStart: EventSubagentStart? = nil, subagentEnd: EventSubagentEnd? = nil, nativeSubagent: EventNativeSubagent? = nil, backgroundCommand: EventBackgroundCommand? = nil, log: EventLog? = nil, syncActivity: EventSyncActivity? = nil, toolOutputDelta: EventToolOutputDelta? = nil, widget: EventWidget? = nil, widgetDelta: EventWidgetDelta? = nil, rateLimit: EventRateLimit? = nil, commitSnapshot: EventCommitSnapshot? = nil, skillLoad: EventSkillLoad? = nil) {
+    public init(source: EventMessageSource? = nil, kind: EventKind, ts: Int, `init`: EventInit? = nil, text: EventText? = nil, textDelta: EventTextDelta? = nil, toolUse: EventToolUse? = nil, toolResult: EventToolResult? = nil, ask: EventAsk? = nil, usage: EventUsage? = nil, result: EventResult? = nil, system: EventSystem? = nil, userInput: Prompt? = nil, todo: EventTodo? = nil, diffStat: EventDiffStat? = nil, error: EventError? = nil, thinking: EventThinking? = nil, thinkingDelta: EventThinkingDelta? = nil, subagentStart: EventSubagentStart? = nil, subagentEnd: EventSubagentEnd? = nil, nativeSubagent: EventNativeSubagent? = nil, backgroundCommand: EventBackgroundCommand? = nil, backgroundRetired: EventBackgroundRetired? = nil, log: EventLog? = nil, syncActivity: EventSyncActivity? = nil, toolOutputDelta: EventToolOutputDelta? = nil, widget: EventWidget? = nil, widgetDelta: EventWidgetDelta? = nil, rateLimit: EventRateLimit? = nil, commitSnapshot: EventCommitSnapshot? = nil, skillLoad: EventSkillLoad? = nil) {
         self.source = source
         self.kind = kind
         self.ts = ts
@@ -4901,6 +4948,7 @@ public struct EventMessage: Codable {
         self.subagentEnd = subagentEnd
         self.nativeSubagent = nativeSubagent
         self.backgroundCommand = backgroundCommand
+        self.backgroundRetired = backgroundRetired
         self.log = log
         self.syncActivity = syncActivity
         self.toolOutputDelta = toolOutputDelta
@@ -5117,8 +5165,12 @@ public struct HistoryBackgroundCommand: Codable {
     public let endedAt: ISOTimestamp?
     public let exitCode: Int?
     public let outputRef: String?
+    /// See EventBackgroundCommand.Watch.
+    public let watch: Bool?
+    /// See EventBackgroundCommand.WakesAgent.
+    public let wakesAgent: Bool?
 
-    public init(id: String, source: EventMessageSource? = nil, toolUseID: String? = nil, label: String? = nil, status: String, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, exitCode: Int? = nil, outputRef: String? = nil) {
+    public init(id: String, source: EventMessageSource? = nil, toolUseID: String? = nil, label: String? = nil, status: String, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, exitCode: Int? = nil, outputRef: String? = nil, watch: Bool? = nil, wakesAgent: Bool? = nil) {
         self.id = id
         self.source = source
         self.toolUseID = toolUseID
@@ -5128,6 +5180,8 @@ public struct HistoryBackgroundCommand: Codable {
         self.endedAt = endedAt
         self.exitCode = exitCode
         self.outputRef = outputRef
+        self.watch = watch
+        self.wakesAgent = wakesAgent
     }
 }
 

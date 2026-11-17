@@ -158,15 +158,17 @@ type HistoryActivity struct {
 // lifecycle. Clients attach it to the tool call identified by Source and
 // ToolUseID; OutputRef names the container file holding its output.
 type HistoryBackgroundCommand struct {
-	ID        string             `json:"id"`
-	Source    EventMessageSource `json:"source,omitzero"`
-	ToolUseID string             `json:"toolUseID,omitempty"`
-	Label     string             `json:"label,omitempty"`
-	Status    string             `json:"status"`
-	StartedAt *time.Time         `json:"startedAt,omitempty"`
-	EndedAt   *time.Time         `json:"endedAt,omitempty"`
-	ExitCode  *int               `json:"exitCode,omitempty"`
-	OutputRef string             `json:"outputRef,omitempty"`
+	ID         string             `json:"id"`
+	Source     EventMessageSource `json:"source,omitzero"`
+	ToolUseID  string             `json:"toolUseID,omitempty"`
+	Label      string             `json:"label,omitempty"`
+	Status     string             `json:"status"`
+	StartedAt  *time.Time         `json:"startedAt,omitempty"`
+	EndedAt    *time.Time         `json:"endedAt,omitempty"`
+	ExitCode   *int               `json:"exitCode,omitempty"`
+	OutputRef  string             `json:"outputRef,omitempty"`
+	Watch      bool               `json:"watch,omitempty"`      // See EventBackgroundCommand.Watch.
+	WakesAgent bool               `json:"wakesAgent,omitempty"` // See EventBackgroundCommand.WakesAgent.
 }
 
 // HistoryRoute is one authoritative delegation relation or namespace observation.

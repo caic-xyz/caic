@@ -408,14 +408,22 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 			Kind: v1.EventKindBackgroundCommand,
 			Ts:   ts,
 			BackgroundCommand: &v1.EventBackgroundCommand{
-				ID:        m.Command.ID,
-				Label:     m.Command.Label,
-				Status:    string(m.Command.Status),
-				Result:    m.Command.Result,
-				ExitCode:  m.Command.ExitCode,
-				OutputRef: m.Command.OutputRef,
-				ToolUseID: m.Command.ToolUseID,
+				ID:         m.Command.ID,
+				Label:      m.Command.Label,
+				Status:     string(m.Command.Status),
+				Result:     m.Command.Result,
+				ExitCode:   m.Command.ExitCode,
+				OutputRef:  m.Command.OutputRef,
+				ToolUseID:  m.Command.ToolUseID,
+				Watch:      m.Command.Watch,
+				WakesAgent: m.Command.WakesAgent,
 			},
+		}}
+	case *agent.BackgroundRetiredMessage:
+		return []v1.EventMessage{{
+			Kind:              v1.EventKindBackgroundRetired,
+			Ts:                ts,
+			BackgroundRetired: &v1.EventBackgroundRetired{ID: m.ID},
 		}}
 	case *agent.DiffStatMessage:
 		return []v1.EventMessage{{

@@ -21,6 +21,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/md/git"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
@@ -157,8 +158,14 @@ func taskMCPSummary(number int, task *v1.Task) mcpschema.TaskSummary {
 	}
 }
 
+// mcpTaskRuntime holds task details read from the task runtime, outside the task DTO.
+type mcpTaskRuntime struct {
+	background taskrun.BackgroundActivity
+	logPath    string // Raw task log path on the server host.
+}
+
 // taskMCPDetail projects independently bounded fields without sharing mutable task data.
-func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
+func taskMCPDetail(number int, task *v1.Task, rt *mcpTaskRuntime) (v1.MCPTaskDetail, error) {
 	model, effort := taskMCPModelAndEffort(task)
 	out := v1.MCPTaskDetail{
 		TaskNumber: number, TaskID: task.ID.String(), State: task.State,
@@ -166,6 +173,10 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 		CostKnown:    task.CostKnown,
 		CostComplete: task.CostComplete,
 		ChangedFiles: len(task.DiffStat), ChangedPaths: []string{},
+		BackgroundItems: []v1.MCPBackgroundItem{},
+		Background: v1.TaskBackground{
+			Commands: rt.background.Counts.Commands, Watches: rt.background.Counts.Watches, Agents: rt.background.Counts.Agents,
+		},
 	}
 	for _, field := range []mcpDetailTextField{
 		{"title", taskTitle(task), &out.Title, maxMCPTaskTitle},
@@ -175,6 +186,7 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 		{"taskResult", task.Result, &out.TaskResult, mcpTextOutputMaxBytes},
 		{"error", task.Error, &out.Error, mcpTextOutputMaxBytes},
 		{"turnError", task.TurnError, &out.TurnError, mcpTextOutputMaxBytes},
+		{"logPath", rt.logPath, &out.LogPath, maxMCPLogPath},
 	} {
 		value, cut, err := boundedMCPDetailText(field.src, field.limit)
 		if err != nil {
@@ -201,6 +213,23 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 			break
 		}
 		out.ChangedPaths = append(out.ChangedPaths, path)
+	}
+	for i := range rt.background.Items {
+		item := &rt.background.Items[i]
+		if len(out.BackgroundItems) == maxMCPBackgroundItems {
+			out.BackgroundItemsTruncated = true
+			break
+		}
+		label, cut, err := boundedMCPDetailText(item.Label, maxMCPBackgroundLabel)
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		out.BackgroundItemsTruncated = out.BackgroundItemsTruncated || cut
+		kind, err := mcpBackgroundKind(item.Kind)
+		if err != nil {
+			return v1.MCPTaskDetail{}, err
+		}
+		out.BackgroundItems = append(out.BackgroundItems, v1.MCPBackgroundItem{Kind: kind, Label: label, StartedAt: item.StartedAt})
 	}
 	if p := task.PendingInput; p != nil {
 		pending := &v1.MCPPendingInput{
@@ -230,11 +259,44 @@ func taskMCPDetail(number int, task *v1.Task) (v1.MCPTaskDetail, error) {
 	if out.TurnError != "" {
 		out.Result += "\nLast turn failed; see turnError"
 	}
+	// Only work that wakes the agent keeps the task running after its turn.
+	if bg := rt.background; task.State == v1.TaskStateRunning && bg.TurnEnded && bg.WakingCommands+bg.Counts.Agents > 0 {
+		var running []string
+		if bg.WakingCommands > 0 {
+			running = append(running, countNoun(bg.WakingCommands, "command"))
+		}
+		if bg.Counts.Agents > 0 {
+			running = append(running, countNoun(bg.Counts.Agents, "agent"))
+		}
+		out.Result += "\nTurn ended; still running in background: " + strings.Join(running, " and ")
+	}
 	if out.PendingInput != nil {
 		out.Result += "\nPending input: " + string(out.PendingInput.State)
 	}
 	slices.Sort(out.TruncatedFields)
 	return out, nil
+}
+
+// mcpBackgroundKind converts a background item kind to its MCP DTO value.
+func mcpBackgroundKind(k taskrun.BackgroundKind) (v1.MCPBackgroundKind, error) {
+	switch k {
+	case taskrun.BackgroundKindAgent:
+		return v1.MCPBackgroundKindAgent, nil
+	case taskrun.BackgroundKindCommand:
+		return v1.MCPBackgroundKindCommand, nil
+	case taskrun.BackgroundKindWatch:
+		return v1.MCPBackgroundKindWatch, nil
+	default:
+		return "", fmt.Errorf("unknown background kind %q", k)
+	}
+}
+
+// countNoun formats a count with its noun, adding "s" for a plural.
+func countNoun(n int, noun string) string {
+	if n != 1 {
+		noun += "s"
+	}
+	return fmt.Sprintf("%d %s", n, noun)
 }
 
 type mcpDetailTextField struct {
@@ -681,6 +743,9 @@ const (
 	mcpTaskPageSizeMax      = 50
 	mcpTaskCursorMaxBytes   = 1024
 	maxMCPSafetyIssues      = 50
+	maxMCPBackgroundItems   = 20
+	maxMCPBackgroundLabel   = 512
+	maxMCPLogPath           = 4 << 10
 	maxMCPRepoField         = 512
 	maxTaskDetailPaths      = 50
 	maxTaskSummaryEffort    = 64
