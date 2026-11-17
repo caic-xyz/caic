@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"sync"
 	"testing"
@@ -509,6 +510,53 @@ func TestNotificationFeed(t *testing.T) {
 		})
 	})
 
+	t.Run("OneOccurrencePerTransition", func(t *testing.T) {
+		// Covers the feed reads checked for a Claude task whose voice client
+		// announced one question repeatedly.
+		t.Parallel()
+		feed := newNotificationFeed()
+		task := v1.Task{ID: ksid.NewID(), Title: "Answer question", State: v1.TaskStateRunning}
+		id := task.ID.String()
+		read := func(ctx context.Context, state v1.TaskState, seq uint64, timeline string) []mcpschema.ServiceNotification {
+			task.State = state
+			return notificationSnapshot(feed, ctx, []v1.Task{task}, map[string]taskStateReplay{id: {seq: seq, timelineID: timeline}}, v1.UsageResp{}, "")
+		}
+		read(t.Context(), v1.TaskStateRunning, 124, "A")
+		first := read(t.Context(), v1.TaskStateAsking, 125, "A")
+		if len(first) != 1 {
+			t.Fatalf("asking transition = %#v", first)
+		}
+		// Repeated reads and a replaced timeline still asking keep the occurrence.
+		for _, timeline := range []string{"A", "A", "A", "B", "B"} {
+			seq := uint64(125)
+			if timeline == "B" {
+				seq = 3
+			}
+			if got := read(t.Context(), v1.TaskStateAsking, seq, timeline); len(got) != 1 || got[0].ID != first[0].ID {
+				t.Fatalf("timeline %s read = %#v, want %q", timeline, got, first[0].ID)
+			}
+		}
+		// Owner eviction re-baselines silently instead of re-announcing.
+		for i := range maxNotificationOwners {
+			notificationSnapshot(feed, auth.NewContext(t.Context(), &auth.User{ID: fmt.Sprintf("owner-%d", i)}), nil, nil, v1.UsageResp{}, "")
+		}
+		for range 2 {
+			if got := read(t.Context(), v1.TaskStateAsking, 3, "B"); len(got) != 0 {
+				t.Fatalf("evicted owner re-announced: %#v", got)
+			}
+		}
+		// Each unobserved asking→running→asking round trip is a new transition
+		// whose occurrence replaces the superseded one.
+		previous := read(t.Context(), v1.TaskStateAsking, 5, "B")
+		if len(previous) != 1 {
+			t.Fatalf("first round trip = %#v", previous)
+		}
+		got := read(t.Context(), v1.TaskStateAsking, 7, "B")
+		if len(got) != 1 || got[0].ID == previous[0].ID {
+			t.Fatalf("second round trip = %#v, want only an occurrence replacing %q", got, previous[0].ID)
+		}
+	})
+
 	t.Run("QuotaRecoveryOccurrences", func(t *testing.T) {
 		t.Parallel()
 		task := v1.Task{ID: ksid.NewID(), Title: "Resume work", State: v1.TaskStateWaiting}
@@ -628,5 +676,5 @@ func BenchmarkNotificationFeed(b *testing.B) {
 func notificationSnapshot(f *notificationFeed, ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.reconcileLocked(ctx, tasks, replays, usage, activeTaskID)
+	return f.reconcileLocked(ctx, slog.New(slog.DiscardHandler), tasks, replays, usage, activeTaskID)
 }

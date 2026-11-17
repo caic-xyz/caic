@@ -67,6 +67,22 @@ for (const width of [390, 1280]) {
             expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(promptBox.y);
             expect(promptBox.y + promptBox.height).toBeLessThanOrEqual(844);
             expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(width);
+            const chipBoxes = await chips.evaluateAll((els) =>
+              els.map((el) => {
+                const r = el.getBoundingClientRect();
+                return { top: r.top, right: r.right };
+              }),
+            );
+            if (mobile) {
+              // A phone keeps one scrolling row so the prompt stays in place.
+              expect(new Set(chipBoxes.map((b) => b.top)).size).toBe(1);
+            } else {
+              // A wide pane wraps chips instead of clipping the last one.
+              for (const [i, b] of chipBoxes.entries()) {
+                expect(b.right).toBeLessThanOrEqual(stripBox.x + stripBox.width);
+                await expect(chips.nth(i)).toBeInViewport({ ratio: 1 });
+              }
+            }
           }
           if (!reload) await page.screenshot({ path: testInfo.outputPath(`background-${name}-${width}.png`) });
         });
@@ -78,7 +94,7 @@ for (const width of [390, 1280]) {
     await expect.poll(() => background(api, id)).toEqual({ state: "running", background: running });
     await checkState("running", running, "Background: 1 command · 1 agent · 1 watch", [
       "Command Run fix, verify, and test",
-      "Agent Review the API handlers",
+      "general-purpose Review the API handlers",
       "Watch fix/verify/test results",
     ]);
 
@@ -143,6 +159,8 @@ for (const width of [390, 1280]) {
     const chips = page.getByTestId("background-strip").getByTestId("background-chip");
     await expect(chips).toHaveCount(4);
     const chip = (label: string) => chips.filter({ hasText: label });
+    // An agent whose harness reports no kind keeps the generic name.
+    await expect(chip("Profile the build")).toHaveAccessibleName(/^Agent Profile the build /);
 
     await test.step("a command in an agent's transcript opens the agent card", async () => {
       const agent = page.locator('[data-native-id="claude:task:edge7agent"]');

@@ -46,4 +46,7 @@ type ModelCodec interface {
 // reads by active tool-call ID and settles them at turn completion.
 type ToolParser interface {
 	Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error)
+	// SettlePrompt returns the evidence a session/prompt response settles; it
+	// precedes the turn result. stop is empty for a JSON-RPC error response.
+	SettlePrompt(stop acp.StopReason) []agent.Message
 }

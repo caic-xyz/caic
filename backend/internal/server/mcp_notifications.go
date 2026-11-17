@@ -5,7 +5,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -94,16 +96,24 @@ func (f *notificationFeed) notifications(ctx context.Context, svc *taskService, 
 		}
 		return tasks[i].ID < tasks[j].ID
 	})
-	return f.reconcileLocked(ctx, tasks, replays, usage, activeTaskID)
+	return f.reconcileLocked(ctx, svc.log, tasks, replays, usage, activeTaskID)
 }
 
 // TODO: A voice client reported repeated "has a question" announcements for
-// one Claude task (4VN78Q1IU000). A replay of that task's log through taskrun
-// shows a single asking transition, so the cause is not in task state; the
-// hypothesis is a re-announcement in this feed (owner eviction, generations,
-// or replayed state history). Capture the feed's output for a task while it
-// asks, and check that one transition yields one alert.
-func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
+// one Claude task. Confirmed within caic: a replay of that
+// task's log through taskrun yields one asking transition; the task state
+// sequence advances only on a real state change; and this feed creates one
+// occurrence ID per observed transition across repeated reconciles, timeline
+// replacement, and owner eviction (eviction re-baselines silently). An
+// unobserved asking→running→asking round trip between reads is a real second
+// transition; its superseded event is dropped below. Task-scoped principals
+// lack tasks:read, and Go Mode clients deduplicate by ID and treat the opening
+// snapshot as a silent baseline. Remaining hypotheses, unverified and outside
+// caic: two monitors announce the same occurrence, or the voice model repeats
+// it. Next step: run with debug logging and correlate the "notification
+// occurrence" IDs logged here with the IDs the client injects into the voice
+// session.
+func (f *notificationFeed) reconcileLocked(ctx context.Context, log *slog.Logger, tasks []v1.Task, replays map[string]taskStateReplay, usage v1.UsageResp, activeTaskID string) []mcpschema.ServiceNotification {
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
@@ -185,8 +195,15 @@ func (f *notificationFeed) reconcileLocked(ctx context.Context, tasks []v1.Task,
 		// repeated enum after an unseen round trip is a new occurrence; content
 		// activity and request timing cannot manufacture another one.
 		if old.seen != 0 && old.timelineID == replay.timelineID && (old.state != task.State || old.seq != seq) && taskNotificationTitle(task.State, i+1) != "" {
+			// Retention above kept only same-state events; the new occurrence
+			// supersedes the one from before an unobserved round trip.
+			f.events[owner] = slices.DeleteFunc(f.events[owner], func(e serviceNotification) bool {
+				return e.ItemID == id && !e.quotaRecovery
+			})
+			occurrence := fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation)
+			log.DebugContext(ctx, "notification occurrence", "owner", owner, "task", id, "state", task.State, "seq", seq, "id", occurrence)
 			f.events[owner] = append(f.events[owner], serviceNotification{
-				ID:        fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
+				ID:        occurrence,
 				ItemID:    id,
 				URL:       "/task/@" + id,
 				Title:     taskNotificationTitle(task.State, i+1),

@@ -1362,7 +1362,7 @@ func TestWireFormat(t *testing.T) {
 	})
 	t.Run("ChildThreadSkillReadLoadsNothing", func(t *testing.T) {
 		t.Parallel()
-		// Observed shape (4DLLPGQ6C000): spawned child threads run the same
+		// Observed shape: spawned child threads run the same
 		// skill read as the root thread on the root session's wire.
 		wire := New("", nil).NewWire()
 		if _, err := wire.ParseOutput([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {

@@ -97,7 +97,7 @@ func (n *nativeSubagents) parseToolUses(messages []agent.Message, sessionID stri
 		if input.Prompt == "" {
 			continue
 		}
-		s := agent.NativeSubagent{ToolUseID: use.ToolUseID, Label: input.Description, Prompt: input.Prompt, Status: agent.NativeSubagentStatusUnknown, Background: input.RunInBackground}
+		s := agent.NativeSubagent{ToolUseID: use.ToolUseID, Label: input.Description, Kind: input.SubagentType, Prompt: input.Prompt, Status: agent.NativeSubagentStatusUnknown, Background: input.RunInBackground}
 		if s.Label == "" {
 			s.Label = input.SubagentType
 		}
@@ -151,6 +151,9 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 		if s.Label == "" {
 			s.Label = tool.Label
 		}
+		if s.Kind == "" {
+			s.Kind = tool.Kind
+		}
 		if s.Prompt == "" {
 			s.Prompt = tool.Prompt
 		}
@@ -158,6 +161,11 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID st
 	}
 	if s.Label == "" {
 		s.Label = ev.Description
+	}
+	if s.Kind == "" {
+		// task_started repeats the Agent tool's subagent_type, so the kind
+		// survives a resume from history that lacks the tool use.
+		s.Kind = ev.SubagentType
 	}
 	if s.Prompt == "" && len(ev.Prompt) > 0 {
 		_ = json.Unmarshal(ev.Prompt, &s.Prompt)
@@ -510,28 +518,30 @@ func claudeBackgroundCommandStatus(status string) agent.BackgroundCommandStatus 
 // deliver its task_notification, even while the parent waits for the user.
 // The queued turn ends at the next root result.
 //
+// A notification that arrives during a parent turn joins the turn's next model
+// request instead. Only when no request follows does it queue a turn after the
+// result. A root user record holding a tool_result proves a later request:
+// Claude Code sends that result to the model. A TaskStop kill record precedes
+// TaskStop's own tool result, so it queues no turn. A notification that arrives
+// after a restart but before init belongs to the turn that init starts, so init
+// clears the pending notification too. The root result reports a pending one
+// through ResultMessage.TurnQueued; AGENTS.md holds the evidence.
+//
 // A background task that a subagent spawned notifies that subagent, not the
 // parent, so it queues no parent turn. Its task records reach the root stream
 // without parent_tool_use_id. The spawning tool use comes from a subagent
 // record, and newer Claude Code versions also mark task_started with
 // owned_by_subagent and parent_task_id.
-//
-// TODO: A notification that arrives during a parent turn can also queue a turn
-// after that turn's result. Task 4VN78Q1IU000 shows it once: a background agent
-// completed 1.4 s before the root result, then init and a task-notification
-// turn followed within 30 ms. Of the 7 other local root results that followed
-// such a notification, 4 preceded an idle notification and 3 preceded no turn
-// that the notification explains. The root result clears the queued turn, so
-// the task shows waiting for about 5 s. A fix needs evidence that tells the
-// cases apart, such as a field of the result or of the notification.
 type turnQueue struct {
 	queued     map[string]string   // card ID → run ID whose end queued a turn
 	childTools map[string]struct{} // tool use IDs that a subagent owns
+	pending    bool                // a terminal record arrived that no later model request delivers yet
 }
 
 // parse returns messages with a TurnQueuedMessage before each background card
-// that a task_updated or task_notification record settled. Only the first
-// terminal record of a run queues a turn.
+// that a task_updated or task_notification record settled, and sets TurnQueued
+// on a root result that such a record precedes with no later request. Only the
+// first terminal record of a run queues a turn.
 func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.Message) []agent.Message {
 	if subagent {
 		for _, message := range messages {
@@ -540,6 +550,21 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 			}
 		}
 		return messages
+	}
+	if record.user != nil {
+		if slices.ContainsFunc(record.user.Message.Content.Blocks, func(b claudecode.OutputUserContentBlock) bool { return b.Type == "tool_result" }) {
+			q.pending = false
+		}
+		return messages
+	}
+	for _, message := range messages {
+		switch m := message.(type) {
+		case *agent.InitMessage:
+			q.pending = false
+		case *agent.ResultMessage:
+			m.TurnQueued = q.pending
+			q.pending = false
+		}
 	}
 	ev := record.system
 	if ev == nil {
@@ -554,6 +579,7 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 	out := messages[:0:0]
 	for _, message := range messages {
 		if q.settles(message) {
+			q.pending = true
 			out = append(out, &agent.TurnQueuedMessage{})
 		}
 		out = append(out, message)

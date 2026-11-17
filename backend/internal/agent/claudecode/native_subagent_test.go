@@ -13,7 +13,7 @@ import (
 
 func TestNativeSubagentResumedRun(t *testing.T) {
 	t.Parallel()
-	// Claude 2.1.319 task 4V6FPSTTU000 completed a child while its shell
+	// A Claude 2.1.319 task completed a child while its shell
 	// checks ran, then woke the same child with a newer run_id.
 	observations := wireSubagents(t,
 		`{"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","run_id":"001","is_backgrounded":true}`,
@@ -29,7 +29,7 @@ func TestNativeSubagentResumedRun(t *testing.T) {
 
 func TestNativeSubagentSendMessageResume(t *testing.T) {
 	t.Parallel()
-	// Claude task 4VN78Q1IU000 resumed a completed background agent with
+	// A Claude task resumed a completed background agent with
 	// SendMessage. The new run's task_started names the SendMessage tool use, and
 	// its tool result only acknowledges the resumption while the run continues.
 	got := wireSubagents(t,
@@ -94,7 +94,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.ID != "claude:task:test-agent" || card.ToolUseID != "test-spawn" {
 				t.Fatalf("identity = %#v, want the native task identity with tool correlation", card)
 			}
-			if card.Scope != "" || card.Label != "Tell a joke about README.md" || !strings.Contains(card.Prompt, "joke about README.md") {
+			if card.Scope != "" || card.Label != "Tell a joke about README.md" || card.Kind != "general-purpose" || !strings.Contains(card.Prompt, "joke about README.md") {
 				t.Fatalf("metadata = %#v, want the delegation description and prompt", card)
 			}
 			if card.Status != agent.NativeSubagentStatusCompleted || !strings.Contains(card.Result, "documentation lead") {
@@ -218,6 +218,36 @@ func TestNativeSubagentBackground(t *testing.T) {
 	}
 }
 
+// TestNativeSubagentKind pins that a card names the subagent_type the Agent
+// tool input or the task record reports, and none when neither does.
+func TestNativeSubagentKind(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"tool input", []string{
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Fetch docs","prompt":"Read the docs","subagent_type":"web-fetch"}}]}}`,
+			`{"type":"system","subtype":"task_started","task_id":"a","tool_use_id":"spawn","task_type":"local_agent"}`,
+		}, "web-fetch"},
+		// A session resumed from history the wire has not seen lacks the tool use.
+		{"task record", []string{
+			`{"type":"system","subtype":"task_started","task_id":"b","tool_use_id":"spawn","subagent_type":"general-purpose","task_type":"local_agent"}`,
+		}, "general-purpose"},
+		{"unreported", []string{
+			`{"type":"system","subtype":"task_started","task_id":"c","tool_use_id":"spawn","description":"Joke","task_type":"local_agent"}`,
+		}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := wireSubagents(t, test.lines...); len(got) != 1 || got[0].Kind != test.want {
+				t.Fatalf("observations = %#v, want one card of kind %q", got, test.want)
+			}
+		})
+	}
+}
+
 // TestNativeSubagentChildStreamCannotSettle guards the parent_tool_use_id rule:
 // a child stream message is never the parent's Agent tool result, even when it
 // carries a tool result for the same tool use ID.
@@ -235,7 +265,7 @@ func TestNativeSubagentChildStreamCannotSettle(t *testing.T) {
 
 func TestNativeSubagentStringContentUserMessage(t *testing.T) {
 	t.Parallel()
-	// Claude task 4VN78Q1IU000 resumed after compaction with a user record whose
+	// A Claude task resumed after compaction with a user record whose
 	// content is a string, not a block list.
 	got := wireSubagents(t,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
@@ -260,8 +290,8 @@ func sameCard(a, b *agent.BackgroundCommand) bool {
 	return *a == *b
 }
 
-// Fixture lines extracted verbatim from the retained recording of task
-// 44HVBS5RG000, a Claude Code session that ran three background lint commands.
+// Fixture lines extracted verbatim from the retained recording of a
+// Claude Code session that ran three background lint commands.
 const (
 	backgroundSnapshotOne = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b3xwrrd6m","task_type":"local_bash","description":"Install and run new lint in pitchpal"}],"uuid":"542c2404-17e6-4ba2-a379-c5e87ee6b83d","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 	backgroundSnapshotTwo = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bu2hdmg1p","task_type":"local_bash","description":"Re-run pitchpal lint with deps built"},{"task_id":"bhlpwfs1v","task_type":"local_bash","description":"Wait for pitchpal lint to finish"}],"uuid":"8b48f4b4-8015-4437-8289-ee717d975d1d","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
@@ -280,7 +310,7 @@ const (
 	foregroundStartedCommit  = `{"type":"system","subtype":"task_started","task_id":"bkmzvu4dn","tool_use_id":"toolu_01EiiP9xQhNNYsUgFZb9gxqK","description":"Commit caic","is_backgrounded":false,"task_type":"local_bash","uuid":"fc77a164-7574-456d-9fc6-4f2b0c2c870c","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 	foregroundNotifiedCommit = `{"type":"system","subtype":"task_notification","task_id":"bkmzvu4dn","tool_use_id":"toolu_01EiiP9xQhNNYsUgFZb9gxqK","status":"completed","output_file":"","summary":"Commit caic","uuid":"2a75abe0-9b81-4f49-8be8-e886fbb21dfc","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 
-	// Minimized from task 50R144VRE000: a Monitor watch that expired after its
+	// Minimized from a task log: a Monitor watch that expired after its
 	// 30-minute timeout. The task records match a backgrounded Bash command.
 	monitorToolUse  = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01Tfpv2sbytgxvgA5J7UKtJW","name":"Monitor","input":{"command":"tail -f out | grep --line-buffered exit=","description":"make fix/verify/test results","timeout_ms":1800000}}]},"session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
 	monitorStarted  = `{"type":"system","subtype":"task_started","task_id":"bizvx8b6o","run_id":"0mwjohbq7-83f2cd99","tool_use_id":"toolu_01Tfpv2sbytgxvgA5J7UKtJW","description":"make fix/verify/test results","is_backgrounded":true,"task_type":"local_bash","session_id":"f48cd6f1-296a-4c99-a453-a18a42c76e99"}`
@@ -489,7 +519,7 @@ func TestTurnQueue(t *testing.T) {
 			}
 		}
 	}
-	// Minimized from task 4VN78Q1IU000: a background agent ends after the
+	// Minimized from a task log: a background agent ends after the
 	// parent result; Claude Code then starts a turn to deliver the notification.
 	const (
 		agentUse      = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_014N3CgJTcnLGnbSbium2crh","name":"Agent","input":{"description":"Commit fixture fix","prompt":"Fix","subagent_type":"general-purpose","run_in_background":true}}]},"session_id":"fe242f82"}`
@@ -508,6 +538,46 @@ func TestTurnQueue(t *testing.T) {
 		got := queued(t, agentUse, agentStarted, agentNotified, resumed, strings.ReplaceAll(agentUpdated, "0mwjtvyk3-60e1451f", "0mwjtvyk4-00000000"))
 		if !slices.Equal(got[2], []string{"turn", "agent:completed"}) || !slices.Equal(got[4], []string{"turn", "agent:completed"}) {
 			t.Fatalf("got %q, want a queued turn at the end of each run", got)
+		}
+	})
+	t.Run("ResultReportsQueuedTurn", func(t *testing.T) {
+		t.Parallel()
+		const (
+			result = `{"type":"result","subtype":"success","is_error":false,"result":"Done","session_id":"fe242f82"}`
+			init   = `{"type":"system","subtype":"init","cwd":"/src","session_id":"fe242f82"}`
+			reply  = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_other","type":"tool_result","content":"ok"}]},"session_id":"fe242f82"}`
+		)
+		// queuedResults returns TurnQueued for each root result, in order.
+		queuedResults := func(t *testing.T, lines ...string) []bool {
+			wire := newWireFormat()
+			var out []bool
+			for i, line := range lines {
+				msgs, err := wire.ParseOutput([]byte(line))
+				if err != nil {
+					t.Fatalf("line %d: %v", i, err)
+				}
+				for _, msg := range msgs {
+					if r, ok := msg.(*agent.ResultMessage); ok {
+						out = append(out, r.TurnQueued)
+					}
+				}
+			}
+			return out
+		}
+		for _, c := range []struct {
+			name  string
+			lines []string
+			want  []bool
+		}{
+			// The notification turn's own result queues nothing more.
+			{"NoLaterRequest", []string{agentUse, agentStarted, agentUpdated, agentNotified, result, init, result}, []bool{true, false}},
+			{"ToolResultDelivers", []string{agentUse, agentStarted, agentUpdated, agentNotified, reply, result}, []bool{false}},
+			// A notification after a restart belongs to the turn that init starts.
+			{"InitDelivers", []string{agentUse, agentStarted, agentUpdated, init, result}, []bool{false}},
+		} {
+			if got := queuedResults(t, c.lines...); !slices.Equal(got, c.want) {
+				t.Errorf("%s: TurnQueued = %v, want %v", c.name, got, c.want)
+			}
 		}
 	})
 	t.Run("BackgroundCommandNotificationOnly", func(t *testing.T) {
@@ -538,7 +608,7 @@ func TestTurnQueue(t *testing.T) {
 	})
 	t.Run("SubagentCommand", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 4VN78Q1IU000: the watch a subagent armed expired
+		// Minimized from a task log: the watch a subagent armed expired
 		// and resumed that subagent; the parent started no turn.
 		childUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01BZYJG5Hou8GZuKXutqD1Jf","name":"Monitor","input":{"command":"tail -f log","description":"NeMo smoke results"}}]},"parent_tool_use_id":"toolu_011Y7rdVxNjW1QcFj63n31FG","session_id":"fe242f82"}`
 		started := `{"type":"system","subtype":"task_started","task_id":"bw2u31182","run_id":"0mwif2bex-f5f2cde1","tool_use_id":"toolu_01BZYJG5Hou8GZuKXutqD1Jf","description":"NeMo smoke results","is_backgrounded":true,"task_type":"local_bash","session_id":"fe242f82"}`
@@ -553,7 +623,7 @@ func TestTurnQueue(t *testing.T) {
 	})
 }
 
-// Records from task 50R144VRE000 (Claude Code 2.1.325). A snapshot names a
+// Records from a Claude Code 2.1.325 task. A snapshot names a
 // task before its task_started; the snapshot after the terminal records drops
 // it. Monitor records above come from the same session.
 const (
@@ -568,14 +638,14 @@ const (
 	liveInit             = `{"type":"system","subtype":"init","cwd":"/home/user/src/gomode",` + liveSession + `}`
 	liveStatusRequesting = `{"type":"system","subtype":"status","status":"requesting",` + liveSession + `}`
 
-	// Task 4VN78Q1IU000 (Claude Code 2.1.325): a background agent run.
+	// Claude Code 2.1.325: a background agent run.
 	agentSession       = `"session_id":"fe242f82-bdf6-4830-aaa7-3ed146718f34"`
 	agentSnapshotLive  = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","task_type":"local_agent","subagent_type":"general-purpose","description":"Phase go-test-helper-check"}],` + agentSession + `}`
 	agentStartedLive   = `{"type":"system","subtype":"task_started","task_id":"a3635a9373e98f76a","run_id":"0mwjtvyk3-60e1451f","tool_use_id":"toolu_014N3CgJTcnLGnbSbium2crh","description":"Phase go-test-helper-check","subagent_type":"general-purpose","is_backgrounded":true,"spawn_depth":1,"task_type":"local_agent","prompt":"Review BLOCKED one item.",` + agentSession + `}`
 	agentSnapshotEmpty = `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + agentSession + `}`
 	agentInit          = `{"type":"system","subtype":"init","cwd":"/home/user/src/genai",` + agentSession + `}`
 
-	// Task 44HVBS5RG000 (Claude Code 2.1.283) emits the dropping snapshot
+	// Claude Code 2.1.283 emits the dropping snapshot
 	// before the terminal task_updated.
 	backgroundSnapshotEmpty = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"uuid":"d657ecde-e616-4889-8b13-c1580134f270","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`
 	backgroundStatus        = `{"type":"system","subtype":"status","status":"requesting","session_id":"6fe924d6-10b5-4c51-8d98-e50e07518c37"}`

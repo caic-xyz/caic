@@ -33,6 +33,8 @@ logs, caches, and temporary disk spools. See the
 ### Documentation Changes
 
 - **Do NOT** create a markdown file listing changes you made.
+- **Do NOT** cite local task IDs in source comments, docs, or test names.
+  Describe the evidence instead, e.g. "Minimized from a task log".
 - **Always update the purpose comment** at the beginning of a source file when
   the code's purpose changes. This comment is used to generate the file index
   in `AGENTS.md`.

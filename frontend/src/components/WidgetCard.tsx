@@ -4,6 +4,7 @@ import { createSignal, createEffect, onCleanup, on, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import type { MessageGroup } from "../grouping";
+import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
 import styles from "./WidgetCard.module.css";
 
 import widgetShellHTML from "./WidgetShell.html?raw";
@@ -149,7 +150,7 @@ export default function WidgetCard(props: { group: MessageGroup }) {
             title="Fullscreen"
             aria-label="Fullscreen"
           >
-            {"\u26F6"}
+            <FullscreenIcon width="1.2em" height="1.2em" aria-hidden="true" />
           </button>
         </div>
         <iframe

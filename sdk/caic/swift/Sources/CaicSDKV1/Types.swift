@@ -4636,6 +4636,9 @@ public struct EventNativeSubagent: Codable {
     public let id: String
     public let groupID: String?
     public let label: String?
+    /// Kind names the agent definition the harness reports, such as Claude's
+    /// subagent_type. It is absent when the harness reports none.
+    public let kind: String?
     public let prompt: String?
     public let status: EventNativeSubagentStatus
     public let result: String?
@@ -4643,13 +4646,14 @@ public struct EventNativeSubagent: Codable {
     /// the parent turn, so it can outlive that turn's result.
     public let background: Bool?
 
-    public init(runID: String? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, id: String, groupID: String? = nil, label: String? = nil, prompt: String? = nil, status: EventNativeSubagentStatus, result: String? = nil, background: Bool? = nil) {
+    public init(runID: String? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, id: String, groupID: String? = nil, label: String? = nil, kind: String? = nil, prompt: String? = nil, status: EventNativeSubagentStatus, result: String? = nil, background: Bool? = nil) {
         self.runID = runID
         self.toolUseID = toolUseID
         self.scope = scope
         self.id = id
         self.groupID = groupID
         self.label = label
+        self.kind = kind
         self.prompt = prompt
         self.status = status
         self.result = result
@@ -5123,6 +5127,9 @@ public struct HistoryActivity: Codable {
     public let scope: EventNativeSubagentScope?
     public let groupID: String?
     public let label: String?
+    /// Kind names the agent definition the harness reports, such as Claude's
+    /// subagent_type. It is absent when the harness reports none.
+    public let kind: String?
     public let status: String
     public let background: Bool?
     public let startedAt: ISOTimestamp?
@@ -5132,7 +5139,7 @@ public struct HistoryActivity: Codable {
     public let bodyThrough: Int
     public let ownershipThrough: Int
 
-    public init(id: String, runID: String? = nil, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int) {
+    public init(id: String, runID: String? = nil, sectionID: String, source: EventMessageSource? = nil, toolUseID: String? = nil, scope: EventNativeSubagentScope? = nil, groupID: String? = nil, label: String? = nil, kind: String? = nil, status: String, background: Bool? = nil, startedAt: ISOTimestamp? = nil, endedAt: ISOTimestamp? = nil, anchorAt: ISOTimestamp, first: HistoryPosition, bodyThrough: Int, ownershipThrough: Int) {
         self.id = id
         self.runID = runID
         self.sectionID = sectionID
@@ -5141,6 +5148,7 @@ public struct HistoryActivity: Codable {
         self.scope = scope
         self.groupID = groupID
         self.label = label
+        self.kind = kind
         self.status = status
         self.background = background
         self.startedAt = startedAt

@@ -138,20 +138,23 @@ type HistoryActivity struct {
 	RunID string `json:"runID,omitempty"`
 	// SectionID identifies the body containing the earliest actual lifecycle or
 	// resolved transcript origin, including an unfinished turn carried forward.
-	SectionID        string                   `json:"sectionID"`
-	Source           EventMessageSource       `json:"source,omitzero"`
-	ToolUseID        string                   `json:"toolUseID,omitempty"`
-	Scope            EventNativeSubagentScope `json:"scope,omitempty"`
-	GroupID          string                   `json:"groupID,omitempty"`
-	Label            string                   `json:"label,omitempty"`
-	Status           string                   `json:"status"`
-	Background       bool                     `json:"background,omitempty"`
-	StartedAt        *time.Time               `json:"startedAt,omitempty"`
-	EndedAt          *time.Time               `json:"endedAt,omitempty"`
-	AnchorAt         time.Time                `json:"anchorAt"`
-	First            HistoryPosition          `json:"first"`
-	BodyThrough      uint64                   `json:"bodyThrough"`
-	OwnershipThrough uint64                   `json:"ownershipThrough"`
+	SectionID string                   `json:"sectionID"`
+	Source    EventMessageSource       `json:"source,omitzero"`
+	ToolUseID string                   `json:"toolUseID,omitempty"`
+	Scope     EventNativeSubagentScope `json:"scope,omitempty"`
+	GroupID   string                   `json:"groupID,omitempty"`
+	Label     string                   `json:"label,omitempty"`
+	// Kind names the agent definition the harness reports, such as Claude's
+	// subagent_type. It is absent when the harness reports none.
+	Kind             string          `json:"kind,omitempty"`
+	Status           string          `json:"status"`
+	Background       bool            `json:"background,omitempty"`
+	StartedAt        *time.Time      `json:"startedAt,omitempty"`
+	EndedAt          *time.Time      `json:"endedAt,omitempty"`
+	AnchorAt         time.Time       `json:"anchorAt"`
+	First            HistoryPosition `json:"first"`
+	BodyThrough      uint64          `json:"bodyThrough"`
+	OwnershipThrough uint64          `json:"ownershipThrough"`
 }
 
 // HistoryBackgroundCommand is a detached command's folded, payload-free

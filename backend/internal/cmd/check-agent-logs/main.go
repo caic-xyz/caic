@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -64,7 +65,7 @@ type finding struct {
 	hint    string
 }
 
-func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[openCodeRequestKey]acp.Method) *finding {
+func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeRequests *openCodeRequests) *finding {
 	if len(message) != 0 && message[0] == '"' {
 		var reason string
 		if err := json.Unmarshal(message, &reason); err == nil {
@@ -110,7 +111,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 			dto, err = checkPi(message)
 		}
 	case "dsh", "opencode":
-		dto, err = checkOpenCode(message, input, openCodeMethods)
+		dto, err = checkOpenCode(message, input, openCodeRequests)
 	default:
 		return &finding{
 			path:    path,
@@ -340,7 +341,7 @@ func checkFile(path string, cutoff time.Time, resolver agent.Backends) (result f
 		}
 	}
 
-	checker := &messageChecker{path: path, harness: harnessID, line: 1, openCodeMethods: make(map[openCodeRequestKey]acp.Method), claudeTools: claudeBackgroundTools{names: make(map[claudeToolKey]string)}}
+	checker := &messageChecker{path: path, harness: harnessID, line: 1, openCodeRequests: newOpenCodeRequests(), claudeTools: claudeBackgroundTools{names: make(map[claudeToolKey]string)}}
 	parser, err := agent.NewLogRecordParser(checker)
 	if err != nil {
 		return fileCheck{}, fmt.Errorf("create task-log parser: %w", err)
@@ -443,12 +444,12 @@ func (v *versionCollector) parse(record []byte, line int) {
 
 // messageChecker validates native DTOs in the direction selected by the log parser.
 type messageChecker struct {
-	path            string
-	harness         string
-	line            int
-	openCodeMethods map[openCodeRequestKey]acp.Method
-	claudeTools     claudeBackgroundTools
-	findings        []finding
+	path             string
+	harness          string
+	line             int
+	openCodeRequests *openCodeRequests
+	claudeTools      claudeBackgroundTools
+	findings         []finding
 }
 
 func (c *messageChecker) ParseInput(message []byte) ([]agent.Message, error) {
@@ -458,7 +459,7 @@ func (c *messageChecker) ParseOutput(message []byte) ([]agent.Message, error) {
 	return c.check(message, false)
 }
 func (c *messageChecker) check(message []byte, input bool) ([]agent.Message, error) {
-	if f := checkMessage(c.path, c.line, c.harness, message, input, c.openCodeMethods); f != nil {
+	if f := checkMessage(c.path, c.line, c.harness, message, input, c.openCodeRequests); f != nil {
 		c.findings = append(c.findings, *f)
 	}
 	if c.harness == "claude" && !input {
@@ -474,6 +475,31 @@ func (c *messageChecker) check(message []byte, input bool) ([]agent.Message, err
 		}
 	}
 	return nil, nil
+}
+
+// openCodeRequests correlates OpenCode JSON-RPC responses with their requests.
+//
+// TODO: Only OpenCode responses are correlated, so relay re-sends in other
+// harnesses go unnoticed. Codex and Pi logs written 2026-09-21 to 2026-09-23
+// (before handshake relay records were persisted) hold whole re-sends after a
+// relay_generation marker, and 23 newer Codex and Pi logs hold short runs of
+// records identical to earlier ones after a marker. It is unconfirmed whether
+// the newer runs are re-sends or legitimately repeated lines. Compare the
+// records after each marker with those before it and report duplicates that
+// the harness parser would fold twice.
+type openCodeRequests struct {
+	pending map[openCodeRequestKey]acp.Method
+	// matched holds a digest of each key's matched response. After the relay
+	// reconnects it re-sends output whose records were not yet persisted, so a
+	// later byte-identical response is a re-send rather than drift.
+	matched map[openCodeRequestKey][sha256.Size]byte
+}
+
+func newOpenCodeRequests() *openCodeRequests {
+	return &openCodeRequests{
+		pending: make(map[openCodeRequestKey]acp.Method),
+		matched: make(map[openCodeRequestKey][sha256.Size]byte),
+	}
 }
 
 // openCodeRequestKey keeps client and server request IDs in separate namespaces.
@@ -702,7 +728,7 @@ func checkPiInput(data []byte) (string, error) {
 	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
 }
 
-func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]acp.Method) (string, error) {
+func checkOpenCode(data []byte, input bool, requests *openCodeRequests) (string, error) {
 	var probe acp.MessageProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return "MessageProbe", err
@@ -726,23 +752,29 @@ func checkOpenCode(data []byte, input bool, methods map[openCodeRequestKey]acp.M
 		if err != nil || msg.ID == nil {
 			return dto, err
 		}
-		if methods != nil {
-			methods[openCodeRequestKey{input: input, id: string(msg.ID)}] = msg.Method
-		}
+		key := openCodeRequestKey{input: input, id: string(msg.ID)}
+		requests.pending[key] = msg.Method
+		delete(requests.matched, key)
 		return dto, nil
 	}
 	if msg.ID == nil {
 		return "JSONRPCMessage", errors.New("OpenCode JSON-RPC message is missing method and id")
 	}
-	if methods == nil {
-		return "JSONRPCMessage", fmt.Errorf("unmatched OpenCode response id %s", msg.ID)
-	}
 	key := openCodeRequestKey{input: !input, id: string(msg.ID)}
-	method, ok := methods[key]
-	delete(methods, key)
+	digest := sha256.Sum256(data)
+	method, ok := requests.pending[key]
 	if !ok {
-		return "JSONRPCMessage", fmt.Errorf("unmatched OpenCode response id %s", msg.ID)
+		prior, matched := requests.matched[key]
+		if !matched {
+			return "JSONRPCMessage", fmt.Errorf("unmatched OpenCode response id %s", msg.ID)
+		}
+		if prior != digest {
+			return "JSONRPCMessage", fmt.Errorf("OpenCode response id %s differs from its matched response", msg.ID)
+		}
+		return "JSONRPCMessage", nil
 	}
+	delete(requests.pending, key)
+	requests.matched[key] = digest
 	if msg.Error != nil {
 		return "JSONRPCMessage", nil
 	}

@@ -116,6 +116,8 @@ type subagentCall struct {
 
 type toolParser struct {
 	subagents map[string]subagentCall
+	// running holds the cards spawned during the current prompt.
+	running []agent.NativeSubagent
 }
 
 func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Message) ([]agent.Message, error) {
@@ -127,20 +129,20 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 		case acp.StatusCompleted:
 			delete(p.subagents, tool.ToolCallID)
 			messages = dropToolMessages(messages, tool.ToolCallID)
-			// TODO: Attach the child's final message and a terminal status once
-			// DSH exposes them through ACP. The parent receives the child result
-			// internally, so the journal currently keeps only the spawn identity,
-			// label, and prompt.
+			// TODO: Attach the child's final message once dsh exposes it
+			// through ACP. The parent receives the child result internally, so
+			// the journal keeps only the spawn identity, label, and prompt.
 			if id, ok := startedSubagentID(agentacp.ToolOutput(tool)); ok {
-				messages = append(messages, &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
-					ToolUseID:  tool.ToolCallID,
-					Scope:      agent.NativeSubagentScopeAgent,
-					ID:         id,
-					Label:      pending.label,
-					Prompt:     pending.prompt,
-					Status:     agent.NativeSubagentStatusUnknown,
-					Background: true,
-				}})
+				s := agent.NativeSubagent{
+					ToolUseID: tool.ToolCallID,
+					Scope:     agent.NativeSubagentScopeAgent,
+					ID:        id,
+					Label:     pending.label,
+					Prompt:    pending.prompt,
+					Status:    agent.NativeSubagentStatusRunning,
+				}
+				p.running = append(p.running, s)
+				messages = append(messages, &agent.NativeSubagentMessage{Subagent: s})
 			}
 			return messages, nil
 		case acp.StatusFailed:
@@ -198,6 +200,38 @@ func (p *toolParser) Parse(tool *acp.ToolCallUpdateUpdate, messages []agent.Mess
 		}
 	}
 	return messages, nil
+}
+
+// SettlePrompt ends the cards spawned during the prompt. dsh emits no child
+// start or end update; it answers session/prompt only after the root agent
+// and its subagent tree go idle, or after cancelling them. end_turn therefore
+// proves each child ended, not that it succeeded, and cancelled proves it was
+// interrupted. Other stop reasons and JSON-RPC errors prove neither outcome,
+// so their cards are retired as unknown.
+//
+// TODO: Settled cards report the prompt's end, not each child's. dsh's ACP
+// bridge (deepseek-harness packages/acp/acp) projects only the root session;
+// the child's start and end stay internal to its subagent lifecycle. Once dsh
+// emits child start and end session updates, map them in Parse and keep this
+// settlement as the fallback for children without an end update.
+func (p *toolParser) SettlePrompt(stop acp.StopReason) []agent.Message {
+	clear(p.subagents)
+	messages := make([]agent.Message, 0, len(p.running))
+	for i := range p.running {
+		s := &p.running[i]
+		switch stop {
+		case acp.StopReasonEndTurn:
+			s.Status = agent.NativeSubagentStatusCompleted
+		case acp.StopReasonCancelled:
+			s.Status = agent.NativeSubagentStatusInterrupted
+		default:
+			messages = append(messages, &agent.BackgroundRetiredMessage{ID: s.ID})
+			continue
+		}
+		messages = append(messages, &agent.NativeSubagentMessage{Subagent: *s})
+	}
+	p.running = p.running[:0]
+	return messages
 }
 
 func startedSubagentID(output string) (string, bool) {

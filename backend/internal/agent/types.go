@@ -651,6 +651,10 @@ type ResultMessage struct {
 	ContextWindow int         `json:"context_window,omitempty"`
 	UUID          string      `json:"uuid"`
 	DiffStat      v3.DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
+	// TurnQueued reports that the harness queued the next turn by itself before
+	// this one ended, like a TurnQueuedMessage that follows the result. The
+	// adapter derives it from native records.
+	TurnQueued bool `json:"-"`
 }
 
 // Type implements Message.
@@ -754,15 +758,18 @@ const (
 type NativeSubagent struct {
 	// RunID distinguishes resumed runs of the same identity. When exposed by
 	// the harness, run IDs must sort in execution order for that identity.
-	RunID     string               `json:"run_id,omitempty"`
-	ToolUseID string               `json:"tool_use_id,omitempty"`
-	Scope     NativeSubagentScope  `json:"scope,omitempty"`
-	ID        string               `json:"id"`
-	GroupID   string               `json:"group_id,omitempty"`
-	Label     string               `json:"label,omitempty"`
-	Prompt    string               `json:"prompt,omitempty"`
-	Status    NativeSubagentStatus `json:"status"`
-	Result    string               `json:"result,omitempty"`
+	RunID     string              `json:"run_id,omitempty"`
+	ToolUseID string              `json:"tool_use_id,omitempty"`
+	Scope     NativeSubagentScope `json:"scope,omitempty"`
+	ID        string              `json:"id"`
+	GroupID   string              `json:"group_id,omitempty"`
+	Label     string              `json:"label,omitempty"`
+	// Kind names the agent definition the harness reports running the
+	// delegation, such as Claude's subagent_type or a pi-subagents agent name.
+	Kind   string               `json:"kind,omitempty"`
+	Prompt string               `json:"prompt,omitempty"`
+	Status NativeSubagentStatus `json:"status"`
+	Result string               `json:"result,omitempty"`
 	// Background reports that the harness launched the delegation independently
 	// of the parent turn, so it can still be running after that turn's result.
 	// A foreground delegation always settles before the parent result arrives.
@@ -865,9 +872,8 @@ type TurnQueuedMessage struct {
 // Type implements Message.
 func (m *TurnQueuedMessage) Type() string { return "turn_queued" }
 
-// BackgroundRetiredMessage reports that the harness stopped listing a running
-// background card, a native subagent or a command, without reporting its
-// outcome. The card ends as unknown, as on host exit. It is derived from
+// BackgroundRetiredMessage reports a running native subagent or background
+// command whose outcome the harness will not report. The card ends as unknown, as on host exit. It is derived from
 // native records and is not part of the transcript.
 type BackgroundRetiredMessage struct {
 	MessageProvenance

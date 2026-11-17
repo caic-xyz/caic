@@ -39,10 +39,17 @@ recording retains that tool call and its completion content.
 
 The native `subagent` tool names a delegated task in `description` and
 `prompt`, then returns `started subagent <id>` on completion. Project that as a
-native card with unknown status and `Background: true`; the generic tool call
-is machinery. The child's later result is not an ACP record, so it cannot be
-attached to the card. The parent model sees that result, but the journal does
-not.
+running foreground native card; the generic tool call is machinery. dsh emits
+no child start or end update and projects only the root session over ACP. The
+prompt response settles the prompt's cards: `end_turn` completes them,
+`cancelled` interrupts them, and other stop reasons or errors retire them as
+unknown. The child's result is not an ACP record, so it cannot be attached to
+the card. The parent model sees that result, but the journal does not.
+`testdata/subagent.jsonl` trims and anonymizes records of a
+local dsh task (not a `record-trace` recording).
+
+Upstream follow-up: dsh should emit child subagent start and end session
+updates over ACP so each card reports its own end.
 
 Successful read and command output arrives only in terminal tool updates;
 failed tool updates carry their error in content and still precede a normal
@@ -78,7 +85,7 @@ prompts, all answered with `end_turn`, and no `session/update` outside a
 prompt. The ACP prompt settles only after the root agent and its subagent tree
 are idle:
 https://github.com/deepseek-ai/deepseek-harness/blob/39163dd30f703a79079e2d2446545cff3c453738/packages/acp/acp/src/session.ts.
-In task 4RPPHQEJQ000, the `subagent` call started the child at record 1142,
+In one local task, the `subagent` call started the child at record 1142,
 the parent reported its completion at 1147, and the prompt response followed
 at 1152.
 

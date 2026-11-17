@@ -510,6 +510,9 @@ func (s *sectionIndex) observeActivity(e *Event) {
 		if a.Label == "" {
 			a.Label = n.Label
 		}
+		if a.Kind == "" {
+			a.Kind = n.Kind
+		}
 		a.Background = a.Background || n.Background
 		if !terminal(a.Status) && n.Status != v1.EventNativeSubagentStatusUnknown {
 			a.Status = string(n.Status)

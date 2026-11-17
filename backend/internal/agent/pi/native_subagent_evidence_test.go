@@ -52,7 +52,7 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 				t.Fatalf("cards = %#v, want one native agent", cards)
 			}
 			card := cards[0]
-			if card.Scope != "" || !strings.HasPrefix(card.Label, "delegate — ") || !strings.Contains(card.Prompt, "joke about README.md") {
+			if card.Scope != "" || !strings.HasPrefix(card.Label, "delegate — ") || card.Kind != "delegate" || !strings.Contains(card.Prompt, "joke about README.md") {
 				t.Fatalf("metadata = %#v, want the single delegated agent", card)
 			}
 			if card.Status != agent.NativeSubagentStatusCompleted || active != 0 {
@@ -150,7 +150,7 @@ func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 				t.Fatalf("cards = %#v, want one batch card", cards)
 			}
 			card := cards[0]
-			if card.Scope != agent.NativeSubagentScopeBatch || card.Label != "workflow" {
+			if card.Scope != agent.NativeSubagentScopeBatch || card.Label != "workflow" || card.Kind != "" {
 				t.Fatalf("metadata = %#v, want an explicit batch orchestration", card)
 			}
 			if card.Status != agent.NativeSubagentStatusCompleted || active != 0 {

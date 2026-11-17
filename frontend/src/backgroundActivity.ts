@@ -1,12 +1,15 @@
 // Formats a task's background-work counts and lists the running items that history metadata reports.
 
-import type { HistoryBackgroundCommand, HistoryMetadata, TaskBackground } from "@sdk/types.gen";
+import type { HistoryActivity, HistoryBackgroundCommand, HistoryMetadata, TaskBackground } from "@sdk/types.gen";
 import { toolIdentity } from "./grouping";
 
 export type BackgroundKind = "command" | "agent" | "watch";
 
 export interface BackgroundItem {
   kind: BackgroundKind;
+  // kindName names what runs: the agent kind the harness reports, or the
+  // generic name of the item's kind.
+  kindName: string;
   id: string;
   label: string;
   startedAt: number | null;
@@ -18,6 +21,13 @@ export interface BackgroundItem {
 }
 
 const kindOrder: readonly BackgroundKind[] = ["command", "agent", "watch"];
+
+// agentKindName names an agent by the kind its harness reports, a batch
+// orchestration as "Batch", and any other agent as "Agent".
+function agentKindName(activity: Pick<HistoryActivity, "kind" | "scope">): string {
+  if (activity.kind) return activity.kind;
+  return activity.scope === "batch" ? "Batch" : "Agent";
+}
 
 function count(n: number, noun: string): string {
   if (n === 1) return `1 ${noun}`;
@@ -55,6 +65,7 @@ export function activeBackgroundItems(
     if (command.status !== "running" || commandSettled(command, settled)) continue;
     items.push({
       kind: command.watch ? "watch" : "command",
+      kindName: command.watch ? "Watch" : "Command",
       id: command.id,
       label: command.label || command.id,
       startedAt: command.startedAt ? Date.parse(command.startedAt) : null,
@@ -66,6 +77,7 @@ export function activeBackgroundItems(
     if (settled || !activity.background || activity.status !== "running") continue;
     items.push({
       kind: "agent",
+      kindName: agentKindName(activity),
       id: activity.id,
       label: activity.label || activity.id,
       startedAt: activity.startedAt ? Date.parse(activity.startedAt) : null,

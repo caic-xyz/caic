@@ -57,6 +57,7 @@ describe("activeBackgroundItems", () => {
     expect(activeBackgroundItems(metadata, false)).toEqual([
       {
         kind: "command",
+        kindName: "Command",
         id: "c",
         label: "checks",
         startedAt: Date.parse(startedAt),
@@ -65,15 +66,25 @@ describe("activeBackgroundItems", () => {
       },
       {
         kind: "command",
+        kindName: "Command",
         id: "bare",
         label: "bare",
         startedAt: Date.parse(startedAt),
         toolKey: null,
         ownerAgentID: null,
       },
-      { kind: "agent", id: "bg", label: "review", startedAt: Date.parse(startedAt), toolKey: null, ownerAgentID: null },
+      {
+        kind: "agent",
+        kindName: "Agent",
+        id: "bg",
+        label: "review",
+        startedAt: Date.parse(startedAt),
+        toolKey: null,
+        ownerAgentID: null,
+      },
       {
         kind: "watch",
+        kindName: "Watch",
         id: "w",
         label: "results",
         startedAt: Date.parse(startedAt),
@@ -85,6 +96,21 @@ describe("activeBackgroundItems", () => {
 
   it("lists only the commands that do not wake the agent for a settled task", () => {
     expect(activeBackgroundItems(metadata, true).map((item) => item.id)).toEqual(["bare"]);
+  });
+
+  it("names an agent by its reported kind, a batch as Batch, and otherwise Agent", () => {
+    const names = activeBackgroundItems(
+      {
+        backgroundCommands: [],
+        activities: [
+          activity("explore", { kind: "Explore", background: true }),
+          activity("batch", { scope: "batch", background: true }),
+          activity("plain", { background: true }),
+        ],
+      },
+      false,
+    ).map((item) => item.kindName);
+    expect(names).toEqual(["Explore", "Batch", "Agent"]);
   });
 
   it("lists nothing for missing metadata", () => {

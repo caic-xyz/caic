@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/genai/acp"
-
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/klauspost/compress/zstd"
 )
@@ -733,7 +731,7 @@ func TestCheckOpenCode(t *testing.T) {
 	t.Run("valid session update", func(t *testing.T) {
 		t.Parallel()
 		data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}}`)
-		if _, err := checkOpenCode(data, false, nil); err != nil {
+		if _, err := checkOpenCode(data, false, newOpenCodeRequests()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -741,14 +739,14 @@ func TestCheckOpenCode(t *testing.T) {
 	t.Run("missing notification params", func(t *testing.T) {
 		t.Parallel()
 		data := []byte(`{"method":"session/update"}`)
-		if _, err := checkOpenCode(data, false, nil); err == nil || !strings.Contains(err.Error(), "missing params") {
+		if _, err := checkOpenCode(data, false, newOpenCodeRequests()); err == nil || !strings.Contains(err.Error(), "missing params") {
 			t.Fatalf("checkOpenCode error = %v, want missing params", err)
 		}
 	})
 
 	t.Run("requests", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[openCodeRequestKey]acp.Method)
+		methods := newOpenCodeRequests()
 		valid := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
 		if _, err := checkOpenCode(valid, true, methods); err != nil {
 			t.Fatal(err)
@@ -767,14 +765,14 @@ func TestCheckOpenCode(t *testing.T) {
 
 	t.Run("unmatched response", func(t *testing.T) {
 		t.Parallel()
-		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), false, make(map[openCodeRequestKey]acp.Method)); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
+		if _, err := checkOpenCode([]byte(`{"jsonrpc":"2.0","id":99,"result":{"stopReason":"end_turn"}}`), false, newOpenCodeRequests()); err == nil || !strings.Contains(err.Error(), "unmatched OpenCode response") {
 			t.Fatalf("checkOpenCode error = %v, want unmatched response", err)
 		}
 	})
 
 	t.Run("strict response result", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[openCodeRequestKey]acp.Method)
+		methods := newOpenCodeRequests()
 		request := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session","prompt":[]}}`)
 		if _, err := checkOpenCode(request, true, methods); err != nil {
 			t.Fatal(err)
@@ -796,7 +794,7 @@ func TestCheckOpenCode(t *testing.T) {
 		t.Parallel()
 		for _, update := range []string{`{"sessionUpdate":"session_info_update","title":"DSH task"}`, `{"sessionUpdate":"config_option_update","configOptions":[]}`} {
 			data := []byte(`{"method":"session/update","params":{"sessionId":"session","update":` + update + `}}`)
-			if _, err := checkOpenCode(data, false, nil); err != nil {
+			if _, err := checkOpenCode(data, false, newOpenCodeRequests()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -877,6 +875,46 @@ func TestCheckFile(t *testing.T) {
 				}
 			})
 		}
+	})
+	t.Run("OpenCode relay re-send", func(t *testing.T) {
+		// Trimmed from a task log: the relay reconnected before the
+		// handshake responses were persisted and re-sent its output, so the
+		// prompt response appears again, byte-identical, after the marker.
+		t.Parallel()
+		response := `{"t":"agent","ts":1789831757.505,"msg":{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn","usage":{"inputTokens":418,"outputTokens":29,"totalTokens":12735,"cachedReadTokens":12288},"_meta":{}}}}`
+		records := func(resent string) []string {
+			return []string{
+				taskMeta("opencode"),
+				`{"t":"input","ts":1789831746.494,"msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"terminal":false},"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"}}}}`,
+				`{"t":"input","ts":1789831747.385,"msg":{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}}`,
+				`{"t":"input","ts":1789831747.826,"msg":{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"tell a joke"}]}}}`,
+				response,
+				`{"t":"relay_generation","generation":"42ebd624-7fd1-444b-a52e-3030bcf594e0"}`,
+				`{"t":"agent","ts":1789831747.385,"msg":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"agentInfo":{"name":"OpenCode","version":"1.18.31"}}}}`,
+				`{"t":"agent","ts":1789831747.826,"msg":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_1","configOptions":[]}}}`,
+				resent,
+			}
+		}
+		t.Run("valid identical response", func(t *testing.T) {
+			t.Parallel()
+			path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), records(response), false)
+			result, err := checkFile(path, time.Time{}, backends.Default("", nil))
+			if err != nil || !result.checked || len(result.findings) != 0 {
+				t.Fatalf("re-sent records = %#v, %v", result, err)
+			}
+		})
+		t.Run("error differing response", func(t *testing.T) {
+			t.Parallel()
+			changed := strings.Replace(response, `"outputTokens":29`, `"outputTokens":30`, 1)
+			path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), records(changed), false)
+			result, err := checkFile(path, time.Time{}, backends.Default("", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.findings) != 1 || result.findings[0].line != 9 || !strings.Contains(result.findings[0].err.Error(), "id 3 differs from its matched response") {
+				t.Fatalf("differing re-send findings = %#v", result.findings)
+			}
+		})
 	})
 	t.Run("error response direction and input schema drift", func(t *testing.T) {
 		t.Parallel()
@@ -1073,7 +1111,7 @@ func TestCheckDSH(t *testing.T) {
 	t.Parallel()
 	t.Run("resume and configuration", func(t *testing.T) {
 		t.Parallel()
-		methods := make(map[openCodeRequestKey]acp.Method)
+		methods := newOpenCodeRequests()
 		for _, record := range []struct {
 			input bool
 			data  string
@@ -1090,7 +1128,7 @@ func TestCheckDSH(t *testing.T) {
 
 	t.Run("unknown resume field", func(t *testing.T) {
 		t.Parallel()
-		finding := checkMessage("dsh.jsonl", 2, "dsh", []byte(`{"jsonrpc":"2.0","id":1,"method":"session/resume","params":{"sessionId":"persisted","cwd":"/workspace","unexpected":true}}`), true, make(map[openCodeRequestKey]acp.Method))
+		finding := checkMessage("dsh.jsonl", 2, "dsh", []byte(`{"jsonrpc":"2.0","id":1,"method":"session/resume","params":{"sessionId":"persisted","cwd":"/workspace","unexpected":true}}`), true, newOpenCodeRequests())
 		if finding == nil || !strings.Contains(finding.String(), `unknown field "unexpected"`) || !strings.Contains(finding.String(), "acp/dto.go") {
 			t.Fatalf("finding = %v, want strict ACP field diagnostic", finding)
 		}

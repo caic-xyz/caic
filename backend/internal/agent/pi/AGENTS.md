@@ -105,6 +105,12 @@ shape, never merely a tool name that resembles delegation:
 - `{ action }` management calls (`list`, `status`, steering) never spawn, and a
   `bg_wait` completion whose mode is not a subagent orchestration is ignored.
 
+A single run's kind is its extension agent name: the `agent` argument, a
+`single` completion's `agent`, or the label of an async-status run whose
+`kind` is `subagent`. A workflow's label lists its steps' agents, so a batch
+card has no kind. Local Pi logs name `worker`, `reviewer`, `scout`,
+`researcher`, and `delegate`.
+
 One card is keyed by the extension's run ID whenever a record reports one, and
 by the tool call ID only for a synchronous or legacy run without one; the start
 record carries no run ID, so it stores the delegation metadata and the end record

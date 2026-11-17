@@ -53,6 +53,9 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 	if old.Label == "" {
 		old.Label = observed.Label
 	}
+	if old.Kind == "" {
+		old.Kind = observed.Kind
+	}
 	if old.Prompt == "" {
 		old.Prompt = observed.Prompt
 	}

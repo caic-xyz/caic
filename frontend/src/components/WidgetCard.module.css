@@ -37,6 +37,7 @@
 }
 
 .fullscreenBtn {
+  display: inline-flex;
   padding: 0.2rem 0.4rem;
   margin-left: auto;
   font-size: 0.85rem;
@@ -45,6 +46,10 @@
   background: none;
   border: none;
   border-radius: var(--radius-sm);
+}
+
+.fullscreenBtn svg {
+  fill: currentcolor;
 }
 
 .fullscreenBtn:hover {

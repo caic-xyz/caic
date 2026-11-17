@@ -70,14 +70,22 @@ test("generate settings screenshots", async ({ page, api }) => {
   await prepareVisualPage(page);
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/settings");
-  await expect(page.getByRole("region", { name: "Container", exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Image and coding agents refreshed. New tasks will use the updated image."),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh image and coding agents for md" })).toBeVisible();
-  await captureScreenshot(page, "desktop", "settings-general.png");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "settings-general.png");
+  // Auto-compaction precedes the Container section, so frame the section the
+  // scene sets up, with its refresh outcome.
+  const containerSection = page.getByRole("region", { name: "Container", exact: true });
+  const refreshed = page.getByText("Image and coding agents refreshed. New tasks will use the updated image.");
+  const refresh = page.getByRole("button", { name: "Refresh image and coding agents for md" });
+  for (const [layout, width, height] of [
+    ["desktop", 1600, 900],
+    ["mobile", 390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await expect(containerSection).toBeVisible();
+    await containerSection.scrollIntoViewIfNeeded();
+    await expect(refreshed).toBeInViewport({ ratio: 1 });
+    await expect(refresh).toBeInViewport({ ratio: 1 });
+    await captureScreenshot(page, layout, "settings-general.png");
+  }
   // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/settings?section=storage");
@@ -130,7 +138,7 @@ test("generate settings screenshots", async ({ page, api }) => {
 test("generate documentation screenshots", async ({ page, api }) => {
   // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
   test.setTimeout(120_000);
-  await prepareVisualPage(page);
+  const visual = await prepareVisualPage(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
@@ -163,6 +171,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
     model: "gemini-3.8-flash-high",
   });
   const id2 = runningTask.id;
+  // Its unfinished verification reads live time instead of the fixed clock's 0ms.
+  visual.startHistoryBefore(id2, 48_000);
   await waitForTaskState(api, id2, "running", 30_000);
 
   const widgetTask = await api.createTask({
@@ -348,6 +358,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const verification = page.getByText("go test ./backend/internal/server -run TestRateLimit", { exact: true });
   await expect(verification).toBeVisible();
   await expect(verification.locator("xpath=ancestor::summary")).toContainText("Bash");
+  await expect(verification.locator("xpath=ancestor::summary").getByTestId("tool-duration")).toHaveText(/^0:4\d$/);
   await captureScreenshot(page, "desktop", "task-running.png");
 
   // Screenshot 4: Ask mode.
@@ -703,13 +714,11 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Screenshot 11: Background work keeps a task running after its result; the
   // card row and the strip above the input name it. It runs last so its task
-  // card stays out of every earlier capture.
-  // TODO: task-background.png is registered but not published. With the fixed
-  // visual clock its running chips and tool rows show "0ms". Give the scene a
-  // realistic elapsed time (advance the clock past the re-timed starts in
-  // e2e/visual.ts), then run `make screenshots-update`.
+  // card stays out of every earlier capture. Its running work shows 75s
+  // elapsed instead of the fixed clock's 0ms.
   await page.setViewportSize({ width: 1280, height: 800 });
   const backgroundId = await createTask("Run the checks as background commands and watch the results");
+  visual.startHistoryBefore(backgroundId, 75_000);
   await expect
     .poll(async () => (await api.getTask(backgroundId)).background)
     .toEqual({ commands: 1, watches: 1, agents: 1 });
@@ -717,7 +726,11 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.locator(`[data-task-id="${backgroundId}"]`).getByTestId("task-card-background")).toHaveText(
     "Background: 1 command · 1 agent · 1 watch",
   );
-  await expect(page.getByTestId("background-strip").getByTestId("background-chip")).toHaveCount(3);
+  await expect(page.getByTestId("background-strip").getByTestId("background-chip")).toHaveText([
+    /^Command .+ 1:\d\d$/,
+    /^general-purpose .+ 1:\d\d$/,
+    /^Watch .+ 1:\d\d$/,
+  ]);
   // The open tool group shows the command and the watch beside their chips.
   await page.getByText(/^1\/3 tools: /).click();
   await expect(page.getByTestId("background-command-chip").filter({ hasText: "watching" })).toBeVisible();

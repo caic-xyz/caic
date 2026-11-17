@@ -1,13 +1,11 @@
-// Lists a task's running commands, background agents, and watches above the prompt input.
+// Lists a task's running commands, background agents by kind, and watches above the prompt input.
 
 import { createMemo, For, Show } from "solid-js";
 
-import type { BackgroundItem, BackgroundKind } from "../backgroundActivity";
+import type { BackgroundItem } from "../backgroundActivity";
 import { createLiveDuration } from "../liveDuration";
 import { formatTimingDuration } from "../timing";
 import styles from "./BackgroundStrip.module.css";
-
-const kindName: Record<BackgroundKind, string> = { agent: "Agent", command: "Command", watch: "Watch" };
 
 // BackgroundStrip renders nothing when no item runs. Activating a chip asks
 // the owner to reveal the transcript element that started the item.
@@ -32,6 +30,8 @@ export default function BackgroundStrip(props: { items: BackgroundItem[]; onReve
 }
 
 function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) => void }) {
+  // A harness can name an agent only by its kind; the chip then says it once.
+  const label = () => (props.item.label === props.item.kindName ? "" : props.item.label);
   const elapsed = createLiveDuration(
     () => props.item.startedAt,
     () => null,
@@ -44,13 +44,17 @@ function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) =>
         class={styles.chip}
         data-testid="background-chip"
         data-kind={props.item.kind}
-        title={`${kindName[props.item.kind]}: ${props.item.label}`}
+        title={label() ? `${props.item.kindName}: ${label()}` : props.item.kindName}
         onClick={() => props.onReveal(props.item)}
-        // Keyboard focus can land on a chip that the row clips.
+        // Keyboard focus can land on a chip that the narrow single row clips;
+        // wrapped chips are already in view, so this is then a no-op.
         onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
       >
-        <span class={styles.kind}>{kindName[props.item.kind]}</span>{" "}
-        <span class={styles.label}>{props.item.label}</span>
+        <span class={styles.kind}>{props.item.kindName}</span>
+        <Show when={label()}>
+          {" "}
+          <span class={styles.label}>{label()}</span>
+        </Show>
         <Show when={elapsed() !== null}>
           {" "}
           <span class={styles.duration}>{formatTimingDuration(elapsed() ?? 0)}</span>

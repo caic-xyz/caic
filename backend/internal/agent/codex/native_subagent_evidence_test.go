@@ -68,8 +68,8 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 	}
 }
 
-// TestConcurrentChildToolsEvidence pins a seven-record excerpt of task
-// 4H9K7LT6U000. The command and IDs are sanitized; the notification ordering,
+// TestConcurrentChildToolsEvidence pins a seven-record excerpt of a
+// local Codex task. The command and IDs are sanitized; the notification ordering,
 // enclosing actor, child tool failure and suppressed child completion remain.
 func TestConcurrentChildToolsEvidence(t *testing.T) {
 	t.Parallel()

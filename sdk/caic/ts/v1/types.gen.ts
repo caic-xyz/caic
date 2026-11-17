@@ -2196,6 +2196,11 @@ export interface EventNativeSubagent {
   id: string;
   groupID?: string;
   label?: string;
+  /**
+   * Kind names the agent definition the harness reports, such as Claude's
+   * subagent_type. It is absent when the harness reports none.
+   */
+  kind?: string;
   prompt?: string;
   status: EventNativeSubagentStatus;
   result?: string;
@@ -2478,6 +2483,11 @@ export interface HistoryActivity {
   scope?: EventNativeSubagentScope;
   groupID?: string;
   label?: string;
+  /**
+   * Kind names the agent definition the harness reports, such as Claude's
+   * subagent_type. It is absent when the harness reports none.
+   */
+  kind?: string;
   status: string;
   background?: boolean;
   startedAt?: ISOTimestamp;

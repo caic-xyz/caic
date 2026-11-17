@@ -409,15 +409,18 @@ const (
 // when the harness did not expose them.
 type EventNativeSubagent struct {
 	// RunID distinguishes resumed runs and sorts in execution order per ID.
-	RunID     string                    `json:"runID,omitempty"`
-	ToolUseID string                    `json:"toolUseID,omitempty"`
-	Scope     EventNativeSubagentScope  `json:"scope,omitempty"`
-	ID        string                    `json:"id"`
-	GroupID   string                    `json:"groupID,omitempty"`
-	Label     string                    `json:"label,omitempty"`
-	Prompt    string                    `json:"prompt,omitempty"`
-	Status    EventNativeSubagentStatus `json:"status"`
-	Result    string                    `json:"result,omitempty"`
+	RunID     string                   `json:"runID,omitempty"`
+	ToolUseID string                   `json:"toolUseID,omitempty"`
+	Scope     EventNativeSubagentScope `json:"scope,omitempty"`
+	ID        string                   `json:"id"`
+	GroupID   string                   `json:"groupID,omitempty"`
+	Label     string                   `json:"label,omitempty"`
+	// Kind names the agent definition the harness reports, such as Claude's
+	// subagent_type. It is absent when the harness reports none.
+	Kind   string                    `json:"kind,omitempty"`
+	Prompt string                    `json:"prompt,omitempty"`
+	Status EventNativeSubagentStatus `json:"status"`
+	Result string                    `json:"result,omitempty"`
 	// Background reports that the harness launched the delegation detached from
 	// the parent turn, so it can outlive that turn's result.
 	Background bool `json:"background,omitempty"`

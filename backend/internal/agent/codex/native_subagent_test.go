@@ -362,7 +362,7 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 
 func TestBackgroundCommand(t *testing.T) {
 	t.Parallel()
-	// Minimized from task 4HM3VRG10000: the agent ended its turn while its
+	// Minimized from a task log: the agent ended its turn while its
 	// unified-exec smoke test still ran, and Codex reported the process exit
 	// 8 minutes later with the original turn ID.
 	const (
@@ -413,7 +413,7 @@ func TestBackgroundCommand(t *testing.T) {
 	})
 	t.Run("Failed", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 45566775I000: the process was killed (143).
+		// Minimized from a task log: the process was killed (143).
 		failed := strings.Replace(strings.Replace(completed, `"status":"completed"`, `"status":"failed"`, 1), `"exitCode":0`, `"exitCode":143`, 1)
 		_, commands := feed(t, threadStarted, started, turnCompleted, failed)
 		if len(commands) != 2 || commands[1].Command.Status != agent.BackgroundCommandStatusFailed || commands[1].Command.ExitCode == nil || *commands[1].Command.ExitCode != 143 {
@@ -428,7 +428,7 @@ func TestBackgroundCommand(t *testing.T) {
 	})
 	t.Run("ReplayedStart", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 459P2FK8M000: a relay reattach replayed the start of
+		// Minimized from a task log: a relay reattach replayed the start of
 		// a command that then completed inside its turn.
 		if _, commands := feed(t, threadStarted, started, started, completed, turnCompleted); len(commands) != 0 {
 			t.Fatalf("commands = %#v, want none for a command that ended in its turn", commands)
@@ -436,7 +436,7 @@ func TestBackgroundCommand(t *testing.T) {
 	})
 	t.Run("ChildThread", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 44N5K67J2000: a child's command outlived the
+		// Minimized from a task log: a child's command outlived the
 		// child's turn and Codex reported its exit on the child thread.
 		child := func(line string) string {
 			return strings.ReplaceAll(line, `"threadId":"thread-root"`, `"threadId":"thread-child"`)

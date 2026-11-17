@@ -103,6 +103,8 @@
 }
 
 .cloneButton {
+  display: inline-flex;
+  align-items: center;
   padding: 0.35rem 0.6rem;
   font: inherit;
   font-size: 0.9rem;
@@ -113,6 +115,11 @@
   background: var(--color-bg-input);
   border: none;
   border-radius: var(--radius-md);
+}
+
+/* Material Symbols ship unfilled; follow the button text color. */
+.cloneButton svg {
+  fill: currentcolor;
 }
 
 .cloneButton:disabled {

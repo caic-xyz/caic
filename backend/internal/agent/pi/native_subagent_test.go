@@ -148,17 +148,25 @@ func TestSubagentAsyncSnapshotSettlesRun(t *testing.T) {
 	if len(started) != 1 || started[0].Status != agent.NativeSubagentStatusRunning || !started[0].Background {
 		t.Fatalf("started = %#v, want one detached running card", started)
 	}
-	settled := feed(widget(asyncSnapshotRun{ID: "test-run", Label: "scout", State: "complete"}))
+	settled := feed(widget(asyncSnapshotRun{ID: "test-run", Kind: "workflow", Label: "scout", State: "complete"}))
 	if len(settled) != 1 || settled[0].Status != agent.NativeSubagentStatusCompleted || !settled[0].Background {
 		t.Fatalf("settled = %#v, want the same detached card completed", settled)
+	}
+	// A workflow's label lists its steps' agents; it names no single kind.
+	if settled[0].Kind != "" {
+		t.Fatalf("kind = %q, want none for a workflow", settled[0].Kind)
 	}
 	if settled[0].ID != started[0].ID {
 		t.Fatalf("identity = %q, want the dispatched %q", settled[0].ID, started[0].ID)
 	}
 	// A run observed only through the snapshot is still detached evidence.
-	fresh := feed(widget(asyncSnapshotRun{ID: "other-run", Label: "worker", State: "running"}))
+	fresh := feed(widget(asyncSnapshotRun{ID: "other-run", Kind: "subagent", Label: "worker", State: "running"}))
 	if len(fresh) != 1 || fresh[0].Status != agent.NativeSubagentStatusRunning || !fresh[0].Background {
 		t.Fatalf("fresh = %#v, want one detached running card", fresh)
+	}
+	// A single run's label is its agent name.
+	if fresh[0].Kind != "worker" {
+		t.Fatalf("kind = %q, want the snapshot's agent name", fresh[0].Kind)
 	}
 }
 

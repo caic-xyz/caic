@@ -1,4 +1,4 @@
-/* Background-work chips in one scrollable row above the task prompt input. */
+/* Background-work chips above the task prompt input: one scrollable row in a narrow pane, wrapped lines in a wide one. */
 
 .strip {
   display: flex;
@@ -6,6 +6,7 @@
   gap: 0.25rem;
   align-items: center;
   min-width: 0;
+  container-type: inline-size;
 }
 
 .scroller {
@@ -56,4 +57,26 @@
 
 .duration {
   font-variant-numeric: tabular-nums;
+}
+
+/* A narrow pane keeps one row so the strip does not push the prompt down; a
+   wide pane has room to wrap every chip into view. */
+@container (min-width: 36rem) {
+  .scroller {
+    overflow-x: visible;
+  }
+
+  .list {
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .list > li {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .chip {
+    max-width: 100%;
+  }
 }

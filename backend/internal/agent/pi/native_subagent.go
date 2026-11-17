@@ -110,6 +110,7 @@ func (n *nativeSubagents) parseStart(ev *pi.ToolExecStartEvent) ([]agent.Message
 	}
 	s := agent.NativeSubagent{ToolUseID: ev.ToolCallID, Label: subagentDescription(info.Kind, info.Spawns), Status: agent.NativeSubagentStatusUnknown}
 	if info.Kind == "single" {
+		s.Kind = info.Spawns[0].Agent
 		s.Prompt = info.Spawns[0].Task
 	} else {
 		s.Scope = agent.NativeSubagentScopeBatch
@@ -161,7 +162,11 @@ func (n *nativeSubagents) parseEnd(ev *pi.ToolExecEndEvent) ([]agent.Message, er
 			s = spawned
 			s.ID = subagentRunIdentity(c.RunID, "")
 		}
-		if c.Mode != "single" {
+		if c.Mode == "single" {
+			// A single run's agent names its definition; a workflow's names the
+			// orchestration.
+			s.Kind = c.Agent
+		} else {
 			s.Scope = agent.NativeSubagentScopeBatch
 		}
 		s.Status = completionStatus(c.State, c.Success, c.Results)
@@ -181,14 +186,17 @@ const (
 )
 
 // asyncSnapshot is the subset of the extension's async-status snapshot caic
-// consumes: each detached run's identity, label, and reported state.
+// consumes: each detached run's identity, kind, label, and reported state.
 type asyncSnapshot struct {
 	Kind string             `json:"kind"`
 	Runs []asyncSnapshotRun `json:"runs"`
 }
 
 type asyncSnapshotRun struct {
-	ID    string `json:"id"`
+	ID string `json:"id"`
+	// Kind is "subagent" for a single run, whose label is its agent name, or
+	// "workflow" for an orchestration, whose label lists its steps' agents.
+	Kind  string `json:"kind"`
 	Label string `json:"label"`
 	State string `json:"state"`
 }
@@ -224,6 +232,9 @@ func (n *nativeSubagents) parseExtensionUI(ev *pi.ExtensionUIRequest) ([]agent.M
 				Label:      run.Label,
 				Status:     asyncSnapshotStatus(run.State),
 				Background: true,
+			}
+			if run.Kind == "subagent" {
+				s.Kind = run.Label
 			}
 			out = append(out, n.timeline.Observe(&s)...)
 		}

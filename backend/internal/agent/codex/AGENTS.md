@@ -83,6 +83,12 @@ delegation through two item types, both of which `native_subagent.go` maps:
   `receiverThreadIds` and empty `agentsStates`, which the recording also
   contains, is not evidence of anything and produces no card.
 
+Neither item type names an agent role. Codex's `Thread` carries `agentRole`
+for an `AgentControl`-spawned sub-agent, but caic receives only the root
+thread's `thread/started`: all 404 in 403 local Codex logs, and their responses,
+have `source: "vscode"` and a null `agentRole`. A Codex card therefore has no
+kind.
+
 A collaborative agent runs independently of the parent turn, so a `spawnAgent`
 receiver or `started` activity marks its card `Background`; only such a card can
 keep a task running after the parent result. A child thread answers for itself:
@@ -120,8 +126,8 @@ https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/core/src/unified_exe
 
 - 20 root-thread commands still running at `turn/completed` (14 completed and
   6 failed turns). 13 reported their exit 0.8 s to 18.5 h later; 7 ended with
-  the host. Their 423 `outputDelta` records arrived after the turn. In task
-  4HM3VRG10000, the final answer says the smoke suite still runs; its exit
+  the host. Their 423 `outputDelta` records arrived after the turn. In one
+  task, the final answer says the smoke suite still runs; its exit
   arrived 8 minutes later.
 - 28 child-thread commands still running at the child's `turn/completed`: 22
   reported their exit, 9 of them by a signal (exit code 130, 137, or 143), and
@@ -134,8 +140,8 @@ a background command, keyed by thread and item. caic opts out of
 Codex starts no turn by itself. Of 3,168 root `turn/started` records, 3,162
 have a `turn/start` response; the other 6 are `thread/compact/start`
 compactions that caic requested. A process exit starts no turn, so the card
-does not wake the agent and does not keep the task running: in task
-44PSC62MQ000, a `sudo` password prompt stayed open across 48 turns.
+does not wake the agent and does not keep the task running: in one
+task, a `sudo` password prompt stayed open across 48 turns.
 
 ## References
 

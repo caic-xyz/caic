@@ -40,6 +40,10 @@ tool's `run_in_background` and a task record's `is_backgrounded`
 card can keep a task running after the parent result, as can a detached shell
 command.
 
+The card's kind is the Agent tool's `subagent_type`, which `task_started`
+repeats. Every `local_agent` `task_started` in 17 local Claude task logs (136
+records) carried it: `general-purpose` (115) and `web-fetch` (21).
+
 `SendMessage` to a settled agent resumes it: a new `task_started` with the same
 `task_id`, a newer `run_id`, and the SendMessage `tool_use_id`. Its tool
 result (`tool_use_result.resumedAgentId`) only acknowledges the resumption and
@@ -87,10 +91,18 @@ turn. The statuses were `local_agent` completed and `local_bash` completed,
 failed, and stopped (a watch expiry). `turnQueue` in `native_subagent.go`
 owns this mapping, and every background command card sets `WakesAgent`.
 
+A notification that arrives during a parent turn joins its next model request.
+When no root `tool_result` user record follows the terminal record before the
+root result, Claude Code starts a notification turn about 30 ms after the
+result: 5 of 5 such results in 116 local Claude task logs. None of the 63
+results with such a record, TaskStop kills included, was followed by a turn
+within 2 s. The result itself does not distinguish them
+(`queued_turn_count` is 0); `turnQueue` sets `ResultMessage.TurnQueued`.
+
 A task that a subagent spawned notifies that subagent. Its task records reach
 the parent stream without `parent_tool_use_id`, and newer versions add
-`owned_by_subagent` and `parent_task_id` to `task_started`. In task
-4VN78Q1IU000, the expiry of such a watch resumed its subagent and started no
+`owned_by_subagent` and `parent_task_id` to `task_started`. In one local
+log, the expiry of such a watch resumed its subagent and started no
 parent turn.
 
 `system/background_tasks_changed` lists every live background task:

@@ -27,8 +27,20 @@ export function screenshotDir(layout: FrontendScreenshotLayout): string {
   return path.join(screenshotRoot, layout);
 }
 
-export async function prepareVisualPage(page: Page): Promise<void> {
+/** Scene controls over the deterministic page that prepareVisualPage sets up. */
+export interface VisualPage {
+  /** Places a task's whole history as if the task started elapsedMs before the
+   *  fixed clock, so its running tool calls read live times while completed
+   *  durations keep their values. Call before the page first loads the task's
+   *  history. */
+  startHistoryBefore(id: string, elapsedMs: number): void;
+}
+
+export async function prepareVisualPage(page: Page): Promise<VisualPage> {
   await page.clock.setFixedTime(visualTime);
+  // Histories are re-timed from the real task start, which is later than the
+  // fixed clock: running work reads 0ms unless its scene moves the history.
+  const historyStartByTask = new Map<string, number>();
   // Freeze demonstration inputs at the API seam. The product keeps its real
   // corners, icons, timing controls, and full native-activity content.
   await page.route("**/api/caic/v1/server/cache-sizes", (route) =>
@@ -61,8 +73,9 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     const taskResponse = await route.fetch({ url: taskURL });
     if (!taskResponse.ok()) throw new Error(`Visual task fetch failed: ${taskResponse.status()}`);
     const task = validateTask(await taskResponse.json());
-    const start = Date.parse(task.startedAt ?? "");
-    if (!Number.isFinite(start)) throw new Error("Visual task has no start timestamp");
+    const taskStart = Date.parse(task.startedAt ?? "");
+    if (!Number.isFinite(taskStart)) throw new Error("Visual task has no start timestamp");
+    const start = historyStartByTask.get(task.id) ?? taskStart;
     const values: unknown = await response.json();
     if (new URL(route.request().url()).pathname.endsWith("/manifest")) {
       const manifest = validateHistoryManifest(values);
@@ -87,14 +100,21 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         return command ? [[event.recordID, event.index, command.id, command.status]] : [];
       });
       const normalized = await page.evaluate(
-        ({ id, start, timestamps, lifecycles, manifest }) => {
+        ({ id, taskStart, start, timestamps, lifecycles, manifest }) => {
           const event = new CustomEvent("caic-visual-history", {
-            detail: { id, start, timestamps, lifecycles, manifest },
+            detail: { id, taskStart, start, timestamps, lifecycles, manifest },
           });
           window.dispatchEvent(event);
           return event.detail.manifest;
         },
-        { id: task.id, start, timestamps, lifecycles, manifest },
+        {
+          id: task.id,
+          taskStart,
+          start,
+          timestamps,
+          lifecycles,
+          manifest,
+        },
       );
       await route.fulfill({ json: normalized });
       return;
@@ -119,7 +139,13 @@ export async function prepareVisualPage(page: Page): Promise<void> {
   const fixtures = { samples: resourceHistory(), health: serverHealth(), stride: visualRecordStrideMs };
   await page.addInitScript(({ samples, health, stride }) => {
     type Lifecycle = { recordID: number; index: number; id: string; status: string };
-    const histories = new Map<string, { start: number; timestamps: Map<string, number>; lifecycles: Lifecycle[] }>();
+    type History = {
+      taskStart: number;
+      start: number;
+      timestamps: Map<string, number>;
+      lifecycles: Lifecycle[];
+    };
+    const histories = new Map<string, History>();
     function normalize(id: string, manifest: HistoryManifest) {
       const history = histories.get(id);
       if (!history) throw new Error(`Visual task has no timestamp map: ${id}`);
@@ -136,7 +162,8 @@ export async function prepareVisualPage(page: Page): Promise<void> {
           .filter((position) => position !== undefined)
           .map(positionTime);
         if (setupEnd.length === 0) throw new Error("Visual setup has no end position");
-        metadata.setupEndedAt = iso(Math.min(...setupEnd));
+        // Setup is timed from the task's API start, which a moved history keeps.
+        metadata.setupEndedAt = iso(Math.min(...setupEnd) - history.start + history.taskStart);
       }
       for (const turn of metadata.turns ?? []) {
         turn.at = iso(positionTime(turn));
@@ -149,7 +176,9 @@ export async function prepareVisualPage(page: Page): Promise<void> {
         // and preserve the server's elapsed lifecycle times as one offset.
         const offset = positionTime(activity.first) - original;
         activity.anchorAt = iso(Date.parse(activity.anchorAt) + offset);
-        if (activity.startedAt) activity.startedAt = iso(Date.parse(activity.startedAt) + offset);
+        if (activity.startedAt) {
+          activity.startedAt = iso(Date.parse(activity.startedAt) + offset);
+        }
         if (activity.endedAt) activity.endedAt = iso(Date.parse(activity.endedAt) + offset);
       }
       // A command starts at its first running record and ends at its first
@@ -169,9 +198,10 @@ export async function prepareVisualPage(page: Page): Promise<void> {
       }
     }
     window.addEventListener("caic-visual-history", (event) => {
-      const { id, start, timestamps, lifecycles, manifest } = (
+      const { id, taskStart, start, timestamps, lifecycles, manifest } = (
         event as CustomEvent<{
           id: string;
+          taskStart: number;
           start: number;
           timestamps: [number, number, number][];
           lifecycles: [number, number, string, string][];
@@ -181,6 +211,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
       const map = new Map<string, number>();
       for (const [recordID, index, original] of timestamps) map.set(`${recordID}:${index}`, original);
       histories.set(id, {
+        taskStart,
         start,
         timestamps: map,
         lifecycles: lifecycles.map(([recordID, index, commandID, status]) => ({
@@ -243,6 +274,11 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     };
   }, fixtures);
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  return {
+    startHistoryBefore(id, elapsedMs) {
+      historyStartByTask.set(id, Date.parse(visualTime) - elapsedMs);
+    },
+  };
 }
 
 export async function waitForVisualReadiness(page: Page): Promise<void> {

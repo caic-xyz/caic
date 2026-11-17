@@ -2353,6 +2353,7 @@ when the harness did not expose them.
 | `id` | `string` |  | yes |
 | `groupID` | `string` |  |  |
 | `label` | `string` |  |  |
+| `kind` | `string` | Kind names the agent definition the harness reports, such as Claude's subagent_type. It is absent when the harness reports none. |  |
 | `prompt` | `string` |  |  |
 | `status` | `EventNativeSubagentStatus` |  | yes |
 | `result` | `string` |  |  |
@@ -2633,6 +2634,7 @@ ownership revisions from new actor output.
 | `scope` | `EventNativeSubagentScope` |  |  |
 | `groupID` | `string` |  |  |
 | `label` | `string` |  |  |
+| `kind` | `string` | Kind names the agent definition the harness reports, such as Claude's subagent_type. It is absent when the harness reports none. |  |
 | `status` | `string` |  | yes |
 | `background` | `boolean` |  |  |
 | `startedAt` | `ISOTimestamp` |  |  |

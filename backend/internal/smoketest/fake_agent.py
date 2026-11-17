@@ -639,6 +639,8 @@ BG_REVIEW = {
     "id": "claude:task:a6c1e0f4b9d27e835",
     "run": "0mwk1a2b3-5d6e7f80",
     "description": "Review the API handlers",
+    # The subagent_type local Claude Code task logs report most often.
+    "kind": "general-purpose",
     "prompt": "Review backend/internal/server for missing input validation. Report each finding with its location.",
 }
 
@@ -717,7 +719,7 @@ def emit_background_turn(turns: int, gated: bool) -> None:
         "Agent",
         {
             "description": BG_REVIEW["description"],
-            "subagent_type": "general-purpose",
+            "subagent_type": BG_REVIEW["kind"],
             "prompt": BG_REVIEW["prompt"],
             "run_in_background": True,
         },
@@ -727,6 +729,7 @@ def emit_background_turn(turns: int, gated: bool) -> None:
         "tool_use_id": BG_REVIEW["tool"],
         "id": BG_REVIEW["id"],
         "label": BG_REVIEW["description"],
+        "kind": BG_REVIEW["kind"],
         "prompt": BG_REVIEW["prompt"],
         "status": "running",
         "background": True,
@@ -763,6 +766,7 @@ BG_EDGE_WATCH = {
     "id": "claude:shell:bedge1wch",
     "description": "deploy log errors",
 }
+# The edge agent reports no subagent_type, so its chip keeps the generic kind.
 BG_EDGE_AGENT = {
     "tool": "toolu_edge_agent",
     "id": "claude:task:edge7agent",

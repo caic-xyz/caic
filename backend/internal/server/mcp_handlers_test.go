@@ -334,7 +334,8 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			t.Logf("mutation-to-alert resource ready: %s elapsed=%s", version, time.Since(alertStarted))
 			firstOccurrence := alerts[0].ID
 			// Both transitions happen between resource reads. The final enum is
-			// unchanged, but its atomic task-state identity denotes a new alert.
+			// unchanged, but its atomic task-state identity denotes a new alert
+			// that supersedes the first.
 			tk.SetState(task.StateRunning)
 			s.taskMgr.NotifyTaskUpdate(tk.ID)
 			tk.SetState(task.StateWaiting)
@@ -352,10 +353,10 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
 				t.Fatal(err)
 			}
-			if len(alerts) != 2 || alerts[0].ID == alerts[1].ID || (alerts[0].ID != firstOccurrence && alerts[1].ID != firstOccurrence) {
+			if len(alerts) != 1 || alerts[0].ID == firstOccurrence {
 				t.Fatalf("repeated-state occurrences=%+v", alerts)
 			}
-			occurrences := []string{alerts[0].ID, alerts[1].ID}
+			occurrence := alerts[0].ID
 			tk.SetTitle("Content-only update")
 			s.taskMgr.NotifyTaskUpdate(tk.ID)
 			readUpdates()
@@ -370,7 +371,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
 				t.Fatal(err)
 			}
-			if len(alerts) != 2 || !slices.Equal([]string{alerts[0].ID, alerts[1].ID}, occurrences) {
+			if len(alerts) != 1 || alerts[0].ID != occurrence {
 				t.Fatalf("content activity manufactured occurrence=%+v", alerts)
 			}
 			// Replacement restarts the task-local sequence. Its existing timeline
@@ -391,7 +392,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			if err := json.Unmarshal([]byte(resource.Contents[0].Text), &alerts); err != nil {
 				t.Fatal(err)
 			}
-			if len(alerts) != 2 || !slices.Equal([]string{alerts[0].ID, alerts[1].ID}, occurrences) {
+			if len(alerts) != 1 || alerts[0].ID != occurrence {
 				t.Fatalf("restored baseline manufactured occurrence=%+v", alerts)
 			}
 			deleteReq := request(http.MethodDelete, ownerToken.AccessToken, session, "")

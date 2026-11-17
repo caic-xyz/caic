@@ -8,6 +8,7 @@ import SearchableSelect, { type SearchableOption } from "./SearchableSelect";
 import selectStyles from "./SearchableSelect.module.css";
 import styles from "./RepoChipStrip.module.css";
 import { api } from "../api";
+import CloneIcon from "@material-symbols/svg-400/outlined/cloud_download.svg?solid";
 
 export type RepoEntry = { path: string; branch: string };
 
@@ -164,9 +165,10 @@ export default function RepoChipStrip(props: Props) {
           class={styles.cloneButton}
           onClick={() => props.onClone?.()}
           title="Clone a repository"
+          aria-label="Clone a repository"
           data-testid="clone-toggle"
         >
-          ⎘
+          <CloneIcon width="1.4em" height="1.4em" aria-hidden="true" />
         </button>
       </Show>
     </div>

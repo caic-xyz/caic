@@ -152,7 +152,7 @@ type Task struct {
 	nativeSubagents        agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands     agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 	backgroundStarts       map[string]backgroundStart      // First running observation of each card's current run, by card ID.
-	turnQueued             bool                            // A root TurnQueuedMessage arrived after the last root result or host exit.
+	turnQueued             bool                            // The harness queued a turn after the last root result or host exit, or that result reported one.
 	skillReads             agent.SkillReadTracker
 
 	subs            []*sub          // active sequenced message subscribers
@@ -1106,7 +1106,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage, settled []
 			}
 		case *agent.ResultMessage:
 			t.completedRootTurns++
-			t.turnQueued = false
+			t.turnQueued = m.TurnQueued
 			t.planDismissed = false
 			if m.ContextWindow > 0 {
 				t.reportedContextWindow = m.ContextWindow
@@ -2171,6 +2171,14 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		case *agent.TurnQueuedMessage:
 			// A turn the harness queued by itself keeps the task running until its
 			// result, even when the work that queued it has already settled.
+			//
+			// TODO: A Claude turn that starts without a TurnQueuedMessage, such as
+			// one for a prompt delivered while the previous turn ran, leaves this
+			// live fold waiting at the turn's system/init, while the replay fold
+			// infers running there. A replay of local Claude logs shows 5
+			// waiting→running flips under 1 s, all from prompts delivered
+			// mid-turn. Make both folds treat a root system/init after a result
+			// the same way, and test live against replay on that sequence.
 			if !child {
 				t.turnQueued = true
 			}
@@ -2200,7 +2208,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
 		t.completedRootTurns++
-		t.turnQueued = false
+		t.turnQueued = rm.TurnQueued
 		if len(rm.DiffStat) > 0 {
 			t.setLiveDiffStatLocked(rm.DiffStat)
 		}

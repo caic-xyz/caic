@@ -3758,7 +3758,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("QueuedTurnState", func(t *testing.T) {
 			t.Parallel()
-			// Minimized from task 4VN78Q1IU000: when background work ends after the
+			// Minimized from a task log: when background work ends after the
 			// parent result, Claude Code starts a turn to deliver its notification.
 			// The task stays running from the terminal update through that turn.
 			const (
@@ -3849,6 +3849,43 @@ func TestTask(t *testing.T) {
 				runsUntilNotificationTurn(t, entries, states)
 				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{Agents: 1}) || final != (BackgroundCounts{}) {
 					t.Errorf("counts at result = %+v, final = %+v, want 1 agent then none", atResult, final)
+				}
+			})
+			t.Run("NotificationDuringFinalRequest", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from a task log: the background agent ended while
+				// the parent's last model request streamed. No tool result followed,
+				// so Claude Code started a turn 26 ms after the result.
+				snapshot := `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + session + `}`
+				entries := parse(t, agentUse, agentStarted, agentLaunched, agentUpdated, agentNotified, snapshot, text, result, init, text, notified)
+				states, counts := fold(t, entries)
+				runsUntilNotificationTurn(t, entries, states)
+				if atResult, final := countsAt(entries, counts); atResult != (BackgroundCounts{}) || final != (BackgroundCounts{}) {
+					t.Errorf("counts at result = %+v, final = %+v, want none", atResult, final)
+				}
+			})
+			t.Run("NotificationBeforeToolResult", func(t *testing.T) {
+				t.Parallel()
+				// Minimized from a task log: a background command ended while a
+				// foreground command ran. The foreground tool result carried the
+				// notification to the model, and no turn followed the result.
+				bgUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bg","name":"Bash","input":{"command":"make test","run_in_background":true}}]},` + session + `}`
+				bgStarted := `{"type":"system","subtype":"task_started","task_id":"but6vcll2","run_id":"0mwindp4h","tool_use_id":"toolu_bg","description":"Run fix, verify, test","is_backgrounded":true,"task_type":"local_bash",` + session + `}`
+				bgLaunched := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bg","type":"tool_result","content":"Command running in background with ID: but6vcll2"}]},` + session + `}`
+				fgUse := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fg","name":"Bash","input":{"command":"wait-for-gates"}}]},` + session + `}`
+				fgStarted := `{"type":"system","subtype":"task_started","task_id":"bf0in983f","run_id":"0mwinex1n","tool_use_id":"toolu_fg","description":"Wait for host gate results","is_backgrounded":false,"task_type":"local_bash",` + session + `}`
+				bgUpdated := `{"type":"system","subtype":"task_updated","task_id":"but6vcll2","run_id":"0mwindp4h","patch":{"status":"completed"},` + session + `}`
+				bgNotified := `{"type":"system","subtype":"task_notification","task_id":"but6vcll2","run_id":"0mwindp4h","tool_use_id":"toolu_bg","status":"completed","summary":"Background command \"Run fix, verify, test\" completed (exit code 0)",` + session + `}`
+				snapshot := `{"type":"system","subtype":"background_tasks_changed","tasks":[],` + session + `}`
+				fgNotified := `{"type":"system","subtype":"task_notification","task_id":"bf0in983f","run_id":"0mwinex1n","tool_use_id":"toolu_fg","status":"completed","summary":"Wait for host gate results",` + session + `}`
+				fgResult := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_fg","type":"tool_result","content":"caic test exit=0","is_error":false}]},` + session + `}`
+				entries := parse(t, bgUse, bgStarted, bgLaunched, fgUse, fgStarted, bgUpdated, bgNotified, snapshot, fgNotified, fgResult, text, result)
+				states, _ := fold(t, entries)
+				if !slices.ContainsFunc(entries, func(e agent.TimedMessage) bool { _, ok := e.Message.(*agent.TurnQueuedMessage); return ok }) {
+					t.Fatal("the background command's end queued no turn")
+				}
+				if got := states[len(states)-1]; got != task.StateWaiting {
+					t.Errorf("state after the result = %v, want waiting", got)
 				}
 			})
 			t.Run("BackgroundCommand", func(t *testing.T) {
@@ -3965,7 +4002,7 @@ func TestTask(t *testing.T) {
 			})
 			t.Run("CodexCommandOutlivesTurn", func(t *testing.T) {
 				t.Parallel()
-				// Minimized from task 4HM3VRG10000: the agent ended its turn while its
+				// Minimized from a task log: the agent ended its turn while its
 				// smoke test still ran; Codex reported the exit later and started no
 				// turn, so the command shows but the task waits for the user.
 				const (
@@ -4006,7 +4043,7 @@ func TestTask(t *testing.T) {
 			})
 			t.Run("SettlementEndsHostedCommand", func(t *testing.T) {
 				t.Parallel()
-				// Minimized from task 4RSNU5UFS000: the log has no exit record and ends
+				// Minimized from a task log: the log has no exit record and ends
 				// with the purge trailer while a Codex process was last seen running.
 				const (
 					thread   = `{"method":"thread/started","params":{"thread":{"id":"thread-root"}}}`
@@ -4054,7 +4091,7 @@ func TestTask(t *testing.T) {
 			})
 			t.Run("PiExtensionWake", func(t *testing.T) {
 				t.Parallel()
-				// Minimized from task 44KFPPA9I000: the pi-subagents extension woke the
+				// Minimized from a task log: the pi-subagents extension woke the
 				// idle parent after a detached run ended.
 				const (
 					agentStart = `{"type":"agent_start"}`
@@ -4099,7 +4136,7 @@ func TestTask(t *testing.T) {
 			})
 			t.Run("SnapshotRetiresLostCard", func(t *testing.T) {
 				t.Parallel()
-				// Minimized from task 4VN78Q1IU000: a snapshot drops background work
+				// Minimized from a task log: a snapshot drops background work
 				// whose terminal records were lost. The card ends as on host exit
 				// and the task settles without a queued turn.
 				listed := `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a3635a","run_id":"001","task_type":"local_agent"},{"task_id":"b3xwrrd6m","task_type":"local_bash"}],` + session + `}`

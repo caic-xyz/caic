@@ -1,4 +1,4 @@
-// Tests native DeepSeek ACP configuration, history reconstruction, permissions, and model discovery.
+// Tests native DeepSeek ACP configuration, history reconstruction, subagent lifecycle, permissions, and model discovery.
 
 package dsh
 
@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -342,33 +343,107 @@ func TestSkillToolRead(t *testing.T) {
 	}
 }
 
+// TestSubagentTool replays trimmed records 1137 and 1141–1152 of a local dsh task: a
+// subagent spawn, the parent's report of the child's end, and the prompt
+// response that dsh sends only after the child tree goes idle.
 func TestSubagentTool(t *testing.T) {
 	t.Parallel()
-	wire := New("", nil).NewWire()
-	initial := []byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"subagent-call","title":"subagent","kind":"other","status":"in_progress","rawInput":{"description":"Silly duck task","cwd":"/tmp","prompt":"act as a rubber duck"}}}}`)
-	msgs, err := wire.ParseOutput(initial)
+	data, err := os.ReadFile("testdata/subagent.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 0 {
-		t.Fatalf("subagent spawn messages=%#v, want generic tool call suppressed", msgs)
+	fixture := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
+	const id = "77c5125c-db9e-4bb0-8bfe-97ac042d25c5"
+	spawn := agent.NativeSubagent{
+		ToolUseID: "call_00_WcW8QyRo4dqT8fFtimbd4993", Scope: agent.NativeSubagentScopeAgent, ID: id,
+		Label: "Silly duck task", Prompt: "act as a rubber duck", Status: agent.NativeSubagentStatusRunning,
 	}
-	completed := []byte(`{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"subagent-call","status":"completed","content":[{"type":"content","content":{"type":"text","text":"started subagent 77c5125c-db9e-4bb0-8bfe-97ac042d25c5"}}]}}}`)
-	msgs, err = wire.ParseOutput(completed)
-	if err != nil {
-		t.Fatal(err)
+	settled := func(status agent.NativeSubagentStatus) agent.Message {
+		s := spawn
+		s.Status = status
+		return &agent.NativeSubagentMessage{Subagent: s}
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("subagent completion messages=%#v, want one native card", msgs)
+	for _, tc := range []struct {
+		name     string
+		response string
+		want     agent.Message
+	}{
+		{"EndTurn", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"end_turn"}}`, settled(agent.NativeSubagentStatusCompleted)},
+		{"Cancelled", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"cancelled"}}`, settled(agent.NativeSubagentStatusInterrupted)},
+		{"MaxTokens", `{"jsonrpc":"2.0","id":8,"result":{"stopReason":"max_tokens"}}`, &agent.BackgroundRetiredMessage{ID: id}},
+		{"Error", `{"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"turn failed"}}`, &agent.BackgroundRetiredMessage{ID: id}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			records := slices.Clone(fixture)
+			records[len(records)-1] = []byte(`{"t":"agent","ts":1793994563.479,"msg":` + tc.response + `}`)
+			want := []agent.Message{&agent.NativeSubagentMessage{Subagent: spawn}, tc.want}
+			wire := New("", nil).NewWire()
+			live := make([]agent.Message, 0, len(want))
+			for _, line := range records[1:] {
+				var record struct {
+					T   string          `json:"t"`
+					Msg json.RawMessage `json:"msg"`
+				}
+				if err := json.Unmarshal(line, &record); err != nil {
+					t.Fatal(err)
+				}
+				parse := wire.ParseOutput
+				if record.T == "input" {
+					parse = wire.ParseInput
+				}
+				msgs, err := parse(record.Msg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				live = append(live, subagentLifecycle(msgs)...)
+			}
+			if !reflect.DeepEqual(live, want) {
+				t.Fatalf("live lifecycle = %s, want %s", lifecycleString(live), lifecycleString(want))
+			}
+			parser, err := agent.NewLogRecordParser(New("", nil).NewWire())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var replay []agent.Message
+			for _, line := range records {
+				record, err := parser.ParseRecord(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, event := range record.Messages {
+					replay = append(replay, subagentLifecycle([]agent.Message{event.Message})...)
+				}
+			}
+			if !reflect.DeepEqual(replay, live) {
+				t.Fatalf("replay lifecycle = %s, want live %s", lifecycleString(replay), lifecycleString(live))
+			}
+		})
 	}
-	m, ok := msgs[0].(*agent.NativeSubagentMessage)
-	if !ok {
-		t.Fatalf("subagent completion=%T, want *agent.NativeSubagentMessage", msgs[0])
+}
+
+func subagentLifecycle(msgs []agent.Message) []agent.Message {
+	return slices.DeleteFunc(msgs, func(m agent.Message) bool {
+		switch m.(type) {
+		case *agent.NativeSubagentMessage, *agent.BackgroundRetiredMessage:
+			return false
+		default:
+			return true
+		}
+	})
+}
+
+func lifecycleString(msgs []agent.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		switch m := m.(type) {
+		case *agent.NativeSubagentMessage:
+			fmt.Fprintf(&b, "[subagent %+v]", m.Subagent)
+		case *agent.BackgroundRetiredMessage:
+			fmt.Fprintf(&b, "[retired %s]", m.ID)
+		}
 	}
-	got := m.Subagent
-	if got.ID != "77c5125c-db9e-4bb0-8bfe-97ac042d25c5" || got.ToolUseID != "subagent-call" || got.Label != "Silly duck task" || got.Prompt != "act as a rubber duck" || got.Status != agent.NativeSubagentStatusUnknown || !got.Background || got.Scope != agent.NativeSubagentScopeAgent {
-		t.Fatalf("native subagent=%+v", got)
-	}
+	return b.String()
 }
 
 // TestDSHNativeRecordings checks the complete production-relay journals, including

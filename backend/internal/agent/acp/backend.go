@@ -530,7 +530,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if handled {
 		if len(metadata) > 0 {
 			if result, ok := metadata[0].(*agent.ResultMessage); ok {
-				return w.finishPrompt(result), nil
+				return w.finishPrompt(line, result)
 			}
 		}
 		return metadata, nil
@@ -618,8 +618,24 @@ func (w *wireFormat) allocIDLocked() int64 {
 	return w.nextID
 }
 
-// finishPrompt emits consolidated output before the normalized terminal report.
-func (w *wireFormat) finishPrompt(rm *agent.ResultMessage) []agent.Message {
+// finishPrompt emits consolidated output and the evidence the prompt response
+// settles before the normalized terminal report.
+func (w *wireFormat) finishPrompt(line []byte, rm *agent.ResultMessage) ([]agent.Message, error) {
+	var settled []agent.Message
+	if w.tools != nil {
+		// promptResult already validated the response shape.
+		result, err := agent.JSONField(line, "result")
+		if err != nil {
+			return nil, err
+		}
+		var stop string
+		if result != nil && string(result) != "null" {
+			if stop, err = agent.JSONString(result, "stopReason"); err != nil {
+				return nil, err
+			}
+		}
+		settled = w.tools.SettlePrompt(acp.StopReason(stop))
+	}
 	// Emit synthetic final messages from accumulated deltas, then reset.
 	w.mu.Lock()
 	var msgs []agent.Message
@@ -632,8 +648,9 @@ func (w *wireFormat) finishPrompt(rm *agent.ResultMessage) []agent.Message {
 	w.resetAccumulatedOutputLocked()
 	clear(w.skillReadCalls)
 	w.mu.Unlock()
+	msgs = append(msgs, settled...)
 	msgs = append(msgs, rm)
-	return msgs
+	return msgs, nil
 }
 
 // handshakeResult bundles everything returned by a successful handshake.

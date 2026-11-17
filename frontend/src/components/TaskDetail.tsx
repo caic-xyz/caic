@@ -3091,20 +3091,27 @@ function ToolCallCard(props: {
   onCleanup(() => inputRequest++);
 
   const timedCommand = () => props.backgroundCommand;
+  // A background agent's launch returns at once, so its row times the agent,
+  // like a background command's row times the command.
+  const timedAgent = () =>
+    timedCommand() ? undefined : props.nativeActivity?.find((activity) => activity.background && activity.startedAt);
   const durationMs = createLiveDuration(
     () => {
       const command = timedCommand();
-      const start = command?.startedAt ? Date.parse(command.startedAt) : props.call.startedAt;
+      const at = command?.startedAt ?? timedAgent()?.startedAt;
+      const start = at ? Date.parse(at) : props.call.startedAt;
       return start !== undefined && start > 0 ? start : null;
     },
     () => {
-      const command = timedCommand();
-      if (!command) return props.durationMs;
-      return command.startedAt && command.endedAt
-        ? Math.max(0, Date.parse(command.endedAt) - Date.parse(command.startedAt))
-        : null;
+      const span = timedCommand() ?? timedAgent();
+      if (!span) return props.durationMs;
+      return span.startedAt && span.endedAt ? Math.max(0, Date.parse(span.endedAt) - Date.parse(span.startedAt)) : null;
     },
-    () => toolCallRunning(props.call, timedCommand(), props.backgroundSettled?.() ?? false),
+    () => {
+      const agent = timedAgent();
+      if (agent) return agent.status === "running" && !(props.nativeSettled?.() ?? false);
+      return toolCallRunning(props.call, timedCommand(), props.backgroundSettled?.() ?? false);
+    },
   );
   // A running call without a folded background command shows only the trailing
   // spinner; every other state shows a leading status mark.

@@ -1646,6 +1646,43 @@ describe("TaskDetail", () => {
     expect(within(call).getByText("Completed")).toBeInTheDocument();
   });
 
+  it("times a background agent's tool row by the agent instead of its launch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20_000);
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      const events: EventMessage[] = [
+        {
+          kind: "toolUse",
+          ts: 8_000,
+          toolUse: { toolUseID: "bg-spawn", name: "Agent", input: { description: "Review" }, background: true },
+        },
+        {
+          kind: "nativeSubagent",
+          ts: 8_000,
+          nativeSubagent: {
+            id: "bg-child",
+            toolUseID: "bg-spawn",
+            label: "Review",
+            status: "running",
+            background: true,
+          },
+        },
+        { kind: "toolResult", ts: 8_002, toolResult: { toolUseID: "bg-spawn", duration: 0.002 } },
+      ];
+      for (const event of events) emit(handlers, event);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    try {
+      await renderTaskDetail();
+      const duration = () => within(toolRow("bg-spawn")).getByTestId("tool-duration");
+      expect(duration()).toHaveTextContent("0:12");
+      vi.advanceTimersByTime(2_000);
+      expect(duration()).toHaveTextContent("0:14");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders a native card that has no transcript item to anchor to", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       emit(handlers, {

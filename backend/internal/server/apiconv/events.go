@@ -397,6 +397,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 				Scope:      v1.EventNativeSubagentScope(m.Subagent.Scope),
 				GroupID:    m.Subagent.GroupID,
 				Label:      m.Subagent.Label,
+				Kind:       m.Subagent.Kind,
 				Prompt:     m.Subagent.Prompt,
 				Status:     v1.EventNativeSubagentStatus(m.Subagent.Status),
 				Result:     m.Subagent.Result,

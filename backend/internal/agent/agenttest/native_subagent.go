@@ -227,6 +227,7 @@ type NativeSubagentContractCard struct {
 	Background bool
 	ToolUseID  bool
 	Label      bool
+	Kind       bool
 	Prompt     bool
 	Result     bool
 }
@@ -265,6 +266,7 @@ func Contract(observations []agent.NativeSubagent) NativeSubagentContract {
 			Background: cards[i].Background,
 			ToolUseID:  cards[i].ToolUseID != "",
 			Label:      cards[i].Label != "",
+			Kind:       cards[i].Kind != "",
 			Prompt:     cards[i].Prompt != "",
 			Result:     cards[i].Result != "",
 		})
@@ -294,8 +296,8 @@ func (c NativeSubagentContract) String() string {
 	}
 	parts := make([]string, 0, len(c.Cards))
 	for _, card := range c.Cards {
-		parts = append(parts, fmt.Sprintf("{identity:%s scope:%q status:%q group:%t background:%t tool:%t label:%t prompt:%t result:%t}",
-			card.Identity, card.Scope, card.Status, card.GroupID, card.Background, card.ToolUseID, card.Label, card.Prompt, card.Result))
+		parts = append(parts, fmt.Sprintf("{identity:%s scope:%q status:%q group:%t background:%t tool:%t label:%t kind:%t prompt:%t result:%t}",
+			card.Identity, card.Scope, card.Status, card.GroupID, card.Background, card.ToolUseID, card.Label, card.Kind, card.Prompt, card.Result))
 	}
 	return fmt.Sprintf("cards:[%s] statuses:[%s] active:%d", strings.Join(parts, " "), strings.Join(statuses, " "), c.Active)
 }

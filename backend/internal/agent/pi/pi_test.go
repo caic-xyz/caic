@@ -801,10 +801,10 @@ func TestPiWireFormat(t *testing.T) {
 			system     = `{"type":"message_start","message":{"role":"system","content":""}}`
 			assistant  = `{"type":"message_start","message":{"role":"assistant","content":[],"provider":"openrouter","model":"m"}}`
 		)
-		// Minimized from task 44KFPPA9I000: the pi-subagents extension woke the
+		// Minimized from a task log: the pi-subagents extension woke the
 		// idle parent after a detached run ended.
 		notify := `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
-		// Minimized from task 42FVQSTV6000: Pi retried a rate-limited request.
+		// Minimized from a task log: Pi retried a rate-limited request.
 		retry := `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429"}`
 		prompt := `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Fix it"}]}}`
 		if got := queued(t, agentStart, turnStart, notify, assistant); !slices.Equal(got, []int{2}) {

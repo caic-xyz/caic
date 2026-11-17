@@ -74,7 +74,7 @@ func TestSourceSections(t *testing.T) {
 	})
 	t.Run("clean root exit ends a command that does not wake the agent", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 4HM3VRG10000: the Codex process outlived its turn,
+		// Minimized from a task log: the Codex process outlived its turn,
 		// and the harness exited cleanly before reporting its end.
 		path := writeFixture(t,
 			`{"t":"caic_meta","version":3,"harness":"codex","prompt":"hi"}`,
@@ -106,7 +106,7 @@ func TestSourceSections(t *testing.T) {
 	})
 	t.Run("settlement trailer ends a command without an exit record", func(t *testing.T) {
 		t.Parallel()
-		// Minimized from task 4RSNU5UFS000: the log has no exit record and ends
+		// Minimized from a task log: the log has no exit record and ends
 		// with the purge trailer while a Codex process was last seen running.
 		path := writeFixture(t,
 			`{"t":"caic_meta","version":3,"harness":"codex","prompt":"hi"}`,
@@ -1045,7 +1045,7 @@ func TestSectionIndex(t *testing.T) {
 			{Kind: v1.EventKindInit, Init: &v1.EventInit{SessionID: "first", ReportedModel: "model"}},
 			{Kind: v1.EventKindToolUse, Ts: 100, ToolUse: &v1.EventToolUse{ToolUseID: "child-tool", Name: "Bash", Input: json.RawMessage(`{"command":"large"}`)}, Source: v1.EventMessageSource{AgentID: "child"}},
 			{Kind: v1.EventKindToolResult, Ts: 200, ToolResult: &v1.EventToolResult{ToolUseID: "child-tool", Error: strings.Repeat("payload", 100)}, Source: v1.EventMessageSource{AgentID: "child"}},
-			{Kind: v1.EventKindNativeSubagent, Ts: 100, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Prompt: strings.Repeat("prompt", 100), Status: v1.EventNativeSubagentStatusRunning}},
+			{Kind: v1.EventKindNativeSubagent, Ts: 100, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Kind: "general-purpose", Prompt: strings.Repeat("prompt", 100), Status: v1.EventNativeSubagentStatusRunning}},
 			{Kind: v1.EventKindSkillLoad, SkillLoad: &v1.EventSkillLoad{Skill: "quality"}},
 			{Kind: v1.EventKindSkillLoad, SkillLoad: &v1.EventSkillLoad{Skill: "quality", Path: "/quality/SKILL.md"}},
 			{Kind: v1.EventKindResult, Ts: 300, Result: &v1.EventResult{Result: strings.Repeat("result", 100), Duration: 0.1, DurationAPI: 0.05, Usage: v1.EventUsage{InputTokens: 10}}},
@@ -1062,7 +1062,8 @@ func TestSectionIndex(t *testing.T) {
 		if len(metadata.Tools) != 1 || metadata.Tools[0].Name != "Bash" || metadata.Tools[0].Calls != 1 || metadata.Tools[0].DurationMS != 100 {
 			t.Fatalf("tool totals = %#v", metadata.Tools)
 		}
-		if len(metadata.Activities) != 1 || metadata.Activities[0].Status != "completed" || metadata.Activities[0].StartedAt == nil || metadata.Activities[0].EndedAt == nil {
+		// The kind survives the terminal update that does not repeat it.
+		if len(metadata.Activities) != 1 || metadata.Activities[0].Status != "completed" || metadata.Activities[0].Kind != "general-purpose" || metadata.Activities[0].StartedAt == nil || metadata.Activities[0].EndedAt == nil {
 			t.Fatalf("activities = %#v", metadata.Activities)
 		}
 		encoded, err := json.Marshal(v1.HistoryManifest{Sections: sections, Metadata: metadata})

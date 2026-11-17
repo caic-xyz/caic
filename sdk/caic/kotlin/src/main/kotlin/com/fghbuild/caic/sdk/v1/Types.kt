@@ -3152,6 +3152,11 @@ data class EventNativeSubagent(
     val id: String,
     @SerialName("groupID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val groupID: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val label: String? = null,
+    /**
+     * Kind names the agent definition the harness reports, such as Claude's
+     * subagent_type. It is absent when the harness reports none.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val kind: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val prompt: String? = null,
     val status: EventNativeSubagentStatus,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val result: String? = null,
@@ -3451,6 +3456,11 @@ data class HistoryActivity(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val scope: EventNativeSubagentScope? = null,
     @SerialName("groupID") @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val groupID: String? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val label: String? = null,
+    /**
+     * Kind names the agent definition the harness reports, such as Claude's
+     * subagent_type. It is absent when the harness reports none.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val kind: String? = null,
     val status: String,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val background: Boolean? = null,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val startedAt: Instant? = null,
