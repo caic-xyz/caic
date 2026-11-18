@@ -51,6 +51,22 @@ import (
 //
 //nolint:paralleltest // The Lifecycle fixture sets process-wide XDG_CONFIG_HOME.
 func TestSmoke(t *testing.T) {
+	t.Run("NativeSubagentConversion", func(t *testing.T) {
+		got := nativeSubagent(&v1.EventNativeSubagent{
+			RunID: "002", ID: "child", ToolUseID: "spawn", Scope: v1.EventNativeSubagentScopeBatch,
+			GroupID: "group", Label: "Explore", Kind: "explorer", Prompt: "Inspect the repository",
+			Status: v1.EventNativeSubagentStatusCompleted, Result: "Found the entry point", Background: true,
+		})
+		want := agent.NativeSubagent{
+			RunID: "002", ID: "child", ToolUseID: "spawn", Scope: agent.NativeSubagentScopeBatch,
+			GroupID: "group", Label: "Explore", Kind: "explorer", Prompt: "Inspect the repository",
+			Status: agent.NativeSubagentStatusCompleted, Result: "Found the entry point", Background: true,
+		}
+		if got != want {
+			t.Fatalf("nativeSubagent = %#v, want %#v", got, want)
+		}
+	})
+
 	// The FailureDiagnostics scenario verifies bounded log tails and immediate launch
 	// failure reporting, including the terminal-state classification used by task
 	// waits. It needs no container runtime.

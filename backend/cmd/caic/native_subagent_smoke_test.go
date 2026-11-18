@@ -474,11 +474,13 @@ func smokeReplayBackend(h harness.Name) agent.Backend {
 // silently weakens the UI contract this test pins.
 func nativeSubagent(e *v1.EventNativeSubagent) agent.NativeSubagent {
 	return agent.NativeSubagent{
+		RunID:      e.RunID,
 		ID:         e.ID,
 		ToolUseID:  e.ToolUseID,
 		Scope:      agent.NativeSubagentScope(e.Scope),
 		GroupID:    e.GroupID,
 		Label:      e.Label,
+		Kind:       e.Kind,
 		Prompt:     e.Prompt,
 		Status:     agent.NativeSubagentStatus(e.Status),
 		Result:     e.Result,
