@@ -38,8 +38,8 @@ export interface MessageGroup {
   resultReplacesText?: boolean;
   // Keep the identified message mounted while the result card shows metadata.
   resultDuplicatesText?: boolean;
-  // Thinking event segments whose durations are summed when several Codex
-  // thinking blocks collapse into one visual group.
+  // Thinking event segments whose durations are summed when several thinking
+  // blocks collapse into one visual group.
   timingSegments?: EventMessage[][];
 }
 
@@ -146,55 +146,93 @@ function appendScopedTool(group: MessageGroup, event: EventMessage, key: string,
     : [];
 }
 
+function isThinkingEvent(event: EventMessage): boolean {
+  return event.kind === "thinking" || event.kind === "thinkingDelta";
+}
+
+// Identified thinking items carry their content; source-free and item-less
+// harnesses such as Claude Code produce legacy thinking-only action groups.
+function isThinkingGroup(group: MessageGroup): boolean {
+  if (group.kind !== "action" || group.tool || group.toolCalls.length > 0) return false;
+  if (group.messageKey) return !!group.content;
+  return group.events.some(isThinkingEvent);
+}
+
+// Identified and legacy thinking never combine: they render from different fields.
+function thinkingScope(group: MessageGroup): string {
+  return (group.content ? "item" : "legacy") + toolIdentity(group.events[0]?.source, "");
+}
+
+// Legacy grouping folds thinking that immediately precedes text into the text
+// group; splitting it back lets the thinking join the run it continues.
+function splitLeadingThinking(group: MessageGroup): [MessageGroup, MessageGroup] | null {
+  if (group.messageKey || group.kind !== "text") return null;
+  const i = group.events.findIndex((event) => event.kind === "text" || event.kind === "textDelta");
+  if (i <= 0 || !group.events.slice(0, i).some(isThinkingEvent)) return null;
+  return [
+    { kind: "action", events: group.events.slice(0, i), toolCalls: [] },
+    { ...group, events: group.events.slice(i) },
+  ];
+}
+
 // Display aggregates combine thinking runs and tools while source items own their stream state.
 export function aggregateMessageGroups(groups: MessageGroup[]): MessageGroup[] {
   const result: MessageGroup[] = [];
   const aggregates = new Map<string, MessageGroup>();
   let thinking: MessageGroup | null = null;
   let thinkingIndex = -1;
-  let thinkingScope: string | null = null;
+  let runScope: string | null = null;
   let parts: string[] = [];
   const finishThinking = () => {
     if (thinking?.content && parts.length > 1) thinking.content.text = parts.filter((part) => part !== "").join("\n\n");
     thinking = null;
     thinkingIndex = -1;
-    thinkingScope = null;
+    runScope = null;
     parts = [];
   };
+  const joinThinking = (group: MessageGroup) => {
+    const scope = thinkingScope(group);
+    if (!thinking || scope !== runScope) {
+      finishThinking();
+      thinking = group;
+      thinkingIndex = result.length;
+      runScope = scope;
+      parts = group.content ? [group.content.text] : [];
+      result.push(thinking);
+      return;
+    }
+    if (!thinking.timingSegments) {
+      thinking = {
+        ...thinking,
+        content: thinking.content ? { ...thinking.content } : undefined,
+        timingSegments: [thinking.events],
+        events: [...thinking.events],
+      };
+      result[thinkingIndex] = thinking;
+    }
+    thinking.timingSegments?.push(group.events);
+    thinking.events.push(...group.events);
+    const content = thinking.content;
+    if (!content || !group.content) return;
+    parts.push(group.content.text);
+    content.complete &&= group.content.complete;
+    const range = group.content.range;
+    if (range)
+      content.range = {
+        start: Math.min(content.range?.start ?? range.start, range.start),
+        end: Math.max(content.range?.end ?? range.end, range.end),
+      };
+  };
   for (const group of groups) {
-    if (group.messageKey && group.content && group.kind === "action" && !group.tool && group.toolCalls.length === 0) {
-      const messageScope = toolIdentity(group.events[0]?.source, "");
-      if (thinking?.content && messageScope === thinkingScope) {
-        if (!thinking.timingSegments) {
-          const copy: MessageGroup = {
-            ...thinking,
-            content: { ...thinking.content },
-            timingSegments: [thinking.events],
-            events: [...thinking.events],
-          };
-          thinking = copy;
-          result[thinkingIndex] = thinking;
-        }
-        thinking.timingSegments?.push(group.events);
-        thinking.events.push(...group.events);
-        parts.push(group.content.text);
-        const content = thinking.content;
-        if (!content) throw new Error("Missing thinking content");
-        content.complete &&= group.content.complete;
-        const range = group.content.range;
-        if (range)
-          content.range = {
-            start: Math.min(content.range?.start ?? range.start, range.start),
-            end: Math.max(content.range?.end ?? range.end, range.end),
-          };
-      } else {
-        finishThinking();
-        thinking = group;
-        thinkingIndex = result.length;
-        thinkingScope = messageScope;
-        parts = [group.content.text];
-        result.push(thinking);
-      }
+    if (isThinkingGroup(group)) {
+      joinThinking(group);
+      continue;
+    }
+    const split = thinking ? splitLeadingThinking(group) : null;
+    if (split && thinkingScope(split[0]) === runScope) {
+      joinThinking(split[0]);
+      finishThinking();
+      result.push(split[1]);
       continue;
     }
     const usageOnly = group.events.length > 0 && group.events.every((event) => event.kind === "usage");

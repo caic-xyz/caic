@@ -75,6 +75,47 @@ describe("thinking display runs", () => {
     expect(grouper.group(events)).toHaveLength(3);
   });
 
+  it("combines item-less Claude thinking across tools, including thinking absorbed by the next text", () => {
+    const source = { threadID: "session" };
+    const thought = (ts: number, text: string): EventMessage => ({ kind: "thinking", ts, source, thinking: { text } });
+    const tool = (ts: number, id: string): EventMessage[] => [
+      { ...toolUseEvent(id, "Read"), ts, source },
+      { ...toolResultEvent(id), ts: ts + 1, source },
+      { ...usageEvent(), ts: ts + 2, source },
+    ];
+    const events: EventMessage[] = [
+      { kind: "text", ts: 100, source, text: { text: "Reading the client." } },
+      thought(200, "Checking the guides."),
+      ...tool(300, "a"),
+      thought(400, "Checking the callbacks."),
+      ...tool(500, "b"),
+      { kind: "thinkingDelta", ts: 600, source, thinkingDelta: { text: "Checking the emulator." } },
+      { kind: "thinking", ts: 610, source, thinking: { text: "Checking the emulator." } },
+      { kind: "text", ts: 700, source, text: { text: "KVM is available." } },
+      {
+        kind: "thinking",
+        ts: 800,
+        source: { ...source, delegationToolUseID: "task" },
+        thinking: { text: "Child thought." },
+      },
+    ];
+    const displayed = aggregateMessageGroups(groupMessages(events));
+    const visible = displayed.filter((group) => group.kind !== "other");
+    expect(visible.map((group) => group.kind)).toEqual(["text", "action", "action", "text", "action"]);
+    const run = visible[1];
+    expect(run?.events.filter((event) => event.kind === "thinking").map((event) => event.thinking?.text)).toEqual([
+      "Checking the guides.",
+      "Checking the callbacks.",
+      "Checking the emulator.",
+    ]);
+    expect(run?.timingSegments).toHaveLength(3);
+    expect(visible[2]?.toolCalls).toHaveLength(2);
+    expect(visible[3]?.events.map((event) => event.kind)).toEqual(["text"]);
+    const grouper = new IncrementalMessageGrouper();
+    grouper.group(events.slice(0, 11));
+    expect(aggregateMessageGroups(grouper.group(events))).toEqual(displayed);
+  });
+
   it("keeps commentary, turns, and concurrent threads as thinking boundaries", () => {
     const source = { threadID: "root", turnID: "turn", itemID: "a" };
     const thought = (itemID: string, threadID: string, turnID: string): EventMessage => ({
