@@ -2,9 +2,34 @@
 // production build policy shared with the other caic frontends.
 
 import { resolve } from "path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import solidSVG from "vite-solid-svg";
+
+// occt-import-js ships Emscripten's default loader, which requires these Node
+// builtins only inside ENVIRONMENT_IS_NODE branches that the STEP worker never
+// runs. Resolve them to an empty module rather than Vite's browser-external stub
+// and its build warning; other importers keep the warning. Frontend tests run
+// the package under Node outside Vite and keep the real modules.
+function occtNodeBuiltins(): Plugin {
+  const stub = "\0occt-node-builtin";
+  return {
+    name: "caic:occt-node-builtins",
+    enforce: "pre",
+    resolveId: {
+      filter: { id: /^(?:crypto|fs|path)$/ },
+      handler(id, importer) {
+        return importer?.includes("/node_modules/occt-import-js/") ? stub : null;
+      },
+    },
+    load: {
+      filter: { id: /^\0occt-node-builtin$/ },
+      handler() {
+        return "module.exports = {};";
+      },
+    },
+  };
+}
 
 export default defineConfig({
   root: "frontend",
@@ -36,9 +61,16 @@ export default defineConfig({
     outDir: "../backend/frontend/dist",
     emptyOutDir: true,
     reportCompressedSize: false,
+    // The largest chunks, CAD (three.js) and PdfPreview (pdfjs-dist), load only
+    // on demand; scripts/startup_budget.mjs gates the initial payload. This
+    // limit only catches a heavy dependency landing in one chunk by accident.
+    chunkSizeWarningLimit: 800,
     // The bundle is brotli-compressed into the Go binary, so a source map would
     // be embedded as dead weight. Debug against the dev server instead.
     sourcemap: false,
+  },
+  worker: {
+    plugins: () => [occtNodeBuiltins()],
   },
   server: {
     proxy: {
