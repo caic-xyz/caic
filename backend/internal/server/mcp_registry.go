@@ -99,7 +99,7 @@ Task numbers follow the current task list and can change when another task is re
 - Summarize task status: state and what the agent is doing. Only mention elapsed time or cost when the user specifically asks.
 - For a status update about all tasks, be extremely concise and focus on the waiting tasks. For a status update about one specific task, be detailed and avoid over-summarizing.
 - After announcing that an agent is asking, call agent_last_message in a following turn to get its question and options. Read them clearly, wait for the user's answer, then call task_answer_question. Do not guess missing question text.
-- When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
+- When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness, model, and effort from the user's saved preferences. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
 - Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.

@@ -95,8 +95,8 @@ func assertMCPToolErrorCode[T any](t *testing.T, result mcp.ToolResult[T], want 
 
 func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{
-		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default"}}}},
-		harness.Pi:     &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "pi-default"}}}},
+		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default", EffortOptions: []string{"max"}}}}},
+		harness.Pi:     &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "pi-default", EffortOptions: []string{"high", "low"}}}}},
 	})
 	if err := s.taskMgr.Start(s.TaskMCPScoper); err != nil {
 		t.Fatalf("Start task manager: %v", err)
@@ -1285,7 +1285,7 @@ func TestMCPTools(t *testing.T) {
 			}
 		})
 
-		t.Run("non default harness leaves omitted model and effort unset", func(t *testing.T) {
+		t.Run("non default harness uses its saved model and effort", func(t *testing.T) {
 			t.Parallel()
 
 			s := newMCPTaskCreateTestRouter(t)
@@ -1317,18 +1317,16 @@ func TestMCPTools(t *testing.T) {
 			if created.Harness != harness.Pi {
 				t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 			}
-			if got := created.RequestedModel; got != "" {
-				t.Fatalf("created model = %q, want empty", got)
+			if created.RequestedModel != "pi-default" || created.RequestedEffort != "high" {
+				t.Fatalf("created model, effort = %q, %q, want pi-default, high", created.RequestedModel, created.RequestedEffort)
 			}
-			if created.RequestedEffort != "" {
-				t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
-			}
+			// Regression: an MCP task without model overwrote the saved model with the harness default.
 			prefs := s.prefs.Get(userIDFromCtx(t.Context()))
-			if model, ok := prefs.Models[string(harness.Pi)]; !ok || model != "" {
-				t.Fatalf("preferences model = %q, present = %v, want empty and present", model, ok)
+			if model := prefs.Models[string(harness.Pi)]; model != "pi-default" {
+				t.Fatalf("preferences model = %q, want pi-default", model)
 			}
-			if effort, ok := prefs.Efforts[string(harness.Pi)][""]; !ok || effort != "" {
-				t.Fatalf("preferences effort = %q, present = %v, want empty and present", effort, ok)
+			if effort := prefs.Efforts[string(harness.Pi)]["pi-default"]; effort != "high" {
+				t.Fatalf("preferences effort = %q, want high", effort)
 			}
 		})
 
@@ -1357,11 +1355,8 @@ func TestMCPTools(t *testing.T) {
 			if created.Harness != harness.Pi {
 				t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 			}
-			if got := created.RequestedModel; got != "" {
-				t.Fatalf("created model = %q, want empty", got)
-			}
-			if created.RequestedEffort != "" {
-				t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
+			if created.RequestedModel != "pi-default" || created.RequestedEffort != "high" {
+				t.Fatalf("created model, effort = %q, %q, want pi-default, high", created.RequestedModel, created.RequestedEffort)
 			}
 		})
 
@@ -1401,11 +1396,47 @@ func TestMCPTools(t *testing.T) {
 			if created.Harness != harness.Pi {
 				t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 			}
-			if got := created.RequestedModel; got != "" {
-				t.Fatalf("created model = %q, want empty", got)
+			if created.RequestedModel != "pi-default" || created.RequestedEffort != "high" {
+				t.Fatalf("created model, effort = %q, %q, want pi-default, high", created.RequestedModel, created.RequestedEffort)
 			}
-			if created.RequestedEffort != "" {
-				t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
+		})
+
+		t.Run("saved values the harness no longer offers use harness defaults", func(t *testing.T) {
+			t.Parallel()
+
+			for _, tc := range []struct {
+				name   string
+				model  string
+				effort string
+			}{
+				{name: "model", model: "retired-model", effort: "high"},
+				{name: "effort", model: "pi-default", effort: "retired-effort"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					s := newMCPTaskCreateTestRouter(t)
+					if err := s.prefs.Update(userIDFromCtx(t.Context()), func(p *preferences.Preferences) {
+						p.Harness = string(harness.Pi)
+						p.Models = map[string]string{string(harness.Pi): tc.model}
+						p.Efforts = preferences.EffortPreferences{string(harness.Pi): {tc.model: tc.effort}}
+					}); err != nil {
+						t.Fatalf("Update preferences: %v", err)
+					}
+					c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+					result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpschema.TaskCreateArgs]{Arguments: mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
+					if result.IsError {
+						t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
+					}
+					created := singleCreatedTask(t, s)
+					wantModel := tc.model
+					if tc.name == "model" {
+						wantModel = ""
+					}
+					if created.RequestedModel != wantModel || created.RequestedEffort != "" {
+						t.Fatalf("created model, effort = %q, %q, want %q, empty", created.RequestedModel, created.RequestedEffort, wantModel)
+					}
+				})
 			}
 		})
 
@@ -1554,7 +1585,7 @@ func TestMCPTools(t *testing.T) {
 				{
 					name:     "unsupported model",
 					args:     mcpschema.TaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
-					want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to use the selected harness's default model, then retry task_create.",
+					want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to use the saved or default model of the selected harness, then retry task_create.",
 					wantCode: api.CodeUnsupportedModel,
 				},
 				{

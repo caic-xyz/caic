@@ -125,7 +125,7 @@ func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (m
 // hint carried from this catalog through ToolDeclaration to the adapter; see
 // github.com/gomodedev/gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpTools) specs() []mcp.ToolSpec {
-	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task with zero or more repositories. Confirm repositories and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
+	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task with zero or more repositories. Confirm repositories and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic fills an omitted harness, model, and effort from the user's saved preferences, falling back to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()
 	createSpec.Annotations = &mcp.ToolAnnotations{Title: "Create task", DestructiveHint: true, OpenWorldHint: false}
 
@@ -333,7 +333,7 @@ func (m *mcpTools) taskCreateToolError(ctx context.Context, args mcpschema.TaskC
 			}
 		}
 		args.Model = ""
-		message += ". Omit model to use the selected harness's default model, then retry task_create."
+		message += ". Omit model to use the saved or default model of the selected harness, then retry task_create."
 	case api.CodeUnknownRuntime:
 		if args.RuntimeName == "" {
 			return domainToolError[mcpschema.TaskCreatedOutput](err)
@@ -396,12 +396,13 @@ func (m *mcpTools) handleTaskCreate(ctx context.Context, call *mcp.ToolRequest[m
 		}
 		return m.taskCreateToolError(ctx, call.Arguments, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
 	}
+	model, effort := m.resolveTaskCreateModel(ctx, apiHarness, call.Arguments.Model, call.Arguments.Effort)
 	req := &v1.CreateTaskReq{
 		InitialPrompt: v1.Prompt{Text: call.Arguments.Prompt},
 		Repos:         make([]v1.RepoSpec, len(call.Arguments.Repos)),
 		Harness:       apiHarness,
-		Model:         call.Arguments.Model,
-		Effort:        call.Arguments.Effort,
+		Model:         model,
+		Effort:        effort,
 		RuntimeName:   call.Arguments.RuntimeName,
 		Display:       call.Arguments.Display,
 		Tailscale:     call.Arguments.Tailscale,
@@ -456,6 +457,38 @@ func (m *mcpTools) resolveTaskCreateHarness(ctx context.Context, harness string)
 		return apiHarness, nil
 	}
 	return m.firstHarness(ctx)
+}
+
+// resolveTaskCreateModel fills an omitted model and effort from the user's
+// saved preferences for harness h, as the web UI's task form does. A saved
+// value the harness no longer offers resolves to the harness default.
+func (m *mcpTools) resolveTaskCreateModel(ctx context.Context, h v1.Harness, model, effort string) (resolvedModel, resolvedEffort string) {
+	harnessName, err := apiconv.AgentHarness(h)
+	if err != nil {
+		return model, effort
+	}
+	backend, ok := m.serverConfig.taskMgr.Backends[harnessName]
+	if !ok {
+		return model, effort
+	}
+	models := backend.ModelInventory().Models
+	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
+	if model == "" {
+		saved := prefs.Models[string(h)]
+		if slices.ContainsFunc(models, func(c agent.Model) bool { return c.ID == saved }) {
+			model = saved
+		}
+	}
+	if effort == "" {
+		saved, ok := prefs.Efforts[string(h)][model]
+		if !ok {
+			saved = prefs.Efforts[string(h)][""]
+		}
+		if i := slices.IndexFunc(models, func(c agent.Model) bool { return c.ID == model }); i >= 0 && slices.Contains(models[i].EffortOptions, saved) {
+			effort = saved
+		}
+	}
+	return model, effort
 }
 
 func (m *mcpTools) firstHarness(ctx context.Context) (v1.Harness, error) {
@@ -1029,8 +1062,8 @@ func buildTaskCreateSchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The task description/prompt for the coding agent"})
 	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (zero or more). Omit or pass an empty list for a task without repositories. Call repos_list first if you need the current repository list.", Items: &jsonschema.Schema{Type: "string"}})
-	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly chose a model; omitted means the selected harness default."})
-	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly chose an effort; omitted means the selected harness default."})
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly chose a model; omitted means the user's saved model for the selected harness, else its default."})
+	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly chose an effort; omitted means the user's saved effort for the selected model, else its default."})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Agent harness override (optional). Omit to use the saved default harness."})
 	props.Set("runtimeName", &jsonschema.Schema{Type: "string", Description: "Runtime backend name (optional). Use docker or podman when multiple runtimes are available."})
 	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: "Enable virtual display (VNC) for this task"})
