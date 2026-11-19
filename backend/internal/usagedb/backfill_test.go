@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -28,7 +28,7 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			dir, store := newStore(t)
 			calls := 0
-			if err := store.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
+			if err := store.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) {
 				calls++
 				usageRows(testRow(5))(yield)
 			}); err != nil {
@@ -37,7 +37,7 @@ func TestStore(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, ".backfill.done")); err != nil {
 				t.Fatalf("backfill sentinel: %v", err)
 			}
-			if err := store.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
+			if err := store.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) {
 				calls++
 				usageRows(testRow(6))(yield)
 			}); err != nil {
@@ -54,7 +54,7 @@ func TestStore(t *testing.T) {
 		t.Run("retry after published days is duplicate free", func(t *testing.T) {
 			t.Parallel()
 			dir, store := newStore(t)
-			rows := []data.UsageRow{testRow(5), testRow(6)}
+			rows := []usagedbv1.UsageRow{testRow(5), testRow(6)}
 			if err := store.Backfill(t.Context(), usageRowsLoader(rows)); err != nil {
 				t.Fatal(err)
 			}
@@ -73,7 +73,7 @@ func TestStore(t *testing.T) {
 		t.Run("requires a producer day", func(t *testing.T) {
 			t.Parallel()
 			_, store := newStore(t)
-			if err := store.Backfill(t.Context(), usageRowsLoader([]data.UsageRow{{Kind: "usage"}})); err == nil {
+			if err := store.Backfill(t.Context(), usageRowsLoader([]usagedbv1.UsageRow{{Kind: "usage"}})); err == nil {
 				t.Error("Backfill unexpectedly accepted a row without a day")
 			}
 		})
@@ -81,11 +81,11 @@ func TestStore(t *testing.T) {
 		t.Run("source error discards every staged day", func(t *testing.T) {
 			t.Parallel()
 			dir, store := newStore(t)
-			source := func(yield func(data.UsageRow, error) bool) {
+			source := func(yield func(usagedbv1.UsageRow, error) bool) {
 				if !yield(testRow(5), nil) {
 					return
 				}
-				yield(data.UsageRow{}, errors.New("source interrupted"))
+				yield(usagedbv1.UsageRow{}, errors.New("source interrupted"))
 			}
 			if err := store.Backfill(t.Context(), source); err == nil {
 				t.Fatal("Backfill unexpectedly accepted a source error")
@@ -112,19 +112,19 @@ func TestStore(t *testing.T) {
 				At:      at,
 				Model:   "claude-test",
 				CostUSD: 0.50,
-				Delta:   data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}},
+				Delta:   usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}},
 			})
-			backfillRow := data.UsageRow{
+			backfillRow := usagedbv1.UsageRow{
 				Kind:    "usage",
 				Day:     at.Format("2006-01-02"),
-				Ts:      data.NewTime(at),
+				Ts:      usagedbv1.NewTime(at),
 				TaskID:  id.String(),
 				Harness: "claude",
 				Repos:   []string{"github/caic"},
 				Model:   "claude-test",
 				Output:  10,
 			}
-			if err := store.Backfill(t.Context(), usageRowsLoader([]data.UsageRow{backfillRow})); err != nil {
+			if err := store.Backfill(t.Context(), usageRowsLoader([]usagedbv1.UsageRow{backfillRow})); err != nil {
 				t.Fatal(err)
 			}
 			store.Observe(meta, &usagedb.Event{
@@ -132,8 +132,8 @@ func TestStore(t *testing.T) {
 				Model:        "claude-test",
 				CostUSD:      0.75,
 				TurnBoundary: true,
-				Delta: data.Delta{
-					TokenBuckets: data.TokenBuckets{Output: 2},
+				Delta: usagedbv1.Delta{
+					TokenBuckets: usagedbv1.TokenBuckets{Output: 2},
 					Turns:        1,
 				},
 			})
@@ -157,23 +157,23 @@ func newStore(t *testing.T) (string, *usagedb.Store) {
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-func testRow(day int) data.UsageRow {
+func testRow(day int) usagedbv1.UsageRow {
 	at := time.Date(2026, time.February, day, 10, 0, 0, 0, time.UTC)
-	return data.UsageRow{
+	return usagedbv1.UsageRow{
 		Kind:   "usage",
 		Day:    at.Format("2006-01-02"),
-		Ts:     data.NewTime(at),
+		Ts:     usagedbv1.NewTime(at),
 		TaskID: "task",
 		Turns:  1,
 	}
 }
 
-func usageRowsLoader(rows []data.UsageRow) iter.Seq2[data.UsageRow, error] {
+func usageRowsLoader(rows []usagedbv1.UsageRow) iter.Seq2[usagedbv1.UsageRow, error] {
 	return usageRows(rows...)
 }
 
-func usageRows(rows ...data.UsageRow) iter.Seq2[data.UsageRow, error] {
-	return func(yield func(data.UsageRow, error) bool) {
+func usageRows(rows ...usagedbv1.UsageRow) iter.Seq2[usagedbv1.UsageRow, error] {
+	return func(yield func(usagedbv1.UsageRow, error) bool) {
 		for i := range rows {
 			if !yield(rows[i], nil) {
 				return
@@ -182,18 +182,18 @@ func usageRows(rows ...data.UsageRow) iter.Seq2[data.UsageRow, error] {
 	}
 }
 
-func readRows(t *testing.T, dir, day string) []data.UsageRow {
+func readRows(t *testing.T, dir, day string) []usagedbv1.UsageRow {
 	//nolint:gosec // day is a fixed YYYY-MM-DD test fixture, not user input.
 	raw, err := os.ReadFile(filepath.Join(dir, day+".jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := make([]data.UsageRow, 0)
+	rows := make([]usagedbv1.UsageRow, 0)
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatal(err)
 		}

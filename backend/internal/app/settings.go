@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/caic-xyz/caic/backend/internal/app/data"
+	appv1 "github.com/caic-xyz/caic/backend/internal/app/data/v1"
 )
 
 type settings struct {
@@ -25,7 +25,7 @@ type settings struct {
 func loadSettings(log *slog.Logger, path string) (*settings, error) {
 	var s settings
 	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
-		var f data.Settings
+		var f appv1.Settings
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, err
 		}
@@ -73,7 +73,7 @@ func newMCPOAuthSigningKey() (keyPEM, keyID string, err error) {
 }
 
 func writeSettingsAtomic(path string, s *settings) error {
-	raw, err := json.MarshalIndent(data.Settings{SessionSecret: s.SessionSecret, OAuthPrivateKeyPEM: s.OAuthPrivateKeyPEM, OAuthKeyID: s.OAuthKeyID}, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
+	raw, err := json.MarshalIndent(appv1.Settings{SessionSecret: s.SessionSecret, OAuthPrivateKeyPEM: s.OAuthPrivateKeyPEM, OAuthKeyID: s.OAuthKeyID}, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
 	if err != nil {
 		return err
 	}

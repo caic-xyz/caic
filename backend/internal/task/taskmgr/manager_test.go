@@ -25,7 +25,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 
-	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	inputqueuev1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue/v1"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
@@ -3311,8 +3311,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
-			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
-			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+			root := logdata.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+			child := logdata.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
 			last := &agent.TextMessage{Source: root, Text: "root answer"}
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.TextMessage{Source: root, Text: "earlier"},
@@ -3374,8 +3374,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "live"}, "", "")
-			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
-			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+			root := logdata.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+			child := logdata.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
 				&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
@@ -5056,8 +5056,8 @@ func TestManager(t *testing.T) {
 					} else if err := log.Close(); err != nil {
 						t.Fatal(err)
 					}
-					pending := inputqueue.Entry{ID: ksid.NewID().String(), TaskID: id.String(), Text: "queued follow-up"}
-					if err := store.Journal.SaveInputQueue([]inputqueue.Entry{pending}); err != nil {
+					pending := inputqueuev1.Entry{ID: ksid.NewID().String(), TaskID: id.String(), Text: "queued follow-up"}
+					if err := store.Journal.SaveInputQueue([]inputqueuev1.Entry{pending}); err != nil {
 						t.Fatal(err)
 					}
 					// Repeat startup against the same relay snapshot. It includes no
@@ -6709,11 +6709,11 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		t.Parallel()
 		store := taskhistory.NewStore(testLogger(), taskslog.NewStore(t.TempDir()), backends.Default("", nil))
 		id := ksid.NewID()
-		queued := inputqueue.Entry{
+		queued := inputqueuev1.Entry{
 			ID: ksid.NewID().String(), TaskID: id.String(),
-			Text: "next", Images: []inputqueue.Image{{MediaType: "image/png", Data: "aGVsbG8="}},
+			Text: "next", Images: []inputqueuev1.Image{{MediaType: "image/png", Data: "aGVsbG8="}},
 		}
-		if err := store.Journal.SaveInputQueue([]inputqueue.Entry{queued}); err != nil {
+		if err := store.Journal.SaveInputQueue([]inputqueuev1.Entry{queued}); err != nil {
 			t.Fatal(err)
 		}
 		m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
@@ -6740,7 +6740,7 @@ func runLoadUnsettledTasksTests(t *testing.T) {
 		m.CompleteRestoration(nil)
 		m.drainInputQueue(t.Context())
 		persisted, err := store.Journal.LoadInputQueue()
-		if err != nil || !reflect.DeepEqual(persisted, []inputqueue.Entry{queued}) {
+		if err != nil || !reflect.DeepEqual(persisted, []inputqueuev1.Entry{queued}) {
 			t.Fatalf("persisted pending prompt = %+v, err=%v", persisted, err)
 		}
 	})

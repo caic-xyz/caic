@@ -151,7 +151,7 @@ func (h *historyHandlers) handleHistoryActivity(w http.ResponseWriter, r *http.R
 		writeError(r.Context(), w, historyBadRange())
 		return
 	}
-	var after history.Position
+	var after v1.HistoryPosition
 	query := r.URL.Query()
 	if query.Has("afterRecordID") != query.Has("afterIndex") {
 		writeError(r.Context(), w, historyBadRange())
@@ -265,7 +265,7 @@ func historyDiscovery(ctx context.Context, e *taskmgr.Entry, snap history.Snapsh
 }
 
 func historyEstimate(c history.TurnEstimate) v1.HistoryTurnEstimate {
-	return v1.HistoryTurnEstimate{HistoryPosition: c.Position, Model: c.Model, Cost: v1.EventCost{USD: c.Cost.USD, Source: v1.EventCostSource(c.Cost.Source)}, TotalUSD: c.TotalUSD}
+	return v1.HistoryTurnEstimate{HistoryPosition: c.HistoryPosition, Model: c.Model, Cost: v1.EventCost{USD: c.Cost.USD, Source: v1.EventCostSource(c.Cost.Source)}, TotalUSD: c.TotalUSD}
 }
 
 func (h *historyHandlers) handleHistoryCosts(w http.ResponseWriter, r *http.Request) {

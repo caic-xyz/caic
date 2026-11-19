@@ -30,7 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -352,13 +352,13 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 		At:             at,
 		Model:          "claude-opus",
 		CostUSD:        0.12,
-		CostProvenance: data.CostProvenance{ReportedUSD: .12, ReportedParts: 1},
+		CostProvenance: usagedbv1.CostProvenance{ReportedUSD: .12, ReportedParts: 1},
 		TurnBoundary:   true,
-		Delta: data.Delta{
-			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheWrites: []data.CacheWrite{{TTLSeconds: 7200, Tokens: 50}}, CacheRead: 30, Output: 40, Reasoning: 5},
+		Delta: usagedbv1.Delta{
+			TokenBuckets: usagedbv1.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheWrites: []usagedbv1.CacheWrite{{TTLSeconds: 7200, Tokens: 50}}, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
 			ToolCalls:    map[string]int{"Read": 2},
-			ToolTimings:  map[string]data.ToolTiming{"Read": data.ToolCallTiming(1250)},
+			ToolTimings:  map[string]usagedbv1.ToolTiming{"Read": usagedbv1.ToolCallTiming(1250)},
 			SkillReads:   map[string]int{"review": 2},
 		},
 	})
@@ -453,7 +453,7 @@ func BenchmarkUsageHandlersHandleGetDashboard(b *testing.B) {
 		At:           time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC),
 		Model:        "claude-opus",
 		TurnBoundary: true,
-		Delta:        data.Delta{TokenBuckets: data.TokenBuckets{Input: 100, Output: 50}, Turns: 1},
+		Delta:        usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Input: 100, Output: 50}, Turns: 1},
 	})
 	h := s.buildAPIHandler()
 	b.ReportAllocs()

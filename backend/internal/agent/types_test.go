@@ -5,6 +5,8 @@ package agent
 import (
 	"encoding/json"
 	"testing"
+
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 func TestUsageMessage(t *testing.T) {
@@ -106,19 +108,19 @@ func TestMessageSource(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
 			name   string
-			source MessageSource
+			source taskslogv3.MessageSource
 			zero   bool
 		}{
 			{name: "absent", zero: true},
-			{name: "root only", source: MessageSource{RootThreadID: "root"}},
-			{name: "thread only", source: MessageSource{ThreadID: "thread"}},
-			{name: "turn only", source: MessageSource{TurnID: "turn"}},
-			{name: "item only", source: MessageSource{ItemID: "item"}},
-			{name: "missing thread", source: MessageSource{TurnID: "turn", ItemID: "item"}},
-			{name: "missing turn", source: MessageSource{ThreadID: "thread", ItemID: "item"}},
-			{name: "missing item", source: MessageSource{ThreadID: "thread", TurnID: "turn"}},
-			{name: "complete rootless", source: MessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item"}},
-			{name: "complete rooted", source: MessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"}},
+			{name: "root only", source: taskslogv3.MessageSource{RootThreadID: "root"}},
+			{name: "thread only", source: taskslogv3.MessageSource{ThreadID: "thread"}},
+			{name: "turn only", source: taskslogv3.MessageSource{TurnID: "turn"}},
+			{name: "item only", source: taskslogv3.MessageSource{ItemID: "item"}},
+			{name: "missing thread", source: taskslogv3.MessageSource{TurnID: "turn", ItemID: "item"}},
+			{name: "missing turn", source: taskslogv3.MessageSource{ThreadID: "thread", ItemID: "item"}},
+			{name: "missing item", source: taskslogv3.MessageSource{ThreadID: "thread", TurnID: "turn"}},
+			{name: "complete rootless", source: taskslogv3.MessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item"}},
+			{name: "complete rooted", source: taskslogv3.MessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -136,7 +138,7 @@ func TestMessageSource(t *testing.T) {
 						t.Errorf("%T source presence = %t: %s", message, present, encoded)
 					}
 					if present {
-						var decoded MessageSource
+						var decoded taskslogv3.MessageSource
 						if err := json.Unmarshal(raw, &decoded); err != nil {
 							t.Fatal(err)
 						}
@@ -152,7 +154,7 @@ func TestMessageSource(t *testing.T) {
 
 func TestMessageProvenance(t *testing.T) {
 	t.Parallel()
-	source := MessageSource{AgentID: "native:child", DelegationToolUseID: "delegate", ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"}
+	source := taskslogv3.MessageSource{AgentID: "native:child", DelegationToolUseID: "delegate", ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"}
 	messages := []Message{&MCPRequestMessage{}, &InitMessage{}, &SessionMetadataMessage{}, &SystemMessage{}, &TextMessage{}, &ToolUseMessage{}, &SkillReadMessage{}, &SkillLoadMessage{}, &AskMessage{}, &PendingUserActionMessage{}, &TodoMessage{}, &UserInputMessage{}, &ToolResultMessage{}, &UsageMessage{}, &TurnCommitSnapshotMessage{}, &ResultMessage{}, &TextDeltaMessage{}, &ThinkingMessage{}, &ThinkingDeltaMessage{}, &ToolOutputDeltaMessage{}, &NativeSubagentMessage{}, &BackgroundCommandMessage{}, &BackgroundRetiredMessage{}, &TurnQueuedMessage{}, &WidgetMessage{}, &WidgetDeltaMessage{}, &RateLimitMessage{}, &RawMessage{}, &LogMessage{}, &StrippedEnvMessage{}, &DiffStatMessage{}, &ExitMessage{}, &MetaMessage{}, &MetaSessionMessage{}, &RelayGenerationMessage{}, &ModelInfoMessage{}, &MetaResultMessage{}, &MetaPRMessage{}}
 	for _, message := range messages {
 		if message.Provenance() == nil {
@@ -173,7 +175,7 @@ func TestMessageProvenance(t *testing.T) {
 		if err := json.Unmarshal(encoded, &fields); err != nil {
 			t.Fatal(err)
 		}
-		var decoded MessageSource
+		var decoded taskslogv3.MessageSource
 		if err := json.Unmarshal(fields["source"], &decoded); err != nil {
 			t.Fatalf("%T source missing: %s, %v", message, encoded, err)
 		}
@@ -209,9 +211,9 @@ func TestToolKeyForSource(t *testing.T) {
 	t.Parallel()
 	t.Run("owners and turns", func(t *testing.T) {
 		t.Parallel()
-		root := &ToolUseMessage{Source: MessageSource{ThreadID: "root", TurnID: "turn"}}
-		child := &ToolUseMessage{Source: MessageSource{ThreadID: "child", TurnID: "turn"}}
-		otherTurn := &ToolUseMessage{Source: MessageSource{ThreadID: "child", TurnID: "other-turn"}}
+		root := &ToolUseMessage{Source: taskslogv3.MessageSource{ThreadID: "root", TurnID: "turn"}}
+		child := &ToolUseMessage{Source: taskslogv3.MessageSource{ThreadID: "child", TurnID: "turn"}}
+		otherTurn := &ToolUseMessage{Source: taskslogv3.MessageSource{ThreadID: "child", TurnID: "other-turn"}}
 		keys := map[ToolKey]struct{}{}
 		for _, m := range []Message{root, child, otherTurn} {
 			keys[ToolKeyForSource(m.Provenance(), "same-tool")] = struct{}{}
@@ -222,7 +224,7 @@ func TestToolKeyForSource(t *testing.T) {
 	})
 	t.Run("late correlation and sessions", func(t *testing.T) {
 		t.Parallel()
-		m := &ToolUseMessage{Source: MessageSource{ThreadID: "session", DelegationToolUseID: "delegation"}}
+		m := &ToolUseMessage{Source: taskslogv3.MessageSource{ThreadID: "session", DelegationToolUseID: "delegation"}}
 		before := ToolKeyForSource(m.Provenance(), "local-tool")
 		m.Source.AgentID = "canonical-child"
 		m.Source.ItemID = "completion-item"

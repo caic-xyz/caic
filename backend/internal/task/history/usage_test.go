@@ -26,7 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -39,13 +39,13 @@ func TestStore(t *testing.T) {
 			name     string
 			native   string
 			wantUSD  float64
-			want     data.CostProvenance
+			want     usagedbv1.CostProvenance
 			estimate bool
 		}{
-			{"reported", `{"type":"result","total_cost_usd":0.25,"num_turns":1,"usage":{"output_tokens":100}}`, .25, data.CostProvenance{ReportedUSD: .25, ReportedParts: 1}, false},
-			{"reported zero", `{"type":"result","total_cost_usd":0,"num_turns":1,"usage":{"output_tokens":100}}`, 0, data.CostProvenance{ReportedParts: 1}, false},
-			{"estimated", `{"type":"result","num_turns":1,"usage":{"output_tokens":100}}`, .5, data.CostProvenance{EstimatedUSD: .5, EstimatedParts: 1}, true},
-			{"unknown", `{"type":"result","num_turns":1}`, 0, data.CostProvenance{UnknownParts: 1}, false},
+			{"reported", `{"type":"result","total_cost_usd":0.25,"num_turns":1,"usage":{"output_tokens":100}}`, .25, usagedbv1.CostProvenance{ReportedUSD: .25, ReportedParts: 1}, false},
+			{"reported zero", `{"type":"result","total_cost_usd":0,"num_turns":1,"usage":{"output_tokens":100}}`, 0, usagedbv1.CostProvenance{ReportedParts: 1}, false},
+			{"estimated", `{"type":"result","num_turns":1,"usage":{"output_tokens":100}}`, .5, usagedbv1.CostProvenance{EstimatedUSD: .5, EstimatedParts: 1}, true},
+			{"unknown", `{"type":"result","num_turns":1}`, 0, usagedbv1.CostProvenance{UnknownParts: 1}, false},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -67,7 +67,7 @@ func TestStore(t *testing.T) {
 				if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context())); err != nil {
 					t.Fatal(err)
 				}
-				if err := rollup.BackfillMissingCosts(t.Context(), func(row *data.UsageRow) (float64, bool) {
+				if err := rollup.BackfillMissingCosts(t.Context(), func(row *usagedbv1.UsageRow) (float64, bool) {
 					if tc.want.ReportedParts != 0 {
 						t.Error("reported cost reached mutable estimator")
 					}
@@ -138,7 +138,7 @@ func TestStore(t *testing.T) {
 				model string
 			}{{2, "first-session"}, {.5, "second-session"}} {
 				day := days[i]
-				if day.CostUSD != want.usd || day.Cost != (data.CostProvenance{ReportedUSD: want.usd, ReportedParts: 1}) || day.Turns != 1 || len(day.Models) != 1 || day.Models[want.model].CostUSD != want.usd {
+				if day.CostUSD != want.usd || day.Cost != (usagedbv1.CostProvenance{ReportedUSD: want.usd, ReportedParts: 1}) || day.Turns != 1 || len(day.Models) != 1 || day.Models[want.model].CostUSD != want.usd {
 					t.Fatalf("session day=%+v, want reported %v on %s", day, want.usd, want.model)
 				}
 			}
@@ -298,7 +298,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			days := rollup.Days()
-			if len(days) != 1 || days[0].Tools["Read"] != 1 || !reflect.DeepEqual(days[0].ToolTimings["Read"], data.ToolCallTiming(2500)) {
+			if len(days) != 1 || days[0].Tools["Read"] != 1 || !reflect.DeepEqual(days[0].ToolTimings["Read"], usagedbv1.ToolCallTiming(2500)) {
 				t.Errorf("backfilled tool totals = %+v", days)
 			}
 		})

@@ -15,7 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -249,7 +249,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.UsageMessage{ReportedModel: "claude-opus", ModelDerived: true, Usage: agent.Usage{InputTokens: 10, CacheCreationInputTokens: 400, CacheReadInputTokens: 900, OutputTokens: 50}},
 			&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 42, CacheCreationInputTokens: 8191, CacheReadInputTokens: 87823, OutputTokens: 746, CacheTTLSeconds: 3600}, NumTurns: 1},
 		}
-		var total data.Delta
+		var total usagedbv1.Delta
 		for _, m := range claude {
 			e, ok := rollupEvent(m, at, at, false, "claude-opus", "", task.CostSnapshot{})
 			if !ok {
@@ -257,7 +257,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			}
 			total.Add(&e.Delta)
 		}
-		want := data.TokenBuckets{Input: 42, CacheWrites: []data.CacheWrite{{TTLSeconds: 3600, Tokens: 8191}}, CacheRead: 87823, Output: 746}
+		want := usagedbv1.TokenBuckets{Input: 42, CacheWrites: []usagedbv1.CacheWrite{{TTLSeconds: 3600, Tokens: 8191}}, CacheRead: 87823, Output: 746}
 		if !reflect.DeepEqual(total.TokenBuckets, want) {
 			t.Errorf("claude tokens = %+v, want %+v (result total counted once)", total, want)
 		}
@@ -269,13 +269,13 @@ func TestTaskRollupTranslation(t *testing.T) {
 			t.Fatalf("pi usage tokens = %+v, ok = %v", e.Delta.TokenBuckets, ok)
 		}
 		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", UsageIsSnapshot: true, Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, at, false, "zai/glm-5.3", "", task.CostSnapshot{})
-		if !ok || !reflect.DeepEqual(e.Delta.TokenBuckets, data.TokenBuckets{}) {
+		if !ok || !reflect.DeepEqual(e.Delta.TokenBuckets, usagedbv1.TokenBuckets{}) {
 			t.Errorf("pi result must carry no tokens, got %+v", e.Delta.TokenBuckets)
 		}
 
 		// OpenCode has no per-call records; its result is the only source.
 		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, at, false, "m", "", task.CostSnapshot{})
-		if !reflect.DeepEqual(e.Delta.TokenBuckets, data.TokenBuckets{Input: 7, Output: 9}) {
+		if !reflect.DeepEqual(e.Delta.TokenBuckets, usagedbv1.TokenBuckets{Input: 7, Output: 9}) {
 			t.Errorf("opencode result tokens = %+v", e.Delta.TokenBuckets)
 		}
 	})
@@ -425,17 +425,17 @@ func newRollupStore(t *testing.T, dir string) *usagedb.Store {
 }
 
 // readUsageRows parses every usage row in the store's day file for day.
-func readUsageRows(t *testing.T, dir, day string) []data.UsageRow {
+func readUsageRows(t *testing.T, dir, day string) []usagedbv1.UsageRow {
 	raw, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
 		t.Fatalf("read day file %s: %v", day, err)
 	}
-	var rows []data.UsageRow
+	var rows []usagedbv1.UsageRow
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}

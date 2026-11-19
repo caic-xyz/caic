@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 
+	voicegatewayv1 "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -271,7 +273,7 @@ type VoiceGatewayConfig struct {
 	TokenMode  VoiceTokenMode
 	SigningKey ed25519.PrivateKey
 	Config     voicegateway.ResolvedConfig
-	WebRTC     voicegateway.WebRTCConfig
+	WebRTC     voicegatewayv1.WebRTC
 }
 
 // Validate returns an error if the voice gateway configuration is invalid.

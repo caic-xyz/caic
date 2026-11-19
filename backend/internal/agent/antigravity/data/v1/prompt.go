@@ -1,5 +1,5 @@
-// Package data defines caic's extension of agy stream-json prompt records.
-package data
+// Package v1 defines version 1 of caic's extension of agy stream-json prompt records.
+package v1
 
 // InputMessage is one user turn written to agy's stdin.
 type InputMessage struct {

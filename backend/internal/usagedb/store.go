@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sync/errgroup"
 )
@@ -57,7 +57,7 @@ type Store struct {
 	// pending.costInFlight is the movement assigned to unflushed buckets;
 	// a later live snapshot reconciles any estimate in that baseline.
 	flushedCost        map[string]float64
-	flushedProvenance  map[string]data.CostProvenance
+	flushedProvenance  map[string]usagedbv1.CostProvenance
 	costProtectedTasks map[string]struct{}           // tasks with a recorded non-estimated cost row
 	pending            map[string]*taskPending       // task id -> unflushed deltas
 	toolTimings        map[string]*ToolTimingTracker // task id -> unmatched tool starts
@@ -87,7 +87,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		days:               make(map[string]*dayAggregate),
 		watermarks:         make(map[string]time.Time),
 		flushedCost:        make(map[string]float64),
-		flushedProvenance:  make(map[string]data.CostProvenance),
+		flushedProvenance:  make(map[string]usagedbv1.CostProvenance),
 		costProtectedTasks: make(map[string]struct{}),
 		pending:            make(map[string]*taskPending),
 		toolTimings:        make(map[string]*ToolTimingTracker),
@@ -141,7 +141,7 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 	if e.ToolResultID != "" {
 		if t := s.toolTimings[id]; t != nil {
 			if name, ms, ok := t.Finish(e.ToolResultID, e.ToolProducerTime, e.ToolNativeDurationMs); ok {
-				e.Delta.ToolTimings = map[string]data.ToolTiming{name: data.ToolCallTiming(ms)}
+				e.Delta.ToolTimings = map[string]usagedbv1.ToolTiming{name: usagedbv1.ToolCallTiming(ms)}
 			}
 			if len(t.pending) == 0 {
 				delete(s.toolTimings, id)
@@ -260,7 +260,7 @@ func (s *Store) Days() []DayRollup {
 // parsing. Staging happens outside the writer lock. Before publishing a staged
 // day, it flushes matching live pending buckets so their later turn-boundary
 // flush cannot repeat records already found by the historical scan.
-func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[data.UsageRow, error]) error {
+func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[usagedbv1.UsageRow, error]) error {
 	s.backfillMu.Lock()
 	defer s.backfillMu.Unlock()
 
@@ -316,7 +316,7 @@ func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[data.UsageRow, erro
 // read-only and valid only for the duration of the call. Rechecking on every
 // startup lets a newly published model price fill rows a prior pass could not
 // price.
-func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*data.UsageRow) (float64, bool)) error {
+func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*usagedbv1.UsageRow) (float64, bool)) error {
 	s.backfillMu.Lock()
 	defer s.backfillMu.Unlock()
 	if estimate == nil {
@@ -378,21 +378,21 @@ func (s *Store) recover(ctx context.Context) {
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
-			var probe data.RowKind
+			var probe usagedbv1.RowKind
 			if err := json.Unmarshal(line, &probe); err != nil {
 				s.log.Warn("skip malformed usage rollup line", "file", name, "err", err)
 				continue
 			}
 			switch probe.Kind {
 			case rowKindUsage:
-				var row data.UsageRow
+				var row usagedbv1.UsageRow
 				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed usage rollup row", "file", name, "err", err)
 					continue
 				}
 				staged.addUsageRow(&row)
 			case rowKindQuota:
-				var row data.QuotaRow
+				var row usagedbv1.QuotaRow
 				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed quota rollup row", "file", name, "err", err)
 					continue
@@ -420,7 +420,7 @@ func (s *Store) recover(ctx context.Context) {
 
 // applyUsageRow folds one flushed usage row into the per-day aggregates. The
 // caller holds s.mu.
-func (s *Store) applyUsageRow(row *data.UsageRow) {
+func (s *Store) applyUsageRow(row *usagedbv1.UsageRow) {
 	foldUsageRow(s.dayAggregate(row.Day), row)
 }
 
@@ -462,7 +462,7 @@ func (s *Store) mergeRecoveryState(staged *recoveryState) {
 }
 
 // foldUsageRow adds row to one day's aggregate.
-func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
+func foldUsageRow(day *dayAggregate, row *usagedbv1.UsageRow) {
 	cost := row.CostProvenance()
 	delta := row.Delta
 	delta.Cost = &cost
@@ -506,7 +506,7 @@ func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
 	}
 }
 
-func protectsTaskCost(row *data.UsageRow) bool {
+func protectsTaskCost(row *usagedbv1.UsageRow) bool {
 	if row.CostEstimated {
 		return false
 	}
@@ -518,9 +518,9 @@ func protectsTaskCost(row *data.UsageRow) bool {
 	return row.CostUSD != 0
 }
 
-func bucketCost(b *bucket) data.CostProvenance {
+func bucketCost(b *bucket) usagedbv1.CostProvenance {
 	if b.Cost == nil {
-		return data.CostProvenance{}
+		return usagedbv1.CostProvenance{}
 	}
 	return *b.Cost
 }
@@ -547,9 +547,9 @@ func newDayAggregate() *dayAggregate {
 // recordQuotaLocked writes a quota row when the window's observed state
 // changes. The caller holds s.mu.
 func (s *Store) recordQuotaLocked(c *QuotaChange) {
-	var resets data.Time
+	var resets usagedbv1.Time
 	if !c.ResetsAt.IsZero() {
-		resets = data.NewTime(c.ResetsAt)
+		resets = usagedbv1.NewTime(c.ResetsAt)
 	}
 	seen := quotaSeen{
 		status:        c.Status,
@@ -561,10 +561,10 @@ func (s *Store) recordQuotaLocked(c *QuotaChange) {
 		return
 	}
 	day := c.At.UTC().Format(dayFormat)
-	if err := s.appendRowLocked(day, &data.QuotaRow{
+	if err := s.appendRowLocked(day, &usagedbv1.QuotaRow{
 		Kind:        rowKindQuota,
 		Day:         day,
-		Ts:          data.NewTime(c.At),
+		Ts:          usagedbv1.NewTime(c.At),
 		Provider:    c.Provider,
 		Window:      c.Window,
 		Status:      c.Status,
@@ -602,7 +602,7 @@ func (s *Store) flushTaskLocked(id string) {
 			newest.CostUSD += amount
 			p.costInFlight += amount
 			if newest.Cost == nil {
-				newest.Cost = &data.CostProvenance{}
+				newest.Cost = &usagedbv1.CostProvenance{}
 			}
 			newest.Cost.Add(provenance)
 			p.provenanceInFlight.Add(provenance)
@@ -622,7 +622,7 @@ func (s *Store) flushTaskLocked(id string) {
 	dayWatermark := time.Time{}
 	for _, key := range keys {
 		b := p.buckets[key]
-		row := data.UsageRow{
+		row := usagedbv1.UsageRow{
 			Kind:    rowKindUsage,
 			Day:     key.day,
 			Ts:      b.ts,
@@ -1093,8 +1093,8 @@ type taskPending struct {
 	meta               TaskMeta
 	buckets            map[bucketKey]*bucket
 	costUSD            float64 // newest observed task cost snapshot
-	costProvenance     data.CostProvenance
-	provenanceInFlight data.CostProvenance
+	costProvenance     usagedbv1.CostProvenance
+	provenanceInFlight usagedbv1.CostProvenance
 	// costInFlight is cost movement already folded into pending rows but not
 	// yet confirmed written; it is never re-added on a flush retry. See the
 	// flushedCost invariant on Store.
@@ -1112,14 +1112,14 @@ func (p *taskPending) fold(e *Event, synthetic bool) {
 	if synthetic {
 		b.synthetic = true
 	}
-	if ts := data.NewTime(e.At); ts > b.ts {
+	if ts := usagedbv1.NewTime(e.At); ts > b.ts {
 		b.ts = ts
 	}
 	b.Add(&e.Delta)
 	p.costUSD = e.CostUSD
 	p.costProvenance = e.CostProvenance
 	if b.Cost == nil {
-		b.Cost = &data.CostProvenance{}
+		b.Cost = &usagedbv1.CostProvenance{}
 	}
 }
 
@@ -1143,9 +1143,9 @@ type bucketKey struct {
 // had no producer time (timestamp-less adopted replay): their rows can never
 // advance the task watermark.
 type bucket struct {
-	data.Delta
+	usagedbv1.Delta
 
-	ts        data.Time // newest producer time folded into the group
+	ts        usagedbv1.Time // newest producer time folded into the group
 	synthetic bool
 
 	// Distinct-task sets for skill reads and repo touches, tracked only by
@@ -1242,8 +1242,8 @@ type quotaKey struct {
 // written only when this state changes.
 type quotaSeen struct {
 	status        string
-	utilizationPc int       // utilization rounded to hundredths
-	resets        data.Time // 0 = unknown
+	utilizationPc int            // utilization rounded to hundredths
+	resets        usagedbv1.Time // 0 = unknown
 }
 
 func cloneCounts(m map[string]int) map[string]int {
@@ -1257,11 +1257,11 @@ func cloneCounts(m map[string]int) map[string]int {
 
 // cloneToolTimings copies each timing's duration buckets so a rollup snapshot
 // does not share them with the live aggregates.
-func cloneToolTimings(m map[string]data.ToolTiming) map[string]data.ToolTiming {
+func cloneToolTimings(m map[string]usagedbv1.ToolTiming) map[string]usagedbv1.ToolTiming {
 	if m == nil {
 		return nil
 	}
-	out := make(map[string]data.ToolTiming, len(m))
+	out := make(map[string]usagedbv1.ToolTiming, len(m))
 	for name, timing := range m {
 		out[name] = timing.Clone()
 	}
@@ -1334,7 +1334,7 @@ type recoveryState struct {
 	days               map[string]*dayAggregate
 	watermarks         map[string]time.Time
 	flushedCost        map[string]float64
-	flushedProvenance  map[string]data.CostProvenance
+	flushedProvenance  map[string]usagedbv1.CostProvenance
 	costProtectedTasks map[string]struct{}
 	lastQuota          map[quotaKey]quotaSeen
 }
@@ -1344,7 +1344,7 @@ type recoveryState struct {
 func newRecoveryState() *recoveryState {
 	return &recoveryState{
 		days: make(map[string]*dayAggregate), watermarks: make(map[string]time.Time),
-		flushedCost: make(map[string]float64), flushedProvenance: make(map[string]data.CostProvenance), costProtectedTasks: make(map[string]struct{}),
+		flushedCost: make(map[string]float64), flushedProvenance: make(map[string]usagedbv1.CostProvenance), costProtectedTasks: make(map[string]struct{}),
 		lastQuota: make(map[quotaKey]quotaSeen),
 	}
 }
@@ -1352,7 +1352,7 @@ func newRecoveryState() *recoveryState {
 // addUsageRow folds a durable row and rebuilds the resume bookkeeping from one recovered usage
 // row: the per-task flush watermark and the cost total already reflected in
 // flushed rows. The caller holds s.mu.
-func (s *recoveryState) addUsageRow(row *data.UsageRow) {
+func (s *recoveryState) addUsageRow(row *usagedbv1.UsageRow) {
 	day := s.days[row.Day]
 	if day == nil {
 		day = newDayAggregate()

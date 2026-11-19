@@ -17,7 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 )
 
 const usageDayFormat = "2006-01-02"
@@ -37,20 +37,20 @@ type usageLogPath struct {
 	startedAt time.Time
 }
 
-func storeUsageRows(s *Store, ctx context.Context) iter.Seq2[data.UsageRow, error] {
-	return func(yield func(data.UsageRow, error) bool) {
+func storeUsageRows(s *Store, ctx context.Context) iter.Seq2[usagedbv1.UsageRow, error] {
+	return func(yield func(usagedbv1.UsageRow, error) bool) {
 		if err := ctx.Err(); err != nil {
-			yield(data.UsageRow{}, err)
+			yield(usagedbv1.UsageRow{}, err)
 			return
 		}
 		paths, err := usageLogPaths(ctx, s)
 		if err != nil {
-			yield(data.UsageRow{}, fmt.Errorf("load retained task logs: %w", err))
+			yield(usagedbv1.UsageRow{}, fmt.Errorf("load retained task logs: %w", err))
 			return
 		}
 		for start := 0; start < len(paths); start += maxParallelLogHeaderLoads {
 			if err := ctx.Err(); err != nil {
-				yield(data.UsageRow{}, err)
+				yield(usagedbv1.UsageRow{}, err)
 				return
 			}
 			end := min(start+maxParallelLogHeaderLoads, len(paths))
@@ -68,7 +68,7 @@ func storeUsageRows(s *Store, ctx context.Context) iter.Seq2[data.UsageRow, erro
 			wg.Wait()
 			for i, result := range results {
 				if err := ctx.Err(); err != nil {
-					yield(data.UsageRow{}, err)
+					yield(usagedbv1.UsageRow{}, err)
 					return
 				}
 				if result.err != nil {
@@ -88,7 +88,7 @@ func storeUsageRows(s *Store, ctx context.Context) iter.Seq2[data.UsageRow, erro
 			}
 		}
 		if err := ctx.Err(); err != nil {
-			yield(data.UsageRow{}, err)
+			yield(usagedbv1.UsageRow{}, err)
 		}
 	}
 }
@@ -142,8 +142,8 @@ func loadUsageStartedAt(path string) (time.Time, error) {
 	return meta.StartedAt, err
 }
 
-func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow, error] {
-	return func(yield func(data.UsageRow, error) bool) {
+func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedbv1.UsageRow, error] {
+	return func(yield func(usagedbv1.UsageRow, error) bool) {
 		if lt.TaskID == "" {
 			return
 		}
@@ -151,7 +151,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 			day   string
 			model string
 		}
-		buckets := make(map[key]*data.UsageRow)
+		buckets := make(map[key]*usagedbv1.UsageRow)
 		model := lt.ReportedModel
 		if model == "" {
 			model = lt.RequestedModel
@@ -195,7 +195,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 			case *agent.ToolResultMessage:
 				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
 				if name, ms, measured := toolTimings.Finish(key.String(), at, m.DurationMs); measured {
-					delta.ToolTimings = map[string]data.ToolTiming{name: data.ToolCallTiming(ms)}
+					delta.ToolTimings = map[string]usagedbv1.ToolTiming{name: usagedbv1.ToolCallTiming(ms)}
 					ok = true
 				}
 			}
@@ -207,7 +207,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 			k := key{day: day, model: label}
 			row := buckets[k]
 			if row == nil {
-				row = &data.UsageRow{
+				row = &usagedbv1.UsageRow{
 					Kind:    "usage",
 					Day:     day,
 					TaskID:  lt.TaskID,
@@ -217,20 +217,20 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				}
 				buckets[k] = row
 			}
-			provenance := data.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}
-			prior := data.CostProvenance{ReportedUSD: previousCost.ReportedUSD, EstimatedUSD: previousCost.EstimatedUSD, ReportedParts: previousCost.ReportedParts, EstimatedParts: previousCost.EstimatedParts, UnknownParts: previousCost.UnknownParts}
+			provenance := usagedbv1.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}
+			prior := usagedbv1.CostProvenance{ReportedUSD: previousCost.ReportedUSD, EstimatedUSD: previousCost.EstimatedUSD, ReportedParts: previousCost.ReportedParts, EstimatedParts: previousCost.EstimatedParts, UnknownParts: previousCost.UnknownParts}
 			movement := provenance.Difference(prior)
 			delta.Cost = &movement
 			delta.CostUSD = cost.USD - previousCost.USD
 			previousCost = cost
 			row.Add(&delta)
-			if ts := data.NewTime(at); ts > row.Ts {
+			if ts := usagedbv1.NewTime(at); ts > row.Ts {
 				row.Ts = ts
 			}
 		}
 		for timed, err := range lt.StreamMessages(ctx) {
 			if err != nil {
-				yield(data.UsageRow{}, err)
+				yield(usagedbv1.UsageRow{}, err)
 				return
 			}
 			if timed.ProducerTime.IsZero() {
@@ -294,8 +294,8 @@ func usageClaudeModel(current string, m agent.Message) string {
 
 // usageDelta mirrors the durable, non-priced part of live rollup
 // translation; see LoadedTask.UsageRows for the fields it cannot reconstruct.
-func usageDelta(m agent.Message) (data.Delta, bool) {
-	var d data.Delta
+func usageDelta(m agent.Message) (usagedbv1.Delta, bool) {
+	var d usagedbv1.Delta
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if m.Additive {
@@ -306,7 +306,7 @@ func usageDelta(m agent.Message) (data.Delta, bool) {
 		}
 	case *agent.ResultMessage:
 		if m.Source.IsChild() {
-			return data.Delta{}, false
+			return usagedbv1.Delta{}, false
 		}
 		if !m.UsageIsSnapshot {
 			d.TokenBuckets = usageTokens(m.Usage)
@@ -320,12 +320,12 @@ func usageDelta(m agent.Message) (data.Delta, bool) {
 		d.ContextWindow = m.ContextWindow
 	case *agent.SystemMessage:
 		if m.Subtype != "compact_boundary" {
-			return data.Delta{}, false
+			return usagedbv1.Delta{}, false
 		}
 		d.Compactions = 1
 	case *agent.SkillReadMessage:
 		if m.Skill == "" {
-			return data.Delta{}, false
+			return usagedbv1.Delta{}, false
 		}
 		d.SkillReads = map[string]int{m.Skill: 1}
 	case *agent.ToolUseMessage:
@@ -336,13 +336,13 @@ func usageDelta(m agent.Message) (data.Delta, bool) {
 			d.SpawnsBackground = 1
 		}
 	default:
-		return data.Delta{}, false
+		return usagedbv1.Delta{}, false
 	}
 	return d, true
 }
 
-func usageTokens(u agent.Usage) data.TokenBuckets {
-	b := data.TokenBuckets{
+func usageTokens(u agent.Usage) usagedbv1.TokenBuckets {
+	b := usagedbv1.TokenBuckets{
 		Input:     int64(u.InputTokens),
 		Output:    int64(u.OutputTokens),
 		CacheRead: int64(u.CacheReadInputTokens),

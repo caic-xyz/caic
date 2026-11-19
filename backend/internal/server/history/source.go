@@ -18,6 +18,8 @@ import (
 	"slices"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -36,11 +38,6 @@ const RecordsPerChunk uint64 = 256
 // RecordEndIndex selects all outputs of a physical record in slice requests.
 // Discovery responses always contain actual normalized positions instead.
 const RecordEndIndex uint32 = math.MaxUint32
-
-// Event identifies one API projection attributable to a physical raw record.
-// Index is zero-based across all outputs from that record, including outputs
-// emitted by different semantic messages in the same native record.
-type Event = v1.HistoryEvent
 
 // Snapshot identifies the complete raw-record prefix projected at one instant.
 // A generation owner must not reuse it with a different Source.
@@ -128,12 +125,12 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 			}
 			return Snapshot{}, err
 		}
-		var events []Event
+		var events []v1.HistoryEvent
 		var exits []hostExit
 		for messageIndex, parsed := range record.Messages {
 			m := parsed.Message
 			index := uint32(len(events)) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
-			if fact := costFactFor(parsed, Position{RecordID: record.ID, Index: index}); fact != nil {
+			if fact := costFactFor(parsed, v1.HistoryPosition{RecordID: record.ID, Index: index}); fact != nil {
 				if err := s.journal.append(fact); err != nil {
 					s.err = err
 					return Snapshot{}, err
@@ -148,7 +145,7 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 				projected = s.tracker.ConvertMessage(record.ID, messageIndex, m, parsed.ProducerTime)
 			}
 			for i := range projected {
-				events = append(events, Event{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
+				events = append(events, v1.HistoryEvent{RecordID: record.ID, Index: uint32(len(events)), Message: projected[i]}) //nolint:gosec // A 32 MiB record cannot emit 2^32 projections.
 			}
 			// Every root exit ends the hosted cards, including one that projects
 			// no event: a clean exit or the exit of a requested stop. The
@@ -206,32 +203,32 @@ func (s *Source) Refresh(ctx context.Context) (Snapshot, error) {
 // Events yields normalized outputs in an inclusive raw-record range, reading
 // one physical record at a time. Stopping releases its decoded working set.
 // It never reads or reparses raw task records.
-func (s *Source) Events(ctx context.Context, snapshot Snapshot, first, last uint64) iter.Seq2[Event, error] {
-	return func(yield func(Event, error) bool) {
+func (s *Source) Events(ctx context.Context, snapshot Snapshot, first, last uint64) iter.Seq2[v1.HistoryEvent, error] {
+	return func(yield func(v1.HistoryEvent, error) bool) {
 		if err := s.checkState(ctx); err != nil {
-			yield(Event{}, err)
+			yield(v1.HistoryEvent{}, err)
 			return
 		}
 		for first <= last {
 			end := min(last, ((first-1)/RecordsPerChunk+1)*RecordsPerChunk)
 			for encoded, err := range s.frames(ctx, snapshot, first, end) {
 				if err != nil {
-					yield(Event{}, err)
+					yield(v1.HistoryEvent{}, err)
 					return
 				}
 				dec := json.NewDecoder(bytes.NewReader(encoded))
 				if _, err := dec.Token(); err != nil {
-					yield(Event{}, err)
+					yield(v1.HistoryEvent{}, err)
 					return
 				}
 				for dec.More() {
 					if err := ctx.Err(); err != nil {
-						yield(Event{}, err)
+						yield(v1.HistoryEvent{}, err)
 						return
 					}
-					var event Event
+					var event v1.HistoryEvent
 					if err := dec.Decode(&event); err != nil {
-						yield(Event{}, err)
+						yield(v1.HistoryEvent{}, err)
 						return
 					}
 					if !yield(event, nil) {
@@ -292,7 +289,7 @@ func (s *Source) TurnCosts(ctx context.Context, snapshot Snapshot, last uint64, 
 				return
 			}
 			cost, known := tracker.Observe(message, fact.At, pricer)
-			source := agent.MessageSource(fact.Source)
+			source := taskslogv3.MessageSource(fact.Source)
 			if fact.Kind != data.KindResult || source.IsChild() {
 				continue
 			}
@@ -328,7 +325,7 @@ func (s *Source) CheckSlice(ctx context.Context, snap Snapshot, body v1.HistoryS
 	if err := validSlice(body, snap.Through); err != nil {
 		return err
 	}
-	var positions []Position
+	var positions []v1.HistoryPosition
 	if body.First.Index != 0 {
 		positions = append(positions, body.First)
 	}
@@ -431,11 +428,11 @@ func (s *Source) WriteSetup(ctx context.Context, snap Snapshot, through uint64, 
 	}
 	records := appendRecordPrefix(nil, s.sections.setupRecords, through)
 	s.unlock()
-	events := func(yield func(Event, error) bool) {
+	events := func(yield func(v1.HistoryEvent, error) bool) {
 		firstInit := false
 		for e, err := range s.selectedEvents(ctx, snap, records) {
 			if err != nil {
-				yield(Event{}, err)
+				yield(v1.HistoryEvent{}, err)
 				return
 			}
 			if historyChild(&e.Message.Source) {
@@ -456,17 +453,17 @@ func (s *Source) WriteSetup(ctx context.Context, snap Snapshot, through uint64, 
 
 // ActivityStart locates one known native subagent's earliest observed position.
 // It bounds a disclosure scan independently of the task's earlier raw history.
-func (s *Source) ActivityStart(ctx context.Context, id string) (Position, error) {
+func (s *Source) ActivityStart(ctx context.Context, id string) (v1.HistoryPosition, error) {
 	if err := s.lock(ctx); err != nil {
-		return Position{}, err
+		return v1.HistoryPosition{}, err
 	}
 	defer s.unlock()
 	if s.err != nil {
-		return Position{}, s.err
+		return v1.HistoryPosition{}, s.err
 	}
 	a, ok := s.sections.activities[id]
 	if !ok {
-		return Position{}, errors.New("unknown history activity")
+		return v1.HistoryPosition{}, errors.New("unknown history activity")
 	}
 	return a.First, nil
 }
@@ -477,7 +474,7 @@ func (s *Source) ActivityStart(ctx context.Context, id string) (Position, error)
 // RecordEndIndex skips all outputs of its record, including outputless
 // checkpoints. A zero bound selects the full prefix. Current status remains
 // manifest metadata.
-func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, through uint64, after Position, w io.Writer) error {
+func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, through uint64, after v1.HistoryPosition, w io.Writer) error {
 	if err := s.lock(ctx); err != nil {
 		return err
 	}
@@ -524,10 +521,10 @@ func (s *Source) WriteActivity(ctx context.Context, snap Snapshot, id string, th
 	s.unlock()
 	slices.Sort(records)
 	records = slices.Compact(records)
-	events := func(yield func(Event, error) bool) {
+	events := func(yield func(v1.HistoryEvent, error) bool) {
 		for e, err := range s.selectedEvents(ctx, snap, records) {
 			if err != nil {
-				yield(Event{}, err)
+				yield(v1.HistoryEvent{}, err)
 				return
 			}
 			if e.RecordID < after.RecordID || e.RecordID == after.RecordID && e.Index <= after.Index {
@@ -562,10 +559,10 @@ func (s *Source) checkState(ctx context.Context) error {
 	return s.err
 }
 
-func (s *Source) selectedEvents(ctx context.Context, snap Snapshot, records []uint64) iter.Seq2[Event, error] {
-	return func(yield func(Event, error) bool) {
+func (s *Source) selectedEvents(ctx context.Context, snap Snapshot, records []uint64) iter.Seq2[v1.HistoryEvent, error] {
+	return func(yield func(v1.HistoryEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
-			yield(Event{}, err)
+			yield(v1.HistoryEvent{}, err)
 			return
 		}
 		for i := 0; i < len(records); {

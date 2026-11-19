@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -257,7 +259,7 @@ func TestCostTracker(t *testing.T) {
 					pricer := usage.NewPricer(nil)
 					c.Observe(&agent.UsageMessage{ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
 					if tc.child {
-						c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "unpriced", Source: agent.MessageSource{ThreadID: "child", RootThreadID: "root"}, Usage: agent.Usage{InputTokens: 200_000}}, at, pricer)
+						c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "unpriced", Source: taskslogv3.MessageSource{ThreadID: "child", RootThreadID: "root"}, Usage: agent.Usage{InputTokens: 200_000}}, at, pricer)
 					}
 					c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: tc.total}}, at, pricer)
 					cost := c.Snapshot()
@@ -274,7 +276,7 @@ func TestCostTracker(t *testing.T) {
 				c := CostTracker{Harness: h, Model: "gpt-6-sol"}
 				c.Observe(&agent.UsageMessage{PerCall: true, Usage: agent.Usage{InputTokens: 100_000}}, at, prices)
 				c.Observe(&agent.SessionMetadataMessage{ReportedModel: "gpt-6-luna"}, at, prices)
-				c.Observe(&agent.SessionMetadataMessage{Source: agent.MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child-model"}, at, prices)
+				c.Observe(&agent.SessionMetadataMessage{Source: taskslogv3.MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child-model"}, at, prices)
 				cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, prices)
 				if !ok || c.Model != "gpt-6-luna" || math.Abs(cost.USD-0.2) > 1e-9 || math.Abs(c.TotalUSD-0.2) > 1e-9 {
 					t.Fatalf("%s partial metadata cost = %+v/%v, model=%s total=%v", h, cost, ok, c.Model, c.TotalUSD)
@@ -302,7 +304,7 @@ func TestCostTracker(t *testing.T) {
 				pricer := usage.NewPricer(nil)
 				c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
 				c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: "gpt-6.1-terra",
-					Source: agent.MessageSource{ThreadID: "child", RootThreadID: "root"}, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
+					Source: taskslogv3.MessageSource{ThreadID: "child", RootThreadID: "root"}, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
 				if !filteredExit {
 					c.Observe(&agent.ExitMessage{ExitCode: 1}, at, pricer)
 				}
@@ -320,7 +322,7 @@ func TestCostTracker(t *testing.T) {
 				c := CostTracker{Harness: harness.Codex, Model: "unknown"}
 				pricer := usage.NewPricer(nil)
 				c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "gpt-6.1-terra",
-					Source: agent.MessageSource{ThreadID: "child", RootThreadID: "root"},
+					Source: taskslogv3.MessageSource{ThreadID: "child", RootThreadID: "root"},
 					Usage:  agent.Usage{InputTokens: 300_000}}, at, pricer)
 				cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 300_000 + parentInput}}, at, pricer)
 				if ok != (parentInput == 0) || (parentInput > 0 && cost.Source != "") || math.Abs(c.TotalUSD-0.6) > 1e-9 {
@@ -334,7 +336,7 @@ func TestCostTracker(t *testing.T) {
 			pricer := usage.NewPricer(nil)
 			c := CostTracker{Harness: harness.Codex, Model: "gpt-6.1-sol"}
 			c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
-			child := agent.MessageSource{ThreadID: "child", RootThreadID: "root"}
+			child := taskslogv3.MessageSource{ThreadID: "child", RootThreadID: "root"}
 			c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "gpt-6.1-terra", Source: child, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
 			if c.Model != "gpt-6.1-sol" {
 				t.Fatalf("child changed parent model to %s", c.Model)

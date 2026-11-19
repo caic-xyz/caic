@@ -1,5 +1,5 @@
-// Package inputqueue defines the durable queued-prompt sidecar schema.
-package inputqueue
+// Package v1 defines version 1 of the durable queued-prompt sidecar schema.
+package v1
 
 // Image is an attached base64-encoded image.
 type Image struct {

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/buger/jsonparser"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/maruel/genai/providers/antigravity"
@@ -79,8 +81,8 @@ func (s *accounting) finishResult() agent.Usage {
 
 // conversationSource retains native identity. Only explicit delegation chains
 // reaching the initialized root establish child ownership; mismatches do not.
-func (w *accounting) conversationSource(id string) agent.MessageSource {
-	s := agent.MessageSource{ThreadID: id}
+func (w *accounting) conversationSource(id string) taskslogv3.MessageSource {
+	s := taskslogv3.MessageSource{ThreadID: id}
 	parent := id
 	for range len(w.parents) + 1 {
 		if parent != "" && parent == w.rootConversationID {
@@ -96,7 +98,7 @@ func (w *accounting) conversationSource(id string) agent.MessageSource {
 	return s
 }
 
-func (w *accounting) foreignConversation(source *agent.MessageSource) bool {
+func (w *accounting) foreignConversation(source *taskslogv3.MessageSource) bool {
 	return w.rootConversationID != "" && source.ThreadID != "" && source.ThreadID != w.rootConversationID && !source.IsChild()
 }
 

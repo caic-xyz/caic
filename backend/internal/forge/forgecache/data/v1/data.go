@@ -1,5 +1,5 @@
-// Package data defines the on-disk CI results and notification cache.
-package data
+// Package v1 defines version 1 of the on-disk CI results and notification cache.
+package v1
 
 import "time"
 

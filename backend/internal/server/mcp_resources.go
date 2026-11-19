@@ -14,7 +14,7 @@ import (
 
 	"github.com/gomodedev/gomode"
 
-	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
+	auditv1 "github.com/caic-xyz/caic/backend/internal/server/data/audit/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/gomodedev/gomode/mcp"
@@ -102,7 +102,7 @@ func (m *mcpResources) ReadResource(ctx context.Context, params *mcp.ResourcesRe
 	}
 	uri := params.URI
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
-		m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: authResult})
+		m.audit.record(ctx, &auditv1.Event{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
 	switch {
@@ -415,7 +415,7 @@ func (m *mcpResources) resourceJSON(ctx context.Context, uri string, value any) 
 	if err != nil {
 		status = "error"
 	}
-	m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: "allow", Status: status})
+	m.audit.record(ctx, &auditv1.Event{Operation: "resources/read", Name: uri, Decision: "allow", Status: status})
 	return result, err
 }
 

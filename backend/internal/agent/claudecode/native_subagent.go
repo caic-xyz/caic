@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -202,7 +204,7 @@ func (n *nativeSubagents) retire(taskID string) []agent.Message {
 // resolveOwner distinguishes missing delegation evidence from a recorded
 // collision. Explicit known native identity can resolve a shared delegation,
 // while contradictory known identities never enrich the source.
-func (n *nativeSubagents) resolveOwner(source *agent.MessageSource, reportedID string) nativeOwnerResolution {
+func (n *nativeSubagents) resolveOwner(source *taskslogv3.MessageSource, reportedID string) nativeOwnerResolution {
 	resolved := *source
 	id := source.AgentID
 	if reportedID != "" {

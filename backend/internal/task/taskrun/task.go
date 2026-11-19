@@ -1192,7 +1192,7 @@ func compactFinalizedDeltaAt(entries timelineEntries, i int) {
 	switch final := entries.At(i).Message.(type) {
 	case *agent.TextMessage:
 		compacted := compactedTextDelta
-		if final.Source != (agent.MessageSource{}) {
+		if final.Source != (v3.MessageSource{}) {
 			compacted = &agent.TextDeltaMessage{Source: final.Source}
 		}
 		for j := i - 1; j >= 0; j-- {
@@ -1206,7 +1206,7 @@ func compactFinalizedDeltaAt(entries timelineEntries, i int) {
 		}
 	case *agent.ThinkingMessage:
 		compacted := compactedThinkingDelta
-		if final.Source != (agent.MessageSource{}) {
+		if final.Source != (v3.MessageSource{}) {
 			compacted = &agent.ThinkingDeltaMessage{Source: final.Source}
 		}
 		for j := i - 1; j >= 0; j-- {

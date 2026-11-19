@@ -8,7 +8,7 @@ import (
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 )
 
 // UsageDashboard converts sorted durable-rollup day snapshots to the public
@@ -47,7 +47,7 @@ func usageDashboardDay(day *usagedb.DayRollup) v1.UsageDashboardDay {
 	}
 }
 
-func usageDashboardToolTimings(timings map[string]data.ToolTiming) []v1.UsageDashboardToolTiming {
+func usageDashboardToolTimings(timings map[string]usagedbv1.ToolTiming) []v1.UsageDashboardToolTiming {
 	names := sortedNames(timings)
 	out := make([]v1.UsageDashboardToolTiming, len(names))
 	for i, name := range names {
@@ -61,7 +61,7 @@ func usageDashboardToolTimings(timings map[string]data.ToolTiming) []v1.UsageDas
 	return out
 }
 
-func usageDashboardTokens(tokens data.TokenBuckets) v1.UsageDashboardTokens {
+func usageDashboardTokens(tokens usagedbv1.TokenBuckets) v1.UsageDashboardTokens {
 	writes := tokens.Writes()
 	buckets := make([]v1.UsageDashboardCacheWrite, 0, len(writes))
 	for _, b := range writes {
@@ -130,7 +130,7 @@ func usageDashboardHarnesses(harnesses map[string]usagedb.HarnessRollup) []v1.Us
 	return out
 }
 
-func usageDashboardCost(cost data.CostProvenance) v1.UsageDashboardCost {
+func usageDashboardCost(cost usagedbv1.CostProvenance) v1.UsageDashboardCost {
 	return v1.UsageDashboardCost{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}
 }
 

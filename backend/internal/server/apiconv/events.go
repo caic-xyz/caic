@@ -527,7 +527,7 @@ func (tt *ToolTimingTracker) convertMessage(recordID uint64, messageIndex int, m
 	}
 }
 
-func (tt *ToolTimingTracker) rememberToolStart(source *agent.MessageSource, toolUseID string, now time.Time, interruptible bool) {
+func (tt *ToolTimingTracker) rememberToolStart(source *logv3.MessageSource, toolUseID string, now time.Time, interruptible bool) {
 	key := agent.ToolKeyForSource(source, toolUseID)
 	if key.ToolUseID == "" {
 		return
@@ -575,7 +575,7 @@ func changeStat(stat *logv3.ChangeStat) *v1.EventChangeStat {
 
 // pendingTool is a tool call whose result has not been converted yet.
 type pendingTool struct {
-	source  agent.MessageSource
+	source  logv3.MessageSource
 	started time.Time // Zero when the producer time is unknown.
 	// interruptible marks a generic tool call. Questions stay answerable by a
 	// later prompt and plan updates complete on their own, so neither is

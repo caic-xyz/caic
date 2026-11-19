@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	inputqueuev1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue/v1"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/klauspost/compress/zstd"
 )
@@ -222,7 +222,7 @@ func validateRawLogAppend(f *os.File, path string, header *v3.MetaMessage) error
 }
 
 // LoadInputQueue reads pending prompts; an absent file is an empty queue.
-func (s *Store) LoadInputQueue() ([]inputqueue.Entry, error) {
+func (s *Store) LoadInputQueue() ([]inputqueuev1.Entry, error) {
 	f, err := os.Open(filepath.Join(s.LogDir, "input-queue.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -239,9 +239,9 @@ func (s *Store) LoadInputQueue() ([]inputqueue.Entry, error) {
 	if token != json.Delim('[') {
 		return nil, errors.New("input queue must be an array")
 	}
-	var out []inputqueue.Entry
+	var out []inputqueuev1.Entry
 	for dec.More() {
-		var entry inputqueue.Entry
+		var entry inputqueuev1.Entry
 		if err := dec.Decode(&entry); err != nil {
 			return nil, fmt.Errorf("read queued prompt: %w", err)
 		}
@@ -258,7 +258,7 @@ func (s *Store) LoadInputQueue() ([]inputqueue.Entry, error) {
 }
 
 // SaveInputQueue commits a complete replacement before callers publish it.
-func (s *Store) SaveInputQueue(entries []inputqueue.Entry) error {
+func (s *Store) SaveInputQueue(entries []inputqueuev1.Entry) error {
 	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
 		return err
 	}

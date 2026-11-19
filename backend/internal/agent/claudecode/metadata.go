@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/buger/jsonparser"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/tokens"
@@ -23,7 +25,7 @@ type reasoning struct {
 
 // Apply observes one decoded record. Child accounting cannot alter the root
 // turn. Explicit result usage wins over preceding actual usage, then estimates.
-func (r *reasoning) Apply(source *agent.MessageSource, estimate int, messages []agent.Message) {
+func (r *reasoning) Apply(source *taskslogv3.MessageSource, estimate int, messages []agent.Message) {
 	r.observe(source, estimate, 0)
 	for _, message := range messages {
 		if message.Provenance().IsChild() {
@@ -44,7 +46,7 @@ func (r *reasoning) Apply(source *agent.MessageSource, estimate int, messages []
 	}
 }
 
-func (r *reasoning) observe(source *agent.MessageSource, estimate, actual int) {
+func (r *reasoning) observe(source *taskslogv3.MessageSource, estimate, actual int) {
 	if !source.IsChild() {
 		r.actual += actual
 		r.estimated += max(0, estimate)
@@ -397,7 +399,7 @@ func parseResult(line []byte) (*agent.ResultMessage, error) {
 	}, nil
 }
 
-func parseSource(line []byte) (source agent.MessageSource, err error) {
+func parseSource(line []byte) (source taskslogv3.MessageSource, err error) {
 	source.ThreadID, err = agent.JSONString(line, "session_id")
 	if err != nil {
 		return source, fmt.Errorf("session_id: %w", err)
@@ -475,7 +477,7 @@ type metadataState struct {
 	childModels   map[agent.ToolKey]string
 }
 
-func (s *metadataState) apply(source *agent.MessageSource, estimate int, messages []agent.Message, line []byte) {
+func (s *metadataState) apply(source *taskslogv3.MessageSource, estimate int, messages []agent.Message, line []byte) {
 	s.reasoning.Apply(source, estimate, messages)
 	for _, message := range messages {
 		switch m := message.(type) {

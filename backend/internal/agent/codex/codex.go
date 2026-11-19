@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -647,7 +649,7 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 			model = w.reportedModel
 		}
 		usageMsg := &agent.UsageMessage{Usage: incremental, ReportedModel: model, ModelDerived: true,
-			Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID}}
+			Source: taskslogv3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID}}
 		// Cumulative deltas may cover several requests after a missed event.
 		// Only Last's exact token buckets establish one request's context size;
 		// repeated totals yield zero deltas and must not reprice Last.
@@ -834,7 +836,7 @@ func (w *wireFormat) rememberRequest(probe *agent.JSONRPCEnvelope) error {
 // recordedInputEcho suppresses only the native item proved by a recorded
 // turn/start request and its matching reply. Other root and child inputs remain.
 // Multiple requests can share a running turn, each with its own input item.
-func (w *wireFormat) recordedInputEcho(source *agent.MessageSource) bool {
+func (w *wireFormat) recordedInputEcho(source *taskslogv3.MessageSource) bool {
 	for i := range w.inputTurns {
 		t := &w.inputTurns[i]
 		if t.threadID == source.ThreadID && t.turnID == source.TurnID && source.ItemID != "" {
@@ -935,11 +937,11 @@ func (w *wireFormat) applyThreadResponse(r *codex.ThreadStartResponse) *agent.In
 	if effort != "" {
 		w.reportedEffort = effort
 	}
-	return &agent.InitMessage{Source: agent.MessageSource{ThreadID: r.Thread.ID, RootThreadID: r.Thread.ID}, SessionID: r.Thread.ID, Cwd: r.Thread.CWD, ReportedModel: model, ReportedEffort: effort, Version: w.agentVersion}
+	return &agent.InitMessage{Source: taskslogv3.MessageSource{ThreadID: r.Thread.ID, RootThreadID: r.Thread.ID}, SessionID: r.Thread.ID, Cwd: r.Thread.CWD, ReportedModel: model, ReportedEffort: effort, Version: w.agentVersion}
 }
 
 // scopeSource adds session ownership without inferring it from arrival order.
-func (w *wireFormat) scopeSource(s *agent.MessageSource) {
+func (w *wireFormat) scopeSource(s *taskslogv3.MessageSource) {
 	if s.ThreadID == "" {
 		return
 	}

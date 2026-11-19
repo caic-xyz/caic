@@ -18,12 +18,8 @@ import (
 	"github.com/maruel/ksid"
 )
 
-// currentVersion is the users file format version written by this store.
-const currentVersion = 1
-
 type usersFile struct {
-	Version int
-	Users   []User
+	Users []User
 }
 
 // Store manages the users.json file with in-memory caching.
@@ -254,13 +250,16 @@ func loadUsersFile(path string) (*usersFile, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is caller-provided, validated at startup
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &usersFile{Version: currentVersion}, nil
+			return &usersFile{}, nil
 		}
 		return nil, fmt.Errorf("read users: %w", err)
 	}
 	var f v1.UsersFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse users: %w", err)
+	}
+	if f.Version != v1.Version {
+		return nil, fmt.Errorf("unsupported users version %d", f.Version)
 	}
 	users := make([]User, len(f.Users))
 	if f.Users == nil {
@@ -275,11 +274,10 @@ func loadUsersFile(path string) (*usersFile, error) {
 			CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
 		}
 	}
-	return &usersFile{Version: f.Version, Users: users}, nil
+	return &usersFile{Users: users}, nil
 }
 
 func saveUsersFile(f *usersFile, path string) error {
-	f.Version = currentVersion
 	users := make([]v1.User, len(f.Users))
 	if f.Users == nil {
 		users = nil
@@ -293,7 +291,7 @@ func saveUsersFile(f *usersFile, path string) error {
 			CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
 		}
 	}
-	data, err := json.MarshalIndent(v1.UsersFile{Version: f.Version, Users: users}, "", "  ")
+	data, err := json.MarshalIndent(v1.UsersFile{Version: v1.Version, Users: users}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal users: %w", err)
 	}

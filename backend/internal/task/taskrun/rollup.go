@@ -8,7 +8,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 )
 
 // rollupEvent translates one agent message into a rollup event. The bool is
@@ -18,7 +18,7 @@ import (
 // and restored rollups count the same token contributions for every harness.
 func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model, effort string, cost task.CostSnapshot) (usagedb.Event, bool) {
 	e := usagedb.Event{At: at, Replayed: replayed, Model: model, Effort: effort, CostUSD: cost.USD,
-		CostProvenance: data.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}}
+		CostProvenance: usagedbv1.CostProvenance{ReportedUSD: cost.ReportedUSD, EstimatedUSD: cost.EstimatedUSD, ReportedParts: cost.ReportedParts, EstimatedParts: cost.EstimatedParts, UnknownParts: cost.UnknownParts}}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if m.Additive {
@@ -81,8 +81,8 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 
 // rollupTokens splits one harness usage report into the disjoint token
 // buckets, retaining mixed and unknown cache lifetimes.
-func rollupTokens(u agent.Usage) data.TokenBuckets {
-	b := data.TokenBuckets{
+func rollupTokens(u agent.Usage) usagedbv1.TokenBuckets {
+	b := usagedbv1.TokenBuckets{
 		Input:     int64(u.InputTokens),
 		Output:    int64(u.OutputTokens),
 		CacheRead: int64(u.CacheReadInputTokens),

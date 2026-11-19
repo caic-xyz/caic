@@ -165,7 +165,7 @@ var _ agent.Backend = (*Backend)(nil)
 // An observed request ID with no questions stays ineligible after conflicting
 // reuse, cancellation, or completion, until a new root session initializes.
 type recordedQuestion struct {
-	source    agent.MessageSource
+	source    v3.MessageSource
 	toolUseID string
 	questions []v3.AskQuestion
 }
@@ -190,7 +190,7 @@ type wireFormat struct {
 	// value is empty for a call naming no skill and for a subagent's call.
 	pendingSkillUses map[agent.ToolKey]string
 	// askSources retains Ask ownership across controls and retries until completion.
-	askSources       map[agent.ToolKey]agent.MessageSource
+	askSources       map[agent.ToolKey]v3.MessageSource
 	questionRequests map[string]recordedQuestion
 	// loadedSkill is the skill whose Skill call succeeded. Its load waits one
 	// record for the synthetic injection that names the skill directory.
@@ -211,7 +211,7 @@ func newWireFormat() *wireFormat {
 		turnQueue:          turnQueue{queued: make(map[string]string), childTools: make(map[string]struct{})},
 		widgetTracker:      newWidgetTracker(),
 		pendingSkillUses:   make(map[agent.ToolKey]string),
-		askSources:         make(map[agent.ToolKey]agent.MessageSource),
+		askSources:         make(map[agent.ToolKey]v3.MessageSource),
 		questionRequests:   make(map[string]recordedQuestion),
 		childModels:        make(map[agent.ToolKey]string),
 	}
@@ -295,7 +295,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 			w.askSources[agent.ToolKeyForSource(source, m.ToolUseID)] = *source
 		case *agent.PendingUserActionMessage:
 			requested := *source
-			var matched agent.MessageSource
+			var matched v3.MessageSource
 			var found, ambiguous bool
 			if question, recorded := w.questionRequests[m.Action.RequestID]; recorded {
 				// Request identity owns duplicates even when other agents later
@@ -437,7 +437,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	}
 	if len(retired) != 0 {
 		for _, m := range retired {
-			*m.Provenance() = agent.MessageSource{ThreadID: w.sessionID}
+			*m.Provenance() = v3.MessageSource{ThreadID: w.sessionID}
 		}
 		out = append(retired, out...)
 	}
@@ -635,7 +635,7 @@ func (w *wireFormat) retireQuestion(id string) {
 	}
 }
 
-func (w *wireFormat) questionAnswer(response *claudecode.ControlResponse, source *agent.MessageSource) *agent.UserInputMessage {
+func (w *wireFormat) questionAnswer(response *claudecode.ControlResponse, source *v3.MessageSource) *agent.UserInputMessage {
 	question := w.questionRequests[response.RequestID]
 	if len(question.questions) == 0 || response.Subtype != claudecode.ControlResponseSuccess || response.Response.Behavior != claudecode.ControlCanUseToolBehaviorAllow {
 		return nil
@@ -689,7 +689,7 @@ func (w *wireFormat) questionAnswer(response *claudecode.ControlResponse, source
 // a root from a native child sharing its thread without delegation metadata.
 // Known identities must agree. Matching native IDs prove compatible missing
 // delegation metadata; matching delegation identity can gain a native ID later.
-func sameQuestionOwner(a, b *agent.MessageSource) bool {
+func sameQuestionOwner(a, b *v3.MessageSource) bool {
 	if a.IsChild() != b.IsChild() ||
 		a.AgentID != "" && b.AgentID != "" && a.AgentID != b.AgentID ||
 		a.ThreadID != "" && b.ThreadID != "" && a.ThreadID != b.ThreadID ||

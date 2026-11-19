@@ -21,7 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
+	auditv1 "github.com/caic-xyz/caic/backend/internal/server/data/audit/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
 	"github.com/caic-xyz/caic/metrics"
@@ -76,7 +76,7 @@ func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (m
 			continue
 		}
 		if authResult, ok := m.authorizeTool(ctx, params.Name); !ok {
-			m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: authResult})
+			m.audit.record(ctx, &auditv1.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: authResult})
 			return mcp.RawToolResult{Meta: mcp.MetaObject{
 				"mcp/www_authenticate":   []string{mcpScopeChallenge(requiredScopeForTool(params.Name))},
 				mcp.ToolErrorCodeMetaKey: string(api.CodeUnauthorized),
@@ -96,7 +96,7 @@ func (m *mcpTools) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (m
 			status, outcome = "tool_error", metrics.OutcomeError
 		}
 		m.metrics.Record(ctx, "mcp.tool."+params.Name, outcome, metrics.Duration(time.Since(start)))
-		m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: "allow", Status: status})
+		m.audit.record(ctx, &auditv1.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: "allow", Status: status})
 		if err == nil && mcpClientSessionFromContext(ctx) != "" {
 			projection, projectionErr := m.taskSvc.conversationFocus(ctx)
 			if projectionErr != nil {

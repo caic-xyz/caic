@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 )
@@ -289,7 +291,7 @@ func TestParseMessage(t *testing.T) {
 				t.Errorf("ToolUseID = %q, want empty so the tool result survives", read.ToolUseID)
 			}
 			// The load waits for the command's success.
-			wantLoad := &agent.SkillLoadMessage{Source: agent.MessageSource{ThreadID: "t1", TurnID: "turn_1", ItemID: "item_2"}, Skill: name, Path: "/home/user/.agents/skills/" + name + "/SKILL.md", SourceToolUseID: "item_2"}
+			wantLoad := &agent.SkillLoadMessage{Source: taskslogv3.MessageSource{ThreadID: "t1", TurnID: "turn_1", ItemID: "item_2"}, Skill: name, Path: "/home/user/.agents/skills/" + name + "/SKILL.md", SourceToolUseID: "item_2"}
 			if load, ok := msgs[2+2*i].(*agent.SkillLoadMessage); !ok || *load != *wantLoad {
 				t.Errorf("msgs[%d] = %#v, want %#v", 2+2*i, msgs[2+2*i], wantLoad)
 			}

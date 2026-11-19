@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -40,7 +42,7 @@ func TestWireFormat(t *testing.T) {
 						parse(false, `{"type":"system","subtype":"init","session_id":"root"}`)
 						parse(false, questionRequest)
 						messages := parse(true, `{"type":"control_response","response":{"subtype":"success","request_id":"request","response":{"behavior":"allow","updatedInput":{"answers":{"Which?":"A"}}}}}`)
-						assertQuestionAnswer(t, messages, &agent.MessageSource{ThreadID: "root"})
+						assertQuestionAnswer(t, messages, &taskslogv3.MessageSource{ThreadID: "root"})
 					})
 					t.Run("unrelated responses remain raw", func(t *testing.T) {
 						t.Parallel()
@@ -91,10 +93,10 @@ func TestWireFormat(t *testing.T) {
 								parse(false, `{"type":"system","subtype":"init","session_id":"root"}`)
 								parse(false, questionRequest)
 								parse(false, tc.line)
-								assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root"})
+								assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root"})
 								// An input attempt is not a delivery outcome. A retry must
 								// still have exactly the same request context.
-								assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root"})
+								assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root"})
 							})
 						}
 					})
@@ -126,7 +128,7 @@ func TestWireFormat(t *testing.T) {
 								t.Fatalf("duplicate request lost child owner: %#v", messages)
 							}
 						}
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
 					})
 					t.Run("duplicate retains owner after another child ask", func(t *testing.T) {
 						t.Parallel()
@@ -142,7 +144,7 @@ func TestWireFormat(t *testing.T) {
 						if !ok || pending.Provenance().ThreadID != "child-a" || pending.Provenance().DelegationToolUseID != "spawn-a" {
 							t.Fatalf("duplicate lost established owner: %#v", messages[0])
 						}
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "child-a", DelegationToolUseID: "spawn-a"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "child-a", DelegationToolUseID: "spawn-a"})
 					})
 					t.Run("unknown agent cannot borrow child ownership", func(t *testing.T) {
 						t.Parallel()
@@ -170,7 +172,7 @@ func TestWireFormat(t *testing.T) {
 						parse(false, `{"type":"system","subtype":"task_started","session_id":"root","task_type":"local_agent","task_id":"known-child"}`)
 						request := strings.Replace(questionRequest, `"tool_use_id":"ask"`, `"agent_id":"known-child","tool_use_id":"ask"`, 1)
 						parse(false, request)
-						owner := &agent.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child"}
+						owner := &taskslogv3.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child"}
 						assertQuestionAnswer(t, parse(true, questionAnswer), owner)
 						parse(false, `{"type":"user","session_id":"root","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ask","content":"done"}]}}`)
 						assertQuestionAnswer(t, parse(true, questionAnswer), owner)
@@ -203,7 +205,7 @@ func TestWireFormat(t *testing.T) {
 								parse(false, `{"type":"system","subtype":"task_started","session_id":"root","task_type":"local_agent","task_id":"known-child"}`)
 								request := strings.Replace(questionRequest, `"tool_use_id":"ask"`, `"agent_id":"known-child","tool_use_id":"ask"`, 1)
 								parse(false, request)
-								assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child"})
+								assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child"})
 								parse(false, `{"type":"system","subtype":"task_updated","session_id":"root","task_id":"known-child","tool_use_id":"spawn"}`)
 								if duplicate {
 									messages := parse(false, request)
@@ -232,8 +234,8 @@ func TestWireFormat(t *testing.T) {
 						parse(false, strings.Replace(requestB, `"tool_use_id":"ask"`, `"agent_id":"child-b","tool_use_id":"ask"`, 1))
 						answerA := strings.Replace(questionAnswer, `"request_id":"request"`, `"request_id":"request-a"`, 1)
 						answerB := strings.Replace(questionAnswer, `"request_id":"request"`, `"request_id":"request-b"`, 1)
-						ownerA := &agent.MessageSource{ThreadID: "root", DelegationToolUseID: "shared", AgentID: "claude:task:child-a"}
-						ownerB := &agent.MessageSource{ThreadID: "root", DelegationToolUseID: "shared", AgentID: "claude:task:child-b"}
+						ownerA := &taskslogv3.MessageSource{ThreadID: "root", DelegationToolUseID: "shared", AgentID: "claude:task:child-a"}
+						ownerB := &taskslogv3.MessageSource{ThreadID: "root", DelegationToolUseID: "shared", AgentID: "claude:task:child-b"}
 						assertQuestionAnswer(t, parse(true, answerA), ownerA)
 						assertQuestionAnswer(t, parse(true, answerB), ownerB)
 						parse(false, `{"type":"user","session_id":"root","parent_tool_use_id":"shared","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ask","content":"done"}]}}`)
@@ -279,7 +281,7 @@ func TestWireFormat(t *testing.T) {
 								parse(false, `{"type":"assistant","session_id":"`+tc.thread+`","parent_tool_use_id":"`+tc.delegation+`","message":{"content":[{"type":"tool_use","id":"ask","name":"AskUserQuestion","input":{"questions":[{"question":"Which?"}]}}]}}`)
 								request := strings.Replace(questionRequest, `"type":"control_request"`, `"type":"control_request","session_id":"`+tc.thread+`","parent_tool_use_id":"`+tc.delegation+`"`, 1)
 								parse(false, request)
-								assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: tc.thread, DelegationToolUseID: tc.delegation})
+								assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: tc.thread, DelegationToolUseID: tc.delegation})
 							})
 						}
 					})
@@ -312,7 +314,7 @@ func TestWireFormat(t *testing.T) {
 						request := strings.Replace(questionRequest, `"type":"control_request"`, `"type":"control_request","parent_tool_use_id":"spawn"`, 1)
 						request = strings.Replace(request, `"tool_use_id":"ask"`, `"agent_id":"known-child","tool_use_id":"ask"`, 1)
 						parse(false, request)
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child", DelegationToolUseID: "spawn"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root", AgentID: "claude:task:known-child", DelegationToolUseID: "spawn"})
 						parse(false, `{"type":"system","subtype":"task_updated","session_id":"root","task_id":"known-child","tool_use_id":"other-spawn"}`)
 						assertQuestionRaw(t, parse(false, request), request)
 						assertQuestionRaw(t, parse(true, questionAnswer), questionAnswer)
@@ -363,12 +365,12 @@ func TestWireFormat(t *testing.T) {
 						parse(false, questionRequest)
 						parse(false, `{"type":"assistant","session_id":"child","parent_tool_use_id":"spawn","message":{"content":[{"type":"tool_use","id":"ask","name":"AskUserQuestion","input":{"questions":[{"question":"Which?"}]}}]}}`)
 						parse(false, `{"type":"control_request","request_id":"child-request","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"ask","input":{"questions":[{"question":"Which?"}]}}}`)
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root"})
 						childAnswer := `{"type":"control_response","response":{"subtype":"success","request_id":"child-request","response":{"behavior":"allow","updatedInput":{"answers":{"Which?":"A"}}}}}`
-						assertQuestionAnswer(t, parse(true, childAnswer), &agent.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
+						assertQuestionAnswer(t, parse(true, childAnswer), &taskslogv3.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
 						parse(false, `{"type":"user","session_id":"child","parent_tool_use_id":"spawn","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ask","content":"done"}]}}`)
 						assertQuestionRaw(t, parse(true, childAnswer), childAnswer)
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "root"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "root"})
 					})
 					t.Run("ambiguous request is not answer context", func(t *testing.T) {
 						t.Parallel()
@@ -410,7 +412,7 @@ func TestWireFormat(t *testing.T) {
 						parse(false, questionRequest)
 						parse(false, `{"type":"system","subtype":"init","session_id":"new-root"}`)
 						parse(false, questionRequest)
-						assertQuestionAnswer(t, parse(true, questionAnswer), &agent.MessageSource{ThreadID: "new-root"})
+						assertQuestionAnswer(t, parse(true, questionAnswer), &taskslogv3.MessageSource{ThreadID: "new-root"})
 					})
 					t.Run("cancel preserves another request for the same child tool", func(t *testing.T) {
 						t.Parallel()
@@ -424,7 +426,7 @@ func TestWireFormat(t *testing.T) {
 						parse(false, otherRequest)
 						otherAnswer := strings.ReplaceAll(questionAnswer, `"request_id":"request"`, `"request_id":"other"`)
 						assertQuestionRaw(t, parse(true, questionAnswer), questionAnswer)
-						assertQuestionAnswer(t, parse(true, otherAnswer), &agent.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
+						assertQuestionAnswer(t, parse(true, otherAnswer), &taskslogv3.MessageSource{ThreadID: "child", DelegationToolUseID: "spawn"})
 					})
 				})
 			}
@@ -606,7 +608,7 @@ func questionParser(t *testing.T, physical bool) func(bool, string) []agent.Mess
 	}
 }
 
-func assertQuestionAnswer(t *testing.T, messages []agent.Message, source *agent.MessageSource) {
+func assertQuestionAnswer(t *testing.T, messages []agent.Message, source *taskslogv3.MessageSource) {
 	if len(messages) != 1 {
 		t.Fatalf("messages = %#v, want one answer", messages)
 	}

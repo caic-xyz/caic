@@ -31,7 +31,7 @@ import (
 	"time"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
-	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	inputqueuev1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue/v1"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/genai"
@@ -1126,11 +1126,11 @@ func (m *Manager) updatePendingInputsLocked(updates map[*Entry]*PendingInput) er
 			entries = append(entries, queuedPrompt{ID: q.ID, TaskID: id, Prompt: q.Prompt})
 		}
 	}
-	encoded := make([]inputqueue.Entry, 0, len(entries))
+	encoded := make([]inputqueuev1.Entry, 0, len(entries))
 	for _, q := range entries {
-		entry := inputqueue.Entry{ID: q.ID.String(), TaskID: q.TaskID.String(), Text: q.Prompt.Text}
+		entry := inputqueuev1.Entry{ID: q.ID.String(), TaskID: q.TaskID.String(), Text: q.Prompt.Text}
 		for _, img := range q.Prompt.Images {
-			entry.Images = append(entry.Images, inputqueue.Image{MediaType: img.MediaType, Data: img.Data})
+			entry.Images = append(entry.Images, inputqueuev1.Image{MediaType: img.MediaType, Data: img.Data})
 		}
 		encoded = append(encoded, entry)
 	}

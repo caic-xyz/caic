@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -33,7 +33,7 @@ func newBackfillStaging(dir string) *backfillStaging {
 	return &backfillStaging{dir: dir, days: make(map[string]*backfillDay)}
 }
 
-func (s *backfillStaging) append(row *data.UsageRow) error {
+func (s *backfillStaging) append(row *usagedbv1.UsageRow) error {
 	day := s.days[row.Day]
 	if day == nil {
 		file, err := os.CreateTemp(s.dir, ".usage-backfill-*.tmp")
@@ -46,7 +46,7 @@ func (s *backfillStaging) append(row *data.UsageRow) error {
 			aggregate:     newDayAggregate(),
 			watermarks:    make(map[string]time.Time),
 			costs:         make(map[string]float64),
-			provenance:    make(map[string]data.CostProvenance),
+			provenance:    make(map[string]usagedbv1.CostProvenance),
 			reportedCosts: make(map[string]struct{}),
 		}
 		s.days[row.Day] = day
@@ -119,7 +119,7 @@ type backfillDay struct {
 	aggregate     *dayAggregate
 	watermarks    map[string]time.Time
 	costs         map[string]float64
-	provenance    map[string]data.CostProvenance
+	provenance    map[string]usagedbv1.CostProvenance
 	reportedCosts map[string]struct{}
 }
 
@@ -136,7 +136,7 @@ func writeBackfillSentinelTemp(dir string) (string, error) {
 	return path, nil
 }
 
-func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(*data.UsageRow) (float64, bool)) error {
+func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(*usagedbv1.UsageRow) (float64, bool)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -168,7 +168,7 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 	changes := newRecoveryState()
 	changed := false
 	transform := func(line []byte) ([]byte, error) {
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		decoded := json.Unmarshal(line, &row) == nil
 		if !decoded {
 			return line, nil
@@ -197,7 +197,7 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 		fields["cost_usd"] = costBytes
 		fields["cost_estimated"] = json.RawMessage("true")
 		previous := row.CostProvenance()
-		estimated := data.CostProvenance{EstimatedUSD: cost, EstimatedParts: 1}
+		estimated := usagedbv1.CostProvenance{EstimatedUSD: cost, EstimatedParts: 1}
 		if row.Cost != nil {
 			encodedCost, err := json.Marshal(estimated)
 			if err != nil {
@@ -211,7 +211,7 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 		}
 		changed = true
 		movement := estimated.Difference(previous)
-		changes.addUsageRow(&data.UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost, Cost: &movement, CostEstimated: true})
+		changes.addUsageRow(&usagedbv1.UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost, Cost: &movement, CostEstimated: true})
 		changes.flushedCost[row.TaskID] += cost
 		current := changes.flushedProvenance[row.TaskID]
 		current.Add(movement)

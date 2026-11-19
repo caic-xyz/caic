@@ -2378,8 +2378,8 @@ func TestMCPTools(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex)
-			root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
-			child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+			root := logdata.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+			child := logdata.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"old root"}`)},
 				&agent.TextMessage{Source: root, Text: "old root answer"},

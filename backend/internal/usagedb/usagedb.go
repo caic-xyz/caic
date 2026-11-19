@@ -16,7 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -52,14 +52,14 @@ type Event struct {
 	Model                string
 	Effort               string
 	CostUSD              float64
-	CostProvenance       data.CostProvenance
+	CostProvenance       usagedbv1.CostProvenance
 	TurnBoundary         bool   // a completed turn; the store flushes on it
 	ToolStartID          string // tool-use correlation; not persisted in a usage row
 	ToolName             string
 	ToolResultID         string
 	ToolNativeDurationMs int64
 	ToolProducerTime     time.Time // zero when the harness did not timestamp the tool event
-	Delta                data.Delta
+	Delta                usagedbv1.Delta
 }
 
 // QuotaChange is one provider quota-window status change observed on a task.
@@ -76,7 +76,7 @@ type QuotaChange struct {
 // full delta fold so dashboard drill-down can filter every panel by model;
 // Skills and Repos keep the day leaderboards' distinct-task semantics.
 type ModelRollup struct {
-	Tokens         data.TokenBuckets
+	Tokens         usagedbv1.TokenBuckets
 	Turns          int
 	ErroredTurns   int
 	APIMs          int64
@@ -84,10 +84,10 @@ type ModelRollup struct {
 	Compactions    int
 	SubagentSpawns int
 	CostUSD        float64
-	Cost           data.CostProvenance
+	Cost           usagedbv1.CostProvenance
 	ContextWindow  int
 	ToolCalls      map[string]int
-	ToolTimings    map[string]data.ToolTiming
+	ToolTimings    map[string]usagedbv1.ToolTiming
 	Skills         map[string]int // distinct tasks that read the skill under this model
 	Repos          map[string]int // distinct tasks that touched the repo under this model
 }
@@ -96,7 +96,7 @@ type ModelRollup struct {
 // ModelRollup plus the harness-by-model cross product so a harness filter can
 // still list the models used under it.
 type HarnessRollup struct {
-	Tokens         data.TokenBuckets
+	Tokens         usagedbv1.TokenBuckets
 	Turns          int
 	ErroredTurns   int
 	APIMs          int64
@@ -104,9 +104,9 @@ type HarnessRollup struct {
 	Compactions    int
 	SubagentSpawns int
 	CostUSD        float64
-	Cost           data.CostProvenance
+	Cost           usagedbv1.CostProvenance
 	ToolCalls      map[string]int
-	ToolTimings    map[string]data.ToolTiming
+	ToolTimings    map[string]usagedbv1.ToolTiming
 	Skills         map[string]int // distinct tasks that read the skill under this harness
 	Repos          map[string]int // distinct tasks that touched the repo under this harness
 	Models         map[string]ModelRollup
@@ -116,7 +116,7 @@ type HarnessRollup struct {
 // Maps are copies; callers may mutate them freely.
 type DayRollup struct {
 	Day                      string
-	Tokens                   data.TokenBuckets
+	Tokens                   usagedbv1.TokenBuckets
 	Turns                    int
 	ErroredTurns             int
 	APIMs                    int64
@@ -125,29 +125,29 @@ type DayRollup struct {
 	SubagentSpawns           int
 	SubagentSpawnsBackground int
 	CostUSD                  float64
-	Cost                     data.CostProvenance
+	Cost                     usagedbv1.CostProvenance
 	Models                   map[string]ModelRollup
 	Harnesses                map[string]HarnessRollup
 	Repos                    map[string]int // distinct tasks that touched the repo that day
 	Skills                   map[string]int // distinct tasks that read the skill that day
 	Tools                    map[string]int
-	ToolTimings              map[string]data.ToolTiming
+	ToolTimings              map[string]usagedbv1.ToolTiming
 }
 
 // CacheWritesToData projects runtime durations to independent persisted seconds.
-func CacheWritesToData(in tokens.CacheWrites) []data.CacheWrite {
+func CacheWritesToData(in tokens.CacheWrites) []usagedbv1.CacheWrite {
 	if in == nil {
 		return nil
 	}
-	out := make([]data.CacheWrite, len(in))
+	out := make([]usagedbv1.CacheWrite, len(in))
 	for i, b := range in {
-		out[i] = data.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens}
+		out[i] = usagedbv1.CacheWrite{TTLSeconds: int64(b.TTL / time.Second), Tokens: b.Tokens}
 	}
 	return out
 }
 
 // CacheWritesFromData restores runtime durations, including unknown lifetimes.
-func CacheWritesFromData(in []data.CacheWrite) tokens.CacheWrites {
+func CacheWritesFromData(in []usagedbv1.CacheWrite) tokens.CacheWrites {
 	if in == nil {
 		return nil
 	}

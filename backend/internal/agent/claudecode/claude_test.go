@@ -263,7 +263,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 			nil,
 			{&agent.SkillReadMessage{ToolUseID: "sk_2", Skill: "missing"}},
 			nil,
-			{&agent.SkillReadMessage{Source: agent.MessageSource{DelegationToolUseID: "agent_1"}, ToolUseID: "sk_3", Skill: "review"}},
+			{&agent.SkillReadMessage{Source: v3.MessageSource{DelegationToolUseID: "agent_1"}, ToolUseID: "sk_3", Skill: "review"}},
 			nil,
 			nil,
 			nil, // The ResultMessage is compared by type below.

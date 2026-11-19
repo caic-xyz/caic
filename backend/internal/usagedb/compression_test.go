@@ -12,7 +12,7 @@ import (
 
 	"strconv"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 )
@@ -28,7 +28,7 @@ func TestCompressOldDays(t *testing.T) {
 	t.Run("busy backfill skips maintenance without delaying flush", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t, t.TempDir())
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 		s.backfillMu.Lock()
 		ran, err := s.tryCompressOldDays(now)
 		s.backfillMu.Unlock()
@@ -52,8 +52,8 @@ func TestCompressOldDays(t *testing.T) {
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
-		s.Observe(meta, &Event{At: recent, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
+		s.Observe(meta, &Event{At: old, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
+		s.Observe(meta, &Event{At: recent, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}}})
 		compressOldDaysForTest(t, s, now)
 		if _, err := os.Stat(filepath.Join(dir, oldDay+".jsonl.zstd")); err != nil {
 			t.Fatalf("compressed old day: %v", err)
@@ -64,7 +64,7 @@ func TestCompressOldDays(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, recentDay+".jsonl")); err != nil {
 			t.Fatalf("recent day should stay plain: %v", err)
 		}
-		s.Observe(meta, &Event{At: old.Add(time.Hour), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 3}}})
+		s.Observe(meta, &Event{At: old.Add(time.Hour), Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 3}}})
 		if _, err := os.Stat(filepath.Join(dir, oldDay+".jsonl.zstd")); !os.IsNotExist(err) {
 			t.Fatalf("compressed copy still present after late write: %v", err)
 		}
@@ -84,10 +84,10 @@ func TestCompressOldDays(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 		compressOldDaysForTest(t, s, now)
-		if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
-			yield(data.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "historical", Model: "m", Output: 10}, nil)
+		if err := s.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) {
+			yield(usagedbv1.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "historical", Model: "m", Output: 10}, nil)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestCompressOldDays(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 		plain := filepath.Join(dir, oldDay+".jsonl")
 		original, err := os.ReadFile(plain) //nolint:gosec // test fixture path built from t.TempDir().
 		if err != nil {
@@ -121,7 +121,7 @@ func TestCompressOldDays(t *testing.T) {
 		if !bytes.Equal(raw, original) {
 			t.Fatal("compressed day did not round trip byte for byte")
 		}
-		late, err := json.Marshal(data.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "late", Model: "m", Output: 3})
+		late, err := json.Marshal(usagedbv1.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "late", Model: "m", Output: 3})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +185,7 @@ func TestDayRecords(t *testing.T) {
 				if len(days) != 1 || days[0].CostUSD != 2 || days[0].Tokens.Output != 3 || s.watermarks["bad"] != (time.Time{}) || s.flushedCost["bad"] != 0 || len(s.lastQuota) != 0 || len(s.costProtectedTasks) != 1 {
 					t.Fatalf("partial recovery published: days=%+v, watermarks=%v, costs=%v, quotas=%v", days, s.watermarks, s.flushedCost, s.lastQuota)
 				}
-				if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return .25, true }); err == nil {
+				if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return .25, true }); err == nil {
 					t.Fatal("corrupt repair reported success")
 				}
 				got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
@@ -212,10 +212,10 @@ func BenchmarkCompressOldDays(b *testing.B) {
 	now := time.Date(2026, time.February, 10, 12, 0, 0, 0, time.UTC)
 	var fixture bytes.Buffer
 	for i := range 1000 {
-		row := data.UsageRow{
+		row := usagedbv1.UsageRow{
 			Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i),
 			Model: "model-" + strconv.Itoa(i%17),
-			Ts:    data.Time(1_770_000_000_000 + int64(i)*1_000),
+			Ts:    usagedbv1.Time(1_770_000_000_000 + int64(i)*1_000),
 			Input: int64(i * 3), CacheRead: int64(i * 7), Output: int64(i + 1),
 		}
 		if err := json.NewEncoder(&fixture).Encode(&row); err != nil {
@@ -268,7 +268,7 @@ func BenchmarkUsageDayRecovery(b *testing.B) {
 				b.Fatal(err)
 			}
 			enc := json.NewEncoder(f)
-			row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Harness: "claude", Output: 1000}
+			row := usagedbv1.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Harness: "claude", Output: 1000}
 			for range n {
 				if err := enc.Encode(&row); err != nil {
 					b.Fatal(err)

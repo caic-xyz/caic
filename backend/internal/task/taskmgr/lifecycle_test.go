@@ -30,7 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	inputqueuev1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue/v1"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 )
@@ -214,7 +214,7 @@ func TestLifecycle(t *testing.T) {
 				t.Fatal("stale edit removed appended content")
 			}
 			loaded, err := store.LoadInputQueue()
-			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID.String() || loaded[0].Text != want.Text || !reflect.DeepEqual(loaded[0].Images, []inputqueue.Image{
+			if err != nil || len(loaded) != 1 || loaded[0].ID != q.ID.String() || loaded[0].Text != want.Text || !reflect.DeepEqual(loaded[0].Images, []inputqueuev1.Image{
 				{MediaType: "image/png", Data: "Zmlyc3Q="},
 				{MediaType: "image/jpeg", Data: "c2Vjb25k"},
 			}) {

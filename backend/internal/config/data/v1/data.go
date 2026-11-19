@@ -1,5 +1,5 @@
-// Package data defines caic's TOML configuration schema.
-package data
+// Package v1 defines version 1 of caic's TOML configuration schema.
+package v1
 
 // Config mirrors the TOML file layout at ~/.config/caic/config.toml.
 // Zero values mean "not set in file".

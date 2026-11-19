@@ -150,7 +150,7 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var projected []history.Event
+	var projected []v1.HistoryEvent
 	if err := json.Unmarshal([]byte(before), &projected); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 
 func readHistoryRange(s *history.Source, ctx context.Context, snapshot history.Snapshot, first, last uint64) (string, error) {
 	var result strings.Builder
-	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: history.Position{RecordID: first}, Last: history.Position{RecordID: last, Index: history.RecordEndIndex}}, &result); err != nil {
+	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: v1.HistoryPosition{RecordID: first}, Last: v1.HistoryPosition{RecordID: last, Index: history.RecordEndIndex}}, &result); err != nil {
 		return "", err
 	}
 	return result.String(), nil

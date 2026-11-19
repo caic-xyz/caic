@@ -41,7 +41,7 @@ func activityOwner(src *v1.EventMessageSource, routes []activityRoute, pending m
 	return owner
 }
 
-func writeHistoryEvents(w io.Writer, events iter.Seq2[Event, error]) error {
+func writeHistoryEvents(w io.Writer, events iter.Seq2[v1.HistoryEvent, error]) error {
 	b := bufio.NewWriterSize(w, 32<<10)
 	if _, err := b.WriteString("[\n"); err != nil {
 		return err

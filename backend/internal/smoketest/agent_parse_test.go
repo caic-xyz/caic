@@ -5,6 +5,8 @@ package smoketest
 import (
 	"testing"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
@@ -23,7 +25,7 @@ func TestParseMessage(t *testing.T) {
 						if err != nil || len(messages) != 1 {
 							t.Fatalf("stream parse = %v, %v", messages, err)
 						}
-						var source agent.MessageSource
+						var source taskslogv3.MessageSource
 						var got string
 						switch m := messages[0].(type) {
 						case *agent.TextMessage:

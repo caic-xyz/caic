@@ -279,7 +279,7 @@ func TestSource(t *testing.T) {
 		if len(lines) != 5 || lines[0] != "[" || !strings.HasPrefix(lines[2], ",") || lines[3] != "]" || lines[4] != "" {
 			t.Fatalf("history is not one output per line: %q", body)
 		}
-		var events []Event
+		var events []v1.HistoryEvent
 		if err := json.Unmarshal([]byte(body), &events); err != nil {
 			t.Fatal(err)
 		}
@@ -336,7 +336,7 @@ func TestSource(t *testing.T) {
 			}
 			if event.Message.Kind == v1.EventKindText {
 				found = true
-				origin := agent.MessageSource(event.Message.Source)
+				origin := logv3.MessageSource(event.Message.Source)
 				if !origin.IsChild() || origin.RootThreadID != "root" || origin.ThreadID != "child" {
 					t.Fatalf("lost earlier ownership: %+v", origin)
 				}
@@ -397,7 +397,7 @@ func TestSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var forward []Event
+		var forward []v1.HistoryEvent
 		for event, err := range source.Events(t.Context(), snapshot, 245, 535) {
 			if err != nil {
 				t.Fatal(err)
@@ -493,7 +493,7 @@ func TestSource(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			origin := agent.MessageSource(event.Message.Source)
+			origin := logv3.MessageSource(event.Message.Source)
 			if event.Message.Result != nil && origin.IsChild() {
 				childResult = true
 			}
@@ -627,7 +627,7 @@ func TestSource(t *testing.T) {
 		done := make(chan error, 1)
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			done <- source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: Position{RecordID: 1}, Last: Position{RecordID: snapshot.Through, Index: RecordEndIndex}}, writer)
+			done <- source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: v1.HistoryPosition{RecordID: 1}, Last: v1.HistoryPosition{RecordID: snapshot.Through, Index: RecordEndIndex}}, writer)
 		})
 		<-writer.started
 		appendFixture(t, path, delta+"\n")
@@ -698,7 +698,7 @@ func TestSourceControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []Event
+	var events []v1.HistoryEvent
 	for event, err := range source.Events(t.Context(), snapshot, 1, snapshot.Through) {
 		if err != nil {
 			t.Fatal(err)
@@ -726,11 +726,11 @@ func assertSourcePoisoned(t *testing.T, source *Source, snapshot Snapshot, want 
 		t.Fatalf("ReadRange after failure: %v", err)
 	}
 	var output bytes.Buffer
-	if err := source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: Position{RecordID: 1}, Last: Position{RecordID: 1, Index: RecordEndIndex}}, &output); !errors.Is(err, want) {
+	if err := source.WriteSlice(t.Context(), snapshot, v1.HistorySlice{First: v1.HistoryPosition{RecordID: 1}, Last: v1.HistoryPosition{RecordID: 1, Index: RecordEndIndex}}, &output); !errors.Is(err, want) {
 		t.Fatalf("WriteSlice after failure: %v", err)
 	}
 	for _, bounds := range [][2]uint64{{1, snapshot.Through}, {1, 0}} {
-		for _, sequence := range []func(func(Event, error) bool){source.Events(t.Context(), snapshot, bounds[0], bounds[1])} {
+		for _, sequence := range []func(func(v1.HistoryEvent, error) bool){source.Events(t.Context(), snapshot, bounds[0], bounds[1])} {
 			failed := false
 			for _, err := range sequence {
 				if !errors.Is(err, want) {
@@ -1173,7 +1173,7 @@ func TestSourceLocalChunkSizes(t *testing.T) {
 // cold/warm benchmark baseline; production callers stream through WriteSlice.
 func readRange(s *Source, ctx context.Context, snapshot Snapshot, first, last uint64) (string, error) {
 	var result strings.Builder
-	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: Position{RecordID: first}, Last: Position{RecordID: last, Index: RecordEndIndex}}, &result); err != nil {
+	if err := s.WriteSlice(ctx, snapshot, v1.HistorySlice{First: v1.HistoryPosition{RecordID: first}, Last: v1.HistoryPosition{RecordID: last, Index: RecordEndIndex}}, &result); err != nil {
 		return "", err
 	}
 	return result.String(), nil

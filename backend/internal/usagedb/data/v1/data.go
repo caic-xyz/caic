@@ -1,8 +1,8 @@
-// Package data defines the persisted daily usage and quota row schemas.
+// Package v1 defines version 1 of the persisted daily usage and quota row schemas.
 //
-// Field names and meanings are stable across released files. Evolve the
-// unversioned format additively through optional fields.
-package data
+// Day files carry no version marker; they are version 1. Adding an optional
+// field is compatible; any other change ships a v2 package beside this one.
+package v1
 
 import (
 	"cmp"

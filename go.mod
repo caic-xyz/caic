@@ -8,7 +8,7 @@ require (
 	github.com/caic-xyz/md v0.19.3
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/gomodedev/gomode v0.4.1-0.20261119030629-cc1df1f7cf4a
+	github.com/gomodedev/gomode v0.4.1-0.20261119230702-ce8e8a0efe19
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
@@ -159,7 +159,7 @@ require (
 	github.com/manuelarte/funcorder v0.6.0 // indirect
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
-	github.com/maruel/genaipy v0.2.0 // indirect
+	github.com/maruel/genaipy v0.2.1-0.20261119180042-0af87659f4b4 // indirect
 	github.com/maruel/httpjson v0.5.3 // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect

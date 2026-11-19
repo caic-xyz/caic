@@ -15,59 +15,61 @@ import (
 	"slices"
 	"strings"
 
+	voicegatewayv1 "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/gomodedev/gomode/httpserver/geoip"
 	"github.com/gomodedev/gomode/voicegateway"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/caic-xyz/caic/backend/internal/config/data"
+	configv1 "github.com/caic-xyz/caic/backend/internal/config/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/gomodedev/gomode/autoupdate"
 )
 
 // defaultConfig returns a data.Config with sensible defaults pre-populated.
 // TOML decoding overwrites only fields present in the file.
-func defaultConfig() data.Config {
-	return data.Config{
-		Core: data.Core{Root: ".", ShellEnv: true},
-		Server: data.Server{
+func defaultConfig() configv1.Config {
+	return configv1.Config{
+		Core: configv1.Core{Root: ".", ShellEnv: true},
+		Server: configv1.Server{
 			HTTP:           ":2242",
 			ExternalURL:    "auto",
 			AllowOrigins:   slices.Clone(defaultAllowOrigins),
 			TrustedProxies: []string{},
 		},
-		Harness: map[string]data.Harness{
+		Harness: map[string]configv1.Harness{
 			"claude":   {},
 			"codex":    {},
 			"dsh":      {},
 			"opencode": {},
 			"pi":       {},
 		},
-		VoiceGateway: data.VoiceGateway{
+		VoiceGateway: configv1.VoiceGateway{
 			TokenMode:   string(server.VoiceTokenModeScoped),
-			Mode:        data.VoiceGatewayModeDisabled,
+			Mode:        configv1.VoiceGatewayModeDisabled,
 			STUNServers: voicegateway.NewWebRTCConfig().STUNServers,
 		},
-		Debug: data.Debug{LogLevel: "info"},
+		Debug: configv1.Debug{LogLevel: "info"},
 	}
 }
 
 // loadTOMLConfig reads and parses config.toml from cfgDir.
 // Returns a zero-value config if the file does not exist.
 // Returns an error if the file exists but is malformed or contains unknown keys.
-func loadTOMLConfig(cfgDir string) (data.Config, error) {
+func loadTOMLConfig(cfgDir string) (configv1.Config, error) {
 	path := filepath.Join(cfgDir, "config.toml")
 	raw, err := os.ReadFile(path) //nolint:gosec // config file from XDG config dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return defaultConfig(), nil
 		}
-		return data.Config{}, fmt.Errorf("read config: %w", err)
+		return configv1.Config{}, fmt.Errorf("read config: %w", err)
 	}
 	tc := defaultConfig()
 	dec := toml.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tc); err != nil {
-		return data.Config{}, fmt.Errorf("parse %s: %w", path, err)
+		return configv1.Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	slog.Info("loaded config", "path", path)
 	return tc, nil
@@ -102,7 +104,7 @@ func resolvePath(path, cfgDir string) string {
 
 // tomlToServerConfig converts a parsed TOML config into a server.Config.
 // cfgDir is used to resolve relative file paths.
-func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
+func tomlToServerConfig(ctx context.Context, tc *configv1.Config, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
 	githubKeyPEM, err := resolveFilePath(tc.GitHub.App.PrivateKeyPEM, cfgDir)
 	if err != nil {
 		return nil, "", "", "", err
@@ -231,7 +233,7 @@ func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cf
 				TokenMode:  voiceTokenMode,
 				SigningKey: voiceSigningKey,
 				Config:     voiceConfig,
-				WebRTC:     voicegateway.WebRTCConfig{UDPPort: tc.VoiceGateway.WebRTCUDPPort, STUNServers: tc.VoiceGateway.STUNServers},
+				WebRTC:     voicegatewayv1.WebRTC{UDPPort: tc.VoiceGateway.WebRTCUDPPort, STUNServers: tc.VoiceGateway.STUNServers},
 			},
 		},
 		Debug: server.DebugConfig{
@@ -296,7 +298,7 @@ const defaultRepoRepack = "0 2 * * *"
 // autoUpdateSchedule returns the parsed auto-update schedule, or nil if
 // disabled. When auto_update is not set in the config file, the default
 // schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
-func autoUpdateSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
+func autoUpdateSchedule(tc *configv1.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.AutoUpdate == nil {
 		s, err := autoupdate.ParseSchedule(autoupdate.DefaultSchedule)
 		if err != nil {
@@ -317,7 +319,7 @@ func autoUpdateSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 // pruneSchedule returns the parsed image-prune schedule, or nil if disabled.
 // When prune is not set in the config file, the default schedule "0 5 * * *"
 // (daily at 05:00) is used. Set to "" to disable.
-func pruneSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
+func pruneSchedule(tc *configv1.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.Prune == nil {
 		s, err := autoupdate.ParseSchedule(defaultPrune)
 		if err != nil {
@@ -335,7 +337,7 @@ func pruneSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 	return &s, nil
 }
 
-func repoRepackSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
+func repoRepackSchedule(tc *configv1.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.RepoRepack == nil {
 		s, err := autoupdate.ParseSchedule(defaultRepoRepack)
 		if err != nil {

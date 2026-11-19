@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/server/history/data"
@@ -173,7 +175,7 @@ func testSourcePricingInputs(t *testing.T) {
 	})
 	t.Run("child requests retain root attribution and lifecycle", func(t *testing.T) {
 		t.Parallel()
-		child := agent.MessageSource{ThreadID: "child", RootThreadID: "root"}
+		child := taskslogv3.MessageSource{ThreadID: "child", RootThreadID: "root"}
 		source, _ := costFixture(t, harness.Codex,
 			[]agent.Message{&agent.InitMessage{ReportedModel: "root-model"}},
 			[]agent.Message{&agent.InitMessage{Source: child, ReportedModel: "child-model"}},

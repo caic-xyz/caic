@@ -1112,11 +1112,11 @@ func TestMarshalLogMessage(t *testing.T) {
 			&MetaSessionMessage{}, &RelayGenerationMessage{Generation: "g"}, &ModelInfoMessage{},
 			&MetaResultMessage{}, &MetaPRMessage{}, &TurnCommitSnapshotMessage{}, &PendingUserActionMessage{},
 		}
-		source := MessageSource{ThreadID: "child", TurnID: "turn", ItemID: "item", RootThreadID: "root", AgentID: "native:child", DelegationToolUseID: "delegate"}
+		source := v3.MessageSource{ThreadID: "child", TurnID: "turn", ItemID: "item", RootThreadID: "root", AgentID: "native:child", DelegationToolUseID: "delegate"}
 		for _, message := range messages {
 			t.Run(fmt.Sprintf("%T", message), func(t *testing.T) {
 				t.Parallel()
-				*message.Provenance() = MessageSource{}
+				*message.Provenance() = v3.MessageSource{}
 				absent, err := MarshalLogMessage(message)
 				if err != nil {
 					t.Fatal(err)
@@ -1135,7 +1135,7 @@ func TestMarshalLogMessage(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				outSource, ok := reflect.TypeAssert[MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
+				outSource, ok := reflect.TypeAssert[v3.MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
 				if !ok {
 					t.Fatal("control has no source schema")
 				}
@@ -1146,7 +1146,7 @@ func TestMarshalLogMessage(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				outSource, ok = reflect.TypeAssert[MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
+				outSource, ok = reflect.TypeAssert[v3.MessageProvenance](reflect.ValueOf(frame.Control).Elem().FieldByName("MessageProvenance"))
 				if !ok {
 					t.Fatal("control has no source schema")
 				}
@@ -1203,7 +1203,7 @@ func TestMarshalLogMessage(t *testing.T) {
 		if !ok || restored.Text != "visible" || restored.Phase != "commentary" || !restored.Source.IsZero() {
 			t.Errorf("text message = %#v", record.Messages[0].Message)
 		}
-		for _, source := range []MessageSource{
+		for _, source := range []v3.MessageSource{
 			{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"},
 			{ThreadID: "thread", RootThreadID: "root"},
 			{RootThreadID: "root"},
@@ -1247,7 +1247,7 @@ func TestMarshalLogMessage(t *testing.T) {
 			t.Fatalf("v3 source rejected: %+v, %v", record, err)
 		}
 		message, ok := record.Messages[0].Message.(*TextMessage)
-		if !ok || message.Source != (MessageSource{ThreadID: "thread", RootThreadID: "root"}) {
+		if !ok || message.Source != (v3.MessageSource{ThreadID: "thread", RootThreadID: "root"}) {
 			t.Errorf("v3 partial source = %#v", record.Messages[0].Message)
 		}
 		for _, line := range []string{
@@ -1918,7 +1918,7 @@ func TestLogRecordParser(t *testing.T) {
 	t.Run("ChildContextDoesNotInheritRootSnapshot", func(t *testing.T) {
 		t.Parallel()
 		p, err := NewLogRecordParser(&testMessageParser{output: func([]byte) ([]Message, error) {
-			return []Message{&UsageMessage{Source: MessageSource{AgentID: "child"}}}, nil
+			return []Message{&UsageMessage{Source: v3.MessageSource{AgentID: "child"}}}, nil
 		}})
 		if err != nil {
 			t.Fatal(err)

@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -51,22 +51,22 @@ func atUTC(day, h, mi, sec int) time.Time {
 	return time.Date(2026, time.February, day, h, mi, sec, 0, time.UTC)
 }
 
-func testEvent(day, h, mi, sec int, model string, d *data.Delta) *Event {
+func testEvent(day, h, mi, sec int, model string, d *usagedbv1.Delta) *Event {
 	return &Event{At: atUTC(day, h, mi, sec), Model: model, Delta: *d}
 }
 
 // readRows parses every usage row in the day file for day.
-func readRows(t *testing.T, dir, day string) []data.UsageRow {
+func readRows(t *testing.T, dir, day string) []usagedbv1.UsageRow {
 	raw, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
 		t.Fatalf("read day file %s: %v", day, err)
 	}
-	var rows []data.UsageRow
+	var rows []usagedbv1.UsageRow
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}
@@ -78,17 +78,17 @@ func readRows(t *testing.T, dir, day string) []data.UsageRow {
 }
 
 // readQuotaRows parses the quota rows in the February 5 fixture day.
-func readQuotaRows(t *testing.T, dir string) []data.QuotaRow {
+func readQuotaRows(t *testing.T, dir string) []usagedbv1.QuotaRow {
 	raw, err := os.ReadFile(filepath.Join(dir, "2026-02-05.jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
 		t.Fatalf("read quota day file: %v", err)
 	}
-	var rows []data.QuotaRow
+	var rows []usagedbv1.QuotaRow
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row data.QuotaRow
+		var row usagedbv1.QuotaRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestStore(t *testing.T) {
 			dir := t.TempDir()
 			meta := testMeta(ksid.NewID())
 			s := newTestStore(t, dir)
-			estimated := Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostUSD: 2, CostProvenance: data.CostProvenance{EstimatedUSD: 2, EstimatedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1}}
+			estimated := Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostUSD: 2, CostProvenance: usagedbv1.CostProvenance{EstimatedUSD: 2, EstimatedParts: 1}, TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}}
 			s.Observe(meta, &estimated)
 			if got := s.Days()[0]; got.CostUSD != 2 || got.Cost.EstimatedUSD != 2 || got.Cost.EstimatedParts != 1 {
 				t.Fatalf("estimate = %+v", got)
@@ -120,8 +120,8 @@ func TestStore(t *testing.T) {
 			restored := newTestStore(t, dir)
 			estimated.Replayed = true
 			restored.Observe(meta, &estimated)
-			restored.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.25, CostProvenance: data.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1}})
-			want := data.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}
+			restored.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.25, CostProvenance: usagedbv1.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}, TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
+			want := usagedbv1.CostProvenance{ReportedUSD: 0.25, ReportedParts: 1}
 			if got := restored.Days()[0]; got.CostUSD != 0.25 || got.Cost != want || got.Turns != 2 {
 				t.Fatalf("reported replacement = %+v", got)
 			}
@@ -141,11 +141,11 @@ func TestStore(t *testing.T) {
 		t.Run("reported zero is not backfilled", func(t *testing.T) {
 			t.Parallel()
 			s := newTestStore(t, t.TempDir())
-			s.Observe(testMeta(ksid.NewID()), &Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostProvenance: data.CostProvenance{ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{Turns: 1, TokenBuckets: data.TokenBuckets{Input: 100}}})
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { t.Error("reported zero reached estimator"); return 99, true }); err != nil {
+			s.Observe(testMeta(ksid.NewID()), &Event{At: atUTC(5, 10, 0, 0), Model: "priced", CostProvenance: usagedbv1.CostProvenance{ReportedParts: 1}, TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1, TokenBuckets: usagedbv1.TokenBuckets{Input: 100}}})
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { t.Error("reported zero reached estimator"); return 99, true }); err != nil {
 				t.Fatal(err)
 			}
-			if got := s.Days()[0]; got.CostUSD != 0 || got.Cost != (data.CostProvenance{ReportedParts: 1}) {
+			if got := s.Days()[0]; got.CostUSD != 0 || got.Cost != (usagedbv1.CostProvenance{ReportedParts: 1}) {
 				t.Fatalf("known zero = %+v", got)
 			}
 		})
@@ -157,8 +157,8 @@ func TestStore(t *testing.T) {
 			meta := testMeta(id)
 			at := atUTC(5, 10, 0, 0)
 
-			s.Observe(meta, &Event{At: at, Model: "claude-opus", CostUSD: 0.01, Delta: data.Delta{
-				TokenBuckets:  data.TokenBuckets{Input: 10, CacheWrite1h: 400, CacheRead: 900, Output: 50},
+			s.Observe(meta, &Event{At: at, Model: "claude-opus", CostUSD: 0.01, Delta: usagedbv1.Delta{
+				TokenBuckets:  usagedbv1.TokenBuckets{Input: 10, CacheWrite1h: 400, CacheRead: 900, Output: 50},
 				ContextWindow: 200000,
 				ToolCalls:     map[string]int{"Edit": 1},
 				SkillReads:    map[string]int{"code-review": 1},
@@ -166,8 +166,8 @@ func TestStore(t *testing.T) {
 			}})
 			s.Observe(meta, &Event{
 				At: at.Add(5 * time.Second), Model: "claude-opus", CostUSD: 0.02, TurnBoundary: true,
-				Delta: data.Delta{
-					TokenBuckets:  data.TokenBuckets{Input: 5, Output: 20},
+				Delta: usagedbv1.Delta{
+					TokenBuckets:  usagedbv1.TokenBuckets{Input: 5, Output: 20},
 					Turns:         1,
 					APIMs:         1500,
 					WallMs:        4000,
@@ -215,8 +215,8 @@ func TestStore(t *testing.T) {
 			at := atUTC(5, 10, 0, 0)
 			// The store derives cost movement from consecutive snapshots; a
 			// regression in the snapshot must not inflate the movement.
-			s.Observe(meta, &Event{At: at, Model: "m", CostUSD: 0.10, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 1}}})
-			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", CostUSD: 0.10, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 1}}})
+			s.Observe(meta, &Event{At: at, Model: "m", CostUSD: 0.10, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 1}}})
+			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", CostUSD: 0.10, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 1}}})
 			s.flushTaskLocked(meta.TaskID.String())
 			rows := readRows(t, s.dir, "2026-02-05")
 			if len(rows) != 1 || rows[0].CostUSD != 0.10 {
@@ -228,8 +228,8 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, testEvent(5, 23, 59, 59, "m", &data.Delta{Output: 10}))
-			s.Observe(meta, &Event{At: atUTC(6, 0, 0, 1), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
+			s.Observe(meta, testEvent(5, 23, 59, 59, "m", &usagedbv1.Delta{Output: 10}))
+			s.Observe(meta, &Event{At: atUTC(6, 0, 0, 1), Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}, Turns: 1}})
 
 			if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 || rows[0].Output != 10 {
 				t.Errorf("day1 rows = %+v", rows)
@@ -250,10 +250,10 @@ func TestStore(t *testing.T) {
 			meta := testMeta(ksid.NewID())
 			at := atUTC(5, 10, 0, 0)
 
-			s.Observe(meta, &Event{At: at, Model: "openai-codex/gpt-6.1-sol", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
-			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "gpt-6.1-sol", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
-			s.Observe(meta, &Event{At: at.Add(2 * time.Second), Model: "gpt-6.1-sol", Effort: "high", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
-			s.Observe(meta, &Event{At: at.Add(3 * time.Second), Model: "claude-sonnet-5-5-medium", TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at, Model: "openai-codex/gpt-6.1-sol", TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "gpt-6.1-sol", TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(2 * time.Second), Model: "gpt-6.1-sol", Effort: "high", TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(3 * time.Second), Model: "claude-sonnet-5-5-medium", TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
 
 			days := s.Days()
 			if len(days) != 1 {
@@ -291,8 +291,8 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
 			current := atUTC(6, 0, 0, 1)
-			s.Observe(meta, &Event{At: current, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
-			s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
+			s.Observe(meta, &Event{At: current, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}, Turns: 1}})
 
 			if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 || rows[0].Output != 5 {
 				t.Errorf("regressed-day rows = %+v, want one retained row", rows)
@@ -303,7 +303,7 @@ func TestStore(t *testing.T) {
 
 			// A historical replay before the watermark remains a duplicate and is
 			// skipped, preserving restart-resume behavior.
-			s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Replayed: true, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Replayed: true, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}, Turns: 1}})
 			if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 {
 				t.Errorf("rows after replay = %+v, want no duplicate", rows)
 			}
@@ -313,8 +313,8 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.10, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.10, TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}}})
 			id := meta.TaskID.String()
 			if s.pending[id] == nil || s.watermarks[id].IsZero() {
 				t.Fatalf("task bookkeeping missing before discard")
@@ -337,7 +337,7 @@ func TestStore(t *testing.T) {
 			}
 			s := newTestStore(t, dir)
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, CostProvenance: data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, CostProvenance: usagedbv1.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}, Turns: 1}})
 			if len(s.pending[meta.TaskID.String()].buckets) != 1 {
 				t.Fatalf("failed delta must stay pending")
 			}
@@ -347,7 +347,7 @@ func TestStore(t *testing.T) {
 			if err := os.Remove(dayDir); err != nil {
 				t.Fatal(err)
 			}
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, CostProvenance: data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, CostProvenance: usagedbv1.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}, TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}, Turns: 1}})
 			rows := readRows(t, s.dir, "2026-02-05")
 			if len(rows) != 1 {
 				t.Fatalf("rows = %d, want 1", len(rows))
@@ -355,7 +355,7 @@ func TestStore(t *testing.T) {
 			if rows[0].CostUSD != 0.50 {
 				t.Errorf("costUSD = %v, want 0.50 written exactly once", rows[0].CostUSD)
 			}
-			if days := s.Days(); days[0].CostUSD != 0.50 || days[0].Cost != (data.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}) {
+			if days := s.Days(); days[0].CostUSD != 0.50 || days[0].Cost != (usagedbv1.CostProvenance{ReportedUSD: 0.50, ReportedParts: 1}) {
 				t.Errorf("aggregate costUSD = %v, want 0.50", days[0].CostUSD)
 			}
 		})
@@ -365,7 +365,7 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
 			at := atUTC(5, 10, 0, 0)
-			s.Observe(meta, &Event{At: at, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+			s.Observe(meta, &Event{At: at, Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}, Turns: 1}})
 			if days := s.Days(); days[0].Tokens.Output != 10 {
 				t.Fatalf("days = %+v, want the flushed row", days)
 			}
@@ -374,7 +374,7 @@ func TestStore(t *testing.T) {
 			// disk, and the delta must stay pending for the next flush.
 			day := "2026-02-05"
 			_ = s.files[day].Close()
-			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
+			s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}, Turns: 1}})
 			if days := s.Days(); days[0].Tokens.Output != 10 {
 				t.Errorf("days after failed append = %+v, want unchanged (aggregate matches disk)", days)
 			}
@@ -389,7 +389,7 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, dir)
 			meta := testMeta(ksid.NewID())
 			at := atUTC(5, 10, 0, 0)
-			s.Observe(meta, &Event{At: at, Model: "m", Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+			s.Observe(meta, &Event{At: at, Model: "m", Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 			//nolint:gosec // t.TempDir needs execute permission for this controlled directory test.
 			if err := os.Chmod(dir, 0o500); err != nil {
 				t.Fatal(err)
@@ -412,8 +412,8 @@ func TestStore(t *testing.T) {
 			if len(s.pending[meta.TaskID.String()].buckets) != 1 {
 				t.Fatal("failed first append did not retain the pending bucket")
 			}
-			row := data.UsageRow{Kind: rowKindUsage, Day: day, Ts: data.NewTime(at), TaskID: meta.TaskID.String(), Model: "m", Output: 10}
-			if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) { yield(row, nil) }); err != nil {
+			row := usagedbv1.UsageRow{Kind: rowKindUsage, Day: day, Ts: usagedbv1.NewTime(at), TaskID: meta.TaskID.String(), Model: "m", Output: 10}
+			if err := s.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) { yield(row, nil) }); err != nil {
 				t.Fatal(err)
 			}
 			rows := readRows(t, dir, day)
@@ -477,13 +477,13 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, dir)
 			meta := testMeta(ksid.NewID())
 			at := atUTC(5, 10, 0, 0)
-			s.Observe(meta, &Event{At: at, ToolProducerTime: at, ToolStartID: "a", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
+			s.Observe(meta, &Event{At: at, ToolProducerTime: at, ToolStartID: "a", ToolName: "Bash", Delta: usagedbv1.Delta{ToolCalls: map[string]int{"Bash": 1}}})
 			s.Observe(meta, &Event{At: at.Add(2 * time.Second), ToolProducerTime: at.Add(2 * time.Second), ToolResultID: "a"})
-			s.Observe(meta, &Event{At: at.Add(3 * time.Second), ToolProducerTime: at.Add(3 * time.Second), ToolStartID: "b", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
-			s.Observe(meta, &Event{At: at.Add(4 * time.Second), TurnBoundary: true, Delta: data.Delta{Turns: 1}})
-			one := data.ToolCallTiming(2000)
-			two := data.ToolCallTiming(2000)
-			two.Add(data.ToolCallTiming(2000))
+			s.Observe(meta, &Event{At: at.Add(3 * time.Second), ToolProducerTime: at.Add(3 * time.Second), ToolStartID: "b", ToolName: "Bash", Delta: usagedbv1.Delta{ToolCalls: map[string]int{"Bash": 1}}})
+			s.Observe(meta, &Event{At: at.Add(4 * time.Second), TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
+			one := usagedbv1.ToolCallTiming(2000)
+			two := usagedbv1.ToolCallTiming(2000)
+			two.Add(usagedbv1.ToolCallTiming(2000))
 			day := s.Days()[0]
 			if day.Tools["Bash"] != 2 || !reflect.DeepEqual(day.ToolTimings["Bash"], one) {
 				t.Errorf("live tool totals = %v, %v", day.Tools, day.ToolTimings)
@@ -498,16 +498,16 @@ func TestStore(t *testing.T) {
 			}
 			// Adoption replays the start at the durable watermark before seeing its
 			// unflushed result. The start restores correlation without recounting a call.
-			reopened.Observe(meta, &Event{At: at.Add(3 * time.Second), ToolProducerTime: at.Add(3 * time.Second), Replayed: true, ToolStartID: "b", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
+			reopened.Observe(meta, &Event{At: at.Add(3 * time.Second), ToolProducerTime: at.Add(3 * time.Second), Replayed: true, ToolStartID: "b", ToolName: "Bash", Delta: usagedbv1.Delta{ToolCalls: map[string]int{"Bash": 1}}})
 			reopened.Observe(meta, &Event{At: at.Add(5 * time.Second), ToolProducerTime: at.Add(5 * time.Second), Replayed: true, ToolResultID: "b"})
-			reopened.Observe(meta, &Event{At: at.Add(6 * time.Second), Replayed: true, TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			reopened.Observe(meta, &Event{At: at.Add(6 * time.Second), Replayed: true, TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
 			day = reopened.Days()[0]
 			if day.Tools["Bash"] != 2 || !reflect.DeepEqual(day.ToolTimings["Bash"], two) {
 				t.Errorf("resumed tool totals = %v, %v", day.Tools, day.ToolTimings)
 			}
-			reopened.Observe(meta, &Event{At: at.Add(7 * time.Second), ToolStartID: "c", ToolName: "Bash", Delta: data.Delta{ToolCalls: map[string]int{"Bash": 1}}})
+			reopened.Observe(meta, &Event{At: at.Add(7 * time.Second), ToolStartID: "c", ToolName: "Bash", Delta: usagedbv1.Delta{ToolCalls: map[string]int{"Bash": 1}}})
 			reopened.Observe(meta, &Event{At: at.Add(8 * time.Second), ToolResultID: "c"})
-			reopened.Observe(meta, &Event{At: at.Add(9 * time.Second), TurnBoundary: true, Delta: data.Delta{Turns: 1}})
+			reopened.Observe(meta, &Event{At: at.Add(9 * time.Second), TurnBoundary: true, Delta: usagedbv1.Delta{Turns: 1}})
 			day = reopened.Days()[0]
 			if day.Tools["Bash"] != 3 || !reflect.DeepEqual(day.ToolTimings["Bash"], two) {
 				t.Errorf("timestamp-less tool totals = %v, %v", day.Tools, day.ToolTimings)
@@ -527,8 +527,8 @@ func TestStore(t *testing.T) {
 			for range 2 {
 				meta := testMeta(ksid.NewID())
 				at := atUTC(5, 10, 0, 0)
-				s1.Observe(meta, &Event{At: at, Model: "m1", CostUSD: 0.10, Delta: data.Delta{
-					TokenBuckets: data.TokenBuckets{Output: 10},
+				s1.Observe(meta, &Event{At: at, Model: "m1", CostUSD: 0.10, Delta: usagedbv1.Delta{
+					TokenBuckets: usagedbv1.TokenBuckets{Output: 10},
 					ToolCalls:    map[string]int{"Edit": 1},
 					SkillReads:   map[string]int{"code-review": 1},
 				}})
@@ -586,13 +586,13 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
 			for range 5 {
-				s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: data.Delta{
+				s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: usagedbv1.Delta{
 					SkillReads: map[string]int{"code-quality": 3},
 				}})
 				s.flushTaskLocked(meta.TaskID.String())
 			}
 			other := testMeta(ksid.NewID())
-			s.Observe(other, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: data.Delta{
+			s.Observe(other, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: usagedbv1.Delta{
 				SkillReads: map[string]int{"code-quality": 1, "review": 1},
 			}})
 			s.flushTaskLocked(other.TaskID.String())
@@ -621,7 +621,7 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			day := "2026-02-05"
-			row := data.UsageRow{Kind: rowKindUsage, Day: day, Ts: 1000, TaskID: "t1", Output: 5}
+			row := usagedbv1.UsageRow{Kind: rowKindUsage, Day: day, Ts: 1000, TaskID: "t1", Output: 5}
 			encoded, err := json.Marshal(&row)
 			if err != nil {
 				t.Fatal(err)
@@ -650,19 +650,19 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := newTestStore(t, dir)
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) {
 				t.Error("published numeric row reached estimator")
 				return 99, true
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
-				yield(data.UsageRow{Day: "2026-02-05", Model: "old", CostUSD: 99, Cost: &data.CostProvenance{ReportedUSD: 99, ReportedParts: 1}}, nil)
+			if err := s.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) {
+				yield(usagedbv1.UsageRow{Day: "2026-02-05", Model: "old", CostUSD: 99, Cost: &usagedbv1.CostProvenance{ReportedUSD: 99, ReportedParts: 1}}, nil)
 			}); err != nil {
 				t.Fatal(err)
 			}
 			days := s.Days()
-			if len(days) != 1 || math.Abs(days[0].CostUSD-.6) > 1e-12 || days[0].Cost != (data.CostProvenance{EstimatedUSD: .2, EstimatedParts: 1, UnknownParts: 1}) {
+			if len(days) != 1 || math.Abs(days[0].CostUSD-.6) > 1e-12 || days[0].Cost != (usagedbv1.CostProvenance{EstimatedUSD: .2, EstimatedParts: 1, UnknownParts: 1}) {
 				t.Fatalf("published totals/source changed = %+v", days)
 			}
 			after, err := os.ReadFile(path) //nolint:gosec // owned test fixture.
@@ -679,9 +679,9 @@ func TestStore(t *testing.T) {
 			dir := t.TempDir()
 			s := newTestStore(t, dir)
 			at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
-			s.Observe(testMeta(ksid.NewID()), &Event{At: at, Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+			s.Observe(testMeta(ksid.NewID()), &Event{At: at, Model: "priced", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 			compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "2026-02-05.jsonl")); !os.IsNotExist(err) {
@@ -701,13 +701,13 @@ func TestStore(t *testing.T) {
 			s := newTestStore(t, dir)
 			at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+			s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
 			compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
-			s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
-			if err := backfillDayCosts(t.Context(), s, "2026-02-05.jsonl.zstd", func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}}})
+			if err := backfillDayCosts(t.Context(), s, "2026-02-05.jsonl.zstd", func(*usagedbv1.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 				t.Fatalf("vanished compressed candidate: %v", err)
 			}
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 				t.Fatal(err)
 			}
 			if got := s.Days()[0].CostUSD; got != 0.5 {
@@ -721,7 +721,7 @@ func TestStore(t *testing.T) {
 			reported := testMeta(ksid.NewID())
 			// Published legacy rows have no provenance object. Recover them from
 			// disk rather than weakening the live cumulative snapshot contract.
-			originalRows := []data.UsageRow{
+			originalRows := []usagedbv1.UsageRow{
 				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: missing.TaskID.String(), Harness: "claude", Model: "missing", Output: 10},
 				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: reported.TaskID.String(), Harness: "claude", Model: "reported", Output: 5},
 				{Kind: rowKindUsage, Day: "2026-02-05", TaskID: reported.TaskID.String(), Harness: "claude", Model: "reported", Output: 20, CostUSD: .4},
@@ -744,7 +744,7 @@ func TestStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			estimate := func(row *data.UsageRow) (float64, bool) {
+			estimate := func(row *usagedbv1.UsageRow) (float64, bool) {
 				if row.Model == "missing" {
 					return 0.25, true
 				}
@@ -763,7 +763,7 @@ func TestStore(t *testing.T) {
 			if got := s.Days()[0]; got.CostUSD != 0.65 || got.Models["missing"].CostUSD != 0.25 || got.Harnesses["claude"].CostUSD != 0.65 {
 				t.Errorf("day totals after cost backfill = %+v", got)
 			}
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 1, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 1, true }); err != nil {
 				t.Fatal(err)
 			}
 			after, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
@@ -783,7 +783,7 @@ func TestStore(t *testing.T) {
 			if got := reopened.Days()[0].CostUSD; got != 0.65 {
 				t.Errorf("recovered day cost = %v, want 0.65", got)
 			}
-			reopened.Observe(missing, &Event{At: atUTC(5, 10, 0, 3), Model: "missing", CostUSD: 0.35, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 2}}})
+			reopened.Observe(missing, &Event{At: atUTC(5, 10, 0, 3), Model: "missing", CostUSD: 0.35, TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 2}}})
 			rows = readRows(t, dir, day)
 			if len(rows) != 4 || math.Abs(rows[3].CostUSD-0.1) > 1e-9 || rows[3].CostEstimated {
 				t.Errorf("next live cost movement = %+v", rows)
@@ -811,7 +811,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := newTestStore(t, dir)
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
 				t.Fatal(err)
 			}
 			raw, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
@@ -827,12 +827,12 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			s := newTestStore(t, t.TempDir())
 			meta := testMeta(ksid.NewID())
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.2, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "priced", TurnBoundary: true, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 10}}})
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.2, Delta: usagedbv1.Delta{TokenBuckets: usagedbv1.TokenBuckets{Output: 5}}})
 			s.mu.Lock()
 			s.pending[meta.TaskID.String()].costInFlight = 0.2 // Simulate cost assigned to a bucket whose append failed.
 			s.mu.Unlock()
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
 				t.Fatal(err)
 			}
 			rows := readRows(t, s.dir, "2026-02-05")
@@ -850,7 +850,7 @@ func TestStore(t *testing.T) {
 			}
 			s := newTestStore(t, dir)
 			ctx, cancel := context.WithCancel(t.Context())
-			err := s.BackfillMissingCosts(ctx, func(*data.UsageRow) (float64, bool) { cancel(); return .1, true })
+			err := s.BackfillMissingCosts(ctx, func(*usagedbv1.UsageRow) (float64, bool) { cancel(); return .1, true })
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("repair error=%v", err)
 			}
@@ -880,7 +880,7 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := newTestStore(t, dir)
-			if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return .25, true }); err != nil {
+			if err := s.BackfillMissingCosts(t.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return .25, true }); err != nil {
 				t.Fatal(err)
 			}
 			got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
@@ -919,12 +919,12 @@ func TestNew(t *testing.T) {
 // iteration: tokens, tool calls and timings, skill reads, repos, and model
 // plus harness attribution for a batch of distinct tasks.
 func BenchmarkFoldUsageRow(b *testing.B) {
-	rows := make([]*data.UsageRow, 0, 8)
+	rows := make([]*usagedbv1.UsageRow, 0, 8)
 	for i := range 8 {
-		rows = append(rows, &data.UsageRow{
+		rows = append(rows, &usagedbv1.UsageRow{
 			Kind:    rowKindUsage,
 			Day:     "2026-02-05",
-			Ts:      data.NewTime(atUTC(5, 10, 0, i)),
+			Ts:      usagedbv1.NewTime(atUTC(5, 10, 0, i)),
 			TaskID:  ksid.NewID().String(),
 			Harness: "claude",
 			Repos:   []string{"github/caic", "github/sdk"},
@@ -935,7 +935,7 @@ func BenchmarkFoldUsageRow(b *testing.B) {
 			WallMs:      3000,
 			SkillReads:  map[string]int{"code-review": 1},
 			ToolCalls:   map[string]int{"Edit": 2, "Read": 3},
-			ToolTimings: map[string]data.ToolTiming{"Edit": {Count: 2, DurationMs: 250}},
+			ToolTimings: map[string]usagedbv1.ToolTiming{"Edit": {Count: 2, DurationMs: 250}},
 			Spawns:      1,
 			CostUSD:     0.05,
 		})
@@ -971,12 +971,12 @@ func BenchmarkObserveTurnFlush(b *testing.B) {
 		metas[i] = testMeta(ksid.ID(i + 1))
 		metas[i].Repos = []string{"github/caic", "github/sdk"}
 	}
-	e := Event{Model: "claude-opus", Delta: data.Delta{
-		TokenBuckets: data.TokenBuckets{Input: 100, CacheRead: 200, Output: 50, Reasoning: 10},
+	e := Event{Model: "claude-opus", Delta: usagedbv1.Delta{
+		TokenBuckets: usagedbv1.TokenBuckets{Input: 100, CacheRead: 200, Output: 50, Reasoning: 10},
 		APIMs:        1500, WallMs: 3000, ContextWindow: 200000,
 		SkillReads:  map[string]int{"review": 1},
 		ToolCalls:   map[string]int{"Read": 2},
-		ToolTimings: map[string]data.ToolTiming{"Read": {Count: 2, DurationMs: 250}},
+		ToolTimings: map[string]usagedbv1.ToolTiming{"Read": {Count: 2, DurationMs: 250}},
 	}}
 	turn := 0
 	observeTurn := func() {
@@ -985,7 +985,7 @@ func BenchmarkObserveTurnFlush(b *testing.B) {
 			e.At = at.Add(time.Duration(turn*4+stage+1) * time.Millisecond)
 			costs[i] += .01
 			e.CostUSD = costs[i]
-			e.CostProvenance = data.CostProvenance{ReportedUSD: costs[i], ReportedParts: turn/tasks*4 + stage + 1}
+			e.CostProvenance = usagedbv1.CostProvenance{ReportedUSD: costs[i], ReportedParts: turn/tasks*4 + stage + 1}
 			e.TurnBoundary = stage == 3
 			e.Delta.Turns = 0
 			if e.TurnBoundary {
@@ -1017,7 +1017,7 @@ func BenchmarkObserveTurnFlush(b *testing.B) {
 	dec := json.NewDecoder(f)
 	rows := 0
 	for {
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		if err := dec.Decode(&row); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
@@ -1037,7 +1037,7 @@ func BenchmarkBackfillMissingCosts(b *testing.B) {
 	const day = "2026-02-05"
 	var fixture bytes.Buffer
 	for i := range 1000 {
-		row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i), Model: "priced", Output: 1000}
+		row := usagedbv1.UsageRow{Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i), Model: "priced", Output: 1000}
 		if err := json.NewEncoder(&fixture).Encode(&row); err != nil {
 			b.Fatal(err)
 		}
@@ -1059,7 +1059,7 @@ func BenchmarkBackfillMissingCosts(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.StartTimer()
-		if err := s.BackfillMissingCosts(b.Context(), func(*data.UsageRow) (float64, bool) { return 0.01, true }); err != nil {
+		if err := s.BackfillMissingCosts(b.Context(), func(*usagedbv1.UsageRow) (float64, bool) { return 0.01, true }); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -1086,7 +1086,7 @@ func BenchmarkBackfillMissingCostsLiveHeap(b *testing.B) {
 					b.Fatal(err)
 				}
 				enc := json.NewEncoder(f)
-				row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Output: 1000}
+				row := usagedbv1.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Output: 1000}
 				for range n {
 					if err := enc.Encode(&row); err != nil {
 						b.Fatal(err)
@@ -1105,7 +1105,7 @@ func BenchmarkBackfillMissingCostsLiveHeap(b *testing.B) {
 				peak := before.HeapAlloc
 				calls := 0
 				b.StartTimer()
-				err = s.BackfillMissingCosts(b.Context(), func(*data.UsageRow) (float64, bool) {
+				err = s.BackfillMissingCosts(b.Context(), func(*usagedbv1.UsageRow) (float64, bool) {
 					calls++
 					if calls == 1 || calls%1024 == 0 || calls == n {
 						runtime.GC()

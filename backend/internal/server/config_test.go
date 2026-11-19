@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	voicegatewayv1 "github.com/gomodedev/gomode/voicegateway/data/v1"
+
 	"github.com/gomodedev/gomode/httpserver/geoip"
-	"github.com/gomodedev/gomode/voicegateway"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {
@@ -105,7 +106,7 @@ func TestVoiceGatewayConfig(t *testing.T) {
 		t.Run("embedded validates listener bounds", func(t *testing.T) {
 			t.Parallel()
 			for _, port := range []int{-2, 65536} {
-				cfg := VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded, WebRTC: voicegateway.WebRTCConfig{UDPPort: port}}
+				cfg := VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded, WebRTC: voicegatewayv1.WebRTC{UDPPort: port}}
 				if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "voice-gateway.webrtc_udp_port") {
 					t.Fatalf("Validate() for port %d = %v, want listener bound error", port, err)
 				}

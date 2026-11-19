@@ -1,5 +1,5 @@
-// Package data defines the independent app startup settings file schema.
-package data
+// Package v1 defines version 1 of the independent app startup settings file schema.
+package v1
 
 // Settings stores session and OAuth signing secrets.
 type Settings struct {

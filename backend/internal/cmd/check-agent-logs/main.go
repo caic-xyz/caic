@@ -21,7 +21,7 @@ import (
 	"github.com/maruel/genai/acp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	agydata "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data"
+	antigravityv1 "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	agentharness "github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -87,7 +87,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 			// caic's record, unlike the genai DTO, has no lenient custom unmarshaler.
 			dto = "InputMessage"
 			hint = "update: backend/internal/agent/antigravity/data/prompt.go"
-			err = strictDecode(message, &agydata.InputMessage{})
+			err = strictDecode(message, &antigravityv1.InputMessage{})
 		} else {
 			dto = "StreamEvent"
 			err = strictDecode(message, &antigravitydto.StreamEvent{})

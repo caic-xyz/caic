@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/config/data"
+	configv1 "github.com/caic-xyz/caic/backend/internal/config/data/v1"
 	"github.com/gomodedev/gomode/autoupdate"
 	"github.com/gomodedev/gomode/voicegateway"
 )
@@ -406,7 +406,7 @@ func TestTomlToServerConfig(t *testing.T) {
 	t.Run("empty origins keep caic filtering defaults", func(t *testing.T) {
 		t.Parallel()
 		for _, origins := range [][]string{nil, {}} {
-			tc := data.Config{Server: data.Server{AllowOrigins: origins}}
+			tc := configv1.Config{Server: configv1.Server{AllowOrigins: origins}}
 			cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -427,9 +427,9 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "voice.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tc := &data.Config{
-			Server: data.Server{ExternalURL: "https://caic.example.com"},
-			VoiceGateway: data.VoiceGateway{
+		tc := &configv1.Config{
+			Server: configv1.Server{ExternalURL: "https://caic.example.com"},
+			VoiceGateway: configv1.VoiceGateway{
 				Mode:                 "external",
 				URL:                  "https://voice.example.com",
 				InstanceID:           "caic-main",
@@ -460,8 +460,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		prune := "0 6 * * *"
 		repoRepack := "0 7 * * *"
 
-		tc := &data.Config{
-			Core: data.Core{
+		tc := &configv1.Config{
+			Core: configv1.Core{
 				Root:       "/repos",
 				Prune:      &prune,
 				RepoRepack: &repoRepack,
@@ -471,30 +471,30 @@ func TestTomlToServerConfig(t *testing.T) {
 					"TAILSCALE_API_KEY": "tskey_from_core_env",
 				},
 			},
-			Debug: data.Debug{
+			Debug: configv1.Debug{
 				LogLevel: "warn",
 			},
-			Server: data.Server{
+			Server: configv1.Server{
 				HTTP:         ":2242",
 				GeoDB:        "geo.mmdb",
 				AllowOrigins: []string{"local", "tailscale"},
 			},
-			GitHub: data.GitHub{
-				PAT: data.PAT{Token: "ghp_abc"},
-				OAuth: data.OAuth{
+			GitHub: configv1.GitHub{
+				PAT: configv1.PAT{Token: "ghp_abc"},
+				OAuth: configv1.OAuth{
 					ClientID:     "github-client-id",
 					ClientSecret: githubClientSecret,
 					AllowedUsers: []string{"alice", "bob"},
 				},
-				App: data.GitHubApp{
+				App: configv1.GitHubApp{
 					PrivateKeyPEM: "key.pem", // relative path
 					AllowedOwners: []string{"org1", "org2"},
 					WebhookSecret: "hmac",
 				},
 			},
-			GitLab: data.GitLab{
-				PAT: data.PAT{Token: "glpat_abc"},
-				OAuth: data.OAuth{
+			GitLab: configv1.GitLab{
+				PAT: configv1.PAT{Token: "glpat_abc"},
+				OAuth: configv1.OAuth{
 					ClientID:     "gitlab-client-id",
 					ClientSecret: gitlabClientSecret,
 					AllowedUsers: []string{"carol"},
@@ -586,8 +586,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tc := &data.Config{
-			Server: data.Server{
+		tc := &configv1.Config{
+			Server: configv1.Server{
 				GeoDB: "", // not set in config
 			},
 		}
@@ -604,8 +604,8 @@ func TestTomlToServerConfig(t *testing.T) {
 	t.Run("geo_db is empty when unset and default file missing", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		tc := &data.Config{
-			Server: data.Server{
+		tc := &configv1.Config{
+			Server: configv1.Server{
 				GeoDB: "", // not set in config
 			},
 		}
@@ -622,8 +622,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "AIza_from_config"
-		tc := &data.Config{
-			Core: data.Core{
+		tc := &configv1.Config{
+			Core: configv1.Core{
 				Env: map[string]string{
 					"GEMINI_API_KEY": wantKey,
 				},
@@ -642,8 +642,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "tskey_config"
-		tc := &data.Config{
-			Core: data.Core{
+		tc := &configv1.Config{
+			Core: configv1.Core{
 				Env: map[string]string{
 					"TAILSCALE_API_KEY": wantKey,
 				},
@@ -661,8 +661,8 @@ func TestTomlToServerConfig(t *testing.T) {
 	t.Run("external voice gateway", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		tc := &data.Config{
-			VoiceGateway: data.VoiceGateway{
+		tc := &configv1.Config{
+			VoiceGateway: configv1.VoiceGateway{
 				Mode: "external",
 				URL:  "https://voice.example.com",
 			},
@@ -714,7 +714,7 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "AIza_from_env"
 		t.Setenv("GEMINI_API_KEY", envKey)
-		tc := &data.Config{} // empty config, no core.env set
+		tc := &configv1.Config{} // empty config, no core.env set
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -729,8 +729,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		envKey := "AIza_from_env"
 		configKey := "AIza_from_config"
 		t.Setenv("GEMINI_API_KEY", envKey)
-		tc := &data.Config{
-			Core: data.Core{
+		tc := &configv1.Config{
+			Core: configv1.Core{
 				Env: map[string]string{
 					"GEMINI_API_KEY": configKey,
 				},
@@ -762,7 +762,7 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "tskey_env"
 		t.Setenv("TAILSCALE_API_KEY", envKey)
-		tc := &data.Config{} // empty config
+		tc := &configv1.Config{} // empty config
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -777,13 +777,13 @@ func TestMaintenanceSchedules(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name         string
-		parse        func(*data.Config) (*autoupdate.Schedule, error)
-		config       func(*string) *data.Config
+		parse        func(*configv1.Config) (*autoupdate.Schedule, error)
+		config       func(*string) *configv1.Config
 		hour, minute int
 	}{
-		{"auto_update", autoUpdateSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{AutoUpdate: s}} }, 4, 50},
-		{"prune", pruneSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{Prune: s}} }, 5, 0},
-		{"repo_repack", repoRepackSchedule, func(s *string) *data.Config { return &data.Config{Core: data.Core{RepoRepack: s}} }, 2, 0},
+		{"auto_update", autoUpdateSchedule, func(s *string) *configv1.Config { return &configv1.Config{Core: configv1.Core{AutoUpdate: s}} }, 4, 50},
+		{"prune", pruneSchedule, func(s *string) *configv1.Config { return &configv1.Config{Core: configv1.Core{Prune: s}} }, 5, 0},
+		{"repo_repack", repoRepackSchedule, func(s *string) *configv1.Config { return &configv1.Config{Core: configv1.Core{RepoRepack: s}} }, 2, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

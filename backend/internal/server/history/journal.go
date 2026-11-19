@@ -12,6 +12,8 @@ import (
 	"iter"
 	"os"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/history/data"
@@ -19,13 +21,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tokens"
 )
 
-// Position identifies an output inside one physical raw record.
-type Position = v1.HistoryPosition
-
 // TurnEstimate is a mutable price for one canonical result event. Pricing must
 // be served through a revalidated endpoint, never merged into immutable chunks.
 type TurnEstimate struct {
-	Position
+	v1.HistoryPosition
 
 	Model    string
 	Cost     task.TurnCost
@@ -61,7 +60,7 @@ func (j *costJournal) append(fact *data.Fact) error {
 	return nil
 }
 
-func costFactFor(message agent.TimedMessage, position Position) *data.Fact {
+func costFactFor(message agent.TimedMessage, position v1.HistoryPosition) *data.Fact {
 	var fact *data.Fact
 	switch m := message.Message.(type) {
 	case *agent.ExitMessage:
@@ -90,7 +89,7 @@ func costFactFor(message agent.TimedMessage, position Position) *data.Fact {
 }
 
 func factMessage(f *data.Fact) (agent.Message, error) {
-	p := agent.MessageProvenance{Source: agent.MessageSource(f.Source)}
+	p := taskslogv3.MessageProvenance{Source: taskslogv3.MessageSource(f.Source)}
 	switch f.Kind {
 	case data.KindExit:
 		return &agent.ExitMessage{MessageProvenance: p}, nil
@@ -99,7 +98,7 @@ func factMessage(f *data.Fact) (agent.Message, error) {
 	case data.KindMetadata:
 		return &agent.SessionMetadataMessage{MessageProvenance: p, ReportedModel: f.Model}, nil
 	case data.KindSystem:
-		return &agent.SystemMessage{Source: agent.MessageSource(f.Source), Subtype: f.Subtype, ReportedModel: f.Model}, nil
+		return &agent.SystemMessage{Source: taskslogv3.MessageSource(f.Source), Subtype: f.Subtype, ReportedModel: f.Model}, nil
 	case data.KindUsage:
 		return &agent.UsageMessage{MessageProvenance: p, Usage: usageFromData(f.Usage), ReportedModel: f.Model, PerCall: f.PerCall, ModelDerived: f.ModelDerived, CumulativeCostUSD: f.CumulativeCostUSD, ReportedCostUSD: f.ReportedCostUSD}, nil
 	case data.KindResult:

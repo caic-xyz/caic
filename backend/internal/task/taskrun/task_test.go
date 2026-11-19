@@ -304,7 +304,7 @@ func TestTask(t *testing.T) {
 					{&agent.InitMessage{SessionID: "root"}, nil, 0},
 					{&agent.UsageMessage{Usage: agent.Usage{InputTokens: 100}, Additive: true}, nil, 100},
 					{&agent.UsageMessage{ContextUsed: &used, ContextWindow: 200_000}, &used, 100},
-					{&agent.UsageMessage{Source: agent.MessageSource{AgentID: "child"}, ContextUsed: &childUsed, Usage: agent.Usage{InputTokens: 999}}, &used, 100},
+					{&agent.UsageMessage{Source: v3.MessageSource{AgentID: "child"}, ContextUsed: &childUsed, Usage: agent.Usage{InputTokens: 999}}, &used, 100},
 					{&agent.UsageMessage{ContextUsed: &zero}, &zero, 100},
 					{&agent.UsageMessage{ContextWindow: 200_000}, &zero, 0},
 					{&agent.InitMessage{SessionID: "root"}, &zero, 0},
@@ -398,7 +398,7 @@ func TestTask(t *testing.T) {
 			{name: "completed", messages: []agent.Message{agent.InputDeliveryStarted(), input, agent.InputDeliveryCompleted()}, accepted: true},
 			{name: "failed", messages: []agent.Message{agent.InputDeliveryStarted(), input, agent.InputDeliveryFailed(io.ErrClosedPipe)}},
 			{name: "root_output", messages: []agent.Message{agent.InputDeliveryStarted(), input, &agent.TextMessage{Text: "working"}}, accepted: true},
-			{name: "child_output", messages: []agent.Message{agent.InputDeliveryStarted(), input, &agent.TextMessage{Source: agent.MessageSource{AgentID: "child"}, Text: "working"}}},
+			{name: "child_output", messages: []agent.Message{agent.InputDeliveryStarted(), input, &agent.TextMessage{Source: v3.MessageSource{AgentID: "child"}, Text: "working"}}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -477,11 +477,11 @@ func TestTask(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				var history []agent.Message
 				for range restored {
-					history = append(history, &agent.ResultMessage{}, &agent.ResultMessage{Source: agent.MessageSource{AgentID: "child"}})
+					history = append(history, &agent.ResultMessage{}, &agent.ResultMessage{Source: v3.MessageSource{AgentID: "child"}})
 				}
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages(history), nil)
 				for n := restored + 1; n <= 151; n++ {
-					tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{Source: agent.MessageSource{AgentID: "child"}}})
+					tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{Source: v3.MessageSource{AgentID: "child"}}})
 					tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{NumTurns: 99}})
 					if got := tk.titleRefreshDue(); got != slices.Contains(want, n) {
 						t.Fatalf("refresh at turn %d = %v", n, got)
@@ -520,7 +520,7 @@ func TestTask(t *testing.T) {
 				history = append(history,
 					&agent.UserInputMessage{Text: fmt.Sprintf("prompt-%02d", n)},
 					&agent.TextMessage{Text: fmt.Sprintf("answer-%02d", n)},
-					&agent.ResultMessage{Source: agent.MessageSource{AgentID: "child"}, Result: "child activity"},
+					&agent.ResultMessage{Source: v3.MessageSource{AgentID: "child"}, Result: "child activity"},
 					&agent.ResultMessage{},
 				)
 			}
@@ -622,7 +622,7 @@ func TestTask(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
 				sink := &rollupSpy{}
 				tk.Rollup = sink
-				quota := &agent.RateLimitMessage{Source: agent.MessageSource{AgentID: "child"}, Status: agent.RateLimitStatusRejected, RateLimitType: "five_hour", ResetsAt: time.Now().Add(time.Hour), QuotaLabel: "shared account", QuotaProvider: agent.QuotaProviderCodex}
+				quota := &agent.RateLimitMessage{Source: v3.MessageSource{AgentID: "child"}, Status: agent.RateLimitStatusRejected, RateLimitType: "five_hour", ResetsAt: time.Now().Add(time.Hour), QuotaLabel: "shared account", QuotaProvider: agent.QuotaProviderCodex}
 				if live {
 					addTaskMessage(tk, quota)
 				} else {
@@ -641,8 +641,8 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("ChildOwnershipLiveAndSeed", func(t *testing.T) {
 		t.Parallel()
-		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
-		child := agent.MessageSource{ThreadID: "child", TurnID: "child-turn", RootThreadID: "root", AgentID: "child"}
+		parent := v3.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+		child := v3.MessageSource{ThreadID: "child", TurnID: "child-turn", RootThreadID: "root", AgentID: "child"}
 		for _, live := range []bool{false, true} {
 			t.Run(strconv.FormatBool(live), func(t *testing.T) {
 				t.Parallel()
@@ -699,8 +699,8 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("ToolCompactionOwnerScope", func(t *testing.T) {
 		t.Parallel()
-		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
-		child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+		parent := v3.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+		child := v3.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "")
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.ToolOutputDeltaMessage{Source: parent, ToolUseID: "same", Delta: "parent output"},
@@ -821,7 +821,7 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("SessionMetadataLiveAndPersistedReplay", func(t *testing.T) {
 		t.Parallel()
-		child := agent.MessageProvenance{Source: agent.MessageSource{DelegationToolUseID: "child"}}
+		child := v3.MessageProvenance{Source: v3.MessageSource{DelegationToolUseID: "child"}}
 		steps := []struct {
 			message agent.Message
 			native  string
@@ -1066,8 +1066,8 @@ func TestTask(t *testing.T) {
 				t.Run(fmt.Sprintf("live=%t/thinking=%t", live, thinking), func(t *testing.T) {
 					t.Parallel()
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-					parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "parent-item"}
-					child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "child-item"}
+					parent := v3.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "parent-item"}
+					child := v3.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "child-item"}
 					messages := []agent.Message{
 						&agent.TextDeltaMessage{Text: "Parent ", Source: parent},
 						&agent.TextDeltaMessage{Text: "Child ", Source: child},
@@ -1104,7 +1104,7 @@ func TestTask(t *testing.T) {
 					}
 					for _, i := range []int{1, 3} {
 						var text string
-						var source agent.MessageSource
+						var source v3.MessageSource
 						switch m := history.At(i).Message.(type) {
 						case *agent.TextDeltaMessage:
 							text, source = m.Text, m.Source
@@ -2652,7 +2652,7 @@ func TestTask(t *testing.T) {
 			{ProducerTime: start.Add(2 * time.Second), Message: &agent.ResultMessage{}},
 			{ProducerTime: start.Add(time.Hour), Message: &agent.UserInputMessage{Text: "second"}},
 			{ProducerTime: start.Add(time.Hour + 3*time.Second), Message: &agent.ResultMessage{}},
-			{ProducerTime: start.Add(time.Hour + 4*time.Second), Message: &agent.ResultMessage{Source: agent.MessageSource{DelegationToolUseID: "child"}, NumTurns: 99, DurationMs: 99000}},
+			{ProducerTime: start.Add(time.Hour + 4*time.Second), Message: &agent.ResultMessage{Source: v3.MessageSource{DelegationToolUseID: "child"}, NumTurns: 99, DurationMs: 99000}},
 			{ProducerTime: start.Add(2 * time.Hour), Message: &agent.UserInputMessage{Text: "native"}},
 			{ProducerTime: start.Add(2*time.Hour + time.Minute), Message: &agent.ResultMessage{NumTurns: 4, DurationMs: 7000}},
 		}

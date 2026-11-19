@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgecache/data"
+	forgecachev1 "github.com/caic-xyz/caic/backend/internal/forge/forgecache/data/v1"
 )
 
 // Result is the cached outcome for a commit SHA.
@@ -60,7 +60,7 @@ func Open(path string) (*Cache, error) {
 		}
 		return nil, fmt.Errorf("forgecache open %s: %w", path, err)
 	}
-	var f data.File
+	var f forgecachev1.File
 	if err := json.Unmarshal(raw, &f); err != nil {
 		// Discard the complete file, including any partially decoded entries.
 		slog.Warn("discarding malformed CI cache", "path", path, "err", err)
@@ -130,11 +130,11 @@ func cacheKey(owner, repo, sha string) string {
 
 // save writes the cache to disk atomically. Must be called with c.mu held.
 func (c *Cache) save() error {
-	results := make(map[string]data.Result, len(c.data))
+	results := make(map[string]forgecachev1.Result, len(c.data))
 	for k, r := range c.data {
 		results[k] = resultToData(r)
 	}
-	raw, err := json.MarshalIndent(data.File{Results: results, Notified: c.notified}, "", "  ")
+	raw, err := json.MarshalIndent(forgecachev1.File{Results: results, Notified: c.notified}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("forgecache marshal: %w", err)
 	}
@@ -150,7 +150,7 @@ func (c *Cache) save() error {
 	return nil
 }
 
-func resultFromData(r data.Result) Result {
+func resultFromData(r forgecachev1.Result) Result {
 	var checks []forge.Check
 	if r.Checks != nil {
 		checks = make([]forge.Check, len(r.Checks))
@@ -174,26 +174,26 @@ func resultFromData(r data.Result) Result {
 	return Result{Status: forge.CIStatus(r.Status), Checks: checks, CachedAt: r.CachedAt}
 }
 
-func resultToData(r Result) data.Result {
-	var checks []data.Check
+func resultToData(r Result) forgecachev1.Result {
+	var checks []forgecachev1.Check
 	if r.Checks != nil {
-		checks = make([]data.Check, len(r.Checks))
+		checks = make([]forgecachev1.Check, len(r.Checks))
 	}
 	for i := range r.Checks {
 		c := &r.Checks[i]
-		checks[i] = data.Check{
+		checks[i] = forgecachev1.Check{
 			Name:        c.Name,
 			Owner:       c.Owner,
 			Repo:        c.Repo,
 			RunID:       c.RunID,
 			JobID:       c.JobID,
-			Status:      data.CheckRunStatus(c.Status),
-			Conclusion:  data.CheckRunConclusion(c.Conclusion),
+			Status:      forgecachev1.CheckRunStatus(c.Status),
+			Conclusion:  forgecachev1.CheckRunConclusion(c.Conclusion),
 			Labels:      c.Labels,
 			QueuedAt:    c.QueuedAt,
 			StartedAt:   c.StartedAt,
 			CompletedAt: c.CompletedAt,
 		}
 	}
-	return data.Result{Status: data.CIStatus(r.Status), Checks: checks, CachedAt: r.CachedAt}
+	return forgecachev1.Result{Status: forgecachev1.CIStatus(r.Status), Checks: checks, CachedAt: r.CachedAt}
 }

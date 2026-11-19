@@ -23,7 +23,7 @@ import (
 	"github.com/gomodedev/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	acpdata "github.com/caic-xyz/caic/backend/internal/agent/acp/data"
+	acpv1 "github.com/caic-xyz/caic/backend/internal/agent/acp/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -405,7 +405,7 @@ func imageLink(img v3.ImageData) (acp.PromptContent, error) {
 	if err != nil {
 		return acp.PromptContent{}, err
 	}
-	meta, err := json.Marshal(acpdata.PromptImageMeta{Caic: acpdata.PromptImage{ImageData: img.Data}})
+	meta, err := json.Marshal(acpv1.PromptImageMeta{Caic: acpv1.PromptImage{ImageData: img.Data}})
 	if err != nil {
 		return acp.PromptContent{}, err
 	}
@@ -418,7 +418,7 @@ func linkedImage(content *acp.PromptContent) (v3.ImageData, bool) {
 	if len(content.Meta) == 0 {
 		return v3.ImageData{}, false
 	}
-	var meta acpdata.PromptImageMeta
+	var meta acpv1.PromptImageMeta
 	if err := json.Unmarshal(content.Meta, &meta); err != nil || meta.Caic.ImageData == "" {
 		return v3.ImageData{}, false
 	}

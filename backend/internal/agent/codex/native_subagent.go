@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -25,7 +27,7 @@ type decodedItem struct {
 	typ           codex.ItemType
 	statusChanged *codex.ThreadStatusChangedNotification
 	turnCompleted *codex.TurnCompletedNotification
-	source        agent.MessageSource // Origin of the observation, distinct from its subject.
+	source        taskslogv3.MessageSource // Origin of the observation, distinct from its subject.
 	threadStarted *codex.ThreadStartedNotification
 }
 

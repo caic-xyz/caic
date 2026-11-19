@@ -45,7 +45,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/metricsdb"
 )
@@ -555,7 +555,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		// day cannot block the rollup writer on a provider request.
 		currentPrices := usage.NewPricer(nil)
 		pricingAt := time.Now().UTC()
-		if err := usageRollup.BackfillMissingCosts(ctx, func(row *data.UsageRow) (float64, bool) {
+		if err := usageRollup.BackfillMissingCosts(ctx, func(row *usagedbv1.UsageRow) (float64, bool) {
 			return estimateUsageRowCost(currentPrices, row, pricingAt)
 		}); err != nil && ctx.Err() == nil {
 			appLog.ErrorContext(ctx, "usage rollup cost backfill failed", "err", err)

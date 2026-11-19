@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
+	auditv1 "github.com/caic-xyz/caic/backend/internal/server/data/audit/v1"
 	"github.com/gomodedev/gomode/devicelogin"
 )
 
@@ -24,12 +24,12 @@ type auditStore struct {
 	path string
 
 	mu     sync.Mutex
-	events []audit.Event
+	events []auditv1.Event
 }
 
 // RecordOAuth records an OAuth audit event.
 func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
-	a.record(ctx, &audit.Event{
+	a.record(ctx, &auditv1.Event{
 		UserID:    userID,
 		Operation: operation,
 		Name:      name,
@@ -39,7 +39,7 @@ func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, d
 	})
 }
 
-func (a *auditStore) record(ctx context.Context, e *audit.Event) {
+func (a *auditStore) record(ctx context.Context, e *auditv1.Event) {
 	if a == nil || e == nil {
 		return
 	}
@@ -66,20 +66,20 @@ func (a *auditStore) record(ctx context.Context, e *audit.Event) {
 
 // auditLogLevel keeps successful allows out of the default logs. The audit trail
 // is the persisted event log; the record mirrors only failures and denials.
-func auditLogLevel(e *audit.Event) slog.Level {
+func auditLogLevel(e *auditv1.Event) slog.Level {
 	if e.Decision != "allow" || (e.Status != "" && e.Status != "ok") {
 		return slog.LevelInfo
 	}
 	return slog.LevelDebug
 }
 
-func (a *auditStore) snapshot() []audit.Event {
+func (a *auditStore) snapshot() []auditv1.Event {
 	if a == nil {
 		return nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := make([]audit.Event, len(a.events))
+	out := make([]auditv1.Event, len(a.events))
 	copy(out, a.events)
 	return out
 }
@@ -110,7 +110,7 @@ func auditValueSummary(v any) string {
 	return auditArgsSummary(data)
 }
 
-func (a *auditStore) persistLocked(e *audit.Event) error {
+func (a *auditStore) persistLocked(e *auditv1.Event) error {
 	if a.path == "" {
 		return nil
 	}
@@ -158,7 +158,7 @@ func (a *auditStore) recordDeviceLogin(_ context.Context, e *devicelogin.AuditEv
 		status = "failed"
 	default:
 	}
-	event := audit.Event{Time: time.Now().UTC(), UserID: userID, Operation: "device_login", Name: string(e.Kind), Decision: decision, Status: status, Args: auditValueSummary(struct {
+	event := auditv1.Event{Time: time.Now().UTC(), UserID: userID, Operation: "device_login", Name: string(e.Kind), Decision: decision, Status: status, Args: auditValueSummary(struct {
 		RequestID   string    `json:"requestID"`
 		SessionID   string    `json:"sessionID,omitempty"`
 		IP          string    `json:"ip"`

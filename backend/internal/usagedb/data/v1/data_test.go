@@ -1,6 +1,6 @@
 // Tests persisted usage timestamps and JSON zero-versus-empty field semantics.
 
-package data
+package v1
 
 import (
 	"encoding/json"

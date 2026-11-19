@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 )
 
 func TestHistoricalRows(t *testing.T) {
@@ -18,13 +18,13 @@ func TestHistoricalRows(t *testing.T) {
 	t.Run("historical complete row survives backfill and restart", func(t *testing.T) {
 		t.Parallel()
 		const historical = `{"input_tokens":10,"cache_write_5m":20,"cache_write_1h":30,"cache_read":40,"output_tokens":50,"reasoning_tokens":60,"turns":2,"errored_turns":1,"api_ms":1500,"wall_ms":4000,"compactions":1,"skill_reads":{"review":2},"tool_calls":{"Read":3},"tool_timings":{"Read":{"count":2,"duration_ms":250}},"subagent_spawns":3,"subagent_spawns_background":1,"context_window":200000,"cost_usd":0.25,"kind":"usage","day":"2026-02-05","ts":1770285600123,"task_id":"historical","harness":"claude","repos":["github/caic"],"model":"claude-opus","cost_estimated":true}`
-		var row data.UsageRow
+		var row usagedbv1.UsageRow
 		if err := json.Unmarshal([]byte(historical), &row); err != nil {
 			t.Fatal(err)
 		}
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
-		if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) { yield(row, nil) }); err != nil {
+		if err := s.Backfill(t.Context(), func(yield func(usagedbv1.UsageRow, error) bool) { yield(row, nil) }); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, "2026-02-05.jsonl")) //nolint:gosec // Temporary fixture directory.

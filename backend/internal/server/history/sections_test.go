@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
@@ -39,7 +41,7 @@ func TestSourceSections(t *testing.T) {
 				{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "002", Status: v1.EventNativeSubagentStatusRunning}},
 				{Kind: v1.EventKindNativeSubagent, Ts: 5000, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "new-route", Status: v1.EventNativeSubagentStatusRunning}},
 			} {
-				s.append(&Event{RecordID: uint64(i + 1), Message: m})
+				s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 				if incremental {
 					s.snapshot()
 				}
@@ -61,7 +63,7 @@ func TestSourceSections(t *testing.T) {
 			{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "002", Status: v1.EventNativeSubagentStatusRunning}},
 			{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "child", RunID: "001", Status: v1.EventNativeSubagentStatusCompleted}},
 		} {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 		}
 		_, meta := s.snapshot()
 		if len(meta.Activities) != 1 {
@@ -321,8 +323,8 @@ func TestSourceSections(t *testing.T) {
 	t.Run("actor body bounds ignore unrelated records and include ownership revisions", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()
-		s.append(&Event{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
-		s.append(&Event{RecordID: 2, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "direct"}}})
+		s.append(&v1.HistoryEvent{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 2, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "direct"}}})
 		assertBounds := func(body, ownership uint64) {
 			_, metadata := s.snapshot()
 			for _, a := range metadata.Activities {
@@ -336,24 +338,24 @@ func TestSourceSections(t *testing.T) {
 			t.Fatal("child missing")
 		}
 		assertBounds(2, 1)
-		s.append(&Event{RecordID: 3, Message: v1.EventMessage{Kind: v1.EventKindText, Text: &v1.EventText{Text: "root"}}})
-		s.append(&Event{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "unrelated", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 3, Message: v1.EventMessage{Kind: v1.EventKindText, Text: &v1.EventText{Text: "root"}}})
+		s.append(&v1.HistoryEvent{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "unrelated", Status: v1.EventNativeSubagentStatusRunning}}})
 		assertBounds(2, 1)
-		s.append(&Event{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "delegated"}}})
+		s.append(&v1.HistoryEvent{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "delegated"}}})
 		assertBounds(5, 5)
-		s.append(&Event{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "more delegated output"}}})
+		s.append(&v1.HistoryEvent{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "more delegated output"}}})
 		assertBounds(6, 5)
-		s.append(&Event{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "competing", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "competing", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		assertBounds(7, 7)
-		s.append(&Event{RecordID: 8, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "another-root"}, Text: &v1.EventText{Text: "namespace"}}})
+		s.append(&v1.HistoryEvent{RecordID: 8, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "another-root"}, Text: &v1.EventText{Text: "namespace"}}})
 		assertBounds(8, 8)
 		// Multiple outputs in one complete raw record expose one coherent pair
 		// of bounds, whether its routing observation is related or unrelated.
-		s.append(&Event{RecordID: 9, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "same-record output"}}})
-		s.append(&Event{RecordID: 9, Index: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "sibling", ToolUseID: "another-tool", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 9, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "same-record output"}}})
+		s.append(&v1.HistoryEvent{RecordID: 9, Index: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, NativeSubagent: &v1.EventNativeSubagent{ID: "sibling", ToolUseID: "another-tool", Status: v1.EventNativeSubagentStatusRunning}}})
 		assertBounds(9, 8)
-		s.append(&Event{RecordID: 10, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "same-record related output"}}})
-		s.append(&Event{RecordID: 10, Index: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "scoped-competitor", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 10, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Source: v1.EventMessageSource{AgentID: "child"}, Text: &v1.EventText{Text: "same-record related output"}}})
+		s.append(&v1.HistoryEvent{RecordID: 10, Index: 1, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "scoped-competitor", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		assertBounds(10, 10)
 	})
 	t.Run("captured setup survives concurrent refresh", func(t *testing.T) {
@@ -430,13 +432,13 @@ func TestSourceSections(t *testing.T) {
 		cases := []struct {
 			name    string
 			batches [][]agent.Message
-			want    [][]Position
+			want    [][]v1.HistoryPosition
 			turns   []int
 		}{
-			{name: "clear and empty context", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, agent.ContextCleared(), &agent.InitMessage{SessionID: "two"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 4}}, {{RecordID: 2, Index: 5}}}, turns: []int{1, 0, 0}},
-			{name: "changed session restart", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, &agent.UserInputMessage{Text: "carry"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 6}}}, turns: []int{1, 1}},
-			{name: "unidentified init keeps the session", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.UserInputMessage{Text: "prompt"}, &agent.InitMessage{}, &agent.TextMessage{Text: "answer"}, &agent.ResultMessage{DurationMs: 1000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 4}}}, turns: []int{1}},
-			{name: "compaction restart and repeated init", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.ResultMessage{DurationMs: 1000}}, {&agent.UserInputMessage{Text: "carry"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, &agent.InitMessage{SessionID: "two"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]Position{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 1}}, {{RecordID: 3, Index: 0}, {RecordID: 3, Index: 5}}}, turns: []int{1, 1}},
+			{name: "clear and empty context", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, agent.ContextCleared(), &agent.InitMessage{SessionID: "two"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}}}, want: [][]v1.HistoryPosition{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 4}}, {{RecordID: 2, Index: 5}}}, turns: []int{1, 0, 0}},
+			{name: "changed session restart", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.TextMessage{Text: "before"}, &agent.ResultMessage{DurationMs: 1000}, &agent.UserInputMessage{Text: "carry"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]v1.HistoryPosition{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 2}}, {{RecordID: 2, Index: 3}, {RecordID: 2, Index: 6}}}, turns: []int{1, 1}},
+			{name: "unidentified init keeps the session", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.UserInputMessage{Text: "prompt"}, &agent.InitMessage{}, &agent.TextMessage{Text: "answer"}, &agent.ResultMessage{DurationMs: 1000}}}, want: [][]v1.HistoryPosition{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 4}}}, turns: []int{1}},
+			{name: "compaction restart and repeated init", batches: [][]agent.Message{{&agent.InitMessage{SessionID: "one"}, &agent.ResultMessage{DurationMs: 1000}}, {&agent.UserInputMessage{Text: "carry"}, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, &agent.InitMessage{SessionID: "two"}, &agent.InitMessage{SessionID: "two"}, &agent.TextMessage{Text: "after"}, &agent.ResultMessage{DurationMs: 2000}}}, want: [][]v1.HistoryPosition{{{RecordID: 2, Index: 0}, {RecordID: 2, Index: 1}}, {{RecordID: 3, Index: 0}, {RecordID: 3, Index: 5}}}, turns: []int{1, 1}},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
@@ -474,7 +476,7 @@ func TestSourceSections(t *testing.T) {
 				if len(sections) != len(c.want) {
 					t.Fatalf("sections = %#v", sections)
 				}
-				var joined []Position
+				var joined []v1.HistoryPosition
 				for i, section := range sections {
 					if section.Body == nil || section.TurnCount != c.turns[i] {
 						t.Fatalf("section %d = %#v", i, section)
@@ -486,14 +488,14 @@ func TestSourceSections(t *testing.T) {
 					if err = source.WriteSlice(t.Context(), snap, *section.Body, &body); err != nil {
 						t.Fatal(err)
 					}
-					var events []Event
+					var events []v1.HistoryEvent
 					if err = json.Unmarshal(body.Bytes(), &events); err != nil {
 						t.Fatal(err)
 					}
 					if len(events) == 0 {
 						t.Fatal("empty slice despite explicit manifest bounds")
 					}
-					bounds := []Position{eventPosition(&events[0])}
+					bounds := []v1.HistoryPosition{eventPosition(&events[0])}
 					if len(events) > 1 {
 						bounds = append(bounds, eventPosition(&events[len(events)-1]))
 					}
@@ -504,7 +506,7 @@ func TestSourceSections(t *testing.T) {
 						joined = append(joined, eventPosition(&events[j]))
 					}
 				}
-				var canonical []Position
+				var canonical []v1.HistoryPosition
 				for e, err := range source.Events(t.Context(), snap, 1, snap.Through) {
 					if err != nil {
 						t.Fatal(err)
@@ -548,7 +550,7 @@ func TestSourceSections(t *testing.T) {
 		if err = source.WriteSetup(t.Context(), snap, snap.Through, &body); err != nil {
 			t.Fatal(err)
 		}
-		var events []Event
+		var events []v1.HistoryEvent
 		if err = json.Unmarshal(body.Bytes(), &events); err != nil {
 			t.Fatal(err)
 		}
@@ -613,7 +615,7 @@ func TestSourceSections(t *testing.T) {
 						&agent.UserInputMessage{Text: "unfinished turn"},
 						&agent.ToolUseMessage{ToolUseID: "spawn", Name: "Agent"},
 						&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "child", ToolUseID: "spawn", Status: agent.NativeSubagentStatusRunning}},
-						&agent.TextMessage{Source: agent.MessageSource{AgentID: "child"}, Text: "child transcript"},
+						&agent.TextMessage{Source: taskslogv3.MessageSource{AgentID: "child"}, Text: "child transcript"},
 					}
 					var opening agent.Message = &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}
 					if boundary == "changed init" {
@@ -658,8 +660,8 @@ func TestSourceSections(t *testing.T) {
 						}
 						// The oracle is actual WriteSlice membership, independent of
 						// opening boundaries or metadata's conservative read bounds.
-						owners := map[Position]string{}
-						origins := map[string]Position{}
+						owners := map[v1.HistoryPosition]string{}
+						origins := map[string]v1.HistoryPosition{}
 						for _, section := range sections {
 							if section.Body == nil {
 								continue
@@ -668,7 +670,7 @@ func TestSourceSections(t *testing.T) {
 							if err := source.WriteSlice(t.Context(), snap, *section.Body, &body); err != nil {
 								t.Fatal(err)
 							}
-							var events []Event
+							var events []v1.HistoryEvent
 							if err := json.Unmarshal(body.Bytes(), &events); err != nil {
 								t.Fatal(err)
 							}
@@ -774,7 +776,7 @@ func TestSourceSections(t *testing.T) {
 		if err = source.WriteSlice(t.Context(), snap, *current.Body, &body); err != nil {
 			t.Fatal(err)
 		}
-		var events []Event
+		var events []v1.HistoryEvent
 		if err = json.Unmarshal(body.Bytes(), &events); err != nil {
 			t.Fatal(err)
 		}
@@ -801,7 +803,7 @@ func TestSourceSections(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		selected := v1.HistorySlice{First: Position{RecordID: 2, Index: 1}, Last: Position{RecordID: 2, Index: 1}}
+		selected := v1.HistorySlice{First: v1.HistoryPosition{RecordID: 2, Index: 1}, Last: v1.HistoryPosition{RecordID: 2, Index: 1}}
 		if err = source.CheckSlice(t.Context(), snap, selected); err != nil {
 			t.Fatal(err)
 		}
@@ -809,14 +811,14 @@ func TestSourceSections(t *testing.T) {
 		if err = source.WriteSlice(t.Context(), snap, selected, &body); err != nil {
 			t.Fatal(err)
 		}
-		var events []Event
+		var events []v1.HistoryEvent
 		if err = json.Unmarshal(body.Bytes(), &events); err != nil {
 			t.Fatal(err)
 		}
 		if len(events) != 1 || events[0].Index != 1 || events[0].Message.Text.Text != "second" {
 			t.Fatalf("selected = %#v", events)
 		}
-		selected.Last = Position{RecordID: 3, Index: RecordEndIndex}
+		selected.Last = v1.HistoryPosition{RecordID: 3, Index: RecordEndIndex}
 		if err = source.CheckSlice(t.Context(), snap, selected); err != nil {
 			t.Fatal(err)
 		}
@@ -830,7 +832,7 @@ func TestSourceSections(t *testing.T) {
 		if len(events) != 1 || events[0].Index != 1 || events[0].Message.Text.Text != "second" {
 			t.Fatalf("record-end slice = %#v", events)
 		}
-		empty := v1.HistorySlice{First: Position{RecordID: 3}, Last: Position{RecordID: 3, Index: RecordEndIndex}}
+		empty := v1.HistorySlice{First: v1.HistoryPosition{RecordID: 3}, Last: v1.HistoryPosition{RecordID: 3, Index: RecordEndIndex}}
 		if err = source.CheckSlice(t.Context(), snap, empty); err != nil {
 			t.Fatal(err)
 		}
@@ -838,7 +840,7 @@ func TestSourceSections(t *testing.T) {
 		if err = source.WriteSlice(t.Context(), snap, empty, &emptyBody); err != nil {
 			t.Fatal(err)
 		}
-		var emptyEvents []Event
+		var emptyEvents []v1.HistoryEvent
 		if err = json.Unmarshal(emptyBody.Bytes(), &emptyEvents); err != nil {
 			t.Fatal(err)
 		}
@@ -853,7 +855,7 @@ func TestSourceSections(t *testing.T) {
 		if err = source.WriteSlice(t.Context(), snap, selected, rejectedSliceWriter{}); !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("failed slice output = %v", err)
 		}
-		selected.Last = Position{RecordID: 2, Index: 2}
+		selected.Last = v1.HistoryPosition{RecordID: 2, Index: 2}
 		if err = source.CheckSlice(t.Context(), snap, selected); err == nil {
 			t.Fatal("accepted nonexistent output index")
 		}
@@ -883,7 +885,7 @@ func TestSectionIndex(t *testing.T) {
 				messages = append(messages, v1.EventMessage{Kind: v1.EventKindToolUse, ToolUse: &v1.EventToolUse{ToolUseID: "b", Name: "Bash"}}, v1.EventMessage{Kind: v1.EventKindTextDelta, TextDelta: &v1.EventTextDelta{Text: "second"}}, v1.EventMessage{Kind: v1.EventKindText, Text: &v1.EventText{Text: "first second"}}, v1.EventMessage{Kind: v1.EventKindResult, Result: &v1.EventResult{Duration: 1}}, v1.EventMessage{Kind: v1.EventKindSystem, System: &v1.EventSystem{Subtype: "compact_boundary"}})
 				for i, m := range messages {
 					m.Ts = int64(i + 1)
-					s.append(&Event{RecordID: uint64(i + 1), Message: m})
+					s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 				}
 				sections, _ := s.snapshot()
 				if sections[0].TextCount != c.texts || sections[0].ToolCount != 2 || sections[0].TurnCount != 1 {
@@ -909,13 +911,13 @@ func TestSectionIndex(t *testing.T) {
 			t.Run(c.name, func(t *testing.T) {
 				t.Parallel()
 				s := newSectionIndex()
-				s.append(&Event{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindInit, Init: &v1.EventInit{SessionID: "root"}}})
+				s.append(&v1.HistoryEvent{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindInit, Init: &v1.EventInit{SessionID: "root"}}})
 				for i, m := range c.messages {
 					m.Ts = int64(i + 1)
-					s.append(&Event{RecordID: uint64(i + 2), Message: m})
+					s.append(&v1.HistoryEvent{RecordID: uint64(i + 2), Message: m})
 				}
-				s.append(&Event{RecordID: uint64(len(c.messages) + 2), Message: v1.EventMessage{Kind: v1.EventKindResult, Result: &v1.EventResult{Duration: 1}}})
-				s.append(&Event{RecordID: uint64(len(c.messages) + 3), Message: v1.EventMessage{Kind: v1.EventKindSystem, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
+				s.append(&v1.HistoryEvent{RecordID: uint64(len(c.messages) + 2), Message: v1.EventMessage{Kind: v1.EventKindResult, Result: &v1.EventResult{Duration: 1}}})
+				s.append(&v1.HistoryEvent{RecordID: uint64(len(c.messages) + 3), Message: v1.EventMessage{Kind: v1.EventKindSystem, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
 				sections, _ := s.snapshot()
 				if sections[0].TextCount != 1 || sections[0].ToolCount != c.tools || sections[0].TurnCount != 1 {
 					t.Fatalf("summary = %#v", sections[0])
@@ -928,7 +930,7 @@ func TestSectionIndex(t *testing.T) {
 		s := newSectionIndex()
 		before := s.revision
 		message := v1.EventMessage{Kind: v1.EventKindTextDelta, Ts: 1000, Source: v1.EventMessageSource{AgentID: "child"}, TextDelta: &v1.EventTextDelta{Text: "first"}}
-		s.append(&Event{RecordID: 1, Message: message})
+		s.append(&v1.HistoryEvent{RecordID: 1, Message: message})
 		if s.revision <= before {
 			t.Fatal("new child did not revise manifest")
 		}
@@ -936,7 +938,7 @@ func TestSectionIndex(t *testing.T) {
 		message.Ts = 2000
 		message.Source.ThreadID = "another-observation-thread"
 		message.Source.DelegationToolUseID = "reported-later"
-		s.append(&Event{RecordID: 2, Message: message})
+		s.append(&v1.HistoryEvent{RecordID: 2, Message: message})
 		if s.revision != published {
 			t.Fatal("ordinary child delta revised manifest")
 		}
@@ -948,13 +950,13 @@ func TestSectionIndex(t *testing.T) {
 	t.Run("activity origin sections use exact positions and resolved ownership", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()
-		s.append(&Event{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindInit, Ts: 1000, Init: &v1.EventInit{SessionID: "a"}}})
-		s.append(&Event{RecordID: 2, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Ts: 1000, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "delegated origin"}}})
-		s.append(&Event{RecordID: 2, Index: 2, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 1000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
-		s.append(&Event{RecordID: 2, Index: 3, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 1000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
-		s.append(&Event{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusRunning}}})
-		s.append(&Event{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 2000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
-		s.append(&Event{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusCompleted}}})
+		s.append(&v1.HistoryEvent{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindInit, Ts: 1000, Init: &v1.EventInit{SessionID: "a"}}})
+		s.append(&v1.HistoryEvent{RecordID: 2, Index: 0, Message: v1.EventMessage{Kind: v1.EventKindText, Ts: 1000, Source: v1.EventMessageSource{DelegationToolUseID: "spawn", ThreadID: "root"}, Text: &v1.EventText{Text: "delegated origin"}}})
+		s.append(&v1.HistoryEvent{RecordID: 2, Index: 2, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 1000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
+		s.append(&v1.HistoryEvent{RecordID: 2, Index: 3, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 1000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 2000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindSystem, Ts: 2000, System: &v1.EventSystem{Subtype: "compact_boundary"}}})
+		s.append(&v1.HistoryEvent{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 3000, NativeSubagent: &v1.EventNativeSubagent{ID: "status-only", Status: v1.EventNativeSubagentStatusCompleted}}})
 		_, meta := s.snapshot()
 		for _, activity := range meta.Activities {
 			want := "1"
@@ -967,7 +969,7 @@ func TestSectionIndex(t *testing.T) {
 		}
 		// A competing correlation removes the old delegated origin. The child's
 		// conservative resource First still includes it, but its home must move.
-		s.append(&Event{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		_, ambiguous := s.snapshot()
 		for _, activity := range ambiguous.Activities {
 			if activity.ID == "child" && (activity.SectionID != "2" || activity.First.RecordID != 2 || activity.First.Index != 0) {
@@ -981,22 +983,22 @@ func TestSectionIndex(t *testing.T) {
 	t.Run("late correlation pins transcript with scoped ambiguity", func(t *testing.T) {
 		t.Parallel()
 		s := newSectionIndex()
-		s.append(&Event{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindTextDelta, Ts: 1000, Source: v1.EventMessageSource{ThreadID: "root", DelegationToolUseID: "spawn"}, TextDelta: &v1.EventTextDelta{Text: "early"}}})
+		s.append(&v1.HistoryEvent{RecordID: 1, Message: v1.EventMessage{Kind: v1.EventKindTextDelta, Ts: 1000, Source: v1.EventMessageSource{ThreadID: "root", DelegationToolUseID: "spawn"}, TextDelta: &v1.EventTextDelta{Text: "early"}}})
 		for i, status := range []v1.EventNativeSubagentStatus{v1.EventNativeSubagentStatusRunning, v1.EventNativeSubagentStatusCompleted} {
-			s.append(&Event{RecordID: uint64(i + 2), Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: int64(i+2) * 1000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: status}}})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 2), Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: int64(i+2) * 1000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "child", ToolUseID: "spawn", Status: status}}})
 		}
 		_, meta := s.snapshot()
 		if len(meta.Activities) != 1 || meta.Activities[0].AnchorAt.UnixMilli() != 1000 {
 			t.Fatalf("late anchor = %#v", meta.Activities)
 		}
-		s.append(&Event{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, Source: v1.EventMessageSource{ThreadID: "other-root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 4, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, Source: v1.EventMessageSource{ThreadID: "other-root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "other", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		_, scoped := s.snapshot()
 		for _, a := range scoped.Activities {
 			if a.ID == "child" && a.AnchorAt.UnixMilli() != 1000 {
 				t.Fatalf("foreign namespace changed anchor = %#v", a)
 			}
 		}
-		s.append(&Event{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 5000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "ambiguous", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 5, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 5000, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "ambiguous", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		_, ambiguous := s.snapshot()
 		for _, a := range ambiguous.Activities {
 			if a.ID == "child" && a.AnchorAt.UnixMilli() != 3000 {
@@ -1018,18 +1020,18 @@ func TestSectionIndex(t *testing.T) {
 			{Kind: v1.EventKindSystem, System: &v1.EventSystem{Subtype: "compact_boundary"}},
 		}
 		for i, m := range messages {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 		}
 		before, _ := s.snapshot()
 		if before[0].TextCount != 2 {
 			t.Fatalf("uncorrelated header = %#v", before[0])
 		}
-		s.append(&Event{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "first", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 6, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "first", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		resolved, _ := s.snapshot()
 		if resolved[0].TextCount != 1 {
 			t.Fatalf("resolved header = %#v", resolved[0])
 		}
-		s.append(&Event{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "second", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Source: v1.EventMessageSource{ThreadID: "root"}, NativeSubagent: &v1.EventNativeSubagent{ID: "second", ToolUseID: "spawn", Status: v1.EventNativeSubagentStatusRunning}}})
 		ambiguous, _ := s.snapshot()
 		if ambiguous[0].TextCount != 2 {
 			t.Fatalf("ambiguous header = %#v", ambiguous[0])
@@ -1053,7 +1055,7 @@ func TestSectionIndex(t *testing.T) {
 			{Kind: v1.EventKindNativeSubagent, Ts: 400, NativeSubagent: &v1.EventNativeSubagent{ID: "child", Status: v1.EventNativeSubagentStatusCompleted, Result: strings.Repeat("child result", 100)}},
 		}
 		for i, m := range events {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 		}
 		sections, metadata := s.snapshot()
 		if len(sections) != 2 || !reflect.DeepEqual(sections[0].Skills, []v1.EventSkillLoad{{Skill: "quality", Path: "/quality/SKILL.md"}}) {
@@ -1091,7 +1093,7 @@ func TestSectionIndex(t *testing.T) {
 			// An exit error event alone ends nothing: Source folds the exit record.
 			{Kind: v1.EventKindError, Ts: 2500, Source: child, Error: &v1.EventError{Err: "child exited"}},
 		} {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 		}
 		s.hostExited(time.UnixMilli(3000).UTC())
 		_, meta := s.snapshot()
@@ -1109,7 +1111,7 @@ func TestSectionIndex(t *testing.T) {
 			t.Fatalf("background commands = %#v", meta.BackgroundCommands)
 		}
 		// A resumed host reporting the card again reopens it.
-		s.append(&Event{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "running", Status: v1.EventNativeSubagentStatusRunning}}})
+		s.append(&v1.HistoryEvent{RecordID: 7, Message: v1.EventMessage{Kind: v1.EventKindNativeSubagent, Ts: 4000, NativeSubagent: &v1.EventNativeSubagent{ID: "running", Status: v1.EventNativeSubagentStatusRunning}}})
 		_, meta = s.snapshot()
 		for _, a := range meta.Activities {
 			if a.ID == "running" && a.Status != "running" {
@@ -1131,7 +1133,7 @@ func TestSectionIndex(t *testing.T) {
 			{Kind: v1.EventKindBackgroundRetired, Ts: 2000, BackgroundRetired: &v1.EventBackgroundRetired{ID: "cmd"}},
 			{Kind: v1.EventKindBackgroundRetired, Ts: 2000, BackgroundRetired: &v1.EventBackgroundRetired{ID: "done"}},
 		} {
-			s.append(&Event{RecordID: uint64(i + 1), Message: m})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: m})
 		}
 		_, meta := s.snapshot()
 		statuses := map[string]string{}
@@ -1160,7 +1162,7 @@ func TestSectionIndex(t *testing.T) {
 			{ID: "lint", ToolUseID: "lint-tool", Label: "make lint", Status: "running"},
 			{ID: "lint", Status: "failed", ExitCode: &exit, OutputRef: "/tmp/lint.output"},
 		} {
-			s.append(&Event{RecordID: uint64(i + 1), Message: v1.EventMessage{Kind: v1.EventKindBackgroundCommand, Ts: int64(i+1) * 1000, Source: source, BackgroundCommand: &b}})
+			s.append(&v1.HistoryEvent{RecordID: uint64(i + 1), Message: v1.EventMessage{Kind: v1.EventKindBackgroundCommand, Ts: int64(i+1) * 1000, Source: source, BackgroundCommand: &b}})
 		}
 		_, meta := s.snapshot()
 		if len(meta.Activities) != 0 {

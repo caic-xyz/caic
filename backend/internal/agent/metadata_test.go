@@ -2,7 +2,11 @@
 
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+)
 
 func TestSessionMetadata(t *testing.T) {
 	t.Parallel()
@@ -21,7 +25,7 @@ func TestSessionMetadata(t *testing.T) {
 	t.Run("Apply", func(t *testing.T) {
 		t.Parallel()
 		m := SessionMetadata{SessionID: "root", ReportedModel: "first", ReportedEffort: "high", AgentVersion: "1", AutoCompactTokenLimit: 100}
-		child := MessageProvenance{Source: MessageSource{DelegationToolUseID: "child"}}
+		child := taskslogv3.MessageProvenance{Source: taskslogv3.MessageSource{DelegationToolUseID: "child"}}
 		for _, msg := range []Message{
 			&SystemMessage{MessageProvenance: child, Subtype: SystemSubtypeModelRerouted, ReportedModel: "child-model"},
 			&SystemMessage{MessageProvenance: child, Subtype: SystemSubtypeContextCleared},
@@ -43,7 +47,7 @@ func TestSessionMetadata(t *testing.T) {
 		t.Parallel()
 		m := SessionMetadata{SessionID: "root", ReportedModel: "old", ReportedEffort: "low", AgentVersion: "1"}
 		m.Apply(&SessionMetadataMessage{ReportedModel: "new", ReportedEffort: "high"})
-		m.Apply(&SessionMetadataMessage{Source: MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child", AgentVersion: "child"})
+		m.Apply(&SessionMetadataMessage{Source: taskslogv3.MessageSource{DelegationToolUseID: "child"}, ReportedModel: "child", AgentVersion: "child"})
 		m.Apply(&MetaSessionMessage{SessionID: "root", ReportedModel: "stale", ReportedEffort: "low"})
 		want := SessionMetadata{SessionID: "root", ReportedModel: "new", ReportedEffort: "high", AgentVersion: "1"}
 		if m != want {

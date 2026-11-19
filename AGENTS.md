@@ -30,6 +30,33 @@ storage formats belong in the owning component's `data` package. This includes
 logs, caches, and temporary disk spools. See the
 [backend serialization rules](backend/AGENTS.md#serialized-structures).
 
+### Versioned Contracts
+
+Every wire API and serialized format has a version. Wire APIs are HTTP routes,
+SSE and WebSocket events, MCP tools, resources and cursors, and SDK types.
+Serialized formats are the files, logs, caches, spools, cookies, and browser
+storage that caic writes. A route path, file path, or `version` field holds the
+version; a format without one is version 1.
+
+A breaking change ships as version N+1 beside version N:
+
+- Breaking: remove or rename a field, route, or enum value; change a type,
+  unit, default, or meaning; make an optional field required; reject input
+  that version N accepts. Adding an optional field or a route is not breaking.
+- Copy the vN package to vN+1 and change the copy: `api/v2` beside `api/v1`,
+  `data/v4` beside `data/v3`.
+- Use the vN types directly. Do not declare type, constant, or variable
+  aliases or forwarding wrappers for them; saving churn does not justify an
+  alias.
+- Move clients and writers to vN+1. Serve and read vN through an adapter over
+  the current implementation.
+- Mark each vN declaration and adapter with
+  `TODO(YYYY-MM-DD): delete vN once this date has passed and two release tags contain vN+1.`
+  The date is the commit date plus 7 days. Count tags with
+  `git fetch --tags origin && git tag --contains <commit that added vN+1>`.
+- When both conditions hold, delete vN with its adapter, tests, and
+  generated SDK.
+
 ### Documentation Changes
 
 - **Do NOT** create a markdown file listing changes you made.

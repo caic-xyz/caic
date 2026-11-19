@@ -1,6 +1,6 @@
 // Additive cost provenance retains exact zeros and estimate replacement corrections.
 
-package data
+package v1
 
 // CostProvenance separates known amounts and signed coverage components.
 // Counts preserve exact zero costs. A later native report can subtract an

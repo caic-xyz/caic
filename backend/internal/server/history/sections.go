@@ -19,9 +19,9 @@ type sectionIndex struct {
 	revision           uint64
 	closed             []v1.HistorySection
 	current            v1.HistorySection
-	last               Position
-	lastResult         Position
-	firstAfterResult   Position
+	last               v1.HistoryPosition
+	lastResult         v1.HistoryPosition
+	firstAfterResult   v1.HistoryPosition
 	sessionID          string
 	facts              []summaryFact
 	closedFacts        [][]summaryFact
@@ -33,7 +33,7 @@ type sectionIndex struct {
 	tools              map[toolKey]toolStart
 	totals             map[string]v1.HistoryToolTiming
 	activities         map[string]v1.HistoryActivity
-	activityOrigins    map[string]Position
+	activityOrigins    map[string]v1.HistoryPosition
 	backgroundCommands []v1.HistoryBackgroundCommand
 	backgroundIndex    map[string]int
 	transcripts        map[string]struct{}
@@ -57,12 +57,12 @@ func newSectionIndex() sectionIndex {
 	return sectionIndex{
 		current: v1.HistorySection{ID: "1", Skills: []v1.EventSkillLoad{}},
 		tools:   map[toolKey]toolStart{}, totals: map[string]v1.HistoryToolTiming{},
-		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]Position{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1,
+		activities: map[string]v1.HistoryActivity{}, activityOrigins: map[string]v1.HistoryPosition{}, backgroundCommands: []v1.HistoryBackgroundCommand{}, backgroundIndex: map[string]int{}, transcripts: map[string]struct{}{}, routing: map[activityRoute]uint64{}, pendingScopes: map[string]map[string]uint64{}, transcriptOrigins: map[transcriptOrigin]transcriptObservation{}, runningPositions: map[string]transcriptObservation{}, lifecycleAnchors: map[string]time.Time{}, waiting: -1,
 		turns: []v1.HistoryTurn{}, lastResultFact: -1, actorRecords: map[string][]uint64{}, delegationRecords: map[delegationScope][]uint64{},
 	}
 }
 
-func (s *sectionIndex) append(e *Event) {
+func (s *sectionIndex) append(e *v1.HistoryEvent) {
 	m := &e.Message
 	if m.Init != nil || m.Result != nil || m.ToolResult != nil || m.NativeSubagent != nil || m.BackgroundCommand != nil || m.BackgroundRetired != nil || m.UserInput != nil || m.SkillLoad != nil || m.Todo != nil || m.Log != nil || m.CommitSnapshot != nil || m.System != nil {
 		s.revision++
@@ -163,7 +163,7 @@ func (s *sectionIndex) append(e *Event) {
 		}
 		if m.Result != nil && !historyChild(&m.Source) {
 			s.lastResult = p
-			s.firstAfterResult = Position{}
+			s.firstAfterResult = v1.HistoryPosition{}
 			s.lastResultFact = len(s.facts) - 1
 		}
 	}
@@ -171,7 +171,7 @@ func (s *sectionIndex) append(e *Event) {
 	s.indexRecords(e)
 }
 
-func (s *sectionIndex) indexRecords(e *Event) {
+func (s *sectionIndex) indexRecords(e *v1.HistoryEvent) {
 	m := &e.Message
 	if id := m.Source.AgentID; id != "" {
 		s.actorRecords[id] = appendRecord(s.actorRecords[id], e.RecordID)
@@ -197,7 +197,7 @@ func (s *sectionIndex) indexRecords(e *Event) {
 	}
 }
 
-func (s *sectionIndex) close(e *Event) {
+func (s *sectionIndex) close(e *v1.HistoryEvent) {
 	end := s.last
 	if s.lastResult.RecordID != 0 {
 		end = s.lastResult
@@ -234,8 +234,8 @@ func (s *sectionIndex) close(e *Event) {
 		first = eventPosition(e)
 	}
 	s.current = v1.HistorySection{ID: strconv.Itoa(len(s.closed) + 1), Body: &v1.HistorySlice{First: first, Last: eventPosition(e)}, ReportedModel: s.model, Skills: []v1.EventSkillLoad{}}
-	s.lastResult = Position{}
-	s.firstAfterResult = Position{}
+	s.lastResult = v1.HistoryPosition{}
+	s.firstAfterResult = v1.HistoryPosition{}
 	s.facts = slices.Clone(s.facts[factCut:])
 	s.lastResultFact = -1
 	s.activityHomesDirty = true
@@ -389,7 +389,7 @@ func (s *sectionIndex) observeTool(m *v1.EventMessage) {
 	}
 }
 
-func (s *sectionIndex) observeActivity(e *Event) {
+func (s *sectionIndex) observeActivity(e *v1.HistoryEvent) {
 	m := &e.Message
 	body := m.NativeSubagent == nil && m.BackgroundCommand == nil && m.BackgroundRetired == nil && (m.Kind != v1.EventKindRateLimit || m.RateLimit != nil && m.RateLimit.RateLimitType == "thread_goal")
 	if body && (m.Source.AgentID != "" || m.Source.DelegationToolUseID != "") {
@@ -666,7 +666,7 @@ func (s *sectionIndex) reanchorActivities() {
 	}
 }
 
-func (s *sectionIndex) sectionAt(position Position) string {
+func (s *sectionIndex) sectionAt(position v1.HistoryPosition) string {
 	if body := s.current.Body; body != nil && !positionBefore(position, body.First) && !positionBefore(body.Last, position) {
 		return s.current.ID
 	}
@@ -1046,11 +1046,11 @@ type transcriptOrigin struct {
 }
 
 type transcriptObservation struct {
-	position Position
+	position v1.HistoryPosition
 	at       time.Time
 }
 
-func positionBefore(a, b Position) bool {
+func positionBefore(a, b v1.HistoryPosition) bool {
 	return a.RecordID < b.RecordID || a.RecordID == b.RecordID && a.Index < b.Index
 }
 
@@ -1074,7 +1074,9 @@ func appendRecordPrefix(dst, records []uint64, through uint64) []uint64 {
 	return append(dst, records[:end]...)
 }
 
-func eventPosition(e *Event) Position { return Position{RecordID: e.RecordID, Index: e.Index} }
+func eventPosition(e *v1.HistoryEvent) v1.HistoryPosition {
+	return v1.HistoryPosition{RecordID: e.RecordID, Index: e.Index}
+}
 
 func historyChild(src *v1.EventMessageSource) bool {
 	return src.AgentID != "" || src.DelegationToolUseID != "" || src.RootThreadID != "" && src.ThreadID != "" && src.ThreadID != src.RootThreadID

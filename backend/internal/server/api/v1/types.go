@@ -1743,12 +1743,6 @@ type UpdateResp struct {
 	Status string `json:"status"` // "started" or "already_up_to_date"
 }
 
-// EmptyReq is used for endpoints that take no request body.
-type EmptyReq = api.EmptyReq
-
-// ErrorResponse is the JSON envelope for error responses.
-type ErrorResponse = api.ErrorResponse
-
 // CPUUsage measures one logical CPU over the sampling interval.
 type CPUUsage struct {
 	ID        string  `json:"id"`

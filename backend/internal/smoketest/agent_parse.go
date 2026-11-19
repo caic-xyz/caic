@@ -174,12 +174,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 // Wire types: thin wrappers matching the flat NDJSON the Python script emits.
 
 type textDelta struct {
-	Source agent.MessageSource `json:"source,omitzero"`
-	Text   string              `json:"text"`
+	Source v3.MessageSource `json:"source,omitzero"`
+	Text   string           `json:"text"`
 }
 
 type toolOutputDelta struct {
-	agent.MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string `json:"tool_use_id"`
 	Delta     string `json:"delta"`

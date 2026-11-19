@@ -5,6 +5,8 @@ package codex
 import (
 	"encoding/json"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/maruel/genai/providers/codex"
 )
@@ -37,7 +39,7 @@ func (p *metadataParser) ParseInput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	input := &agent.UserInputMessage{Source: agent.MessageSource{ThreadID: threadID}}
+	input := &agent.UserInputMessage{Source: taskslogv3.MessageSource{ThreadID: threadID}}
 	p.wire.scopeSource(input.Provenance())
 	return []agent.Message{input}, nil
 }
@@ -151,7 +153,7 @@ func parseMetadataMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Me
 		if err != nil {
 			return nil, decodedItem{}, err
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Source: agent.MessageSource{ThreadID: threadID, TurnID: turnID}}}, decodedItem{}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Source: taskslogv3.MessageSource{ThreadID: threadID, TurnID: turnID}}}, decodedItem{}, nil
 	case codex.MethodThreadStarted, codex.MethodTurnStarted, codex.MethodTurnCompleted,
 		codex.MethodModelRerouted, codex.MethodErrorNotification, codex.MethodThreadStatusChanged:
 		return parseMessage(line, probe)

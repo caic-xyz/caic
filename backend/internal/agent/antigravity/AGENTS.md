@@ -38,7 +38,7 @@ out of the estimate.
 
 agy 1.5.9 stream-json input rejects every block type but `text` and ignores
 unknown fields. Prompt images are written to `agent.AttachmentDir` and sent as
-a text block naming the path; its `caic_image` field (`data/prompt.go`) keeps
+a text block naming the path; its `caic_image` field (`data/v1/prompt.go`) keeps
 the image for history. Older records carry images as text data URLs.
 
 Run `go run ./backend/internal/cmd/check-agent-logs` for offline DTO drift checks. Live parsers accept

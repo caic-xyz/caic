@@ -45,7 +45,7 @@ func TestToolTimingTracker(t *testing.T) {
 			t.Parallel()
 			tracker := NewToolTimingTracker("", harness.Claude, "", nil)
 			message := &agent.MetaSessionMessage{
-				Source:    agent.MessageSource{ThreadID: "thread"},
+				Source:    logv3.MessageSource{ThreadID: "thread"},
 				SessionID: "session", ReportedModel: "model", ReportedEffort: "high", AgentVersion: "1",
 			}
 			events := tracker.ConvertMessage(2, 0, message, time.Unix(10, 0))
@@ -585,8 +585,8 @@ func TestToolTimingTracker(t *testing.T) {
 		t.Run("tool timing separates owners and late correlation", func(t *testing.T) {
 			t.Parallel()
 			tracker := NewToolTimingTracker("", harness.Codex, "", nil)
-			root := agent.MessageSource{ThreadID: "root", TurnID: "turn"}
-			child := agent.MessageSource{ThreadID: "session", DelegationToolUseID: "delegate"}
+			root := logv3.MessageSource{ThreadID: "root", TurnID: "turn"}
+			child := logv3.MessageSource{ThreadID: "session", DelegationToolUseID: "delegate"}
 			t0 := time.Unix(10, 0)
 			tracker.ConvertMessage(2, 0, &agent.ToolUseMessage{Source: root, ToolUseID: "same", Name: "Bash"}, t0)
 			tracker.ConvertMessage(2, 0, &agent.ToolUseMessage{Source: child, ToolUseID: "same", Name: "Read"}, t0.Add(time.Second))
@@ -645,7 +645,7 @@ func TestToolTimingTracker(t *testing.T) {
 
 		t.Run("common provenance", func(t *testing.T) {
 			t.Parallel()
-			source := agent.MessageSource{AgentID: "child", DelegationToolUseID: "delegation", ThreadID: "thread", TurnID: "turn", ItemID: "item"}
+			source := logv3.MessageSource{AgentID: "child", DelegationToolUseID: "delegation", ThreadID: "thread", TurnID: "turn", ItemID: "item"}
 			for _, message := range []agent.Message{
 				&agent.TextMessage{Text: "visible"}, &agent.TextDeltaMessage{Text: "fragment"},
 				&agent.ThinkingMessage{Text: "reason"}, &agent.ThinkingDeltaMessage{Text: "reason fragment"},
@@ -668,7 +668,7 @@ func TestToolTimingTracker(t *testing.T) {
 						t.Fatal(err)
 					}
 					var envelope struct {
-						Source agent.MessageSource `json:"source"`
+						Source logv3.MessageSource `json:"source"`
 					}
 					if err := json.Unmarshal(encoded, &envelope); err != nil {
 						t.Fatal(err)
@@ -682,8 +682,8 @@ func TestToolTimingTracker(t *testing.T) {
 
 		t.Run("result fallback excludes child output", func(t *testing.T) {
 			t.Parallel()
-			parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
-			child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+			parent := logv3.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+			child := logv3.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
 			for _, messages := range [][]agent.Message{
 				{&agent.TextMessage{Text: "Parent answer", Source: parent}, &agent.ToolUseMessage{Source: child, ToolUseID: "child-tool"}, &agent.ToolResultMessage{Source: child, ToolUseID: "child-tool"}, &agent.ThinkingDeltaMessage{Text: "child reasoning", Source: child}, &agent.TextMessage{Text: "Child answer", Source: child}},
 				{&agent.TextDeltaMessage{Text: "Parent ", Source: parent}, &agent.TextDeltaMessage{Text: "Child answer", Source: child}, &agent.TextDeltaMessage{Text: "answer", Source: parent}},
@@ -701,7 +701,7 @@ func TestToolTimingTracker(t *testing.T) {
 
 		t.Run("empty scoped completions remain observable", func(t *testing.T) {
 			t.Parallel()
-			source := agent.MessageSource{ThreadID: "parent", TurnID: "turn", ItemID: "item"}
+			source := logv3.MessageSource{ThreadID: "parent", TurnID: "turn", ItemID: "item"}
 			for _, msg := range []agent.Message{
 				&agent.TextMessage{Source: source},
 				&agent.ThinkingMessage{Source: source},
@@ -711,7 +711,7 @@ func TestToolTimingTracker(t *testing.T) {
 					t.Errorf("%T completion = %+v", msg, events)
 				}
 			}
-			for _, partial := range []agent.MessageSource{
+			for _, partial := range []logv3.MessageSource{
 				{},
 				{RootThreadID: "root"},
 				{ThreadID: "parent"},
@@ -902,7 +902,7 @@ func TestToolTimingTracker(t *testing.T) {
 		t.Run("root exit interrupts open tool calls", func(t *testing.T) {
 			t.Parallel()
 			tracker := NewToolTimingTracker("", harness.Claude, "", nil)
-			child := agent.MessageSource{DelegationToolUseID: "agent-tool"}
+			child := logv3.MessageSource{DelegationToolUseID: "agent-tool"}
 			start := time.Unix(1, 0)
 			tracker.ConvertMessage(2, 0, &agent.ToolUseMessage{Source: child, ToolUseID: "child-tool", Name: "Read"}, start.Add(time.Second))
 			tracker.ConvertMessage(2, 0, &agent.ToolUseMessage{ToolUseID: "root-tool", Name: "Bash"}, start)

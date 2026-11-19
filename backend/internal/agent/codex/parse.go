@@ -84,13 +84,13 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 				IsError:     true,
 				Result:      errMsg,
 				DurationMs:  durationMs,
-			}}, decodedItem{turnCompleted: &p, source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
+			}}, decodedItem{turnCompleted: &p, source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
 		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
 				DurationMs:  durationMs,
-			}}, decodedItem{turnCompleted: &p, source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
+			}}, decodedItem{turnCompleted: &p, source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
 		}
 
 	case codex.MethodItemStarted, codex.MethodItemCompleted:
@@ -116,7 +116,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if sourceErr != nil {
 			return nil, decodedItem{}, fmt.Errorf("%s item id: %w", msg.Method, sourceErr)
 		}
-		source := agent.MessageSource{ThreadID: threadID, TurnID: turnID, ItemID: itemID}
+		source := v3.MessageSource{ThreadID: threadID, TurnID: turnID, ItemID: itemID}
 		for _, m := range msgs {
 			*m.Provenance() = source
 		}
@@ -135,7 +135,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("item/agentMessage/delta params: %w", err)
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta, Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta, Source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
 
 	case codex.MethodErrorNotification:
 		var p codex.ErrorNotification
@@ -146,7 +146,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			return nil, decodedItem{}, nil
 		}
 		return []agent.Message{&agent.ResultMessage{
-			Source:      agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
+			Source:      v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
 			MessageType: "result",
 			Subtype:     "result",
 			IsError:     true,
@@ -172,35 +172,35 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta, Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
+		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta, Source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
 
 	case codex.MethodCommandOutputDelta:
 		var p codex.CommandExecutionOutputDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("commandExecution/outputDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Delta}}, decodedItem{}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Delta}}, decodedItem{}, nil
 
 	case codex.MethodMcpToolCallProgress:
 		var p codex.McpToolCallProgressNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("mcpToolCall/progress params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Message}}, decodedItem{}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Message}}, decodedItem{}, nil
 
 	case codex.MethodThreadStatusChanged:
 		var p codex.ThreadStatusChangedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("thread/status/changed params: %w", err)
 		}
-		item := decodedItem{statusChanged: &p, source: agent.MessageSource{ThreadID: p.ThreadID}}
+		item := decodedItem{statusChanged: &p, source: v3.MessageSource{ThreadID: p.ThreadID}}
 		// Task state and native subagent cards already track activity; only a
 		// system error carries information the transcript lacks.
 		if p.Status.Type != codex.ThreadStatusTypeSystemError {
 			return nil, item, nil
 		}
 		return []agent.Message{&agent.SystemMessage{
-			Source:      agent.MessageSource{ThreadID: p.ThreadID},
+			Source:      v3.MessageSource{ThreadID: p.ThreadID},
 			MessageType: "system",
 			Subtype:     agent.SystemSubtypeError,
 			Detail:      "Codex thread entered a system error state",
@@ -216,7 +216,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			detail += " (" + string(p.Reason) + ")"
 		}
 		return []agent.Message{&agent.SystemMessage{
-			Source:        agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
+			Source:        v3.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
 			MessageType:   "system",
 			Subtype:       agent.SystemSubtypeModelRerouted,
 			Detail:        detail,

@@ -1,5 +1,5 @@
-// Package audit defines the persisted OAuth and MCP audit event schema.
-package audit
+// Package v1 defines version 1 of the persisted OAuth and MCP audit event schema.
+package v1
 
 import "time"
 

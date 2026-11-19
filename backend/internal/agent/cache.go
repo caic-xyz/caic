@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent/data/harnesscache"
+	harnesscachev1 "github.com/caic-xyz/caic/backend/internal/agent/data/harnesscache/v1"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -49,7 +49,7 @@ func OpenHarnessCache(path string) *HarnessCache {
 		}
 		return c
 	}
-	var disk map[string]*harnesscache.Entry
+	var disk map[string]*harnesscachev1.Entry
 	if err := json.Unmarshal(raw, &disk); err != nil {
 		slog.Warn("discarding malformed harness cache", "path", path, "err", err)
 		return c
@@ -123,13 +123,13 @@ func APIKeyHash(envVars []string) string {
 }
 
 func (c *HarnessCache) flush() {
-	disk := make(map[string]*harnesscache.Entry, len(c.data))
+	disk := make(map[string]*harnesscachev1.Entry, len(c.data))
 	for k, e := range c.data {
 		if e == nil {
 			disk[string(k)] = nil
 			continue
 		}
-		disk[string(k)] = &harnesscache.Entry{Inventory: inventoryToData(e.Inventory), Updated: e.Updated, EnvHash: e.EnvHash}
+		disk[string(k)] = &harnesscachev1.Entry{Inventory: inventoryToData(e.Inventory), Updated: e.Updated, EnvHash: e.EnvHash}
 	}
 	data, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
@@ -153,7 +153,7 @@ func CachedModelInventory(cacheDir string, h harness.Name, envVars []string) Mod
 	return inventory
 }
 
-func inventoryFromData(i harnesscache.ModelInventory) ModelInventory {
+func inventoryFromData(i harnesscachev1.ModelInventory) ModelInventory {
 	var models []Model
 	if i.Models != nil {
 		models = make([]Model, len(i.Models))
@@ -164,13 +164,13 @@ func inventoryFromData(i harnesscache.ModelInventory) ModelInventory {
 	return ModelInventory{Models: models}
 }
 
-func inventoryToData(i ModelInventory) harnesscache.ModelInventory {
-	var models []harnesscache.Model
+func inventoryToData(i ModelInventory) harnesscachev1.ModelInventory {
+	var models []harnesscachev1.Model
 	if i.Models != nil {
-		models = make([]harnesscache.Model, len(i.Models))
+		models = make([]harnesscachev1.Model, len(i.Models))
 	}
 	for n, m := range i.Models {
-		models[n] = harnesscache.Model{ID: m.ID, EffortOptions: m.EffortOptions, ContextWindow: m.ContextWindow}
+		models[n] = harnesscachev1.Model{ID: m.ID, EffortOptions: m.EffortOptions, ContextWindow: m.ContextWindow}
 	}
-	return harnesscache.ModelInventory{Models: models}
+	return harnesscachev1.ModelInventory{Models: models}
 }

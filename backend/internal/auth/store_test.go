@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,18 @@ func TestStore(t *testing.T) {
 			}
 			if info.Mode().Perm() != 0o600 {
 				t.Fatalf("permissions = %v", info.Mode().Perm())
+			}
+		})
+		t.Run("unsupported version", func(t *testing.T) {
+			t.Parallel()
+			for _, fixture := range []string{`{"users":[]}`, `{"version":2,"users":[]}`} {
+				p := filepath.Join(t.TempDir(), "users.json")
+				if err := os.WriteFile(p, []byte(fixture), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := Open(p); err == nil || !strings.Contains(err.Error(), "unsupported users version") {
+					t.Fatalf("Open(%s) error = %v, want unsupported users version", fixture, err)
+				}
 			}
 		})
 		t.Run("empty", func(t *testing.T) {

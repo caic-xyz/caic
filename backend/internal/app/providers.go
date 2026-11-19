@@ -18,7 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 )
@@ -35,7 +35,7 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 // estimateUsageRowCost selects today's API-equivalent model price for a
 // historical row. Reported costs never need it: this fills rows written before
 // live pricing covered their harness.
-func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.Time) (float64, bool) {
+func estimateUsageRowCost(pricer usage.ModelPricer, row *usagedbv1.UsageRow, at time.Time) (float64, bool) {
 	price, ok := pricer.ModelPrice(row.Model, at)
 	if !ok {
 		return 0, false

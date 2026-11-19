@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
@@ -191,8 +193,8 @@ func TestSkillReadTracker(t *testing.T) {
 	t.Run("child completion and parent turn boundary", func(t *testing.T) {
 		t.Parallel()
 		var tracker agent.SkillReadTracker
-		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn"}
-		child := agent.MessageSource{ThreadID: "child", DelegationToolUseID: "delegate"}
+		parent := taskslogv3.MessageSource{ThreadID: "root", TurnID: "turn"}
+		child := taskslogv3.MessageSource{ThreadID: "child", DelegationToolUseID: "delegate"}
 		read := &agent.SkillReadMessage{Source: child, Skill: "review", Inferred: true, SourceToolUseID: "same"}
 		tracker.Confirm(read)
 		tracker.Confirm(&agent.ResultMessage{Source: parent})

@@ -1075,7 +1075,7 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 	if toolUseID == "" {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "toolUseID required"}
 	}
-	source := agent.MessageSource{AgentID: scope.AgentID, DelegationToolUseID: scope.DelegationToolUseID, ThreadID: scope.ThreadID, TurnID: scope.TurnID}
+	source := logv3.MessageSource{AgentID: scope.AgentID, DelegationToolUseID: scope.DelegationToolUseID, ThreadID: scope.ThreadID, TurnID: scope.TurnID}
 	toolUse, err := s.taskMgr.ToolInput(ctx, entry, &taskmgr.ToolInputQuery{ToolUseID: toolUseID, Source: source})
 	switch {
 	case errors.Is(err, taskmgr.ErrToolUseAmbiguous):

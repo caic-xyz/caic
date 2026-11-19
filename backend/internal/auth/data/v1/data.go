@@ -1,7 +1,10 @@
-// Package v1 defines version 1 of the persisted users schema.
+// Package v1 defines version 1 of the persisted users and host sessions schemas.
 package v1
 
 import "time"
+
+// Version is the version field value of every file in this schema.
+const Version = 1
 
 // Provider identifies the stored login identity provider.
 type Provider string

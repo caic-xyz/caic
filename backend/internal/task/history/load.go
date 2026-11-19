@@ -25,7 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 )
 
 const maxParallelLogHeaderLoads = 8
@@ -302,7 +302,7 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedM
 // Quota snapshots require live state and remain absent. Task-ID-less logs yield
 // no rows. A non-nil error
 // is yielded at most once and terminates the sequence.
-func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[data.UsageRow, error] {
+func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[usagedbv1.UsageRow, error] {
 	return taskUsageRows(lt, ctx)
 }
 

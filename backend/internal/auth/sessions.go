@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	v1 "github.com/caic-xyz/caic/backend/internal/auth/data/v1"
 )
 
 // SessionInfo describes the device that receives a normal host session.
@@ -20,19 +22,14 @@ type SessionInfo struct {
 
 // Session is a persisted host login, independent of MCP authorization grants.
 type Session struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"userID"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	Source    string    `json:"source"`
-	IP        string    `json:"ip"`
-	UserAgent string    `json:"userAgent"`
-	TokenHash [32]byte  `json:"tokenHash"`
-}
-
-type sessionsFile struct {
-	Version  int       `json:"version"`
-	Sessions []Session `json:"sessions"`
+	ID        string
+	UserID    string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	Source    string
+	IP        string
+	UserAgent string
+	TokenHash [32]byte
 }
 
 func loadSessions(path string) (out []Session, retErr error) {
@@ -44,14 +41,19 @@ func loadSessions(path string) (out []Session, retErr error) {
 		return nil, fmt.Errorf("open sessions: %w", err)
 	}
 	defer func() { retErr = errors.Join(retErr, f.Close()) }()
-	var data sessionsFile
+	var data v1.SessionsFile
 	if err := json.NewDecoder(f).Decode(&data); err != nil {
 		return nil, fmt.Errorf("read sessions: %w", err)
 	}
-	if data.Version != 1 {
-		return nil, errors.New("unsupported sessions version")
+	if data.Version != v1.Version {
+		return nil, fmt.Errorf("unsupported sessions version %d", data.Version)
 	}
-	return data.Sessions, nil
+	out = make([]Session, len(data.Sessions))
+	for i := range data.Sessions {
+		r := &data.Sessions[i]
+		out[i] = Session{ID: r.ID, UserID: r.UserID, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
+	}
+	return out, nil
 }
 
 func saveSessions(path string, sessions []Session) error {
@@ -61,7 +63,12 @@ func saveSessions(path string, sessions []Session) error {
 	}
 	name := f.Name()
 	defer func() { _ = os.Remove(name) }()
-	err = json.NewEncoder(f).Encode(sessionsFile{Version: 1, Sessions: sessions})
+	records := make([]v1.Session, len(sessions))
+	for i := range sessions {
+		r := &sessions[i]
+		records[i] = v1.Session{ID: r.ID, UserID: r.UserID, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, Source: r.Source, IP: r.IP, UserAgent: r.UserAgent, TokenHash: r.TokenHash}
+	}
+	err = json.NewEncoder(f).Encode(v1.SessionsFile{Version: v1.Version, Sessions: records})
 	if err == nil {
 		err = f.Sync()
 	}

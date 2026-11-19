@@ -1,5 +1,5 @@
-// Package data defines caic's ACP extension metadata.
-package data
+// Package v1 defines version 1 of caic's ACP extension metadata.
+package v1
 
 // PromptImageMeta is the _meta of a resource_link prompt block that references
 // a caic prompt image by path. It keeps the image in the recorded native input;

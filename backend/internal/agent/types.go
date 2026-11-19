@@ -98,7 +98,7 @@ func (*MCPRequestMessage) Type() string { return messageTypeMCPRequest }
 // Message is the interface for all agent streaming messages.
 type Message interface {
 	// Provenance returns the message-owned source. Zero denotes global or unknown origin.
-	Provenance() *MessageSource
+	Provenance() *v3.MessageSource
 	// Type returns the message type string.
 	Type() string
 }
@@ -148,7 +148,7 @@ func NativeDuration(message Message) (time.Duration, bool) {
 // Its JSON encoding is persisted in task logs. Keep JSON field names and their
 // meanings backward-compatible with logs written by released binaries.
 type InitMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	SessionID             string   `json:"session_id"`
 	Cwd                   string   `json:"cwd"`
@@ -166,7 +166,7 @@ func (m *InitMessage) Type() string { return "init" }
 // a session. Its known values replace prior reports; omitted values are retained.
 // Native records persist the report, so this runtime event has no owned log encoding.
 type SessionMetadataMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 	SessionMetadata
 }
 
@@ -213,12 +213,6 @@ type TextMessage v3.TextMessage
 // Type implements Message.
 func (m *TextMessage) Type() string { return messageTypeText }
 
-// MessageSource is the v3 persisted provenance shared by semantic stream messages.
-type MessageSource = v3.MessageSource
-
-// MessageProvenance is the shared serialized origin carrier embedded by all messages.
-type MessageProvenance = v3.MessageProvenance
-
 // ToolKey identifies one provider tool invocation across agents and turns.
 // Delegation and native thread identities take precedence over a canonical
 // agent identity so late card correlation cannot change an existing key.
@@ -232,7 +226,7 @@ type ToolKey struct {
 
 // ToolKeyForSource identifies a tool referenced by an event source without changing its
 // provider-reported ID. ItemID identifies the referencing event, not the tool.
-func ToolKeyForSource(s *MessageSource, id string) ToolKey {
+func ToolKeyForSource(s *v3.MessageSource, id string) ToolKey {
 	k := ToolKey{ThreadID: s.ThreadID, DelegationToolUseID: s.DelegationToolUseID, TurnID: s.TurnID, ToolUseID: id}
 	if k.ThreadID == "" && k.DelegationToolUseID == "" {
 		k.AgentID = s.AgentID
@@ -261,7 +255,7 @@ func (k *ToolKey) String() string {
 // ToolUseMessage is emitted when the agent invokes a tool (except
 // AskUserQuestion and TodoWrite which have their own types).
 type ToolUseMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string          `json:"id"`
 	Name      string          `json:"name"`
@@ -285,7 +279,7 @@ func (m *ToolUseMessage) Type() string { return "tool_use" }
 // field names and their meanings backward-compatible with logs written by
 // released binaries.
 type SkillReadMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	// ToolUseID identifies reported skill machinery hidden from presentation.
 	// This read precedes any generic tool messages retained for that invocation.
@@ -319,7 +313,7 @@ func (m *SkillReadMessage) Type() string { return "skill_read" }
 // field names and their meanings backward-compatible with logs written by
 // released binaries.
 type SkillLoadMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Skill string `json:"skill"`
 	// Path is the loaded SKILL.md in the task runtime, or empty when the
@@ -425,7 +419,7 @@ func writePatchLines(b *strings.Builder, prefix byte, text string) {
 // AskMessage is emitted when the agent asks the user a question via the
 // AskUserQuestion tool.
 type AskMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string           `json:"id"`
 	Questions []v3.AskQuestion `json:"questions"`
@@ -459,7 +453,7 @@ func ClonePendingUserAction(a v3.PendingUserAction) v3.PendingUserAction {
 // TodoMessage is emitted when the agent updates its todo list via the
 // TodoWrite tool.
 type TodoMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string     `json:"id"`
 	Todos     []TodoItem `json:"todos"`
@@ -476,7 +470,7 @@ func (m *UserInputMessage) Type() string { return messageTypeUserInput }
 
 // ToolResultMessage is emitted when a tool returns its result.
 type ToolResultMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID  string `json:"tool_use_id"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
@@ -493,7 +487,7 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 
 // UsageMessage reports token consumption, context occupancy, and per-call or cumulative harness costs.
 type UsageMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Usage         Usage  `json:"usage"`
 	ReportedModel string `json:"model,omitempty"`
@@ -625,7 +619,7 @@ func (m *TurnCommitSnapshotMessage) Type() string { return messageTypeTurnCommit
 
 // ResultMessage is the terminal message for a query.
 type ResultMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	MessageType string `json:"type"`
 	Subtype     string `json:"subtype"`
@@ -669,7 +663,7 @@ func (m *ResultMessage) NativeDuration() (time.Duration, bool) {
 // --include-partial-messages is enabled. Extracted from the nested wire
 // format (stream_event → content_block_delta → text_delta) during parsing.
 type TextDeltaMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Text string
 }
@@ -679,7 +673,7 @@ func (m *TextDeltaMessage) Type() string { return "text_delta" }
 
 // ThinkingMessage is emitted when the agent produces a thinking block.
 type ThinkingMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Text string `json:"text"`
 }
@@ -689,7 +683,7 @@ func (m *ThinkingMessage) Type() string { return "thinking" }
 
 // ThinkingDeltaMessage is a streaming thinking fragment.
 type ThinkingDeltaMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Text string
 }
@@ -701,7 +695,7 @@ func (m *ThinkingDeltaMessage) Type() string { return "thinking_delta" }
 // Codex only: emitted via item/commandExecution/outputDelta (Bash stdout) and
 // item/mcpToolCall/progress (MCP tool progress messages).
 type ToolOutputDeltaMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string
 	Delta     string
@@ -780,7 +774,7 @@ type NativeSubagent struct {
 // It is harness activity within the parent session, not an independently
 // runnable session.
 type NativeSubagentMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Subagent NativeSubagent `json:"subagent"`
 }
@@ -851,7 +845,7 @@ type BackgroundCommand struct {
 // update. A running command that wakes the agent keeps its task running after
 // the turn ends; a watch or a command that does not wake the agent does not.
 type BackgroundCommandMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Command BackgroundCommand `json:"command"`
 }
@@ -866,7 +860,7 @@ func (m *BackgroundCommandMessage) Type() string { return "background_command" }
 // task while the turn is pending. It is derived from native records and is not
 // part of the transcript.
 type TurnQueuedMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 }
 
 // Type implements Message.
@@ -876,7 +870,7 @@ func (m *TurnQueuedMessage) Type() string { return "turn_queued" }
 // command whose outcome the harness will not report. The card ends as unknown, as on host exit. It is derived from
 // native records and is not part of the transcript.
 type BackgroundRetiredMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	// ID is the card's NativeSubagent.ID or BackgroundCommand.ID.
 	ID string `json:"id"`
@@ -903,7 +897,7 @@ var WidgetToolNames = map[string]struct{}{
 // via a tool call (e.g. Claude's show_widget). The HTML is the complete,
 // renderable widget code.
 type WidgetMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string `json:"id"`
 	Title     string `json:"title"`
@@ -942,7 +936,7 @@ type widgetInput struct {
 // agent generates the widget code. Clients accumulate deltas for progressive
 // rendering; the final WidgetMessage replaces them.
 type WidgetDeltaMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	ToolUseID string
 	Delta     string // Partial HTML fragment.
@@ -1107,7 +1101,7 @@ const (
 
 // RateLimitMessage is emitted when the CLI reports a rate limit status change.
 type RateLimitMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	Status          RateLimitStatus `json:"status"`            // "allowed", "allowed_warning", "rejected".
 	ResetsAt        time.Time       `json:"resets_at"`         // When the quota window resets; zero if unknown.
@@ -1133,7 +1127,7 @@ func (m *RateLimitMessage) IsChildThreadGoal() bool {
 // RawMessage is a pass-through for message types we don't need to inspect
 // (tool_progress, etc.).
 type RawMessage struct {
-	MessageProvenance
+	v3.MessageProvenance
 
 	MessageType string
 	Raw         []byte

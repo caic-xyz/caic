@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	usagedbv1 "github.com/caic-xyz/caic/backend/internal/usagedb/data/v1"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 )
@@ -84,23 +84,23 @@ func TestEstimateUsageRowCost(t *testing.T) {
 		name    string
 		harness string
 		model   string
-		tokens  data.TokenBuckets
+		tokens  usagedbv1.TokenBuckets
 		want    float64
 		priced  bool
 	}{
-		{"Claude unprefixed and one-hour cache", "claude", "claude-opus-5-5", data.TokenBuckets{Input: 1_000_000, CacheWrite1h: 1_000_000, Output: 1_000_000}, 32, true},
-		{"Codex unprefixed", "codex", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.2, true},
-		{"OpenCode prefixed", "opencode", "openai/gpt-6-luna", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 0.6, true},
-		{"Pi prefixed", "pi", "anthropic/claude-opus-5-5", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
-		{"Antigravity Gemini", "antigravity", "gemini-3.8-flash-high", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 4.5, true},
-		{"Antigravity Claude", "antigravity", "claude-opus-5-5-low", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
-		{"Antigravity open weight", "antigravity", "gpt-oss-120b-medium", data.TokenBuckets{Input: 1_000_000}, 0, false},
-		{"unregistered harness", "new", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000}, 2, true},
-		{"unknown model", "codex", "unpriced", data.TokenBuckets{Input: 1_000_000}, 0, false},
+		{"Claude unprefixed and one-hour cache", "claude", "claude-opus-5-5", usagedbv1.TokenBuckets{Input: 1_000_000, CacheWrite1h: 1_000_000, Output: 1_000_000}, 32, true},
+		{"Codex unprefixed", "codex", "gpt-6-sol", usagedbv1.TokenBuckets{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.2, true},
+		{"OpenCode prefixed", "opencode", "openai/gpt-6-luna", usagedbv1.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 0.6, true},
+		{"Pi prefixed", "pi", "anthropic/claude-opus-5-5", usagedbv1.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
+		{"Antigravity Gemini", "antigravity", "gemini-3.8-flash-high", usagedbv1.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 4.5, true},
+		{"Antigravity Claude", "antigravity", "claude-opus-5-5-low", usagedbv1.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
+		{"Antigravity open weight", "antigravity", "gpt-oss-120b-medium", usagedbv1.TokenBuckets{Input: 1_000_000}, 0, false},
+		{"unregistered harness", "new", "gpt-6-sol", usagedbv1.TokenBuckets{Input: 1_000_000}, 2, true},
+		{"unknown model", "codex", "unpriced", usagedbv1.TokenBuckets{Input: 1_000_000}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			row := data.UsageRow{Harness: tc.harness, Model: tc.model, TokenBuckets: tc.tokens}
+			row := usagedbv1.UsageRow{Harness: tc.harness, Model: tc.model, TokenBuckets: tc.tokens}
 			got, ok := estimateUsageRowCost(pricer, &row, at)
 			if ok != tc.priced || math.Abs(got-tc.want) > 1e-9 {
 				t.Errorf("estimated cost = %v/%v, want %v/%v", got, ok, tc.want, tc.priced)

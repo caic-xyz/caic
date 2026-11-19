@@ -145,7 +145,7 @@ type decodedLine struct {
 	reasoningEstimate int                                 // Nonnegative thinking-token estimate from a system record.
 	system            *claudecode.OutputSystemMsg         // Set for a task lifecycle record or a background-task snapshot.
 	user              *claudecode.OutputUserMsg           // Set for a decoded user record.
-	source            agent.MessageSource                 // Actual session and delegating tool metadata of this record.
+	source            v3.MessageSource                    // Actual session and delegating tool metadata of this record.
 	askControl        bool                                // Native Ask controls match actual Ask ownership before session fallback.
 	controlAgentID    string                              // Agent named by a can_use_tool request, when reported.
 	controlRequest    *claudecode.OutputControlRequestMsg // Request identity is bound after resolving control ownership.
@@ -156,7 +156,7 @@ type decodedLine struct {
 // parseRecordHeader reads dispatch and ownership together so streamed fragments
 // do not repeatedly scan the same envelope for optional metadata. First fields,
 // nulls, escaping and UTF-8 replacement match agent.JSONString semantics.
-func parseRecordHeader(line []byte) (typ string, source agent.MessageSource, err error) {
+func parseRecordHeader(line []byte) (typ string, source v3.MessageSource, err error) {
 	var seen uint8
 	err = jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
 		var target *string

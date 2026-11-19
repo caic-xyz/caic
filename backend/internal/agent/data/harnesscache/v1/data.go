@@ -1,5 +1,5 @@
-// Package harnesscache defines the on-disk per-harness model inventory cache.
-package harnesscache
+// Package v1 defines version 1 of the on-disk per-harness model inventory cache.
+package v1
 
 import "time"
 

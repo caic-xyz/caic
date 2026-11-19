@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	agydata "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data"
+	antigravityv1 "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -263,7 +263,7 @@ type wireFormat struct {
 // naming its AttachmentPath; the agent opens that file with its read tool.
 // The block also carries the image so history keeps it.
 func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
-	var blocks []agydata.ContentBlock
+	var blocks []antigravityv1.ContentBlock
 	if p.Text != "" {
 		blocks = append(blocks, textBlock(p.Text))
 	}
@@ -273,15 +273,15 @@ func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 			return nil, err
 		}
 		b := textBlock("\nAttached image: " + path)
-		b.CaicImage = &agydata.Image{MediaType: img.MediaType, Data: img.Data}
+		b.CaicImage = &antigravityv1.Image{MediaType: img.MediaType, Data: img.Data}
 		blocks = append(blocks, b)
 	}
 	if len(blocks) == 0 {
 		blocks = append(blocks, textBlock(""))
 	}
-	line, err := json.Marshal(agydata.InputMessage{
+	line, err := json.Marshal(antigravityv1.InputMessage{
 		Event:   string(antigravity.EventUser),
-		Message: agydata.InputUserMessage{Content: blocks},
+		Message: antigravityv1.InputUserMessage{Content: blocks},
 	})
 	if err != nil {
 		return nil, err
@@ -289,14 +289,14 @@ func (*wireFormat) EncodePrompt(p agent.Prompt) ([]byte, error) {
 	return append(line, '\n'), nil
 }
 
-func textBlock(text string) agydata.ContentBlock {
-	return agydata.ContentBlock{Type: "text", Text: text}
+func textBlock(text string) antigravityv1.ContentBlock {
+	return antigravityv1.ContentBlock{Type: "text", Text: text}
 }
 
 // ParseInput decodes client prompts without updating output conversation state.
 // Records written before path attachments carry each image as a text data URL.
 func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
-	var ev agydata.InputMessage
+	var ev antigravityv1.InputMessage
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("antigravity input: %w", err)
 	}

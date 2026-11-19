@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	taskslogv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
@@ -17,7 +19,7 @@ func TestTurnMetrics(t *testing.T) {
 		t.Run("ContextReplacement", func(t *testing.T) {
 			t.Parallel()
 			childClear := agent.ContextCleared()
-			childClear.Source = agent.MessageSource{DelegationToolUseID: "child"}
+			childClear.Source = taskslogv3.MessageSource{DelegationToolUseID: "child"}
 			for _, tc := range []struct {
 				name     string
 				boundary agent.Message
@@ -58,7 +60,7 @@ func TestTurnMetrics(t *testing.T) {
 				{"reported", &agent.SkillReadMessage{Skill: "review", ToolUseID: "skill"}, false, 2 * time.Second},
 				{"inferred with owning tool", &agent.SkillReadMessage{Skill: "review", Inferred: true, SourceToolUseID: "read"}, true, 2 * time.Second},
 				{"inferred alone", &agent.SkillReadMessage{Skill: "review", Inferred: true}, false, 0},
-				{"child reported", &agent.SkillReadMessage{Source: agent.MessageSource{DelegationToolUseID: "child"}, Skill: "review", ToolUseID: "skill"}, false, 0},
+				{"child reported", &agent.SkillReadMessage{Source: taskslogv3.MessageSource{DelegationToolUseID: "child"}, Skill: "review", ToolUseID: "skill"}, false, 0},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()

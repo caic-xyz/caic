@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	voiceapi "github.com/gomodedev/gomode/voicegateway/api"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
@@ -429,8 +431,8 @@ func (r *Router) buildAPIHandler() http.Handler {
 	// disabled gateway has no routes here.
 	if r.voiceBridge != nil {
 		gateway := voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge)
-		for _, version := range []string{"v1", "v2"} {
-			mountPrefix(apiMux, "", "/api/voicegateway/"+version, gateway)
+		for _, version := range voiceapi.ProtocolVersions() {
+			mountPrefix(apiMux, "", "/api/voicegateway/"+version.String(), gateway)
 		}
 	}
 	apiMux.Handle("/api/", http.NotFoundHandler())

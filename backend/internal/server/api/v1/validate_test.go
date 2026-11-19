@@ -16,7 +16,7 @@ func TestValidate(t *testing.T) {
 	t.Parallel()
 	t.Run("EmptyReq", func(t *testing.T) {
 		t.Parallel()
-		var r EmptyReq
+		var r api.EmptyReq
 		if err := r.Validate(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
