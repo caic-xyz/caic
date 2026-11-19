@@ -227,6 +227,25 @@ a.featureIconBadge:focus-visible {
   vertical-align: -0.125em;
 }
 
+.background {
+  display: inline-flex;
+  gap: 0.4em;
+  align-items: center;
+  vertical-align: bottom;
+}
+
+.backgroundCount {
+  display: inline-flex;
+  gap: 0.1em;
+  align-items: center;
+}
+
+.backgroundIcon {
+  width: 1.1em;
+  height: 1.1em;
+  fill: currentcolor;
+}
+
 .tokens {
   --tokens-color: inherit;
 

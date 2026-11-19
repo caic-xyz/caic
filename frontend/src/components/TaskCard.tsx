@@ -1,8 +1,8 @@
-// Compact sidebar task card with background-work counts, container resource levels, and per-repository Git markers.
+// Compact sidebar task card with container resource levels, background-work counts beside context usage, and per-repository Git markers.
 
-import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
-import type { Accessor } from "solid-js";
-import { Portal } from "solid-js/web";
+import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup } from "solid-js";
+import type { Accessor, Component, JSX } from "solid-js";
+import { Dynamic, Portal } from "solid-js/web";
 import { A } from "@solidjs/router";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
@@ -11,6 +11,9 @@ import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?soli
 import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
+import AgentIcon from "@material-symbols/svg-400/outlined/smart_toy.svg?solid";
+import CommandIcon from "@material-symbols/svg-400/outlined/terminal.svg?solid";
+import WatchIcon from "@material-symbols/svg-400/outlined/visibility.svg?solid";
 
 import type {
   DiffStat,
@@ -35,12 +38,18 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
-import { backgroundSummary } from "../backgroundActivity";
+import { backgroundCounts, backgroundLabel, type BackgroundKind } from "../backgroundActivity";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
 import type { HostPressure } from "../resourceLevel";
 import { api } from "../api";
+
+const backgroundIcons: Record<BackgroundKind, Component<JSX.SvgSVGAttributes<SVGSVGElement>>> = {
+  agent: AgentIcon,
+  command: CommandIcon,
+  watch: WatchIcon,
+};
 
 export interface TaskCardProps {
   id: string;
@@ -152,6 +161,7 @@ export default function TaskCard(props: TaskCardProps) {
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
+  const background = createMemo(() => backgroundCounts(props.background));
   const contextUsed = () => props.contextUsed ?? props.activeInputTokens + props.activeCacheReadTokens;
   const hasRepositoryRuntime = () => Boolean(props.runtime?.id) && props.state !== "purged";
   let cardRef: HTMLDivElement | undefined;
@@ -540,15 +550,7 @@ export default function TaskCard(props: TaskCardProps) {
           );
         })()}
 
-        <Show when={backgroundSummary(props.background)}>
-          {(text) => (
-            <div class={styles.meta} data-testid="task-card-background">
-              {text()}
-            </div>
-          )}
-        </Show>
-
-        {/* Line 3: harness · model · effort · tokens */}
+        {/* Line 3: harness · model · effort · tokens · background */}
         <Show when={props.harness || props.model}>
           <div class={styles.metaRow}>
             <span class={styles.meta}>
@@ -604,6 +606,30 @@ export default function TaskCard(props: TaskCardProps) {
                     <Show when={props.autoCompactTokenLimit || props.contextWindowLimit}>
                       /{formatTokens(props.autoCompactTokenLimit || props.contextWindowLimit)}
                     </Show>
+                  </span>
+                </Tooltip>
+              </Show>
+              <Show when={background().length > 0}>
+                {" · "}
+                <Tooltip text={backgroundLabel(background())} stopActivationPropagation>
+                  <span
+                    class={styles.background}
+                    data-testid="task-card-background"
+                    role="img"
+                    aria-label={backgroundLabel(background())}
+                  >
+                    <For each={background()}>
+                      {(c) => (
+                        <span class={styles.backgroundCount}>
+                          {c.count}
+                          <Dynamic
+                            component={backgroundIcons[c.kind]}
+                            class={styles.backgroundIcon}
+                            aria-hidden="true"
+                          />
+                        </span>
+                      )}
+                    </For>
                   </span>
                 </Tooltip>
               </Show>

@@ -27,8 +27,8 @@ for (const width of [390, 1280]) {
     const chips = strip.getByTestId("background-chip");
     const prompt = page.getByTestId("task-detail-prompt");
 
-    // The card row comes from the task's counts and the strip from history
-    // metadata; each state checks both against the API, before and after a reload.
+    // The card counts come from the task and the strip from history metadata;
+    // each state checks both against the API, before and after a reload.
     const checkState = async (
       name: string,
       expected: TaskBackground | null,
@@ -42,9 +42,13 @@ for (const width of [390, 1280]) {
           await expect(card).toBeVisible();
           if (text === null) await expect(row).toHaveCount(0);
           else {
-            await expect(row).toHaveText(text);
+            await expect(row).toHaveAccessibleName(text);
             await expect(card).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-            expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+            // The counts share the model line and must stay inside the card.
+            const rowBox = await row.boundingBox();
+            const cardBox = await card.boundingBox();
+            ok(rowBox && cardBox);
+            expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
           }
           if (mobile) {
             if (!reload) await page.screenshot({ path: testInfo.outputPath(`background-${name}-card-${width}.png`) });

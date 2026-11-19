@@ -3,19 +3,31 @@
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import type { HistoryActivity, HistoryBackgroundCommand, ISOTimestamp } from "@sdk/types.gen";
-import { activeBackgroundItems, backgroundSummary, commandSettled } from "./backgroundActivity";
+import { activeBackgroundItems, backgroundCounts, backgroundLabel, commandSettled } from "./backgroundActivity";
 import { toolIdentity } from "./grouping";
 
-describe("backgroundSummary", () => {
-  it("lists non-zero counts as command, agent, then watch with correct plurals", () => {
-    expect(backgroundSummary({ commands: 1, watches: 1, agents: 1 })).toBe("Background: 1 command · 1 agent · 1 watch");
-    expect(backgroundSummary({ commands: 2, watches: 3, agents: 0 })).toBe("Background: 2 commands · 3 watches");
-    expect(backgroundSummary({ commands: 0, watches: 0, agents: 2 })).toBe("Background: 2 agents");
+describe("backgroundCounts", () => {
+  it("lists non-zero counts as command, agent, then watch", () => {
+    expect(backgroundCounts({ commands: 2, watches: 3, agents: 0 })).toEqual([
+      { kind: "command", count: 2 },
+      { kind: "watch", count: 3 },
+    ]);
   });
 
-  it("returns null without running work", () => {
-    expect(backgroundSummary(undefined)).toBeNull();
-    expect(backgroundSummary({ commands: 0, watches: 0, agents: 0 })).toBeNull();
+  it("lists nothing without running work", () => {
+    expect(backgroundCounts(undefined)).toEqual([]);
+    expect(backgroundCounts({ commands: 0, watches: 0, agents: 0 })).toEqual([]);
+  });
+});
+
+describe("backgroundLabel", () => {
+  it("names each count with correct plurals", () => {
+    expect(backgroundLabel(backgroundCounts({ commands: 1, watches: 1, agents: 1 }))).toBe(
+      "Background: 1 command · 1 agent · 1 watch",
+    );
+    expect(backgroundLabel(backgroundCounts({ commands: 2, watches: 3, agents: 2 }))).toBe(
+      "Background: 2 commands · 2 agents · 3 watches",
+    );
   });
 });
 

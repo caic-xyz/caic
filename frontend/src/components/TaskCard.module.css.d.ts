@@ -3,6 +3,9 @@ declare const classes: {
   readonly "asking": string;
   readonly "asking-blink": string;
   readonly "autoBadge": string;
+  readonly "background": string;
+  readonly "backgroundCount": string;
+  readonly "backgroundIcon": string;
   readonly "badge": string;
   readonly "card": string;
   readonly "contextMenu": string;

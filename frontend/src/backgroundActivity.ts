@@ -34,15 +34,26 @@ function count(n: number, noun: string): string {
   return `${n} ${noun}${noun.endsWith("h") ? "es" : "s"}`;
 }
 
-// backgroundSummary is the task card row, or null when no background work runs.
-export function backgroundSummary(background: TaskBackground | undefined): string | null {
-  if (!background) return null;
-  const parts = [
-    background.commands > 0 ? count(background.commands, "command") : "",
-    background.agents > 0 ? count(background.agents, "agent") : "",
-    background.watches > 0 ? count(background.watches, "watch") : "",
-  ].filter(Boolean);
-  return parts.length ? `Background: ${parts.join(" · ")}` : null;
+export interface BackgroundCount {
+  kind: BackgroundKind;
+  count: number;
+}
+
+// backgroundCounts lists each kind of running background work in display
+// order, or nothing when none runs.
+export function backgroundCounts(background: TaskBackground | undefined): BackgroundCount[] {
+  if (!background) return [];
+  const byKind: Record<BackgroundKind, number> = {
+    command: background.commands,
+    agent: background.agents,
+    watch: background.watches,
+  };
+  return kindOrder.filter((kind) => byKind[kind] > 0).map((kind) => ({ kind, count: byKind[kind] }));
+}
+
+// backgroundLabel names the counts, such as "Background: 2 agents · 1 watch".
+export function backgroundLabel(counts: readonly BackgroundCount[]): string {
+  return `Background: ${counts.map((c) => count(c.count, c.kind)).join(" · ")}`;
 }
 
 // commandSettled reports whether a settled task makes a running command record

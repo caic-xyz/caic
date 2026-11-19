@@ -258,15 +258,15 @@ describe("TaskCard", () => {
     expect(screen.queryByTestId("task-card-cost")).not.toBeInTheDocument();
   });
 
-  it("names running background work in the card's accessible name and omits the row without any", () => {
+  it("counts running background work, names it in the card's accessible name, and omits it without any", () => {
     const [background, setBackground] = createSignal<TaskCardProps["background"]>({
       commands: 0,
       watches: 1,
       agents: 2,
     });
-    renderCard(() => <TaskCard {...props({ background: background() })} />);
-    expect(screen.getByTestId("task-card-background")).toHaveTextContent(/^Background: 2 agents · 1 watch$/);
-    expect(screen.getByRole("button", { name: /Background: 2 agents · 1 watch/ })).toBeInTheDocument();
+    const { container } = renderCard(() => <TaskCard {...props({ background: background() })} />);
+    expect(screen.getByRole("img", { name: "Background: 2 agents · 1 watch" })).toHaveTextContent(/^21$/);
+    expect(container.querySelector("[data-task-id]")).toHaveAccessibleName(/Background: 2 agents · 1 watch/);
     setBackground(undefined);
     expect(screen.queryByTestId("task-card-background")).not.toBeInTheDocument();
   });

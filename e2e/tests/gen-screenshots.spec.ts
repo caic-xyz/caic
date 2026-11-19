@@ -713,7 +713,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await captureScreenshot(page, "mobile", "usage.png");
 
   // Screenshot 11: Background work keeps a task running after its result; the
-  // card row and the strip above the input name it. It runs last so its task
+  // card's model line counts it and the strip above the input names it. It runs last so its task
   // card stays out of every earlier capture. Its running work shows 75s
   // elapsed instead of the fixed clock's 0ms.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -723,9 +723,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
     .poll(async () => (await api.getTask(backgroundId)).background)
     .toEqual({ commands: 1, watches: 1, agents: 1 });
   await page.goto(`/task/@${backgroundId}`);
-  await expect(page.locator(`[data-task-id="${backgroundId}"]`).getByTestId("task-card-background")).toHaveText(
-    "Background: 1 command · 1 agent · 1 watch",
-  );
+  await expect(
+    page.locator(`[data-task-id="${backgroundId}"]`).getByTestId("task-card-background"),
+  ).toHaveAccessibleName("Background: 1 command · 1 agent · 1 watch");
   await expect(page.getByTestId("background-strip").getByTestId("background-chip")).toHaveText([
     /^Command .+ 1:\d\d$/,
     /^general-purpose .+ 1:\d\d$/,
