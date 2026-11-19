@@ -216,8 +216,8 @@ github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e h1:ai0EfmVYE2b
 github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e/go.mod h1:Vrn4B5oR9qRwM+f54koyeH3yzphlecwERs0el27Fr/s=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e h1:gD6P7NEo7Eqtt0ssnqSJNNndxe69DOQ24A5h7+i3KpM=
 github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e/go.mod h1:h+wZwLjUTJnm/P2rwlbJdRPZXOzaT36/FwnPnY2inzc=
-github.com/gomodedev/gomode v0.3.1-0.20261117163420-1d9ef781b340 h1:bmM/AyhOq8d9JhyvwurcR1BM5ZBE5/6N2aZAWjAx3dU=
-github.com/gomodedev/gomode v0.3.1-0.20261117163420-1d9ef781b340/go.mod h1:e+J/AEzGR2EyLPfmKbJS4FD2MuxUd8DUm65FGDtn2FE=
+github.com/gomodedev/gomode v0.4.0 h1:OeFHfCCp1kWhIXVPvlkGrsnKYQTX/ucOmMENg9jrvZM=
+github.com/gomodedev/gomode v0.4.0/go.mod h1:F7Uv4w+/oLcilq411hpefFhF1pXZZtadrF2spXPR/04=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.4/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
@@ -315,8 +315,8 @@ github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aU
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
 github.com/maruel/apisdkgen v0.3.1 h1:XpRrihGkws4EUdK9JjFC8M/1cp0rn2tgTok+wy04IJM=
 github.com/maruel/apisdkgen v0.3.1/go.mod h1:jz+pYct5Kla2Kp+DU+EEh0moySaB8kaleT0pQmMx9/8=
-github.com/maruel/genai v0.11.3 h1:BDF305qvx5Mv542FUJPIPMskDI3Z2V/I0L+eAWgPXdU=
-github.com/maruel/genai v0.11.3/go.mod h1:s1k7dxL59wB8/LVPuqL4M5rfxUK6eVljdeJYWIjcgNg=
+github.com/maruel/genai v0.11.4 h1:1NuzErLFPZsRdadpIqF1xvhOSCqTsdfABHXVAGeyrEA=
+github.com/maruel/genai v0.11.4/go.mod h1:s1k7dxL59wB8/LVPuqL4M5rfxUK6eVljdeJYWIjcgNg=
 github.com/maruel/genaipy v0.2.0 h1:bRHQ3Ly9+Zwun4q/bnkgwNfMgiHPoEGGi3VhRWKR1jc=
 github.com/maruel/genaipy v0.2.0/go.mod h1:Sb16uYojy3+3Xm1lISHt3RTZoq095oCdrAw8a9ZFlHo=
 github.com/maruel/httpjson v0.5.3 h1:GXxDoiaMJyax0nMR0RfefzDiKd86lbMeqPIgkoFqI2I=

@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@gomodedev/gomode':
-        specifier: github:gomodedev/gomode#1d9ef781b340187c2029ffc9025d3bc2399f6f2d
-        version: https://codeload.github.com/gomodedev/gomode/tar.gz/1d9ef781b340187c2029ffc9025d3bc2399f6f2d(@solidjs/router@1.0.0(solid-js@1.9.18))(solid-js@1.9.18)
+        specifier: github:gomodedev/gomode#9a6a5e791ac313c64abb2f0c88bcc7bd9f4b37fe
+        version: https://codeload.github.com/gomodedev/gomode/tar.gz/9a6a5e791ac313c64abb2f0c88bcc7bd9f4b37fe(@solidjs/router@1.0.0(solid-js@1.9.18))(solid-js@1.9.18)
       '@material-symbols/svg-400':
         specifier: 0.47.4
         version: 0.47.4
@@ -765,8 +765,8 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@gomodedev/gomode@https://codeload.github.com/gomodedev/gomode/tar.gz/1d9ef781b340187c2029ffc9025d3bc2399f6f2d':
-    resolution: {gitHosted: true, integrity: sha512-9hDAgyrs/Lh0fNya4FgiZ2c1bV0LgWnQxlHpTn7KPX7R5/7O3ugMAweZS6fEAhWCulkQYzKO+4qxruE6Wz+QMQ==, tarball: https://codeload.github.com/gomodedev/gomode/tar.gz/1d9ef781b340187c2029ffc9025d3bc2399f6f2d}
+  '@gomodedev/gomode@https://codeload.github.com/gomodedev/gomode/tar.gz/9a6a5e791ac313c64abb2f0c88bcc7bd9f4b37fe':
+    resolution: {gitHosted: true, integrity: sha512-8emLzmOSl1pr5nAxCR8qybGRb7jBTmCYiK6RgE74JmL7MwYJiQ4fga6CQvc6UVkwMrfH/Lph8gIZywJV1ZX79A==, tarball: https://codeload.github.com/gomodedev/gomode/tar.gz/9a6a5e791ac313c64abb2f0c88bcc7bd9f4b37fe}
     version: 0.1.0
     engines: {node: '>=26 <27', pnpm: '>=12.17.0'}
     peerDependencies:
@@ -3269,7 +3269,7 @@ snapshots:
 
   '@exodus/bytes@1.16.0': {}
 
-  '@gomodedev/gomode@https://codeload.github.com/gomodedev/gomode/tar.gz/1d9ef781b340187c2029ffc9025d3bc2399f6f2d(@solidjs/router@1.0.0(solid-js@1.9.18))(solid-js@1.9.18)':
+  '@gomodedev/gomode@https://codeload.github.com/gomodedev/gomode/tar.gz/9a6a5e791ac313c64abb2f0c88bcc7bd9f4b37fe(@solidjs/router@1.0.0(solid-js@1.9.18))(solid-js@1.9.18)':
     dependencies:
       '@material-symbols/svg-400': 0.48.2
       '@solidjs/router': 1.0.0(solid-js@1.9.18)
