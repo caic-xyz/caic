@@ -7,16 +7,6 @@
   min-height: 0;
 }
 
-.historyNavigation {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-}
-
 /* One font size and one line height for every header item. A shared metric keeps
    text baselines identical, and the centered flex items then share one optical
    center with them. */

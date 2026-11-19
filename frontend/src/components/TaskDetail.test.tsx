@@ -325,7 +325,8 @@ it("keeps a single-call plan dormant inside a collapsed past turn", async () => 
   expect(screen.getByTestId("tool-call")).not.toHaveAttribute("open");
 });
 
-it("retries live history and automatically loads the full tool output", async () => {
+it("automatically retries failed history and loads the full tool output", async () => {
+  vi.useFakeTimers();
   const startedAt = Date.now() - 2_000;
   let chunkRequests = 0;
   const requests: string[] = [];
@@ -362,10 +363,14 @@ it("retries live history and automatically loads the full tool output", async ()
   });
   const view = await renderTaskDetail({});
   try {
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("History request failed (503)"));
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Retry history" }));
-    await waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
+    const manifests = () => requests.filter((url) => url.endsWith("/history/manifest")).length;
+    await vi.waitFor(() => expect(chunkRequests).toBe(3));
+    await vi.waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
+    expect(manifests()).toBe(1);
+    // The failed bootstrap schedules its own retry after the base backoff.
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.waitFor(() => expect(manifests()).toBe(2));
+    await vi.waitFor(() => expect(screen.getByTestId("task-message-area")).toHaveAttribute("aria-busy", "false"));
     expect(screen.getAllByTestId("tool-call")).toHaveLength(1);
     expect(screen.getByTestId("tool-duration")).toBeInTheDocument();
     expect(requests.some((url) => url.endsWith("/slice/2/0/256/end"))).toBe(true);
@@ -374,6 +379,7 @@ it("retries live history and automatically loads the full tool output", async ()
     view.unmount();
     fetchMock.mockRestore();
     historyStream.mockRestore();
+    vi.useRealTimers();
   }
 });
 

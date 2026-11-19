@@ -69,11 +69,14 @@ test("silent streams recover without replacing the conversation being read", asy
   let recovering = false;
   let gated = false;
   let fail = true;
+  let failures = 0;
   await page.route(`**/tasks/${id}/history/manifest`, async (route) => {
     if (!recovering) return route.continue();
     gated = true;
     await gate.promise;
-    return fail ? route.fulfill({ status: 503, body: "temporarily unavailable" }) : route.continue();
+    if (!fail) return route.continue();
+    failures++;
+    return route.fulfill({ status: 503, body: "temporarily unavailable" });
   });
   const setupGate = Promise.withResolvers<void>();
   let setupRequested = false;
@@ -144,14 +147,16 @@ test("silent streams recover without replacing the conversation being read", asy
     ).toBeLessThan(1);
     await expect.poll(() => requests.filter((path) => path.endsWith("/usage/events")).length).toBe(2);
     gate.resolve();
-    await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
+    await expect.poll(() => failures).toBe(1);
+    // The failure ends loading only after it schedules the automatic retry.
+    await expect(area).toHaveAttribute("aria-busy", "false");
     expect(await original.evaluate((element) => element.isConnected)).toBe(true);
     expect(
       Math.abs((await original.evaluate((element) => element.getBoundingClientRect().top)) - position),
     ).toBeLessThan(1);
     fail = false;
     paused = false;
-    await page.getByRole("button", { name: "Retry history" }).dispatchEvent("click");
+    await page.clock.runFor(500);
     await expect(area).toHaveAttribute("aria-busy", "false");
     expect(await original.evaluate((element) => element.isConnected)).toBe(true);
     expect(

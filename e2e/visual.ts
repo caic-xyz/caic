@@ -289,7 +289,6 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   const history = page.getByTestId("task-message-area");
   if ((await history.count()) > 0) {
     await expect(history).toHaveAttribute("aria-busy", "false");
-    await expect(page.getByRole("button", { name: "Retry history", exact: true })).toHaveCount(0);
   }
   if ((await page.locator("#caic-visual-test-style").count()) === 0) {
     const style = await page.addStyleTag({

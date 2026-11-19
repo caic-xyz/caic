@@ -1473,7 +1473,7 @@ export default function TaskDetail(props: Props) {
               costComplete: props.costComplete ?? false,
             }}
           />
-          <Show when={timeline.loading() && !timeline.error()}>
+          <Show when={timeline.loading()}>
             <span class={styles.headerLoading} role="status" aria-label="Loading history">
               <LoadingIcon aria-hidden="true" />
             </span>
@@ -1557,17 +1557,6 @@ export default function TaskDetail(props: Props) {
           aria-busy={timeline.loading()}
         >
           <div ref={messageContentRef} class={styles.messageContent}>
-            <Show when={timeline.error()} keyed>
-              {(error) => (
-                <div class={styles.historyNavigation} role="alert">
-                  <span>{error}</span>
-                  <Button variant="gray" onClick={timeline.retry}>
-                    Retry history
-                  </Button>
-                </div>
-              )}
-            </Show>
-
             <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
               {(prompt) => (
                 <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
