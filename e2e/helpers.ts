@@ -222,7 +222,9 @@ export type { Page } from "@playwright/test";
 // that: a recorded import pulled the worker script in 393 ms and the compressed
 // wasm in 747 ms over loopback, then spent about 1.5 s compiling and parsing a
 // 12-triangle cube and finished just past Playwright's five-second default.
-// Budget cold STEP imports well above it.
+// Faceted imports skip OCCT but still load the CAD chunk, the worker, and the
+// WebGL renderer: a recorded 20-triangle polygon labeled its count just after
+// the same default. Budget cold STEP imports well above it.
 // ---------------------------------------------------------------------------
 
 export const STEP_IMPORT_TIMEOUT = 30_000;

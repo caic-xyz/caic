@@ -42,7 +42,7 @@ for (const width of [390, 1280]) {
     await waitForTaskState(api, id, "waiting");
     await page.goto(`/task/@${id}`);
     await page.getByRole("link", { name: "Assembly", exact: true }).click();
-    await expect(page.getByText("32 triangles", { exact: true })).toBeVisible();
+    await expect(page.getByText("32 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
     await expect(page.getByLabel(/^3D model/)).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
@@ -84,7 +84,7 @@ for (const width of [390, 1280]) {
     await waitForTaskState(api, id, "waiting");
     await page.goto(`/task/@${id}`);
     await page.getByRole("link", { name: "Polygon", exact: true }).click();
-    await expect(page.getByText("20 triangles", { exact: true })).toBeVisible();
+    await expect(page.getByText("20 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
     await expect(page.getByLabel(/^3D model/)).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
