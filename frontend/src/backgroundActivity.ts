@@ -22,11 +22,19 @@ export interface BackgroundItem {
 
 const kindOrder: readonly BackgroundKind[] = ["command", "agent", "watch"];
 
+// genericKindNames is each kind's kindName when nothing more specific is
+// known; its icon then says as much.
+export const genericKindNames: Readonly<Record<BackgroundKind, string>> = {
+  agent: "Agent",
+  command: "Command",
+  watch: "Watch",
+};
+
 // agentKindName names an agent by the kind its harness reports, a batch
-// orchestration as "Batch", and any other agent as "Agent".
+// orchestration as "Batch", and any other agent generically.
 function agentKindName(activity: Pick<HistoryActivity, "kind" | "scope">): string {
   if (activity.kind) return activity.kind;
-  return activity.scope === "batch" ? "Batch" : "Agent";
+  return activity.scope === "batch" ? "Batch" : genericKindNames.agent;
 }
 
 function count(n: number, noun: string): string {
@@ -76,7 +84,7 @@ export function activeBackgroundItems(
     if (command.status !== "running" || commandSettled(command, settled)) continue;
     items.push({
       kind: command.watch ? "watch" : "command",
-      kindName: command.watch ? "Watch" : "Command",
+      kindName: command.watch ? genericKindNames.watch : genericKindNames.command,
       id: command.id,
       label: command.label || command.id,
       startedAt: command.startedAt ? Date.parse(command.startedAt) : null,

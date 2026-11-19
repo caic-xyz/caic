@@ -1,10 +1,11 @@
-// Lists a task's running commands, background agents by kind, and watches above the prompt input.
+// Lists a task's running commands, background agents by kind, and watches above the prompt input, each behind its kind's icon.
 
 import { createMemo, For, Show } from "solid-js";
 
-import type { BackgroundItem } from "../backgroundActivity";
+import { genericKindNames, type BackgroundItem } from "../backgroundActivity";
 import { createLiveDuration } from "../liveDuration";
 import { formatTimingDuration } from "../timing";
+import BackgroundKindIcon from "./BackgroundKindIcon";
 import styles from "./BackgroundStrip.module.css";
 
 // BackgroundStrip renders nothing when no item runs. Activating a chip asks
@@ -32,6 +33,8 @@ export default function BackgroundStrip(props: { items: BackgroundItem[]; onReve
 function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) => void }) {
   // A harness can name an agent only by its kind; the chip then says it once.
   const label = () => (props.item.label === props.item.kindName ? "" : props.item.label);
+  // The icon shows a generic kind; its name remains for assistive technology.
+  const generic = () => props.item.kindName === genericKindNames[props.item.kind];
   const elapsed = createLiveDuration(
     () => props.item.startedAt,
     () => null,
@@ -50,7 +53,8 @@ function Chip(props: { item: BackgroundItem; onReveal: (item: BackgroundItem) =>
         // wrapped chips are already in view, so this is then a no-op.
         onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
       >
-        <span class={styles.kind}>{props.item.kindName}</span>
+        <BackgroundKindIcon kind={props.item.kind} class={styles.icon} />
+        <span class={generic() ? styles.visuallyHidden : styles.kind}>{props.item.kindName}</span>
         <Show when={label()}>
           {" "}
           <span class={styles.label}>{label()}</span>

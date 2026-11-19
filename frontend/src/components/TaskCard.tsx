@@ -1,8 +1,8 @@
 // Compact sidebar task card with container resource levels, background-work counts beside context usage, and per-repository Git markers.
 
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup } from "solid-js";
-import type { Accessor, Component, JSX } from "solid-js";
-import { Dynamic, Portal } from "solid-js/web";
+import type { Accessor } from "solid-js";
+import { Portal } from "solid-js/web";
 import { A } from "@solidjs/router";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
@@ -11,9 +11,6 @@ import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?soli
 import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
-import AgentIcon from "@material-symbols/svg-400/outlined/smart_toy.svg?solid";
-import CommandIcon from "@material-symbols/svg-400/outlined/terminal.svg?solid";
-import WatchIcon from "@material-symbols/svg-400/outlined/visibility.svg?solid";
 
 import type {
   DiffStat,
@@ -30,6 +27,7 @@ import type {
 } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
+import BackgroundKindIcon from "./BackgroundKindIcon";
 import CIDot from "./CIDot";
 import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -38,18 +36,12 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
-import { backgroundCounts, backgroundLabel, type BackgroundKind } from "../backgroundActivity";
+import { backgroundCounts, backgroundLabel } from "../backgroundActivity";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import { formatQuotaCountdown } from "../quota";
 import type { HostPressure } from "../resourceLevel";
 import { api } from "../api";
-
-const backgroundIcons: Record<BackgroundKind, Component<JSX.SvgSVGAttributes<SVGSVGElement>>> = {
-  agent: AgentIcon,
-  command: CommandIcon,
-  watch: WatchIcon,
-};
 
 export interface TaskCardProps {
   id: string;
@@ -162,6 +154,17 @@ export default function TaskCard(props: TaskCardProps) {
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
   const background = createMemo(() => backgroundCounts(props.background));
+  // tokensTooltip lists one measurement per line. Billed input only
+  // approximates occupancy when the harness reports none, hence the "~".
+  const tokensTooltip = () =>
+    [
+      `${typeof props.contextUsed === "number" ? "" : "~"}${formatTokens(contextUsed())} context`,
+      props.autoCompactTokenLimit > 0 ? `${formatTokens(props.autoCompactTokenLimit)} auto-compact` : "",
+      props.contextWindowLimit > 0 ? `${formatTokens(props.contextWindowLimit)} window` : "",
+      `Total: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached · ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in · ${formatTokens(props.cumulativeOutputTokens)} out`,
+    ]
+      .filter(Boolean)
+      .join("\n");
   const contextUsed = () => props.contextUsed ?? props.activeInputTokens + props.activeCacheReadTokens;
   const hasRepositoryRuntime = () => Boolean(props.runtime?.id) && props.state !== "purged";
   let cardRef: HTMLDivElement | undefined;
@@ -589,9 +592,7 @@ export default function TaskCard(props: TaskCardProps) {
               </Show>
               <Show when={typeof props.contextUsed === "number" || contextUsed() > 0}>
                 {" · "}
-                <Tooltip
-                  text={`${typeof props.contextUsed === "number" ? `Reported context usage: ${formatTokens(props.contextUsed)}. ` : "Displayed input is approximate. "}${props.autoCompactTokenLimit > 0 ? `Configured auto-compact threshold: ${props.autoCompactTokenLimit.toLocaleString()} total active tokens. The effective limit may be lower. ` : ""}${props.contextWindowLimit > 0 ? `Context window: ${formatTokens(props.contextWindowLimit)}. ` : ""}Accumulated API tokens: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
-                >
+                <Tooltip text={tokensTooltip()}>
                   <span
                     class={styles.tokens}
                     data-testid="task-card-tokens"
@@ -622,11 +623,7 @@ export default function TaskCard(props: TaskCardProps) {
                       {(c) => (
                         <span class={styles.backgroundCount}>
                           {c.count}
-                          <Dynamic
-                            component={backgroundIcons[c.kind]}
-                            class={styles.backgroundIcon}
-                            aria-hidden="true"
-                          />
+                          <BackgroundKindIcon kind={c.kind} class={styles.backgroundIcon} />
                         </span>
                       )}
                     </For>

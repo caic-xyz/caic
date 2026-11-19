@@ -44,10 +44,14 @@ for (const width of [390, 1280]) {
           else {
             await expect(row).toHaveAccessibleName(text);
             await expect(card).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-            // The counts share the model line and must stay inside the card.
+            // The counts follow the context size on the model line and stay
+            // inside the card.
             const rowBox = await row.boundingBox();
+            const tokensBox = await card.getByTestId("task-card-tokens").boundingBox();
             const cardBox = await card.boundingBox();
-            ok(rowBox && cardBox);
+            ok(rowBox && tokensBox && cardBox);
+            expect(rowBox.x).toBeGreaterThan(tokensBox.x + tokensBox.width);
+            expect(Math.abs(rowBox.y + rowBox.height / 2 - (tokensBox.y + tokensBox.height / 2))).toBeLessThan(2);
             expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
           }
           if (mobile) {

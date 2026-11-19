@@ -736,6 +736,8 @@ def emit_background_turn(turns: int, gated: bool) -> None:
     }
     emit({"type": "native_subagent", "subagent": subagent})
     emit_tool_started(BG_REVIEW["tool"])
+    # The card shows the background counts beside the context size.
+    emit({"type": "usage", "usage": {}, "context_used": 45000, "context_window": 200000})
     emit_text("The checks, the watch, and the review run in the background. I will report when they finish.")
     emit_result(turns, "Background work started")
     if not gated or not gate("FAKE_BACKGROUND_SETTLE_WORK"):

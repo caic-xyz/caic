@@ -2,10 +2,12 @@
 declare const classes: {
   readonly "chip": string;
   readonly "duration": string;
+  readonly "icon": string;
   readonly "kind": string;
   readonly "label": string;
   readonly "list": string;
   readonly "scroller": string;
   readonly "strip": string;
+  readonly "visuallyHidden": string;
 };
 export default classes;

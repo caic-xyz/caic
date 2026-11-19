@@ -135,7 +135,7 @@ describe("TaskCard", () => {
     const trigger = meter.parentElement;
     if (!trigger) throw new Error("Missing token tooltip trigger");
     fireEvent.mouseEnter(trigger);
-    expect(screen.getByText(/Reported context usage: 45kt/)).toHaveTextContent("Accumulated API tokens");
+    expect(screen.getByText(/^45kt context\n/, { normalizer: (text) => text })).toBeInTheDocument();
     fireEvent.mouseLeave(trigger);
     setUsed(0);
     expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("0t/200kt");
@@ -520,7 +520,7 @@ describe("TaskCard", () => {
     expect(screen.getByTestId("task-card-tokens")).not.toHaveTextContent("/");
   });
 
-  it("uses the auto-compact threshold and explains both limits", () => {
+  it("uses the auto-compact threshold and lists both limits", () => {
     renderCard(() => (
       <TaskCard
         {...props({ activeInputTokens: 180_000, autoCompactTokenLimit: 244_800, contextWindowLimit: 400_000 })}
@@ -531,9 +531,11 @@ describe("TaskCard", () => {
     const trigger = tokens.parentElement;
     if (!trigger) throw new Error("Missing token tooltip trigger");
     fireEvent.mouseEnter(trigger);
-    const tooltip = screen.getByText(/Configured auto-compact threshold: 244,800 total active tokens/);
-    expect(tooltip).toHaveTextContent("The effective limit may be lower");
-    expect(tooltip).toHaveTextContent("Context window: 400kt");
+    expect(
+      screen.getByText(/^~180kt context\n245kt auto-compact\n400kt window\nTotal: .+ cached · .+ in · .+ out$/, {
+        normalizer: (text) => text,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("hides quota recovery when the task has no repository", () => {
