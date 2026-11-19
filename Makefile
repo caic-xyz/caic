@@ -47,7 +47,8 @@ custom-gcl:
 	go tool golangci-lint custom --version "$$version" && echo "$$want" > .custom-gcl.sha
 
 # The existing CI build gates initial JavaScript/CSS size after compression.
-# Recheck or measure an existing build without rebuilding (about 0.1s warm):
+# Recheck or measure a local build without rebuilding (about 0.1s warm); it
+# reads the untracked Vite manifest, so a fresh checkout needs a build first:
 #   node scripts/startup_budget.mjs --dist backend/frontend/dist --report
 build: frontend-build
 	@node scripts/startup_budget.mjs --dist backend/frontend/dist

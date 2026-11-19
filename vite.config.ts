@@ -26,7 +26,7 @@ export default defineConfig({
     // these chunks instant on repeat visits.
     modulePreload: false,
     // The startup budget walks Vite's static imports and CSS dependencies.
-    // Keep this build-only metadata in .vite, which go:embed excludes.
+    // Keep this build-only metadata in .vite, which go:embed and git exclude.
     manifest: true,
     // Matches the browsers Vite 8 supports by default; pinned so a Vite upgrade
     // cannot silently move the floor.

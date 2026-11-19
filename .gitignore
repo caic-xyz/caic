@@ -5,6 +5,7 @@
 /.gradle/
 /.ruff_cache/
 /.venv/
+/backend/frontend/dist/.vite/
 /caic
 /codecov
 /codecov.SHA256SUM

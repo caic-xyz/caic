@@ -3,7 +3,7 @@
 // Measure a frontend build: node scripts/startup_budget.mjs --dist backend/frontend/dist --report
 // make build runs this same check in CI. It never rebuilds or changes the bundle.
 // Scope: Vite-managed assets from the single index.html application entry.
-// Build-only .vite/manifest.json.br metadata is excluded from go:embed and serving.
+// Build-only .vite/manifest.json.br metadata is untracked and excluded from go:embed and serving.
 // The manifest owns import parsing, so static re-exports and shared CSS count;
 // dynamic-only chunks, fonts, images, and other non-JS/CSS assets do not.
 // Budgets leave about 5% above the current payload while protecting most of the
