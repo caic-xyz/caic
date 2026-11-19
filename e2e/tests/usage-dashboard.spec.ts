@@ -79,7 +79,7 @@ test("usage cost distinguishes native zero, estimates, and unknown coverage", as
     { reportedUSD: 0, estimatedUSD: 0, reportedParts: 1, estimatedParts: 0, unknownParts: 0 },
     { reportedUSD: 0, estimatedUSD: 0, reportedParts: 0, estimatedParts: 0, unknownParts: 1 },
     { reportedUSD: 0, estimatedUSD: 0.25, reportedParts: 0, estimatedParts: 1, unknownParts: 0 },
-    { reportedUSD: 0.5, estimatedUSD: 0.25, reportedParts: 1, estimatedParts: 1, unknownParts: 1 },
+    { reportedUSD: 2993.57, estimatedUSD: 0.25, reportedParts: 1, estimatedParts: 1, unknownParts: 1 },
   ];
   dashboard.days = (dashboard.days ?? []).slice(0, 4);
   for (const [index, day] of dashboard.days.entries()) {
@@ -101,20 +101,46 @@ test("usage cost distinguishes native zero, estimates, and unknown coverage", as
       }
     }
   }
+  // Long MCP tool names and four-digit counts are what widen a table past its
+  // panel on a phone.
+  for (const entry of [...(dashboard.days[0]?.models ?? []), ...(dashboard.days[0]?.harnesses ?? [])]) {
+    entry.turns = 1865;
+    entry.compactions = 299;
+  }
+  dashboard.days[0]?.tools?.push({ name: "mcp__plugin_example_server__search_every_indexed_document", count: 1 });
   await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: dashboard }));
   await page.goto("/monitoring?range=all");
   const daily = page.getByRole("region", { name: "Daily usage totals" });
-  await expect(daily.getByText("$0 · reported", { exact: true })).toBeVisible();
-  await expect(daily.getByText("Unknown", { exact: true })).toBeVisible();
-  await expect(daily.getByText("$0.25 · estimated", { exact: true })).toBeVisible();
-  await expect(daily.getByText("$0.75 known subtotal · incomplete", { exact: true })).toBeVisible();
+  // Cost cells show a rounded amount; the exact amount and provenance are the
+  // tooltip and the accessible name.
+  for (const [name, visible] of [
+    ["$0 · reported", "$0"],
+    ["Unknown", "—"],
+    ["$0.25 · estimated", "$0.25"],
+    ["$2993.82 · known subtotal, incomplete", "$2.99k"],
+  ] as const) {
+    const cell = daily.getByRole("cell", { name, exact: true });
+    await expect(cell).toHaveAttribute("title", name);
+    await expect(cell.locator("[aria-hidden=true]")).toHaveText(visible);
+  }
   const chart = page.getByRole("img", { name: "Cost per day in US dollars" });
   await expect(chart).toBeVisible();
   // A native zero is a plotted point; a missing cost is a gap.
   await expect(chart.locator('g[aria-label="dot"] circle')).toHaveCount(3);
-  for (const width of [1280, 390]) {
+  for (const width of [1280, 760, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    // Panels truncate long names instead of scrolling sideways.
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...document.querySelectorAll("[role=region][aria-label]")]
+            .filter((region) => region.querySelector("table"))
+            .filter((region) => region.scrollWidth > region.clientWidth)
+            .map((region) => region.getAttribute("aria-label")),
+        ),
+      )
+      .toEqual([]);
     await page
       .getByTestId("usage-charts")
       .screenshot({ path: testInfo.outputPath(`cost-provenance-charts-${width}.png`) });

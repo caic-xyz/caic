@@ -24,16 +24,39 @@ export function usageCostSource(cost: UsageDashboardCost): "estimated" | "mixed"
   return estimated ? "estimated" : "unknown";
 }
 
-export function formatUsageCost(usd: number, cost: UsageDashboardCost): string {
+// UsageCostReadout splits a cost into its dollar amount and its provenance.
+export interface UsageCostReadout {
+  // amount is null when no part of the cost is known.
+  amount: string | null;
+  provenance: string;
+  // incomplete marks an amount that excludes unknown costs or lacks a source.
+  incomplete: boolean;
+}
+
+export function usageCostReadout(usd: number, cost: UsageDashboardCost): UsageCostReadout {
   const source = usageCostSource(cost);
-  if (source === "unknown") return usd === 0 ? "Unknown" : `${formatCost(usd)} · source unknown`;
+  if (source === "unknown") {
+    return usd === 0
+      ? { amount: null, provenance: "unknown", incomplete: true }
+      : { amount: formatCost(usd), provenance: "source unknown", incomplete: true };
+  }
   if (source === "partial") {
     const known = cost.reportedUSD + cost.estimatedUSD;
     // Old rows can retain numeric amounts without proving their source.
-    if (Math.abs(usd - known) > 1e-9) return `${formatCost(usd)} · incomplete (${formatCost(known)} known)`;
-    return `${formatCost(usd)} known subtotal · incomplete`;
+    const provenance =
+      Math.abs(usd - known) > 1e-9 ? `incomplete (${formatCost(known)} known)` : "known subtotal, incomplete";
+    return { amount: formatCost(usd), provenance, incomplete: true };
   }
-  return `${formatCost(usd)} · ${source === "mixed" ? "reported + estimated" : source}`;
+  return {
+    amount: formatCost(usd),
+    provenance: source === "mixed" ? "reported + estimated" : source,
+    incomplete: false,
+  };
+}
+
+export function formatUsageCost(usd: number, cost: UsageDashboardCost): string {
+  const readout = usageCostReadout(usd, cost);
+  return readout.amount === null ? "Unknown" : `${readout.amount} · ${readout.provenance}`;
 }
 
 export type UsageRange = "7" | "30" | "90" | "all";

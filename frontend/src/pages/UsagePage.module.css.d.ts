@@ -6,6 +6,8 @@ declare const classes: {
   readonly "drilldown": string;
   readonly "empty": string;
   readonly "error": string;
+  readonly "headerIcon": string;
+  readonly "incomplete": string;
   readonly "lowerGrid": string;
   readonly "metrics": string;
   readonly "noRows": string;
@@ -13,5 +15,6 @@ declare const classes: {
   readonly "panelHeader": string;
   readonly "rowButton": string;
   readonly "tableWrap": string;
+  readonly "visuallyHidden": string;
 };
 export default classes;

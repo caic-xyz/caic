@@ -3,20 +3,23 @@
 import { loadCode } from "../codeLoad";
 import { createMemo, createSignal, For, lazy, onMount, Show, Suspense } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
+import CachedIcon from "@material-symbols/svg-400/outlined/cached.svg?solid";
+import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid";
 import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
-import type { UsageDashboardResp } from "@sdk/types.gen";
+import type { UsageDashboardCost, UsageDashboardResp } from "@sdk/types.gen";
 
 import { api } from "../api";
 import ActionButton from "../components/ActionButton";
 import SectionControls from "../components/SectionControls";
 import Table from "../components/Table";
-import { formatTokens } from "../formatting";
+import { formatCostShort, formatTokens } from "../formatting";
 import { harnessLabel } from "../harnessLabels";
 import {
   formatUsageCost,
   summarizeUsageDays,
   usageCacheHitRate,
+  usageCostReadout,
   usageDailySeries,
   usageDaysForRange,
   usageRangeFrom,
@@ -215,12 +218,16 @@ function Leaderboard(props: {
             <th scope="col">Name</th>
             <th scope="col">Tokens</th>
             <th scope="col">Turns</th>
-            <th scope="col">Compactions</th>
+            <th scope="col" aria-label="Compactions" title="Compactions">
+              <CompressIcon class={styles.headerIcon} aria-hidden="true" />
+            </th>
             <Show when={props.showCost}>
               <th scope="col">Cost</th>
             </Show>
             <Show when={props.showCache}>
-              <th scope="col">Cache hit</th>
+              <th scope="col" aria-label="Cache hit" title="Cache hit">
+                <CachedIcon class={styles.headerIcon} aria-hidden="true" />
+              </th>
             </Show>
           </tr>
         </thead>
@@ -244,7 +251,7 @@ function Leaderboard(props: {
                 <td>{entry.turns}</td>
                 <td>{entry.compactions}</td>
                 <Show when={props.showCost}>
-                  <td>{formatUsageCost(entry.costUSD, entry.cost)}</td>
+                  <CostCell usd={entry.costUSD} cost={entry.cost} />
                 </Show>
                 <Show when={props.showCache}>
                   <td>{entry.cacheHitRate === undefined ? "—" : `${(entry.cacheHitRate * 100).toFixed(1)}%`}</td>
@@ -255,6 +262,20 @@ function Leaderboard(props: {
         </tbody>
       </Table>
     </Show>
+  );
+}
+
+// CostCell keeps the column to a three-digit amount; the exact amount and its
+// provenance move to the tooltip and the accessible text, and an incomplete
+// amount is muted.
+function CostCell(props: { usd: number; cost: UsageDashboardCost }) {
+  const readout = () => usageCostReadout(props.usd, props.cost);
+  const exact = () => formatUsageCost(props.usd, props.cost);
+  return (
+    <td class={readout().incomplete ? styles.incomplete : undefined} title={exact()}>
+      <span aria-hidden="true">{readout().amount === null ? "—" : formatCostShort(props.usd)}</span>
+      <span class={styles.visuallyHidden}>{exact()}</span>
+    </td>
   );
 }
 
@@ -274,7 +295,7 @@ function DailyTotals(props: { points: readonly UsageDailyPoint[] }) {
             <tr>
               <th scope="row">{point.inProgress ? `${point.day} (in progress)` : point.day}</th>
               <td>{formatTokens(point.tokens)}</td>
-              <td>{formatUsageCost(point.costUSD, point.cost)}</td>
+              <CostCell usd={point.costUSD} cost={point.cost} />
             </tr>
           )}
         </For>

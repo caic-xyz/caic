@@ -6,6 +6,7 @@ import { expect } from "@tests/expect";
 import {
   formatBytes,
   formatCost,
+  formatCostShort,
   formatElapsed,
   formatTokens,
   staleStateColor,
@@ -44,6 +45,28 @@ describe("formatCost", () => {
   it("preserves negative cost corrections", () => {
     expect(formatCost(-0.004)).toBe(">-$0.01");
     expect(formatCost(-1.75)).toBe("-$1.75");
+  });
+});
+
+describe("formatCostShort", () => {
+  it("keeps three significant digits", () => {
+    expect(formatCostShort(2993.82)).toBe("$2.99k");
+    expect(formatCostShort(915.05)).toBe("$915");
+    expect(formatCostShort(47.56)).toBe("$47.6");
+    expect(formatCostShort(8.39)).toBe("$8.39");
+    expect(formatCostShort(17_340)).toBe("$17.3k");
+    expect(formatCostShort(1_250_000)).toBe("$1.25M");
+  });
+
+  it("carries rounding into the next unit", () => {
+    expect(formatCostShort(999.6)).toBe("$1k");
+    expect(formatCostShort(99.96)).toBe("$100");
+  });
+
+  it("keeps cents below one dollar and the sign of corrections", () => {
+    expect(formatCostShort(0.38)).toBe("$0.38");
+    expect(formatCostShort(0.004)).toBe("<$0.01");
+    expect(formatCostShort(-1761.85)).toBe("-$1.76k");
   });
 });
 

@@ -26,6 +26,26 @@ export function formatCost(usd: number): string {
   return usd < 0 ? `-$${formatMoney(-usd, 2)}` : `$${formatMoney(usd, 2)}`;
 }
 
+const costUnits = [
+  { scale: 1_000_000, suffix: "M" },
+  { scale: 1_000, suffix: "k" },
+];
+
+// formatCostShort rounds a cost from one dollar up to three significant digits
+// so a table column stays narrow: $2.99k, $915, $47.6, $8.39. Smaller amounts
+// keep formatCost's cents.
+export function formatCostShort(usd: number): string {
+  const abs = Math.abs(usd);
+  if (abs < 1) return formatCost(usd);
+  // Round first so $999.60 reads as $1k rather than $1000.
+  const step = 10 ** (Math.floor(Math.log10(abs)) - 2);
+  const rounded = Math.round(abs / step) * step;
+  const unit = costUnits.find((u) => rounded >= u.scale) ?? { scale: 1, suffix: "" };
+  const value = rounded / unit.scale;
+  const text = formatMoney(value, Math.max(0, 2 - Math.floor(Math.log10(value))));
+  return `${usd < 0 ? "-" : ""}$${text}${unit.suffix}`;
+}
+
 // tokenUnits lists the scaled token magnitudes, largest first. Counts below one
 // kilotoken stay in plain tokens.
 const tokenUnits = [
