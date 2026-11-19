@@ -249,13 +249,20 @@ type step struct {
 	overflow bool
 }
 
-// wireFormat state belongs to the single message-reading goroutine. Writing a
-// prompt does not mutate it, so live parsing and prompt writes can run together.
+// wireFormat state belongs to the single goroutine that parses ordered input
+// and output records. Writing a prompt does not mutate it, so live parsing and
+// prompt writes can run together.
 type wireFormat struct {
 	accounting
 
 	steps             map[string]*step
 	textConversations map[string]struct{}
+	// inTurn is set from a root user_input step until the root result.
+	inTurn bool
+	// queued counts prompts delivered during a root turn whose own turn has
+	// not started. agy starts one turn for each after the result; AGENTS.md
+	// holds the evidence.
+	queued int
 }
 
 // EncodePrompt encodes text and image input as one complete native record.
@@ -293,9 +300,9 @@ func textBlock(text string) antigravityv1.ContentBlock {
 	return antigravityv1.ContentBlock{Type: "text", Text: text}
 }
 
-// ParseInput decodes client prompts without updating output conversation state.
+// ParseInput decodes client prompts and counts those delivered during a turn.
 // Records written before path attachments carry each image as a text data URL.
-func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
+func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 	var ev antigravityv1.InputMessage
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("antigravity input: %w", err)
@@ -314,6 +321,9 @@ func (*wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 			} else {
 				m.Text += c.Text
 			}
+		}
+		if w.inTurn {
+			w.queued++
 		}
 		return []agent.Message{m}, nil
 
@@ -353,7 +363,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		if !accepted {
 			return nil, nil
 		}
-		messages := append(w.parseStep(s), usage...)
+		messages := append(w.parseStep(s, !source.IsChild()), usage...)
 		for _, message := range messages {
 			*message.Provenance() = source
 		}
@@ -393,13 +403,15 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 		// resumed processes. Only DONE steps from the task's proven conversations
 		// contribute to the neutral per-turn usage.
 		m.Usage = w.finishResult()
+		m.TurnQueued = w.queued > 0
+		w.inTurn = false
 		return append(messages, m), nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(ev.Event), Raw: bytes.Clone(line)}}, nil
 	}
 }
 
-func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message {
+func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload, root bool) []agent.Message {
 	id := s.ConversationID + ":" + strconv.FormatInt(s.StepIndex, 10)
 	st := w.steps[id]
 	if st == nil {
@@ -444,9 +456,17 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 		if s.TextDelta != "" {
 			msgs = append(msgs, &agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeNotice, Detail: s.TextDelta})
 		}
-	case antigravity.StepUserInput, antigravity.StepFinish, antigravity.StepErrorMessage:
-		// User text is retained by the recorded stdin; finish and error_message
-		// precede the result, which carries the outcome.
+	case antigravity.StepUserInput:
+		// agy opens every turn with this step, including one for a prompt that
+		// arrived during the previous turn. The recorded stdin retains its text.
+		if !st.started && root {
+			msgs = append(msgs, &agent.TurnStartedMessage{})
+			w.inTurn = true
+			w.queued = max(0, w.queued-1)
+		}
+		st.started = true
+	case antigravity.StepFinish, antigravity.StepErrorMessage:
+		// finish and error_message precede the result, which carries the outcome.
 	}
 	return msgs
 }

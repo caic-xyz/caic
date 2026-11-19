@@ -15,6 +15,7 @@ import (
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/gomodedev/gomode/mcp/mcptest"
 )
@@ -170,11 +171,13 @@ func TestWireFormat(t *testing.T) {
 			sc := bufio.NewScanner(bytes.NewReader(data))
 			var text string
 			var result *agent.ResultMessage
+			var all []agent.Message
 			for sc.Scan() {
 				msgs, err := w.ParseOutput(sc.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}
+				all = append(all, msgs...)
 				for _, msg := range msgs {
 					switch m := msg.(type) {
 					case *agent.InitMessage:
@@ -193,6 +196,38 @@ func TestWireFormat(t *testing.T) {
 			}
 			if text != "OK.\n" || result == nil || result.IsError || result.Result != text || result.Usage.InputTokens != 12260 || result.Usage.ReasoningOutputTokens != 38 {
 				t.Fatalf("text = %q, result = %+v", text, result)
+			}
+			if got := agenttest.TurnBoundaries(all); got != "SR" {
+				t.Errorf("boundaries = %q, want %q", got, "SR")
+			}
+		})
+		t.Run("prompt during a turn", func(t *testing.T) {
+			t.Parallel()
+			// Trimmed and anonymized from a task log: agy started a turn for
+			// the prompt delivered during the first turn 29 ms after its result.
+			const (
+				first  = `{"event":"user","message":{"content":[{"type":"text","text":"Investigate image input."}]}}`
+				second = `{"event":"user","message":{"content":[{"type":"text","text":"Clone the client library if it helps."}]}}`
+				init   = `{"event":"init","conversation_id":"conv","init":{"model":"gemini-3.8-flash-high","cwd":"/src","tools":["view_file"]}}`
+				start  = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":0,"state":"DONE","step_type":"user_input"}}`
+				result = `{"event":"result","result":{"conversation_id":"conv","status":"SUCCESS","response":"Yes."}}`
+				next   = `{"event":"step_update","step_update":{"conversation_id":"conv","step_index":154,"state":"DONE","step_type":"user_input"}}`
+			)
+			w := New("", nil).NewWire()
+			var all []agent.Message
+			for i, line := range []string{first, init, start, second, result, next, result} {
+				parse := w.ParseOutput
+				if line == first || line == second {
+					parse = w.ParseInput
+				}
+				msgs, err := parse([]byte(line))
+				if err != nil {
+					t.Fatalf("line %d: %v", i, err)
+				}
+				all = append(all, msgs...)
+			}
+			if got := agenttest.TurnBoundaries(all); got != "ISIQSR" {
+				t.Errorf("boundaries = %q, want %q", got, "ISIQSR")
 			}
 		})
 		t.Run("recorded cached usage and tool output", func(t *testing.T) {

@@ -91,8 +91,11 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 0 {
-			t.Fatalf("msgs = %d, want 0 (turn/started is suppressed)", len(msgs))
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.TurnStartedMessage); !ok {
+			t.Fatalf("msgs[0] = %T, want *agent.TurnStartedMessage", msgs[0])
 		}
 	})
 	t.Run("ItemStartedUserMessage", func(t *testing.T) {
@@ -1047,6 +1050,38 @@ func TestParseMessage(t *testing.T) {
 }
 
 func TestWireFormat(t *testing.T) {
+	t.Run("TurnBoundaries", func(t *testing.T) {
+		t.Parallel()
+		if got := agenttest.TurnBoundaries(agenttest.ParseJSONL(t, "testdata/tool-error.jsonl", New("", nil).NewWire())); got != "ISR" {
+			t.Errorf("tool-error: boundaries = %q, want %q", got, "ISR")
+		}
+		// Trimmed from a task log: a spawned agent's thread runs its own turns
+		// inside the root turn; they neither start nor end the root turn.
+		w := New("", nil).NewWire()
+		var msgs []agent.Message
+		for i, line := range []string{
+			`{"method":"thread/started","params":{"thread":{"id":"root"}}}`,
+			`{"method":"turn/started","params":{"threadId":"root","turn":{"id":"t1","items":[],"status":"inProgress"}}}`,
+			`{"method":"turn/started","params":{"threadId":"child","turn":{"id":"c1","rootTurnId":"t1","items":[],"status":"inProgress"}}}`,
+			`{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"c1","rootTurnId":"t1","items":[],"status":"completed"}}}`,
+			`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"t1","items":[],"status":"completed"}}}`,
+		} {
+			m, err := w.ParseOutput([]byte(line))
+			if err != nil {
+				t.Fatalf("line %d: %v", i, err)
+			}
+			msgs = append(msgs, m...)
+		}
+		if got := agenttest.TurnBoundaries(msgs); got != "SR" {
+			t.Errorf("child turns: boundaries = %q, want %q", got, "SR")
+		}
+		if i := slices.IndexFunc(msgs, func(m agent.Message) bool {
+			_, ok := m.(*agent.TurnStartedMessage)
+			return ok && m.Provenance().IsChild()
+		}); i >= 0 {
+			t.Errorf("message %d: child turn start %#v", i, msgs[i])
+		}
+	})
 	t.Run("RecordedInputCorrelation", func(t *testing.T) {
 		t.Parallel()
 		w := New("", nil).NewWire()

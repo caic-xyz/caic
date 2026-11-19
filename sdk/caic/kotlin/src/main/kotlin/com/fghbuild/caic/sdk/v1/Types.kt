@@ -1273,14 +1273,6 @@ sealed interface TaskState {
         override val value = "has_plan"
     }
     @Serializable
-    data object Pulling : TaskState {
-        override val value = "pulling"
-    }
-    @Serializable
-    data object Pushing : TaskState {
-        override val value = "pushing"
-    }
-    @Serializable
     data object Stopping : TaskState {
         override val value = "stopping"
     }
@@ -1322,8 +1314,6 @@ object TaskStateSerializer : KSerializer<TaskState> {
             "waiting" -> TaskState.Waiting
             "asking" -> TaskState.Asking
             "has_plan" -> TaskState.HasPlan
-            "pulling" -> TaskState.Pulling
-            "pushing" -> TaskState.Pushing
             "stopping" -> TaskState.Stopping
             "stopped" -> TaskState.Stopped
             "purging" -> TaskState.Purging

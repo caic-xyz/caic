@@ -32,8 +32,6 @@ describe("MobileVoiceTasks", () => {
       task("4", "waiting", "Ready for input"),
       task("5", "has_plan", "Plan to review"),
       task("7", "starting", "Starting title"),
-      task("8", "pulling", "Pulling title"),
-      task("9", "pushing", "Pushing title"),
       task("10", "branching", "Branching title"),
       task("11", "provisioning", "Provisioning title"),
     ];
@@ -52,8 +50,6 @@ describe("MobileVoiceTasks", () => {
       "#5Plan to review",
       "#6Pending title",
       "#7Starting title",
-      "#8Pulling title",
-      "#9Pushing title",
       "#10Branching title",
       "#11Provisioning title",
     ]);
@@ -64,8 +60,6 @@ describe("MobileVoiceTasks", () => {
       "has_plan",
       "pending",
       "starting",
-      "pulling",
-      "pushing",
       "branching",
       "provisioning",
     ]);

@@ -448,7 +448,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				r, _ := mustTaskRun(t, tk)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				// Simulate an agent entering plan mode and writing a plan file.
 				addTaskMessage(tk, &agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "EnterPlanMode",
@@ -486,7 +486,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				// and write to .claude/plans/. The plan must not resurface.
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				r, _ := mustTaskRun(t, tk)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				// Original plan.
 				addTaskMessage(tk, &agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "Write",
@@ -501,7 +501,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				if err := r.RecordHost(t.Context(), tk, agent.ContextCleared()); err != nil {
 					t.Fatal(err)
 				}
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 
 				// Agent re-enters plan mode during execution.
 				addTaskMessage(tk, &agent.ToolUseMessage{
@@ -531,7 +531,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				// immutable.
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				r, _ := mustTaskRun(t, tk)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				addTaskMessage(tk, &agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
@@ -556,7 +556,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				// must be able to produce a plan again.
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				r, _ := mustTaskRun(t, tk)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				addTaskMessage(tk, &agent.ToolUseMessage{
 					ToolUseID: "tu1", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan"}`),
@@ -567,13 +567,13 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 				if err := r.RecordHost(t.Context(), tk, agent.ContextCleared()); err != nil {
 					t.Fatal(err)
 				}
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				// Turn completes without plan.
 				addTaskMessage(tk, &agent.TextMessage{Text: "done"})
 				addTaskMessage(tk, &agent.ResultMessage{MessageType: "result"})
 
 				// Suppression lifted — next turn can set plan.
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				addTaskMessage(tk, &agent.ToolUseMessage{
 					ToolUseID: "tu2", Name: "Write",
 					Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"fresh plan"}`),
@@ -806,7 +806,7 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 					t.Parallel()
 					r := newTestAgentRuntime(t, nil, t.TempDir(), nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
-					tk.SetState(task.StateWaiting)
+					setState(tk, task.StateWaiting)
 					run := beginTestExecution(t, r, tk)
 					if mode == "settled" {
 						if err := r.closeRun(tk, run); err != nil {
@@ -838,6 +838,29 @@ func TestAgentRuntime(t *testing.T) { //nolint:tparallel // Relay subprocess cas
 						t.Fatal("canceled admission changed journal or published task state")
 					}
 				})
+			}
+		})
+	})
+	t.Run("RecordLifecycleIntent", func(t *testing.T) {
+		t.Run("valid/starting_session_with_folded_prompt", func(t *testing.T) {
+			t.Parallel()
+			// Start and Restart fold the initial prompt before the session goes
+			// live; Stop and Purge accept the running task meanwhile.
+			for _, persisted := range []task.State{task.StateStopping, task.StatePurging} {
+				r := newTestAgentRuntime(t, nil, t.TempDir(), nil)
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+				tk.Restore(task.StateStarting, time.Time{})
+				beginTestExecution(t, r, tk)
+				addTaskMessage(tk, &agent.TurnStartedMessage{})
+				if got := tk.GetState(); got != task.StateRunning {
+					t.Fatalf("%s: state = %s, want running", persisted, got)
+				}
+				if _, accepted, err := r.RecordLifecycleIntent(t.Context(), tk, persisted, task.StateStopping, task.StateRunning); !accepted || err != nil {
+					t.Fatalf("%s: RecordLifecycleIntent = %v, %v", persisted, accepted, err)
+				}
+				if got := tk.GetState(); got != task.StateStopping {
+					t.Errorf("%s: state = %s, want stopping", persisted, got)
+				}
 			}
 		})
 	})
@@ -916,7 +939,7 @@ else:
 				}
 				t.Setenv("CAIC_TEST_RELAY_OUTPUT", relayPath)
 				tk.SetRelayOffset(int64(len(prefix)))
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				h, err := r.Reconnect(t.Context(), tk)
 				if err != nil {
 					t.Fatal(err)
@@ -991,7 +1014,7 @@ else:
 						r := newTestAgentRuntime(t, nil, "", nil)
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness, "", "")
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-						tk.SetState(task.StateRunning)
+						setState(tk, task.StateRunning)
 						_, err := r.Reconnect(t.Context(), tk)
 						if err == nil {
 							t.Fatal("Reconnect returned nil error")
@@ -1018,7 +1041,7 @@ else:
 							t.Fatal(err)
 						}
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-						tk.SetState(state)
+						setState(tk, state)
 						h, err := r.Reconnect(t.Context(), tk)
 						if err != nil {
 							t.Fatal(err)
@@ -1050,7 +1073,7 @@ else:
 					t.Fatal(err)
 				}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 					&agent.AskMessage{
 						ToolUseID: "toolu-1",
@@ -1122,7 +1145,7 @@ else:
 								t.Fatal(err)
 							}
 							tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-							tk.SetState(task.StateWaiting)
+							setState(tk, task.StateWaiting)
 							ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 							t.Cleanup(cancel)
 							h, err := r.Reconnect(ctx, tk)
@@ -1170,7 +1193,7 @@ else:
 							t.Fatal(err)
 						}
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-						tk.SetState(task.StateWaiting)
+						setState(tk, task.StateWaiting)
 						ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 						t.Cleanup(cancel)
 						h, err := r.Reconnect(ctx, tk)
@@ -1207,7 +1230,7 @@ else:
 				r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{"test": backend})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 
 				if _, err := r.Reconnect(t.Context(), tk); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("Reconnect error = %v, want os.ErrNotExist", err)
@@ -1425,7 +1448,7 @@ else:
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
 				tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk.GitTarget())
 				if err != nil {
 					t.Fatal(err)
@@ -1475,7 +1498,7 @@ else:
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 						tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
 						tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
-						tk.SetState(task.StateRunning)
+						setState(tk, task.StateRunning)
 						prior := v3.DiffStat{{Path: "prior.go", LinesAdded: 4}}
 						backend.onDiff = func() {
 							// A summary change before this RPC finishes must not invalidate the
@@ -1532,7 +1555,7 @@ else:
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/home/user/src/repo"}}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				// Exercise delivery before AttachSession.
 				addTaskMessage(tk, agent.NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{{
 					RepositoryPath: "/home/user/src/repo",
@@ -1613,7 +1636,7 @@ else:
 						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 						tk.Repos = []repo.Mount{{Branch: "caic-0"}}
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-						tk.SetState(task.StateRunning)
+						setState(tk, task.StateRunning)
 						ch := newMessageCursor(t, tk)
 
 						run := beginTestExecution(t, r, tk)
@@ -1684,7 +1707,7 @@ else:
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0"}}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				ch := newMessageCursor(t, tk)
 
 				run := beginTestExecution(t, r, tk)
@@ -1826,7 +1849,7 @@ else:
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0"}}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				tk.SetTitle("Stable title")
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}}), nil)
 				provider := &titleProviderSpy{calls: make(chan struct{}, 4)}
@@ -1887,7 +1910,7 @@ else:
 				r := newTestAgentRuntime(t, nil, "", nil)
 
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 
 				run := beginTestExecution(t, r, tk)
 
@@ -1936,7 +1959,7 @@ else:
 						&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 						&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
 					}), nil)
-					tk.SetState(task.StateHasPlan)
+					setState(tk, task.StateHasPlan)
 					changes := make(chan Snapshot, 4)
 					r.NotifyTaskChange = func() { changes <- tk.Snapshot() }
 					log, err := r.openLog(tk)
@@ -1956,7 +1979,7 @@ else:
 					}
 					select {
 					case snapshot := <-changes:
-						if snapshot.PlanExitID != "" || snapshot.PlanContent != "" || snapshot.InPlanMode {
+						if snapshot.PlanExitID != "" || snapshot.PlanContent != "" || snapshot.InPlanMode || snapshot.State != task.StateWaiting {
 							t.Fatalf("notification retained cleared plan: %+v", snapshot)
 						}
 					default:
@@ -1979,7 +2002,7 @@ else:
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "old prompt"}, "test", "", "")
 					tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
-					tk.SetState(startState)
+					setState(tk, startState)
 
 					log, err := r.openLog(tk)
 					if err != nil {
@@ -2042,7 +2065,7 @@ else:
 			if err != nil {
 				t.Fatal(err)
 			}
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateRunning)
 
 			// Simulate the agent writing a plan file.
 			addTaskMessage(tk, &agent.ToolUseMessage{
@@ -2055,7 +2078,7 @@ else:
 
 			// Gracefully end the first session so we can restart.
 			_ = h1.GracefulStop(t.Context(), 5*time.Second)
-			tk.SetState(task.StateWaiting)
+			setState(tk, task.StateWaiting)
 
 			// Restart: should write context_cleared to the log before closing it.
 			h2, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "execute plan"})
@@ -2097,7 +2120,7 @@ else:
 				backend := &synchronousPromptBackend{completed: completed}
 				r := newTestAgentRuntimeWithRuntime(t, testContainer(), agent.Backends{"test": backend}, t.TempDir())
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
-				tk.SetState(task.StateWaiting)
+				setState(tk, task.StateWaiting)
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "fake-instance"), runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 				var completion sync.Once
 				r.NotifyTaskChange = func() {
@@ -2562,7 +2585,7 @@ else:
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "main"}}
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateRunning)
 
 			// Restore messages with cost info (simulates SeedTimelineParts from logs).
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
@@ -2574,7 +2597,7 @@ else:
 				},
 			}), nil)
 
-			result := r.Cleanup(t.Context(), tk, task.StatePurged)
+			result := r.Cleanup(t.Context(), tk)
 			if result.State != task.StatePurged {
 				t.Errorf("state = %v, want %v", result.State, task.StatePurged)
 			}
@@ -2601,7 +2624,7 @@ else:
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0"}}
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
 			// Create a pre-existing log file (written by StopTask scenario).
 			logW, err := r.openLog(tk)
@@ -2611,7 +2634,7 @@ else:
 			_ = logW.Close()
 
 			// Purge the stopped task — should reopen the log and write the trailer.
-			r.Cleanup(t.Context(), tk, task.StatePurged)
+			r.Cleanup(t.Context(), tk)
 
 			plainPath := filepath.Join(logDir, tk.ID.String()+"-org-repo-caic-0.jsonl")
 			if _, err := os.Stat(plainPath); !os.IsNotExist(err) {
@@ -2648,7 +2671,7 @@ else:
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "main"}}
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateRunning)
 
 			// Restore messages including a DiffStatMessage (simulates relay output).
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
@@ -2661,7 +2684,7 @@ else:
 				},
 			}), nil)
 
-			result := r.Cleanup(t.Context(), tk, task.StatePurged)
+			result := r.Cleanup(t.Context(), tk)
 			if len(result.DiffStat) != 2 {
 				t.Fatalf("DiffStat has %d entries, want 2", len(result.DiffStat))
 			}
@@ -2679,9 +2702,9 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
-			r.Cleanup(t.Context(), tk, task.StatePurged)
+			r.Cleanup(t.Context(), tk)
 
 			if caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 still exists, want deleted")
@@ -2697,9 +2720,9 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
-			r.Cleanup(t.Context(), tk, task.StatePurged)
+			r.Cleanup(t.Context(), tk)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -2715,13 +2738,13 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
 			}), nil)
 
-			r.Cleanup(t.Context(), tk, task.StatePurged)
+			r.Cleanup(t.Context(), tk)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -2743,9 +2766,9 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.Repos = []repo.Mount{{Name: "org/repo", Branch: "caic-0", GitRoot: clone}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
-			r.Cleanup(t.Context(), tk, task.StatePurged)
+			r.Cleanup(t.Context(), tk)
 
 			if !caic0BranchExists(t, clone) {
 				t.Fatal("caic-0 was deleted, want preserved")
@@ -2762,7 +2785,7 @@ else:
 				r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(state)
+				setState(tk, state)
 
 				if _, err := r.StopTask(t.Context(), tk); err != nil {
 					t.Fatal(err)
@@ -2793,7 +2816,7 @@ else:
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "retained"), runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
 			tk.OwnerID = owner.ID
 			r.OwnerPolicy = store
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateStopping)
 			run := beginTestExecution(t, r, tk)
 			cmd := exec.CommandContext(run.ctx, "sh", "-c", "read line")
 			stdin, err := cmd.StdinPipe()
@@ -2858,7 +2881,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateStopping)
 			beginTestExecution(t, r, tk)
 			var announced []task.State
 			r.NotifyTaskChange = func() { announced = append(announced, tk.GetState()) }
@@ -2915,7 +2938,7 @@ else:
 				&agent.ResultMessage{},
 				&agent.ResultMessage{},
 			}), nil)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 			tk.SetTitle("existing title")
 			provider := &titleProviderSpy{calls: make(chan struct{}, 1)}
 			tk.Provider = provider
@@ -2971,7 +2994,7 @@ else:
 			prompt := agent.Prompt{Text: "recover this task", Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
 			tk := mustNewTask(t, ksid.NewID(), prompt, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
 			if _, err := r.ReviveTask(t.Context(), tk); err == nil || !strings.Contains(err.Error(), "did not accept its initial prompt") {
 				t.Fatalf("ReviveTask error = %v, want incomplete-startup error", err)
@@ -2988,7 +3011,7 @@ else:
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "session-1"})
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}}), nil)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
 			previousLog, err := r.openLog(tk)
 			if err != nil {
@@ -3048,7 +3071,7 @@ else:
 				r := newTestAgentRuntimeWithRuntime(t, testContainer(), nil, "")
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 					t.Fatal("want error")
 				}
@@ -3088,7 +3111,7 @@ else:
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
-					tk.SetState(task.StateStopped)
+					setState(tk, task.StateStopped)
 					log, err := r.openLog(tk)
 					if err != nil {
 						t.Fatal(err)
@@ -3135,7 +3158,7 @@ else:
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "accepted"}}), nil)
 			tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 			log, err := r.openLog(tk)
 			if err != nil {
 				t.Fatal(err)
@@ -3157,7 +3180,7 @@ else:
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.UserInputMessage{Text: "test"}}), nil)
-			tk.SetState(task.StateStopped)
+			setState(tk, task.StateStopped)
 
 			previousLog, err := r.openLog(tk)
 			if err != nil {
@@ -3180,6 +3203,50 @@ else:
 			}
 			if err := r.Shutdown(context.WithoutCancel(t.Context()), tk); err != nil {
 				t.Error(err)
+			}
+		})
+		t.Run("valid/fresh_relay_replays_as_live", func(t *testing.T) {
+			t.Parallel()
+			backend := &instantExitBackend{}
+			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{harness.Claude: backend}, t.TempDir())
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.Restore(task.StateStarting, time.Time{})
+			run := beginTestExecution(t, r, tk)
+			for _, native := range []string{
+				`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ask","name":"AskUserQuestion","input":{"questions":[{"question":"Which?"}]}}]}}`,
+				`{"type":"result","result":"done","num_turns":1}`,
+			} {
+				if err := taskNative(t.Context(), run.records, native); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.closeRun(tk, run); err != nil {
+				t.Fatal(err)
+			}
+			if got := tk.GetState(); got != task.StateAsking {
+				t.Fatalf("fixture state = %s, want asking", got)
+			}
+			setState(tk, task.StateStopped)
+			if _, err := r.ReviveTask(t.Context(), tk); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Shutdown(context.WithoutCancel(t.Context()), tk); err != nil {
+				t.Fatal(err)
+			}
+			lt, err := taskhistory.NewStore(testLogger(), taskslog.NewStore(filepath.Dir(r.LogPath.Get())), agentbackends.Default("", nil)).LoadSource(r.LogPath.Get())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lt.LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+			replay := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+			replay.Restore(task.StateStarting, time.Time{})
+			replay.SeedTimelineParts(nil, lt.Timeline, nil)
+			replay.GoLive()
+			if got := replay.GetState(); got != task.StateWaiting {
+				t.Fatalf("replayed state = %s, want waiting as live", got)
 			}
 		})
 	})

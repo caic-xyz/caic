@@ -776,45 +776,38 @@ func TestPiWireFormat(t *testing.T) {
 		}
 	})
 
-	t.Run("QueuedTurn", func(t *testing.T) {
+	t.Run("RunStartsTurn", func(t *testing.T) {
 		t.Parallel()
-		// queued returns the index of each line that reports a queued turn.
-		queued := func(t *testing.T, lines ...string) []int {
-			wire := New("", nil).NewWire()
-			var got []int
-			for i, line := range lines {
-				msgs, err := wire.ParseOutput([]byte(line))
-				if err != nil {
-					t.Fatalf("line %d: %v", i, err)
-				}
-				for _, msg := range msgs {
-					if _, ok := msg.(*agent.TurnQueuedMessage); ok {
-						got = append(got, i)
-					}
-				}
-			}
-			return got
-		}
 		const (
 			agentStart = `{"type":"agent_start"}`
 			turnStart  = `{"type":"turn_start"}`
-			system     = `{"type":"message_start","message":{"role":"system","content":""}}`
+			prompt     = `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Fix it"}]}}`
 			assistant  = `{"type":"message_start","message":{"role":"assistant","content":[],"provider":"openrouter","model":"m"}}`
+			agentEnd   = `{"type":"agent_end","messages":[]}`
+			// Minimized from a task log: the pi-subagents extension woke the
+			// idle parent after a detached run ended.
+			notify = `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
+			// Minimized from a task log: Pi retried a rate-limited request.
+			retry = `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429"}`
 		)
-		// Minimized from a task log: the pi-subagents extension woke the
-		// idle parent after a detached run ended.
-		notify := `{"type":"message_start","message":{"role":"custom","customType":"subagent-notify","content":"Background task completed: **worker**","display":false}}`
-		// Minimized from a task log: Pi retried a rate-limited request.
-		retry := `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429"}`
-		prompt := `{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Fix it"}]}}`
-		if got := queued(t, agentStart, turnStart, notify, assistant); !slices.Equal(got, []int{2}) {
-			t.Errorf("extension wake: queued at %v, want [2]", got)
+		// A prompt's run, an extension wake, and a retry each start at agent_start.
+		lines := []string{agentStart, turnStart, prompt, assistant, agentEnd, agentStart, turnStart, notify, assistant, agentEnd, retry, agentStart, turnStart, assistant, agentEnd}
+		wire := New("", nil).NewWire()
+		var msgs []agent.Message
+		for i, line := range lines {
+			m, err := wire.ParseOutput([]byte(line))
+			if err != nil {
+				t.Fatalf("line %d: %v", i, err)
+			}
+			msgs = append(msgs, m...)
 		}
-		if got := queued(t, retry, agentStart, turnStart, assistant, assistant); !slices.Equal(got, []int{3}) {
-			t.Errorf("retry: queued at %v, want [3]", got)
+		if got := agenttest.TurnBoundaries(msgs); got != "SRSRSR" {
+			t.Errorf("boundaries = %q, want %q", got, "SRSRSR")
 		}
-		if got := queued(t, agentStart, turnStart, system, prompt, assistant); len(got) != 0 {
-			t.Errorf("prompt: queued at %v, want none", got)
+		for _, name := range []string{"read-edit-bash", "tool-error"} {
+			if got := agenttest.TurnBoundaries(agenttest.ParseJSONL(t, filepath.Join("testdata", name+".jsonl"), New("", nil).NewWire())); got != "ISR" {
+				t.Errorf("%s: boundaries = %q, want %q", name, got, "ISR")
+			}
 		}
 	})
 

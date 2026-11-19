@@ -10,6 +10,7 @@ import (
 	"time"
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 
 	"github.com/maruel/ksid"
 
@@ -49,7 +50,7 @@ func TestEntry(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateRunning)
 		e := m.NewEntry(tk, nil)
 		m.Insert(tk.ID, e)
 		if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "next"}); err != nil {

@@ -1,8 +1,9 @@
-// Tests native Claude lifecycle correlation, detached shell folding, queued notification turns, and snapshot retirement from recorded evidence.
+// Tests native Claude lifecycle correlation, detached shell folding, queued turns, and snapshot retirement from recorded evidence.
 
 package claudecode
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -483,7 +484,7 @@ func TestBackgroundCommandLifecycle(t *testing.T) {
 func TestTurnQueue(t *testing.T) {
 	t.Parallel()
 	// queued returns, per line, the card kinds in emission order, with "turn"
-	// for a TurnQueuedMessage.
+	// for a TurnStartedMessage.
 	queued := func(t *testing.T, lines ...string) [][]string {
 		wire := newWireFormat()
 		out := make([][]string, len(lines))
@@ -494,9 +495,9 @@ func TestTurnQueue(t *testing.T) {
 			}
 			for _, msg := range msgs {
 				switch m := msg.(type) {
-				case *agent.TurnQueuedMessage:
+				case *agent.TurnStartedMessage:
 					if m.Source.IsChild() {
-						t.Fatalf("line %d: queued turn has child provenance %#v", i, m.Source)
+						t.Fatalf("line %d: turn start has child provenance %#v", i, m.Source)
 					}
 					out[i] = append(out[i], "turn")
 				case *agent.NativeSubagentMessage:
@@ -515,7 +516,7 @@ func TestTurnQueue(t *testing.T) {
 					t.Errorf("line %d = %q, want %q", i, g, kinds)
 				}
 			} else if slices.Contains(g, "turn") {
-				t.Errorf("line %d = %q, want no queued turn", i, g)
+				t.Errorf("line %d = %q, want no turn start", i, g)
 			}
 		}
 	}
@@ -532,51 +533,70 @@ func TestTurnQueue(t *testing.T) {
 		got := queued(t, agentUse, agentStarted, agentUpdated, agentNotified)
 		want(t, got, 2, "turn", "agent:completed")
 	})
-	t.Run("ResumedAgentQueuesAgain", func(t *testing.T) {
+	t.Run("ResumedAgentStartsAgain", func(t *testing.T) {
 		t.Parallel()
 		resumed := strings.ReplaceAll(agentStarted, "0mwjtvyk3-60e1451f", "0mwjtvyk4-00000000")
 		got := queued(t, agentUse, agentStarted, agentNotified, resumed, strings.ReplaceAll(agentUpdated, "0mwjtvyk3-60e1451f", "0mwjtvyk4-00000000"))
 		if !slices.Equal(got[2], []string{"turn", "agent:completed"}) || !slices.Equal(got[4], []string{"turn", "agent:completed"}) {
-			t.Fatalf("got %q, want a queued turn at the end of each run", got)
+			t.Fatalf("got %q, want a turn start at the end of each run", got)
 		}
 	})
-	t.Run("ResultReportsQueuedTurn", func(t *testing.T) {
+	t.Run("Boundaries", func(t *testing.T) {
 		t.Parallel()
 		const (
 			result = `{"type":"result","subtype":"success","is_error":false,"result":"Done","session_id":"fe242f82"}`
 			init   = `{"type":"system","subtype":"init","cwd":"/src","session_id":"fe242f82"}`
 			reply  = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_other","type":"tool_result","content":"ok"}]},"session_id":"fe242f82"}`
+			// prompt is an input record: the user's prompt that caic delivered.
+			prompt = `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Also update the docs"}]}}`
 		)
-		// queuedResults returns TurnQueued for each root result, in order.
-		queuedResults := func(t *testing.T, lines ...string) []bool {
+		boundaries := func(t *testing.T, lines ...string) string {
 			wire := newWireFormat()
-			var out []bool
+			var msgs []agent.Message
 			for i, line := range lines {
-				msgs, err := wire.ParseOutput([]byte(line))
+				parse := wire.ParseOutput
+				if line == prompt {
+					parse = wire.ParseInput
+				}
+				m, err := parse([]byte(line))
 				if err != nil {
 					t.Fatalf("line %d: %v", i, err)
 				}
-				for _, msg := range msgs {
-					if r, ok := msg.(*agent.ResultMessage); ok {
-						out = append(out, r.TurnQueued)
-					}
-				}
+				msgs = append(msgs, m...)
 			}
-			return out
+			return agenttest.TurnBoundaries(msgs)
 		}
 		for _, c := range []struct {
 			name  string
 			lines []string
-			want  []bool
+			want  string
 		}{
-			// The notification turn's own result queues nothing more.
-			{"NoLaterRequest", []string{agentUse, agentStarted, agentUpdated, agentNotified, result, init, result}, []bool{true, false}},
-			{"ToolResultDelivers", []string{agentUse, agentStarted, agentUpdated, agentNotified, reply, result}, []bool{false}},
-			// A notification after a restart belongs to the turn that init starts.
-			{"InitDelivers", []string{agentUse, agentStarted, agentUpdated, init, result}, []bool{false}},
+			// Every init starts a turn, including one Claude Code starts
+			// without a prompt or reported evidence.
+			{"InitStartsTurn", []string{init, result, init}, "SRS"},
+			// A notification during the final model request queues a turn
+			// after the result; that turn's own result queues nothing more.
+			{"NotificationDuringFinalRequest", []string{init, agentUse, agentStarted, agentUpdated, agentNotified, result, init, result}, "SQSR"},
+			{"ToolResultDelivers", []string{init, agentUse, agentStarted, agentUpdated, agentNotified, reply, result}, "SR"},
+			// A notification while no turn runs, such as after a restart, starts
+			// the turn that init then reports.
+			{"NotificationWhileIdle", []string{agentUse, agentStarted, agentUpdated, init, result}, "SSR"},
+			// A prompt delivered during the final model request starts its own
+			// turn after the result; a later request or init carries it otherwise.
+			{"PromptDuringFinalRequest", []string{init, prompt, result, init, result}, "SIQSR"},
+			{"PromptToolResultDelivers", []string{init, prompt, reply, result}, "SIR"},
+			{"PromptBeforeInit", []string{prompt, init, result}, "ISR"},
 		} {
-			if got := queuedResults(t, c.lines...); !slices.Equal(got, c.want) {
-				t.Errorf("%s: TurnQueued = %v, want %v", c.name, got, c.want)
+			if got := boundaries(t, c.lines...); got != c.want {
+				t.Errorf("%s: boundaries = %q, want %q", c.name, got, c.want)
+			}
+		}
+	})
+	t.Run("Recordings", func(t *testing.T) {
+		t.Parallel()
+		for name, want := range map[string]string{"read-edit-bash": "ISR", "ask-user-question": "ISIR"} {
+			if got := agenttest.TurnBoundaries(agenttest.ParseJSONL(t, filepath.Join("testdata", name+".jsonl"), newWireFormat())); got != want {
+				t.Errorf("%s: boundaries = %q, want %q", name, got, want)
 			}
 		}
 	})
@@ -614,11 +634,11 @@ func TestTurnQueue(t *testing.T) {
 		started := `{"type":"system","subtype":"task_started","task_id":"bw2u31182","run_id":"0mwif2bex-f5f2cde1","tool_use_id":"toolu_01BZYJG5Hou8GZuKXutqD1Jf","description":"NeMo smoke results","is_backgrounded":true,"task_type":"local_bash","session_id":"fe242f82"}`
 		killed := `{"type":"system","subtype":"task_updated","task_id":"bw2u31182","run_id":"0mwif2bex-f5f2cde1","patch":{"status":"killed","end_time":1794783538399},"session_id":"fe242f82"}`
 		if got := queued(t, childUse, started, killed); slices.ContainsFunc(got, func(g []string) bool { return slices.Contains(g, "turn") }) {
-			t.Errorf("subagent tool use: got %q, want no queued turn", got)
+			t.Errorf("subagent tool use: got %q, want no turn start", got)
 		}
 		owned := strings.Replace(started, `"is_backgrounded":true`, `"owned_by_subagent":true,"is_backgrounded":true,"parent_task_id":"a5ae28ce78d5b5f5e"`, 1)
 		if got := queued(t, owned, killed); slices.ContainsFunc(got, func(g []string) bool { return slices.Contains(g, "turn") }) {
-			t.Errorf("owned_by_subagent: got %q, want no queued turn", got)
+			t.Errorf("owned_by_subagent: got %q, want no turn start", got)
 		}
 	})
 }
@@ -665,7 +685,7 @@ func TestLiveTasks(t *testing.T) {
 			}
 			for _, msg := range msgs {
 				switch m := msg.(type) {
-				case *agent.TurnQueuedMessage:
+				case *agent.TurnStartedMessage:
 					out[i] = append(out[i], "turn")
 				case *agent.BackgroundRetiredMessage:
 					if m.Source.IsChild() {
@@ -691,17 +711,17 @@ func TestLiveTasks(t *testing.T) {
 		t.Run("Command", func(t *testing.T) {
 			t.Parallel()
 			got := events(t, liveSnapshotCommand, liveStartedCommand, liveSnapshotDropped, liveInit, liveStatusRequesting)
-			check(t, got, [][]string{nil, {"command:running"}, nil, {"retired:claude:shell:bhvck4yky"}, nil})
+			check(t, got, [][]string{nil, {"command:running"}, nil, {"retired:claude:shell:bhvck4yky", "turn"}, nil})
 		})
 		t.Run("Watch", func(t *testing.T) {
 			t.Parallel()
 			got := events(t, monitorToolUse, liveSnapshotWatch, monitorStarted, liveSnapshotEmpty, liveInit)
-			check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"retired:claude:shell:bizvx8b6o"}})
+			check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"retired:claude:shell:bizvx8b6o", "turn"}})
 		})
 		t.Run("Agent", func(t *testing.T) {
 			t.Parallel()
 			got := events(t, agentSnapshotLive, agentStartedLive, agentSnapshotEmpty, agentInit)
-			check(t, got, [][]string{nil, {"agent:running"}, nil, {"retired:claude:task:a3635a9373e98f76a"}})
+			check(t, got, [][]string{nil, {"agent:running"}, nil, {"retired:claude:task:a3635a9373e98f76a", "turn"}})
 		})
 		t.Run("NextSnapshot", func(t *testing.T) {
 			t.Parallel()
@@ -713,21 +733,21 @@ func TestLiveTasks(t *testing.T) {
 	t.Run("SnapshotBeforeStartKeepsCard", func(t *testing.T) {
 		t.Parallel()
 		got := events(t, liveSnapshotCommand, liveStartedCommand, liveInit, liveSnapshotCommand, liveStatusRequesting)
-		check(t, got, [][]string{nil, {"command:running"}, nil, nil, nil})
+		check(t, got, [][]string{nil, {"command:running"}, {"turn"}, nil, nil})
 	})
 	t.Run("StartAfterDropKeepsCard", func(t *testing.T) {
 		t.Parallel()
 		// Only a task the previous snapshot listed can be dropped, and its
 		// task_started cancels the drop.
 		got := events(t, liveSnapshotDropped, liveStartedCommand, liveSnapshotEmpty, liveInit)
-		check(t, got, [][]string{nil, {"command:running"}, nil, nil})
+		check(t, got, [][]string{nil, {"command:running"}, nil, {"turn"}})
 		got = events(t, liveSnapshotCommand, liveSnapshotEmpty, liveStartedCommand, liveInit)
-		check(t, got, [][]string{nil, nil, {"command:running"}, nil})
+		check(t, got, [][]string{nil, nil, {"command:running"}, {"turn"}})
 	})
 	t.Run("TerminalNotReopened", func(t *testing.T) {
 		t.Parallel()
 		got := events(t, liveSnapshotCommand, liveStartedCommand, liveUpdatedCommand, liveNotifiedCommand, liveSnapshotDropped, liveInit, liveSnapshotCommand, liveStatusRequesting)
-		check(t, got, [][]string{nil, {"command:running"}, {"turn", "command:completed"}, {"command:completed"}, nil, nil, nil, nil})
+		check(t, got, [][]string{nil, {"command:running"}, {"turn", "command:completed"}, {"command:completed"}, nil, {"turn"}, nil, nil})
 	})
 	t.Run("DropBeforeTerminal", func(t *testing.T) {
 		t.Parallel()
@@ -740,13 +760,13 @@ func TestLiveTasks(t *testing.T) {
 		t.Parallel()
 		foreground := strings.Replace(agentStartedLive, `"is_backgrounded":true`, `"is_backgrounded":false`, 1)
 		got := events(t, agentSnapshotLive, foreground, agentSnapshotEmpty, agentInit)
-		check(t, got, [][]string{nil, {"agent:running"}, nil, nil})
+		check(t, got, [][]string{nil, {"agent:running"}, nil, {"turn"}})
 	})
 	t.Run("InterleavedTasks", func(t *testing.T) {
 		t.Parallel()
 		// The watch's task_started does not cancel the command's drop, and each
 		// drop retires only its own card.
 		got := events(t, monitorToolUse, liveSnapshotCommand, liveStartedCommand, liveSnapshotWatch, monitorStarted, liveSnapshotDropped, liveInit, liveSnapshotEmpty, liveStatusRequesting)
-		check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"command:running"}, {"retired:claude:shell:bhvck4yky"}, nil, nil, {"retired:claude:shell:bizvx8b6o"}})
+		check(t, got, [][]string{nil, nil, {"command:running"}, nil, {"command:running"}, {"retired:claude:shell:bhvck4yky"}, {"turn"}, nil, {"retired:claude:shell:bizvx8b6o"}})
 	})
 }

@@ -22,6 +22,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/history"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -30,7 +31,7 @@ func TestTaskHistory(t *testing.T) {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 	id := ksid.NewID()
 	tk := mustNewTask(t, id, agent.Prompt{Text: "history"}, harness.Claude)
-	tk.SetState(task.StateRunning)
+	taskruntest.SetState(tk, task.StateRunning)
 	insertTestTask(s, id, tk)
 	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
@@ -80,14 +81,14 @@ func TestTaskHistory(t *testing.T) {
 	}
 	sameRelease()
 	secondRelease()
-	tk.SetState(task.StatePurged)
+	taskruntest.SetState(tk, task.StatePurged)
 	owner.prune(false)
 	if same, release, err := owner.acquire(t.Context(), entry); err != nil || same != second {
 		t.Fatalf("state-only transition lost projection: %v", err)
 	} else {
 		release()
 	}
-	tk.SetState(task.StateRunning)
+	taskruntest.SetState(tk, task.StateFailed)
 	cancel()
 	if _, _, err := owner.acquire(t.Context(), entry); !errors.Is(err, context.Canceled) {
 		t.Fatalf("source created after shutdown: %v", err)
@@ -109,12 +110,13 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 	id := ksid.NewID()
 	tk := mustNewTask(t, id, agent.Prompt{Text: "history"}, harness.Claude)
+	taskruntest.SetState(tk, task.StateWaiting)
 	tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
+		&agent.TurnStartedMessage{},
 		&agent.ToolUseMessage{ToolUseID: "enter", Name: "EnterPlanMode"},
 		&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"first plan"}`)},
 		&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
 	}), nil)
-	tk.SetState(task.StateRunning)
 	if snap := tk.Snapshot(); snap.PlanExitID != "exit" || snap.PlanContent != "first plan" {
 		t.Fatal("fixture has no mutable visible-plan state")
 	}
@@ -179,9 +181,9 @@ func TestTaskHistoryImmutableInputs(t *testing.T) {
 	owner.invalidate(entry, first)
 	for _, revive := range []bool{false, true} {
 		if revive {
-			tk.SetState(task.StateStopped)
+			taskruntest.SetState(tk, task.StateStopped)
 			owner.prune(false)
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateWaiting)
 		}
 		rebuilt, release, err := owner.acquire(t.Context(), entry)
 		if err != nil {
@@ -223,7 +225,7 @@ func TestTaskHistoryBoundedLeases(t *testing.T) {
 	var releaseHeld func()
 	for i := range 10 {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "history"}, harness.Claude)
-		tk.SetState(task.StatePurged)
+		taskruntest.SetState(tk, task.StatePurged)
 		entry := s.taskMgr.NewEntry(tk, nil)
 		entry.LogPath.Set(path)
 		s.taskMgr.Insert(tk.ID, entry)

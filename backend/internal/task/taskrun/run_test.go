@@ -146,7 +146,7 @@ func TestRun(t *testing.T) {
 					r.NotifyTaskChange = func() { notifications <- struct{}{} }
 					tk := mustNewTask(t, id, agent.Prompt{Text: "initial"}, harness.Claude, "", "")
 					tk.SetTitle("Current")
-					tk.SetState(task.StateRunning)
+					setState(tk, task.StateRunning)
 					provider := &runTitleProvider{started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}, 1), title: test.title}
 					tk.Provider = provider
 					run := beginTestExecution(t, r, tk)
@@ -192,7 +192,7 @@ func TestRun(t *testing.T) {
 			notifications := make(chan struct{}, 16)
 			r.NotifyTaskChange = func() { notifications <- struct{}{} }
 			tk := mustNewTask(t, id, agent.Prompt{Text: "initial"}, harness.Claude, "", "")
-			tk.SetState(task.StateRunning)
+			setState(tk, task.StateRunning)
 			run := beginTestExecution(t, r, tk)
 			const session = `"session_id":"s"`
 			if err := taskNative(t.Context(), run.records, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_watch","name":"Monitor","input":{"command":"tail -f out","description":"results"}}]},`+session+`}`); err != nil {
@@ -226,7 +226,7 @@ func TestRun(t *testing.T) {
 				tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude, "", "")
 				tk.Repos = []repo.Mount{{Branch: "caic-0", ContainerPath: "/repo"}}
 				tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				setState(tk, task.StateRunning)
 				run := beginTestExecution(t, r, tk)
 				result := make(chan error, 1)
 				input := make(chan error, 1)
@@ -289,7 +289,7 @@ func TestRun(t *testing.T) {
 		r := newTestAgentRuntime(t, nil, "", agent.Backends{harness.Claude: backend})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
-		tk.SetState(task.StateWaiting)
+		setState(tk, task.StateWaiting)
 		var workers sync.WaitGroup
 		t.Cleanup(func() {
 			close(backend.abort)

@@ -151,8 +151,8 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
-	case "turn_queued":
-		var m agent.TurnQueuedMessage
+	case "turn_started":
+		var m agent.TurnStartedMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}

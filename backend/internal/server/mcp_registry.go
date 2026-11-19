@@ -75,8 +75,6 @@ A task has a prompt (what to build), a repo, a branch, and a state:
 - waiting: agent completed a turn, awaiting user input
 - asking: agent asked a question, needs the user to answer
 - has_plan: agent produced a plan, awaiting approval
-- pulling: pulling changes from container
-- pushing: pushing changes to remote
 - stopping: graceful stop in progress
 - stopped: container stopped and can be revived
 - purging: cleanup in progress, container being deleted

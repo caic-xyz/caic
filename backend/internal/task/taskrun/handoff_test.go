@@ -261,9 +261,8 @@ func TestExternalConversationCannotReplaceRoot(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Research geometry"}, harness.Antigravity, "", "")
 	tk.SeedTimelineParts(nil, agenttest.TimedMessages(messages), nil)
-	result := lastAgentMessage(tk.timelineViewLocked())
-	if result == nil || !result.IsError || !strings.Contains(result.Result, "root failure") {
-		t.Fatalf("foreign activity replaced root result: %+v", result)
+	if result := tk.LastAgentResult(); !tk.BackgroundActivity().TurnEnded || !strings.Contains(result, "root failure") {
+		t.Fatalf("foreign activity replaced root result: %q", result)
 	}
 	handoff := BuildHandoffPrompt(tk, 0)
 	if strings.Contains(handoff, "FOREIGN_PRIVATE_ANSWER") || !strings.Contains(handoff, "Root answer") {

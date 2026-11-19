@@ -98,10 +98,6 @@ func TaskState(s task.State) (v1.TaskState, error) {
 		return v1.TaskStateAsking, nil
 	case task.StateHasPlan:
 		return v1.TaskStateHasPlan, nil
-	case task.StatePulling:
-		return v1.TaskStatePulling, nil
-	case task.StatePushing:
-		return v1.TaskStatePushing, nil
 	case task.StateStopping:
 		return v1.TaskStateStopping, nil
 	case task.StateStopped:

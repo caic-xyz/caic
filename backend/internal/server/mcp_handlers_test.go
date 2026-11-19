@@ -23,6 +23,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 
 	"github.com/maruel/ksid"
 
@@ -140,7 +141,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			id := ksid.NewID()
 			tk := mustNewTask(t, id, agent.Prompt{Text: "Owned task"}, harness.Claude)
 			tk.OwnerID = owner.ID
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateRunning)
 			insertTestTask(s, id, tk)
 			foreignID := ksid.NewID()
 			foreign := mustNewTask(t, foreignID, agent.Prompt{Text: "Private work"}, harness.Claude)
@@ -311,7 +312,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 				t.Fatalf("baseline notifications: %#v", baseline)
 			}
 			alertStarted := time.Now()
-			tk.SetState(task.StateWaiting)
+			taskruntest.SetState(tk, task.StateWaiting)
 			s.taskMgr.NotifyTaskUpdate(tk.ID)
 			readUpdates()
 			_, updated, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
@@ -336,9 +337,9 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			// Both transitions happen between resource reads. The final enum is
 			// unchanged, but its atomic task-state identity denotes a new alert
 			// that supersedes the first.
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateStopped)
 			s.taskMgr.NotifyTaskUpdate(tk.ID)
-			tk.SetState(task.StateWaiting)
+			taskruntest.SetState(tk, task.StateWaiting)
 			s.taskMgr.NotifyTaskUpdate(tk.ID)
 			readUpdates()
 			readUpdates()
@@ -378,7 +379,7 @@ func TestMCPReleasedNotifications(t *testing.T) {
 			// incarnation identifies a quiet baseline, not a new occurrence ID.
 			restored := mustNewTask(t, id, agent.Prompt{Text: "Restored task"}, harness.Claude)
 			restored.OwnerID = owner.ID
-			restored.SetState(task.StateWaiting)
+			taskruntest.SetState(restored, task.StateWaiting)
 			insertTestTask(s, id, restored)
 			readUpdates()
 			_, replaced, _ := post(ownerToken.AccessToken, session, "resources/read", `{"uri":"gomode://notifications"}`)
@@ -1389,7 +1390,7 @@ func TestMCPHandlers(t *testing.T) {
 				updates <- update
 				count++
 				if count == 1 {
-					tk.SetState(task.StateWaiting)
+					taskruntest.SetState(tk, task.StateWaiting)
 					s.taskMgr.NotifyTaskUpdate(tk.ID)
 				}
 				if count == 2 {
@@ -1402,7 +1403,7 @@ func TestMCPHandlers(t *testing.T) {
 			wg.Wait()
 		})
 
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateRunning)
 		s.taskMgr.NotifyTaskUpdate(tk.ID)
 		for range 2 {
 			select {
@@ -1461,7 +1462,7 @@ func TestMCPHandlers(t *testing.T) {
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude)
 		tk.SetTitle("Fix tests")
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, id, tk)
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)

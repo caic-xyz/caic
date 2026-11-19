@@ -11,6 +11,9 @@ DTO and provider file to update. It also replays each log through caic's wire
 and metadata parsers, as task loading does, and reports the first record each
 rejects; such a record fails the task. When a wire protocol changes, update the genai
 DTO and its method-to-DTO map, such as `codex.NewNotificationParams`.
+It also loads each validated log as task restore does, feeds it through live
+ingestion, and reports a log whose replay derives different task state at any
+replayed point; `-fold-out` writes every point so two runs can be diffed.
 It also reports a backgrounded Claude `local_bash` task whose spawning tool use
 is missing or is not `claudecode.ToolBash` or `claudecode.ToolMonitor`; classify
 the new tool in `claudecode/native_subagent.go`.

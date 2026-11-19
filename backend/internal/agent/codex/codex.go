@@ -723,11 +723,15 @@ func (w *wireFormat) parseOutput(line []byte, decode func([]byte, *agent.JSONRPC
 	if record.turnCompleted != nil && record.source.IsChild() {
 		msgs = nil
 	}
-	// Child reads count in analytics; their loads never enter root context.
+	// Child reads count in analytics; their loads never enter root context, and
+	// a child turn start cannot start the parent turn.
 	if record.source.IsChild() {
 		msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
-			_, ok := m.(*agent.SkillLoadMessage)
-			return ok
+			switch m.(type) {
+			case *agent.SkillLoadMessage, *agent.TurnStartedMessage:
+				return true
+			}
+			return false
 		})
 	}
 	commands, err := w.backgroundCommands.parse(codex.Method(probe.Method), &record)

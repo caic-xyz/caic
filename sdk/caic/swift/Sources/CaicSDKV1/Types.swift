@@ -708,8 +708,6 @@ public struct TaskState: Codable, Equatable, Hashable {
     public static let Waiting = TaskState("waiting")
     public static let Asking = TaskState("asking")
     public static let HasPlan = TaskState("has_plan")
-    public static let Pulling = TaskState("pulling")
-    public static let Pushing = TaskState("pushing")
     public static let Stopping = TaskState("stopping")
     public static let Stopped = TaskState("stopped")
     public static let Purging = TaskState("purging")

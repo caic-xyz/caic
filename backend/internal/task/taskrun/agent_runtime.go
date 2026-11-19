@@ -109,8 +109,9 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 }
 
 // EnsureSession waits briefly for h to confirm it's alive. If the session
-// exits within 10 seconds (agent had already finished), it detaches and
-// starts a fresh idle relay only when the task has no saved session.
+// exits within 10 seconds (agent had already finished), it detaches and,
+// only when the task has no saved session, records a context boundary and
+// starts a fresh idle relay.
 // Existing conversations fail instead of silently losing history. The supplied
 // context must also own the session process; cancellation drains its local
 // transport without sending a stop sentinel to the retained remote agent.
@@ -135,7 +136,9 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		if s := t.GetState(); s == task.StateStopping || s == task.StateStopped || s == task.StatePurged {
 			return nil, fmt.Errorf("task is %s", s)
 		}
-		t.SetState(task.StateWaiting)
+		if err := r.RecordHost(ctx, t, agent.ContextCleared()); err != nil {
+			return nil, err
+		}
 		return r.StartSession(ctx, t, agent.Prompt{})
 	case <-time.After(timeout):
 		// Session is alive — all good.
@@ -147,9 +150,9 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 }
 
 // StartSession starts a fresh relay+agent session on an existing instance.
-// If prompt is non-empty, it is sent as the initial input and the task
-// transitions to StateRunning. If prompt is empty, the agent starts idle
-// and the task stays in its current state (typically StateWaiting).
+// If prompt is non-empty, the session starts and the prompt is sent as its
+// initial input. If prompt is empty, the agent starts idle and the task keeps
+// its state.
 func (r *AgentRuntime) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	if t.RuntimeInstanceID() == "" {
 		return nil, errors.New("no instance")
@@ -174,8 +177,8 @@ func (r *AgentRuntime) RestartSession(ctx context.Context, t *Task, prompt agent
 }
 
 // ClearContextSession closes the current agent session and starts a fresh one
-// in the same instance without a prompt. The task transitions to StateWaiting
-// so the user can send a new message when ready.
+// in the same instance without a prompt, so the task waits for the user's next
+// message.
 func (r *AgentRuntime) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	return r.replaceSession(ctx, t, agent.Prompt{}, replaceSessionClearContext)
 }
@@ -205,7 +208,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	run, err := r.beginRun(ctx, t, false, false)
 	if err != nil {
 		startupErr := &StartupError{Harness: t.Harness, Phase: "task log setup", Err: err}
-		t.SetState(task.StateFailed)
+		t.Transition(task.StateFailed)
 		return nil, startupErr
 	}
 
@@ -214,7 +217,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	records := run.records
 
 	if r.Checkout != nil {
-		t.SetState(task.StateBranching)
+		t.Transition(task.StateBranching)
 	}
 	tStart := time.Now()
 	// 1. Create the branch, then start the instance.
@@ -241,7 +244,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	r.Log.Info("checkout", "msg", "ready", "br", primaryBranch, "instance", sr.InstanceID, "dur", time.Since(tStart))
 
 	// 2. Start the agent session.
-	t.SetState(task.StateStarting)
+	t.Transition(task.StateStarting)
 
 	tSession := time.Now()
 	tlog := r.Log.With("br", primaryBranch, "instance", sr.InstanceID)
@@ -274,9 +277,8 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	h := &SessionHandle{Session: session, Run: run}
 	t.AttachSession(h)
 
-	// Keep a result already applied by the recording owner during startup
-	// from being overwritten back to Running.
-	t.SetStateIf(task.StateStarting, task.StateRunning)
+	// The recording owner already folded the initial prompt.
+	t.GoLive()
 	tlog.Info("agent running", "session_dur", time.Since(tSession), "total_startup_dur", time.Since(tStart))
 	return h, nil
 }
@@ -285,19 +287,18 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 // shutdown protocol — see package agent). It sends the null-byte sentinel
 // to trigger graceful agent exit, then purges the instance.
 //
-// This is only called for intentional purge (user action or instance
-// death), never during backend restart. On restart, the relay daemon stays
-// alive and the server reconnects during task import.
+// This is only called for an intentional purge of a purging task, never
+// during backend restart. On restart, the relay daemon stays alive and the
+// server reconnects during task import.
 //
 // Steps:
 //  1. Detach the session handle from the task.
 //  2. If a session exists: Stop (sends \x00, waits up to 20s), then Close.
-//  3. Set task state to reason (StatePurged or StateFailed).
-//  4. Purge the instance (stop + remove + cleanup git remotes/runtime config).
-//  5. If graceful wait timed out, drain session now (runtime connection severed).
-//  6. Close msgCh and log, write log trailer.
-//  7. Build and return Result.
-func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) task.Result {
+//  3. Purge the instance (stop + remove + cleanup git remotes/runtime config).
+//  4. If graceful wait timed out, drain session now (runtime connection severed).
+//  5. Write the purged log trailer, then move the task to purged.
+//  6. Build and return Result.
+func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task) task.Result {
 	ctx, span := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
 	defer span.End()
 
@@ -308,7 +309,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 		primaryBranch = p.Branch
 	}
 	tlog := r.Log.With("br", primaryBranch, "instance", name)
-	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
+	tlog.InfoContext(ctx, "cleanup starting", "state", t.GetState(), "has_session", t.HasSession())
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
 	// Stats come from the committed-message fold.
@@ -331,7 +332,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
 	var summaryErr error
-	if reason == task.StatePurged && !t.DiffCreated() && name != "" && r.Checkout != nil {
+	if !t.DiffCreated() && name != "" && r.Checkout != nil {
 		snapshot, err := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, t.GitTarget())
 		switch {
 		case err != nil:
@@ -377,7 +378,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	snapshot := t.Snapshot()
 	res := task.Result{
 		Err:          summaryErr,
-		State:        reason,
+		State:        task.StatePurged,
 		AgentResult:  t.LastAgentResult(),
 		CostUSD:      snapshot.CostUSD,
 		CostKnown:    snapshot.CostKnown,
@@ -389,7 +390,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	if ds := snapshot.DiffStat; len(ds) > 0 {
 		res.DiffStat = ds
 	}
-	if reason == task.StatePurged && runtimeRemovedOrAbsent && branchConfirmedEmpty {
+	if runtimeRemovedOrAbsent && branchConfirmedEmpty {
 		if r.Checkout != nil {
 			r.Checkout.DeleteUnmodifiedTaskBranches(ctx, r.Log, t)
 		}
@@ -403,11 +404,11 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason task.State) 
 	if recordErr != nil {
 		res.Err = errors.Join(res.Err, recordErr)
 	} else {
-		t.SetState(reason)
+		t.Transition(task.StatePurged)
 		res.Err = errors.Join(res.Err, r.compressLog(nil, t, &res))
 	}
 	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
-		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)
+		"cost", res.CostUSD, "turns", res.NumTurns)
 	return res
 }
 
@@ -426,9 +427,10 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) (*task.Result, err
 		primaryBranch = p.Branch
 	}
 	tlog := r.Log.With("br", primaryBranch, "instance", name)
-	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
-	if _, changed := t.SetStateUnless(task.StateStopping, task.StatePurging, task.StatePurged, task.StateCrashed, task.StateFailed, task.StateStopped); !changed {
-		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
+	// Stop and Purge record the stopping intent first; a purge or a crash that
+	// settled this incarnation since then owns the result.
+	if state := t.GetState(); state != task.StateStopping {
+		tlog.InfoContext(ctx, "stop skipped", "state", state)
 		return nil, nil //nolint:nilnil // A superseding lifecycle operation owns the settled result.
 	}
 
@@ -472,7 +474,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) (*task.Result, err
 		tlog.DebugContext(ctx, "stop: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
-	if _, changed := t.SetStateUnless(task.StateStopped, task.StatePurging, task.StatePurged, task.StateCrashed, task.StateFailed); !changed {
+	if !t.Transition(task.StateStopped) {
 		// A purge or a crash already settled this incarnation and owns its record
 		// owner, so a stop must not record a result over it.
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
@@ -536,7 +538,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	}
 	run, err := r.beginRun(ctx, t, true, false)
 	if err != nil {
-		t.SetState(task.StateCrashed)
+		t.Transition(task.StateCrashed)
 		r.NotifyTaskChange()
 		return nil, err
 	}
@@ -544,10 +546,11 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	return r.reviveRun(t, run)
 }
 
-// RecoverRetainedSession records recovery intent before stopping an unverified
-// retained runtime, then resumes it through the same newly owned execution.
-func (r *AgentRuntime) RecoverRetainedSession(ctx context.Context, t *Task, expectedState task.State) (*SessionHandle, error) {
-	_, accepted, err := r.RecordLifecycleIntent(ctx, t, task.StateProvisioning, task.StateProvisioning, expectedState)
+// RecoverRetainedSession records recovery intent for a task adoption left
+// provisioning, before stopping its unverified retained runtime, then resumes
+// it through the same newly owned execution.
+func (r *AgentRuntime) RecoverRetainedSession(ctx context.Context, t *Task) (*SessionHandle, error) {
+	_, accepted, err := r.RecordLifecycleIntent(ctx, t, task.StateProvisioning, task.StateProvisioning, task.StateProvisioning)
 	if err != nil {
 		return nil, err
 	}
@@ -556,14 +559,14 @@ func (r *AgentRuntime) RecoverRetainedSession(ctx context.Context, t *Task, expe
 	}
 	run, err := r.beginRun(ctx, t, true, false)
 	if err != nil {
-		t.SetState(task.StateCrashed)
+		t.Transition(task.StateCrashed)
 		r.NotifyTaskChange()
 		return nil, err
 	}
 	defer close(run.startupDone)
 	if err := r.Runtimes.Stop(run.ctx, t.RuntimeInstanceID()); err != nil { //nolint:contextcheck // Retained recovery belongs to the independently cancelable execution.
 		failure := fmt.Errorf("stop retained instance before recovery: %w", err)
-		t.SetState(task.StateCrashed)
+		t.Transition(task.StateCrashed)
 		return nil, errors.Join(failure, r.finalizeRun(context.WithoutCancel(ctx), t, run, &task.Result{State: task.StateCrashed, Err: failure}))
 	}
 	return r.reviveRun(t, run)
@@ -593,7 +596,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	// Every fork branch — primary and extras alike — was assigned by the Manager
 	// before ForkTask, so the log can open with a correct metadata header up
 	// front and provisioning output is durable from the first line.
-	fork.SetState(task.StateProvisioning)
+	fork.Transition(task.StateProvisioning)
 	forkBranch := ""
 	if p := fork.Primary(); p != nil {
 		forkBranch = p.Branch
@@ -629,7 +632,7 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 
 	run, err := r.beginRun(ctx, fork, false, false)
 	if err != nil {
-		fork.SetState(task.StateFailed)
+		fork.Transition(task.StateFailed)
 		return nil, err
 	}
 
@@ -670,12 +673,13 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 
 	// 3. Start a fresh agent session with the fork prompt.
 	// No --resume: the fork gets its own session ID and clean message history.
-	fork.SetState(task.StateStarting)
+	fork.Transition(task.StateStarting)
 	h, err := r.startSessionWithRun(fork, fork.InitialPrompt, run)
 	if err != nil {
 		startupErr := fmt.Errorf("start session on fork: %w", err)
 		return nil, r.finishStartupFailure(ctx, fork, run, startupErr)
 	}
+	fork.GoLive()
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
 }
@@ -816,7 +820,7 @@ func (r *AgentRuntime) reviveRun(t *Task, run *Run) (*SessionHandle, error) {
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("revive instance: %w", err), run)
 	}
 	t.SetVNCPort(r.Runtimes.VNCPort(ctx, id))
-	t.SetState(task.StateStarting)
+	t.Transition(task.StateStarting)
 	opts := &agent.Options{Logger: r.Log, Target: t.RuntimeConnectionTarget(), Dir: r.runtimeDir(t), Model: t.RequestedModel, Effort: t.RequestedEffort, AutoCompactTokenLimit: t.RequestedAutoCompactTokenLimit, CompactionBudget: t.RequestedCompactionBudget, ResumeSessionID: t.GetSessionID(), Records: run.records}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		return nil, r.finishReviveFailure(ctx, t, err, run)
@@ -826,7 +830,7 @@ func (r *AgentRuntime) reviveRun(t *Task, run *Run) (*SessionHandle, error) {
 		return nil, r.finishReviveFailure(ctx, t, err, run)
 	}
 	h := &SessionHandle{Session: session, Run: run}
-	t.SetStateIf(task.StateStarting, task.StateWaiting)
+	t.GoLive()
 	t.AttachSession(h)
 	h, err = r.EnsureSession(run.parent, r.Log, t, h)
 	if err != nil {
@@ -907,7 +911,7 @@ func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *task.Result)
 // connects to the instance. The ordering ensures runtimes never receive a
 // mapped branch that does not exist yet.
 func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string, records *agent.Records) (setupResult, error) {
-	t.SetState(task.StateProvisioning)
+	t.Transition(task.StateProvisioning)
 	detached := ctx
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
@@ -1005,7 +1009,7 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	stopErr := r.Runtimes.Stop(stopCtx, t.RuntimeInstanceID())
 	cancel()
-	t.SetStateUnless(task.StateCrashed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
+	t.Transition(task.StateCrashed)
 	res := &task.Result{State: task.StateCrashed, Err: reviveErr}
 	if run == nil {
 		return errors.Join(reviveErr, stopErr, r.CommitSettledResult(context.WithoutCancel(ctx), t, res))
@@ -1024,7 +1028,7 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, run *R
 		res.StartupFailure = &details
 	}
 	writeErr := run.records.AppendMessages(context.WithoutCancel(ctx), []agent.Message{&agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}, taskhistory.ResultMessage(t.Title(), res)})
-	t.SetState(task.StateFailed)
+	t.Transition(task.StateFailed)
 	purgeErr := r.purgeFailedStartupInstance(ctx, t)
 	closeErr := r.closeRun(t, run) //nolint:contextcheck // Final producer drain uses its execution owner, independently of request cancellation.
 	var compressErr error
@@ -1086,7 +1090,7 @@ func (r *AgentRuntime) startSessionWithRun(t *Task, prompt agent.Prompt, run *Ru
 		return nil, err
 	}
 	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan)
+		t.Transition(task.StateStarting)
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	if err != nil {
@@ -1127,12 +1131,10 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	}
 	h, err := r.StartSession(ctx, t, prompt)
 	if err != nil {
-		t.SetStateUnless(task.StateFailed, task.StatePurging, task.StatePurged, task.StateStopping, task.StateStopped)
+		t.Transition(task.StateFailed)
 		return nil, err
 	}
-	if mode == replaceSessionClearContext {
-		t.SetStateIf(task.StateStarting, task.StateWaiting)
-	}
+	t.GoLive()
 	return h, nil
 }
 

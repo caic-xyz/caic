@@ -645,9 +645,9 @@ type ResultMessage struct {
 	ContextWindow int         `json:"context_window,omitempty"`
 	UUID          string      `json:"uuid"`
 	DiffStat      v3.DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
-	// TurnQueued reports that the harness queued the next turn by itself before
-	// this one ended, like a TurnQueuedMessage that follows the result. The
-	// adapter derives it from native records.
+	// TurnQueued reports that the harness starts another turn right after this
+	// one, for input it received during this turn. The adapter derives it from
+	// native records.
 	TurnQueued bool `json:"-"`
 }
 
@@ -853,18 +853,21 @@ type BackgroundCommandMessage struct {
 // Type implements Message.
 func (m *BackgroundCommandMessage) Type() string { return "background_command" }
 
-// TurnQueuedMessage reports that the harness queued a turn by itself, without
-// user input, for example to deliver the outcome of background work. The turn
-// ends at the next root ResultMessage. An adapter emits it before the lifecycle
-// update that causes the turn, so a consumer never sees that update settle the
-// task while the turn is pending. It is derived from native records and is not
-// part of the transcript.
-type TurnQueuedMessage struct {
+// TurnStartedMessage reports that the harness started a turn: the native
+// boundary each adapter observes, such as Claude Code init, Codex
+// turn/started, Pi agent_start, or an Antigravity user_input step. A turn
+// started by the harness itself, without user input, is one too. An adapter
+// emits it before a lifecycle update that causes the turn, so a consumer never
+// sees that update settle the task while the turn is pending. A root turn ends
+// at the next root ResultMessage. An accepted root prompt also starts a turn;
+// ACP has no other boundary. It is derived from native records and is not part
+// of the transcript.
+type TurnStartedMessage struct {
 	v3.MessageProvenance
 }
 
 // Type implements Message.
-func (m *TurnQueuedMessage) Type() string { return "turn_queued" }
+func (m *TurnStartedMessage) Type() string { return "turn_started" }
 
 // BackgroundRetiredMessage reports a running native subagent or background
 // command whose outcome the harness will not report. The card ends as unknown, as on host exit. It is derived from

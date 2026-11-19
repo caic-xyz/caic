@@ -20,6 +20,31 @@ func TimedMessages(messages []agent.Message) []agent.TimedMessage {
 	return entries
 }
 
+// TurnBoundaries renders the root turn boundaries in messages, in order: "I"
+// for a prompt, "S" for a turn start, "R" for a result, and "Q" for a result
+// that reports the harness starts another turn right after it.
+func TurnBoundaries(messages []agent.Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		if msg.Provenance().IsChild() {
+			continue
+		}
+		switch m := msg.(type) {
+		case *agent.UserInputMessage:
+			b.WriteByte('I')
+		case *agent.TurnStartedMessage:
+			b.WriteByte('S')
+		case *agent.ResultMessage:
+			if m.TurnQueued {
+				b.WriteByte('Q')
+			} else {
+				b.WriteByte('R')
+			}
+		}
+	}
+	return b.String()
+}
+
 // ParseJSONL parses every non-empty physical v3 fixture record with parser.
 func ParseJSONL(t testing.TB, path string, parser agent.MessageParser) []agent.Message {
 	file, err := os.Open(filepath.Clean(path))

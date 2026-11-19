@@ -5,6 +5,7 @@ package taskrun
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // mustNewTask calls NewTask and fails t if it returns an error. baseImage,
@@ -35,6 +37,53 @@ func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name, 
 		t.Fatal(err)
 	}
 	return tk
+}
+
+// setState puts tk in published state s as of now, as taskruntest.SetState
+// does.
+func setState(tk *Task, s task.State) {
+	setStateAt(tk, s, time.Time{})
+}
+
+// setStateAt puts tk in published state s as of at (zero means now) and keeps
+// a task already in s. A lifecycle phase replaces the current one. Waiting
+// ends a running turn, or starts a session that reports no turn. Running,
+// asking, and has_plan start a session and fold a turn, a question, or a plan
+// into it without adding them to the timeline.
+func setStateAt(tk *Task, s task.State, at time.Time) {
+	if tk.GetState() == s {
+		return
+	}
+	var turn []agent.Message
+	switch s {
+	case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateStopping, task.StateStopped, task.StatePurging, task.StatePurged, task.StateCrashed, task.StateFailed:
+		tk.Restore(s, at)
+		return
+	case task.StateWaiting:
+		if tk.SessionLost(at) {
+			return
+		}
+	case task.StateRunning:
+		turn = []agent.Message{&agent.TurnStartedMessage{}}
+	case task.StateAsking:
+		turn = []agent.Message{&agent.TurnStartedMessage{}, &agent.AskMessage{ToolUseID: "question"}}
+	case task.StateHasPlan:
+		turn = []agent.Message{
+			&agent.TurnStartedMessage{},
+			&agent.ToolUseMessage{ToolUseID: "write", Name: "Write", Input: json.RawMessage(`{"file_path":"/root/.claude/plans/plan.md","content":"plan"}`)},
+			&agent.ToolUseMessage{ToolUseID: "exit", Name: "ExitPlanMode"},
+			&agent.ResultMessage{},
+		}
+	default:
+		panic("unsupported state " + string(s))
+	}
+	tk.Restore(task.StateStarting, at)
+	tk.mu.Lock()
+	for _, m := range turn {
+		tk.foldMessageLocked(m, at, at, false)
+	}
+	tk.mu.Unlock()
+	tk.GoLive()
 }
 
 // testBackend implements agent.Backend for tests. It launches a process that

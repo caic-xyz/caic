@@ -39,12 +39,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 )
 
 func historyHTTPFixture(t testing.TB) (*testRouter, *taskrun.Task, string) {
 	s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: claudecode.New()})
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "history"}, harness.Claude)
-	tk.SetState(task.StateRunning)
+	taskruntest.SetState(tk, task.StateRunning)
 	insertTestTask(s, tk.ID, tk)
 	e, _ := s.taskMgr.GetEntry(tk.ID)
 	p := filepath.Join(t.TempDir(), "history.jsonl")
@@ -373,7 +374,7 @@ func TestHistoryResources(t *testing.T) {
 			}
 		}
 		replacement := mustNewTask(t, tk.ID, agent.Prompt{Text: "replacement"}, harness.Claude)
-		replacement.SetState(task.StateRunning)
+		taskruntest.SetState(replacement, task.StateRunning)
 		insertTestTask(s, tk.ID, replacement)
 		if w := historyRequest(t, s, recentHistoryURL(&b), ""); w.Code != 409 {
 			t.Fatalf("replacement accepted old reference: %d", w.Code)
@@ -516,7 +517,7 @@ func TestTaskResourceSnapshot(t *testing.T) {
 				// IDs use a 2026 epoch; synctest starts its clock in 2000.
 				time.Sleep(time.Until(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)))
 				s, tk, _ := historyHTTPFixture(t)
-				tk.SetState(state)
+				taskruntest.SetState(tk, state)
 				if retained {
 					tk.PushStats(&runtime.Stats{Ts: time.Unix(1, 0), CPUQuota: new(0.0), DiskUsed: -1})
 					tk.UpdateDiskUsage(42)
@@ -1108,7 +1109,7 @@ func TestHistoryCompressionAndRevival(t *testing.T) {
 	if err := encoder.Close(); err != nil {
 		t.Fatal(err)
 	}
-	tk.SetState(task.StatePurged)
+	taskruntest.SetState(tk, task.StatePurged)
 	entry.LogPath.Set(compressed)
 	owner.prune(false)
 	if err := os.Remove(path); err != nil {
@@ -1129,7 +1130,7 @@ func TestHistoryCompressionAndRevival(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry.LogPath.Set(path)
-	tk.SetState(task.StateRunning)
+	taskruntest.SetState(tk, task.StateWaiting)
 	revived := historyBootstrap(t, s, tk, "")
 	if revived.Through != initial.Through+1 {
 		t.Fatalf("revived prefix: %+v", revived)
@@ -1173,7 +1174,7 @@ func TestHistorySettlementKeepsPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, _ := s.taskMgr.GetEntry(tk.ID)
-	tk.SetState(task.StatePurged)
+	taskruntest.SetState(tk, task.StatePurged)
 	entry.LogPath.Set(compressed)
 	s.taskHandlers.taskSvc.history.prune(false)
 
@@ -1245,7 +1246,7 @@ func BenchmarkHistoryTaskOpen(b *testing.B) {
 		}
 		b.Run(format, func(b *testing.B) {
 			s, tk, path := historyHTTPFixture(b)
-			tk.SetState(task.StatePurged)
+			taskruntest.SetState(tk, task.StatePurged)
 			var raw strings.Builder
 			raw.WriteString(`{"t":"caic_meta","version":3,"harness":"claude","prompt":"history"}` + "\n")
 			for i := range 1000 {

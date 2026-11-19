@@ -1351,9 +1351,10 @@ func TestStore(t *testing.T) {
 			if len(tasks[0].Timeline) != 1 {
 				t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Timeline))
 			}
-			// init2 produces 1 InitMessage; asst2 produces 1 TextMessage = 2 total.
-			if len(tasks[1].Timeline) != 2 {
-				t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Timeline))
+			// init2 produces a TurnStartedMessage and an InitMessage; asst2
+			// produces 1 TextMessage = 3 total.
+			if len(tasks[1].Timeline) != 3 {
+				t.Errorf("tasks[1].Msgs len = %d, want 3", len(tasks[1].Timeline))
 			}
 		})
 		t.Run("FeatureFlagsAllSet", func(t *testing.T) {

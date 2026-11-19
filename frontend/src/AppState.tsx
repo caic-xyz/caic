@@ -73,14 +73,7 @@ function jitteredDelay(base: number): number {
 }
 
 const inputNeededTaskStates = new Set<TaskState>(["waiting", "asking", "has_plan"]);
-const otherAliveTaskStates = new Set<TaskState>([
-  "pending",
-  "branching",
-  "provisioning",
-  "starting",
-  "pulling",
-  "pushing",
-]);
+const otherAliveTaskStates = new Set<TaskState>(["pending", "branching", "provisioning", "starting"]);
 
 type AliveFocusTarget = { kind: "task"; task: Task } | { kind: "prompt" };
 

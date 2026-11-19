@@ -137,6 +137,10 @@ https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/core/src/unified_exe
 a background command, keyed by thread and item. caic opts out of
 `item/commandExecution/terminalInteraction`, so no log contains one.
 
+A root `turn/started` reports a turn start (`TurnStartedMessage`); a
+compaction is a turn too. `codex.go` drops a child thread's start, which
+cannot start the parent turn.
+
 Codex starts no turn by itself. Of 3,168 root `turn/started` records, 3,162
 have a `turn/start` response; the other 6 are `thread/compact/start`
 compactions that caic requested. A process exit starts no turn, so the card

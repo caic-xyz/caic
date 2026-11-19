@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/server/mcpschema"
 	taskstate "github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 )
 
 func TestTaskQuotaBlocked(t *testing.T) {
@@ -102,7 +103,7 @@ func TestNotificationFeed(t *testing.T) {
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, id, agent.Prompt{Text: "Resume task"}, "claude")
 			tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{Status: agent.RateLimitStatusRejected, ResetsAt: time.Now().Add(time.Hour), QuotaProvider: agent.QuotaProviderAnthropic, RateLimitType: "fivehour"}}), nil)
-			tk.SetState(taskstate.StateWaiting)
+			taskruntest.SetState(tk, taskstate.StateWaiting)
 			insertTestTask(s, id, tk)
 			feed := newNotificationFeed()
 			svc := testTaskHandlers(s).taskSvc
@@ -126,7 +127,7 @@ func TestNotificationFeed(t *testing.T) {
 			ctx := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
 			tk := mustNewTask(t, id, agent.Prompt{Text: "owned"}, "claude")
 			tk.OwnerID = "owner"
-			tk.SetState(taskstate.StateRunning)
+			taskruntest.SetState(tk, taskstate.StateRunning)
 			insertTestTask(s, id, tk)
 			feed.notifications(ctx, svc, v1.UsageResp{}, "")
 			results := make(chan []mcpschema.ServiceNotification, 1)
@@ -137,7 +138,7 @@ func TestNotificationFeed(t *testing.T) {
 			started := make(chan struct{})
 			workers.Go(func() { close(started); results <- feed.notifications(ctx, svc, v1.UsageResp{}, "") })
 			<-started
-			tk.SetState(taskstate.StateWaiting)
+			taskruntest.SetState(tk, taskstate.StateWaiting)
 			feed.mu.Unlock()
 			synctest.Wait()
 			first := <-results
@@ -152,7 +153,7 @@ func TestNotificationFeed(t *testing.T) {
 			<-started
 			replacement := mustNewTask(t, id, agent.Prompt{Text: "foreign"}, "claude")
 			replacement.OwnerID = "foreign"
-			replacement.SetState(taskstate.StateWaiting)
+			taskruntest.SetState(replacement, taskstate.StateWaiting)
 			insertTestTask(s, id, replacement)
 			feed.mu.Unlock()
 			synctest.Wait()
@@ -161,7 +162,7 @@ func TestNotificationFeed(t *testing.T) {
 			}
 			restored := mustNewTask(t, id, agent.Prompt{Text: "restored"}, "claude")
 			restored.OwnerID = "owner"
-			restored.SetState(taskstate.StateWaiting)
+			taskruntest.SetState(restored, taskstate.StateWaiting)
 			insertTestTask(s, id, restored)
 			if got := feed.notifications(ctx, svc, v1.UsageResp{}, ""); len(got) != 0 {
 				t.Fatalf("replacement incarnation was not a quiet baseline: %+v", got)
@@ -171,7 +172,7 @@ func TestNotificationFeed(t *testing.T) {
 	t.Run("StaleConcurrentSnapshot", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "attention"}, "claude")
-		tk.SetState(taskstate.StateRunning)
+		taskruntest.SetState(tk, taskstate.StateRunning)
 		feed := newNotificationFeed()
 		capture := func() ([]v1.Task, map[string]taskStateReplay) {
 			snap, seq, _ := tk.SnapshotWithStateHistory(math.MaxUint64)
@@ -184,7 +185,7 @@ func TestNotificationFeed(t *testing.T) {
 		}
 		tasks, replays := capture()
 		notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
-		tk.SetState(taskstate.StateWaiting)
+		taskruntest.SetState(tk, taskstate.StateWaiting)
 		captured, release := make(chan struct{}), make(chan struct{})
 		result := make(chan []mcpschema.ServiceNotification, 1)
 		var workers sync.WaitGroup
@@ -200,8 +201,8 @@ func TestNotificationFeed(t *testing.T) {
 			}
 		})
 		<-captured
-		tk.SetState(taskstate.StateRunning)
-		tk.SetState(taskstate.StateWaiting)
+		taskruntest.SetState(tk, taskstate.StateStopped)
+		taskruntest.SetState(tk, taskstate.StateWaiting)
 		tasks, replays = capture()
 		current := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, "")
 		if len(current) != 1 {
@@ -223,7 +224,7 @@ func TestNotificationFeed(t *testing.T) {
 			t.Errorf("equal-sequence metadata=%+v", updated)
 		}
 		oldTasks, oldReplays := tasks, replays
-		tk.SetState(taskstate.StateRunning)
+		taskruntest.SetState(tk, taskstate.StateStopped)
 		tasks, replays = capture()
 		if got := notificationSnapshot(feed, t.Context(), tasks, replays, v1.UsageResp{}, ""); len(got) != 0 {
 			t.Errorf("withdrawal=%+v", got)

@@ -23,8 +23,6 @@ func TestState(t *testing.T) {
 			{StateWaiting, "waiting"},
 			{StateAsking, "asking"},
 			{StateHasPlan, "has_plan"},
-			{StatePulling, "pulling"},
-			{StatePushing, "pushing"},
 			{StatePurging, "purging"},
 			{StateCrashed, "crashed"},
 			{StateFailed, "failed"},
@@ -61,7 +59,7 @@ func TestState(t *testing.T) {
 			t.Parallel()
 			for _, s := range []State{
 				StatePending, StateBranching, StateProvisioning, StateStarting, StateRunning,
-				StateWaiting, StateAsking, StateHasPlan, StatePulling, StatePushing,
+				StateWaiting, StateAsking, StateHasPlan,
 				StateStopping, StateStopped, StatePurging, StateCrashed, StateFailed, StatePurged,
 			} {
 				if err := s.Validate(); err != nil {

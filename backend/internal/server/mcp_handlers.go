@@ -72,8 +72,7 @@ func taskMCPStateActive(state task.State) bool {
 	switch state {
 	case task.StatePending, task.StateBranching, task.StateProvisioning,
 		task.StateStarting, task.StateRunning, task.StateWaiting,
-		task.StateAsking, task.StateHasPlan, task.StatePulling,
-		task.StatePushing:
+		task.StateAsking, task.StateHasPlan:
 		return true
 	default:
 		return false

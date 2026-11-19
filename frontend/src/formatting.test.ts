@@ -94,7 +94,7 @@ describe("formatElapsed", () => {
 
 describe("stateColor", () => {
   it("uses green for busy task states", () => {
-    const busyStates = ["pending", "branching", "provisioning", "starting", "running", "pulling", "pushing"] as const;
+    const busyStates = ["pending", "branching", "provisioning", "starting", "running"] as const;
 
     for (const state of busyStates) {
       expect(stateColor(state)).toBe("var(--color-state-active-bg)");

@@ -31,6 +31,7 @@ import (
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
@@ -93,8 +94,8 @@ func TestTaskService(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "replay"}, harness.Claude)
-		tk.SetState(task.StateRunning)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateRunning)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		svc := testTaskHandlers(s).taskSvc
 		tasks, replays, _ := svc.taskListSnapshotWithReplay(t.Context(), nil)
@@ -103,14 +104,14 @@ func TestTaskService(t *testing.T) {
 		}
 		tasks, replays, _ = svc.taskListSnapshotWithReplay(t.Context(), map[string]uint64{})
 		replay := replays[tk.ID.String()]
-		if len(tasks) != 1 || tasks[0].State != v1.TaskStateWaiting || len(replay.history) != 3 || replay.history[0].State != task.StatePending || replay.history[1].State != task.StateRunning || replay.history[2].State != task.StateWaiting || replay.history[2].Seq != replay.seq {
+		if len(tasks) != 1 || tasks[0].State != v1.TaskStateWaiting || len(replay.history) != 4 || replay.history[0].State != task.StatePending || replay.history[1].State != task.StateStarting || replay.history[2].State != task.StateRunning || replay.history[3].State != task.StateWaiting || replay.history[3].Seq != replay.seq {
 			t.Fatalf("empty cursor: tasks=%+v replay=%+v", tasks, replay)
 		}
 		cursor := replay.seq
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateStopped)
 		tasks, replays, _ = svc.taskListSnapshotWithReplay(t.Context(), map[string]uint64{tk.ID.String(): cursor})
 		replay = replays[tk.ID.String()]
-		if len(tasks) != 1 || tasks[0].State != v1.TaskStateRunning || len(replay.history) != 1 || replay.history[0].State != task.StateRunning || replay.history[0].Seq != replay.seq || replay.seq <= cursor {
+		if len(tasks) != 1 || tasks[0].State != v1.TaskStateStopped || len(replay.history) != 1 || replay.history[0].State != task.StateStopped || replay.history[0].Seq != replay.seq || replay.seq <= cursor {
 			t.Fatalf("advanced cursor: tasks=%+v replay=%+v", tasks, replay)
 		}
 	})
@@ -192,7 +193,7 @@ func TestTaskService(t *testing.T) {
 
 				s := newTestRouter(t, nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, tc.harness)
-				tk.SetState(task.StateWaiting)
+				taskruntest.SetState(tk, task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				entry, _ := s.taskMgr.GetEntry(tk.ID)
 				session, _ := newGatedInputSession(t, tk, tc.wireFactory, nil)
@@ -289,7 +290,7 @@ func TestTaskService(t *testing.T) {
 		s := newTestRouter(t, nil)
 		inactiveID := ksid.NewID()
 		inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
-		inactive.SetState(task.StateStopped)
+		taskruntest.SetState(inactive, task.StateStopped)
 		insertTestTask(s, inactiveID, inactive)
 
 		activeID := ksid.NewID()
@@ -321,7 +322,7 @@ func TestTaskService(t *testing.T) {
 		s := newTestOAuthRouter(t, store)
 		source := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 		source.OwnerID = user.ID
-		source.SetState(task.StateWaiting)
+		taskruntest.SetState(source, task.StateWaiting)
 		insertTestTask(s, source.ID, source)
 		entry, _ := s.taskMgr.GetEntry(source.ID)
 		stale := auth.NewContext(t.Context(), &user)
@@ -360,7 +361,7 @@ func TestTaskService(t *testing.T) {
 				s := newTestOAuthRouter(t, store)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
 				tk.OwnerID = user.ID
-				tk.SetState(task.StateWaiting)
+				taskruntest.SetState(tk, task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				entry, _ := s.taskMgr.GetEntry(tk.ID)
 				_, conn := newGatedInputSession(t, tk, claudecode.New().NewWire, store)
@@ -410,7 +411,7 @@ func TestTaskService(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-				tk.SetState(task.StateWaiting)
+				taskruntest.SetState(tk, task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				e, _ := s.taskMgr.GetEntry(tk.ID)
 				wake, unsubscribe := tk.SubscribeTimelineWakeups(t.Context())
@@ -562,7 +563,7 @@ func BenchmarkTaskListSnapshot(b *testing.B) {
 		id := ksid.NewID()
 		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
 		if i%2 == 0 {
-			tk.SetState(task.StateStopped)
+			taskruntest.SetState(tk, task.StateStopped)
 		}
 		insertTestTask(s, id, tk)
 	}
@@ -583,7 +584,7 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 		id := ksid.NewID()
 		tk := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
 		if i%2 == 0 {
-			tk.SetState(task.StateStopped)
+			taskruntest.SetState(tk, task.StateStopped)
 		}
 		insertTestTask(s, id, tk)
 	}

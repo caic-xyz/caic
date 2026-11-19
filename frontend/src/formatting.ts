@@ -122,8 +122,6 @@ export function stateColor(state: TaskState): string {
     case "provisioning":
     case "starting":
     case "pending":
-    case "pulling":
-    case "pushing":
       return "var(--color-state-active-bg)";
     case "asking":
       return "var(--color-state-asking-bg)";

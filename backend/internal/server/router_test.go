@@ -30,6 +30,7 @@ import (
 
 	agentbackends "github.com/caic-xyz/caic/backend/internal/agent/backends"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 
 	logdata "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -780,7 +781,7 @@ func TestHandleTaskInput(t *testing.T) {
 func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-	tk.SetState(state)
+	taskruntest.SetState(tk, state)
 	insertTestTask(s, tk.ID, tk)
 
 	body := strings.NewReader(bodyJSON)
@@ -836,7 +837,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 		tk.Repos = []repo.Mount{{Name: "r"}}
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)
@@ -864,7 +865,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 		tk.Repos = []repo.Mount{{Name: "r"}}
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)

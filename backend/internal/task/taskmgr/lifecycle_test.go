@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 
 	"github.com/caic-xyz/caic/backend/internal/task"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
@@ -54,7 +55,7 @@ func TestLifecycle(t *testing.T) {
 		tk.OwnerID = user.ID
 		tk.Provider = provider
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "owned-title"), runtime.ConnectionTarget{SSHHost: "owned-title"}, "", "", 0)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		entry := manager.NewEntry(tk, nil)
 		manager.Insert(tk.ID, entry)
 		admission, release, err := manager.OwnerContext(t.Context(), user.ID)
@@ -117,7 +118,7 @@ func TestLifecycle(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude, "")
 				tk.Provider = provider
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "title-drain"), runtime.ConnectionTarget{SSHHost: "title-drain"}, "", "", 0)
-				tk.SetState(task.StateRunning)
+				taskruntest.SetState(tk, task.StateRunning)
 				entry := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, entry)
 				command := "read line"
@@ -210,7 +211,7 @@ func TestLifecycle(t *testing.T) {
 					}
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Claude, "")
 					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "fixture"}, "", "", 0)
-					tk.SetState(task.StateWaiting)
+					taskruntest.SetState(tk, task.StateWaiting)
 					entry := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, entry)
 					_, before, _ := tk.SnapshotWithStateHistory(0)
@@ -239,7 +240,7 @@ func TestLifecycle(t *testing.T) {
 			store := taskslog.NewStore(t.TempDir())
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), store, backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			first := agent.Prompt{Text: "first", Images: []v3.ImageData{{MediaType: "image/png", Data: "Zmlyc3Q="}}}
@@ -247,7 +248,7 @@ func TestLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := e.PendingInput()
-			tk.SetState(task.StateWaiting)
+			taskruntest.SetState(tk, task.StateWaiting)
 			second := agent.Prompt{Text: "second", Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "c2Vjb25k"}}}
 			if queued, err := e.Lifecycle.QueueInput(t.Context(), second); err != nil || !queued {
 				t.Fatalf("append = %v, %v", queued, err)
@@ -281,7 +282,7 @@ func TestLifecycle(t *testing.T) {
 				t.Parallel()
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-				tk.SetState(task.StateRunning)
+				taskruntest.SetState(tk, task.StateRunning)
 				e := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, e)
 				for _, text := range []string{tc.first, tc.second} {
@@ -299,7 +300,7 @@ func TestLifecycle(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			var wg sync.WaitGroup
@@ -322,7 +323,7 @@ func TestLifecycle(t *testing.T) {
 				t.Parallel()
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-				tk.SetState(task.StateRunning)
+				taskruntest.SetState(tk, task.StateRunning)
 				e := m.NewEntry(tk, nil)
 				m.Insert(tk.ID, e)
 				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "first"}); err != nil {
@@ -346,7 +347,7 @@ func TestLifecycle(t *testing.T) {
 					t.Parallel()
 					m := newTestManager(t, Config{ServerCtx: t.Context()})
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-					tk.SetState(state)
+					taskruntest.SetState(tk, state)
 					e := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, e)
 					if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "after startup"}); err != nil {
@@ -365,7 +366,7 @@ func TestLifecycle(t *testing.T) {
 			dir := t.TempDir()
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskhistory.NewStore(testLogger(), taskslog.NewStore(dir), backends.Default("", nil))})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateRunning)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "saved"}); err != nil {
@@ -389,7 +390,7 @@ func TestLifecycle(t *testing.T) {
 				t.Fatalf("failed writes changed queue: %+v", got)
 			}
 			m.Insert(tk.ID, e)
-			tk.SetState(task.StatePurged)
+			taskruntest.SetState(tk, task.StatePurged)
 			m.drainInputQueue(t.Context())
 			if got := e.PendingInput(); got == nil || got.ID != q.ID {
 				t.Fatalf("failed pruning write changed queue: %+v", got)
@@ -415,7 +416,7 @@ func TestLifecycle(t *testing.T) {
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "blocked-reconnect"), runtime.ConnectionTarget{SSHHost: "blocked-reconnect"}, "", "", 0)
 					tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-					tk.SetState(task.StateWaiting)
+					taskruntest.SetState(tk, task.StateWaiting)
 					e := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, e)
 					recordTestTaskLog(t, m, e)
@@ -462,7 +463,7 @@ func TestLifecycle(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-			tk.SetState(task.StateStopped)
+			taskruntest.SetState(tk, task.StateStopped)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
 			recordTestTaskLog(t, m, e)
@@ -507,7 +508,7 @@ func TestLifecycle(t *testing.T) {
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", "", 0)
 					tk.SetSessionMetadata(agent.SessionMetadata{SessionID: "saved-session"})
-					tk.SetState(state)
+					taskruntest.SetState(tk, state)
 					e := m.NewEntry(tk, nil)
 					m.Insert(tk.ID, e)
 					recordTestTaskLog(t, m, e)
@@ -576,7 +577,7 @@ func BenchmarkLifecycleInputDelivery(b *testing.B) {
 					if attached {
 						for range 4 {
 							other := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
-							other.SetState(task.StateRunning)
+							taskruntest.SetState(other, task.StateRunning)
 							oe := m.NewEntry(other, nil)
 							m.Insert(other.ID, oe)
 							if _, err := oe.Lifecycle.QueueInput(b.Context(), agent.Prompt{Text: "pending", Images: []v3.ImageData{{MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("a"), 1<<20))}}}); err != nil {
@@ -587,7 +588,7 @@ func BenchmarkLifecycleInputDelivery(b *testing.B) {
 					prompt := agent.Prompt{Text: "Continue implementing the requested change."}
 					b.ResetTimer()
 					for b.Loop() {
-						tk.SetState(task.StateWaiting)
+						taskruntest.SetState(tk, task.StateWaiting)
 						if deferred {
 							if _, err := e.Lifecycle.QueueInput(b.Context(), prompt); err != nil {
 								b.Fatal(err)

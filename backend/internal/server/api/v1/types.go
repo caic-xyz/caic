@@ -271,8 +271,6 @@ const (
 	TaskStateWaiting      TaskState = "waiting"
 	TaskStateAsking       TaskState = "asking"
 	TaskStateHasPlan      TaskState = "has_plan"
-	TaskStatePulling      TaskState = "pulling"
-	TaskStatePushing      TaskState = "pushing"
 	TaskStateStopping     TaskState = "stopping"
 	TaskStateStopped      TaskState = "stopped"
 	TaskStatePurging      TaskState = "purging"

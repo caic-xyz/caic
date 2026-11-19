@@ -23,6 +23,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/gomodedev/gomode/mcp"
 )
 
@@ -536,7 +537,7 @@ func BenchmarkMCPResources(b *testing.B) {
 	s := newTestRouter(b, nil)
 	for range 20 {
 		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Claude)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 	}
 	reg := s.mcpHandlers.protocol.Registry

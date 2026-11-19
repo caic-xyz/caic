@@ -26,20 +26,20 @@ type CreateRequest struct {
 	ForgeIssue int
 }
 
-// State represents the lifecycle state of a task. The persisted and API
+// State represents the published state of a task. The persisted and API
 // representation is the string value itself, so a corrupt or forward-versioned
 // value round-trips instead of aliasing an unrelated state.
 //
-// Transitions are written by message processing, lifecycle operations, and
-// recovery. A few transitions are reachable from more than one source, so task
-// code uses compare-and-swap helpers to keep them race-safe.
+// A task publishes its lifecycle phase, or while its agent session is starting
+// or live, the activity its message fold derives: running, waiting, asking, or
+// has_plan. Package taskrun owns the derivation.
 type State string
 
 // Validate rejects unrecognized task states.
 func (s State) Validate() error {
 	switch s {
 	case StatePending, StateBranching, StateProvisioning, StateStarting, StateRunning,
-		StateWaiting, StateAsking, StateHasPlan, StatePulling, StatePushing,
+		StateWaiting, StateAsking, StateHasPlan,
 		StateStopping, StateStopped, StatePurging, StateCrashed, StateFailed, StatePurged:
 		return nil
 	default:
@@ -78,8 +78,6 @@ const (
 	StateWaiting      State = "waiting"
 	StateAsking       State = "asking"
 	StateHasPlan      State = "has_plan"
-	StatePulling      State = "pulling"
-	StatePushing      State = "pushing"
 	StateStopping     State = "stopping"
 	StateStopped      State = "stopped"
 	StatePurging      State = "purging"

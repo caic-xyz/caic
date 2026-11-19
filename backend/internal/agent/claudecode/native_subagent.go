@@ -1,4 +1,4 @@
-// Resolves Claude native ownership, correlates Agent invocations with task updates, folds detached shell commands outside subagent cards, retires cards Claude stops listing, and reports the turns their ends queue.
+// Resolves Claude native ownership, correlates Agent invocations with task updates, folds detached shell commands outside subagent cards, retires cards Claude stops listing, and reports turn starts, including those Claude Code starts by itself.
 
 package claudecode
 
@@ -515,35 +515,46 @@ func claudeBackgroundCommandStatus(status string) agent.BackgroundCommandStatus 
 	}
 }
 
-// turnQueue reports the turns Claude Code starts by itself. When a background
-// agent or command spawned by the parent ends, Claude Code starts a turn to
-// deliver its task_notification, even while the parent waits for the user.
-// The queued turn ends at the next root result.
+// turnQueue reports Claude Code's turn starts. Claude Code sends init at the
+// start of every turn, so init starts one. It also starts turns by itself:
+// when a background agent or command spawned by the parent ends while the
+// parent waits for the user, Claude Code starts a turn about 20 ms later to
+// deliver its task_notification. The turn starts at that terminal record, so
+// the card that settles never leaves the task waiting before init.
 //
 // A notification that arrives during a parent turn joins the turn's next model
-// request instead. Only when no request follows does it queue a turn after the
-// result. A root user record holding a tool_result proves a later request:
-// Claude Code sends that result to the model. A TaskStop kill record precedes
-// TaskStop's own tool result, so it queues no turn. A notification that arrives
-// after a restart but before init belongs to the turn that init starts, so init
-// clears the pending notification too. The root result reports a pending one
-// through ResultMessage.TurnQueued; AGENTS.md holds the evidence.
+// request instead. Only when no request follows does Claude Code start a turn
+// for it after the result. A root user record holding a tool_result proves a
+// later request: Claude Code sends that result to the model. A TaskStop kill
+// record precedes TaskStop's own tool result, so it queues no turn. A user
+// prompt delivered during a turn follows the same rule: a later request
+// carries it, or Claude Code starts a turn for it after the result. The root
+// result reports such a pending notification or prompt through
+// ResultMessage.TurnQueued; AGENTS.md holds the evidence.
 //
 // A background task that a subagent spawned notifies that subagent, not the
-// parent, so it queues no parent turn. Its task records reach the root stream
+// parent, so it starts no parent turn. Its task records reach the root stream
 // without parent_tool_use_id. The spawning tool use comes from a subagent
 // record, and newer Claude Code versions also mark task_started with
 // owned_by_subagent and parent_task_id.
 type turnQueue struct {
-	queued     map[string]string   // card ID → run ID whose end queued a turn
+	queued     map[string]string   // card ID → run ID whose end started or queued a turn
 	childTools map[string]struct{} // tool use IDs that a subagent owns
-	pending    bool                // a terminal record arrived that no later model request delivers yet
+	pending    bool                // a terminal record or prompt arrived during the turn that no later model request delivers yet
+	inTurn     bool                // a root init started a turn that no root result has ended yet
 }
 
-// parse returns messages with a TurnQueuedMessage before each background card
-// that a task_updated or task_notification record settled, and sets TurnQueued
-// on a root result that such a record precedes with no later request. Only the
-// first terminal record of a run queues a turn.
+// input records a root prompt. Delivered during a turn, it is pending until a
+// later model request carries it; otherwise it starts its own turn.
+func (q *turnQueue) input() {
+	q.pending = q.pending || q.inTurn
+}
+
+// parse returns messages with a TurnStartedMessage before each root init and
+// before each background card that a task_updated or task_notification record
+// settled while no turn runs, and sets TurnQueued on a root result that such a
+// record or a prompt precedes with no later request. Only the first terminal
+// record of a run starts or queues a turn.
 func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.Message) []agent.Message {
 	if subagent {
 		for _, message := range messages {
@@ -559,13 +570,14 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 		}
 		return messages
 	}
-	for _, message := range messages {
+	for i, message := range messages {
 		switch m := message.(type) {
 		case *agent.InitMessage:
-			q.pending = false
+			q.pending, q.inTurn = false, true
+			return slices.Insert(slices.Clone(messages), i, agent.Message(&agent.TurnStartedMessage{}))
 		case *agent.ResultMessage:
 			m.TurnQueued = q.pending
-			q.pending = false
+			q.pending, q.inTurn = false, false
 		}
 	}
 	ev := record.system
@@ -581,8 +593,11 @@ func (q *turnQueue) parse(record *decodedLine, subagent bool, messages []agent.M
 	out := messages[:0:0]
 	for _, message := range messages {
 		if q.settles(message) {
-			q.pending = true
-			out = append(out, &agent.TurnQueuedMessage{})
+			if q.inTurn {
+				q.pending = true
+			} else {
+				out = append(out, &agent.TurnStartedMessage{})
+			}
 		}
 		out = append(out, message)
 	}

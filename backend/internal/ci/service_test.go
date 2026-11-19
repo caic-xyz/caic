@@ -30,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/ksid"
@@ -192,7 +193,7 @@ func TestService(t *testing.T) {
 		if err := store.SetDisabled(user.ID, false); err != nil {
 			t.Fatal(err)
 		}
-		entry.Task().SetState(task.StateStopped)
+		taskruntest.SetState(entry.Task(), task.StateStopped)
 		svc.ApplyMonitorCIResult(t.Context(), entry, client, "owner", "repo", "def", forgecache.Result{Status: forge.CIStatusSuccess})
 		if client.merged {
 			t.Fatal("webhook-style result resumed stopped-owner automation")
@@ -228,7 +229,7 @@ func TestService(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				tk.SetState(task.StateWaiting)
+				taskruntest.SetState(tk, task.StateWaiting)
 				entry := manager.NewEntry(tk, nil)
 				svc := NewService(log, nil, nil, nil)
 				t.Cleanup(svc.Close)
@@ -339,7 +340,7 @@ func ownedCIEntryWithPolicy(t *testing.T, policy func(*auth.Store) task.OwnerPol
 		t.Fatal(err)
 	}
 	tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: tk.ID.String()}, "", "", 0)
-	tk.SetState(task.StateWaiting)
+	taskruntest.SetState(tk, task.StateWaiting)
 	entry := manager.NewEntry(tk, nil)
 	journal, path, err := logs.Open(tk.LogFilename(), tk.LogHeader())
 	if err != nil {

@@ -30,6 +30,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/gomodedev/gomode"
 	"github.com/gomodedev/gomode/mcp"
@@ -110,7 +111,7 @@ func TestMCPRegistry(t *testing.T) {
 		if _, err := registry.ReadResource(t.Context(), &mcp.ResourcesReadParams{URI: "gomode://notifications"}); err != nil {
 			t.Fatal(err)
 		}
-		first.SetState(task.StateWaiting)
+		taskruntest.SetState(first, task.StateWaiting)
 		check := func(session string, want ksid.ID) {
 			requestMeta := meta(session)
 			instructions, err := registry.Instructions(t.Context(), &requestMeta)
@@ -210,7 +211,7 @@ func TestMCPRegistry(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			target := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "target"}, harness.Claude)
-			target.SetState(task.StateAsking)
+			taskruntest.SetState(target, task.StateAsking)
 			insertTestTask(s, target.ID, target)
 			session, gate := newGatedInputSession(t, target, claudecode.New().NewWire, nil)
 			executor := agent.NewMCPExecutor(t.Context())
@@ -280,7 +281,7 @@ func TestMCPRegistry(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateRunning)
 		log, path, err := s.logStore.Open(tk.LogFilename(), tk.LogHeader())
 		if err != nil {
 			t.Fatal(err)

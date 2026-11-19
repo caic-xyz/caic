@@ -125,8 +125,9 @@ type Task struct {
 	statsWakeSubs          []chan struct{} // active coalescing stats wakeup subscribers
 	diskUsed               int64
 	diskKnown              bool
-	state                  task.State
-	stateUpdatedAt         time.Time         // UTC timestamp of the last state transition.
+	lifecycle              task.State        // Phase runtime code drives through the lifecycle transitions.
+	activity               task.State        // Turn activity the fold derived for the starting or live session; empty until it reports one.
+	stateUpdatedAt         time.Time         // UTC timestamp of the last published state transition.
 	stateSeq               uint64            // Monotonic sequence of recorded state transitions.
 	stateTransitions       []StateTransition // Bounded journal of recent state transitions.
 	sessionMetadata        agent.SessionMetadata
@@ -147,22 +148,28 @@ type Task struct {
 	nativeSubagents        agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands     agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 	backgroundStarts       map[string]backgroundStart      // First running observation of each card's current run, by card ID.
-	turnQueued             bool                            // The harness queued a turn after the last root result or host exit, or that result reported one.
+	turnQueued             bool                            // The last root result reported that the harness starts another turn right after it.
+	turnEnded              bool                            // The last root turn has a trailing result or host exit; only background work or a queued turn keeps the task running.
+	turnAsks               []turnAsk                       // Unanswered root questions of the current turn, oldest first.
+	turnExitPlan           bool                            // The current turn presented a plan with ExitPlanMode.
+	inputDelivering        bool                            // An input delivery started and has no outcome yet.
+	deferredInput          bool                            // A root input arrived while its delivery is unresolved.
+	deferredInputAt        time.Time                       // When the deferred input arrived; its acceptance starts the turn then.
+	lastProducerAt         time.Time                       // Latest recorded producer time; state transitions of messages without one use it.
 	skillReads             agent.SkillReadTracker
 
-	wakeSubs        []chan struct{} // active coalescing timeline wakeup subscribers
-	handle          *SessionHandle  // current active session; nil when no session is attached
-	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
-	turnStartedAt   time.Time       // when the current running turn started; zero when not running
-	costTracker     task.CostTracker
-	turnMetrics     task.TurnMetrics
-	liveUsage       agent.Usage
-	lastUsage       agent.Usage  // Most recent ResultMessage usage (active context).
-	lastAPIUsage    agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
-	cacheExpiresAt  time.Time    // When the prompt cache from the last API call expires.
-	liveDiffStat    v3.DiffStat  // Updated by DiffStatMessage from relay.
-	lastGitRead     repo.GitRead // Rejects deferred snapshots older than the applied Git state.
-	liveRepoStates  []v3.RepoState
+	wakeSubs       []chan struct{} // active coalescing timeline wakeup subscribers
+	handle         *SessionHandle  // current active session; nil when no session is attached
+	turnStartedAt  time.Time       // when the current running turn started; zero when not running
+	costTracker    task.CostTracker
+	turnMetrics    task.TurnMetrics
+	liveUsage      agent.Usage
+	lastUsage      agent.Usage  // Most recent ResultMessage usage (active context).
+	lastAPIUsage   agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt time.Time    // When the prompt cache from the last API call expires.
+	liveDiffStat   v3.DiffStat  // Updated by DiffStatMessage from relay.
+	lastGitRead    repo.GitRead // Rejects deferred snapshots older than the applied Git state.
+	liveRepoStates []v3.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
 	diffCreated  bool // True after any non-empty diff was reported for the task.
 	exitStatus   task.ExitStatus
@@ -197,7 +204,7 @@ func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, bas
 		StartedAt:         time.Now().UTC(),
 		Rollup:            task.DiscardRollup{},
 	}
-	t.SetState(task.StatePending)
+	t.Restore(task.StatePending, t.StartedAt)
 	if title == "" {
 		title = prompt.Text
 	}
@@ -404,83 +411,96 @@ func (t *Task) SetGitHubTokenEnabled(enabled bool) {
 	t.GitHubToken = enabled
 }
 
-// SetState updates the state under the mutex and records the transition time.
-func (t *Task) SetState(s task.State) {
-	t.mu.Lock()
-	t.setState(s)
-	t.mu.Unlock()
+// live is the lifecycle phase of an attached agent session.
+const live task.State = "live"
+
+// lifecycleSources lists the phases runtime code may move a task from into
+// each lifecycle phase. The message fold owns the activity of a starting or
+// live session; stateLocked derives the published state from both.
+// RuntimeStarted and RuntimeDestroyed also act on a stopped task. A pending
+// task stops when its admission is cancelled before it starts.
+var lifecycleSources = map[task.State][]task.State{
+	task.StateBranching:    {task.StatePending},
+	task.StateProvisioning: {task.StatePending, task.StateBranching, task.StateStopped, task.StateCrashed},
+	task.StateStarting:     {task.StateProvisioning, live},
+	live:                   {task.StateStarting},
+	task.StateStopping:     {task.StateStarting, live, task.StateCrashed, task.StateFailed},
+	task.StateStopped:      {task.StatePending, live, task.StateStopping, task.StateCrashed},
+	task.StatePurging:      {task.StateStopped},
+	task.StatePurged:       {task.StatePurging},
+	task.StateCrashed:      {task.StateProvisioning, task.StateStarting, live},
+	task.StateFailed:       {task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, live, task.StateCrashed},
 }
 
-// SetStateAt updates the state under the mutex with an explicit timestamp.
-// Used during import to preserve the original transition time.
-func (t *Task) SetStateAt(s task.State, at time.Time) {
-	t.mu.Lock()
-	if s != task.StateRunning {
-		t.turnStartedAt = time.Time{}
-	}
-	t.recordStateTransition(s, at)
-	t.state = s
-	t.stateUpdatedAt = at
-	t.mu.Unlock()
-}
-
-// SetTurnStartedAt sets the turn start time if the task is currently running.
-// Called during import to estimate when the current mid-turn started.
-func (t *Task) SetTurnStartedAt(at time.Time) {
-	t.mu.Lock()
-	if t.state == task.StateRunning {
-		t.turnStartedAt = at
-	}
-	t.mu.Unlock()
-}
-
-// SetStateIf atomically transitions the state to next only if the current
-// state equals expected. Returns true if the transition occurred.
-func (t *Task) SetStateIf(expected, next task.State) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.state != expected {
-		return false
-	}
-	t.setState(next)
-	return true
-}
-
-// SetStateIfAny atomically transitions the state to next only if the current
-// state is one of allowed. Returns the previous state and whether the
-// transition occurred.
-func (t *Task) SetStateIfAny(next task.State, allowed ...task.State) (prev task.State, changed bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	prev = t.state
-	if !slices.Contains(allowed, t.state) {
-		return prev, false
-	}
-	t.setState(next)
-	return prev, true
-}
-
-// SetStateUnless atomically transitions the state to next unless the current
-// state is one of excluded, in which case it is left unchanged. Returns the
-// previous state and whether the transition occurred. Performing the guard and
-// the transition under a single lock closes the check-then-set race that a
-// separate GetState/SetState pair leaves open against concurrent transitions.
-func (t *Task) SetStateUnless(next task.State, excluded ...task.State) (prev task.State, changed bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	prev = t.state
-	if slices.Contains(excluded, t.state) {
-		return prev, false
-	}
-	t.setState(next)
-	return prev, true
-}
-
-// GetState returns the current state under the mutex.
+// GetState returns the published state under the mutex.
 func (t *Task) GetState() task.State {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.state
+	return t.stateLocked()
+}
+
+// Restore sets the lifecycle phase of a task that is not published yet, as of
+// at.
+func (t *Task) Restore(s task.State, at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prev := t.stateLocked()
+	t.lifecycle, t.activity = s, ""
+	t.publishLocked(prev, at)
+}
+
+// Transition moves the lifecycle to `to` if lifecycleSources allows it.
+func (t *Task) Transition(to task.State) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.transitionLocked(to)
+}
+
+// GoLive moves a starting session live once its agent runs.
+func (t *Task) GoLive() bool { return t.Transition(live) }
+
+// RuntimeStarted moves a stopped task live when its runtime started by itself.
+func (t *Task) RuntimeStarted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.lifecycle != task.StateStopped {
+		return false
+	}
+	t.moveLocked(live)
+	return true
+}
+
+// RuntimeDestroyed fails a task, including a stopped one, whose runtime
+// instance was destroyed.
+func (t *Task) RuntimeDestroyed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.lifecycle != task.StateStopped {
+		return t.transitionLocked(task.StateFailed)
+	}
+	t.moveLocked(task.StateFailed)
+	return true
+}
+
+// RuntimeExited stops a live task whose runtime exited by itself, and reports
+// the state it left.
+func (t *Task) RuntimeExited() (task.State, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prev := t.stateLocked()
+	return prev, t.lifecycle == live && t.transitionLocked(task.StateStopped)
+}
+
+// SessionLost ends the running turn of a session caic lost as of at; zero
+// means now. It reports whether a turn ended.
+func (t *Task) SessionLost(at time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stateLocked() != task.StateRunning {
+		return false
+	}
+	t.setActivityLocked(task.StateWaiting, at)
+	return true
 }
 
 // InvalidationState is bounded metadata needed to classify resource effects.
@@ -499,7 +519,7 @@ type InvalidationState struct {
 func (t *Task) InvalidationState() InvalidationState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return InvalidationState{State: t.state, Sequence: t.stateSeq, Title: t.title, RateLimit: t.rateLimit, CIStatus: t.ciStatus, ForgePR: t.forgePR}
+	return InvalidationState{State: t.stateLocked(), Sequence: t.stateSeq, Title: t.title, RateLimit: t.rateLimit, CIStatus: t.ciStatus, ForgePR: t.forgePR}
 }
 
 // GetSessionID returns the agent session ID under the mutex.
@@ -750,6 +770,13 @@ type BackgroundActivity struct {
 	TurnEnded bool
 }
 
+// turnAsk is an unanswered root question and the pending user action the
+// harness reported for it, if any.
+type turnAsk struct {
+	key    agent.ToolKey
+	action *v3.PendingUserAction
+}
+
 // backgroundStart records the first running observation of a card's run. Run
 // is the subagent RunID: only a new run restarts the clock. Pauses,
 // retirements, and host exits keep it, matching the task history's StartedAt.
@@ -809,7 +836,7 @@ func (t *Task) SnapshotWithStateHistory(after uint64) (Snapshot, uint64, []State
 func (t *Task) BackgroundActivity() BackgroundActivity {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	a := BackgroundActivity{Counts: t.backgroundCountsLocked(), WakingCommands: t.backgroundCommands.Active(), TurnEnded: lastAgentMessage(t.timelineViewLocked()) != nil}
+	a := BackgroundActivity{Counts: t.backgroundCountsLocked(), WakingCommands: t.backgroundCommands.Active(), TurnEnded: t.turnEnded}
 	var items []BackgroundItem
 	for _, c := range t.backgroundCommands.Commands() {
 		if c.Status != agent.BackgroundCommandStatusRunning {
@@ -973,10 +1000,18 @@ func (t *Task) BackwardMessages() iter.Seq[agent.Message] {
 }
 
 // PendingUserActions returns current user-facing actions that still need input.
+// Today AskUserQuestion is the only pending action kind: an unanswered question
+// of the current turn whose action the harness reported.
 func (t *Task) PendingUserActions() []v3.PendingUserAction {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return pendingUserActionsFromMessages(t.timelineViewLocked())
+	var actions []v3.PendingUserAction
+	for _, a := range t.turnAsks {
+		if a.action != nil {
+			actions = append(actions, agent.ClonePendingUserAction(*a.action))
+		}
+	}
+	return actions
 }
 
 // CurrentTurnProtocolMessages returns the provider messages without a
@@ -1006,9 +1041,9 @@ func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 	return msgs
 }
 
-// SeedTimelineParts fills an empty task with the message history from previously
-// saved logs, then derives session metadata, plan state, live stats and task
-// state from it.
+// SeedTimelineParts fills an empty task with the message history from
+// previously saved logs and folds every message into task state as live
+// ingestion does, starting from the task's current state.
 //
 // Seeding is for an adopted task that will resume live operation. Restored
 // completed tasks intentionally leave the timeline empty and serve rare
@@ -1020,16 +1055,6 @@ func (t *Task) CurrentTurnProtocolMessages() []agent.Message {
 // grows through the session message pump instead; task import runs exactly once
 // before registration.
 //
-// State inference rules (applied only for non-terminal states):
-//   - Current turn has unanswered AskUserQuestion → StateAsking
-//   - Trailing ResultMessage and active detached work or a queued turn → StateRunning
-//   - Trailing ResultMessage (no ask, no detached work, no queued turn) → StateWaiting
-//   - No trailing ResultMessage → state unchanged (agent was mid-output)
-//
-// Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// NativeSubagentMessage, BackgroundCommandMessage, BackgroundRetiredMessage, TurnQueuedMessage, RawMessage, SyncActivityMessage) after the ResultMessage are skipped during inference. For
-// import, the caller must handle the case where state remains StateRunning
-// with no relay alive.
 // The owned durable prefix and live suffix remain logically contiguous without
 // concatenation. Both slices transfer to the task.
 //
@@ -1047,141 +1072,15 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage, settled []
 	compactFinalizedDeltas(view)
 	t.timelinePrefix = prefix
 	t.timeline = suffix
-	// One forward pass: the task starts empty, so every field below is derived
-	// from msgs alone and the per-concern handlers touch disjoint fields.
-	// Later entries (model_rerouted) override earlier ones. The fold only reads
-	// msgs; the current plan is projected through the task snapshot.
-	//
-	// Plan state: a context_cleared marker makes previous plan data stale
-	// and suppresses plan tracking until the next ResultMessage. planExitID
-	// holds the ToolUseID of the ExitPlanMode that
-	// carries the current plan; a new ExitPlanMode or context_cleared
-	// supersedes it so only the latest plan is visible.
-	//
-	// Live stats: Claude's TotalCostUSD is cumulative until context_cleared.
-	// Completed root metrics preserve native values or measure producer time.
-	// Token usage is always summed.
 	next := 0
 	for i, entry := range view.Forward() {
 		for ; next < len(settled) && settled[next] <= i; next++ {
 			t.hostExitedLocked()
 		}
-		msg := entry.Message
-		t.turnMetrics.Observe(msg, entry.ProducerTime)
-		t.exitStatus.Observe(msg)
-		if msg.Provenance().IsChild() {
-			t.foldBackgroundLocked(msg, entry.ProducerTime)
-			if m, ok := msg.(*agent.RateLimitMessage); ok && !m.IsChildThreadGoal() {
-				t.recordRateLimitLocked(m)
-			}
-			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
-			t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
-			continue
-		}
-
-		t.observeContextLocked(msg, entry.ProducerTime, t.sessionMetadata.SessionID)
-		t.sessionMetadata.Apply(msg)
-		t.observeUsageLocked(msg)
-		if _, ok := msg.(*agent.ExitMessage); ok {
-			t.hostExitedLocked()
-			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
-			continue
-		}
-		switch m := msg.(type) {
-		case *agent.SystemMessage:
-			switch m.Subtype {
-			case "context_cleared", "compact_boundary":
-				if m.Subtype == "context_cleared" {
-					t.clearContextLocked()
-				}
-			}
-		case *agent.RateLimitMessage:
-			t.recordRateLimitLocked(m)
-		case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage:
-			t.foldBackgroundLocked(m, entry.ProducerTime)
-		case *agent.TurnQueuedMessage:
-			t.turnQueued = true
-		case *agent.ToolUseMessage:
-			t.trackToolUse(m)
-		case *agent.DiffStatMessage:
-			if len(m.DiffStat) > 0 {
-				t.diffCreated = true
-			}
-		case *agent.ResultMessage:
-			t.completedRootTurns++
-			t.turnQueued = m.TurnQueued
-			t.planDismissed = false
-			if m.ContextWindow > 0 {
-				t.reportedContextWindow = m.ContextWindow
-			}
-			if len(m.DiffStat) > 0 {
-				t.diffCreated = true
-			}
-			t.lastUsage = m.Usage
-		}
-		t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
-		// Forward the folded message to the usage rollup with the cost
-		// snapshot reflecting every prior entry, so resumed replays carry the
-		// correct cost delta for the unflushed tail.
-		t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
+		t.foldMessageLocked(entry.Message, entry.ProducerTime, entry.ProducerTime, true)
 	}
 	for ; next < len(settled); next++ {
 		t.hostExitedLocked()
-	}
-	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
-	// whichever appears later. ResultMessage carries the authoritative
-	// host-side diff stat but a DiffStatMessage from the relay may follow it.
-	// Repo states restore separately: only the backend's post-tool probe fills
-	// them, and a newer watcher-only DiffStatMessage must not hide it.
-	for _, entry := range view.Backward() {
-		if ds, ok := entry.Message.(*agent.DiffStatMessage); ok {
-			t.liveDiffStat = ds.DiffStat
-			break
-		}
-		if rm, ok := entry.Message.(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
-			t.liveDiffStat = rm.DiffStat
-			break
-		}
-	}
-	for _, entry := range view.Backward() {
-		if ds, ok := entry.Message.(*agent.DiffStatMessage); ok {
-			if len(ds.Repos) > 0 {
-				t.liveRepoStates = ds.Repos
-				break
-			}
-		}
-	}
-	// Infer state: if the last agent-emitted message is a ResultMessage, the
-	// agent finished its turn and is waiting for user input (or asking a
-	// question). A harness-native subagent still running keeps the task Running,
-	// because a background delegation ends the parent turn before the child
-	// settles. Skip trailing metadata — the relay emits periodic diff stats and
-	// native child updates that can appear after the ResultMessage.
-	// Only override non-terminal states — purged/crashed/failed tasks loaded
-	// from logs must keep their recorded state.
-	if view.Len() > 0 && t.state != task.StatePurged && t.state != task.StateCrashed && t.state != task.StateFailed && t.state != task.StatePurging {
-		var next task.State
-		switch {
-		case lastAgentMessage(view) != nil:
-			next = t.settledTurnStateLocked()
-		case lastTurnHasUnansweredAsk(view):
-			next = task.StateAsking
-		}
-		if next != "" {
-			// Producer timestamps keep the adopted task's state duration and turn
-			// start equal to the live values the restart replaced.
-			if at := seedStateTime(view, next); !at.IsZero() {
-				t.seedStateAtLocked(next, at)
-			} else {
-				t.setState(next)
-			}
-		} else if t.state == task.StateRunning || t.state == task.StateStarting {
-			// The log ends mid-turn. Record the turn start because import set a
-			// provisional Running state without a turn timestamp.
-			if at := turnStartTime(view); !at.IsZero() {
-				t.seedStateAtLocked(task.StateRunning, at)
-			}
-		}
 	}
 }
 
@@ -1496,7 +1395,7 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		default:
 		}
 	}
-	state := t.state
+	state := t.stateLocked()
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("%w (state=%s session=%s)", ErrNoActiveSession, state, sessionStatus)
@@ -1525,7 +1424,7 @@ func (t *Task) SendCompact(ctx context.Context, instructions string) error {
 		default:
 		}
 	}
-	state := t.state
+	state := t.stateLocked()
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
@@ -1556,24 +1455,22 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger, notify func(
 	t.generateTitle(ctx, log, nil, notify)
 }
 
-// MarkSessionCrashed records operational health when a recoverable session ends.
+// MarkSessionCrashed records operational health when the session of a
+// starting or live task ends after reporting activity, or its runtime fails.
 // The execution owner separately reports its error through the lifecycle result.
 func (t *Task) MarkSessionCrashed() bool {
-	if _, changed := t.SetStateIfAny(task.StateCrashed, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
-		return false
-	}
-
-	return true
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return (t.lifecycle == live || t.activity != "") && t.transitionLocked(task.StateCrashed)
 }
 
-// MarkSessionFailed records operational health when startup transport fails.
-// The execution owner separately reports its error through the lifecycle result.
+// MarkSessionFailed records operational health when a starting session ends
+// before it reports activity. The execution owner separately reports its
+// error through the lifecycle result.
 func (t *Task) MarkSessionFailed() bool {
-	if _, changed := t.SetStateIfAny(task.StateFailed, task.StateStarting); !changed {
-		return false
-	}
-
-	return true
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lifecycle == task.StateStarting && t.activity == "" && t.transitionLocked(task.StateFailed)
 }
 
 // DiscardRollup stops forwarding this task's events and tells its previous
@@ -1672,13 +1569,18 @@ func (t *Task) generateTitle(ctx context.Context, log *slog.Logger, run *Run, no
 }
 
 // clearContextLocked resets turn and plan state when a root context boundary
-// is applied. The caller holds t.mu.
-func (t *Task) clearContextLocked() {
+// is applied as of at: the turn, question, or plan of the cleared
+// conversation no longer applies, so the task waits. The caller holds t.mu.
+func (t *Task) clearContextLocked(at time.Time) {
 	t.inPlanMode = false
 	t.planFile = ""
 	t.planContent = ""
 	t.planDismissed = true
 	t.planExitID = ""
+	t.turnAsks, t.turnExitPlan, t.turnQueued, t.turnEnded = nil, false, false, true
+	if s := t.stateLocked(); s == task.StateRunning || s == task.StateAsking || s == task.StateHasPlan {
+		t.setActivityLocked(task.StateWaiting, at)
+	}
 }
 
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
@@ -1689,7 +1591,7 @@ func (t *Task) snapshotLocked() Snapshot {
 	}
 	return Snapshot{
 		SessionMetadata:    t.sessionMetadata,
-		State:              t.state,
+		State:              t.stateLocked(),
 		StateUpdatedAt:     t.stateUpdatedAt,
 		TurnStartedAt:      t.turnStartedAt,
 		Repos:              append([]repo.Mount(nil), t.Repos...),
@@ -1791,12 +1693,14 @@ func (t *Task) observeBackgroundStartLocked(id, run string, running bool, at tim
 	t.backgroundStarts[id] = backgroundStart{run: run, at: at}
 }
 
-// hostExitedLocked ends every running card and the queued turn: the root
-// harness process hosted them and can no longer report them.
+// hostExitedLocked ends the open root turn, every running card, and the
+// queued turn: the root harness process hosted them and can no longer report
+// them. Unanswered questions and a presented plan stay until a turn starts.
 func (t *Task) hostExitedLocked() {
 	t.nativeSubagents.HostExited()
 	t.backgroundCommands.HostExited()
 	t.turnQueued = false
+	t.turnEnded = true
 }
 
 // latestCommitSnapshot returns a copy of the most recently recorded repository
@@ -1900,44 +1804,67 @@ func (t *Task) observeUsageLocked(msg agent.Message) {
 	}
 }
 
-// setState updates the state and records the transition time. The caller must
-// hold t.mu when called from a locked context, or ensure exclusive access.
-func (t *Task) setState(s task.State) {
-	t.setStateAtLocked(s, time.Now().UTC())
+// stateLocked derives the published state: the lifecycle, or the activity the
+// fold derived for a starting or live session once it reports one. A live
+// session that has not reported a turn waits for input. Callers hold t.mu.
+func (t *Task) stateLocked() task.State {
+	switch {
+	case t.activity != "":
+		return t.activity
+	case t.lifecycle == live:
+		return task.StateWaiting
+	default:
+		return t.lifecycle
+	}
 }
 
-// setStateAtLocked updates the state at an explicit transition time. Entering
-// Running records the turn start; leaving it clears the turn start. Callers
-// hold t.mu.
-func (t *Task) setStateAtLocked(s task.State, at time.Time) {
-	if s == task.StateRunning && t.state != task.StateRunning {
+// transitionLocked moves the lifecycle to `to` when lifecycleSources allows it.
+// Callers hold t.mu.
+func (t *Task) transitionLocked(to task.State) bool {
+	if !slices.Contains(lifecycleSources[to], t.lifecycle) {
+		return false
+	}
+	t.moveLocked(to)
+	return true
+}
+
+// moveLocked moves the lifecycle to `to` without checking lifecycleSources. A
+// new lifecycle phase starts without activity, except a starting session that
+// goes live keeps the activity it already reported. Callers hold t.mu.
+func (t *Task) moveLocked(to task.State) {
+	prev := t.stateLocked()
+	if t.lifecycle != task.StateStarting || to != live {
+		t.activity = ""
+	}
+	t.lifecycle = to
+	if t.stateLocked() != prev {
+		t.publishLocked(prev, time.Now().UTC())
+	}
+}
+
+// setActivityLocked records the fold's activity for the starting or live
+// session at its transition time; a zero time means now. Callers hold t.mu.
+func (t *Task) setActivityLocked(a task.State, at time.Time) {
+	prev := t.stateLocked()
+	t.activity = a
+	t.publishLocked(prev, at)
+}
+
+// publishLocked records the published state as of at, which is now when zero.
+// Entering Running records the turn start; leaving it clears the turn start. A
+// change appends to the bounded transition journal. Callers hold t.mu.
+func (t *Task) publishLocked(prev task.State, at time.Time) {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	s := t.stateLocked()
+	if s == task.StateRunning && prev != task.StateRunning {
 		t.turnStartedAt = at
 	} else if s != task.StateRunning {
 		t.turnStartedAt = time.Time{}
 	}
-	t.recordStateTransition(s, at)
-	t.state = s
 	t.stateUpdatedAt = at
-}
-
-// seedStateAtLocked applies a timeline-inferred state at its recorded
-// transition time. Seeding starts from a provisional Running state, so a
-// Running result always records the derived turn start. Callers hold t.mu.
-func (t *Task) seedStateAtLocked(s task.State, at time.Time) {
-	if s == task.StateRunning {
-		t.turnStartedAt = at
-	} else {
-		t.turnStartedAt = time.Time{}
-	}
-	t.recordStateTransition(s, at)
-	t.state = s
-	t.stateUpdatedAt = at
-}
-
-// recordStateTransition appends a state change to the bounded transition
-// journal. Callers hold t.mu.
-func (t *Task) recordStateTransition(s task.State, at time.Time) {
-	if s == t.state {
+	if s == prev {
 		return
 	}
 	t.stateSeq++
@@ -1962,9 +1889,9 @@ func (t *Task) recordStateTransition(s task.State, at time.Time) {
 // The caller must hold t.mu.
 func (t *Task) settledTurnStateLocked() task.State {
 	switch {
-	case lastTurnHasUnansweredAsk(t.timelineViewLocked()):
+	case len(t.turnAsks) > 0:
 		return task.StateAsking
-	case lastTurnHasExitPlan(t.timelineViewLocked()) && t.planContent != "":
+	case t.turnExitPlan && t.planContent != "":
 		return task.StateHasPlan
 	case t.turnQueued || t.nativeSubagents.ActiveBackground() > 0 || t.backgroundCommands.Active() > 0:
 		return task.StateRunning
@@ -1977,7 +1904,6 @@ func (t *Task) settledTurnStateLocked() task.State {
 // timeline, then wakes timeline subscribers.
 func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	m := parsed.Message
-	child := m.Provenance().IsChild()
 	t.mu.Lock()
 	if pr, ok := m.(*agent.MetaPRMessage); ok {
 		changed := t.forgeOwner != pr.ForgeOwner || t.forgeRepo != pr.ForgeRepo || t.forgePR != pr.ForgePR
@@ -2001,104 +1927,79 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		t.mu.Unlock()
 		return changed
 	}
-	initialState := t.state
+	initialState := t.stateLocked()
 	initialPlanMode, initialPlanID, initialPlanContent := t.inPlanMode, t.planExitID, t.planContent
-	// A compaction boundary rewrites the summary's live context fill, so the
-	// task list must refresh even though the task state is unchanged.
 	summaryChanged := false
 	defer func() {
-		stateChanged = summaryChanged || t.state != initialState || t.inPlanMode != initialPlanMode || t.planExitID != initialPlanID || t.planContent != initialPlanContent
+		stateChanged = summaryChanged || t.stateLocked() != initialState || t.inPlanMode != initialPlanMode || t.planExitID != initialPlanID || t.planContent != initialPlanContent
 		t.mu.Unlock()
 	}()
-	priorMetadata := t.sessionMetadata
-	t.sessionMetadata.Apply(m)
-	if agent.IsSessionMetadataUpdate(m) {
-		summaryChanged = t.sessionMetadata != priorMetadata
-		t.costTracker.Observe(m, parsed.ProducerTime, t.Pricer)
-		return stateChanged
-	}
 	producerAt := parsed.ProducerTime
 	at := producerAt
 	if at.IsZero() {
 		at = time.Now()
 	}
-	parsed.ProducerTime = at
-	t.timeline = append(t.timeline, parsed)
+	timeline := !agent.IsSessionMetadataUpdate(m)
+	if timeline {
+		parsed.ProducerTime = at
+		t.timeline = append(t.timeline, parsed)
+		if isDeltaFinal(m) {
+			if t.timelineReaders == 0 {
+				view := t.timelineViewLocked()
+				compactFinalizedDeltaAt(view, view.Len()-1)
+			} else {
+				t.timelineCompactPending = append(t.timelineCompactPending, t.timelineLenLocked()-1)
+			}
+		}
+	}
+	summaryChanged = t.foldMessageLocked(m, at, producerAt, false)
+	if timeline && !agent.IsInputDeliveryControl(m) {
+		wakeLocked(t.wakeSubs)
+	}
+	return stateChanged
+}
+
+// foldMessageLocked folds one ordered message into the task's derived state.
+// Live ingestion and SeedTimelineParts both apply it, so a restored task
+// reaches the state the live task had. at is when the message took effect,
+// zero when unknown; producerAt is the recorded producer time, zero when
+// unknown. It reports
+// whether the message is published and whether it changed the task summary
+// without a state change. The caller holds t.mu.
+func (t *Task) foldMessageLocked(m agent.Message, at, producerAt time.Time, replayed bool) (summaryChanged bool) {
+	child := m.Provenance().IsChild()
+	priorMetadata := t.sessionMetadata
+	t.sessionMetadata.Apply(m)
+	if agent.IsSessionMetadataUpdate(m) {
+		t.costTracker.Observe(m, producerAt, t.Pricer)
+		return t.sessionMetadata != priorMetadata
+	}
+	// State transitions take the producer time so live and restored tasks
+	// agree; a message without one inherits the latest recorded producer time.
+	stateAt := producerAt
+	if stateAt.IsZero() {
+		stateAt = t.lastProducerAt
+	} else {
+		t.lastProducerAt = producerAt
+	}
 	t.turnMetrics.Observe(m, producerAt)
 	t.exitStatus.Observe(m)
-	if sm, ok := m.(*agent.SystemMessage); ok && !child {
-		switch sm.Subtype {
-		case agent.SystemSubtypeInputDeliveryStarted:
-			t.inputPriorState = t.state
-		case agent.SystemSubtypeInputDeliveryCompleted:
-			t.inputPriorState = ""
-		case agent.SystemSubtypeInputDeliveryFailed:
-			if t.inputPriorState != "" && t.state == task.StateRunning {
-				t.setState(t.inputPriorState)
-			}
-			t.inputPriorState = ""
-		}
-	} else if task.AcceptedInputOutput(m) {
-		t.inputPriorState = ""
+	if !child {
+		t.observeTurnLocked(m, stateAt)
 	}
-
 	if agent.IsInputDeliveryControl(m) {
-		return stateChanged
-	}
-	if isDeltaFinal(m) {
-		if t.timelineReaders == 0 {
-			view := t.timelineViewLocked()
-			compactFinalizedDeltaAt(view, view.Len()-1)
-		} else {
-			t.timelineCompactPending = append(t.timelineCompactPending, t.timelineLenLocked()-1)
-		}
+		return false
 	}
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
 		t.recordRateLimitLocked(rateLimit)
 	}
-
-	// Track plan mode and plan file from tool_use events.
-	if tu, ok := m.(*agent.ToolUseMessage); ok && !child {
-		t.trackToolUse(tu)
-	}
 	if !child {
-		summaryChanged = t.observeContextLocked(m, at, priorMetadata.SessionID) || summaryChanged
-	}
-	// Transition to running when the agent starts producing output.
-	// Handles three cases:
-	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
-	//   - Server restart: history restoration inferred a waiting state,
-	//     but the relay already started a new turn before reattach.
-	//   - First turn: the agent may produce output before Checkout.Start
-	//     sets StateRunning (race between backend subprocess and
-	//     SetState on the main goroutine).
-	if !child {
-		switch m.(type) {
-		case *agent.AskMessage:
-			if t.state == task.StateStarting || t.state == task.StateRunning || t.state == task.StateWaiting || t.state == task.StateHasPlan {
-				t.setState(task.StateAsking)
-			}
-		case *agent.UserInputMessage:
-			if t.state == task.StateStarting || t.state == task.StateWaiting || t.state == task.StateAsking || t.state == task.StateHasPlan {
-				t.setState(task.StateRunning)
-			}
-		case *agent.TextMessage, *agent.TextDeltaMessage,
-			*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
-			*agent.ToolUseMessage, *agent.ToolOutputDeltaMessage, *agent.TodoMessage,
-			*agent.WidgetMessage, *agent.WidgetDeltaMessage:
-			if t.state == task.StateStarting || t.state == task.StateWaiting || t.state == task.StateAsking || t.state == task.StateHasPlan {
-				if t.state == task.StateAsking && lastTurnHasUnansweredAsk(t.timelineViewLocked()) {
-					break
-				}
-				// Output of a process that outlived its settled turn starts no
-				// turn, as lastAgentMessage infers on replay. The scan runs only
-				// outside a turn, so streamed output does not repeat it.
-				if _, ok := m.(*agent.ToolOutputDeltaMessage); ok && lastAgentMessage(t.timelineViewLocked()) != nil {
-					break
-				}
-				t.setState(task.StateRunning)
-			}
+		if tu, ok := m.(*agent.ToolUseMessage); ok {
+			t.trackToolUse(tu)
 		}
+		// A compaction boundary rewrites the summary's live context fill, so the
+		// task list must refresh even though the task state is unchanged.
+		summaryChanged = t.observeContextLocked(m, at, priorMetadata.SessionID)
 	}
 
 	// Fold harness-native child activity into the canonical card set and let it
@@ -2110,36 +2011,19 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// the agent ends its turn, and a card the harness stopped listing ends as on
 	// host exit.
 	switch m.(type) {
-	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.TurnQueuedMessage, *agent.ExitMessage:
+	case *agent.NativeSubagentMessage, *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.ExitMessage:
 		before := t.backgroundCountsLocked()
 		t.foldBackgroundLocked(m, at)
-		switch m.(type) {
-		case *agent.ExitMessage:
-			// The root harness process hosts its native subagents, so its exit ends
-			// their observable lifecycle and they no longer keep the task running.
-			if !child {
-				t.hostExitedLocked()
-			}
-		case *agent.TurnQueuedMessage:
-			// A turn the harness queued by itself keeps the task running until its
-			// result, even when the work that queued it has already settled.
-			//
-			// TODO: A Claude turn that starts without a TurnQueuedMessage, such as
-			// one for a prompt delivered while the previous turn ran, leaves this
-			// live fold waiting at the turn's system/init, while the replay fold
-			// infers running there. A replay of local Claude logs shows 5
-			// waiting→running flips under 1 s, all from prompts delivered
-			// mid-turn. Make both folds treat a root system/init after a result
-			// the same way, and test live against replay on that sequence.
-			if !child {
-				t.turnQueued = true
-			}
+		// The root harness process hosts its native subagents, so its exit ends
+		// their observable lifecycle and they no longer keep the task running.
+		if _, ok := m.(*agent.ExitMessage); ok && !child {
+			t.hostExitedLocked()
 		}
 		// Counts change the card summary without a state change.
 		summaryChanged = summaryChanged || t.backgroundCountsLocked() != before
-		if (t.state == task.StateWaiting || t.state == task.StateRunning) && lastAgentMessage(t.timelineViewLocked()) != nil {
-			if next := t.settledTurnStateLocked(); next != t.state {
-				t.setState(next)
+		if cur := t.stateLocked(); (cur == task.StateWaiting || cur == task.StateRunning) && t.turnEnded {
+			if next := t.settledTurnStateLocked(); next != cur {
+				t.setActivityLocked(next, stateAt)
 			}
 		}
 	}
@@ -2152,10 +2036,8 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		// must still push the new card summary.
 		summaryChanged = true
 	}
-	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
-		if sm.Subtype == "context_cleared" {
-			t.clearContextLocked()
-		}
+	if sm, ok := m.(*agent.SystemMessage); ok && !child && sm.Subtype == "context_cleared" {
+		t.clearContextLocked(stateAt)
 	}
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
@@ -2174,15 +2056,15 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 		// goroutine processed this ResultMessage (it does a blocking Fetch
 		// first). In that case we still need to distinguish Asking/HasPlan and
 		// to keep Running while a native subagent is active.
-		// StateStarting is also handled: the agent subprocess may
-		// produce a result before Checkout.Start calls SetState(Running).
-		if t.state == task.StateRunning || t.state == task.StateStarting || t.state == task.StateWaiting || t.state == task.StateAsking {
+		// StateStarting is also handled: the agent subprocess may produce a
+		// result before its session goes live.
+		if cur := t.stateLocked(); cur == task.StateRunning || cur == task.StateStarting || cur == task.StateWaiting || cur == task.StateAsking {
 			next := t.settledTurnStateLocked()
-			t.setState(next)
+			t.setActivityLocked(next, stateAt)
 			if next == task.StateRunning {
 				// Duration now includes the settled turn, so the live delta starts
 				// at its result rather than at the turn that just ended.
-				t.turnStartedAt = at
+				t.turnStartedAt = t.stateUpdatedAt
 			}
 		}
 	}
@@ -2192,9 +2074,116 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	t.costTracker.Observe(m, at, t.Pricer)
 	// Forward the folded message to the usage rollup with the cost snapshot
 	// reflecting every prior fold in this message.
-	t.observeRollupLocked(m, at, producerAt, false)
-	wakeLocked(t.wakeSubs)
-	return stateChanged
+	t.observeRollupLocked(m, at, producerAt, replayed)
+	return summaryChanged
+}
+
+// observeTurnLocked folds a root message into the turn boundaries and the
+// evidence of the current turn: an accepted prompt or a TurnStartedMessage
+// starts a turn, its trailing result ends it, and the turn collects its
+// unanswered questions and whether it presented a plan. Agent output neither
+// starts nor ends a turn. A root input whose delivery is unresolved takes
+// effect once delivery completes or root output proves it was accepted; a
+// failed delivery discards it, so the task keeps the state the attempt started
+// from. The caller holds t.mu.
+func (t *Task) observeTurnLocked(m agent.Message, at time.Time) {
+	if task.AcceptedInputOutput(m) {
+		t.resolveInputLocked(true)
+	}
+	switch m := m.(type) {
+	case *agent.SystemMessage:
+		switch m.Subtype {
+		case agent.SystemSubtypeInputDeliveryStarted:
+			t.resolveInputLocked(false)
+			t.inputDelivering = true
+		case agent.SystemSubtypeInputDeliveryCompleted:
+			t.resolveInputLocked(true)
+		case agent.SystemSubtypeInputDeliveryFailed:
+			t.resolveInputLocked(false)
+		}
+	case *agent.TurnStartedMessage:
+		t.startTurnLocked(at)
+	case *agent.ResultMessage:
+		if t.turnEnded {
+			t.turnAsks, t.turnExitPlan = nil, false
+		}
+		t.turnEnded = true
+	case *agent.UserInputMessage:
+		if t.inputDelivering {
+			t.deferredInput, t.deferredInputAt = true, at
+		} else {
+			t.acceptInputLocked(at)
+		}
+	case *agent.AskMessage:
+		t.continueTurnLocked()
+		key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		if !slices.ContainsFunc(t.turnAsks, func(a turnAsk) bool { return a.key == key && m.ToolUseID != "" }) {
+			t.turnAsks = append(t.turnAsks, turnAsk{key: key})
+		}
+		if cur := t.stateLocked(); cur == task.StateStarting || cur == task.StateRunning || cur == task.StateWaiting || cur == task.StateHasPlan {
+			t.setActivityLocked(task.StateAsking, at)
+		}
+	case *agent.ToolResultMessage:
+		if m.ToolUseID != "" && m.Error == "" {
+			key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+			t.turnAsks = slices.DeleteFunc(t.turnAsks, func(a turnAsk) bool { return a.key == key })
+		}
+	case *agent.PendingUserActionMessage:
+		if m.Action.Kind != agent.PendingUserActionAskUserQuestion || m.Action.ToolUseID == "" {
+			return
+		}
+		key := agent.ToolKeyForSource(m.Provenance(), m.Action.ToolUseID)
+		if i := slices.IndexFunc(t.turnAsks, func(a turnAsk) bool { return a.key == key }); i >= 0 {
+			t.turnAsks[i].action = &m.Action
+		}
+	case *agent.ToolUseMessage:
+		if m.Name == "ExitPlanMode" {
+			t.turnExitPlan = true
+		}
+	}
+}
+
+// resolveInputLocked ends an unresolved input delivery and applies its input,
+// as of its arrival, once accepted.
+func (t *Task) resolveInputLocked(accepted bool) {
+	if accepted && t.deferredInput {
+		t.acceptInputLocked(t.deferredInputAt)
+	}
+	t.inputDelivering, t.deferredInput, t.deferredInputAt = false, false, time.Time{}
+}
+
+// acceptInputLocked applies an accepted root input: it answers every open
+// question and starts a turn.
+func (t *Task) acceptInputLocked(at time.Time) {
+	t.turnAsks = nil
+	t.startTurnLocked(at)
+}
+
+// startTurnLocked starts a root turn after a trailing result; during a turn it
+// changes nothing. A waiting task, or one that a restart left starting, runs.
+// So does an asking task without unanswered questions; a question of the
+// current turn keeps asking until input answers it. The caller holds t.mu.
+func (t *Task) startTurnLocked(at time.Time) {
+	t.continueTurnLocked()
+	switch t.stateLocked() {
+	case task.StateStarting, task.StateWaiting, task.StateHasPlan:
+	case task.StateAsking:
+		if len(t.turnAsks) > 0 {
+			return
+		}
+	default:
+		return
+	}
+	t.setActivityLocked(task.StateRunning, at)
+}
+
+// continueTurnLocked keeps the current root turn; after a trailing result it
+// starts a new one.
+func (t *Task) continueTurnLocked() {
+	if t.turnEnded {
+		t.turnEnded = false
+		t.turnAsks, t.turnExitPlan = nil, false
+	}
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {
@@ -2615,129 +2604,6 @@ func (v timelineEntries) Slice(end int) timelineEntries {
 	return timelineEntries{prefix: v.prefix, suffix: v.suffix[:end-len(v.prefix)]}
 }
 
-// seedStateTime returns the recorded time the loaded timeline entered state
-// next. Producer timestamps survive a restart, so the adopted task reports the
-// same state duration and running turn start as the live task did. A running
-// state comes from a trailing result that settled the parent turn while a
-// background subagent stays active; its duration already includes that turn, so
-// the live delta starts at the result.
-func seedStateTime(entries timelineEntries, next task.State) time.Time {
-	if next == task.StateAsking {
-		return lastAskTime(entries)
-	}
-	return lastResultTime(entries)
-}
-
-// lastResultTime returns the producer time of the trailing root result.
-func lastResultTime(entries timelineEntries) time.Time {
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		if _, ok := entry.Message.(*agent.ResultMessage); ok {
-			return entry.ProducerTime
-		}
-	}
-	return time.Time{}
-}
-
-// lastAskTime returns the producer time of the trailing root question.
-func lastAskTime(entries timelineEntries) time.Time {
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		if _, ok := entry.Message.(*agent.AskMessage); ok {
-			return entry.ProducerTime
-		}
-	}
-	return time.Time{}
-}
-
-// turnStartTime returns when the turn that is still running began. A trailing
-// ResultMessage belongs to that turn when a background subagent outlived it, so
-// skip it and measure from the turn before.
-func turnStartTime(entries timelineEntries) time.Time {
-	skipResult := lastAgentMessage(entries) != nil
-	start := time.Time{}
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() || nonSemanticMessage(entry.Message) {
-			continue
-		}
-		if _, ok := entry.Message.(*agent.SystemMessage); ok {
-			continue
-		}
-		if _, ok := entry.Message.(*agent.ResultMessage); ok {
-			if skipResult {
-				skipResult = false
-				continue
-			}
-			return start
-		}
-		if !entry.ProducerTime.IsZero() {
-			start = entry.ProducerTime
-		}
-	}
-	return start
-}
-
-// nonSemanticMessage reports whether m is relay or caic bookkeeping that
-// neither settles a turn nor starts one.
-func nonSemanticMessage(m agent.Message) bool {
-	switch m.(type) {
-	case *agent.BackgroundCommandMessage, *agent.BackgroundRetiredMessage, *agent.DiffStatMessage, *agent.ExitMessage,
-		*agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.MetaSessionMessage,
-		*agent.ModelInfoMessage, *agent.NativeSubagentMessage, *agent.PendingUserActionMessage,
-		*agent.RawMessage, *agent.RelayGenerationMessage, *agent.StrippedEnvMessage, *agent.SyncActivityMessage,
-		*agent.TextDeltaMessage, *agent.TurnCommitSnapshotMessage, *agent.TurnQueuedMessage, *agent.UsageMessage:
-		return true
-	default:
-		return false
-	}
-}
-
-// lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages, and returns the trailing ResultMessage if the last semantically
-// meaningful message is a result. Returns nil if it is not a ResultMessage
-// (agent still producing output) or msgs is empty.
-//
-// It also skips tool output and results: one whose tool use is in the
-// current turn ends the scan at that use, and one that reaches a result
-// belongs to a settled turn, such as the late exit of a Codex process that
-// outlived its turn.
-func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
-	var rejected map[*agent.UserInputMessage]struct{}
-	checkedInputs := false
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() || nonSemanticMessage(entry.Message) {
-			continue
-		}
-		switch m := entry.Message.(type) {
-		case *agent.ToolOutputDeltaMessage, *agent.ToolResultMessage:
-			continue
-		case *agent.SystemMessage:
-			if m.Subtype == agent.SystemSubtypeInputDeliveryFailed || agent.IsInputDeliveryControl(m) {
-				continue
-			}
-			return nil
-		case *agent.ResultMessage:
-			return m
-		case *agent.UserInputMessage:
-			if !checkedInputs {
-				rejected = unacceptedInputs(entries, 0)
-				checkedInputs = true
-			}
-			if _, rejected := rejected[m]; rejected {
-				continue
-			}
-			return nil
-		default:
-			return nil
-		}
-	}
-	return nil
-}
-
 // fallbackResultText returns the visible assistant text of the turn preceding
 // the trailing ResultMessage in msgs, using the same window rules as
 // ResultTextWindow. The input may include the trailing ResultMessage.
@@ -2753,146 +2619,6 @@ func fallbackResultText(entries timelineEntries) string {
 		w.Update(entry.Message)
 	}
 	return w.Value()
-}
-
-// lastTurnHasUnansweredAsk reports whether the current turn contains an
-// AskMessage that has not been followed by a successful ToolResultMessage or
-// accepted user answer.
-// It scans backwards from the end until it hits the previous turn's
-// ResultMessage boundary. If the current turn's ResultMessage is present, it is
-// skipped as a boundary first.
-func lastTurnHasUnansweredAsk(entries timelineEntries) bool {
-	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[agent.ToolKey]struct{}{}
-	var rejected map[*agent.UserInputMessage]struct{}
-	checkedInputs := false
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		switch m := entry.Message.(type) {
-		case *agent.UserInputMessage:
-			if !checkedInputs {
-				rejected = unacceptedInputs(entries, 0)
-				checkedInputs = true
-			}
-			if _, failed := rejected[m]; !failed {
-				return false
-			}
-		case *agent.AskMessage:
-			if m.ToolUseID == "" {
-				return true
-			}
-			if _, ok := answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; !ok {
-				return true
-			}
-		case *agent.ToolResultMessage:
-			if m.ToolUseID != "" && m.Error == "" {
-				answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
-			}
-		case *agent.ResultMessage:
-			if skipTrailingResult {
-				skipTrailingResult = false
-			} else {
-				return false
-			}
-		}
-	}
-	return false
-}
-
-// pendingUserActionsFromMessages derives reconnect state from the current turn.
-// Today AskUserQuestion is the only pending action kind; adding a new kind
-// should add its close condition here instead of preserving provider-specific
-// control messages directly.
-func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAction {
-	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[agent.ToolKey]struct{}{}
-	restored := map[agent.ToolKey]struct{}{}
-	pending := map[agent.ToolKey]v3.PendingUserAction{}
-	var actions []v3.PendingUserAction
-	var rejected map[*agent.UserInputMessage]struct{}
-	checkedInputs := false
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		switch m := entry.Message.(type) {
-		case *agent.UserInputMessage:
-			if !checkedInputs {
-				rejected = unacceptedInputs(entries, 0)
-				checkedInputs = true
-			}
-			if _, failed := rejected[m]; !failed {
-				// Accepted answers close earlier Asks even before their tool
-				// results arrive. Keep only newer, still-pending questions.
-				slices.Reverse(actions)
-				return actions
-			}
-		case *agent.AskMessage:
-			if m.ToolUseID == "" {
-				continue
-			}
-			if _, ok := answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; ok {
-				continue
-			}
-			if _, ok := restored[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; ok {
-				continue
-			}
-			action, ok := pending[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]
-			if ok {
-				actions = append(actions, agent.ClonePendingUserAction(action))
-				restored[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
-				delete(pending, agent.ToolKeyForSource(m.Provenance(), m.ToolUseID))
-			}
-		case *agent.PendingUserActionMessage:
-			switch m.Action.Kind {
-			case agent.PendingUserActionAskUserQuestion:
-			default:
-				continue
-			}
-			if m.Action.ToolUseID != "" {
-				pending[agent.ToolKeyForSource(m.Provenance(), m.Action.ToolUseID)] = m.Action
-			}
-		case *agent.ToolResultMessage:
-			if m.ToolUseID != "" && m.Error == "" {
-				answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
-			}
-		case *agent.ResultMessage:
-			if skipTrailingResult {
-				skipTrailingResult = false
-			} else {
-				slices.Reverse(actions)
-				return actions
-			}
-		}
-	}
-	slices.Reverse(actions)
-	return actions
-}
-
-// lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
-// tool call. It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary.
-func lastTurnHasExitPlan(entries timelineEntries) bool {
-	skippedResult := false
-	for _, entry := range entries.Backward() {
-		if entry.Message.Provenance().IsChild() {
-			continue
-		}
-		switch m := entry.Message.(type) {
-		case *agent.ToolUseMessage:
-			if m.Name == "ExitPlanMode" {
-				return true
-			}
-		case *agent.ResultMessage:
-			if skippedResult {
-				return false
-			}
-			skippedResult = true
-		}
-	}
-	return false
 }
 
 const maxTitleChars = 80

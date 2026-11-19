@@ -1,4 +1,4 @@
-// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against direction-specific genai wire DTOs and caic's parsers, flags unclassified Claude background tools, and lists the newest harness version each harness ran.
+// Command check-agent-logs deletes obsolete task logs, validates recent v3 harness records against genai wire DTOs and caic's parsers, compares live and replayed task state, flags unclassified Claude background tools, and lists each harness's newest version.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	antigravityv1 "github.com/caic-xyz/caic/backend/internal/agent/antigravity/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	agentharness "github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
@@ -34,10 +36,11 @@ import (
 )
 
 type config struct {
-	dir   string
-	since time.Duration
-	all   bool
-	paths []string
+	dir     string
+	since   time.Duration
+	all     bool
+	foldOut string
+	paths   []string
 }
 
 type fileCheck struct {
@@ -153,16 +156,37 @@ func main() {
 }
 
 // run processes all discoverable logs even when discovery, file I/O, or reporting fails.
-func run(args []string, out io.Writer) error {
+func run(args []string, out io.Writer) (runErr error) {
 	cfg, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	paths, runErr := logPaths(cfg)
+	var paths []string
+	paths, runErr = logPaths(cfg)
 	var findings []finding
 	var checked int
 	newest := map[string]*newestVersion{}
 	resolver := backends.Default("", nil)
+	store := history.NewStore(slog.New(slog.DiscardHandler), taskslog.NewStore(cfg.dir), resolver)
+	foldOut := io.Discard
+	if cfg.foldOut != "" {
+		f, err := os.Create(cfg.foldOut)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		}()
+		w := bufio.NewWriter(f)
+		defer func() {
+			if err := w.Flush(); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		}()
+		foldOut = w
+	}
 	var cutoff time.Time
 	if len(cfg.paths) == 0 && !cfg.all {
 		cutoff = time.Now().Add(-cfg.since)
@@ -185,6 +209,12 @@ func run(args []string, out io.Writer) error {
 		case agent.LogVersionV3:
 			if result.checked {
 				checked++
+				f, err := checkFold(store, path, result.harness, foldOut)
+				if err != nil {
+					runErr = errors.Join(runErr, err)
+				} else if f != nil {
+					result.findings = append(result.findings, *f)
+				}
 			}
 			for _, v := range result.agentVersions {
 				n := newest[result.harness]
@@ -235,6 +265,7 @@ func parseFlags(args []string) (config, error) {
 	})
 	fs.DurationVar(&cfg.since, "since", 72*time.Hour, "validate v3 bodies modified within this duration; explicit paths ignore this cutoff")
 	fs.BoolVar(&cfg.all, "all", false, "validate all v3 bodies regardless of modification time")
+	fs.StringVar(&cfg.foldOut, "fold-out", "", "write one line per root message of each validated log comparing live ingestion with replay, to diff runs")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}

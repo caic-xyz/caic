@@ -485,8 +485,6 @@ TaskState is the lifecycle state of a task.
 | `waiting` |  |
 | `asking` |  |
 | `has_plan` |  |
-| `pulling` |  |
-| `pushing` |  |
 | `stopping` |  |
 | `stopped` |  |
 | `purging` |  |

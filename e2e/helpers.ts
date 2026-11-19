@@ -199,7 +199,7 @@ export const test = base.extend<{
             .poll(
               async () => {
                 task = await api.getTask(task.id);
-                return ["branching", "pending", "provisioning", "pulling", "pushing", "starting"].includes(task.state);
+                return ["branching", "pending", "provisioning", "starting"].includes(task.state);
               },
               { timeout: 30_000 },
             )

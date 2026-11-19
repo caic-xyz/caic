@@ -26,6 +26,7 @@ import (
 //
 // Emitted agent.Message types:
 //   - InitMessage          — thread/started
+//   - TurnStartedMessage   — turn/started
 //   - TextMessage          — item/completed agentMessage or plan
 //   - TextDeltaMessage     — item/agentMessage/delta
 //   - ThinkingMessage      — item/completed reasoning
@@ -61,7 +62,15 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		}}, decodedItem{threadStarted: &p}, nil
 
 	case codex.MethodTurnStarted:
-		return nil, decodedItem{}, nil
+		threadID, err := agent.JSONString(msg.Params, "threadId")
+		if err != nil {
+			return nil, decodedItem{}, fmt.Errorf("turn/started threadId: %w", err)
+		}
+		turnID, err := agent.JSONString(msg.Params, "turn", "id")
+		if err != nil {
+			return nil, decodedItem{}, fmt.Errorf("turn/started turn id: %w", err)
+		}
+		return []agent.Message{&agent.TurnStartedMessage{}}, decodedItem{source: v3.MessageSource{ThreadID: threadID, TurnID: turnID}}, nil
 
 	case codex.MethodTurnCompleted:
 		var p codex.TurnCompletedNotification

@@ -79,7 +79,7 @@ func (e *Entry) AutomationContext(ctx context.Context) (context.Context, context
 	// Bind before reading state: an unbound webhook may cross disable/re-enable
 	// while admission waits, and must then observe the suspended task.
 	switch e.Task().GetState() {
-	case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
+	case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
 		return work, release, nil
 	case task.StateStopped, task.StateStopping, task.StatePurging, task.StatePurged, task.StateFailed, task.StateCrashed:
 		release()

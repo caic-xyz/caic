@@ -19,6 +19,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskrun"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/ksid"
 )
@@ -334,8 +335,6 @@ func TestTaskState(t *testing.T) {
 		{task.StateWaiting, v1.TaskStateWaiting},
 		{task.StateAsking, v1.TaskStateAsking},
 		{task.StateHasPlan, v1.TaskStateHasPlan},
-		{task.StatePulling, v1.TaskStatePulling},
-		{task.StatePushing, v1.TaskStatePushing},
 		{task.StateStopping, v1.TaskStateStopping},
 		{task.StateStopped, v1.TaskStateStopped},
 		{task.StatePurging, v1.TaskStatePurging},
@@ -469,7 +468,6 @@ func TestTask(t *testing.T) {
 	t.Run("OverageDoesNotBlock", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StatePending)
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:         "rejected",
 			ResetsAt:       time.Now().Add(time.Hour),
@@ -490,7 +488,6 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		now := time.Now()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StatePending)
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{
 			&agent.RateLimitMessage{
 				Status:        agent.RateLimitStatusRejected,
@@ -518,7 +515,6 @@ func TestTask(t *testing.T) {
 	t.Run("AllowsEmptyQuotaProvider", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StatePending)
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:      agent.RateLimitStatusRejected,
 			ResetsAt:    time.Now().Add(time.Hour),
@@ -536,7 +532,6 @@ func TestTask(t *testing.T) {
 	t.Run("RejectsUnsupportedQuotaProvider", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StatePending)
 		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.RateLimitMessage{
 			Status:        agent.RateLimitStatusRejected,
 			ResetsAt:      time.Now().Add(time.Hour),
@@ -555,7 +550,6 @@ func TestTask(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
 		tk.ForkedFromTaskID = forkedFromTaskID
 		tk.ParentTaskID = parentTaskID
-		tk.SetState(task.StatePending)
 
 		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
@@ -571,7 +565,7 @@ func TestTask(t *testing.T) {
 	t.Run("IncludesStoppedDiskUsage", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StateStopped)
+		taskruntest.SetState(tk, task.StateStopped)
 		tk.UpdateDiskUsage(1024)
 
 		live, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
@@ -595,7 +589,7 @@ func TestTask(t *testing.T) {
 			t.Fatalf("durable stopped disk = %v, want %d", durable.StoppedDiskUsedBytes, durableDisk)
 		}
 
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		notStopped, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
@@ -605,7 +599,7 @@ func TestTask(t *testing.T) {
 		}
 
 		oldTask := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "old task"})
-		oldTask.SetState(task.StateStopped)
+		taskruntest.SetState(oldTask, task.StateStopped)
 		old, err := Task(&TaskInput{Task: oldTask, Snapshot: oldTask.Snapshot()})
 		if err != nil {
 			t.Fatal(err)
@@ -617,7 +611,7 @@ func TestTask(t *testing.T) {
 	t.Run("IncludesStartupFailure", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
-		tk.SetState(task.StateFailed)
+		taskruntest.SetState(tk, task.StateFailed)
 
 		got, err := Task(&TaskInput{
 			Task:     tk,

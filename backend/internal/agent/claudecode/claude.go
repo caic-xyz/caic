@@ -257,7 +257,7 @@ func (w *wireFormat) ParseOutput(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A retired card has no terminal record and so queues no turn: keep it out
+	// A retired card has no terminal record and so starts no turn: keep it out
 	// of turnQueue.
 	var retired []agent.Message
 	for _, id := range w.liveTasks.parse(&record) {
@@ -540,6 +540,9 @@ func (w *wireFormat) ParseInput(line []byte) ([]agent.Message, error) {
 					input.Images = append(input.Images, v3.ImageData{MediaType: content.Source.MediaType, Data: content.Source.Data})
 				}
 			}
+		}
+		if !source.IsChild() {
+			w.turnQueue.input()
 		}
 		return []agent.Message{input}, nil
 	case claudecode.InputControlResponse:

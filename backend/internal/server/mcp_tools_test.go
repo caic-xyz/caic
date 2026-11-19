@@ -25,6 +25,7 @@ import (
 
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 
 	"github.com/invopop/jsonschema"
@@ -275,10 +276,11 @@ func TestMCPTools(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first"}, harness.Claude)
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateWaiting)
 		start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 		tk.SeedTimelineParts(nil, []agent.TimedMessage{
 			{ProducerTime: start, Message: &agent.UserInputMessage{Text: "first"}},
+			{ProducerTime: start, Message: &agent.TurnStartedMessage{}},
 			{ProducerTime: start.Add(time.Second), Message: &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "w", Label: "results", Status: agent.BackgroundCommandStatusRunning, Watch: true}}},
 			{ProducerTime: start.Add(2 * time.Second), Message: &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: "c", Label: "Run tests", Status: agent.BackgroundCommandStatusRunning, WakesAgent: true}}},
 			{ProducerTime: start.Add(3 * time.Second), Message: &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: "a", Label: "Fix", Status: agent.NativeSubagentStatusRunning, Background: true}}},
@@ -380,7 +382,7 @@ func TestMCPTools(t *testing.T) {
 
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "first"}, harness.Claude)
-		tk.SetState(task.StateRunning)
+		taskruntest.SetState(tk, task.StateWaiting)
 		tk.SeedTimelineParts(nil, timeline, nil)
 		insertTestTask(s, tk.ID, tk)
 		entry, _ := s.taskMgr.GetEntry(tk.ID)
@@ -438,7 +440,7 @@ func TestMCPTools(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-			tk.SetState(task.StateRunning)
+			taskruntest.SetState(tk, task.StateRunning)
 			insertTestTask(s, tk.ID, tk)
 			entry, _ := s.taskMgr.GetEntry(tk.ID)
 			c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
@@ -502,7 +504,7 @@ func TestMCPTools(t *testing.T) {
 					t.Parallel()
 					s := newTestRouter(t, nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-					tk.SetState(state)
+					taskruntest.SetState(tk, state)
 					insertTestTask(s, tk.ID, tk)
 					entry, _ := s.taskMgr.GetEntry(tk.ID)
 					withPending := mode == "steer" && state == task.StateRunning
@@ -559,7 +561,7 @@ func TestMCPTools(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-				tk.SetState(task.StateRunning)
+				taskruntest.SetState(tk, task.StateRunning)
 				insertTestTask(s, tk.ID, tk)
 				entry, _ := s.taskMgr.GetEntry(tk.ID)
 				if existing {
@@ -594,14 +596,14 @@ func TestMCPTools(t *testing.T) {
 				t.Parallel()
 				s := newTestRouter(t, nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
-				tk.SetState(task.StateRunning)
+				taskruntest.SetState(tk, task.StateRunning)
 				insertTestTask(s, tk.ID, tk)
 				entry, _ := s.taskMgr.GetEntry(tk.ID)
 				if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "old"}); err != nil {
 					t.Fatal(err)
 				}
 				old := entry.PendingInput()
-				tk.SetState(tc.state)
+				taskruntest.SetState(tk, tc.state)
 				c := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 				res := c.handleTaskSendMessage(t.Context(), &mcp.ToolRequest[mcpschema.TaskSendMessageArgs]{Arguments: mcpschema.TaskSendMessageArgs{TaskNumber: mcpschema.TaskReference(tk.ID.String()), Message: tc.message, DeliveryMode: mcpschema.InputReplace}})
 				assertMCPToolErrorCode(t, res, tc.code)
@@ -1014,11 +1016,11 @@ func TestMCPTools(t *testing.T) {
 		s := newTestRouter(t, nil)
 		stoppedID := ksid.NewID()
 		stopped := mustNewTask(t, stoppedID, agent.Prompt{Text: "stopped"}, harness.Claude)
-		stopped.SetState(task.StateStopped)
+		taskruntest.SetState(stopped, task.StateStopped)
 		insertTestTask(s, stoppedID, stopped)
 		runningID := ksid.NewID()
 		running := mustNewTask(t, runningID, agent.Prompt{Text: "running"}, harness.Codex)
-		running.SetState(task.StateRunning)
+		taskruntest.SetState(running, task.StateRunning)
 		insertTestTask(s, runningID, running)
 		registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 		testTaskHandlers(s).taskSvc.focusTask(t.Context(), runningID)
@@ -1040,7 +1042,7 @@ func TestMCPTools(t *testing.T) {
 		if len(secondOutput.Tasks) != 1 || secondOutput.Tasks[0].TaskNumber != 2 || secondOutput.Tasks[0].State != v1.TaskStateStopped || secondOutput.Tasks[0].Active || secondOutput.NextCursor != "" {
 			t.Fatalf("second page = %#v, want unfocused stopped task without cursor", secondOutput)
 		}
-		stopped.SetState(task.StateRunning)
+		taskruntest.SetState(stopped, task.StateRunning)
 		stale := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpschema.TaskListArgs]{Arguments: mcpschema.TaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
 		if !stale.IsError {
 			t.Fatal("tasks_list accepted a cursor after another task changed ordering partition")
@@ -1130,16 +1132,16 @@ func TestMCPTools(t *testing.T) {
 			registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 			parentID := ksid.NewID()
 			parent := mustNewTask(t, parentID, agent.Prompt{Text: "parent"}, harness.Claude)
-			parent.SetState(task.StateWaiting)
+			taskruntest.SetState(parent, task.StateWaiting)
 			insertTestTask(s, parentID, parent)
 			childID := ksid.NewID()
 			child := mustNewTask(t, childID, agent.Prompt{Text: "child"}, harness.Codex)
 			child.ParentTaskID = parentID
-			child.SetState(task.StateWaiting)
+			taskruntest.SetState(child, task.StateWaiting)
 			insertTestTask(s, childID, child)
 			unrelatedID := ksid.NewID()
 			unrelated := mustNewTask(t, unrelatedID, agent.Prompt{Text: "unrelated"}, harness.Claude)
-			unrelated.SetState(task.StateWaiting)
+			taskruntest.SetState(unrelated, task.StateWaiting)
 			insertTestTask(s, unrelatedID, unrelated)
 
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
@@ -1790,7 +1792,7 @@ func TestMCPTools(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 				tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
-				tk.SetState(task.StateWaiting)
+				taskruntest.SetState(tk, task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
@@ -1818,7 +1820,7 @@ func TestMCPTools(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "source"}, harness.Claude)
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"}})
@@ -1844,7 +1846,7 @@ func TestMCPTools(t *testing.T) {
 		tk.RequestedModel = "retired-model"
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "mistyped"}})
@@ -1870,7 +1872,7 @@ func TestMCPTools(t *testing.T) {
 		tk.RequestedModel = "claude-default"
 		tk.Repos = []repo.Mount{{Name: "myrepo", Branch: "main"}}
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
-		tk.SetState(task.StateWaiting)
+		taskruntest.SetState(tk, task.StateWaiting)
 		insertTestTask(s, tk.ID, tk)
 		c := &mcpTools{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 		result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpschema.TaskForkArgs]{Arguments: mcpschema.TaskForkArgs{TaskNumber: mcpschema.TaskReference("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"}})
@@ -2124,7 +2126,7 @@ func TestMCPTools(t *testing.T) {
 				t.Parallel()
 				s, rt, id := newMCPDiffstatRouter(t)
 				ent, _ := s.taskMgr.GetEntry(id)
-				ent.Task().SetState(task.StateRunning)
+				taskruntest.SetState(ent.Task(), task.StateRunning)
 				prompt := strings.Repeat("pending \" \u754c\n", 5000) + "end of pending instructions"
 				if _, err := ent.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: prompt}); err != nil {
 					t.Fatal(err)
@@ -2336,7 +2338,7 @@ func TestMCPTools(t *testing.T) {
 						svc := testTaskHandlers(s).taskSvc
 						id := ksid.NewID()
 						target := mustNewTask(t, id, agent.Prompt{Text: "focus target"}, harness.Claude)
-						target.SetState(task.StateStopped)
+						taskruntest.SetState(target, task.StateStopped)
 						insertTestTask(s, id, target)
 						ch, cancel := svc.subscribeTaskFocus(t.Context())
 						t.Cleanup(cancel)

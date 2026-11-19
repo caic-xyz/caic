@@ -232,8 +232,8 @@ type lifecycleIntent struct {
 func (i *lifecycleIntent) PrepareRecords(context.Context) ([]agent.Message, error) {
 	t := i.task
 	t.mu.Lock()
-	i.previous = t.state
-	i.accepted = slices.Contains(i.allowed, t.state)
+	i.previous = t.stateLocked()
+	i.accepted = slices.Contains(i.allowed, i.previous)
 	title := t.title
 	t.mu.Unlock()
 	if !i.accepted {
@@ -241,12 +241,12 @@ func (i *lifecycleIntent) PrepareRecords(context.Context) ([]agent.Message, erro
 	}
 	return []agent.Message{taskhistory.ResultMessage(title, &task.Result{State: i.persisted})}, nil
 }
+
+// ApplyRecords moves the lifecycle unless the intent only persists the phase
+// the task is already in.
 func (i *lifecycleIntent) ApplyRecords(context.Context) error {
-	if i.accepted {
-		i.task.SetState(i.state)
-		if i.previous != i.state {
-			i.runtime.NotifyTaskChange()
-		}
+	if i.accepted && i.task.Transition(i.state) {
+		i.runtime.NotifyTaskChange()
 	}
 	return nil
 }

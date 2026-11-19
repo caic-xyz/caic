@@ -74,9 +74,9 @@ type LoadedTask struct {
 	Repos                          []repo.Mount // GitRoot will be empty for purged tasks loaded from logs.
 	Harness                        harness.Name
 	StartedAt                      time.Time
-	LastActivityAt                 time.Time // Best-known state or activity time: latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State                          task.State
-	ForgeIssue                     int // Originating issue number for bot comment callbacks.
+	LastActivityAt                 time.Time  // Best-known state or activity time: latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	State                          task.State // Lifecycle phase the last settlement trailer records; empty while the log has none.
+	ForgeIssue                     int        // Originating issue number for bot comment callbacks.
 	OwnerID                        string
 	ForkedFromTaskID               string
 	ParentTaskID                   string
@@ -151,7 +151,6 @@ func loadedTaskFromMeta(path, taskID string, meta *v3.MetaMessage, modified time
 		RequestedCompactionBudget:      agent.CompactionBudget(meta.RequestedCompactionBudget),
 		StartedAt:                      meta.StartedAt,
 		LastActivityAt:                 modified,
-		State:                          task.StateRunning,
 		ForgeIssue:                     meta.ForgeIssue,
 		OwnerID:                        meta.OwnerID,
 		ForkedFromTaskID:               meta.ForkedFromTaskID,

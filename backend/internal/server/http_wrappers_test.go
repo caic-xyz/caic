@@ -30,6 +30,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/gomodedev/gomode/sse"
 	"github.com/maruel/ksid"
 )
@@ -788,7 +789,7 @@ func TestHandleWithTask(t *testing.T) {
 	if gap || len(changes) != 0 {
 		t.Fatalf("pure reads published task changes: %+v gap=%v", changes, gap)
 	}
-	tk.SetState(task.StateRunning)
+	taskruntest.SetState(tk, task.StateRunning)
 	entry, ok := s.taskMgr.GetEntry(tk.ID)
 	if !ok {
 		t.Fatal("missing task")

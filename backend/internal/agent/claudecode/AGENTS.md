@@ -90,6 +90,8 @@ another notification first, and 3 by user input first. None ended without a
 turn. The statuses were `local_agent` completed and `local_bash` completed,
 failed, and stopped (a watch expiry). `turnQueue` in `native_subagent.go`
 owns this mapping, and every background command card sets `WakesAgent`.
+`turnQueue` reports a turn start (`TurnStartedMessage`) before each `init`, and
+at a terminal record that arrives while no turn runs.
 
 A notification that arrives during a parent turn joins its next model request.
 When no root `tool_result` user record follows the terminal record before the
@@ -98,6 +100,13 @@ result: 5 of 5 such results in 116 local Claude task logs. None of the 63
 results with such a record, TaskStop kills included, was followed by a turn
 within 2 s. The result itself does not distinguish them
 (`queued_turn_count` is 0); `turnQueue` sets `ResultMessage.TurnQueued`.
+
+A user prompt delivered during a turn follows the same rule. With no root
+`tool_result` record between the prompt's input record and the root result,
+Claude Code started a turn for it within 30 ms of the result: 5 of 5 cases in
+the same logs. None of the 63 prompts that a tool result followed was followed
+by a turn within 2 s: 50 next saw user input, and 13 an `init` after 2 s. A
+prompt delivered before `init` belongs to the turn that `init` starts.
 
 A task that a subagent spawned notifies that subagent. Its task records reach
 the parent stream without `parent_tool_use_id`, and newer versions add

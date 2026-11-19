@@ -4,10 +4,13 @@ package taskslog
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
@@ -250,4 +253,42 @@ func v3JSONFields(t reflect.Type) map[string]bool {
 		}
 	}
 	return out
+}
+
+func TestDecodeFrameProducerTime(t *testing.T) {
+	t.Parallel()
+	lines := map[Kind]string{
+		KindDiffStat:            `{"t":"diff_stat","ts":12.345}`,
+		KindExit:                `{"t":"exit","exit_code":1,"ts":12.345}`,
+		KindTurnCommitSnapshot:  `{"t":"turn_commit_snapshot","ts":12.345}`,
+		KindSyncActivity:        `{"t":"sync_activity","sync_id":"s","phase":"start","ts":12.345}`,
+		KindContextCleared:      `{"t":"context_cleared","subtype":"context_cleared","ts":12.345}`,
+		KindInputDeliveryFailed: `{"t":"input_delivery_failed","subtype":"input_delivery_failed","ts":12.345}`,
+		KindInputDelivery:       `{"t":"input_delivery","subtype":"input_delivery_started","ts":12.345}`,
+		KindUserInput:           `{"t":"user_input","text":"hi","ts":12.345}`,
+	}
+	// Every control kind whose schema carries a producer time must be covered.
+	for kind, fields := range v3ControlFields {
+		if !slices.Contains(fields, "ts") {
+			continue
+		}
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(lines)), func(k Kind) bool {
+			c, _ := k.controlKind()
+			return c == kind
+		}) {
+			t.Errorf("control kind %d carries ts but has no case", kind)
+		}
+	}
+	for kind, line := range lines {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			frame, err := DecodeFrame([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := time.UnixMilli(12345); !frame.ProducerTime.Equal(want) {
+				t.Errorf("producer time = %v, want %v", frame.ProducerTime, want)
+			}
+		})
+	}
 }

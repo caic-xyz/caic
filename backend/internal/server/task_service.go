@@ -330,8 +330,7 @@ func taskStateActive(state v1.TaskState) bool {
 	switch state {
 	case v1.TaskStatePending, v1.TaskStateBranching, v1.TaskStateProvisioning,
 		v1.TaskStateStarting, v1.TaskStateRunning, v1.TaskStateWaiting,
-		v1.TaskStateAsking, v1.TaskStateHasPlan, v1.TaskStatePulling,
-		v1.TaskStatePushing:
+		v1.TaskStateAsking, v1.TaskStateHasPlan:
 		return true
 	case v1.TaskStateStopping, v1.TaskStateStopped, v1.TaskStatePurging,
 		v1.TaskStateCrashed, v1.TaskStateFailed, v1.TaskStatePurged:

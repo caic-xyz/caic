@@ -17,6 +17,9 @@ report the same session/settings/usage without retaining transcript content.
 
 ## Event → agent.Message Mapping
 
+A `session/prompt` request (UserInputMessage) starts a turn and its response
+(ResultMessage) ends it. ACP reports no other turn boundary.
+
 | ACP session/update type | agent.Message type   |
 |-------------------------|----------------------|
 | `agent_message_chunk`   | TextDeltaMessage     |

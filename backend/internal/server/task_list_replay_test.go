@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 )
 
 // TestTaskListEventsReplayTransitions verifies that a task whose state advances
@@ -27,7 +28,7 @@ func TestTaskListEventsReplayTransitions(t *testing.T) {
 	t.Parallel()
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
-	tk.SetState(task.StateWaiting)
+	taskruntest.SetState(tk, task.StateWaiting)
 	insertTestTask(s, tk.ID, tk)
 
 	r := connectTaskListStream(t, s)
@@ -38,8 +39,8 @@ func TestTaskListEventsReplayTransitions(t *testing.T) {
 
 	// Both transitions land before the stream's next snapshot, reproducing a
 	// purge whose stop finishes faster than the snapshot loop.
-	tk.SetState(task.StateStopping)
-	tk.SetState(task.StateStopped)
+	taskruntest.SetState(tk, task.StateStopping)
+	taskruntest.SetState(tk, task.StateStopped)
 	s.taskMgr.NotifyTaskChange()
 
 	var states []string
@@ -68,7 +69,7 @@ func TestTaskListEventsReplayPurgeTransitions(t *testing.T) {
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	tk.Repos = []repo.Mount{{Name: "r"}}
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
-	tk.SetState(task.StateWaiting)
+	taskruntest.SetState(tk, task.StateWaiting)
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 	insertTestTask(s, tk.ID, tk)
 	recordRouterTaskLog(t, s, tk)

@@ -325,7 +325,7 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	defer r.operationMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		t := r.entry.Task()
-		t.SetState(task.StateStopped)
+		t.Transition(task.StateStopped)
 		res := &task.Result{State: task.StateStopped, Err: err}
 		res.Err = errors.Join(err, r.agentRuntime.CommitSettledResult(context.WithoutCancel(ctx), t, res))
 		r.entry.Finish(res)
@@ -472,7 +472,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 		forkEntry.Lifecycle.operationMu.Lock()
 		defer forkEntry.Lifecycle.operationMu.Unlock()
 		if err := admission.Err(); err != nil {
-			t.SetState(task.StateStopped)
+			t.Transition(task.StateStopped)
 			res := &task.Result{State: task.StateStopped, Err: err}
 			res.Err = errors.Join(err, forkEntry.Lifecycle.agentRuntime.CommitSettledResult(context.WithoutCancel(admission), t, res))
 			forkEntry.Finish(res)
@@ -547,7 +547,7 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		return nil, conflict("task has no instance yet")
 	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateCrashed, task.StateFailed, task.StatePurged:
 		return nil, conflict("task is in a terminal state")
-	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
+	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
 		// Syncable states; continue below.
 	}
 	if target == SyncTargetDefault && force {
@@ -818,12 +818,12 @@ func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
 
 // scheduleImportedRecovery waits until buffered inventory events are applied
 // before stopping and reviving the selected retained instance.
-func (r *Lifecycle) scheduleImportedRecovery(expectedState task.State) {
+func (r *Lifecycle) scheduleImportedRecovery() {
 	r.wg.Go(func() {
 		if err := r.manager.WaitForRuntimeImport(r.manager.serverCtx); err != nil {
 			return
 		}
-		if err := r.recoverImportedSession(expectedState); err != nil {
+		if err := r.recoverImportedSession(); err != nil {
 			r.manager.log.Warn("startup recovery failed", "task", r.entry.Task().ID, "err", err)
 		}
 	})
@@ -831,13 +831,13 @@ func (r *Lifecycle) scheduleImportedRecovery(expectedState task.State) {
 
 // recoverImportedSession holds the lifecycle reservation while core records the
 // recovery intent, stops the retained instance, and restores one execution.
-func (r *Lifecycle) recoverImportedSession(expectedState task.State) error {
+func (r *Lifecycle) recoverImportedSession() error {
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
 	defer r.operationMu.Unlock()
 	t := r.entry.Task()
-	h, err := r.agentRuntime.RecoverRetainedSession(r.ctx, t, expectedState)
+	h, err := r.agentRuntime.RecoverRetainedSession(r.ctx, t)
 	if err != nil {
 		r.entry.Finish(&task.Result{State: t.GetState(), Err: err})
 		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
@@ -933,8 +933,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 		h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
 		if err != nil {
 			tlog.Warn("ensure session failed", "err", err)
-			// Failed readiness cannot resolve a pending question or plan.
-			t.SetStateIf(task.StateRunning, task.StateWaiting)
+			t.SessionLost(time.Time{})
 			r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 			return
 		}
@@ -1029,29 +1028,27 @@ func (r *Lifecycle) finishPurge(ctx context.Context, t *taskrun.Task, stoppedImm
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
 	if !stoppedImmediately {
-		if !t.SetStateIf(task.StateStopped, task.StatePurging) {
+		if !t.Transition(task.StatePurging) {
 			r.manager.log.InfoContext(ctx, "scheduled purge cancelled", "task", t.ID, "state", t.GetState())
 			return
 		}
 		r.manager.NotifyTaskUpdate(r.entry.Task().ID)
 	}
-	r.cleanup(ctx, task.StatePurged)
+	r.cleanup(ctx)
 	r.manager.log.InfoContext(ctx, "purge completed", "task", t.ID, "final_state", t.GetState())
 }
 
-func (r *Lifecycle) cleanup(ctx context.Context, reason task.State) {
+func (r *Lifecycle) cleanup(ctx context.Context) {
 	r.entry.Cleanup(func() {
 		start := time.Now()
 		t := r.entry.Task()
-		if reason == task.StatePurged {
-			t.DiscardRollup()
-		}
-		result := r.agentRuntime.Cleanup(ctx, t, reason)
+		t.DiscardRollup()
+		result := r.agentRuntime.Cleanup(ctx, t)
 		elapsed := time.Since(start).Round(time.Millisecond)
 		if result.Err != nil {
-			r.manager.log.ErrorContext(ctx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)
+			r.manager.log.ErrorContext(ctx, "cleanup failed", "task", t.ID, "dur", elapsed, "err", result.Err)
 		} else {
-			r.manager.log.InfoContext(ctx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed, "cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
+			r.manager.log.InfoContext(ctx, "cleanup done", "task", t.ID, "dur", elapsed, "cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
 		}
 		r.entry.Finish(&result)
 		if t.GetState() == task.StatePurged {

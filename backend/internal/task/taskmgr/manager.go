@@ -941,7 +941,7 @@ func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (stat
 		switch st {
 		case task.StateWaiting, task.StateStopped, task.StateCrashed, task.StateFailed, task.StatePurged:
 			return st.String(), lastResultText(entry.task), nil
-		case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing, task.StateStopping, task.StatePurging:
+		case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateAsking, task.StateHasPlan, task.StateStopping, task.StatePurging:
 			// Not yet done; keep waiting below.
 		}
 		m.mu.Lock()
@@ -1299,15 +1299,16 @@ func (m *Manager) insertLoadedTasks(lts []*taskhistory.LoadedTask) (loaded int, 
 		t.Display = lt.Display
 		t.Sudo = lt.Sudo
 		t.GitHubToken = lt.GitHubToken
-		t.SetStateAt(lt.State, lt.LastActivityAt)
 		t.SetSessionMetadata(lt.SessionMetadata)
-		if lt.State == task.StateRunning {
+		if lt.State == "" {
 			// Nothing adopted the instance that was running this log, so the task can
 			// never settle. Name the downgrade: a bare failure with no error gives the
 			// task list no way to explain what happened.
 			m.log.Warn("loaded running task log without an adopted instance; marking failed",
-				"task", lt.TaskID, "harness", lt.Harness, "log", lt.LogPath(), "state", lt.State)
-			t.SetState(task.StateFailed)
+				"task", lt.TaskID, "harness", lt.Harness, "log", lt.LogPath())
+			t.Restore(task.StateFailed, time.Time{})
+		} else {
+			t.Restore(lt.State, lt.LastActivityAt)
 		}
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
@@ -1961,16 +1962,7 @@ func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runt
 		return
 	}
 	t := found.task
-	// Atomically archive as stopped unless the task is already terminal or in
-	// cleanup. StateStopping and StatePurging are both self-inflicted: Stop and
-	// Purge stop/remove the runtime instance, which emits the "die" event we are
-	// handling here. Acting on them would flap the task to StateStopped
-	// mid-cleanup and race the cleanup goroutine. Guarding and transitioning in
-	// one lock also prevents clobbering a state a concurrent Stop/Purge sets
-	// between our check and our write.
-	prevState, changed := t.SetStateUnless(task.StateStopped,
-		task.StatePurged, task.StateCrashed, task.StateFailed, task.StateStopped,
-		task.StateStopping, task.StatePurging, task.StateProvisioning, task.StateStarting)
+	prevState, changed := t.RuntimeExited()
 	if !changed {
 		return
 	}
@@ -1989,7 +1981,7 @@ func (m *Manager) handleRuntimeDestroy(ctx context.Context, instanceID runtime.I
 		return
 	}
 	t := entry.Task()
-	if _, changed := t.SetStateUnless(task.StateFailed, task.StatePurged, task.StatePurging, task.StateFailed, task.StateStopping); !changed {
+	if !t.RuntimeDestroyed() {
 		return
 	}
 	err := errors.New("runtime instance was destroyed")
@@ -2018,7 +2010,7 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 		return
 	}
 	t := entry.Task()
-	if _, changed := t.SetStateIfAny(task.StateWaiting, task.StateStopped); !changed {
+	if !t.RuntimeStarted() {
 		return
 	}
 	entry.Lifecycle.reconnectImportedSession()
@@ -2463,7 +2455,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if lt.GitHubToken || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
-	t.SetStateAt(task.StateRunning, stateUpdatedAt)
+	// Replay starts before the first turn; the timeline fold derives the
+	// activity the live task had.
+	t.Restore(task.StateStarting, stateUpdatedAt)
 	if c.Sudo {
 		if pw, err := m.Runtimes.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
@@ -2510,14 +2504,15 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("load reconciled task history %s: %w", taskID, err)
 	}
 	t.SeedTimelineParts(lt.Timeline, nil, lt.Settlements)
+	t.GoLive()
 	m.log.DebugContext(ctx, "relay", "msg", "restored ordered history", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(lt.Timeline))
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)
 	}
 	var importFailure error
-	if lt.LogPath() != "" && lt.State == task.StateRunning && t.InitialPrompt.Text != "" && !t.HasAcceptedInputEvidence() && t.LastExitError() == "" {
+	if lt.LogPath() != "" && lt.LastTrailer == nil && t.InitialPrompt.Text != "" && !t.HasAcceptedInputEvidence() && t.LastExitError() == "" {
 		importFailure = taskrun.ErrInitialPromptNotAccepted
-		t.SetStateAt(task.StateFailed, stateUpdatedAt)
+		t.Restore(task.StateFailed, stateUpdatedAt)
 		m.log.ErrorContext(ctx, "imported task startup incomplete", "task", t.ID, "instance", c.ID, "err", importFailure)
 		if !isExited {
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
@@ -2552,10 +2547,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// the waiting duration the live task showed before the restart. Recorded
 	// terminal results below override it with their own persisted time.
 	if importFailure == nil && lt.State == task.StateFailed {
-		t.SetStateAt(lt.State, stateUpdatedAt)
+		t.Restore(lt.State, stateUpdatedAt)
 	}
 	if importFailure == nil && lt.State == task.StateCrashed && t.LastExitError() != "" {
-		t.SetStateAt(lt.State, stateUpdatedAt)
+		t.Restore(lt.State, stateUpdatedAt)
 	}
 
 	// The validated full parse above may have recovered PR metadata.
@@ -2565,16 +2560,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 	}
 
-	if !isExited && t.GetState() == task.StateRunning && t.Snapshot().TurnStartedAt.IsZero() {
-		t.SetTurnStartedAt(time.Now().UTC())
-	}
-
 	if isExited {
 		if importFailure == nil && t.GetState() != task.StateCrashed {
 			if t.LastExitError() != "" {
 				t.MarkSessionCrashed()
 			} else {
-				t.SetState(task.StateStopped)
+				t.Restore(task.StateStopped, time.Time{})
 			}
 		}
 	} else if relayConfirmedDead {
@@ -2588,8 +2579,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
 				m.log.ErrorContext(ctx, "stop failed after imported relay crash", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 			}
-		} else if t.GetState() == task.StateRunning {
-			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
+		} else if t.SessionLost(stateUpdatedAt) {
 			m.log.WarnContext(ctx, "relay", "msg", "dead, marking waiting",
 				"repo", relPath, "br", branch, "instance", c.ID,
 				"sess", t.GetSessionID(), "msgs", t.MessageCount())
@@ -2597,7 +2587,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	if shutdownIntent {
-		t.SetState(task.StateStopped)
+		t.Restore(task.StateStopped, time.Time{})
 		if !isExited {
 			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // completing persisted user intent uses the Manager lifetime
 				return nil, fmt.Errorf("complete persisted stop intent: %w", err)
@@ -2606,9 +2596,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 	recoverImported := !ownerDisabled && importFailure == nil && relayConfirmedDead && canRecoverImportedTask(t, lt)
 	if recoverImported {
-		t.SetState(task.StateProvisioning)
+		t.Restore(task.StateProvisioning, time.Time{})
 	}
-	recoveryState := t.GetState()
 	entry := m.NewEntry(t, lt)
 	entry.LogPath.Set(importLogPath)
 	// Import reconstructs the full timeline because the task may resume live;
@@ -2686,7 +2675,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// recognize their persisted runtime-revive error without retrying other
 	// startup failures or deliberate stops.
 	if recoverImported {
-		entry.Lifecycle.scheduleImportedRecovery(recoveryState) //nolint:contextcheck // recovery uses the Manager lifetime
+		entry.Lifecycle.scheduleImportedRecovery() //nolint:contextcheck // recovery uses the Manager lifetime
 		return entry, nil
 	}
 
@@ -2698,11 +2687,11 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", relPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
-		t.SetState(task.StateStopping)
+		t.Transition(task.StateStopping)
 		if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
 			m.log.ErrorContext(ctx, "stop failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
 		}
-		t.SetState(task.StateStopped)
+		t.Transition(task.StateStopped)
 	}
 
 	return entry, nil
@@ -2720,7 +2709,7 @@ func canRecoverImportedTask(t *taskrun.Task, lt *taskhistory.LoadedTask) bool {
 		return false
 	}
 	switch lt.State {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateStarting, task.StateProvisioning, task.StateCrashed:
+	case "", task.StateProvisioning, task.StateCrashed:
 		return lt.LastTrailer == nil || lt.LastTrailer.StartupFailure == nil
 	case task.StateFailed:
 		return lt.LastTrailer != nil && lt.LastTrailer.Err != nil && strings.HasPrefix(lt.LastTrailer.Err.Error(), "revive instance:")

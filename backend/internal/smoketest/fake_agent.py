@@ -2,7 +2,7 @@
 #
 # Each envelope's message is a flat object whose "type" field maps directly to
 # an agent.Message type (init, text, text_delta, tool_use, ask, widget,
-# widget_delta, tool_result, native_subagent, background_command, turn_queued,
+# widget_delta, tool_result, native_subagent, background_command, turn_started,
 # result).
 #
 # Reads plain text from stdin (one prompt per line), responds with streaming
@@ -618,8 +618,9 @@ def emit_quota_recovery_turn(turns: int) -> None:
 # folds them: a backgrounded Bash and a Monitor start local_bash tasks, a
 # backgrounded Agent starts a local_agent task. Labels are the tool
 # descriptions; summaries follow task_notification. Claude starts a turn by
-# itself to deliver each notification, so each terminal update follows a
-# turn_queued and precedes that turn's result.
+# itself to deliver a notification that arrives while it waits for the user,
+# so such a terminal update follows a turn_started and precedes that turn's
+# result. A notification during a turn joins it.
 BG_CHECKS = {
     "tool": "toolu_bg_checks",
     "watch": False,
@@ -689,7 +690,6 @@ def emit_monitor(item: dict) -> None:
 
 def emit_command_end(item: dict, summary: str, exit_code: int | None) -> None:
     """Emit task_updated then task_notification, as the adapter folds them."""
-    emit({"type": "turn_queued"})
     command = {
         "id": item["id"],
         "label": item["description"],
@@ -742,12 +742,14 @@ def emit_background_turn(turns: int, gated: bool) -> None:
     emit_result(turns, "Background work started")
     if not gated or not gate("FAKE_BACKGROUND_SETTLE_WORK"):
         return
+    emit({"type": "turn_started"})
     emit_text("The checks and the review are still running.")
     emit_result(turns, "Background work running")
+    emit({"type": "turn_started"})
     emit_command_end(BG_CHECKS, f'Background command "{BG_CHECKS["description"]}" completed (exit code 0)', 0)
     emit_text("The checks passed with exit code 0.")
     emit_result(turns, "Checks passed")
-    emit({"type": "turn_queued"})
+    emit({"type": "turn_started"})
     emit({"type": "native_subagent", "subagent": {**subagent, "status": "completed"}})
     review = "The handlers validate every input. I found no missing checks."
     emit({"type": "native_subagent", "subagent": {**subagent, "status": "completed", "result": review}})
@@ -755,8 +757,10 @@ def emit_background_turn(turns: int, gated: bool) -> None:
     emit_result(turns, "Review finished")
     if not gate("FAKE_BACKGROUND_SETTLE_WATCH"):
         return
+    emit({"type": "turn_started"})
     emit_text("The watch is still open.")
     emit_result(turns, "Watch running")
+    emit({"type": "turn_started"})
     emit_command_end(BG_WATCH, f'Monitor "{BG_WATCH["description"]}" stream ended', None)
     emit_text("The watch ended without a failure.")
     emit_result(turns, "Watch ended")
@@ -1107,6 +1111,7 @@ def main() -> None:
         if not line:
             continue
         turns += 1
+        emit({"type": "turn_started"})
 
         # Exact keyword triggers (for e2e tests).
         if line.startswith("FAKE_CONCURRENT_STREAMS"):

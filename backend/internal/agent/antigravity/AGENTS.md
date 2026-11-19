@@ -40,6 +40,14 @@ quota fetcher in `internal/usage` sets `SSH_CONNECTION` for this reason, and
 genai's antigravity provider sets it by default. agy reads the SSH variables
 elsewhere only for interactive sign-in, the clipboard, and terminal detection.
 
+## Turn boundaries
+
+agy reports `init` once per process. Each turn opens with one root
+`user_input` step, which reports a turn start (`TurnStartedMessage`), and ends
+at the root result. A prompt delivered during a turn gets its own turn right
+after the result: 22 of 23 such results in local logs; an exit followed the
+other. The result then sets `ResultMessage.TurnQueued`.
+
 ## Integration boundary
 
 The backend is selectable through `backends.Default`.

@@ -152,8 +152,12 @@ https://github.com/nicobailon/pi-subagents/blob/4aa4ddb0ecb7ad56a6c9e56c96f39f78
 In the 72 `subagent-notify` wakes, `agent_start` followed the async-status
 widget's completion after 0.126 s (median), 0.153 s at most. The first
 assistant output followed the opening message after 2.4 s (median), 6.1 s at
-the 90th percentile. `queuedTurn` in `pi.go` maps such an opening to a
-`TurnQueuedMessage`.
+the 90th percentile. `ParseOutput` in `pi.go` reports every `agent_start` as
+a `TurnStartedMessage`, whatever opens the run.
+
+A steered prompt that no run consumes stays in Pi's queue at `agent_end`, so
+`queue_update` does not predict a run: of 27 non-empty queues at `agent_end`,
+26 were followed by user input and 1 by a run.
 
 ## Upstream Source
 

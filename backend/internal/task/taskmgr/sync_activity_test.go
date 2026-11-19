@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	taskhistory "github.com/caic-xyz/caic/backend/internal/task/history"
+	"github.com/caic-xyz/caic/backend/internal/task/taskrun/taskruntest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
@@ -267,7 +268,7 @@ func newSyncTestEntry(t *testing.T, backend func(dir string, fetched []runtime.F
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 	tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
-	tk.SetState(task.StateWaiting)
+	taskruntest.SetState(tk, task.StateWaiting)
 	e := m.NewEntry(tk, nil)
 	m.Insert(tk.ID, e)
 	recordTestTaskLog(t, m, e)
@@ -387,11 +388,11 @@ func TestLifecycleSyncRecords(t *testing.T) {
 		t.Run("rejected_up_front_writes_nothing", func(t *testing.T) {
 			t.Parallel()
 			e := newSyncTestEntry(t, hooked(func(io.Writer) error { return nil }))
-			e.Task().SetState(task.StatePurging)
+			taskruntest.SetState(e.Task(), task.StatePurging)
 			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false); err == nil {
 				t.Fatal("Sync of a purging task succeeded")
 			}
-			e.Task().SetState(task.StateWaiting)
+			taskruntest.SetState(e.Task(), task.StateWaiting)
 			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetDefault, true); err == nil {
 				t.Fatal("forced default sync succeeded")
 			}

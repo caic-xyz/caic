@@ -233,20 +233,23 @@ func DecodeFrame(line []byte) (Frame, error) {
 		return frame, fmt.Errorf("decode %s: %w", token, err)
 	}
 	frame.Control = control
-	if input, ok := control.(*v3.UserInputMessage); ok && input.Ts > 0 {
-		frame.ProducerTime = time.UnixMilli(int64(math.Round(input.Ts * 1000)))
+	var ts float64
+	switch m := control.(type) {
+	case *v3.UserInputMessage:
+		ts = m.Ts
+	case *v3.SystemMessage:
+		ts = m.Ts
+	case *v3.DiffStatMessage:
+		ts = m.Ts
+	case *v3.ExitMessage:
+		ts = m.Ts
+	case *v3.TurnCommitSnapshotMessage:
+		ts = m.Ts
+	case *v3.SyncActivityMessage:
+		ts = m.Ts
 	}
-	if system, ok := control.(*v3.SystemMessage); ok && system.Ts > 0 {
-		frame.ProducerTime = time.UnixMilli(int64(math.Round(system.Ts * 1000)))
-	}
-	if diff, ok := control.(*v3.DiffStatMessage); ok && diff.Ts > 0 {
-		frame.ProducerTime = time.UnixMilli(int64(math.Round(diff.Ts * 1000)))
-	}
-	if snapshot, ok := control.(*v3.TurnCommitSnapshotMessage); ok && snapshot.Ts > 0 {
-		frame.ProducerTime = time.UnixMilli(int64(math.Round(snapshot.Ts * 1000)))
-	}
-	if sync, ok := control.(*v3.SyncActivityMessage); ok && sync.Ts > 0 {
-		frame.ProducerTime = time.UnixMilli(int64(math.Round(sync.Ts * 1000)))
+	if ts > 0 {
+		frame.ProducerTime = time.UnixMilli(int64(math.Round(ts * 1000)))
 	}
 	return frame, nil
 }

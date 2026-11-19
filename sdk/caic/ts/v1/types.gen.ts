@@ -428,8 +428,6 @@ export type TaskState =
   | "waiting"
   | "asking"
   | "has_plan"
-  | "pulling"
-  | "pushing"
   | "stopping"
   | "stopped"
   | "purging"
@@ -447,8 +445,6 @@ export const TaskStateRunning = "running";
 export const TaskStateWaiting = "waiting";
 export const TaskStateAsking = "asking";
 export const TaskStateHasPlan = "has_plan";
-export const TaskStatePulling = "pulling";
-export const TaskStatePushing = "pushing";
 export const TaskStateStopping = "stopping";
 export const TaskStateStopped = "stopped";
 export const TaskStatePurging = "purging";
