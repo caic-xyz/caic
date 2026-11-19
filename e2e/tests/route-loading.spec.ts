@@ -12,7 +12,7 @@ for (const width of [390, 1280]) {
     uniquePrompt,
   }) => {
     await page.setViewportSize({ width, height: 844 });
-    const id = await createTaskAPI(api, uniquePrompt("Keep the conversation while opening task info"));
+    const id = await createTaskAPI(api, uniquePrompt("FAKE_LIFECYCLE Keep the conversation while opening task info"));
     await waitForTaskState(api, id, "waiting");
     const scripts: string[] = [];
     const errors: string[] = [];
@@ -39,6 +39,12 @@ for (const width of [390, 1280]) {
 
       await page.locator(`[data-task-id="${id}"]`).click();
       const conversation = page.getByTestId("conversation-pane");
+      const transcript = conversation.getByText("Lifecycle streaming marker", { exact: true });
+      await expect(transcript).toBeVisible();
+      // The fake CI badge changes width when the last check passes.
+      await expect(
+        conversation.getByTestId("task-detail-header").getByText("CI: passed", { exact: true }),
+      ).toBeVisible();
       const original = await conversation.elementHandle();
       const prompt = page.getByTestId("task-detail-prompt");
       await expect(prompt).toBeVisible();
@@ -55,7 +61,7 @@ for (const width of [390, 1280]) {
       await expect(page.getByTestId("app-shell")).toBeVisible();
       expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
       await expect(prompt).toHaveText("Keep this draft while the view loads");
-      await expect(conversation).toBeVisible();
+      await expect(transcript).toBeVisible();
       expect(await infoLink.boundingBox()).toEqual(linkBounds);
 
       release.resolve();

@@ -28,10 +28,10 @@ for (const width of [390, 1280]) {
     }
     await page.reload();
     await expect(cards).toHaveCount(4);
-    await expect(page.getByText("Completed", { exact: true })).toBeVisible();
-    await expect(page.getByText("Failed", { exact: true })).toBeVisible();
-    await expect(page.getByText("Completion not reported", { exact: true })).toBeVisible();
-    await expect(page.getByText("Paused", { exact: true })).toBeVisible();
+    await expect(cards.getByRole("img", { name: "Completed", exact: true })).toBeVisible();
+    await expect(cards.getByRole("img", { name: "Failed", exact: true })).toBeVisible();
+    await expect(cards.getByText("Completion not reported", { exact: true })).toBeVisible();
+    await expect(cards.getByRole("img", { name: "Paused", exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("native-subagents.png") });
   });
 }
