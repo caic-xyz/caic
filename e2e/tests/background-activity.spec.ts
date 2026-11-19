@@ -45,14 +45,25 @@ for (const width of [390, 1280]) {
             await expect(row).toHaveAccessibleName(text);
             await expect(card).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
             // The counts follow the context size on the model line and stay
-            // inside the card.
-            const rowBox = await row.boundingBox();
-            const tokensBox = await card.getByTestId("task-card-tokens").boundingBox();
-            const cardBox = await card.boundingBox();
-            ok(rowBox && tokensBox && cardBox);
-            expect(rowBox.x).toBeGreaterThan(tokensBox.x + tokensBox.width);
-            expect(Math.abs(rowBox.y + rowBox.height / 2 - (tokensBox.y + tokensBox.height / 2))).toBeLessThan(2);
-            expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+            // inside the card. Tasks from parallel tests reorder the list, so
+            // one layout snapshot measures all three boxes.
+            const {
+              row: rowBox,
+              tokens: tokensBox,
+              card: cardBox,
+            } = await card.evaluate((el) => {
+              const rect = (testId: string) =>
+                el.querySelector(`[data-testid="${testId}"]`)?.getBoundingClientRect().toJSON() as DOMRect | undefined;
+              return {
+                row: rect("task-card-background"),
+                tokens: rect("task-card-tokens"),
+                card: el.getBoundingClientRect().toJSON() as DOMRect,
+              };
+            });
+            ok(rowBox && tokensBox);
+            expect(rowBox.left).toBeGreaterThan(tokensBox.right);
+            expect(Math.abs(rowBox.top + rowBox.height / 2 - (tokensBox.top + tokensBox.height / 2))).toBeLessThan(2);
+            expect(rowBox.right).toBeLessThanOrEqual(cardBox.right);
           }
           if (mobile) {
             if (!reload) await page.screenshot({ path: testInfo.outputPath(`background-${name}-card-${width}.png`) });
