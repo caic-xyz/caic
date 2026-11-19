@@ -26,7 +26,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("LargeBinary", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		// Create a branch with a large binary file.
 		runGit(t, clone, "checkout", "-b", "caic-0")
@@ -59,7 +59,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("SmallBinaryOK", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		data := make([]byte, 100) // well under threshold
@@ -82,7 +82,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("SecretDetection", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		content := "package main\n" + `const awsKey = "AK` + `IAIOSFODNN7EXAMPLE"` + "\n"
@@ -110,7 +110,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("PrivateKey", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		content := "-----BEGIN RSA " + "PRIVATE KEY-----\nblahblah\n-----END RSA PRIVATE KEY-----\n"
@@ -135,7 +135,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("HardcodedCredential", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		content := "pass" + `word = "supersecretpassword123"` + "\n"
@@ -162,7 +162,7 @@ func TestCheckSafety(t *testing.T) {
 		// After Runtime.Fetch, commits live at refs/remotes/<runtime>/<branch>,
 		// not a local branch. CheckSafety must work with full ref paths.
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		if err := os.WriteFile(filepath.Join(clone, "new.go"), []byte("package new\n"), 0o600); err != nil {
@@ -191,7 +191,7 @@ func TestCheckSafety(t *testing.T) {
 	t.Run("NoIssues", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 
 		runGit(t, clone, "checkout", "-b", "caic-0")
 		if err := os.WriteFile(filepath.Join(clone, "clean.go"), []byte("package clean\n"), 0o600); err != nil {
@@ -213,7 +213,7 @@ func TestCheckSafety(t *testing.T) {
 		t.Parallel()
 		t.Run("LongLineAndRedactedLogs", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "topic")
 			key := "AK" + "IAIOSFODNN7EXAMPLE"
 			data := strings.Repeat("x", 128<<10) + key + "\n" + key + "\n"
@@ -237,7 +237,7 @@ func TestCheckSafety(t *testing.T) {
 		})
 		t.Run("OversizedLine", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "topic")
 			if err := os.WriteFile(filepath.Join(clone, "large.txt"), []byte(strings.Repeat("x", 2<<20)+"\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -259,7 +259,7 @@ func TestCheckSafety(t *testing.T) {
 			for _, length := range []int{(1 << 20) - 1, 1 << 20} {
 				t.Run(fmt.Sprintf("AddedContent%d", length), func(t *testing.T) {
 					t.Parallel()
-					clone := initTestRepo(t, "main")
+					clone := initTestRepo(t)
 					runGit(t, clone, "checkout", "-b", "topic")
 					if err := os.WriteFile(filepath.Join(clone, "boundary.txt"), []byte(strings.Repeat("x", length)+"\n"), 0o600); err != nil {
 						t.Fatal(err)
@@ -280,7 +280,7 @@ func TestCheckSafety(t *testing.T) {
 
 		t.Run("CommandError", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			issues, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "missing", "origin/main", nil)
 			if err == nil || !strings.Contains(err.Error(), "git diff for secret scan") || len(issues) != 0 {
 				t.Fatalf("issues=%v, err=%v", issues, err)
@@ -288,7 +288,7 @@ func TestCheckSafety(t *testing.T) {
 		})
 		t.Run("CancelInheritedPipe", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "topic")
 			if err := os.WriteFile(filepath.Join(clone, "changed.txt"), []byte("change\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -313,7 +313,7 @@ func TestCheckSafety(t *testing.T) {
 		})
 		t.Run("ErrorRedaction", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "topic")
 			if err := os.WriteFile(filepath.Join(clone, "changed.txt"), []byte("change\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -372,7 +372,7 @@ func TestHumanSize(t *testing.T) {
 func TestScanDiffForSecrets_Deduplication(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	clone := initTestRepo(t, "main")
+	clone := initTestRepo(t)
 
 	runGit(t, clone, "checkout", "-b", "caic-0")
 	// Multiple AWS keys in the same file should produce only one issue.

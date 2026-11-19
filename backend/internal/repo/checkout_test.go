@@ -125,7 +125,7 @@ func TestCheckout(t *testing.T) {
 		t.Parallel()
 		// The host repository's own hook rejects everything: the container already
 		// ran it, so the host must push without running any hook.
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		writePushFile(t, root, ".git/hooks/pre-push", "#!/bin/sh\nexit 1\n", 0o700)
 		runGit(t, root, "checkout", "-b", "task")
 		writePushFile(t, root, "task.txt", "task\n", 0o600)
@@ -163,7 +163,7 @@ func TestCheckout(t *testing.T) {
 			t.Parallel()
 			t.Run("PreservesCommits", func(t *testing.T) {
 				t.Parallel()
-				clone := initTestRepo(t, "main")
+				clone := initTestRepo(t)
 				g := &git.Checkout{Root: clone, Logger: logtest.Logger(t)}
 				runGit(t, clone, "checkout", "-b", "caic-1")
 				for _, content := range []string{"first change\n", "second change\n"} {
@@ -214,7 +214,7 @@ func TestCheckout(t *testing.T) {
 			t.Parallel()
 			t.Run("RejectsNonFastForward", func(t *testing.T) {
 				t.Parallel()
-				clone := initTestRepo(t, "main")
+				clone := initTestRepo(t)
 				g := &git.Checkout{Root: clone, Logger: logtest.Logger(t)}
 				runGit(t, clone, "checkout", "-b", "caic-1")
 				for _, content := range []string{"first change\n", "second change\n"} {
@@ -271,7 +271,7 @@ func TestCheckout(t *testing.T) {
 	t.Run("PushDestinations", func(t *testing.T) {
 		t.Parallel()
 		id := runtime.NewID("test-runtime", "ctr-1")
-		roots := []string{initTestRepo(t, "main"), initTestRepo(t, "main")}
+		roots := []string{initTestRepo(t), initTestRepo(t)}
 		runGit(t, roots[1], "remote", "rename", "origin", "upstream")
 		runGit(t, roots[1], "branch", "-m", "main", "trunk")
 		runGit(t, roots[1], "push", "upstream", "trunk")
@@ -381,7 +381,7 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("PushPreHook", func(t *testing.T) {
 		t.Parallel()
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 		runGit(t, root, "branch", "caic-1")
 		tip, err := g.RevParse(t.Context(), "caic-1")
@@ -439,7 +439,7 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("remoteBranchTip", func(t *testing.T) {
 		t.Parallel()
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 		tip := runPushGit(t, root, "rev-parse", "HEAD")
 		got, err := remoteBranchTip(t.Context(), g, PushDestination{Remote: "origin", Branch: "main"}, len(tip))
@@ -459,7 +459,7 @@ func TestCheckout(t *testing.T) {
 		for _, remoteBase := range []bool{false, true} {
 			t.Run(fmt.Sprintf("RemoteBase=%v", remoteBase), func(t *testing.T) {
 				t.Parallel()
-				root := initTestRepo(t, "main")
+				root := initTestRepo(t)
 				g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 				runGit(t, root, "checkout", "-b", "feature")
 				if err := os.WriteFile(filepath.Join(root, "baseline.txt"), []byte("existing feature baseline\n"), 0o600); err != nil {
@@ -527,7 +527,7 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("PushTimeout", func(t *testing.T) {
 		t.Parallel()
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		w := newInitializedTestCheckout(t, root)
 		w.GitTimeout = 10 * time.Millisecond
 		ctx, cancel := context.WithCancel(t.Context())
@@ -562,7 +562,7 @@ func TestCheckout(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					root := initTestRepo(t, "main")
+					root := initTestRepo(t)
 					g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 					runGit(t, root, "checkout", "-b", "caic-1")
 					content := "safe task change\n"
@@ -610,7 +610,7 @@ func TestCheckout(t *testing.T) {
 			t.Parallel()
 			t.Run("BypassDoesNotForce", func(t *testing.T) {
 				t.Parallel()
-				root := initTestRepo(t, "main")
+				root := initTestRepo(t)
 				g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 				runGit(t, root, "checkout", "-b", "caic-1")
 				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("safe task change\n"), 0o600); err != nil {
@@ -650,7 +650,7 @@ func TestCheckout(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			r := newInitializedTestCheckout(t, clone)
 			if r.nextID != 0 {
 				t.Errorf("nextID = %d, want 0", r.nextID)
@@ -658,7 +658,7 @@ func TestCheckout(t *testing.T) {
 		})
 		t.Run("SkipsExisting", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			// Pre-create branches and push to remote.
 			runGit(t, clone, "branch", "caic-0")
 			runGit(t, clone, "push", "origin", "caic-0")
@@ -674,7 +674,7 @@ func TestCheckout(t *testing.T) {
 			t.Parallel()
 			// Local-only branches (e.g. from stopped tasks that were never
 			// pushed) must also be accounted for.
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "caic-5")
 			// Do NOT push — simulates a stopped task whose branch was
 			// never synced to origin.
@@ -687,7 +687,7 @@ func TestCheckout(t *testing.T) {
 		t.Run("IgnoresNonCaicPrefix", func(t *testing.T) {
 			t.Parallel()
 			// Branches like "foo-caic-9" must not be matched.
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "foo-caic-9")
 			runGit(t, clone, "branch", "caic-2")
 
@@ -703,7 +703,7 @@ func TestCheckout(t *testing.T) {
 			// was decided). It must still reserve its sequence number, or the
 			// next allocation would reissue the same name to a second
 			// container. See checkRepoOverlap in the md package.
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "caic-1")
 
 			r := newInitializedTestCheckoutWithLiveBranches(t, clone, []string{"caic-5"})
@@ -741,7 +741,7 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("AdoptLocalBranch", func(t *testing.T) {
 		t.Parallel()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 		runGit(t, clone, "branch", "local-work")
 		runGit(t, clone, "branch", "--set-upstream-to", "origin/main", "local-work")
 		r := newInitializedTestCheckout(t, clone)
@@ -1137,26 +1137,14 @@ func (b *compactFailingBackend) CompactRepositoryStatus(_ context.Context, _ run
 }
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on
-// baseBranch. Returns the clone directory. origin points to the bare repo so
-// git fetch/push work locally.
-func initTestRepo(t *testing.T, baseBranch string) string { //nolint:unparam // baseBranch is parameterized for clarity.
+// main. Returns the clone directory. origin points to the bare repo so git
+// fetch/push work locally.
+func initTestRepo(t *testing.T) string {
 	dir := t.TempDir()
-	bare := filepath.Join(dir, "remote.git")
 	clone := filepath.Join(dir, "clone")
-
-	runGit(t, "", "init", "--bare", bare)
-	runGit(t, "", "init", clone)
-	runGit(t, clone, "config", "user.name", "Test")
-	runGit(t, clone, "config", "user.email", "test@test.com")
-	runGit(t, clone, "checkout", "-b", baseBranch)
-
-	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("hello\n"), 0o600); err != nil {
+	if err := gittest.InitClonedRepo(t.Context(), filepath.Join(dir, "remote.git"), clone, "main"); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, clone, "add", ".")
-	runGit(t, clone, "commit", "-m", "init")
-	runGit(t, clone, "remote", "add", "origin", bare)
-	runGit(t, clone, "push", "-u", "origin", baseBranch)
 	return clone
 }
 
@@ -1297,7 +1285,7 @@ func TestDeleteLocalBranchIfUnmodified(t *testing.T) {
 
 	t.Run("valid_deletes_unmodified", func(t *testing.T) {
 		t.Parallel()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 		runGit(t, clone, "branch", "caic-1", "main")
 		deleted, err := deleteLocalBranchIfUnmodified(t.Context(), newCheckout(clone), "caic-1", "main")
 		if err != nil {
@@ -1313,7 +1301,7 @@ func TestDeleteLocalBranchIfUnmodified(t *testing.T) {
 
 	t.Run("valid_keeps_modified", func(t *testing.T) {
 		t.Parallel()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 		runGit(t, clone, "checkout", "-b", "caic-2", "main")
 		if err := os.WriteFile(filepath.Join(clone, "extra.txt"), []byte("work\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -1335,7 +1323,7 @@ func TestDeleteLocalBranchIfUnmodified(t *testing.T) {
 
 	t.Run("error_checked_out", func(t *testing.T) {
 		t.Parallel()
-		clone := initTestRepo(t, "main")
+		clone := initTestRepo(t)
 		runGit(t, clone, "checkout", "-b", "caic-3", "main")
 		deleted, err := deleteLocalBranchIfUnmodified(t.Context(), newCheckout(clone), "caic-3", "main")
 		if !errors.Is(err, errBranchCheckedOut) {
@@ -1458,7 +1446,7 @@ func runAllocateBranchTests(t *testing.T) {
 		for _, mode := range []string{"default", "local_override", "local_fallback", "preferred_collision"} {
 			t.Run(mode, func(t *testing.T) {
 				t.Parallel()
-				root := initTestRepo(t, "main")
+				root := initTestRepo(t)
 				w := newInitializedTestCheckout(t, root)
 				g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 				base, preferred, start, upstream := "", "caic-0", "origin/main", "refs/remotes/origin/main"
@@ -1511,7 +1499,7 @@ func runAllocateBranchTests(t *testing.T) {
 		if goruntime.GOOS == "windows" {
 			t.Skip("Git hook fixture requires POSIX shell")
 		}
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		w := newInitializedTestCheckout(t, root)
 		runGit(t, root, "branch", "feature")
 		writePushFile(t, root, ".git/hooks/reference-transaction", `#!/bin/sh
@@ -1534,7 +1522,7 @@ done
 		if goruntime.GOOS == "windows" {
 			t.Skip("Git hook fixture requires POSIX shell")
 		}
-		root := initTestRepo(t, "main")
+		root := initTestRepo(t)
 		w := newInitializedTestCheckout(t, root)
 		g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 		want, err := g.RevParse(t.Context(), "origin/main")
@@ -1572,7 +1560,7 @@ func TestAllocatedBranch(t *testing.T) {
 			if goruntime.GOOS == "windows" {
 				t.Skip("Git hook fixture requires POSIX shell")
 			}
-			root := initTestRepo(t, "main")
+			root := initTestRepo(t)
 			w := newInitializedTestCheckout(t, root)
 			runGit(t, root, "commit", "--allow-empty", "-m", "external work")
 			writePushFile(t, root, ".git/hooks/reference-transaction", `#!/bin/sh
@@ -1601,7 +1589,7 @@ done
 		})
 		t.Run("error_ref_lock_preserves_branch", func(t *testing.T) {
 			t.Parallel()
-			root := initTestRepo(t, "main")
+			root := initTestRepo(t)
 			w := newInitializedTestCheckout(t, root)
 			b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
 			if err != nil {
@@ -1620,7 +1608,7 @@ done
 		})
 		t.Run("removes_config_of_deleted_branch", func(t *testing.T) {
 			t.Parallel()
-			root := initTestRepo(t, "main")
+			root := initTestRepo(t)
 			w := newInitializedTestCheckout(t, root)
 			b, err := w.AllocateBranch(t.Context(), logtest.Logger(t), "", "caic-0")
 			if err != nil {

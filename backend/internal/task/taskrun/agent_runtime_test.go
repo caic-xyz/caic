@@ -2461,7 +2461,7 @@ else:
 		t.Parallel()
 		t.Run("CreatesBranchBeforeLaunch", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runtimeBackend := &branchCheckingRuntime{FakeBackend: testContainer(), dir: clone}
 			checkout := newTestCheckout(t, "main", clone, runtimeBackend)
 			r := newTestAgentRuntime(t, checkout, t.TempDir(), nil)
@@ -2498,7 +2498,7 @@ else:
 			t.Parallel()
 			// Verify that setup creates the task branch from t.BaseBranch
 			// when it differs from the checkout's default BaseBranch.
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			// Create a feature branch on origin with a distinct commit.
 			runGit(t, clone, "checkout", "-b", "feature")
 			if err := os.WriteFile(filepath.Join(clone, "feature.txt"), []byte("feat\n"), 0o600); err != nil {
@@ -2535,7 +2535,7 @@ else:
 			t.Parallel()
 			// Verify that setup works when BaseBranch exists only locally
 			// (not pushed to origin).
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "local-only")
 			if err := os.WriteFile(filepath.Join(clone, "local.txt"), []byte("local\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -2576,7 +2576,7 @@ else:
 			// Simulate an adopted task after server restart: no active session, but
 			// accounting was restored from log messages. Cleanup must preserve it
 			// in the settled result.
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			checkout := newTestCheckout(t, "main", clone, nil)
 			r := newTestAgentRuntime(t, checkout, "", nil)
 
@@ -2615,7 +2615,7 @@ else:
 			// reopen the existing log and write a caic_result trailer so the
 			// task loads as "purged" (not "failed") on the next server restart.
 			logDir := t.TempDir()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			checkout := newTestCheckout(t, "main", clone, nil)
 			r := newTestAgentRuntime(t, checkout, logDir, nil)
 
@@ -2662,7 +2662,7 @@ else:
 
 		t.Run("UsesDiffStat", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			checkout := newTestCheckout(t, "main", clone, nil)
 			r := newTestAgentRuntime(t, checkout, "", nil)
 
@@ -2692,7 +2692,7 @@ else:
 
 		t.Run("DeletesUnmodifiedEmptyBranch", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "caic-0", "origin/main")
 			checkout := newTestCheckout(t, "main", clone, &runtimetest.FakeBackend{})
 			r := newTestAgentRuntime(t, checkout, "", nil)
@@ -2710,7 +2710,7 @@ else:
 
 		t.Run("KeepsBranchWhenRuntimeReportsDiffAtPurge", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "caic-0", "origin/main")
 			checkout := newTestCheckout(t, "main", clone, testContainer())
 			r := newTestAgentRuntime(t, checkout, "", nil)
@@ -2728,7 +2728,7 @@ else:
 
 		t.Run("KeepsBranchWhenDiffWasEverCreated", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "branch", "caic-0", "origin/main")
 			checkout := newTestCheckout(t, "main", clone, &runtimetest.FakeBackend{})
 			r := newTestAgentRuntime(t, checkout, "", nil)
@@ -2750,7 +2750,7 @@ else:
 
 		t.Run("KeepsBranchModifiedOnHost", func(t *testing.T) {
 			t.Parallel()
-			clone := initTestRepo(t, "main")
+			clone := initTestRepo(t)
 			runGit(t, clone, "checkout", "-b", "caic-0", "origin/main")
 			if err := os.WriteFile(filepath.Join(clone, "host.txt"), []byte("host\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -3394,7 +3394,7 @@ func (r *repeatedRelayReader) Read(p []byte) (int, error) {
 }
 
 func BenchmarkAgentRuntimeSetup(b *testing.B) {
-	clone := initTestRepo(b, "main")
+	clone := initTestRepo(b)
 	runtimeBackend := testContainer()
 	checkout := newTestCheckout(b, "main", clone, runtimeBackend)
 	r := newTestAgentRuntime(b, checkout, b.TempDir(), nil)

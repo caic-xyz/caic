@@ -12,7 +12,6 @@ import (
 	"iter"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	stdruntime "runtime"
 	"slices"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -478,47 +478,7 @@ var _ runtime.System = (*RuntimeBackend)(nil)
 
 // initOneRepo initialises a bare remote and a clone under tmpDir.
 func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error {
-	bare := filepath.Join(tmpDir, bareName)
-	clone := filepath.Join(tmpDir, cloneName)
-	if err := os.MkdirAll(filepath.Dir(bare), 0o700); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(clone), 0o700); err != nil {
-		return err
-	}
-	for _, args := range [][]string{
-		{"init", "--bare", bare},
-		{"init", clone},
-		{"-C", clone, "config", "user.name", "Test"},
-		{"-C", clone, "config", "user.email", "test@test.com"},
-		{"-C", clone, "checkout", "-b", "main"},
-	} {
-		if err := runGit(ctx, args...); err != nil {
-			return err
-		}
-	}
-	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("hello\n"), 0o600); err != nil {
-		return err
-	}
-	for _, args := range [][]string{
-		{"-C", clone, "add", "."},
-		{"-C", clone, "commit", "-m", "init"},
-		{"-C", clone, "remote", "add", "origin", bare},
-		{"-C", clone, "push", "-u", "origin", "main"},
-	} {
-		if err := runGit(ctx, args...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runGit(ctx context.Context, args ...string) error {
-	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput() //nolint:gosec // args are hardcoded git subcommands
-	if err != nil {
-		return fmt.Errorf("git %v: %w\n%s", args, err, out)
-	}
-	return nil
+	return gittest.InitClonedRepo(ctx, filepath.Join(tmpDir, bareName), filepath.Join(tmpDir, cloneName), "main")
 }
 
 // fakeProcesses returns a canned process tree for e2e screenshots:

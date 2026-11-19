@@ -5,7 +5,6 @@ package taskrun
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/gittest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 )
@@ -147,26 +147,14 @@ func recvMsg(t *testing.T, ch <-chan TimelineMessage) agent.Message {
 }
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on
-// baseBranch. Returns the clone directory. origin points to the bare repo so
-// git fetch/push work locally.
-func initTestRepo(t testing.TB, baseBranch string) string { //nolint:unparam // baseBranch is parameterized for clarity.
+// main. Returns the clone directory. origin points to the bare repo so git
+// fetch/push work locally.
+func initTestRepo(t testing.TB) string {
 	dir := t.TempDir()
-	bare := filepath.Join(dir, "remote.git")
 	clone := filepath.Join(dir, "clone")
-
-	runGit(t, "", "init", "--bare", bare)
-	runGit(t, "", "init", clone)
-	runGit(t, clone, "config", "user.name", "Test")
-	runGit(t, clone, "config", "user.email", "test@test.com")
-	runGit(t, clone, "checkout", "-b", baseBranch)
-
-	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("hello\n"), 0o600); err != nil {
+	if err := gittest.InitClonedRepo(t.Context(), filepath.Join(dir, "remote.git"), clone, "main"); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, clone, "add", ".")
-	runGit(t, clone, "commit", "-m", "init")
-	runGit(t, clone, "remote", "add", "origin", bare)
-	runGit(t, clone, "push", "-u", "origin", baseBranch)
 	return clone
 }
 

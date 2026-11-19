@@ -67,6 +67,10 @@ func TestSmoke(t *testing.T) {
 		}
 	})
 
+	// md keys its specialized image on the SSH keys under the md configuration,
+	// so fixtures sharing one configuration build the image once per run instead
+	// of once per fixture. Fixtures therefore run serially.
+	mdConfigDir := t.TempDir()
 	// The FailureDiagnostics scenario verifies bounded log tails and immediate launch
 	// failure reporting, including the terminal-state classification used by task
 	// waits. It needs no container runtime.
@@ -163,7 +167,7 @@ func TestSmoke(t *testing.T) {
 	// md/container runtime path, which makes it host-dependent and isolated
 	// behind the smoke build tag and its own make target (make test-smoke).
 	t.Run("Lifecycle", func(t *testing.T) {
-		smoke := startSmokeServer(t)
+		smoke := startSmokeServer(t, mdConfigDir)
 		baseURL := smoke.baseURL
 
 		// --- API endpoints ---
@@ -471,7 +475,7 @@ func TestSmoke(t *testing.T) {
 			}
 			backendSet[h] = backend
 		}
-		fixture := startServerFixture(t, serverFixture{backends: backendSet})
+		fixture := startServerFixture(t, serverFixture{mdConfigDir: mdConfigDir, backends: backendSet})
 		for _, rec := range smokeReplayRecordings {
 			t.Run(rec.name(), func(t *testing.T) {
 				runSmokeReplay(t, fixture, rec.harness, cases[rec.name()])
@@ -480,7 +484,7 @@ func TestSmoke(t *testing.T) {
 	})
 
 	t.Run("Push", func(t *testing.T) {
-		smoke := startSmokeServer(t)
+		smoke := startSmokeServer(t, mdConfigDir)
 		var repos []v1.Repo
 		getJSON(t, smoke.baseURL, "/api/caic/v1/server/repos", &repos)
 		root := filepath.Join(smoke.rootDir, repos[0].Path)
@@ -577,8 +581,9 @@ func TestSmoke(t *testing.T) {
 
 // serverFixture configures one isolated real-runtime server fixture.
 type serverFixture struct {
-	// mdConfigDir optionally reuses keys and the specialized image from an
-	// operator-owned disposable md configuration. Its tests must run serially.
+	// mdConfigDir optionally reuses keys and the specialized image from a
+	// disposable md configuration shared with other fixtures. Its tests must
+	// run serially.
 	mdConfigDir string
 	// backends overrides the agent backends. Empty uses the standard caic set.
 	backends map[harness.Name]agent.Backend
@@ -603,14 +608,16 @@ type smokeServer struct {
 	serverLogPath string
 }
 
-// startSmokeServer creates the deterministic real-runtime smoke fixture.
-func startSmokeServer(t *testing.T) *smokeServer {
+// startSmokeServer creates the deterministic real-runtime smoke fixture with
+// the md configuration in mdConfigDir.
+func startSmokeServer(t *testing.T, mdConfigDir string) *smokeServer {
 	// Use deterministic no-LLM agents, but run them inside real md containers
 	// through the normal relay over SSH.
 	sb := smoketest.NewSmokeBackend(harness.Codex)
 	sbFork := smoketest.NewSmokeBackend(harness.Pi)
 	return startServerFixture(t, serverFixture{
-		backends: map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
+		mdConfigDir: mdConfigDir,
+		backends:    map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
 		harnessEnv: func(runToken string) map[string][]string {
 			return map[string][]string{
 				// Re-injected into each instance's ~/.env; the fork section of
