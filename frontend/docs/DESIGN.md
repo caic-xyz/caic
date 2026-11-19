@@ -15,6 +15,9 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 
 - Use neutral surfaces with green undertones. Use the caic.xyz brand green for
   primary actions and selection. Status colors identify task and service states.
+- Give the task transcript and its fallback prompt an untinted, near-white
+  reading surface in light mode. Badges, tabs, graphs, and menus keep their
+  own surface colors inside the task detail view.
 - Establish hierarchy through spacing, alignment, typography, and subtle
   separators before adding cards, borders, or shadows.
 - Diagrams use flat fills with distinct node and group surfaces. A faint, tight

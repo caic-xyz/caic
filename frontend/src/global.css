@@ -114,7 +114,7 @@
   --color-text-muted: #475d52;
   --color-text-faint: #495e53;
 
-  /* Application and elevated surfaces. The channel triplet supports alpha gradient stops. */
+  /* Workspace surfaces. The application RGB triplet supports alpha gradient stops. */
   --color-bg-app-rgb: 244 248 245;
   --color-bg-elevated: #fff;
   --color-bg-input: #e9f0eb;
@@ -122,6 +122,7 @@
   --color-bg-hover: #e1ece5;
   --color-bg-code: #dbe8df;
   --color-bg-surface: #e6efe9;
+  --color-bg-conversation: #fafafa;
   --color-cad-annotation: #263442;
 
   /* Toast and tooltip aliases currently share one inverse popup palette. */
@@ -263,6 +264,7 @@
     --color-bg-hover: #263b38;
     --color-bg-code: #1c3030;
     --color-bg-surface: #172525;
+    --color-bg-conversation: var(--color-bg-surface);
     --color-cad-annotation: #d7ebe1;
     --color-border: #3d5350;
     --color-border-light: #314744;

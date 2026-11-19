@@ -92,6 +92,7 @@ Use the existing surface families consistently:
 
 - Application background: page canvas.
 - Surface: inset cards and content regions.
+- Use `--color-bg-conversation` for the task transcript and its fallback prompt.
 - Elevated surface: menus, dialogs, and popups.
 - Input surface: editable controls and their hover state.
 - Inverse/media surface: dark controls, camera, and VNC content.
