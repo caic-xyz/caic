@@ -142,7 +142,7 @@ type Task struct {
 	planExitID             string                          // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
 	planDismissed          bool                            // True after a context boundary; suppresses plan tracking until the next ResultMessage.
 	inPlanMode             bool                            // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
-	completedRootTurns     int                             // Completed root turns; reconstructed from history for title refresh cadence.
+	completedRootTurns     int                             // Completed root turns, including turns reconstructed from history.
 	titleGeneration        uint64                          // Orders concurrent title requests so stale responses cannot replace newer titles.
 	title                  string                          // LLM-generated short title; set via SetTitle.
 	timelinePrefix         []agent.TimedMessage            // Imported durable history; ownership transfers at adoption.
@@ -156,6 +156,7 @@ type Task struct {
 	skillReads             agent.SkillReadTracker
 
 	subs            []*sub          // active sequenced message subscribers
+	wakeSubs        []chan struct{} // active coalescing timeline wakeup subscribers
 	rateLimitSubs   []*rateLimitSub // active lossless quota subscribers
 	handle          *SessionHandle  // current active session; nil when no session is attached
 	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
@@ -557,6 +558,15 @@ func (t *Task) LastAgentResult() string {
 		}
 	}
 	return ""
+}
+
+// CompletedRootTurns returns the number of root turns that ended with a
+// result, including turns restored from history. Pair it with
+// SubscribeTimelineWakeups to wait for the next turn to end.
+func (t *Task) CompletedRootTurns() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.completedRootTurns
 }
 
 // LastExitError returns the most recent non-zero relay exit diagnostic.
@@ -1338,18 +1348,6 @@ func (t *Task) SubscribeSnapshot(ctx context.Context) (history TimelineSnapshot,
 	}
 }
 
-// SubscribeLiveMessages returns the current timeline position and sequenced
-// messages produced after subscription. It avoids copying retained task history
-// for consumers with another authoritative history source.
-func (t *Task) SubscribeLiveMessages(ctx context.Context) (after uint64, live <-chan TimelineMessage, unsubFn func()) {
-	s := &sub{ch: make(chan TimelineMessage, 256)}
-	t.mu.Lock()
-	after = uint64(t.timelineLenLocked()) //nolint:gosec // A timeline cannot approach uint64 capacity.
-	t.subs = append(t.subs, s)
-	t.mu.Unlock()
-	return after, s.ch, unsubscribeMessages(t, ctx, s)
-}
-
 func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
 	var once sync.Once
 	cleanup := func() {
@@ -1369,6 +1367,30 @@ func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
 	return func() {
 		stop()
 		cleanup()
+	}
+}
+
+// SubscribeTimelineWakeups returns a channel that receives a signal after
+// timeline messages are published. Signals coalesce: one pending signal stands
+// for any number of messages, so a burst never drops the subscriber. Consumers
+// read the messages from another authoritative source. The caller must call
+// unsubFn at most once; context cancellation also unsubscribes.
+func (t *Task) SubscribeTimelineWakeups(ctx context.Context) (wake <-chan struct{}, unsubFn func()) {
+	ch := make(chan struct{}, 1)
+	t.mu.Lock()
+	t.wakeSubs = append(t.wakeSubs, ch)
+	t.mu.Unlock()
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if i := slices.Index(t.wakeSubs, ch); i >= 0 {
+			t.wakeSubs = slices.Delete(t.wakeSubs, i, i+1)
+		}
+	}
+	stop := context.AfterFunc(ctx, unsub)
+	return ch, func() {
+		stop()
+		unsub()
 	}
 }
 
@@ -2263,6 +2285,13 @@ func (t *Task) broadcastTimelineMessageLocked(m agent.Message, at time.Time) {
 			t.subs[i].close()
 			t.subs = append(t.subs[:i], t.subs[i+1:]...)
 			i--
+		}
+	}
+	for _, ch := range t.wakeSubs {
+		select {
+		case ch <- struct{}{}:
+		default:
+			// A signal is already pending.
 		}
 	}
 }

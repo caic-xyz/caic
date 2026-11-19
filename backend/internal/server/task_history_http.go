@@ -365,8 +365,9 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 	}
 	// Subscribe before inspecting raw history. The semantic timeline is only a
 	// wakeup: all bytes and IDs come from the shared authoritative raw projector.
-	// A timer also detects physical controls that emit no semantic notification.
-	_, live, unsub := e.Task().SubscribeLiveMessages(r.Context())
+	// Wakeups coalesce, so a message burst cannot drop the stream. A timer also
+	// detects physical controls that emit no semantic notification.
+	wake, unsub := e.Task().SubscribeTimelineWakeups(r.Context())
 	defer unsub()
 	stats, statsLive, statsUnsub := e.Task().SubscribeStats(r.Context())
 	defer statsUnsub()
@@ -407,10 +408,7 @@ func (h *historyHandlers) handleHistoryEvents(w http.ResponseWriter, r *http.Req
 		select {
 		case <-r.Context().Done():
 			return
-		case _, ok := <-live:
-			if !ok {
-				return
-			}
+		case <-wake:
 		case sample, ok := <-statsLive:
 			if !ok {
 				return

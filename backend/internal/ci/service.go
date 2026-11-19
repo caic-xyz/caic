@@ -253,6 +253,9 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	}
 	t.SetCIStatus(ciStatus, result.Checks)
 	svc.backend.NotifyTaskChange(t.ID)
+	// Count before sending so a fix turn that ends before the worker starts
+	// still counts.
+	turns := t.CompletedRootTurns()
 	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
 		svc.log.WarnContext(ctx, "send input", "task", t.ID, "err", err)
 		// No active session — attempt auto-fix for CI failures if enabled.
@@ -269,7 +272,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
 	if ciStatus == forge.CIStatusFailure {
-		svc.startWorker(ctx, func(ctx context.Context) { svc.autoResync(ctx, entry, f, owner, repoName) })
+		svc.startWorker(ctx, func(ctx context.Context) { svc.autoResync(ctx, entry, f, owner, repoName, turns) })
 	}
 }
 
@@ -360,34 +363,28 @@ func (svc *Service) startWorker(ctx context.Context, fn func(context.Context)) {
 	})
 }
 
-// waitForAgentResult subscribes to task messages and blocks until the agent
-// emits a ResultMessage (end of turn) or ctx is cancelled. Returns true when
-// a ResultMessage arrives, false on cancellation or closed channel.
-func (svc *Service) waitForAgentResult(ctx context.Context, t *taskrun.Task) bool {
-	_, live, unsub := t.SubscribeLiveMessages(ctx)
+// waitForAgentResult blocks until the task has completed more than turns root
+// turns or ctx is cancelled. Returns false on cancellation.
+func waitForAgentResult(ctx context.Context, t *taskrun.Task, turns int) bool {
+	wake, unsub := t.SubscribeTimelineWakeups(ctx)
 	defer unsub()
-	for {
+	for t.CompletedRootTurns() <= turns {
 		select {
 		case <-ctx.Done():
 			return false
-		case msg, ok := <-live:
-			if !ok {
-				return false
-			}
-			if _, isResult := msg.Message.(*agent.ResultMessage); isResult {
-				return true
-			}
+		case <-wake:
 		}
 	}
+	return true
 }
 
-// autoResync waits for the agent to finish its current turn, then pushes the
-// latest branch commits to each repository's remote and restarts CI monitoring.
-// Called after a CI failure so the loop closes: CI fails → agent fixes →
-// auto-push → CI re-runs → (repeat or merge on success).
-func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName string) {
+// autoResync waits for the agent to finish the root turn after turns, then
+// pushes the latest branch commits to each repository's remote and restarts CI
+// monitoring. Called after a CI failure so the loop closes: CI fails → agent
+// fixes → auto-push → CI re-runs → (repeat or merge on success).
+func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName string, turns int) {
 	t := entry.Task()
-	if !svc.waitForAgentResult(ctx, t) {
+	if !waitForAgentResult(ctx, t, turns) {
 		return
 	}
 

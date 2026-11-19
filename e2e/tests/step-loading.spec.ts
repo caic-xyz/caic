@@ -146,7 +146,10 @@ test("STEP worker startup errors are recoverable", async ({ page, context, api, 
   await waitForTaskState(api, id, "waiting");
   await page.goto(`/task/@${id}`);
   await page.getByRole("link", { name: "Cube", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Failed to start STEP import worker");
+  // The worker starts only after the cold CAD chunk evaluates.
+  await expect(page.getByRole("alert")).toContainText("Failed to start STEP import worker", {
+    timeout: STEP_IMPORT_TIMEOUT,
+  });
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
   await expect(page.getByRole("alert")).toHaveCount(0);

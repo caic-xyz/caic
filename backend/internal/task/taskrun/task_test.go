@@ -1178,7 +1178,7 @@ func TestTask(t *testing.T) {
 	t.Run("LiveSubscriberRetainsPublishedDelta", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		_, live, unsubscribe := tk.SubscribeLiveMessages(t.Context())
+		_, live, unsubscribe := tk.Subscribe(t.Context())
 		defer unsubscribe()
 		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
 		addTaskMessage(tk, delta)
@@ -1289,6 +1289,67 @@ func TestTask(t *testing.T) {
 		})
 		if got := tk.Snapshot().RateLimit; got.Status != agent.RateLimitStatusRejected || got.QuotaWindow != "5h" {
 			t.Errorf("RateLimit after a different-window update = %+v, want active 5h rejection", got)
+		}
+	})
+	t.Run("SubscribeTimelineWakeups", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		wake, unsub := tk.SubscribeTimelineWakeups(t.Context())
+		// A burst larger than any message buffer, with no reader, coalesces into
+		// one pending signal instead of dropping the subscriber.
+		for range 1000 {
+			addTaskMessage(tk, &agent.TextDeltaMessage{Text: "."})
+		}
+		select {
+		case <-wake:
+		default:
+			t.Fatal("burst left no pending wakeup")
+		}
+		select {
+		case <-wake:
+			t.Fatal("burst queued more than one wakeup")
+		default:
+		}
+		addTaskMessage(tk, &agent.TextMessage{Text: "after burst"})
+		select {
+		case <-wake:
+		default:
+			t.Fatal("subscription did not survive the burst")
+		}
+		unsub()
+		addTaskMessage(tk, &agent.TextMessage{Text: "after unsubscribe"})
+		select {
+		case <-wake:
+			t.Fatal("wakeup after unsubscribe")
+		default:
+		}
+	})
+	t.Run("CompletedRootTurns", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}}), nil)
+		if got := tk.CompletedRootTurns(); got != 1 {
+			t.Fatalf("restored turns = %d, want 1", got)
+		}
+		wake, unsub := tk.SubscribeTimelineWakeups(t.Context())
+		defer unsub()
+		addTaskMessage(tk, &agent.ResultMessage{Source: v3.MessageSource{AgentID: "child"}})
+		select {
+		case <-wake:
+		default:
+			t.Fatal("result published no wakeup")
+		}
+		if got := tk.CompletedRootTurns(); got != 1 {
+			t.Fatalf("turns after child result = %d, want 1", got)
+		}
+		addTaskMessage(tk, &agent.ResultMessage{})
+		select {
+		case <-wake:
+		default:
+			t.Fatal("result published no wakeup")
+		}
+		if got := tk.CompletedRootTurns(); got != 2 {
+			t.Fatalf("turns after root result = %d, want 2", got)
 		}
 	})
 	t.Run("SubscribeRateLimits", func(t *testing.T) {
@@ -1611,32 +1672,6 @@ func TestTask(t *testing.T) {
 			addTaskMessage(tk, &agent.TextMessage{Text: "next turn"})
 			if got := <-ch; got.Sequence != 3 {
 				t.Fatalf("message sequence = %d, want 3 after suppressed exit", got.Sequence)
-			}
-		})
-		t.Run("LiveOnlyDoesNotReplayHistory", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			addTaskMessage(tk, &agent.TextMessage{Text: "old"})
-			_, ch, unsub := tk.SubscribeLiveMessages(t.Context())
-			defer unsub()
-
-			select {
-			case got := <-ch:
-				t.Fatalf("unexpected historical message %q", got.Message.Type())
-			default:
-			}
-			addTaskMessage(tk, &agent.TextMessage{Text: "new"})
-			select {
-			case got := <-ch:
-				text, ok := got.Message.(*agent.TextMessage)
-				if !ok {
-					t.Fatalf("message = %T, want *agent.TextMessage", got.Message)
-				}
-				if text.Text != "new" {
-					t.Fatalf("message = %q, want new", text.Text)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for live message")
 			}
 		})
 	})
