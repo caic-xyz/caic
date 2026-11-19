@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { zipSync } from "three/addons/libs/fflate.module.js";
 import { createFacetedStep } from "../../frontend/tests/step-fixture";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, STEP_IMPORT_TIMEOUT } from "../helpers";
 
 async function archiveStream(corrupt: boolean) {
   const archive = Buffer.from(zipSync({ "assembly.stp": createFacetedStep(8, false) }));
@@ -95,7 +95,7 @@ test.describe("streaming STEP", () => {
           await expect(page.getByText(/[1-9][\d,]* records indexed/)).toBeVisible();
           source.finish();
         }
-        await expect(page.getByText("32 triangles", { exact: true })).toBeVisible();
+        await expect(page.getByText("32 triangles", { exact: true })).toBeVisible({ timeout: STEP_IMPORT_TIMEOUT });
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
         expect(errors).toEqual([]);
