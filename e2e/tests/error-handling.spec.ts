@@ -77,10 +77,10 @@ test("network failure shows reconnect banner", async ({ page }) => {
   const origin = await page.evaluate(() => performance.timeOrigin);
   await page.context().setOffline(true);
 
-  // The caic wordmark should turn red when disconnected.
+  // The caic wordmark distinguishes disconnected and recovered states.
   const word = page.getByTestId("new-task-button");
   await expect(word).toHaveAttribute("data-status", "disconnected", { timeout: 15_000 });
-  await expect(word).toHaveCSS("color", "rgb(220, 53, 69)");
+  const disconnectedColor = await word.evaluate((el) => getComputedStyle(el).color);
   await expect(word).toHaveCSS("animation-name", /connection-wave/);
   await expect(word).toHaveCSS("transform", "none");
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -88,7 +88,7 @@ test("network failure shows reconnect banner", async ({ page }) => {
 
   await page.context().setOffline(false);
   await expect(word).toHaveAttribute("data-status", "connected", { timeout: 15_000 });
-  await expect(word).toHaveCSS("color", "rgb(0, 0, 0)");
+  await expect(word).not.toHaveCSS("color", disconnectedColor);
   await expect(draft).toHaveText("Keep my draft through the network handoff");
   expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
 });

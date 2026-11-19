@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
-import { Box3, Color, LineSegments, Mesh, MeshPhongMaterial, Vector3 } from "three";
+import { Box3, Color, LineBasicMaterial, LineSegments, Mesh, MeshPhongMaterial, Vector3 } from "three";
 import type { GeometryGroup } from "three";
 import { strToU8, strFromU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { create3mfFixture, createBambu3mfFixture, createPaintedBambu3mfFixture } from "../tests/cad-fixture";
@@ -171,7 +171,8 @@ endsolid test_triangle
     expect(plates[1].outline[0]).toEqual({ x: 60, y: 0 });
     assert.ok(plates[2] !== undefined);
     expect(plates[2].outline[0]).toEqual({ x: 0, y: -48 });
-    const beds = createPlateGroup(plates);
+    const ink = new Color(0);
+    const beds = createPlateGroup(plates, ink);
     expect(beds.children).toHaveLength(9); // Each bed has a surface, outline, and grid.
     const surface = beds.children[0];
     expect(surface).toBeInstanceOf(Mesh);
@@ -183,6 +184,9 @@ endsolid test_triangle
     const grid = beds.children[2];
     expect(grid).toBeInstanceOf(LineSegments);
     if (!(grid instanceof LineSegments)) throw new Error("Missing plate grid");
+    assert.ok(grid.material instanceof LineBasicMaterial);
+    ink.setHex(0xffffff);
+    expect(grid.material.color.getHex()).toBe(0xffffff);
     const positions = grid.geometry.getAttribute("position");
     expect(positions.count).toBe(14); // Four vertical and three horizontal interior lines.
     expect([positions.getX(0), positions.getY(0), positions.getX(1), positions.getY(1)]).toEqual([10, 0, 10, 40]);
@@ -194,22 +198,25 @@ endsolid test_triangle
   });
 
   it("clips grid lines around concave plate cutouts", () => {
-    const beds = createPlateGroup([
-      {
-        id: 1,
-        name: "U",
-        outline: [
-          { x: 0, y: 0 },
-          { x: 30, y: 0 },
-          { x: 30, y: 30 },
-          { x: 20, y: 30 },
-          { x: 20, y: 10 },
-          { x: 10, y: 10 },
-          { x: 10, y: 30 },
-          { x: 0, y: 30 },
-        ],
-      },
-    ]);
+    const beds = createPlateGroup(
+      [
+        {
+          id: 1,
+          name: "U",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 30, y: 0 },
+            { x: 30, y: 30 },
+            { x: 20, y: 30 },
+            { x: 20, y: 10 },
+            { x: 10, y: 10 },
+            { x: 10, y: 30 },
+            { x: 0, y: 30 },
+          ],
+        },
+      ],
+      new Color(0),
+    );
     const grid = beds.children[2];
     if (!(grid instanceof LineSegments)) throw new Error("Missing plate grid");
     const positions = grid.geometry.getAttribute("position");
@@ -227,18 +234,21 @@ endsolid test_triangle
 
   it("rejects plate grids that exceed the bounded intersection work", () => {
     expect(() =>
-      createPlateGroup([
-        {
-          id: 1,
-          name: "Oversized",
-          outline: [
-            { x: 0, y: 0 },
-            { x: 10_000_000, y: 0 },
-            { x: 10_000_000, y: 10_000_000 },
-            { x: 0, y: 10_000_000 },
-          ],
-        },
-      ]),
+      createPlateGroup(
+        [
+          {
+            id: 1,
+            name: "Oversized",
+            outline: [
+              { x: 0, y: 0 },
+              { x: 10_000_000, y: 0 },
+              { x: 10_000_000, y: 10_000_000 },
+              { x: 0, y: 10_000_000 },
+            ],
+          },
+        ],
+        new Color(0),
+      ),
     ).toThrow("Printing plate is too large");
   });
 

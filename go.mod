@@ -8,7 +8,7 @@ require (
 	github.com/caic-xyz/md v0.19.3
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/gomodedev/gomode v0.4.0
+	github.com/gomodedev/gomode v0.4.1-0.20261119030629-cc1df1f7cf4a
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0

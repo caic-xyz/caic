@@ -1,8 +1,13 @@
 // Browser coverage for always-visible CPU/memory levels, live SSE readings, stream liveness, and header containment.
 
 import { createServer, type ServerResponse } from "node:http";
+import type { Locator } from "@playwright/test";
 import type { ServerHealth, TaskListEvent, ISOTimestamp } from "../../sdk/caic/ts/v1/types.gen";
 import { expect, test } from "../helpers";
+
+function iconFill(icon: Locator) {
+  return icon.evaluate((el) => getComputedStyle(el).fill);
+}
 
 for (const width of [320, 390, 1280]) {
   test(`live server usage levels at ${width}px`, async ({ page }) => {
@@ -39,7 +44,6 @@ for (const width of [320, 390, 1280]) {
       clients.add(response);
       response.on("close", () => clients.delete(response));
       send(response, { kind: "snapshot", snapshot: [], complete: true });
-      send(response, { kind: "health", health });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -57,7 +61,10 @@ for (const width of [320, 390, 1280]) {
       );
       await page.goto("/");
       const link = page.getByRole("link", { name: /CPU .*memory .* — open System/ });
-      await expect(link).toBeVisible();
+      await expect(link).toHaveAccessibleName("CPU unavailable, memory unavailable — open System");
+      await expect.poll(() => clients.size).toBe(1);
+      update({});
+      await expect(link).toHaveAccessibleName("CPU high, memory high — open System");
       const cpu = page.getByTestId("cpu-alarm");
       const memory = page.getByTestId("memory-alarm");
       const avatar = page.getByRole("button", { name: "Menu" });
@@ -73,8 +80,8 @@ for (const width of [320, 390, 1280]) {
       expect(linkBox.width).toBeGreaterThanOrEqual(28);
       expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(before.x);
       expect(before.x - (cpuBox.x + cpuBox.width)).toBeLessThanOrEqual(8);
-      await expect(cpu).toHaveCSS("fill", "rgb(220, 53, 69)");
-      await expect(memory).toHaveCSS("fill", "rgb(220, 53, 69)");
+      const highColor = await iconFill(cpu);
+      await expect(memory).toHaveCSS("fill", highColor);
       await avatar.focus();
       await link.hover();
       const tooltip = page.getByRole("tooltip");
@@ -98,28 +105,31 @@ for (const width of [320, 390, 1280]) {
 
       update({ cpuPerc: 400 });
       await expect(link).toHaveAccessibleName("CPU normal, memory high — open System");
-      await expect(cpu).toHaveCSS("fill", "rgb(40, 167, 69)");
-      await expect(memory).toHaveCSS("fill", "rgb(220, 53, 69)");
+      const normalColor = await iconFill(cpu);
+      expect(normalColor).not.toBe(highColor);
+      await expect(memory).toHaveCSS("fill", highColor);
       expect(await memory.boundingBox()).toEqual(memBox);
       expect(await avatar.boundingBox()).toEqual(before);
 
       update({ cpuPerc: 680, memUsed: 16 * 2 ** 30 });
       await expect(link).toHaveAccessibleName("CPU warning, memory normal — open System");
-      await expect(cpu).toHaveCSS("fill", "rgb(184, 92, 0)");
-      await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
+      const warningColor = await iconFill(cpu);
+      expect([highColor, normalColor]).not.toContain(warningColor);
+      await expect(memory).toHaveCSS("fill", normalColor);
       expect(await cpu.boundingBox()).toEqual(cpuBox);
 
       update({ cpuPerc: 0, memUsed: 0 });
       await expect(link).toHaveAccessibleName("CPU normal, memory normal — open System");
       await expect(cpu).toBeVisible();
       await expect(memory).toBeVisible();
-      await expect(cpu).toHaveCSS("fill", "rgb(40, 167, 69)");
-      await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
+      await expect(cpu).toHaveCSS("fill", normalColor);
+      await expect(memory).toHaveCSS("fill", normalColor);
 
       update({ error: "sample failed" });
       await expect(link).toHaveAccessibleName("CPU unavailable, memory unavailable — open System");
-      await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
-      await expect(memory).toHaveCSS("fill", "rgb(108, 117, 125)");
+      const unavailableColor = await iconFill(cpu);
+      expect([highColor, normalColor, warningColor]).not.toContain(unavailableColor);
+      await expect(memory).toHaveCSS("fill", unavailableColor);
       await avatar.focus();
       await link.focus();
       await expect(tooltip).toContainText("Sampling error: sample failed");
@@ -142,8 +152,8 @@ for (const width of [320, 390, 1280]) {
       await expect(link).toBeVisible();
       await link.focus();
       await expect(tooltip).toContainText("Updates unavailable");
-      await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
-      await expect(memory).toHaveCSS("fill", "rgb(108, 117, 125)");
+      await expect(cpu).toHaveCSS("fill", unavailableColor);
+      await expect(memory).toHaveCSS("fill", unavailableColor);
 
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await link.focus();

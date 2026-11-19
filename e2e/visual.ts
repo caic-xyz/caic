@@ -1,4 +1,4 @@
-// Deterministic browser setup and capture helpers for documentation screenshots.
+// Deterministic browser setup and paired appearance captures for documentation screenshots.
 import { expect, type Page, type Route } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "path";
@@ -383,19 +383,38 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   });
 }
 
-export async function captureScreenshot(page: Page, layout: FrontendScreenshotLayout, filename: string): Promise<void> {
+export async function captureScreenshotPair(
+  page: Page,
+  layout: FrontendScreenshotLayout,
+  scene: string,
+): Promise<void> {
   // Keep incidental hover controls and focus rings from depending on the
   // previous click or resize.
   await page.mouse.move(0, 0);
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
-  await waitForVisualReadiness(page);
   const outputDir = screenshotDir(layout);
   mkdirSync(outputDir, { recursive: true });
-  await page.screenshot({
-    animations: "disabled",
-    caret: "hide",
-    path: path.join(outputDir, filename),
-  });
+  async function capture(scheme: "light" | "dark") {
+    await waitForVisualReadiness(page);
+    await page.screenshot({
+      animations: "disabled",
+      caret: "hide",
+      path: path.join(outputDir, `${scene}-${scheme}.png`),
+    });
+  }
+
+  // Use the same viewport, task, and scroll position for both preferences.
+  // Restore light for the next scene and the single widget recording.
+  await capture("light");
+  const body = page.locator("body");
+  const lightCanvas = await body.evaluate((el) => getComputedStyle(el).backgroundColor);
+  try {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(body).not.toHaveCSS("background-color", lightCanvas);
+    await capture("dark");
+  } finally {
+    await page.emulateMedia({ colorScheme: "light" });
+  }
 }

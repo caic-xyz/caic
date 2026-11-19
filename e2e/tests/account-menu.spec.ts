@@ -68,7 +68,6 @@ test("quota pills use the space beside the connection word", async ({ page }) =>
     const firstPill = page.getByTestId("provider-usage").first();
     await expect(firstPill).toBeVisible();
     await expect(title).toHaveAttribute("data-status", "connected");
-    await expect(title).toHaveCSS("color", "rgb(0, 0, 0)");
     await title.hover();
     await expect(title).toHaveCSS("text-decoration-line", "none");
 
@@ -258,7 +257,10 @@ test("circular connection wave crosses a stationary word and respects reduced mo
   const word = page.getByTestId("new-task-button");
   await expect(word).toHaveAttribute("data-status", "connected");
   await expect(word).toHaveCSS("background-image", /radial-gradient/);
-  await expect(word).toHaveCSS("background-image", /rgb\(255, 255, 255\)/);
+  const lightGradient = await word.evaluate((el) => getComputedStyle(el).backgroundImage);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(word).not.toHaveCSS("background-image", lightGradient);
+  await expect(word).toHaveCSS("background-image", /radial-gradient/);
   await expect(word).toHaveCSS("animation-name", /connection-ready-wave/);
   await expect(word).toHaveCSS("animation-duration", "6s");
   await expect(word).toHaveCSS("animation-delay", "-2s");

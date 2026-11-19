@@ -7,7 +7,7 @@
   --device-login-input-background: var(--color-bg-input);
   --device-login-button-background: var(--color-primary-container);
   --device-login-border: var(--color-border);
-  --device-login-focus: var(--color-primary);
+  --device-login-focus: var(--color-focus-border);
   --device-login-link-color: var(--color-link);
   --device-login-radius: var(--radius-md);
 

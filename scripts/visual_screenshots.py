@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render and publish deterministic frontend documentation screenshots.
+"""Render and publish deterministic light and dark frontend documentation screenshots.
 
 Renders twice, requires both passes to match, and publishes the first. The
 tracked images encode the development container's font stack, so publish them
@@ -15,7 +15,6 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 from screenshot_publish import publish_images, recover_images, validate_images
@@ -25,46 +24,48 @@ FRONTEND_VISUAL_PORTS = (41741, 41742)
 FRONTEND_VISUAL_HOST = "127.0.0.1"
 SCREENSHOT_DIR = ROOT_DIR / "e2e" / "screenshots" / "frontend"
 IMAGE_SUFFIXES = frozenset({".avif", ".png", ".webp"})
-# Every declared documentation scene is required, including prompt and animation captures.
-FRONTEND_SCENE_FILES = frozenset(
+# Each scene must publish a matched light and dark image. The widget animation is a single recording.
+FRONTEND_SCENES = frozenset(
     {
-        "desktop/overview.webp",
-        "desktop/prompt-detail-long.webp",
-        "desktop/prompt-detail-short.webp",
-        "desktop/prompt-long.webp",
-        "desktop/prompt-short.webp",
-        "desktop/settings-general.webp",
-        "desktop/settings-mounts.webp",
-        "desktop/settings-server-error.webp",
-        "desktop/settings-server.webp",
-        "desktop/task-ask.webp",
-        "desktop/task-background.webp",
-        "desktop/task-detail.webp",
-        "desktop/task-list-scrolled.webp",
-        "desktop/task-native-subagents.webp",
-        "desktop/task-repository-changes.webp",
-        "desktop/task-resources.webp",
-        "desktop/task-running.webp",
-        "desktop/task-stats.webp",
-        "desktop/task-vnc.webp",
-        "desktop/task-widget.avif",
-        "desktop/task-widget.webp",
-        "desktop/usage.webp",
-        "mobile/overview.webp",
-        "mobile/settings-general.webp",
-        "mobile/settings-mounts-mobile.webp",
-        "mobile/settings-server-error-mobile.webp",
-        "mobile/settings-server-mobile.webp",
-        "mobile/task-background.webp",
-        "mobile/task-detail-header-compact.webp",
-        "mobile/task-detail.webp",
-        "mobile/task-list-scrolled-mobile.webp",
-        "mobile/task-repository-changes.webp",
-        "mobile/task-resources.webp",
-        "mobile/task-stats.webp",
-        "mobile/usage.webp",
+        "desktop/overview",
+        "desktop/prompt-detail-long",
+        "desktop/prompt-detail-short",
+        "desktop/prompt-long",
+        "desktop/prompt-short",
+        "desktop/settings-general",
+        "desktop/settings-mounts",
+        "desktop/settings-server-error",
+        "desktop/settings-server",
+        "desktop/task-ask",
+        "desktop/task-background",
+        "desktop/task-detail",
+        "desktop/task-list-scrolled",
+        "desktop/task-native-subagents",
+        "desktop/task-repository-changes",
+        "desktop/task-resources",
+        "desktop/task-running",
+        "desktop/task-stats",
+        "desktop/task-vnc",
+        "desktop/task-widget",
+        "desktop/usage",
+        "mobile/overview",
+        "mobile/settings-general",
+        "mobile/settings-mounts-mobile",
+        "mobile/settings-server-error-mobile",
+        "mobile/settings-server-mobile",
+        "mobile/task-background",
+        "mobile/task-detail-header-compact",
+        "mobile/task-detail",
+        "mobile/task-list-scrolled-mobile",
+        "mobile/task-repository-changes",
+        "mobile/task-resources",
+        "mobile/task-stats",
+        "mobile/usage",
     },
 )
+FRONTEND_SCENE_FILES = frozenset(
+    f"{scene}-{scheme}.webp" for scene in FRONTEND_SCENES for scheme in ("light", "dark")
+) | {"desktop/task-widget.avif"}
 VISUAL_SEED = "caic-visual-v1"
 # Playwright deletes test-results/ at the start of every run, so failed renders
 # live beside it instead of inside it: they have to survive a re-run to be
@@ -279,9 +280,28 @@ def image_dimensions(path: Path) -> tuple[int, int]:
     return int(width), int(height)
 
 
-def validate_frontend_images(directory: Path, expected_files: frozenset[str] | None = FRONTEND_SCENE_FILES) -> None:
-    """Validate the frontend screenshot inventory against the shared image checks."""
-    validate_images(directory, expected_files, IMAGE_SUFFIXES, image_dimensions)
+def validate_frontend_images(directory: Path) -> None:
+    """Validate the inventory and check each new pair shows a distinct, equally sized image."""
+    dimensions: dict[str, tuple[int, int]] = {}
+
+    def measure(path: Path) -> tuple[int, int]:
+        size = image_dimensions(path)
+        dimensions[path.relative_to(directory).as_posix()] = size
+        return size
+
+    validate_images(directory, FRONTEND_SCENE_FILES, IMAGE_SUFFIXES, measure)
+    for scene in sorted(FRONTEND_SCENES):
+        light = f"{scene}-light.webp"
+        dark = f"{scene}-dark.webp"
+        if dimensions[light] != dimensions[dark]:
+            raise RuntimeError(f"Screenshot pair has different dimensions: {scene}")
+        if (directory / light).read_bytes() == (directory / dark).read_bytes():
+            raise RuntimeError(f"Screenshot pair has identical images: {scene}")
+
+
+def validate_previous_images(directory: Path) -> None:
+    """Allow recovery of an earlier catalog with different scene names."""
+    validate_images(directory, None, IMAGE_SUFFIXES, image_dimensions)
 
 
 def publish_screenshots(source_dir: Path) -> None:
@@ -290,8 +310,8 @@ def publish_screenshots(source_dir: Path) -> None:
         source_dir,
         ROOT_DIR,
         SCREENSHOT_DIR,
-        partial(validate_frontend_images, expected_files=FRONTEND_SCENE_FILES),
-        partial(validate_frontend_images, expected_files=None),
+        validate_frontend_images,
+        validate_previous_images,
     )
 
 
@@ -313,7 +333,7 @@ def main() -> int:
         if shutil.which(executable) is None:
             print(f"{executable} is required for documentation screenshots", file=sys.stderr)
             return 1
-    recover_images(ROOT_DIR, SCREENSHOT_DIR, partial(validate_frontend_images, expected_files=None))
+    recover_images(ROOT_DIR, SCREENSHOT_DIR, validate_previous_images)
 
     with tempfile.TemporaryDirectory(prefix="caic-visual-") as tmp:
         tmp_dir = Path(tmp)

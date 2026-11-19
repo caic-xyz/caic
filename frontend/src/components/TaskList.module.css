@@ -162,7 +162,7 @@
 }
 
 .fixCIBtn:hover {
-  color: var(--color-on-primary);
+  color: var(--color-on-danger);
   background: var(--color-danger);
 }
 
@@ -172,8 +172,8 @@
   font-size: 0.65rem;
   font-weight: 700;
   line-height: 1.2;
-  color: var(--color-primary);
-  background: var(--color-primary-ring);
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
   border-radius: var(--radius-sm);
 }
 

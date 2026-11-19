@@ -2,6 +2,7 @@
 import { test, expect } from "../helpers";
 
 test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePrompt }) => {
+  await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/");
 
   // Wait for repos to load.
@@ -32,6 +33,28 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   await expect(messages.locator("strong", { hasText: "Done" })).toBeVisible({
     timeout: 10_000,
   });
+
+  const widgetFrame = page.frameLocator("iframe[title='light_refraction_in_water']");
+  const widgetBody = widgetFrame.locator("body");
+  const heading = widgetFrame.getByRole("heading", { name: "Light Refraction in Water" });
+  const slider = widgetFrame.getByRole("slider");
+  await slider.press("ArrowRight");
+  await expect(slider).toHaveValue("41");
+
+  // The same widget responds to the preference change without losing user input.
+  const lightCanvas = await page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor);
+  const lightWidgetCanvas = await widgetBody.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const lightWidgetHeading = await heading.evaluate((el) => getComputedStyle(el).color);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("body")).not.toHaveCSS("background-color", lightCanvas);
+  await expect(widgetBody).not.toHaveCSS("background-color", lightWidgetCanvas);
+  await expect(heading).not.toHaveCSS("color", lightWidgetHeading);
+  await expect(slider).toHaveValue("41");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("body")).toHaveCSS("background-color", lightCanvas);
+  await expect(widgetBody).toHaveCSS("background-color", lightWidgetCanvas);
+  await expect(heading).toHaveCSS("color", lightWidgetHeading);
+
   // Observe both messages after the app's listener has processed them, in
   // sender order, so the assertion cannot race the sandbox's resize events.
   await page.evaluate(() => {
@@ -52,8 +75,7 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
       window.addEventListener("message", onMessage);
     });
   });
-  const widgetFrame = page.frameLocator("iframe[title='light_refraction_in_water']");
-  await widgetFrame.locator("body").evaluate(() => {
+  await widgetBody.evaluate(() => {
     window.parent.postMessage({ type: "resize", height: 123, testResize: true }, "*");
     window.parent.postMessage({ type: "resize", height: "bad", testResize: true }, "*");
   });

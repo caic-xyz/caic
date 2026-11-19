@@ -13,11 +13,11 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 
 ## Visual direction
 
-- Use neutral surfaces. Blue identifies primary actions and selection. Status
-  colors communicate state, not decoration.
+- Use neutral surfaces with green undertones. Use the caic.xyz brand green for
+  primary actions and selection. Status colors identify task and service states.
 - Establish hierarchy through spacing, alignment, typography, and subtle
   separators before adding cards, borders, or shadows.
-- Diagrams use flat fills with white nodes and pale groups. A faint, tight
+- Diagrams use flat fills with distinct node and group surfaces. A faint, tight
   shadow may separate node shapes from their background. Keep labels and
   connectors crisp; do not filter the whole diagram or add decorative gradients.
 - Use Material Design icons for familiar actions. Keep action buttons
@@ -48,7 +48,7 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 
 Use this direction for new and touched components. It does not require a
 navigation redesign, wholesale restyling, or UX migration. Keep the existing
-light theme and semantic token boundaries; implementation rules live in
+light and dark semantic token boundaries. Implementation rules live in
 [the frontend guidelines](../AGENTS.md#styling-and-theming).
 
 Judge changes by whether someone can monitor several agents for hours without

@@ -8,7 +8,7 @@ import {
   convertPngsToWebp,
   type APIClient,
 } from "../helpers";
-import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual";
+import { captureScreenshotPair, prepareVisualPage, screenshotRoot } from "../visual";
 
 /** Creates the task cards the prompt captures show, newest first. */
 async function seedTaskList(api: APIClient) {
@@ -62,7 +62,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   // Screenshot 1: main prompt with two words.
   await prompt.fill("hello world");
   await expect(prompt).toContainText("hello world");
-  await captureScreenshot(page, "desktop", "prompt-short.png");
+  await captureScreenshotPair(page, "desktop", "prompt-short");
 
   // Screenshot 2: main prompt with long text.
   const longText =
@@ -75,7 +75,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
     "client applications that still use the legacy session-based authentication mechanism";
   await prompt.fill(longText);
   await expect(prompt).toContainText(longText);
-  await captureScreenshot(page, "desktop", "prompt-long.png");
+  await captureScreenshotPair(page, "desktop", "prompt-long");
 
   // Clear and create a task for detail view.
   await prompt.fill("");
@@ -93,12 +93,12 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   // Screenshot 3: task detail input with two words.
   await detailInput.fill("looks good");
   await expect(detailInput).toContainText("looks good");
-  await captureScreenshot(page, "desktop", "prompt-detail-short.png");
+  await captureScreenshotPair(page, "desktop", "prompt-detail-short");
 
   // Screenshot 4: task detail input with long text.
   await detailInput.fill(longText);
   await expect(detailInput).toContainText(longText);
-  await captureScreenshot(page, "desktop", "prompt-detail-long.png");
+  await captureScreenshotPair(page, "desktop", "prompt-detail-long");
 
   await convertPngsToWebp(screenshotRoot);
 });

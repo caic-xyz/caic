@@ -45,8 +45,8 @@
   font-size: 0.65rem;
   font-weight: 700;
   line-height: 1;
-  color: var(--color-primary);
-  background: var(--color-primary-ring);
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
   border-radius: var(--radius-sm);
 }
 
@@ -458,8 +458,8 @@ a.featureIconBadge:focus-visible {
   font-size: 0.65rem;
   font-weight: 700;
   line-height: 1;
-  color: var(--color-primary);
-  background: var(--color-primary-ring);
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
   border-radius: var(--radius-sm);
 }
 

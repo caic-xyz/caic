@@ -240,18 +240,19 @@ function createPlateGrid(outline: CadPlate["outline"]): THREE.BufferGeometry {
 }
 
 // Builds translucent plate surfaces, outlines, and grids independently of model metrics.
-export function createPlateGroup(plates: CadPlate[]): THREE.Group {
+export function createPlateGroup(plates: CadPlate[], ink: THREE.Color): THREE.Group {
   const group = new THREE.Group();
   for (const plate of plates) {
     const grid = new THREE.LineSegments(
       createPlateGrid(plate.outline),
       new THREE.LineBasicMaterial({
-        color: 0x263442,
         transparent: true,
         opacity: 0.35,
         depthWrite: false,
+        toneMapped: false,
       }),
     );
+    grid.material.color = ink;
     const shape = new THREE.Shape(plate.outline.map((p) => new THREE.Vector2(p.x, p.y)));
     const surface = new THREE.Mesh(
       new THREE.ShapeGeometry(shape),
@@ -269,8 +270,9 @@ export function createPlateGroup(plates: CadPlate[]): THREE.Group {
     surface.name = `Plate ${plate.id}: ${plate.name}`;
     const line = new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(plate.outline.map((p) => new THREE.Vector3(p.x, p.y, -0.05))),
-      new THREE.LineBasicMaterial({ color: 0x263442 }),
+      new THREE.LineBasicMaterial({ toneMapped: false }),
     );
+    line.material.color = ink;
     group.add(surface, line, grid);
   }
   return group;
@@ -309,6 +311,7 @@ export function prepareModelShading(group: THREE.Group): void {
 function createPlateLabel(
   plate: CadPlate,
   anisotropy: number,
+  ink: THREE.Color,
 ): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
@@ -333,7 +336,8 @@ function createPlateLabel(
   canvas.height = Math.min(1024, lines.length * 60 + 32);
   const lineHeight = (canvas.height - 32) / lines.length;
   context.font = `${Math.min(48, lineHeight / 1.25)}px sans-serif`;
-  context.fillStyle = new THREE.Color(0x263442).getStyle();
+  // Keep the glyph texture neutral so the material can tint it in either scheme.
+  context.fillStyle = new THREE.Color().getStyle();
   context.textAlign = "center";
   context.textBaseline = "middle";
   lines.forEach((text, i) => context.fillText(text, canvas.width / 2, 16 + (i + 0.5) * lineHeight, canvas.width - 32));
@@ -356,6 +360,7 @@ function createPlateLabel(
       toneMapped: false,
     }),
   );
+  label.material.color = ink;
   label.name = `Plate ${plate.id}: ${plate.name}`;
   label.position.set((bounds.min.x + bounds.max.x) / 2, bounds.max.y + size.y * 0.025 + height / 2, 0);
   return label;
@@ -402,6 +407,16 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
   controls.screenSpacePanning = true;
+
+  // Materials share the annotation color. Recoloring changes neither the scene
+  // geometry nor the camera, even while a model is still loading.
+  const annotationInk = new THREE.Color();
+  const themePreference = window.matchMedia("(prefers-color-scheme: dark)");
+  function updateAnnotationInk() {
+    annotationInk.setStyle(getComputedStyle(canvas).color);
+  }
+  updateAnnotationInk();
+  themePreference.addEventListener("change", updateAnnotationInk);
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambientLight);
@@ -472,10 +487,10 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
         signal.throwIfAborted();
         const info = { ...computeModelInfo(model.group), plates: model.plates };
         prepareModelShading(model.group);
-        const plates = createPlateGroup(model.plates);
+        const plates = createPlateGroup(model.plates, annotationInk);
         candidate.add(plates);
         for (const plate of model.plates)
-          plates.add(createPlateLabel(plate, Math.min(8, renderer.capabilities.getMaxAnisotropy())));
+          plates.add(createPlateLabel(plate, Math.min(8, renderer.capabilities.getMaxAnisotropy()), annotationInk));
         const box = new THREE.Box3().setFromObject(candidate);
         const center = box.getCenter(new THREE.Vector3());
         candidate.position.sub(center);
@@ -574,6 +589,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
 
     destroy() {
       isDestroyed = true;
+      themePreference.removeEventListener("change", updateAnnotationInk);
       if (animId !== null) {
         cancelAnimationFrame(animId);
         animId = null;

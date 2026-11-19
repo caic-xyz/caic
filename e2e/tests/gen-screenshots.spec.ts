@@ -1,10 +1,16 @@
-// Generate screenshots for the documentation site.
+// Generate paired screenshots and widget animation for the documentation sites.
 //
 // Run with: make screenshots-update
-// Output: e2e/screenshots/frontend/{desktop,mobile}/
+// Output: e2e/screenshots/frontend/{desktop,mobile}/ with -light and -dark WebP variants.
 import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
-import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot, waitForVisualReadiness } from "../visual";
+import {
+  captureScreenshotPair,
+  prepareVisualPage,
+  screenshotDir,
+  screenshotRoot,
+  waitForVisualReadiness,
+} from "../visual";
 import { visualPositionTime } from "../visual-fixtures";
 import { formatTimingDuration } from "../../frontend/src/timing";
 import type { Locator } from "@playwright/test";
@@ -84,7 +90,7 @@ test("generate settings screenshots", async ({ page, api }) => {
     await containerSection.scrollIntoViewIfNeeded();
     await expect(refreshed).toBeInViewport({ ratio: 1 });
     await expect(refresh).toBeInViewport({ ratio: 1 });
-    await captureScreenshot(page, layout, "settings-general.png");
+    await captureScreenshotPair(page, layout, "settings-general");
   }
   // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
   await page.setViewportSize({ width: 1600, height: 900 });
@@ -111,26 +117,26 @@ test("generate settings screenshots", async ({ page, api }) => {
     ).toBeLessThanOrEqual(1);
   }
   await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
-  await captureScreenshot(page, "desktop", "settings-mounts.png");
+  await captureScreenshotPair(page, "desktop", "settings-mounts");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
-  await captureScreenshot(page, "mobile", "settings-mounts-mobile.png");
+  await captureScreenshotPair(page, "mobile", "settings-mounts-mobile");
   await page.goto("/settings?section=server");
   const reloadModels = page.getByRole("region", { name: "Reload models", exact: true });
   await expect(reloadModels.getByRole("button", { name: "codex", exact: true })).toBeVisible();
   await expect(reloadModels.getByRole("button", { name: "pi", exact: true })).toBeVisible();
-  await captureScreenshot(page, "mobile", "settings-server-mobile.png");
+  await captureScreenshotPair(page, "mobile", "settings-server-mobile");
   await page.setViewportSize({ width: 1600, height: 900 });
-  await captureScreenshot(page, "desktop", "settings-server.png");
+  await captureScreenshotPair(page, "desktop", "settings-server");
   const failure = { error: { code: "INTERNAL_ERROR", message: "Model provider unavailable." } } satisfies ErrorResponse;
   await page.route("**/server/harnesses/pi/refresh", (route) => route.fulfill({ status: 503, json: failure }), {
     times: 1,
   });
   await reloadModels.getByRole("button", { name: "pi", exact: true }).click();
   await expect(reloadModels.getByRole("alert", { name: "Model reload status" })).toHaveText(failure.error.message);
-  await captureScreenshot(page, "desktop", "settings-server-error.png");
+  await captureScreenshotPair(page, "desktop", "settings-server-error");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "settings-server-error-mobile.png");
+  await captureScreenshotPair(page, "mobile", "settings-server-error-mobile");
   await convertPngsToWebp(screenshotDir("desktop"));
   await convertPngsToWebp(screenshotDir("mobile"));
 });
@@ -235,9 +241,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
     if (task.effort) await expect(card).toContainText(task.effort);
   }
 
-  await captureScreenshot(page, "desktop", "overview.png");
+  await captureScreenshotPair(page, "desktop", "overview");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "overview.png");
+  await captureScreenshotPair(page, "mobile", "overview");
   await page.setViewportSize({ width: 1280, height: 800 });
 
   // Screenshot 1: Interacting with an agent — task detail with tool uses.
@@ -265,7 +271,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (let i = 0; i < 2; i++) {
     await expect(desktopHeaderStats.nth(i)).toBeVisible();
   }
-  await captureScreenshot(page, "desktop", "task-detail.png");
+  await captureScreenshotPair(page, "desktop", "task-detail");
 
   // The Git markers and the glyph links share one optical center on the row, so
   // no icon sits on the text baseline instead of the row axis.
@@ -334,9 +340,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
     )
     .toEqual({ documentFits: true, paneFits: true });
   await page.mouse.move(0, 0);
-  await captureScreenshot(page, "desktop", "task-repository-changes.png");
+  await captureScreenshotPair(page, "desktop", "task-repository-changes");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "task-repository-changes.png");
+  await captureScreenshotPair(page, "mobile", "task-repository-changes");
   await page.setViewportSize({ width: 1280, height: 800 });
   // The responsive breakpoint reopens the sidebar when the viewport returns to
   // desktop width, so wait for that state instead of clicking a transient button.
@@ -359,14 +365,14 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(verification).toBeVisible();
   await expect(verification.locator("xpath=ancestor::summary")).toContainText("Bash");
   await expect(verification.locator("xpath=ancestor::summary").getByTestId("tool-duration")).toHaveText(/^0:4\d$/);
-  await captureScreenshot(page, "desktop", "task-running.png");
+  await captureScreenshotPair(page, "desktop", "task-running");
 
   // Screenshot 4: Ask mode.
   const askCard = page.locator(`[data-task-id="${id3}"]`);
   if ((await askCard.count()) > 0) {
     await askCard.click();
     await expect(page.getByTestId("ask-option-In-memory (sync.Map)")).toBeVisible();
-    await captureScreenshot(page, "desktop", "task-ask.png");
+    await captureScreenshotPair(page, "desktop", "task-ask");
   }
 
   // Screenshot 5: Widget — generative UI with interactive SVG diagram.
@@ -389,7 +395,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
       el.scrollTop = 0;
     });
     await expect.poll(() => messageArea.evaluate((el) => el.scrollTop)).toBe(0);
-    await captureScreenshot(page, "desktop", "task-widget.png");
+    await captureScreenshotPair(page, "desktop", "task-widget");
 
     // Animate the angle slider and capture frames for AVIF animation.
     if ((await slider.count()) > 0) {
@@ -519,7 +525,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     .toBe(true);
   // The narrow pane wraps the header, so it hides the raw Git line totals.
   await expect(page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats").first()).toBeHidden();
-  await captureScreenshot(page, "desktop", "task-vnc.png");
+  await captureScreenshotPair(page, "desktop", "task-vnc");
 
   // Screenshot 7: Mobile — task detail at phone viewport.
   await page.goto("/");
@@ -531,7 +537,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Verify the task-actions menu is reachable at mobile width.
   const actionsMenu = page.locator("[aria-label='Task actions']");
   await expect(actionsMenu).toBeVisible({ timeout: 3_000 });
-  await captureScreenshot(page, "mobile", "task-detail.png");
+  await captureScreenshotPair(page, "mobile", "task-detail");
 
   // Screenshot 8: Dense task-detail header at the width where a larger phone
   // or narrow desktop pane needs compact repository state markers.
@@ -564,7 +570,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     })
     .toBeLessThanOrEqual(1);
   await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  await captureScreenshot(page, "mobile", "task-detail-header-compact.png");
+  await captureScreenshotPair(page, "mobile", "task-detail-header-compact");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
@@ -609,7 +615,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
   await expect.poll(async () => taskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await expect.poll(async () => taskList.evaluate((el) => getComputedStyle(el, "::before").opacity)).toBe("1");
-  await captureScreenshot(page, "desktop", "task-list-scrolled.png");
+  await captureScreenshotPair(page, "desktop", "task-list-scrolled");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -627,7 +633,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect
     .poll(async () => mobileAppShell.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom))
     .toBeLessThanOrEqual(0);
-  await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
+  await captureScreenshotPair(page, "mobile", "task-list-scrolled-mobile");
 
   // Screenshot 10: Native subagents — inline lifecycle cards anchored to the
   // parent narration that preceded each run settling.
@@ -651,7 +657,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await nativeMessageArea.evaluate((el) => {
     el.scrollTop = 0;
   });
-  await captureScreenshot(page, "desktop", "task-native-subagents.png");
+  await captureScreenshotPair(page, "desktop", "task-native-subagents");
 
   await page.goto(`/task/@${id1}/stats`);
   await expect(page.getByTestId("resource-charts")).toBeVisible();
@@ -670,9 +676,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
       }),
     )
     .toBe(true);
-  await captureScreenshot(page, "desktop", "task-stats.png");
+  await captureScreenshotPair(page, "desktop", "task-stats");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "task-stats.png");
+  await captureScreenshotPair(page, "mobile", "task-stats");
 
   // Frame the resource section independently of the token/timing summary.
   // Lazy chart modules and responsive Plot redraws must settle before capture.
@@ -703,14 +709,14 @@ test("generate documentation screenshots", async ({ page, api }) => {
         }),
       )
       .toBe(true);
-    await captureScreenshot(page, layout, "task-resources.png");
+    await captureScreenshotPair(page, layout, "task-resources");
   }
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/monitoring");
   await expect(page.getByTestId("usage-charts")).toBeVisible();
-  await captureScreenshot(page, "desktop", "usage.png");
+  await captureScreenshotPair(page, "desktop", "usage");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "usage.png");
+  await captureScreenshotPair(page, "mobile", "usage");
 
   // Screenshot 11: Background work keeps a task running after its result; the
   // card's model line counts it and the strip above the input names it. It runs last so its task
@@ -734,8 +740,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // The open tool group shows the command and the watch beside their chips.
   await page.getByText(/^1\/3 tools: /).click();
   await expect(page.getByTestId("background-command-chip").filter({ hasText: "watching" })).toBeVisible();
-  await captureScreenshot(page, "desktop", "task-background.png");
+  await captureScreenshotPair(page, "desktop", "task-background");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "task-background.png");
+  await captureScreenshotPair(page, "mobile", "task-background");
   await convertPngsToWebp(screenshotRoot);
 });
