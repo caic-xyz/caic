@@ -157,7 +157,7 @@ type TaskAnswerQuestionArgs struct {
 // TaskPushBranchArgs selects a task branch synchronization destination.
 type TaskPushBranchArgs struct {
 	TaskNumber TaskReference `json:"task_number"      jsonschema:"oneof_type=integer;string"                      jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
-	Force      bool          `json:"force,omitempty"  jsonschema_description:"Force sync even with safety issues"`
+	Force      bool          `json:"force,omitempty"  jsonschema_description:"Push despite safety issues; task branch only, rejected for main"`
 	Target     string        `json:"target,omitempty" jsonschema:"enum=branch,enum=default,enum=main,enum=master" jsonschema_description:"Where to push: branch (default) or main"`
 }
 

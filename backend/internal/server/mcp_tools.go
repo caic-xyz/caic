@@ -580,22 +580,42 @@ func (m *mcpTools) handleTaskPushBranchToRemote(ctx context.Context, call *mcp.T
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	verb := fmt.Sprintf("Synced task #%d", num)
-	if req.Target == v1.SyncTargetDefault {
-		verb = fmt.Sprintf("Pushed task #%d to main", num)
+	return pushToolResult(num, req.Target, resp)
+}
+
+// pushToolResult reports a finished push. A blocked push pushed nothing; only
+// a push to the task branch can be retried with force.
+func pushToolResult(num int, target v1.SyncTarget, resp *v1.SyncResp) mcp.ToolResult[mcp.TextOutput] {
+	dest := "the task branch"
+	if target == v1.SyncTargetDefault {
+		dest = "main"
 	}
-	if len(resp.SafetyIssues) == 0 {
-		return mcp.TextToolResult(verb + ".")
+	var head, tail string
+	switch {
+	case resp.Status == "blocked" && target == v1.SyncTargetDefault:
+		head = fmt.Sprintf("Did not push task #%d to main: blocked by safety issues:", num)
+		tail = "A push to main cannot be forced. Remove the flagged content from the task's commits, or push to the task branch with force."
+	case resp.Status == "blocked":
+		head = fmt.Sprintf("Did not push task #%d to the task branch: blocked by safety issues:", num)
+		tail = "Retry with force to push anyway."
+	case len(resp.SafetyIssues) == 0:
+		return mcp.TextToolResult(fmt.Sprintf("Pushed task #%d to %s.", num, dest))
+	default:
+		head = fmt.Sprintf("Pushed task #%d to %s despite safety issues:", num, dest)
 	}
 	issueCount := min(len(resp.SafetyIssues), maxMCPSafetyIssues)
-	issueLines := make([]string, 0, issueCount+1)
+	lines := make([]string, 0, issueCount+3)
+	lines = append(lines, head)
 	for _, issue := range resp.SafetyIssues[:issueCount] {
-		issueLines = append(issueLines, fmt.Sprintf("- **%s** %s: %s", issue.Kind, issue.File, issue.Detail))
+		lines = append(lines, fmt.Sprintf("- **%s** %s: %s", issue.Kind, issue.File, issue.Detail))
 	}
 	if omitted := len(resp.SafetyIssues) - issueCount; omitted > 0 {
-		issueLines = append(issueLines, fmt.Sprintf("- … %d more safety issues omitted", omitted))
+		lines = append(lines, fmt.Sprintf("- … %d more safety issues omitted", omitted))
 	}
-	return boundedTextToolResult(verb + " with safety issues:\n" + strings.Join(issueLines, "\n"))
+	if tail != "" {
+		lines = append(lines, tail)
+	}
+	return boundedTextToolResult(strings.Join(lines, "\n"))
 }
 
 func (m *mcpTools) handleTaskStop(ctx context.Context, call *mcp.ToolRequest[mcpschema.TaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {

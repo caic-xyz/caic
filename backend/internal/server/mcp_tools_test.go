@@ -2804,3 +2804,42 @@ func BenchmarkMCPRepoListPage(b *testing.B) {
 		}
 	}
 }
+
+func TestPushToolResult(t *testing.T) {
+	t.Parallel()
+	issues := []v1.SafetyIssue{{File: "key.env", Kind: "secret", Detail: "API secret key"}}
+	for _, tc := range []struct {
+		name   string
+		target v1.SyncTarget
+		resp   v1.SyncResp
+		want   string
+	}{
+		{name: "main", target: v1.SyncTargetDefault, resp: v1.SyncResp{Status: "synced"}, want: "Pushed task #3 to main."},
+		{name: "branch", target: v1.SyncTargetBranch, resp: v1.SyncResp{Status: "synced"}, want: "Pushed task #3 to the task branch."},
+		{
+			// Regression: a blocked push to main was reported as pushed, and the
+			// instructions suggested a force retry that main rejects.
+			name: "main blocked", target: v1.SyncTargetDefault, resp: v1.SyncResp{Status: "blocked", SafetyIssues: issues},
+			want: "Did not push task #3 to main: blocked by safety issues:\n- **secret** key.env: API secret key\nA push to main cannot be forced. Remove the flagged content from the task's commits, or push to the task branch with force.",
+		},
+		{
+			name: "branch blocked", target: v1.SyncTargetBranch, resp: v1.SyncResp{Status: "blocked", SafetyIssues: issues},
+			want: "Did not push task #3 to the task branch: blocked by safety issues:\n- **secret** key.env: API secret key\nRetry with force to push anyway.",
+		},
+		{
+			name: "branch forced", target: v1.SyncTargetBranch, resp: v1.SyncResp{Status: "synced", SafetyIssues: issues},
+			want: "Pushed task #3 to the task branch despite safety issues:\n- **secret** key.env: API secret key",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := pushToolResult(3, tc.target, &tc.resp)
+			if result.IsError {
+				t.Fatalf("pushToolResult() IsError = true")
+			}
+			if got := toolTextOutput(t, result.Structured); got != tc.want {
+				t.Fatalf("pushToolResult() =\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
+}

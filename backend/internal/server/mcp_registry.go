@@ -103,7 +103,7 @@ Task numbers follow the current task list and can change when another task is re
 - Refer to tasks by title.
 - Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
-- For safety issues during sync, describe each issue and ask whether to force.`
+- When safety issues block a push, nothing was pushed: describe each issue. For a task branch push, ask whether to retry with force; a push to main cannot be forced.`
 
 var mcpToolScopes = map[string]string{
 	"repos_list":                 mcpScopeRead,
