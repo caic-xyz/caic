@@ -96,12 +96,13 @@
   color: var(--color-success);
 }
 
-.status[data-state="paused"] {
-  color: var(--color-text-secondary);
+.statusIcon {
+  margin-inline: 0.5rem;
 }
 
 /* Inline status chips in tool rows keep their margins; the card uses gap. */
-.summaryContent > .status {
+.summaryContent > .status,
+.summaryContent > .statusIcon {
   flex-shrink: 0;
   margin-inline: 0;
 }

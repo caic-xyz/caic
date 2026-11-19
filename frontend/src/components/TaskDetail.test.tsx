@@ -600,7 +600,7 @@ it("keeps concurrent child Markdown and parent thinking stable through item and 
       result: "- A **bowtie** example.",
     },
   });
-  await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+  await waitFor(() => expect(within(card).getByRole("img", { name: "Completed" })).toBeInTheDocument());
   expect(screen.getByTestId("native-subagent-card")).toBe(card);
   expect(card).toHaveAttribute("open");
   expect(within(card).getByTestId("stream-message")).toBe(childBlock);
@@ -1589,6 +1589,29 @@ describe("TaskDetail", () => {
     expect(deleted.className).toMatch(/lineDeleted/);
   });
 
+  it("marks a running foreground delegation with one spinner on its tool row", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
+      const events: EventMessage[] = [
+        { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "spawn-1", name: "Agent", input: {} } },
+        {
+          kind: "nativeSubagent",
+          ts: 2_000,
+          nativeSubagent: { id: "child-1", toolUseID: "spawn-1", label: "Review", status: "running" },
+        },
+      ];
+      for (const event of events) emit(handlers, event);
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+
+    const { getByText, getByTestId } = await renderTaskDetail();
+
+    const call = getByText("Agent").closest("summary");
+    if (!call) throw new Error("tool card must have a summary element");
+    expect(within(call).getAllByRole("img", { name: "Running" })).toHaveLength(1);
+    const card = getByTestId("native-subagent-card");
+    expect(within(card).getByRole("img", { name: "Running" })).toBeInTheDocument();
+  });
+
   it("shows canonical native status on the tool call that spawned it", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
       const events: EventMessage[] = [
@@ -1634,7 +1657,7 @@ describe("TaskDetail", () => {
 
     // The canonical card anchors to the transcript where the lifecycle settled.
     const anchored = getByTestId("native-subagents");
-    expect(within(anchored).getByText("Completed")).toBeInTheDocument();
+    expect(within(anchored).getByRole("img", { name: "Completed" })).toBeInTheDocument();
     expect(within(anchored).queryByText("Read me before you judge me.")).not.toBeInTheDocument();
     const summary = anchored.querySelector("summary");
     if (!summary) throw new Error("Missing native summary");
@@ -1643,7 +1666,7 @@ describe("TaskDetail", () => {
     // The spawning tool call carries the same correlated status.
     const call = getByText("Agent").closest("details");
     if (!call) throw new Error("tool card must have a details element");
-    expect(within(call).getByText("Completed")).toBeInTheDocument();
+    expect(within(call).getByRole("img", { name: "Completed" })).toBeInTheDocument();
   });
 
   it("times a background agent's tool row by the agent instead of its launch", async () => {
@@ -3106,7 +3129,7 @@ it("keeps an open cross-context child focused when it completes, archiving it on
     ts: 5000,
     nativeSubagent: { id: "spanning-child", status: "completed", result: "Review complete" },
   });
-  await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+  await waitFor(() => expect(within(card).getByRole("img", { name: "Completed" })).toBeInTheDocument());
   expect(screen.getByTestId("native-subagent-card")).toBe(card);
   expect(card).toHaveAttribute("open");
   expect(summary).toHaveFocus();
@@ -3114,7 +3137,9 @@ it("keeps an open cross-context child focused when it completes, archiving it on
   await waitFor(() => expect(screen.getAllByTestId("native-subagent-card")).toHaveLength(1));
   expect(screen.getByTestId("native-subagent-card")).not.toBe(card);
   await waitFor(() => expect(screen.getByRole("button", { name: /^Compacted session/ })).toHaveFocus());
-  expect(screen.getByTestId("native-subagent-card")).toHaveTextContent("Completed");
+  expect(
+    within(screen.getByTestId("native-subagent-card")).getByRole("img", { name: "Completed" }),
+  ).toBeInTheDocument();
 });
 
 it("settles background work on its archived tool row across equal-time compaction", async () => {
@@ -3331,7 +3356,7 @@ for (const boundary of ["compaction", "changed init"]) {
     send?.(resultEvent(1000));
     send?.({ kind: "nativeSubagent", ts: 1000, nativeSubagent: { id: "carried-child", status: "completed" } });
     send?.({ kind: "backgroundCommand", ts: 1000, backgroundCommand: { id: "carried-shell", status: "completed" } });
-    await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+    await waitFor(() => expect(within(card).getByRole("img", { name: "Completed" })).toBeInTheDocument());
     expect(within(toolRow("carried-tool")).getByTestId("background-command-chip")).toHaveTextContent("Completed");
     expect(screen.getByTestId("native-subagent-card")).toBe(card);
     expect(summary).toHaveFocus();

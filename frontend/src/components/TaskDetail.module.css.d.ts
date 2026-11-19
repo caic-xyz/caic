@@ -130,7 +130,6 @@ declare const classes: {
   readonly "thinkingExcerpt": string;
   readonly "thinkingText": string;
   readonly "timedItemContent": string;
-  readonly "tool-spin": string;
   readonly "toolBackground": string;
   readonly "toolBlock": string;
   readonly "toolBlockPre": string;

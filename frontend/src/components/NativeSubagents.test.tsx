@@ -11,7 +11,7 @@ import type { HistoryEvent, HistoryBackgroundCommand, ISOTimestamp } from "@sdk/
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
 import { TaskTimelineProvider } from "../TaskTimelineContext";
 import { api } from "../api";
-import { BackgroundCommandStatusChip, NativeAgentCard } from "./NativeSubagents";
+import { BackgroundCommandStatusChip, NativeActivityStatus, NativeAgentCard } from "./NativeSubagents";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -243,6 +243,26 @@ const command: HistoryBackgroundCommand = {
   status: "running",
   startedAt: new Date(2000).toISOString() as ISOTimestamp,
 };
+describe("native status", () => {
+  it("marks known outcomes with icons and explains a stale running observation", () => {
+    const [status, setStatus] = createSignal("running");
+    const [settled, setSettled] = createSignal(false);
+    render(() => <NativeActivityStatus activity={{ status: status() }} settled={settled()} />);
+    expect(screen.getByRole("img", { name: "Running" })).toBeInTheDocument();
+    setSettled(true);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("Last observed running · outcome unknown")).toBeInTheDocument();
+    for (const [state, name] of [
+      ["completed", "Completed"],
+      ["failed", "Failed"],
+      ["interrupted", "Interrupted"],
+      ["paused", "Paused"],
+    ] as const) {
+      setStatus(state);
+      expect(screen.getByRole("img", { name })).toBeInTheDocument();
+    }
+  });
+});
 describe("background summaries", () => {
   it("keeps a running chip distinct from terminal exit evidence and unknown outcomes", () => {
     const [activity, setActivity] = createSignal(command);

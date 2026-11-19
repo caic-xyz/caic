@@ -146,7 +146,7 @@ for (const width of [390, 1280]) {
       );
       expect(await toolA.evaluate((el, original) => el === original, originalTool)).toBe(true);
       await expect(toolA).toHaveAttribute("open", "");
-      await expect(cardB.locator(":scope > summary")).toContainText("Running");
+      await expect(cardB.locator(":scope > summary").getByRole("img", { name: "Running" })).toBeVisible();
       expect((await api.getTask(id)).state).toBe("running");
 
       // The burst can close a bounded live subscription. Wait for its recovery
@@ -207,8 +207,8 @@ for (const width of [390, 1280]) {
       await expect(groupB.locator(":scope > summary")).toContainText("0/1 tools");
       expect((await api.getTask(id)).state).toBe("running");
       await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_FINISH" } });
-      await expect(cardA.locator(":scope > summary")).toContainText("Completed");
-      await expect(cardB.locator(":scope > summary")).toContainText("Failed");
+      await expect(cardA.locator(":scope > summary").getByRole("img", { name: "Completed" })).toBeVisible();
+      await expect(cardB.locator(":scope > summary").getByRole("img", { name: "Failed" })).toBeVisible();
       expect((await api.getTask(id)).state).toBe("running");
       await expect(toolA.locator(":scope > summary")).toBeFocused();
       await expect(cardB).toContainText("Assembly command failed");
@@ -222,8 +222,8 @@ for (const width of [390, 1280]) {
       await toolA.locator(":scope > summary").focus();
       await api.sendInput(id, { prompt: { text: "FAKE_CONCURRENT_STREAMS_ROOT_FINISH" } });
       await waitForTaskState(api, id, "waiting");
-      await expect(cardA.locator(":scope > summary")).toContainText("Completed");
-      await expect(cardB.locator(":scope > summary")).toContainText("Failed");
+      await expect(cardA.locator(":scope > summary").getByRole("img", { name: "Completed" })).toBeVisible();
+      await expect(cardB.locator(":scope > summary").getByRole("img", { name: "Failed" })).toBeVisible();
       await expect(answerB).toContainText("Assembly frames preserve local transforms.");
       await expect(cardB).not.toContainText("Assembly draft");
       await expect(cardB.getByText("Assembly frames preserve local transforms.", { exact: true })).toHaveCount(1);
@@ -242,7 +242,7 @@ for (const width of [390, 1280]) {
       await cardA.locator(":scope > summary").press("Enter");
       await expect(answerA).toHaveCount(0);
       await expect(toolA).toHaveCount(0);
-      await expect(cardA.locator(":scope > summary")).toContainText("Completed");
+      await expect(cardA.locator(":scope > summary").getByRole("img", { name: "Completed" })).toBeVisible();
       await cardA.locator(":scope > summary").press("Enter");
       await expect(answerA.locator("li")).toHaveText([
         "A bowtie uses Earcut.",
@@ -271,8 +271,8 @@ for (const width of [390, 1280]) {
         expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-      await expect(cardA.locator(":scope > summary")).toContainText("Completed");
-      await expect(cardB.locator(":scope > summary")).toContainText("Failed");
+      await expect(cardA.locator(":scope > summary").getByRole("img", { name: "Completed" })).toBeVisible();
+      await expect(cardB.locator(":scope > summary").getByRole("img", { name: "Failed" })).toBeVisible();
       expect(await totals()).toEqual(expectedTotals);
       await expect(page.getByTestId("tool-call")).toHaveCount(3);
       await groupA.locator(":scope > summary").press("Enter");

@@ -1,4 +1,4 @@
-// Native activity disclosures keep summaries mounted and build child transcripts and results only while open.
+// Native activity disclosures show status icons, keep summaries mounted, and build child transcripts and results only while open.
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
@@ -7,6 +7,7 @@ import { createActivityHistory } from "../historyDisclosure";
 import { NativeActivityTracker } from "../nativeSubagents";
 import Button from "./Button";
 import Duration from "./Duration";
+import StatusIcon, { type StatusIconState } from "./StatusIcon";
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import { backgroundCommandStatus, nativeActivityStatus, nativeTerminal } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
@@ -17,11 +18,31 @@ import { aggregateMessageGroups, IncrementalMessageGrouper } from "../grouping";
 
 type TranscriptRenderer = (groups: () => MessageGroup[]) => JSX.Element;
 
-export function NativeActivityStatus(props: { activity: HistoryActivity; settled: boolean }) {
+// nativeStatusIcon maps a reported state to its icon. A running observation
+// under a settled parent and an unreported completion have none: their outcome
+// is unknown, so the text explains it instead.
+function nativeStatusIcon(status: string, settled: boolean): StatusIconState | undefined {
+  switch (status) {
+    case "running":
+      return settled ? undefined : "running";
+    case "completed":
+    case "failed":
+    case "interrupted":
+    case "paused":
+      return status;
+    default:
+      return undefined;
+  }
+}
+
+export function NativeActivityStatus(props: { activity: Pick<HistoryActivity, "status">; settled: boolean }) {
   return (
-    <span class={styles.status} data-state={props.activity.status}>
-      {nativeActivityStatus(props.activity, props.settled)}
-    </span>
+    <Show
+      when={nativeStatusIcon(props.activity.status, props.settled)}
+      fallback={<span class={styles.status}>{nativeActivityStatus(props.activity, props.settled)}</span>}
+    >
+      {(state) => <StatusIcon state={state()} class={styles.statusIcon} />}
+    </Show>
   );
 }
 

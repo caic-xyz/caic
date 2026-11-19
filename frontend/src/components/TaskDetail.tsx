@@ -28,7 +28,6 @@ import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.sv
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import EditIcon from "@material-symbols/svg-400/outlined/edit.svg?solid";
 import MoreIcon from "@material-symbols/svg-400/outlined/more_vert.svg?solid";
-import StopCircleIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 
 import type {
   EventMessage,
@@ -111,6 +110,7 @@ import { assignNativeAnchors } from "../nativeSubagents";
 import { SyncActivityTracker, type SyncEntry } from "../syncActivity";
 import SyncActivity from "./SyncActivity";
 import StatsIcon from "./StatsIcon";
+import StatusIcon from "./StatusIcon";
 import ActionButton from "./ActionButton";
 import Duration from "./Duration";
 import TimingIcon from "./TimingIcon";
@@ -2746,17 +2746,13 @@ function GroupTiming(props: {
 // ToolPendingIcon marks a tool call or group whose work has not finished. It
 // trails the summary text.
 function ToolPendingIcon() {
-  return <span class={styles.toolPending} role="img" aria-label="Running" />;
+  return <StatusIcon state="running" class={styles.toolPending} />;
 }
 
 // ToolInterruptedIcon marks a call that ended without a result because its
 // agent process exited or its task stopped.
 function ToolInterruptedIcon() {
-  return (
-    <span class={styles.toolInterrupted} role="img" aria-label="Interrupted" title="Interrupted">
-      <StopCircleIcon aria-hidden="true" />
-    </span>
-  );
+  return <StatusIcon state="interrupted" class={styles.toolInterrupted} />;
 }
 
 function ToolMessageGroup(props: {
@@ -3181,7 +3177,12 @@ function ToolCallCard(props: {
               </Show>
               {props.call.use.name}
               <For each={props.nativeActivity ?? []}>
-                {(activity) => <NativeActivityStatus activity={activity} settled={props.nativeSettled?.() ?? false} />}
+                {(activity) => (
+                  // The trailing pending spinner already marks a running foreground delegation.
+                  <Show when={!(toolPending() && activity.status === "running")}>
+                    <NativeActivityStatus activity={activity} settled={props.nativeSettled?.() ?? false} />
+                  </Show>
+                )}
               </For>
               <Show when={detail()}>
                 <span class={styles.toolDetail}>{detail()}</span>

@@ -6,6 +6,7 @@ declare const classes: {
   readonly "duration": string;
   readonly "label": string;
   readonly "status": string;
+  readonly "statusIcon": string;
   readonly "summaryContent": string;
 };
 export default classes;

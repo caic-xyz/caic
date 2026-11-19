@@ -1048,28 +1048,6 @@ a.ciStatus:hover {
   content: "▼" / "";
 }
 
-@keyframes tool-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.toolPending {
-  display: inline-block;
-  width: 0.7em;
-  height: 0.7em;
-  vertical-align: middle;
-  border: 2px solid var(--color-border-medium);
-  border-top-color: var(--color-text-tertiary);
-  border-radius: 50%;
-  animation: tool-spin 0.8s linear infinite;
-}
-
-.toolSummaryContent > .toolPending {
-  flex-shrink: 0;
-  align-self: center;
-}
-
 .toolGroup > summary > .toolPending {
   margin-left: 0.4em;
 }
@@ -1082,17 +1060,8 @@ a.ciStatus:hover {
 }
 
 .toolInterrupted {
-  display: inline-flex;
   margin-right: 0.3em;
   font-size: 0.85em;
-  vertical-align: middle;
-  color: var(--color-text-muted);
-}
-
-.toolInterrupted svg {
-  width: 1em;
-  height: 1em;
-  fill: currentcolor;
 }
 
 .toolDetail {
@@ -1431,8 +1400,7 @@ a.ciStatus:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .historyLoading svg,
-  .headerLoading svg,
-  .toolPending {
+  .headerLoading svg {
     animation: none;
   }
 }
