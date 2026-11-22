@@ -1,9 +1,9 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build coverage custom-gcl fix generate-sdks git-hooks frontend-build frontend-deps playwright-browser screenshots-update test test-e2e test-smoke upgrade verify
+.PHONY: help benchmark build custom-gcl fix generate-sdks git-hooks frontend-build frontend-deps playwright-browser screenshots-update test test-e2e test-frontend test-smoke upgrade verify
 
-FRONTEND_TEST = pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs scripts/startup_budget.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
+FRONTEND_UNIT_TEST = NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --test-reporter-destination=stdout --import ./frontend/tests/setup-dom.ts
 FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
 
 help:
@@ -12,7 +12,8 @@ help:
 	@echo 'Available targets:'
 	@printf '  %-36s - %s\n' 'make fix' 'Apply every autofix and regenerate SDKs, indexes, and architecture docs'
 	@printf '  %-36s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
-	@printf '  %-36s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
+	@printf '  %-36s - %s\n' 'make test [COVERAGE=1]' 'Run unit tests (Go, frontend, Python); COVERAGE=1 adds frontend coverage'
+	@printf '  %-36s - %s\n' 'make test-frontend [FILES=...]' 'Run frontend unit tests, or only the named test files'
 	@printf '  %-36s - %s\n' 'make test-e2e [SPEC=...] [ROUNDS=N]' 'Run Playwright end-to-end tests, or one spec, N times (slow)'
 	@printf '  %-36s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
 	@printf '  %-36s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
@@ -89,12 +90,23 @@ benchmark: frontend-deps
 	@pnpm exec tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'
 
 # Independent Go, frontend, and Python suites run after dependency installation.
+# Go coverage is cheap and always goes to coverage.out; view it with
+# go tool cover -html=coverage.out. Frontend coverage is costly: it doubles the
+# frontend unit lane, which sets the target's wall time (22 s without, 50 s
+# with, on a 24-core host). COVERAGE=1 enables it and writes
+# frontend/coverage/lcov.info; CI sets it on the job that uploads coverage.
+FRONTEND_COVERAGE = $(if $(filter 1,$(COVERAGE)),--experimental-test-coverage --test-reporter=lcov --test-reporter-destination=frontend/coverage/lcov.info)
 test: frontend-deps
 	@./scripts/run-concurrently.sh \
 		go,frontend,python \
-		'go test -cover ./...' \
-		'$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)' \
+		'go test -coverprofile=coverage.out ./...' \
+		'pnpm exec tsx --test e2e/browser.test.ts e2e/bundle.test.ts && pnpm exec node --test scripts/css_module_types.test.mjs scripts/startup_budget.test.mjs && $(FRONTEND_UNIT_TEST) $(FRONTEND_COVERAGE) $(FRONTEND_TEST_FILES)' \
 		'uv run --locked python scripts/run_python_tests.py'
+
+# Frontend unit tests without coverage or the build-script checks. FILES limits
+# the run to the named test files.
+test-frontend: frontend-deps
+	@$(FRONTEND_UNIT_TEST) $(or $(FILES),$(FRONTEND_TEST_FILES))
 
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
@@ -129,17 +141,6 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 # without that runtime (see the smoke build tag sources for what they need).
 test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
-
-coverage: frontend-deps
-	@go test -coverprofile=coverage.out ./...
-	@echo ""
-	@echo "=== Go coverage ==="
-	@go tool cover -func=coverage.out | tail -1
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "  HTML report: coverage.html"
-	@echo ""
-	@echo "=== Frontend coverage ==="
-	@$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)
 
 git-hooks: frontend-deps
 	@./scripts/install-git-hooks.sh

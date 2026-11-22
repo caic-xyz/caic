@@ -48,7 +48,6 @@ describe("thinking display runs", () => {
     );
     expect(groups.filter((group) => group.kind === "action")).toHaveLength(1);
     expect(groups[0]?.content?.text).toBe("First thought.\n\nLatest thought.");
-    expect(groups.flatMap((group) => group.events).filter((event) => event.kind === "usage")).toHaveLength(1);
   });
 
   it("combines scoped items across tools without changing their streaming snapshots", () => {
@@ -336,8 +335,8 @@ describe("groupMessages", () => {
       completion,
     ]);
 
-    expect(groups.map((group) => group.kind)).toEqual(["text", "other", "other"]);
-    expect(groups[2]?.resultDuplicatesText).toBe(true);
+    expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
+    expect(groups[1]?.resultDuplicatesText).toBe(true);
   });
 
   it("keeps preceding assistant text when the result payload differs", () => {

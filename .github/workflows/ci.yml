@@ -40,11 +40,9 @@ jobs:
           status=$(git status --porcelain)
           [ -z "$status" ] || { echo 'The build left a dirty worktree; commit the generated files it rewrote:' >&2; echo "$status" >&2; exit 1; }
       - name: Test
-        if: runner.os != 'Linux'
+        env:
+          COVERAGE: ${{ runner.os == 'Linux' && '1' || '' }}
         run: make test
-      - name: Coverage
-        if: runner.os == 'Linux'
-        run: make coverage
       - name: Install ffmpeg
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg

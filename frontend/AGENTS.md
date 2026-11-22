@@ -39,13 +39,12 @@ unrelated dependency edits. Use `go.work` separately when testing Go changes.
 
 Unit tests use `node:test` through `tsx --test`. The vitest runner is not
 installed: `npx vitest` and `pnpm exec vitest` fail. `make test` runs the
-complete lane. To run one file, use the flags of `FRONTEND_TEST` in the
-`Makefile`:
+complete lane; `make test COVERAGE=1` adds frontend coverage, which doubles
+the lane's time. `make test-frontend` runs only the frontend unit tests;
+`FILES` limits it to named files:
 
 ```bash
-NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test \
-  --conditions=browser --test-force-exit --import ./frontend/tests/setup-dom.ts \
-  frontend/src/grouping.test.ts
+make test-frontend FILES=frontend/src/grouping.test.ts
 ```
 
 Assertions and mocks come from the `tests/expect.ts` facade (vitest's

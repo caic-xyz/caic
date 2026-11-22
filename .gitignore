@@ -19,7 +19,6 @@
 /e2e/screenshots/.frontend.previous/
 /e2e/screenshots/.frontend.publish.lock
 /emulator*.log
-/frontend/coverage/
 /go.work
 /go.work.sum
 /package-lock.json
@@ -27,6 +26,5 @@
 /tmp/
 /visual-screenshots-failures/
 __pycache__/
-coverage.html
 coverage.out
 node_modules/

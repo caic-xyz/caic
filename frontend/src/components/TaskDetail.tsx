@@ -2361,7 +2361,7 @@ function hasGroupTiming(group: MessageGroup): boolean {
         (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
     );
   }
-  return group.kind !== "other" || group.events.some((event) => event.kind !== "usage");
+  return true;
 }
 
 // compactTokenSummary describes the harness-reported context transition on a
