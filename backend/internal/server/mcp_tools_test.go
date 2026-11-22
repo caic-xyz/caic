@@ -2477,10 +2477,8 @@ func TestMCPTools(t *testing.T) {
 				t.Fatalf("agent_last_message = %#v", result.Structured)
 			}
 
-			history, _, unsubscribe := entry.Task().Subscribe(t.Context())
-			unsubscribe()
-			if len(history) != 0 {
-				t.Fatalf("restored task retained %d history messages", len(history))
+			if n := entry.Task().MessageCount(); n != 0 {
+				t.Fatalf("restored task retained %d history messages", n)
 			}
 		})
 		t.Run("valid_recorded_result_without_scanning_the_log", func(t *testing.T) {
@@ -2610,10 +2608,8 @@ func TestMCPTools(t *testing.T) {
 				if result.IsError || !ok || output.Result != "Task #1 result: offline prompt rejected" {
 					t.Fatalf("correlated result = %#v", result.Structured)
 				}
-				history, _, unsubscribe := entry.Task().Subscribe(t.Context())
-				unsubscribe()
-				if len(history) != 0 {
-					t.Fatalf("query retained %d task messages", len(history))
+				if n := entry.Task().MessageCount(); n != 0 {
+					t.Fatalf("query retained %d task messages", n)
 				}
 			})
 			t.Run(fmt.Sprintf("error_required_native_decode/compressed=%t", compressed), func(t *testing.T) {

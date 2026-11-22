@@ -317,7 +317,7 @@ func TestTaskService(t *testing.T) {
 				tk.SetState(task.StateWaiting)
 				insertTestTask(s, tk.ID, tk)
 				e, _ := s.taskMgr.GetEntry(tk.ID)
-				_, live, unsubscribe := tk.Subscribe(t.Context())
+				wake, unsubscribe := tk.SubscribeTimelineWakeups(t.Context())
 				t.Cleanup(unsubscribe)
 				session, conn := newGatedInputSession(t, tk, claudecode.New().NewWire)
 				ctx, cancel := context.WithCancel(t.Context())
@@ -364,7 +364,7 @@ func TestTaskService(t *testing.T) {
 					t.Fatalf("accepted input state=%s result=%+v", tk.GetState(), e.Result())
 				}
 				select {
-				case <-live:
+				case <-wake:
 				case <-time.After(5 * time.Second):
 					t.Fatal("accepted input was not dispatched")
 				}

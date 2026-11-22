@@ -157,22 +157,6 @@ func BenchmarkTask(b *testing.B) {
 	})
 }
 
-// recvType reads one message type from a live subscriber channel. The task
-// fanout performs a synchronous non-blocking send into a buffered channel
-// during addTaskMessage, so a message is available immediately on return; a
-// non-blocking receive is therefore deterministic with no timing dependency.
-func recvType(ch <-chan TimelineMessage) string {
-	select {
-	case m, ok := <-ch:
-		if !ok {
-			return ""
-		}
-		return m.Message.Type()
-	default:
-		return ""
-	}
-}
-
 func TestTask(t *testing.T) {
 	t.Run("CodexZeroDeltaReplacesBilledFallback", func(t *testing.T) {
 		t.Parallel()
@@ -996,10 +980,8 @@ func TestTask(t *testing.T) {
 		const timestamp = int64(1_788_122_692_466)
 		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: message, ProducerTime: time.UnixMilli(timestamp)}}, nil)
 
-		history, _, unsubscribe := tk.Subscribe(t.Context())
-		defer unsubscribe()
-		if len(history) != 1 || history[0].Message != message || history[0].ObservedAt.UnixMilli() != timestamp {
-			t.Fatalf("history = %#v, want message observed at %d", history, timestamp)
+		if got := tk.timeline; len(got) != 1 || got[0].Message != message || got[0].ProducerTime.UnixMilli() != timestamp {
+			t.Fatalf("timeline = %#v, want message observed at %d", got, timestamp)
 		}
 	})
 	t.Run("SeedTimelineCompactsFinalizedDeltas", func(t *testing.T) {
@@ -1094,25 +1076,23 @@ func TestTask(t *testing.T) {
 						suffix := []agent.TimedMessage{{Message: messages[2]}, {Message: messages[3]}, {Message: messages[4]}}
 						tk.SeedTimelineParts(prefix, suffix, nil)
 					}
-					history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
-					defer unsubscribe()
-					defer history.Release()
+					history := tk.Messages()
 					for _, i := range []int{0, 2} {
-						if got := history.At(i).Message; got != messages[i] {
+						if got := history[i]; got != messages[i] {
 							t.Errorf("parent fragment %d compacted by child: %#v", i, got)
 						}
 					}
 					for _, i := range []int{1, 3} {
 						var text string
 						var source v3.MessageSource
-						switch m := history.At(i).Message.(type) {
+						switch m := history[i].(type) {
 						case *agent.TextDeltaMessage:
 							text, source = m.Text, m.Source
 						case *agent.ThinkingDeltaMessage:
 							text, source = m.Text, m.Source
 						}
 						if text != "" || source != child {
-							t.Errorf("child placeholder %d lost identity or retained payload: %#v", i, history.At(i).Message)
+							t.Errorf("child placeholder %d lost identity or retained payload: %#v", i, history[i])
 						}
 					}
 				})
@@ -1134,79 +1114,26 @@ func TestTask(t *testing.T) {
 			t.Error("published live delta was mutated")
 		}
 	})
-	t.Run("LiveCompactionWaitsForSnapshotRelease", func(t *testing.T) {
+	t.Run("LiveCompactionWaitsForReaderRelease", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
 		addTaskMessage(tk, delta)
-		history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
-		defer unsubscribe()
+		messages := tk.ForwardMessages()
 		addTaskMessage(tk, &agent.TextMessage{Text: "complete"})
 
-		if got := history.At(0).Message; got != delta {
-			t.Fatalf("active snapshot delta = %#v, want original", got)
-		}
 		if tk.timeline[0].Message != delta {
-			t.Fatal("retained delta compacted while snapshot was active")
+			t.Fatal("retained delta compacted while a reader was active")
 		}
-		history.Release()
+		var got []agent.Message
+		for m := range messages {
+			got = append(got, m)
+		}
+		if len(got) != 1 || got[0] != delta {
+			t.Fatalf("active reader messages = %#v, want original delta", got)
+		}
 		if tk.timeline[0].Message != compactedTextDelta {
-			t.Errorf("released snapshot delta = %#v, want compacted placeholder", tk.timeline[0].Message)
-		}
-	})
-	t.Run("CanceledSnapshotRemainsStableUntilRelease", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
-		addTaskMessage(tk, delta)
-		ctx, cancel := context.WithCancel(t.Context())
-		history, _, unsubscribe := tk.SubscribeSnapshot(ctx)
-		cancel()
-		addTaskMessage(tk, &agent.TextMessage{Text: "complete"})
-
-		if got := history.At(0).Message; got != delta {
-			t.Fatalf("canceled snapshot delta = %#v, want original", got)
-		}
-		if tk.timeline[0].Message != delta {
-			t.Fatal("retained delta compacted before canceled snapshot was released")
-		}
-		unsubscribe()
-		if tk.timeline[0].Message != compactedTextDelta {
-			t.Errorf("released canceled snapshot delta = %#v, want compacted placeholder", tk.timeline[0].Message)
-		}
-	})
-	t.Run("LiveSubscriberRetainsPublishedDelta", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		_, live, unsubscribe := tk.Subscribe(t.Context())
-		defer unsubscribe()
-		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
-		addTaskMessage(tk, delta)
-		addTaskMessage(tk, &agent.TextMessage{Text: "complete"})
-
-		if got := recvMsg(t, live); got != delta || delta.Text == "" {
-			t.Errorf("published delta = %#v, want original payload", got)
-		}
-	})
-	t.Run("SubscribeSnapshotRetainsCallTimeHistory", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		first := &agent.TextMessage{Text: "first"}
-		tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{first}), nil)
-		history, live, unsubscribe := tk.SubscribeSnapshot(t.Context())
-		defer unsubscribe()
-		defer history.Release()
-
-		second := &agent.TextMessage{Text: "second"}
-		addTaskMessage(tk, second)
-		if history.Len() != 1 {
-			t.Fatalf("snapshot length = %d, want 1", history.Len())
-		}
-		if got := history.At(0); got.Message != first || got.Sequence != 1 {
-			t.Errorf("snapshot message = %#v, want first message at sequence 1", got)
-		}
-		if got := recvMsg(t, live); got != second {
-			t.Errorf("live message = %#v, want second message", got)
+			t.Errorf("released reader delta = %#v, want compacted placeholder", tk.timeline[0].Message)
 		}
 	})
 	t.Run("TerminalLogSummary", func(t *testing.T) {
@@ -1474,43 +1401,6 @@ func TestTask(t *testing.T) {
 			t.Errorf("state = %v, want waiting", got)
 		}
 	})
-	t.Run("AddMessageSkipsSpuriousExitAfterCleanTurn", func(t *testing.T) {
-		t.Parallel()
-		// A non-zero exit that follows a cleanly completed turn (e.g. SIGINT
-		// from a user-requested stop, exit code -2) must not be fanned out to
-		// live SSE subscribers: it is a spurious termination artifact already
-		// dropped from the persisted replay, so the live stream must match.
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.SetState(task.StateRunning)
-		_, ch, unsub := tk.Subscribe(t.Context())
-		defer unsub()
-
-		addTaskMessage(tk, &agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"})
-		addTaskMessage(tk, &agent.ExitMessage{ExitCode: -2})
-
-		got := recvType(ch)
-		if got != "result" {
-			t.Fatalf("live msg = %q, want %q", got, "result")
-		}
-		if extra := recvType(ch); extra != "" {
-			t.Fatalf("spurious exit fanned out: got %q, want none", extra)
-		}
-	})
-	t.Run("AddMessageFansOutExitMidTurn", func(t *testing.T) {
-		t.Parallel()
-		// A non-zero exit with no preceding clean result is a genuine
-		// interruption and must still reach live subscribers.
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		tk.SetState(task.StateRunning)
-		_, ch, unsub := tk.Subscribe(t.Context())
-		defer unsub()
-
-		addTaskMessage(tk, &agent.ExitMessage{ExitCode: -2})
-
-		if got := recvType(ch); got != "caic_exit" {
-			t.Fatalf("live msg = %q, want %q", got, "caic_exit")
-		}
-	})
 	t.Run("MarkSessionFailed", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -1529,151 +1419,6 @@ func TestTask(t *testing.T) {
 		if got := tk.LastExitError(); got != "Unknown option: --approve" {
 			t.Fatalf("recorded exit = %q", got)
 		}
-	})
-	t.Run("Subscribe", func(t *testing.T) {
-		t.Parallel()
-		t.Run("SlowSubscriberThenCancel", func(t *testing.T) {
-			t.Parallel()
-			// Regression test: if fan-out drops and closes a slow subscriber,
-			// later cancellation and explicit cleanup must not double-close it.
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			ctx, cancel := context.WithCancel(t.Context())
-			_, ch, unsub := tk.Subscribe(ctx)
-			defer unsub()
-
-			// Fill the subscriber buffer (256) so the next send overflows.
-			for range 256 {
-				addTaskMessage(tk, &agent.SystemMessage{MessageType: "system", Subtype: "status"})
-			}
-			// This send should trigger the slow-subscriber drop+close.
-			addTaskMessage(tk, &agent.SystemMessage{MessageType: "system", Subtype: "status"})
-
-			// Drain to confirm channel was closed by fan-out.
-			for range ch {
-			}
-
-			cancel()
-			unsub()
-		})
-		t.Run("ExplicitUnsubscribeClosesChannel", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			_, ch, unsub := tk.Subscribe(t.Context())
-			unsub()
-			unsub()
-
-			if _, ok := <-ch; ok {
-				t.Fatal("subscriber channel remained open after unsubscribe")
-			}
-		})
-		t.Run("Replay", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			// Add messages before subscribing.
-			msg1 := &agent.SystemMessage{MessageType: "system", Subtype: "status"}
-			msg2 := &agent.TextMessage{Text: "hello"}
-			addTaskMessage(tk, msg1)
-			addTaskMessage(tk, msg2)
-
-			history, ch, unsub := tk.Subscribe(t.Context())
-			defer unsub()
-			_ = ch
-
-			if len(history) != 2 {
-				t.Fatalf("history len = %d, want 2", len(history))
-			}
-			if history[0].Message.Type() != "system" {
-				t.Errorf("history[0].Message.Type() = %q, want %q", history[0].Message.Type(), "system")
-			}
-			if history[1].Message.Type() != "text" {
-				t.Errorf("history[1].Message.Type() = %q, want %q", history[1].Message.Type(), "text")
-			}
-		})
-		t.Run("ReplayLargeHistory", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			// Add more messages than any reasonable channel buffer to verify no deadlock.
-			const n = 1000
-			for range n {
-				addTaskMessage(tk, &agent.TextMessage{Text: "msg"})
-			}
-
-			history, ch, unsub := tk.Subscribe(t.Context())
-			defer unsub()
-			_ = ch
-
-			if len(history) != n {
-				t.Fatalf("history len = %d, want %d", len(history), n)
-			}
-		})
-		t.Run("MultipleListeners", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			addTaskMessage(tk, &agent.SystemMessage{MessageType: "system", Subtype: "init"})
-
-			// Start two subscribers.
-			h1, ch1, unsub1 := tk.Subscribe(t.Context())
-			defer unsub1()
-			h2, ch2, unsub2 := tk.Subscribe(t.Context())
-			defer unsub2()
-
-			// Both get the same history.
-			if len(h1) != 1 || len(h2) != 1 {
-				t.Fatalf("history lens = %d, %d; want 1, 1", len(h1), len(h2))
-			}
-
-			// Send a live message — both channels should receive it.
-			addTaskMessage(tk, &agent.TextMessage{Text: "live"})
-
-			timeout := time.After(time.Second)
-			for i, ch := range []<-chan TimelineMessage{ch1, ch2} {
-				select {
-				case msg := <-ch:
-					if msg.Message.Type() != "text" {
-						t.Errorf("subscriber %d: type = %q, want %q", i, msg.Message.Type(), "text")
-					}
-				case <-timeout:
-					t.Fatalf("subscriber %d: timed out waiting for live message", i)
-				}
-			}
-		})
-		t.Run("Live", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-
-			_, ch, unsub := tk.Subscribe(t.Context())
-			defer unsub()
-
-			// Send a live message after subscribing.
-			msg := &agent.TextMessage{Text: "live"}
-			addTaskMessage(tk, msg)
-
-			timeout := time.After(time.Second)
-			select {
-			case got := <-ch:
-				if got.Message.Type() != "text" {
-					t.Errorf("type = %q, want %q", got.Message.Type(), "text")
-				}
-			case <-timeout:
-				t.Fatal("timed out waiting for live message")
-			}
-		})
-		t.Run("TimelinePreservesSuppressedMessageGaps", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			_, ch, unsub := tk.Subscribe(t.Context())
-			defer unsub()
-
-			addTaskMessage(tk, &agent.ResultMessage{MessageType: "result", Subtype: "success"})
-			if got := <-ch; got.Sequence != 1 {
-				t.Fatalf("result sequence = %d, want 1", got.Sequence)
-			}
-			addTaskMessage(tk, &agent.ExitMessage{ExitCode: 2, Error: "interrupted"})
-			addTaskMessage(tk, &agent.TextMessage{Text: "next turn"})
-			if got := <-ch; got.Sequence != 3 {
-				t.Fatalf("message sequence = %d, want 3 after suppressed exit", got.Sequence)
-			}
-		})
 	})
 
 	t.Run("SendInput", func(t *testing.T) {
@@ -1753,8 +1498,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.SetState(task.StateWaiting)
-			_, live, unsubscribe := tk.Subscribe(t.Context())
-			t.Cleanup(unsubscribe)
+			live := newMessageCursor(t, tk)
 			_, run := mustTaskRun(t, tk)
 			writer := taskInputWriter(func(p []byte) (int, error) {
 				if err := taskNative(t.Context(), run.records, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`); err != nil {
@@ -1781,12 +1525,9 @@ func TestTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			var order []string
-			for range 3 {
-				select {
-				case msg := <-live:
-					order = append(order, msg.Message.Type())
-				case <-t.Context().Done():
-					t.Fatal("missing live output")
+			for len(order) < 3 {
+				if m := live.recv(t).Message; !agent.IsInputDeliveryControl(m) {
+					order = append(order, m.Type())
 				}
 			}
 			if !slices.Equal(order, []string{"user_input", "text", "result"}) {
@@ -4203,23 +3944,6 @@ func TestTask(t *testing.T) {
 					t.Errorf("state after the retirement = %v, want waiting", got)
 				}
 			})
-		})
-		t.Run("Subscribe", func(t *testing.T) {
-			t.Parallel()
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			msgs := []agent.Message{
-				&agent.TextMessage{Text: "msg1"},
-				&agent.TextMessage{Text: "msg2"},
-			}
-			tk.SeedTimelineParts(nil, agenttest.TimedMessages(msgs), nil)
-
-			// A subscriber should see restored messages in the history snapshot.
-			history, _, unsub := tk.Subscribe(t.Context())
-			t.Cleanup(unsub)
-
-			if len(history) != 2 {
-				t.Fatalf("history len = %d, want 2", len(history))
-			}
 		})
 		t.Run("EmptyResultUsesRestoredTurnText", func(t *testing.T) {
 			t.Parallel()

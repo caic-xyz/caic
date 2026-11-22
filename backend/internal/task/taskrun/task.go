@@ -155,7 +155,6 @@ type Task struct {
 	turnQueued             bool                            // The harness queued a turn after the last root result or host exit, or that result reported one.
 	skillReads             agent.SkillReadTracker
 
-	subs            []*sub          // active sequenced message subscribers
 	wakeSubs        []chan struct{} // active coalescing timeline wakeup subscribers
 	rateLimitSubs   []*rateLimitSub // active lossless quota subscribers
 	handle          *SessionHandle  // current active session; nil when no session is attached
@@ -1310,66 +1309,6 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 	return h, err
 }
 
-// Subscribe returns a snapshot of all past messages plus a live channel for
-// new messages. The caller must call unsubFn when done to release resources.
-func (t *Task) Subscribe(ctx context.Context) (history []TimelineMessage, live <-chan TimelineMessage, unsubFn func()) {
-	s := &sub{ch: make(chan TimelineMessage, 256)}
-
-	t.mu.Lock()
-	// Snapshot history under lock — no channel writes, so no deadlock risk
-	// regardless of history size.
-	view := t.timelineViewLocked()
-	history = make([]TimelineMessage, view.Len())
-	for i, entry := range view.Forward() {
-		history[i] = TimelineMessage{Message: entry.Message, Sequence: uint64(i + 1), ObservedAt: entry.ProducerTime} //nolint:gosec // A timeline cannot approach uint64 capacity.
-	}
-	t.subs = append(t.subs, s)
-	t.mu.Unlock()
-
-	return history, s.ch, unsubscribeMessages(t, ctx, s)
-}
-
-// SubscribeSnapshot returns a zero-copy view of past messages plus a live
-// channel for messages appended after the snapshot. The view remains stable
-// until history.Release or unsubFn is called. The caller must call one of them;
-// context cancellation only unsubscribes the live channel and does not release
-// the snapshot lease.
-func (t *Task) SubscribeSnapshot(ctx context.Context) (history TimelineSnapshot, live <-chan TimelineMessage, unsubFn func()) {
-	s := &sub{ch: make(chan TimelineMessage, 256)}
-	t.mu.Lock()
-	history.entries = t.acquireTimelineReaderLocked()
-	history.lease = &timelineSnapshotLease{release: t.releaseTimelineReader}
-	t.subs = append(t.subs, s)
-	t.mu.Unlock()
-	unsubMessages := unsubscribeMessages(t, ctx, s)
-	return history, s.ch, func() {
-		history.Release()
-		unsubMessages()
-	}
-}
-
-func unsubscribeMessages(t *Task, ctx context.Context, s *sub) func() {
-	var once sync.Once
-	cleanup := func() {
-		once.Do(func() {
-			t.mu.Lock()
-			for i, ss := range t.subs {
-				if ss == s {
-					t.subs = append(t.subs[:i], t.subs[i+1:]...)
-					break
-				}
-			}
-			t.mu.Unlock()
-			s.close()
-		})
-	}
-	stop := context.AfterFunc(ctx, cleanup)
-	return func() {
-		stop()
-		cleanup()
-	}
-}
-
 // SubscribeTimelineWakeups returns a channel that receives a signal after
 // timeline messages are published. Signals coalesce: one pending signal stands
 // for any number of messages, so a burst never drops the subscriber. Consumers
@@ -2037,8 +1976,8 @@ func (t *Task) settledTurnStateLocked() task.State {
 	}
 }
 
-// addParsedMessage folds an accepted semantic message into task state and
-// the subscriber timeline.
+// addParsedMessage folds an accepted semantic message into task state and the
+// timeline, then wakes timeline subscribers.
 func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	m := parsed.Message
 	child := m.Provenance().IsChild()
@@ -2089,7 +2028,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	parsed.ProducerTime = at
 	t.timeline = append(t.timeline, parsed)
 	t.turnMetrics.Observe(m, producerAt)
-	visible := t.exitStatus.Observe(m)
+	t.exitStatus.Observe(m)
 	if sm, ok := m.(*agent.SystemMessage); ok && !child {
 		switch sm.Subtype {
 		case agent.SystemSubtypeInputDeliveryStarted:
@@ -2263,30 +2202,6 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	// Forward the folded message to the usage rollup with the cost snapshot
 	// reflecting every prior fold in this message.
 	t.observeRollupLocked(m, at, producerAt, false)
-	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
-	// follows a cleanly completed turn: it is a spurious termination artifact
-	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
-	// persisted replay, so the live stream must match to avoid a transient
-	// "Agent exited" error that disappears when the task log is reloaded.
-	if !visible {
-		return stateChanged
-	}
-	t.broadcastTimelineMessageLocked(m, at)
-	return stateChanged
-}
-
-func (t *Task) broadcastTimelineMessageLocked(m agent.Message, at time.Time) {
-	event := TimelineMessage{Message: m, Sequence: uint64(t.timelineLenLocked()), ObservedAt: at} //nolint:gosec // A timeline cannot approach uint64 capacity.
-	for i := 0; i < len(t.subs); i++ {
-		select {
-		case t.subs[i].ch <- event:
-		default:
-			// Slow subscriber — drop and remove.
-			t.subs[i].close()
-			t.subs = append(t.subs[:i], t.subs[i+1:]...)
-			i--
-		}
-	}
 	for _, ch := range t.wakeSubs {
 		select {
 		case ch <- struct{}{}:
@@ -2294,6 +2209,7 @@ func (t *Task) broadcastTimelineMessageLocked(m agent.Message, at time.Time) {
 			// A signal is already pending.
 		}
 	}
+	return stateChanged
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {
@@ -2714,44 +2630,6 @@ func (v timelineEntries) Slice(end int) timelineEntries {
 	return timelineEntries{prefix: v.prefix, suffix: v.suffix[:end-len(v.prefix)]}
 }
 
-// TimelineMessage is an immutable task message and its stable, one-based
-// position in the task timeline.
-type TimelineMessage struct {
-	Message    agent.Message
-	Sequence   uint64
-	ObservedAt time.Time
-}
-
-// TimelineSnapshot is a stable view of a task timeline at subscription time.
-// It retains the underlying entries without copying them until Release or the
-// subscription's unsubscribe function is called.
-type TimelineSnapshot struct {
-	entries timelineEntries
-	lease   *timelineSnapshotLease
-}
-
-// Len returns the number of messages retained by the snapshot.
-func (s TimelineSnapshot) Len() int { return s.entries.Len() }
-
-// At returns the indexed message with its stable one-based sequence number.
-func (s TimelineSnapshot) At(i int) TimelineMessage {
-	entry := s.entries.At(i)
-	return TimelineMessage{Message: entry.Message, Sequence: uint64(i + 1), ObservedAt: entry.ProducerTime} //nolint:gosec // A timeline cannot approach uint64 capacity.
-}
-
-// Release allows finalized live deltas retained for this zero-copy snapshot to
-// be compacted. It must be called once after replay finishes.
-func (s TimelineSnapshot) Release() {
-	if s.lease != nil {
-		s.lease.once.Do(s.lease.release)
-	}
-}
-
-type timelineSnapshotLease struct {
-	once    sync.Once
-	release func()
-}
-
 // seedStateTime returns the recorded time the loaded timeline entered state
 // next. Producer timestamps survive a restart, so the adopted task reports the
 // same state duration and running turn start as the live task did. A running
@@ -3030,18 +2908,6 @@ func lastTurnHasExitPlan(entries timelineEntries) bool {
 		}
 	}
 	return false
-}
-
-// sub is a message subscriber with a once-guarded close to prevent double-close
-// panics when both the fan-out (slow subscriber drop) and context cancellation
-// race to close the channel.
-type sub struct {
-	ch   chan TimelineMessage
-	once sync.Once
-}
-
-func (s *sub) close() {
-	s.once.Do(func() { close(s.ch) })
 }
 
 type rateLimitSub struct {

@@ -1391,22 +1391,12 @@ func TestManager(t *testing.T) {
 					Utilization:   1,
 				}}), nil)
 				m.Insert(tk.ID, m.NewEntry(tk, nil))
-				_, live, unsubscribe := tk.Subscribe(m.serverCtx)
-				t.Cleanup(unsubscribe)
 				_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
 
 				if err := m.Close(); err != nil {
 					t.Fatalf("Close() = %v, want nil", err)
 				}
 
-				select {
-				case _, ok := <-live:
-					if ok {
-						t.Fatal("live task subscription remained open after Manager.Close")
-					}
-				case <-time.After(time.Second):
-					t.Fatal("live task subscription did not close after Manager.Close")
-				}
 				select {
 				case _, ok := <-rateLimitLive:
 					if ok {

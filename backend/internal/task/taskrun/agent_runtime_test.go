@@ -1396,19 +1396,18 @@ else:
 				t.Parallel()
 				r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", nil), "", nil)
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-				_, sub, unsub := tk.Subscribe(t.Context())
-				t.Cleanup(unsub)
+				sub := newMessageCursor(t, tk)
 				run := beginTestExecution(t, r, tk)
 				line := `{"t":"agent","ts":1.234,"msg":{"type":"assistant","message":{"content":[{"type":"text","text":"timed"}]}}}` + "\n"
 				if _, _, err := agent.NewRelayRecordReader(t.Context(), strings.NewReader(line), run.records).ReadRecord(); err != nil {
 					t.Fatal(err)
 				}
-				got := <-sub
+				got := sub.recv(t)
 				if text, ok := got.Message.(*agent.TextMessage); !ok || text.Text != "timed" {
-					t.Fatalf("subscriber message=%#v", got.Message)
+					t.Fatalf("recorded message=%#v", got.Message)
 				}
-				if want := time.Unix(1, 234_000_000); !got.ObservedAt.Equal(want) {
-					t.Fatalf("subscriber observed time = %v, want %v", got.ObservedAt, want)
+				if want := time.Unix(1, 234_000_000); !got.ProducerTime.Equal(want) {
+					t.Fatalf("recorded producer time = %v, want %v", got.ProducerTime, want)
 				}
 				if err := r.closeRun(tk, run); err != nil {
 					t.Fatal(err)
@@ -1539,8 +1538,7 @@ else:
 					BranchName:     "caic-0",
 					CommitHash:     "1111111111111111111111111111111111111111",
 				}}, true, nil))
-				_, ch, unsub := tk.Subscribe(t.Context())
-				t.Cleanup(unsub)
+				ch := newMessageCursor(t, tk)
 
 				run := beginTestExecution(t, r, tk)
 
@@ -1549,24 +1547,19 @@ else:
 				}
 
 				// Wait for the dispatched message.
-				timeout := time.After(time.Second)
-				select {
-				case got := <-ch:
-					rr, ok := got.Message.(*agent.ResultMessage)
-					if !ok {
-						t.Fatalf("expected *agent.ResultMessage, got %T", got.Message)
-					}
-					if len(rr.DiffStat) != 1 || rr.DiffStat[0].Path != "main.go" {
-						t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", rr.DiffStat)
-					}
-				case <-timeout:
-					t.Fatal("timed out waiting for message")
+				got := ch.recv(t)
+				rr, ok := got.Message.(*agent.ResultMessage)
+				if !ok {
+					t.Fatalf("expected *agent.ResultMessage, got %T", got.Message)
+				}
+				if len(rr.DiffStat) != 1 || rr.DiffStat[0].Path != "main.go" {
+					t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", rr.DiffStat)
 				}
 				if got := tk.Snapshot().DiffStat; len(got) != 1 || got[0].Path != "main.go" {
 					t.Errorf("result did not update live stats without a newer read: %+v", got)
 				}
 
-				summaryMessage := recvMsg(t, ch)
+				summaryMessage := ch.recv(t).Message
 				summary, ok := summaryMessage.(*agent.DiffStatMessage)
 				if !ok || len(summary.DiffStat) != 1 {
 					t.Fatalf("result summary = %#v", summaryMessage)
@@ -1577,21 +1570,17 @@ else:
 					BranchName:     "caic-0",
 					CommitHash:     "2222222222222222222222222222222222222222",
 				}}
-				select {
-				case got := <-ch:
-					snapshot, ok := got.Message.(*agent.TurnCommitSnapshotMessage)
-					if !ok {
-						t.Fatalf("expected *agent.TurnCommitSnapshotMessage, got %T", got.Message)
-					}
-					if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
-						t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
-					}
-					wantChange := &v3.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 2, BinaryFiles: 1}
-					if !reflect.DeepEqual(snapshot.ChangeStat, wantChange) {
-						t.Errorf("commit snapshot change = %+v, want %+v", snapshot.ChangeStat, wantChange)
-					}
-				case <-timeout:
-					t.Fatal("timed out waiting for commit snapshot")
+				msg := ch.recv(t).Message
+				snapshot, ok := msg.(*agent.TurnCommitSnapshotMessage)
+				if !ok {
+					t.Fatalf("expected *agent.TurnCommitSnapshotMessage, got %T", msg)
+				}
+				if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
+					t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
+				}
+				wantChange := &v3.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 2, BinaryFiles: 1}
+				if !reflect.DeepEqual(snapshot.ChangeStat, wantChange) {
+					t.Errorf("commit snapshot change = %+v, want %+v", snapshot.ChangeStat, wantChange)
 				}
 				// The finished turn hands what it committed to the host, and leaves
 				// what it did not commit pending in the container.
@@ -1624,8 +1613,7 @@ else:
 						tk.Repos = []repo.Mount{{Branch: "caic-0"}}
 						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 						tk.SetState(task.StateRunning)
-						_, ch, unsub := tk.Subscribe(t.Context())
-						t.Cleanup(unsub)
+						ch := newMessageCursor(t, tk)
 
 						run := beginTestExecution(t, r, tk)
 
@@ -1635,18 +1623,18 @@ else:
 							t.Fatal(err)
 						}
 						// Drain the tool_use message from the subscriber.
-						recvMsg(t, ch)
+						ch.recv(t)
 
 						// Send the tool result.
 						if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, toolID)); err != nil {
 							t.Fatal(err)
 						}
 
-						msg := recvMsg(t, ch)
+						msg := ch.recv(t).Message
 						if _, ok := msg.(*agent.ToolResultMessage); !ok {
 							t.Fatalf("expected *agent.ToolResultMessage, got %T", msg)
 						}
-						msg = recvMsg(t, ch)
+						msg = ch.recv(t).Message
 						ds, ok := msg.(*agent.DiffStatMessage)
 						if !ok {
 							t.Fatalf("expected *agent.DiffStatMessage, got %T", msg)
@@ -1669,21 +1657,19 @@ else:
 						if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":%q,"input":{}}]}}`, secondID, tool)); err != nil {
 							t.Fatal(err)
 						}
-						recvMsg(t, ch)
+						ch.recv(t)
 						if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, secondID)); err != nil {
 							t.Fatal(err)
 						}
-						if msg := recvMsg(t, ch); msg == nil {
+						if msg := ch.recv(t).Message; msg == nil {
 							t.Fatal("missing second tool result")
 						} else if _, ok := msg.(*agent.ToolResultMessage); !ok {
 							t.Fatalf("second tool result = %T", msg)
 						}
-						select {
-						case msg := <-ch:
+						if msg, ok := ch.recvWithin(time.Second); ok {
 							if _, ok := msg.Message.(*agent.DiffStatMessage); ok {
 								t.Fatal("unchanged snapshot appended another Git summary")
 							}
-						case <-time.After(time.Second):
 						}
 					})
 				}
@@ -1698,8 +1684,7 @@ else:
 				tk.Repos = []repo.Mount{{Branch: "caic-0"}}
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(task.StateRunning)
-				_, ch, unsub := tk.Subscribe(t.Context())
-				t.Cleanup(unsub)
+				ch := newMessageCursor(t, tk)
 
 				run := beginTestExecution(t, r, tk)
 
@@ -1707,13 +1692,13 @@ else:
 				if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":%q,"input":{}}]}}`, toolID, "Read")); err != nil {
 					t.Fatal(err)
 				}
-				recvMsg(t, ch) // drain tool_use
+				ch.recv(t) // drain tool_use
 
 				if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, toolID)); err != nil {
 					t.Fatal(err)
 				}
 				// Only expect the ToolResultMessage, no DiffStatMessage.
-				msg := recvMsg(t, ch)
+				msg := ch.recv(t).Message
 				if _, ok := msg.(*agent.DiffStatMessage); ok {
 					t.Error("unexpected DiffStatMessage emitted for non-mutating tool")
 				}
@@ -1840,8 +1825,7 @@ else:
 				tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}}), nil)
 				provider := &titleProviderSpy{calls: make(chan struct{}, 4)}
 				tk.Provider = provider
-				_, ch, unsub := tk.Subscribe(t.Context())
-				t.Cleanup(unsub)
+				ch := newMessageCursor(t, tk)
 
 				run := beginTestExecution(t, r, tk)
 
@@ -1850,19 +1834,19 @@ else:
 				if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":%q,"name":%q,"input":{}}]}}`, toolID, "Edit")); err != nil {
 					t.Fatal(err)
 				}
-				recvMsg(t, ch)
+				ch.recv(t)
 				if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, toolID)); err != nil {
 					t.Fatal(err)
 				}
-				recvMsg(t, ch)
+				ch.recv(t)
 				if err := taskNative(t.Context(), run.records, `{"type":"result","result":"done","num_turns":1}`); err != nil {
 					t.Fatal(err)
 				}
-				recvMsg(t, ch)
+				ch.recv(t)
 				if err := taskNative(t.Context(), run.records, `{"type":"result","result":"done","num_turns":1}`); err != nil {
 					t.Fatal(err)
 				}
-				recvMsg(t, ch)
+				ch.recv(t)
 				if err := r.closeRun(tk, run); err != nil {
 					t.Fatal(err)
 				}
@@ -2219,8 +2203,7 @@ else:
 	t.Run("ProvisioningWriter", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-		_, ch, unsub := tk.Subscribe(t.Context())
-		t.Cleanup(unsub)
+		ch := newMessageCursor(t, tk)
 
 		r := newTestAgentRuntime(t, nil, t.TempDir(), nil)
 		run := beginTestExecution(t, r, tk)
@@ -2231,17 +2214,15 @@ else:
 			t.Fatal(err)
 		}
 		_ = n
-		select {
-		case <-ch:
+		if _, ok := ch.recvWithin(0); ok {
 			t.Fatal("unexpected message for partial line")
-		default:
 		}
 
 		_, err = w.Write([]byte("lo\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		msg := recvMsg(t, ch)
+		msg := ch.recv(t).Message
 		lm, ok := msg.(*agent.LogMessage)
 		if !ok {
 			t.Fatalf("expected *agent.LogMessage, got %T", msg)
@@ -2254,21 +2235,19 @@ else:
 		if err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case <-ch:
+		if _, ok := ch.recvWithin(0); ok {
 			t.Fatal("unexpected message for empty lines")
-		default:
 		}
 
 		_, err = w.Write([]byte("line1\nline2\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		msg1 := recvMsg(t, ch)
+		msg1 := ch.recv(t).Message
 		if lm, ok := msg1.(*agent.LogMessage); !ok || lm.Line != "line1" {
 			t.Errorf("msg1 = %+v", msg1)
 		}
-		msg2 := recvMsg(t, ch)
+		msg2 := ch.recv(t).Message
 		if lm, ok := msg2.(*agent.LogMessage); !ok || lm.Line != "line2" {
 			t.Errorf("msg2 = %+v", msg2)
 		}
@@ -2279,25 +2258,21 @@ else:
 		if _, err := w.Write([]byte("final line")); err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case <-ch:
+		if _, ok := ch.recvWithin(0); ok {
 			t.Fatal("unexpected message before flush")
-		default:
 		}
 		if err := w.Flush(); err != nil {
 			t.Fatal(err)
 		}
-		flushed := recvMsg(t, ch)
+		flushed := ch.recv(t).Message
 		if lm, ok := flushed.(*agent.LogMessage); !ok || lm.Line != "final line" {
 			t.Errorf("flushed message = %#v, want final line", flushed)
 		}
 		if err := w.Flush(); err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case <-ch:
+		if _, ok := ch.recvWithin(0); ok {
 			t.Fatal("duplicate message after second flush")
-		default:
 		}
 		if got := strings.Join(logLines(t, r.LogPath.Get()), "\n"); !strings.Contains(got, `{"line":"final line","t":"log"}`) {
 			t.Errorf("persisted logs = %q", got)
@@ -2437,8 +2412,7 @@ else:
 			r := newTestAgentRuntimeWithRuntime(t, &runtimetest.FakeBackend{LaunchErr: launchErr}, nil, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.StartedAt = time.Now().UTC()
-			_, ch, unsub := tk.Subscribe(t.Context())
-			t.Cleanup(unsub)
+			ch := newMessageCursor(t, tk)
 
 			if _, err := r.Start(t.Context(), tk, ""); err == nil {
 				t.Fatal("want launch error")
@@ -2446,7 +2420,7 @@ else:
 			if got := tk.GetState(); got != task.StateFailed {
 				t.Errorf("state = %v, want %v", got, task.StateFailed)
 			}
-			msg := recvMsg(t, ch)
+			msg := ch.recv(t).Message
 			lm, ok := msg.(*agent.LogMessage)
 			if !ok {
 				t.Fatalf("message = %T, want *agent.LogMessage", msg)

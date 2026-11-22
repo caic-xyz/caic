@@ -131,18 +131,47 @@ func (b *fetchRecorder) TurnSnapshot(ctx context.Context, id runtime.ID, previou
 	return b.FakeBackend.TurnSnapshot(ctx, id, previous)
 }
 
-// recvMsg reads a single message from ch, respecting the test context and a
-// 1-second safety timeout.
-func recvMsg(t *testing.T, ch <-chan TimelineMessage) agent.Message {
-	select {
-	case m := <-ch:
-		return m.Message
-	case <-t.Context().Done():
-		t.Fatal("test context canceled waiting for message")
-		return nil
-	case <-time.After(time.Second):
+// messageCursor reads, in order, the messages appended to a task timeline
+// after the cursor was created.
+type messageCursor struct {
+	tk   *Task
+	wake <-chan struct{}
+	next int
+}
+
+func newMessageCursor(t *testing.T, tk *Task) *messageCursor {
+	wake, unsub := tk.SubscribeTimelineWakeups(t.Context())
+	t.Cleanup(unsub)
+	return &messageCursor{tk: tk, wake: wake, next: tk.MessageCount()}
+}
+
+// recv returns the next message and fails the test after one second.
+func (c *messageCursor) recv(t *testing.T) agent.TimedMessage {
+	m, ok := c.recvWithin(time.Second)
+	if !ok {
 		t.Fatal("timed out waiting for message")
-		return nil
+	}
+	return m
+}
+
+// recvWithin returns the next message, or false when none is appended within
+// wait. A zero wait only reports a message that is already appended.
+func (c *messageCursor) recvWithin(wait time.Duration) (agent.TimedMessage, bool) {
+	timeout := time.After(wait)
+	for {
+		c.tk.mu.Lock()
+		if c.next < c.tk.timelineLenLocked() {
+			m := c.tk.timelineViewLocked().At(c.next)
+			c.next++
+			c.tk.mu.Unlock()
+			return m, true
+		}
+		c.tk.mu.Unlock()
+		select {
+		case <-c.wake:
+		case <-timeout:
+			return agent.TimedMessage{}, false
+		}
 	}
 }
 
