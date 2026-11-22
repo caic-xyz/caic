@@ -323,6 +323,23 @@ describe("groupMessages", () => {
     expect(groups[0].events[0].kind).toBe("result");
   });
 
+  it("hides a result payload that repeats keyed text across token usage", () => {
+    // Codex reports token usage between its final agent message and turn
+    // completion; the server fills the empty result payload from that message.
+    const completion = resultEvent();
+    if (!completion.result) throw new Error("result fixture is missing payload");
+    completion.result.result = "Finished the requested change.";
+    const source = { threadID: "thread", turnID: "turn", itemID: "answer" };
+    const groups = groupMessages([
+      { kind: "text", ts: 1, source, text: { text: "Finished the requested change." } },
+      usageEvent(),
+      completion,
+    ]);
+
+    expect(groups.map((group) => group.kind)).toEqual(["text", "other", "other"]);
+    expect(groups[2]?.resultDuplicatesText).toBe(true);
+  });
+
   it("keeps preceding assistant text when the result payload differs", () => {
     const groups = groupMessages([{ kind: "text", ts: 1, text: { text: "A useful explanation." } }, resultEvent()]);
 

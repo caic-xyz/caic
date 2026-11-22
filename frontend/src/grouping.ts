@@ -72,6 +72,11 @@ export function toolIdentity(source: EventMessageSource | undefined, id: string)
   ]);
 }
 
+// Usage events render nothing; a group of only usage events is invisible.
+function isUsageOnly(group: MessageGroup): boolean {
+  return group.events.length > 0 && group.events.every((event) => event.kind === "usage");
+}
+
 // Legacy coalescing may combine source-free calls; scoped groups own exactly one invocation.
 function isLegacyToolGroup(group: MessageGroup): boolean {
   return !group.tool && !group.messageKey && group.kind === "action" && group.toolCalls.length > 0;
@@ -235,8 +240,8 @@ export function aggregateMessageGroups(groups: MessageGroup[]): MessageGroup[] {
       result.push(split[1]);
       continue;
     }
-    const usageOnly = group.events.length > 0 && group.events.every((event) => event.kind === "usage");
-    if (!group.tool && !usageOnly && !(group.kind === "text" && group.content?.text.trim() === "")) finishThinking();
+    if (!group.tool && !isUsageOnly(group) && !(group.kind === "text" && group.content?.text.trim() === ""))
+      finishThinking();
     if (!group.tool?.use) {
       result.push(group);
       continue;
@@ -908,25 +913,25 @@ function groupMessagesAfter(
     if (hasRealText) resetRun();
   }
 
-  // Claude Code emits the final assistant response twice: once as assistant
-  // text and again as the successful result payload. Keep the result group as
-  // the canonical completion card, but retain preceding text when it differs.
+  // The successful result payload repeats the final assistant text: Claude
+  // Code sends it twice, and the server fills an empty payload, such as Codex's,
+  // from the turn's text. Keep the result group as the canonical completion
+  // card, but retain preceding text when it differs. Codex reports token usage
+  // between the text and the result; a keyed text group does not absorb it, so
+  // skip invisible usage-only groups.
   for (let i = 1; i < finalGroups.length; i++) {
     const group = finalGroups[i];
     if (!group) throw new Error("Missing result group");
     const result = group.events.find((event) => event.kind === "result")?.result;
-    const previous = finalGroups[i - 1];
-    if (
-      result &&
-      !result.isError &&
-      result.result.trim() !== "" &&
-      previous?.kind === "text" &&
-      renderedText(previous).trim() === result.result.trim()
-    ) {
+    if (!result || result.isError || result.result.trim() === "") continue;
+    let j = i - 1;
+    for (let skipped = finalGroups[j]; skipped && isUsageOnly(skipped); skipped = finalGroups[j]) j--;
+    const previous = finalGroups[j];
+    if (previous?.kind === "text" && renderedText(previous).trim() === result.result.trim()) {
       if (previous.messageKey) group.resultDuplicatesText = true;
       else {
         group.resultReplacesText = true;
-        finalGroups.splice(i - 1, 1);
+        finalGroups.splice(j, 1);
         i--;
       }
     }

@@ -37,15 +37,24 @@ unrelated dependency edits. Use `go.work` separately when testing Go changes.
 
 ## Testing
 
-Unit tests run via `tsx --test`. Assertions and mocks
-come from the `tests/expect.ts` facade (vitest's standalone expect/spy packages
-with a `vi` shim over node:test fake timers). There is no module mocking:
-singletons are spied through object properties, contexts export their context
-objects for real providers, and components using router hooks render inside a
-real `Router`. `tests/setup-dom.ts` (loaded via `--import`) provides jsdom
-globals, the Solid TSX transform, and CSS/asset stubs; the lane runs with
-`--conditions=browser --test-force-exit`. jsdom is used instead of happy-dom
-for the select `value` fixup and the markdown sanitizer.
+Unit tests use `node:test` through `tsx --test`. The vitest runner is not
+installed: `npx vitest` and `pnpm exec vitest` fail. `make test` runs the
+complete lane. To run one file, use the flags of `FRONTEND_TEST` in the
+`Makefile`:
+
+```bash
+NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test \
+  --conditions=browser --test-force-exit --import ./frontend/tests/setup-dom.ts \
+  frontend/src/grouping.test.ts
+```
+
+Assertions and mocks come from the `tests/expect.ts` facade (vitest's
+standalone expect/spy packages with a `vi` shim over node:test fake timers).
+There is no module mocking: singletons are spied through object properties,
+contexts export their context objects for real providers, and components using
+router hooks render inside a real `Router`. `tests/setup-dom.ts` provides jsdom
+globals, the Solid TSX transform, and CSS/asset stubs. jsdom is used instead of
+happy-dom for the select `value` fixup and the markdown sanitizer.
 
 Prefer semantic queries for user-visible interactions. Use stable
 `data-testid` contracts for internal component identities that should survive
