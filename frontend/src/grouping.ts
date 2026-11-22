@@ -36,8 +36,6 @@ export interface MessageGroup {
   widgetDone?: boolean;
   // For result groups whose payload canonically replaces duplicate text.
   resultReplacesText?: boolean;
-  // Keep the identified message mounted while the result card shows metadata.
-  resultDuplicatesText?: boolean;
   // Thinking event segments whose durations are summed when several thinking
   // blocks collapse into one visual group.
   timingSegments?: EventMessage[][];
@@ -908,8 +906,8 @@ function groupMessagesAfter(
 
   // The successful result payload repeats the final assistant text: Claude
   // Code sends it twice, and the server fills an empty payload, such as Codex's,
-  // from the turn's text. Keep the result group as the canonical completion
-  // card, but retain preceding text when it differs.
+  // from the turn's text. The completion card shows the answer: drop the
+  // preceding text group, keyed or not, when it matches the payload.
   for (let i = 1; i < finalGroups.length; i++) {
     const group = finalGroups[i];
     if (!group) throw new Error("Missing result group");
@@ -922,12 +920,9 @@ function groupMessagesAfter(
       previous?.kind === "text" &&
       renderedText(previous).trim() === result.result.trim()
     ) {
-      if (previous.messageKey) group.resultDuplicatesText = true;
-      else {
-        group.resultReplacesText = true;
-        finalGroups.splice(i - 1, 1);
-        i--;
-      }
+      group.resultReplacesText = true;
+      finalGroups.splice(i - 1, 1);
+      i--;
     }
   }
 

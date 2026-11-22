@@ -2329,15 +2329,7 @@ function GroupContent(props: {
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => (
-            <MessageItem
-              ev={ev}
-              taskId={props.taskId}
-              model={props.model}
-              turnTiming={props.turnTiming(ev)}
-              hideResultText={group().resultDuplicatesText}
-            />
-          )}
+          {(ev) => <MessageItem ev={ev} taskId={props.taskId} model={props.model} turnTiming={props.turnTiming(ev)} />}
         </For>
       </Match>
     </Switch>
@@ -2563,13 +2555,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   );
 }
 
-function MessageItem(props: {
-  taskId: string;
-  ev: EventMessage;
-  model: string | null;
-  turnTiming?: HistoryTurn;
-  hideResultText?: boolean;
-}) {
+function MessageItem(props: { taskId: string; ev: EventMessage; model: string | null; turnTiming?: HistoryTurn }) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -2611,14 +2597,7 @@ function MessageItem(props: {
         )}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => (
-          <ResultCard
-            result={result}
-            model={props.model}
-            turnTiming={props.turnTiming}
-            hideText={props.hideResultText}
-          />
-        )}
+        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => <div class={styles.agentError}>Agent exited: {err.err}</div>}
@@ -2630,12 +2609,7 @@ function MessageItem(props: {
   );
 }
 
-function ResultCard(props: {
-  result: EventResult;
-  model: string | null;
-  turnTiming?: HistoryTurn;
-  hideText?: boolean;
-}) {
+function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: HistoryTurn }) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
@@ -2645,7 +2619,7 @@ function ResultCard(props: {
     if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });
-  const bodyText = () => (props.hideText ? "" : result().result);
+  const bodyText = () => result().result;
   // The header owns the raw toggle so the text spans the card's full width.
   const [raw, setRaw] = createSignal(false);
   return (

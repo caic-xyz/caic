@@ -921,7 +921,7 @@ describe("TaskDetail", () => {
     expect(progress?.textContent).not.toContain("Child todo");
   });
 
-  it("keeps an identified answer mounted when the successful result repeats it", async () => {
+  it("moves an identified answer into the Done card when the successful result repeats it", async () => {
     const source = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "answer" };
     let send: ((message: EventMessage) => void) | undefined;
     taskEventStreamMock.mockImplementationOnce((_id, _cursor, handlers) => {
@@ -930,18 +930,17 @@ describe("TaskDetail", () => {
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
     await renderTaskDetail();
-    const block = screen.getByTestId("stream-message");
-    // The message identity is what keeps the row in place across canonical
-    // history replacement, so it is the conversation's scroll anchor too.
-    expect(block).toHaveAttribute("data-anchor-key", 'msg:["parent","turn","answer","text"]');
+    expect(screen.getByTestId("stream-message")).toHaveTextContent("Finished.");
     send?.({ kind: "text", ts: 2000, source, text: { text: "Finished." } });
     const completion = resultEvent(3000);
     if (!completion.result) throw new Error("Missing result payload");
     completion.result.result = "Finished.";
     send?.(completion);
-    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument());
-    expect(screen.getByTestId("stream-message")).toBe(block);
-    expect(screen.getAllByText("Finished.")).toHaveLength(1);
+    const done = await screen.findByText("Done");
+    const answers = screen.getAllByText("Finished.");
+    expect(answers).toHaveLength(1);
+    expect(done.closest("[data-raw-scope]")).toContainElement(answers[0] ?? null);
+    expect(screen.queryByTestId("stream-message")).not.toBeInTheDocument();
   });
 
   it("omits empty session metadata without leaving extra separators", async () => {

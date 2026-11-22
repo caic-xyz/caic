@@ -322,7 +322,7 @@ describe("groupMessages", () => {
     expect(groups[0].events[0].kind).toBe("result");
   });
 
-  it("hides a result payload that repeats keyed text across token usage", () => {
+  it("shows the result payload instead of keyed text it repeats across token usage", () => {
     // Codex reports token usage between its final agent message and turn
     // completion; the server fills the empty result payload from that message.
     const completion = resultEvent();
@@ -335,8 +335,8 @@ describe("groupMessages", () => {
       completion,
     ]);
 
-    expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
-    expect(groups[1]?.resultDuplicatesText).toBe(true);
+    expect(groups.map((group) => group.kind)).toEqual(["other"]);
+    expect(groups[0]?.resultReplacesText).toBe(true);
   });
 
   it("keeps preceding assistant text when the result payload differs", () => {
