@@ -51,6 +51,10 @@ func (f *AntigravityFetcher) fetch(ctx context.Context) (*ProviderQuota, error) 
 	cmd := exec.CommandContext(ctx, f.path, "--output-format", "json", "--print=/usage") //nolint:gosec // executable resolved from PATH; arguments are fixed
 	// Do not let the server's checkout supply project configuration or plugins.
 	cmd.Dir = os.TempDir()
+	// agy deletes ~/.gemini/antigravity-cli/antigravity-oauth-token after it
+	// saves a token in the OS keyring, and md containers share that file as
+	// their only sign-in. A set SSH variable selects file storage instead.
+	cmd.Env = append(os.Environ(), "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
 	var out agyQuotaOutput
 	cmd.Stdout = &out
 	// Do not copy raw CLI diagnostics into server logs; they can contain auth data.

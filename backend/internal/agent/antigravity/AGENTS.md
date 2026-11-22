@@ -24,6 +24,22 @@ the initialized root, but does not establish native lifecycle statuses or a
 canonical card ID. Tests using that DTO shape are synthetic protocol cases,
 not recorded lifecycle evidence.
 
+## Sign-in storage
+
+md mounts the host `~/.gemini` into containers, which have no OS keyring, so a
+container's only Google sign-in is
+`~/.gemini/antigravity-cli/antigravity-oauth-token`. agy 1.5.14 stores the
+token in the OS keyring unless a detector selects the file: an SSH variable
+(`SSH_TTY`, `SSH_CLIENT`, `SSH_CONNECTION`), a container (`/.dockerenv`, or
+`docker`, `containerd` or `kubepods` in `/proc/1/cgroup`), no usable D-Bus
+session bus, Termux, or WSL. Each keyring save, such as an hourly refresh,
+deletes the token file, so one host run in keyring mode signs out every
+container. In the disassembly, `saveTokenWithExistingFileState` calls
+`purgeTokenStorage` on the file storage after `writeKeyring` succeeds. The
+quota fetcher in `internal/usage` sets `SSH_CONNECTION` for this reason, and
+genai's antigravity provider sets it by default. agy reads the SSH variables
+elsewhere only for interactive sign-in, the clipboard, and terminal detection.
+
 ## Integration boundary
 
 The backend is selectable through `backends.Default`.

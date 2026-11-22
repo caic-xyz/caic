@@ -26,6 +26,10 @@ func init() {
 		fmt.Fprintln(os.Stderr, "unexpected agy arguments")
 		os.Exit(2)
 	}
+	if os.Getenv("SSH_CONNECTION") == "" {
+		fmt.Fprintln(os.Stderr, "agy would store its token in the OS keyring")
+		os.Exit(2)
+	}
 	switch os.Getenv("CAIC_TEST_AGY_MODE") {
 	case "exit":
 		os.Exit(1)
@@ -50,6 +54,7 @@ func TestAntigravityFetcher(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	t.Setenv("CAIC_TEST_AGY_QUOTA", "1")
+	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("CAIC_TEST_AGY_RESPONSE", agyQuotaResponse)
 
 	t.Run("Get", func(t *testing.T) {
