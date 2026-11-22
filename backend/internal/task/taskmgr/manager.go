@@ -2003,10 +2003,11 @@ func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
 	if m.quotaWatchClosed {
 		return
 	}
-	history, live, _ := t.SubscribeRateLimits(m.serverCtx)
-	// Subscribe before processing history so events arriving during setup are
-	// buffered on live. Apply each event directly: the task snapshot retains
-	// only its latest rate limit, while the tracker needs every quota window.
+	// Subscribe before reading history so a message appended in between still
+	// wakes the watcher. Apply each message: the task snapshot retains only its
+	// latest rate limit, while the tracker needs every quota window.
+	wake, _ := t.SubscribeTimelineWakeups(m.serverCtx)
+	history, next := t.RateLimitsSince(0)
 	historyChanged := false
 	for _, rateLimit := range history {
 		if m.recordRateLimitMessage(rateLimit) {
@@ -2017,9 +2018,18 @@ func (m *Manager) watchRateLimitEvents(t *taskrun.Task) {
 		m.NotifyTaskUpdate(t.ID)
 	}
 	m.quotaWatchers.Go(func() {
-		for rateLimit := range live {
-			m.recordRateLimitMessage(rateLimit)
-			m.NotifyTaskUpdate(t.ID)
+		for {
+			select {
+			case <-m.serverCtx.Done():
+				return
+			case <-wake:
+			}
+			var rateLimits []*agent.RateLimitMessage
+			rateLimits, next = t.RateLimitsSince(next)
+			for _, rateLimit := range rateLimits {
+				m.recordRateLimitMessage(rateLimit)
+				m.NotifyTaskUpdate(t.ID)
+			}
 		}
 	})
 }

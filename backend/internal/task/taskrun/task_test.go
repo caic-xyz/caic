@@ -612,8 +612,7 @@ func TestTask(t *testing.T) {
 				} else {
 					tk.SeedTimelineParts(nil, agenttest.TimedMessages([]agent.Message{quota}), nil)
 				}
-				history, _, unsub := tk.SubscribeRateLimits(t.Context())
-				unsub()
+				history, _ := tk.RateLimitsSince(0)
 				if len(history) != 1 || tk.rateLimit.Status != agent.RateLimitStatusRejected || len(sink.Quotas) != 1 {
 					t.Fatalf("child-origin account quota discarded: history=%v quota=%+v sink=%v", history, tk.rateLimit, sink.Quotas)
 				}
@@ -666,13 +665,12 @@ func TestTask(t *testing.T) {
 				if got := tk.LastAgentResult(); got != "root answer" {
 					t.Errorf("last result = %q", got)
 				}
-				history, _, unsub := tk.SubscribeRateLimits(t.Context())
-				unsub()
+				history, _ := tk.RateLimitsSince(0)
 				if len(sink.Quotas) != 0 {
 					t.Fatalf("child goal affected provider quota: %+v", sink.Quotas)
 				}
 				if len(history) != 0 {
-					t.Fatalf("child thread quota entered root subscription: %+v", history)
+					t.Fatalf("child thread quota entered root rate limits: %+v", history)
 				}
 				prompt := BuildHandoffPrompt(tk, 0)
 				if strings.Contains(prompt, "child answer") || strings.Contains(prompt, "child prompt") || strings.Contains(prompt, "child error") || strings.Contains(prompt, "child-only-quota") {
@@ -1279,28 +1277,22 @@ func TestTask(t *testing.T) {
 			t.Fatalf("turns after root result = %d, want 2", got)
 		}
 	})
-	t.Run("SubscribeRateLimits", func(t *testing.T) {
+	t.Run("RateLimitsSince", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		historical := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowed, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "5h"}
 		addTaskMessage(tk, historical)
-		history, live, _ := tk.SubscribeRateLimits(t.Context())
-		if len(history) != 1 || history[0] != historical {
-			t.Fatalf("history = %#v, want the historical rate-limit message", history)
+		history, next := tk.RateLimitsSince(0)
+		if len(history) != 1 || history[0] != historical || next != 1 {
+			t.Fatalf("history = %#v next = %d, want the historical rate-limit message at 1", history, next)
 		}
-
 		for range 257 {
 			addTaskMessage(tk, &agent.TextMessage{Text: "ordinary task output"})
 		}
-		liveRateLimit := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowedWarning, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "7d"}
-		addTaskMessage(tk, liveRateLimit)
-		select {
-		case got := <-live:
-			if got != liveRateLimit {
-				t.Errorf("live rate-limit = %#v, want %#v", got, liveRateLimit)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for live rate-limit message")
+		live := &agent.RateLimitMessage{Status: agent.RateLimitStatusAllowedWarning, QuotaProvider: agent.QuotaProviderClaudeCode, QuotaWindow: "7d"}
+		addTaskMessage(tk, live)
+		if got, end := tk.RateLimitsSince(next); len(got) != 1 || got[0] != live || end != 259 {
+			t.Fatalf("since %d = %#v end = %d, want only the new rate-limit message and end 259", next, got, end)
 		}
 	})
 	t.Run("ConcurrentMetadataSnapshots", func(t *testing.T) {
@@ -4851,11 +4843,30 @@ func TestSessionHandle(t *testing.T) {
 		}
 	})
 
-	t.Run("StatsSubClose", func(t *testing.T) {
+	t.Run("Unsubscribe", func(t *testing.T) {
 		t.Parallel()
-		s := &statsSub{ch: make(chan runtime.Stats)}
-		s.close()
-		s.close() // double close must not panic.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		ctx, cancel := context.WithCancel(t.Context())
+		_, canceledStats, unsubCanceledStats := tk.SubscribeStats(ctx)
+		_, unsubCanceledWake := tk.SubscribeTimelineWakeups(ctx)
+		_, explicitStats, unsubStats := tk.SubscribeStats(t.Context())
+		_, unsubWake := tk.SubscribeTimelineWakeups(t.Context())
+		cancel()
+		for range canceledStats {
+		}
+		// Calls after cancellation and repeated calls are no-ops.
+		for _, unsub := range []func(){unsubCanceledStats, unsubCanceledWake, unsubStats, unsubWake} {
+			unsub()
+			unsub()
+		}
+		if _, ok := <-explicitStats; ok {
+			t.Fatal("stats channel open after unsubscribe")
+		}
+		tk.mu.Lock()
+		defer tk.mu.Unlock()
+		if len(tk.statsSubs) != 0 || len(tk.wakeSubs) != 0 {
+			t.Fatalf("subscribers left: stats=%d wake=%d", len(tk.statsSubs), len(tk.wakeSubs))
+		}
 	})
 }
 

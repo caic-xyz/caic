@@ -1380,7 +1380,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
-			t.Run("closes subscriptions", func(t *testing.T) {
+			t.Run("stops rate-limit watchers", func(t *testing.T) {
 				t.Parallel()
 				m := newTestManager(t, Config{ServerCtx: t.Context()})
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
@@ -1391,19 +1391,19 @@ func TestManager(t *testing.T) {
 					Utilization:   1,
 				}}), nil)
 				m.Insert(tk.ID, m.NewEntry(tk, nil))
-				_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
 
-				if err := m.Close(); err != nil {
-					t.Fatalf("Close() = %v, want nil", err)
-				}
-
+				// Close joins the watcher started by Insert.
+				closed := make(chan error, 1)
+				var closing sync.WaitGroup
+				t.Cleanup(closing.Wait)
+				closing.Go(func() { closed <- m.Close() })
 				select {
-				case _, ok := <-rateLimitLive:
-					if ok {
-						t.Fatal("rate-limit subscription remained open after Manager.Close")
+				case err := <-closed:
+					if err != nil {
+						t.Fatalf("Close() = %v, want nil", err)
 					}
-				case <-time.After(time.Second):
-					t.Fatal("rate-limit subscription did not close after Manager.Close")
+				case <-time.After(5 * time.Second):
+					t.Fatal("Close did not stop the rate-limit watcher")
 				}
 			})
 

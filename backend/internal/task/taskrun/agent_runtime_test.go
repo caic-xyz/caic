@@ -1666,10 +1666,10 @@ else:
 						} else if _, ok := msg.(*agent.ToolResultMessage); !ok {
 							t.Fatalf("second tool result = %T", msg)
 						}
-						if msg, ok := ch.recvWithin(time.Second); ok {
-							if _, ok := msg.Message.(*agent.DiffStatMessage); ok {
-								t.Fatal("unchanged snapshot appended another Git summary")
-							}
+						// taskNative returns after the record batch, including any
+						// derived Git summary, is applied.
+						if msg, ok := ch.recvWithin(0); ok {
+							t.Fatalf("unchanged snapshot appended %T", msg.Message)
 						}
 					})
 				}
@@ -1697,10 +1697,15 @@ else:
 				if err := taskNative(t.Context(), run.records, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"ok"}]}}`, toolID)); err != nil {
 					t.Fatal(err)
 				}
-				// Only expect the ToolResultMessage, no DiffStatMessage.
-				msg := ch.recv(t).Message
-				if _, ok := msg.(*agent.DiffStatMessage); ok {
-					t.Error("unexpected DiffStatMessage emitted for non-mutating tool")
+				// Only expect the ToolResultMessage, no DiffStatMessage. taskNative
+				// returns after the record batch is applied.
+				if msg := ch.recv(t).Message; msg == nil {
+					t.Fatal("missing tool result")
+				} else if _, ok := msg.(*agent.ToolResultMessage); !ok {
+					t.Fatalf("message = %T, want *agent.ToolResultMessage", msg)
+				}
+				if msg, ok := ch.recvWithin(0); ok {
+					t.Errorf("non-mutating tool appended %T", msg.Message)
 				}
 				if stub.fetched.Load() {
 					t.Error("Fetch was called for non-mutating tool")

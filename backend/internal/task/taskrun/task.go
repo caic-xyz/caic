@@ -43,13 +43,6 @@ const statsRingSize = 60
 // miss between two snapshots, so a short window is sufficient.
 const stateTransitionHistory = 16
 
-type statsSub struct {
-	ch   chan runtime.Stats
-	once sync.Once
-}
-
-func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
-
 // SessionHandle associates a transport with its owning execution lifetime.
 type SessionHandle struct {
 	Session *agent.Session
@@ -127,7 +120,7 @@ type Task struct {
 	statsRing              [statsRingSize]runtime.Stats
 	statsLen               int
 	statsHead              int
-	statsSubs              []*statsSub
+	statsSubs              []chan runtime.Stats
 	diskUsed               int64
 	diskKnown              bool
 	state                  task.State
@@ -156,7 +149,6 @@ type Task struct {
 	skillReads             agent.SkillReadTracker
 
 	wakeSubs        []chan struct{} // active coalescing timeline wakeup subscribers
-	rateLimitSubs   []*rateLimitSub // active lossless quota subscribers
 	handle          *SessionHandle  // current active session; nil when no session is attached
 	inputPriorState task.State      // Nonzero only while a committed attempt has no accepted root output.
 	turnStartedAt   time.Time       // when the current running turn started; zero when not running
@@ -1312,62 +1304,31 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 // SubscribeTimelineWakeups returns a channel that receives a signal after
 // timeline messages are published. Signals coalesce: one pending signal stands
 // for any number of messages, so a burst never drops the subscriber. Consumers
-// read the messages from another authoritative source. The caller must call
-// unsubFn at most once; context cancellation also unsubscribes.
+// read the messages from another authoritative source, such as
+// RateLimitsSince. The channel is never closed; select on ctx as well.
+// unsubFn is idempotent and safe after ctx cancellation, which also
+// unsubscribes.
 func (t *Task) SubscribeTimelineWakeups(ctx context.Context) (wake <-chan struct{}, unsubFn func()) {
 	ch := make(chan struct{}, 1)
 	t.mu.Lock()
 	t.wakeSubs = append(t.wakeSubs, ch)
 	t.mu.Unlock()
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		if i := slices.Index(t.wakeSubs, ch); i >= 0 {
-			t.wakeSubs = slices.Delete(t.wakeSubs, i, i+1)
-		}
-	}
-	stop := context.AfterFunc(ctx, unsub)
-	return ch, func() {
-		stop()
-		unsub()
-	}
+	return ch, unsubscribe(t, ctx, &t.wakeSubs, ch, func() {})
 }
 
-// SubscribeRateLimits returns historical quota messages and a lossless stream
-// of future quota messages. The caller must call unsubFn at most once when
-// done; context cancellation automatically unsubscribes.
-func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLimitMessage, live <-chan *agent.RateLimitMessage, unsubFn func()) {
-	s := &rateLimitSub{ctx: ctx, ch: make(chan *agent.RateLimitMessage, 16)}
-
+// RateLimitsSince returns the root quota messages at timeline positions from
+// next onward, and the position to pass to the next call. Start at 0 for the
+// full history.
+func (t *Task) RateLimitsSince(next int) (rateLimits []*agent.RateLimitMessage, end int) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	view := t.timelineViewLocked()
-	for _, entry := range view.Forward() {
-		if rateLimit, ok := entry.Message.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
-			history = append(history, rateLimit)
+	for i := next; i < view.Len(); i++ {
+		if rateLimit, ok := view.At(i).Message.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
+			rateLimits = append(rateLimits, rateLimit)
 		}
 	}
-	t.rateLimitSubs = append(t.rateLimitSubs, s)
-	t.mu.Unlock()
-
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.rateLimitSubs {
-			if ss == s {
-				t.rateLimitSubs = append(t.rateLimitSubs[:i], t.rateLimitSubs[i+1:]...)
-				close(s.ch)
-				return
-			}
-		}
-		panic("rate limit subscriber already unsubscribed")
-	}
-	stop := context.AfterFunc(ctx, unsub)
-	return history, s.ch, func() {
-		if !stop() {
-			panic("rate limit subscriber already unsubscribed")
-		}
-		unsub()
-	}
+	return rateLimits, view.Len()
 }
 
 // PushStats records a runtime stats snapshot and notifies live subscribers.
@@ -1387,9 +1348,9 @@ func (t *Task) PushStats(s *runtime.Stats) {
 	} else {
 		t.statsHead = (t.statsHead + 1) % statsRingSize
 	}
-	for _, sub := range t.statsSubs {
+	for _, ch := range t.statsSubs {
 		select {
-		case sub.ch <- val:
+		case ch <- val:
 		default:
 		}
 	}
@@ -1410,9 +1371,9 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 	idx := (t.statsHead + t.statsLen - 1) % statsRingSize
 	t.statsRing[idx].DiskUsed = bytes
 	val := t.statsRing[idx]
-	for _, sub := range t.statsSubs {
+	for _, ch := range t.statsSubs {
 		select {
-		case sub.ch <- val:
+		case ch <- val:
 		default:
 		}
 	}
@@ -1420,31 +1381,35 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 }
 
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that
-// receives only live stats arriving after the snapshot. Cancellation or
-// unsubscribing closes the channel and removes the subscriber.
+// receives only live stats arriving after the snapshot. A full channel skips
+// samples; the ring buffer stays authoritative. Cancellation or unsubscribing
+// closes the channel. unsubFn is idempotent and safe after ctx cancellation.
 func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, live <-chan runtime.Stats, unsubFn func()) {
-	s := &statsSub{ch: make(chan runtime.Stats, 64)}
+	ch := make(chan runtime.Stats, 64)
 	t.mu.Lock()
 	history = make([]runtime.Stats, t.statsLen)
 	for i := range t.statsLen {
 		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
 	}
-	t.statsSubs = append(t.statsSubs, s)
+	t.statsSubs = append(t.statsSubs, ch)
 	t.mu.Unlock()
-	return history, s.ch, unsubscribeStats(t, ctx, s)
+	return history, ch, unsubscribe(t, ctx, &t.statsSubs, ch, func() { close(ch) })
 }
 
-func unsubscribeStats(t *Task, ctx context.Context, s *statsSub) func() {
+// unsubscribe returns a function that, on its first call or on ctx
+// cancellation, removes s from subs and runs release while holding t.mu, the
+// lock publishers hold while sending to s.
+func unsubscribe[S comparable](t *Task, ctx context.Context, subs *[]S, s S, release func()) func() {
+	var once sync.Once
 	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.statsSubs {
-			if ss == s {
-				t.statsSubs = append(t.statsSubs[:i], t.statsSubs[i+1:]...)
-				break
+		once.Do(func() {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			if i := slices.Index(*subs, s); i >= 0 {
+				*subs = slices.Delete(*subs, i, i+1)
 			}
-		}
-		s.close()
+			release()
+		})
 	}
 	stop := context.AfterFunc(ctx, unsub)
 	return func() {
@@ -2058,12 +2023,6 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
 	}
 	if rateLimit, ok := m.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
 		t.recordRateLimitLocked(rateLimit)
-		for _, sub := range t.rateLimitSubs {
-			select {
-			case sub.ch <- rateLimit:
-			case <-sub.ctx.Done():
-			}
-		}
 	}
 
 	// Track plan mode and plan file from tool_use events.
@@ -2908,11 +2867,6 @@ func lastTurnHasExitPlan(entries timelineEntries) bool {
 		}
 	}
 	return false
-}
-
-type rateLimitSub struct {
-	ctx context.Context
-	ch  chan *agent.RateLimitMessage
 }
 
 const maxTitleChars = 80

@@ -18,7 +18,7 @@ help:
 	@printf '  %-36s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
 	@printf '  %-36s - %s\n' 'make build' 'Build Go server (includes frontend build)'
 	@printf '  %-36s - %s\n' 'make screenshots-update' 'Render twice and publish the documentation screenshots'
-	@printf '  %-36s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
+	@printf '  %-36s - %s\n' 'make git-hooks' 'Install git hooks and the pnpm packages they run'
 	@printf '  %-36s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
 
 # Reconcile dependencies once per Make invocation before checks start. Warm
@@ -141,7 +141,7 @@ coverage: frontend-deps
 	@echo "=== Frontend coverage ==="
 	@$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)
 
-git-hooks:
+git-hooks: frontend-deps
 	@./scripts/install-git-hooks.sh
 	@hooks=$$(git config --local --get core.hooksPath); \
 	  [ "$$hooks" = "scripts/hooks" ] || { \
