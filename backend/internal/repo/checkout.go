@@ -333,37 +333,43 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	for i := range roots {
 		order = append(order, i)
 	}
-	moved := false
+	result := PushResult{DiffStat: ds, SafetyIssues: allIssues}
 	for _, i := range order {
 		d := &destinations[i]
 		rp := &repos[i]
+		update := PushRefUpdate{RepositoryPath: rp.ContainerPath, Remote: d.Remote, Branch: d.Branch, Commit: commits[i]}
 		pushCtx, cancel := context.WithTimeout(ctx, w.PushTimeout)
 		g := hostRepository(rp, log)
 		remoteCommit, err := remoteBranchTip(pushCtx, g, d, len(commits[i]))
 		if err != nil {
 			cancel()
-			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("remote tip of %s/%s: %w", d.Remote, d.Branch, err)
+			err = result.pushError("read remote tip for "+update.destination(), err)
+			return result, err
 		}
 		refs := runtime.PushRefs{Submodule: d.submodule, Remote: d.Remote, Branch: d.Branch, RemoteCommit: remoteCommit}
 		err = runtimes.RunPrePush(pushCtx, id, d.repoIdx, commits[i], refs, opts.HookOutput)
 		if err != nil {
 			cancel()
-			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("pre-push hook for %s: %w", rp.ContainerPath, err)
+			err = result.pushError("pre-push hook for "+update.destination(), err)
+			return result, err
 		}
 		pushed, err := pushCommit(pushCtx, log, g, commits[i], d, opts.Force)
 		cancel()
 		if err != nil {
-			return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
+			err = result.pushError("push "+update.destination(), err)
+			return result, err
 		}
-		moved = moved || pushed
+		if pushed {
+			result.UpdatedRefs = append(result.UpdatedRefs, update)
+		}
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
 	err = runtimes.RefreshRefs(refreshCtx, id)
 	cancel()
 	if err != nil {
-		return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, &PushRefreshError{Err: err}
+		return result, &PushRefreshError{Err: err, updatedRefs: result.UpdatedRefs}
 	}
-	return PushResult{DiffStat: ds, SafetyIssues: allIssues, Updated: moved}, nil
+	return result, nil
 }
 
 // DiffContent returns the unified diff for the given repos, optionally filtered
@@ -867,16 +873,25 @@ func pushCommit(ctx context.Context, log *slog.Logger, g gitRepository, commit s
 		args = append(args, "--force")
 	}
 	log.InfoContext(ctx, "git push", "remote", d.Remote, "branch", d.Branch, "force", force)
-	out, err := g.RunGit(ctx, append(args, "--", d.Remote, commit+":refs/heads/"+d.Branch)...)
+	ref := "refs/heads/" + d.Branch
+	out, err := g.RunGit(ctx, append(args, "--", d.Remote, commit+":"+ref)...)
 	if err != nil {
 		return false, err
 	}
+	reported, moved := false, false
 	for line := range strings.SplitSeq(out, "\n") {
-		if flag, _, ok := strings.Cut(line, "\t"); ok {
-			return flag != "=", nil
+		flag, rest, ok := strings.Cut(line, "\t")
+		refs, _, hasSummary := strings.Cut(rest, "\t")
+		_, dst, hasDst := strings.Cut(refs, ":")
+		if ok && hasSummary && hasDst && dst == ref {
+			reported = true
+			moved = moved || flag != "="
 		}
 	}
-	return false, errors.New("git push did not report the destination status")
+	if !reported {
+		return false, errors.New("git push did not report the destination status")
+	}
+	return moved, nil
 }
 
 // AllocatedBranch owns a newly created branch at its pinned starting commit.
@@ -962,9 +977,39 @@ type PushResult struct {
 	DiffStat v3.DiffStat
 	// SafetyIssues block publication unless the caller bypassed them.
 	SafetyIssues []SafetyIssue
-	// Updated reports whether any destination ref moved. An already published
-	// task reports false, so callers can tell a no-op sync apart.
-	Updated bool
+	// UpdatedRefs lists destination changes confirmed by Git, in push order.
+	// It can be nonempty even when a later push fails.
+	UpdatedRefs []PushRefUpdate
+}
+
+func (r *PushResult) pushError(message string, err error) error {
+	if len(r.UpdatedRefs) != 0 {
+		message = pushFailureMessage(message+" failed", r.UpdatedRefs)
+	}
+	return fmt.Errorf("%s: %w", message, err)
+}
+
+func pushFailureMessage(message string, updates []PushRefUpdate) string {
+	if len(updates) == 0 {
+		return message
+	}
+	refs := make([]string, 0, len(updates))
+	for _, update := range updates {
+		refs = append(refs, update.destination()+" to "+update.Commit)
+	}
+	return message + " after Git confirmed updates to " + strings.Join(refs, ", ")
+}
+
+// PushRefUpdate identifies the destination and commit of a push.
+type PushRefUpdate struct {
+	RepositoryPath string // Path inside the runtime, including any submodule path.
+	Remote         string // Configured remote name.
+	Branch         string // Short branch name.
+	Commit         string // Full object ID.
+}
+
+func (u *PushRefUpdate) destination() string {
+	return fmt.Sprintf("%q on remote %q branch %q", u.RepositoryPath, u.Remote, u.Branch)
 }
 
 // PushOptions keeps committing pending edits, accepting safety issues, and
@@ -983,11 +1028,13 @@ type PushOptions struct {
 // push succeeded. Callers must still track CI for the published commits.
 type PushRefreshError struct {
 	Err error
+
+	updatedRefs []PushRefUpdate
 }
 
 // Error describes the completed publication and failed refresh.
 func (e *PushRefreshError) Error() string {
-	return "push completed but refreshing container upstream refs failed: " + e.Err.Error()
+	return pushFailureMessage("push completed but refreshing container upstream refs failed", e.updatedRefs) + ": " + e.Err.Error()
 }
 
 // Unwrap returns the refresh failure.

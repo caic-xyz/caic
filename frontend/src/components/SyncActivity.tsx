@@ -129,7 +129,8 @@ export default function SyncActivity(props: Props) {
           {props.entry.output}
         </pre>
       </Show>
-      <Show when={props.entry.status !== "cancelled" && props.entry.error}>
+      {/* Older task logs recorded a redundant error string for ordinary cancellations. */}
+      <Show when={(props.entry.status !== "cancelled" || props.entry.error !== "sync cancelled") && props.entry.error}>
         {(error) => (
           <p class={styles.error} data-testid="sync-error">
             {error()}

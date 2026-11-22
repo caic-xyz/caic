@@ -157,6 +157,28 @@ func TestCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("pushCommit reports updates at a second push URL", func(t *testing.T) {
+		t.Parallel()
+		root := initTestRepo(t)
+		first := runPushGit(t, root, "remote", "get-url", "origin")
+		second := filepath.Join(t.TempDir(), "remote.git")
+		runGit(t, "", "init", "--bare", second)
+		runGit(t, root, "config", "--add", "remote.origin.pushurl", first)
+		runGit(t, root, "config", "--add", "remote.origin.pushurl", second)
+		tip := runPushGit(t, first, "rev-parse", "refs/heads/main")
+		log := logtest.Logger(t)
+		g := &git.Checkout{Root: root, Logger: log}
+		d := PushDestination{Remote: "origin", Branch: "main"}
+		if moved, err := pushCommit(t.Context(), log, g, tip, &d, false); err != nil || !moved {
+			t.Fatalf("push to second URL = %v, %v, want an update", moved, err)
+		}
+		if got := runPushGit(t, second, "rev-parse", "refs/heads/main"); got != tip {
+			t.Fatalf("second remote tip = %q, want %q", got, tip)
+		}
+		if moved, err := pushCommit(t.Context(), log, g, tip, &d, false); err != nil || moved {
+			t.Fatalf("push to up-to-date URLs = %v, %v, want a no-op", moved, err)
+		}
+	})
 	t.Run("Push", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
@@ -496,7 +518,7 @@ func TestCheckout(t *testing.T) {
 				if err != nil || len(ds) != 0 || len(issues) != 0 {
 					t.Fatalf("unchanged task report: stats=%+v issues=%+v err=%v", ds, issues, err)
 				}
-				if !res.Updated {
+				if len(res.UpdatedRefs) == 0 {
 					t.Fatal("publishing a new task branch reported no update")
 				}
 				// Pending runtime edits belong in the public default-sync report
@@ -514,12 +536,12 @@ func TestCheckout(t *testing.T) {
 				if err != nil || len(ds) != 1 || ds[0].Path != "pending.txt" || len(issues) != 0 || destinations[0].Branch != "main" {
 					t.Fatalf("pending report is separate from committed safety: stats=%+v issues=%+v destination=%+v err=%v", ds, issues, destinations[0], err)
 				}
-				if !res.Updated {
+				if len(res.UpdatedRefs) == 0 {
 					t.Fatal("moving the default branch reported no update")
 				}
 				// Republishing the same commit is a no-op the caller can detect.
 				res, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
-				if err != nil || res.Updated || len(res.SafetyIssues) != 0 {
+				if err != nil || len(res.UpdatedRefs) != 0 || len(res.SafetyIssues) != 0 {
 					t.Fatalf("republishing the same commit must report no update: %+v, %v", res, err)
 				}
 				out, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/main")

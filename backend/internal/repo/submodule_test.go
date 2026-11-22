@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -70,6 +71,58 @@ func TestSubmodulePushTargets(t *testing.T) {
 			if got := runPushGit(t, dir, "ls-remote", "origin", "refs/heads/caic-1"); got != "" {
 				t.Fatalf("preflight published %s: %s", dir, got)
 			}
+		}
+	})
+
+	t.Run("parent rejection after a confirmed child push", func(t *testing.T) {
+		t.Parallel()
+		root, child := initTestRepo(t), initTestRepo(t)
+		runGit(t, child, "commit", "--allow-empty", "-m", "Update child")
+		childTip := runPushGit(t, child, "rev-parse", "HEAD")
+		runGit(t, root, "checkout", "-b", "caic-1")
+		runGit(t, root, "update-index", "--add", "--cacheinfo", "160000,"+childTip+",lib")
+		runGit(t, root, "commit", "-m", "Pin child")
+		rootTip := runPushGit(t, root, "rev-parse", "HEAD")
+		rootRemote := runPushGit(t, root, "remote", "get-url", "origin")
+		childRemote := runPushGit(t, child, "remote", "get-url", "origin")
+		runGit(t, rootRemote, "config", "receive.hideRefs", "refs/heads/caic-1")
+		backend := &runtimetest.FakeBackend{FetchedBranches: []runtime.FetchedBranch{
+			{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: rootTip},
+			{RepositoryPath: "/repo/lib", Submodule: "lib", GitDir: filepath.Join(child, ".git"), CommitHash: childTip},
+		}}
+		log := logtest.Logger(t)
+		rt := newTestRuntime(t, backend)
+		checkout := newInitializedTestCheckout(t, root)
+		target := GitTarget{InstanceID: "test-runtime:ctr", Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
+		target, destinations, err := checkout.ResolvePushDestinations(t.Context(), log, target, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := checkout.Push(t.Context(), log, rt, target, destinations, PushOptions{})
+		wantError := `push "/repo" on remote "origin" branch "caic-1" failed after Git confirmed updates to "/repo/lib" on remote "origin" branch "caic-1" to ` + childTip
+		if err == nil || !strings.HasPrefix(err.Error(), wantError+": ") {
+			t.Fatalf("push error = %v, want prefix %q", err, wantError)
+		}
+		wantChild := []PushRefUpdate{{RepositoryPath: "/repo/lib", Remote: "origin", Branch: "caic-1", Commit: childTip}}
+		if !slices.Equal(result.UpdatedRefs, wantChild) {
+			t.Fatalf("confirmed updates = %+v, want %+v", result.UpdatedRefs, wantChild)
+		}
+		if got := runPushGit(t, childRemote, "rev-parse", "refs/heads/caic-1"); got != childTip {
+			t.Fatalf("child remote = %q, want %q", got, childTip)
+		}
+		if got := runPushGit(t, rootRemote, "for-each-ref", "--format=%(refname)", "refs/heads/caic-1"); got != "" {
+			t.Fatalf("parent remote published unexpectedly: %q", got)
+		}
+
+		runGit(t, rootRemote, "config", "--unset", "receive.hideRefs")
+		result, err = checkout.Push(t.Context(), log, rt, target, destinations, PushOptions{})
+		wantRoot := []PushRefUpdate{{RepositoryPath: "/repo", Remote: "origin", Branch: "caic-1", Commit: rootTip}}
+		if err != nil || !slices.Equal(result.UpdatedRefs, wantRoot) {
+			t.Fatalf("retry confirmed updates = %+v, %v, want %+v", result.UpdatedRefs, err, wantRoot)
+		}
+		if got := runPushGit(t, rootRemote, "rev-parse", "refs/heads/caic-1"); got != rootTip {
+			t.Fatalf("parent remote = %q, want %q", got, rootTip)
 		}
 	})
 

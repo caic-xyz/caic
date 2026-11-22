@@ -76,6 +76,13 @@ it("shows a cancelled push without a failure message", () => {
   expect(screen.queryByTestId("sync-error")).not.toBeInTheDocument();
 });
 
+it("shows confirmed updates when a push is cancelled partway", () => {
+  const error = 'pre-push hook for "/repo" failed after Git confirmed updates to "/repo/lib"';
+  render(() => <SyncActivity entry={{ ...running, status: "cancelled", error, durationMs: 2_000 }} onCancel={null} />);
+  expect(screen.getByRole("status")).toHaveTextContent("Cancelled");
+  expect(screen.getByTestId("sync-error")).toHaveTextContent(error);
+});
+
 it("offers no cancel for an entry outside the live push", () => {
   render(() => <SyncActivity entry={running} onCancel={null} />);
   expect(screen.queryByRole("button", { name: "Cancel push" })).not.toBeInTheDocument();

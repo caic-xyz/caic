@@ -584,10 +584,11 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true, HookOutput: recorder}
 	}
 	result, err := checkout.Push(pushCtx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
+	updated := len(result.UpdatedRefs) != 0
 	status := "synced"
 	if err == nil && len(result.SafetyIssues) > 0 && !opts.BypassSafety {
 		status = "blocked"
-	} else if err == nil && !result.Updated {
+	} else if err == nil && !updated {
 		status = "empty"
 	}
 	cancelled := err != nil && errors.Is(context.Cause(pushCtx), errSyncCancelled)
@@ -595,7 +596,10 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	outcome, outcomeErr := v3.SyncStatusPushed, err
 	switch _, refreshFailed := errors.AsType[*repo.PushRefreshError](err); {
 	case cancelled:
-		outcome, outcomeErr = v3.SyncStatusCancelled, errSyncCancelled
+		outcome = v3.SyncStatusCancelled
+		if !updated {
+			outcomeErr = nil
+		}
 	case err == nil && status == "blocked":
 		outcome, outcomeErr = v3.SyncStatusFailed, fmt.Errorf("blocked by %d safety issue(s)", len(result.SafetyIssues))
 	case err != nil && !refreshFailed:
@@ -604,6 +608,9 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	}
 	recorder.finish(outcome, outcomeErr)
 	if cancelled {
+		if updated {
+			return nil, conflictErr(err, "sync cancelled")
+		}
 		return nil, conflict("sync cancelled")
 	}
 	if err != nil {

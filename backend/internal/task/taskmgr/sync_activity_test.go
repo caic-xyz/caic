@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -247,7 +248,7 @@ func (b *hookBackend) RunPrePush(_ context.Context, _ runtime.ID, _ int, _ strin
 	return b.hook(out)
 }
 
-func newSyncTestEntry(t *testing.T, backend func(fetched []runtime.FetchedBranch) testRuntimeBackend) *Entry {
+func newSyncTestEntry(t *testing.T, backend func(dir string, fetched []runtime.FetchedBranch) testRuntimeBackend) *Entry {
 	dir := t.TempDir()
 	initTaskRepo(t, dir, []string{"branch", "caic-0"})
 	checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, "", nil)
@@ -261,7 +262,7 @@ func newSyncTestEntry(t *testing.T, backend func(fetched []runtime.FetchedBranch
 		t.Fatal(err)
 	}
 	fetched := []runtime.FetchedBranch{{RepositoryPath: "/home/user/src/repo", BranchName: "caic-0", CommitHash: strings.TrimSpace(string(out))}}
-	m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend(fetched), nil)})
+	m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend(dir, fetched), nil)})
 	registerCheckout(t, m.Checkouts, "repo", checkout)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 	tk.Repos = []repo.Mount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
@@ -296,8 +297,8 @@ func loggedSyncRecords(t *testing.T, e *Entry) []v3.SyncActivityMessage {
 
 func TestLifecycleSyncRecords(t *testing.T) {
 	t.Parallel()
-	hooked := func(hook func(io.Writer) error) func([]runtime.FetchedBranch) testRuntimeBackend {
-		return func(fetched []runtime.FetchedBranch) testRuntimeBackend {
+	hooked := func(hook func(io.Writer) error) func(string, []runtime.FetchedBranch) testRuntimeBackend {
+		return func(_ string, fetched []runtime.FetchedBranch) testRuntimeBackend {
 			return &hookBackend{FakeBackend: &runtimetest.FakeBackend{FetchedBranches: fetched}, hook: hook}
 		}
 	}
@@ -401,18 +402,33 @@ func TestLifecycleSyncRecords(t *testing.T) {
 	})
 }
 
-// ctxHookBackend blocks its first pre-push hook until its context ends or
-// release closes; later hooks succeed at once.
-type ctxHookBackend struct {
+// ctxSyncBackend blocks a sync step until its context ends or release closes.
+type ctxSyncBackend struct {
 	*runtimetest.FakeBackend
 
-	started chan struct{} // Closed when the first hook starts.
-	release chan struct{} // Closed to let the first hook succeed.
-	once    sync.Once
-	ctxErr  chan error // Receives the context error of a cancelled hook.
+	started     chan struct{} // Closed when the blocking step starts.
+	release     chan struct{} // Closed to let the step succeed.
+	once        sync.Once
+	ctxErr      chan error // Receives the context error of a cancelled step.
+	rootOnly    bool       // Let submodule hooks finish before blocking on the root.
+	refreshOnly bool       // Let all hooks finish before blocking on refresh.
 }
 
-func (b *ctxHookBackend) RunPrePush(ctx context.Context, _ runtime.ID, _ int, _ string, _ runtime.PushRefs, _ io.Writer) error {
+func (b *ctxSyncBackend) RunPrePush(ctx context.Context, _ runtime.ID, _ int, _ string, dest runtime.PushRefs, _ io.Writer) error {
+	if b.refreshOnly || (b.rootOnly && dest.Submodule != nil) {
+		return nil
+	}
+	return b.wait(ctx)
+}
+
+func (b *ctxSyncBackend) RefreshRefs(ctx context.Context, _ runtime.ID) error {
+	if b.refreshOnly {
+		return b.wait(ctx)
+	}
+	return nil
+}
+
+func (b *ctxSyncBackend) wait(ctx context.Context) error {
 	first := false
 	b.once.Do(func() { first = true })
 	if !first {
@@ -430,9 +446,9 @@ func (b *ctxHookBackend) RunPrePush(ctx context.Context, _ runtime.ID, _ int, _ 
 
 func TestLifecycleCancelSync(t *testing.T) {
 	t.Parallel()
-	newBlocked := func(t *testing.T) (*Entry, *ctxHookBackend) {
-		backend := &ctxHookBackend{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
-		e := newSyncTestEntry(t, func(fetched []runtime.FetchedBranch) testRuntimeBackend {
+	newBlocked := func(t *testing.T) (*Entry, *ctxSyncBackend) {
+		backend := &ctxSyncBackend{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
+		e := newSyncTestEntry(t, func(_ string, fetched []runtime.FetchedBranch) testRuntimeBackend {
 			backend.FakeBackend = &runtimetest.FakeBackend{FetchedBranches: fetched}
 			return backend
 		})
@@ -446,11 +462,11 @@ func TestLifecycleCancelSync(t *testing.T) {
 		}()
 		return done
 	}
-	waitStarted := func(t *testing.T, b *ctxHookBackend) {
+	waitStarted := func(t *testing.T, b *ctxSyncBackend) {
 		select {
 		case <-b.started:
 		case <-time.After(30 * time.Second):
-			t.Fatal("hook did not start")
+			t.Fatal("sync step did not start")
 		}
 	}
 	waitDone := func(t *testing.T, done <-chan error) error {
@@ -478,8 +494,8 @@ func TestLifecycleCancelSync(t *testing.T) {
 				t.Fatalf("Sync error = %v, want a cancelled conflict", err)
 			}
 			got := loggedSyncRecords(t, e)
-			if len(got) != 2 || got[1].Phase != v3.SyncPhaseEnd || got[1].Status != v3.SyncStatusCancelled {
-				t.Fatalf("records = %+v, want start and a cancelled end", got)
+			if len(got) != 2 || got[1].Phase != v3.SyncPhaseEnd || got[1].Status != v3.SyncStatusCancelled || got[1].Error != "" {
+				t.Fatalf("records = %+v, want start and a cancelled end without details", got)
 			}
 			// The cancelled sync released its lock: a following sync succeeds.
 			if _, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false); err != nil {
@@ -490,6 +506,73 @@ func TestLifecycleCancelSync(t *testing.T) {
 				t.Fatalf("records = %+v, want a pushed end after the cancelled one", got)
 			}
 		})
+		for _, fixture := range []struct {
+			name    string
+			refresh bool
+			failed  string
+		}{
+			{"reports the child update when cancelled during the parent hook", false, `pre-push hook for "~/src/repo" on remote "origin" branch "caic-0" failed`},
+			{"reports both updates when cancelled during refresh", true, "push completed but refreshing container upstream refs failed"},
+		} {
+			t.Run(fixture.name, func(t *testing.T) {
+				t.Parallel()
+				child := t.TempDir()
+				initTaskRepo(t, child)
+				childTip := preparationGit(t, child, "rev-parse", "HEAD")
+				parentRemote := filepath.Join(t.TempDir(), "remote.git")
+				var parentTip string
+				b := &ctxSyncBackend{
+					started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1),
+					rootOnly: true, refreshOnly: fixture.refresh,
+				}
+				e := newSyncTestEntry(t, func(root string, fetched []runtime.FetchedBranch) testRuntimeBackend {
+					preparationGit(t, root, "init", "--bare", parentRemote)
+					preparationGit(t, root, "remote", "set-url", "origin", parentRemote)
+					preparationGit(t, root, "push", "origin", "main")
+					preparationGit(t, root, "checkout", "caic-0")
+					preparationGit(t, root, "update-index", "--add", "--cacheinfo", "160000,"+childTip+",lib")
+					preparationGit(t, root, "commit", "-m", "Pin child")
+					parentTip = preparationGit(t, root, "rev-parse", "HEAD")
+					fetched[0].CommitHash = parentTip
+					preparationGit(t, root, "checkout", "main")
+					b.FakeBackend = &runtimetest.FakeBackend{FetchedBranches: append(fetched, runtime.FetchedBranch{
+						RepositoryPath: fetched[0].RepositoryPath + "/lib", Submodule: "lib",
+						GitDir: filepath.Join(child, ".git"), CommitHash: childTip,
+					})}
+					return b
+				})
+				done := runSync(t.Context(), e)
+				waitStarted(t, b)
+				if err := e.Lifecycle.CancelSync(); err != nil {
+					t.Fatal(err)
+				}
+				err := waitDone(t, done)
+				want := fixture.failed + ` after Git confirmed updates to "/home/user/src/repo/lib" on remote "origin" branch "caic-0" to ` + childTip
+				if fixture.refresh {
+					want += `, "~/src/repo" on remote "origin" branch "caic-0" to ` + parentTip
+				}
+				if got, ok := errors.AsType[*Error](err); !ok || got.Kind != KindConflict || !strings.HasPrefix(err.Error(), "sync cancelled: "+want+": ") {
+					t.Fatalf("Sync error = %v, want cancelled conflict containing %q", err, want)
+				}
+				if _, ok := errors.AsType[*repo.PushRefreshError](err); ok != fixture.refresh || !errors.Is(err, context.Canceled) {
+					t.Fatalf("Sync error = %v, want cancellation with refresh error = %t", err, fixture.refresh)
+				}
+				records := loggedSyncRecords(t, e)
+				if len(records) == 0 {
+					t.Fatal("no sync records")
+				}
+				if end := records[len(records)-1]; end.Status != v3.SyncStatusCancelled || !strings.HasPrefix(end.Error, want+": ") {
+					t.Fatalf("end record = %+v, want cancellation containing %q", end, want)
+				}
+				if got := preparationGit(t, child, "rev-parse", "refs/heads/caic-0"); got != childTip {
+					t.Fatalf("child branch = %s, want %s", got, childTip)
+				}
+				got := preparationGit(t, parentRemote, "for-each-ref", "--format=%(objectname)", "refs/heads/caic-0")
+				if (fixture.refresh && got != parentTip) || (!fixture.refresh && got != "") {
+					t.Fatalf("parent branch = %q, want update to %q only on refresh failure", got, parentTip)
+				}
+			})
+		}
 		t.Run("request_cancel_alone_does_not_cancel", func(t *testing.T) {
 			t.Parallel()
 			e, b := newBlocked(t)
